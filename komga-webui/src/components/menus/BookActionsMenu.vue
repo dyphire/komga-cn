@@ -22,6 +22,9 @@
         <v-list-item @click="markUnread" v-if="!isUnread">
           <v-list-item-title>{{ $t('menu.mark_unread') }}</v-list-item-title>
         </v-list-item>
+        <v-list-item :href="fileUrl" v-if="canDownload">
+          <v-list-item-title>{{ $t('browse_book.download_file') }}</v-list-item-title>
+        </v-list-item>
         <v-list-item @click="promptDeleteBook" class="list-danger" v-if="isAdmin">
           <v-list-item-title>{{ $t('menu.delete') }}</v-list-item-title>
         </v-list-item>
@@ -31,6 +34,7 @@
 </template>
 <script lang="ts">
 import {getReadProgress} from '@/functions/book-progress'
+import {bookFileUrl} from '@/functions/urls'
 import {ReadStatus} from '@/types/enum-books'
 import Vue from 'vue'
 import {BookDto, ReadProgressUpdateDto} from '@/types/komga-books'
@@ -66,6 +70,15 @@ export default Vue.extend({
     },
     isUnread (): boolean {
       return getReadProgress(this.book) === ReadStatus.UNREAD
+    },
+    unavailable (): boolean {
+      return this.book.deleted || this.$store.getters.getLibraryById(this.book.libraryId).unavailable
+    },
+    canDownload (): boolean {
+      return this.$store.getters.meFileDownload && !this.unavailable
+    },
+    fileUrl (): string {
+      return bookFileUrl(this.book.id)
     },
   },
   methods: {
