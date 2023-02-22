@@ -35,6 +35,7 @@ import org.gotson.komga.domain.model.SeriesSearch
 import org.gotson.komga.domain.model.ThumbnailSeries
 import org.gotson.komga.domain.model.WebLink
 import org.gotson.komga.domain.persistence.BookRepository
+import org.gotson.komga.domain.persistence.MediaRepository
 import org.gotson.komga.domain.persistence.SeriesCollectionRepository
 import org.gotson.komga.domain.persistence.SeriesMetadataRepository
 import org.gotson.komga.domain.persistence.SeriesRepository
@@ -51,6 +52,7 @@ import org.gotson.komga.infrastructure.openapi.PageableWithoutSortAsQueryParam
 import org.gotson.komga.infrastructure.security.KomgaPrincipal
 import org.gotson.komga.infrastructure.web.Authors
 import org.gotson.komga.infrastructure.web.DelimitedPair
+import org.gotson.komga.infrastructure.web.getMediaTypeOrDefault
 import org.gotson.komga.interfaces.api.ContentRestrictionChecker
 import org.gotson.komga.interfaces.api.persistence.BookDtoRepository
 import org.gotson.komga.interfaces.api.persistence.ReadProgressDtoRepository
@@ -112,6 +114,7 @@ class SeriesController(
   private val bookLifecycle: BookLifecycle,
   private val bookRepository: BookRepository,
   private val bookDtoRepository: BookDtoRepository,
+  private val mediaRepository: MediaRepository,
   private val collectionRepository: SeriesCollectionRepository,
   private val readProgressDtoRepository: ReadProgressDtoRepository,
   private val eventPublisher: ApplicationEventPublisher,
@@ -807,42 +810,71 @@ class SeriesController(
     principal.user.checkContentRestriction(seriesId)
 
     val books = bookRepository.findAllBySeriesId(seriesId)
+    val firstBook = books.firstOrNull() ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
 
-    val streamingResponse =
-      StreamingResponseBody { responseStream: OutputStream ->
-        ZipArchiveOutputStream(responseStream).use { zipStream ->
-          zipStream.setMethod(ZipArchiveOutputStream.DEFLATED)
-          zipStream.setLevel(Deflater.NO_COMPRESSION)
-          zipStream.setUseZip64(Zip64Mode.Always)
-          books.forEach { book ->
-            val file = FileSystemResource(book.path)
-            if (!file.exists()) {
-              logger.warn { "Book file not found, skipping archive entry: ${file.path}" }
-              return@forEach
-            }
+    val responseEntity =
+      if (firstBook.oneshot) {
+        val file = FileSystemResource(firstBook.path)
+        if (!file.exists()) {
+          logger.warn { "Book file not found, returning empty response: ${firstBook.path}" }
+          throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        }
 
-            logger.debug { "Adding file to zip archive: ${file.path}" }
-            file.inputStream.use {
-              zipStream.putArchiveEntry(ZipArchiveEntry(file.filename))
-              IOUtils.copyLarge(it, zipStream, ByteArray(8192))
-              zipStream.closeArchiveEntry()
+        val media = mediaRepository.findById(firstBook.id)
+        val streamingResponse =
+          StreamingResponseBody { responseStream: OutputStream ->
+            file.inputStream.transferTo(responseStream)
+          }
+
+        ResponseEntity.ok()
+          .headers(
+            HttpHeaders().apply {
+              contentDisposition =
+                ContentDisposition.builder("attachment")
+                  .filename(file.filename, UTF_8)
+                  .build()
+            },
+          )
+          .contentType(getMediaTypeOrDefault(media.mediaType))
+          .body(streamingResponse)
+      } else {
+        val streamingResponse =
+          StreamingResponseBody { responseStream: OutputStream ->
+            ZipArchiveOutputStream(responseStream).use { zipStream ->
+              zipStream.setMethod(ZipArchiveOutputStream.DEFLATED)
+              zipStream.setLevel(Deflater.NO_COMPRESSION)
+              zipStream.setUseZip64(Zip64Mode.Always)
+              books.forEach { book ->
+                val file = FileSystemResource(book.path)
+                if (!file.exists()) {
+                  logger.warn { "Book file not found, skipping archive entry: ${file.path}" }
+                  return@forEach
+                }
+
+                logger.debug { "Adding file to zip archive: ${file.path}" }
+                file.inputStream.use {
+                  zipStream.putArchiveEntry(ZipArchiveEntry(file.filename))
+                  IOUtils.copyLarge(it, zipStream, ByteArray(8192))
+                  zipStream.closeArchiveEntry()
+                }
+              }
             }
           }
-        }
+
+        ResponseEntity.ok()
+          .headers(
+            HttpHeaders().apply {
+              contentDisposition =
+                ContentDisposition.builder("attachment")
+                  .filename(seriesMetadataRepository.findById(seriesId).title + ".zip", UTF_8)
+                  .build()
+            },
+          )
+          .contentType(MediaType.parseMediaType(ZIP.type))
+          .body(streamingResponse)
       }
 
-    return ResponseEntity
-      .ok()
-      .headers(
-        HttpHeaders().apply {
-          contentDisposition =
-            ContentDisposition
-              .builder("attachment")
-              .filename(seriesMetadataRepository.findById(seriesId).title + ".zip", UTF_8)
-              .build()
-        },
-      ).contentType(MediaType.parseMediaType(ZIP.type))
-      .body(streamingResponse)
+    return responseEntity
   }
 
   @Operation(summary = "Delete series files", description = "Delete all of the series' books files on disk.", tags = [OpenApiConfiguration.TagNames.SERIES])
