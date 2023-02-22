@@ -25,6 +25,9 @@
         <v-list-item @click="markUnread" v-if="!isUnread">
           <v-list-item-title>{{ $t('menu.mark_unread') }}</v-list-item-title>
         </v-list-item>
+        <v-list-item :href="fileUrl" v-if="canDownload">
+          <v-list-item-title>{{ $t('common.download') }}</v-list-item-title>
+        </v-list-item>
         <v-list-item @click="promptDelete" class="list-danger" v-if="isAdmin">
           <v-list-item-title>{{ $t('menu.delete') }}</v-list-item-title>
         </v-list-item>
@@ -39,6 +42,7 @@ import Vue from 'vue'
 import {BookDto} from '@/types/komga-books'
 import {SeriesDto} from '@/types/komga-series'
 import {BookSearch, SearchConditionSeriesId, SearchOperatorIs} from '@/types/komga-search'
+import {bookFileUrl} from '@/functions/urls'
 
 export default Vue.extend({
   name: 'OneShotActionsMenu',
@@ -79,6 +83,15 @@ export default Vue.extend({
     },
     seriesId(): string {
       return this.series ? this.series.id : this.book?.seriesId
+    },
+    unavailable (): boolean {
+      return this.book.deleted || this.$store.getters.getLibraryById(this.book.libraryId).unavailable
+    },
+    canDownload (): boolean {
+      return this.$store.getters.meFileDownload && !this.unavailable
+    },
+    fileUrl (): string {
+      return bookFileUrl(this.book.id)
     },
   },
   methods: {
