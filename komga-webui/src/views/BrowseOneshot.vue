@@ -152,10 +152,10 @@
 
             <v-row class="text-body-2">
               <v-col class="py-1 pe-0" cols="auto" v-if="series.metadata && series.metadata.ageRating">
-                <v-chip label small link
+                <v-chip label small link :color="ageRatingChip.color" :text-color="ageRatingChip.text"
                         :to="{name:'browse-libraries', params: {libraryId: series.libraryId }, query: {ageRating: [new SearchConditionAgeRating(new SearchOperatorIs(series.metadata.ageRating.toString()))]}}"
                 >
-                  {{ series.metadata.ageRating }}+
+                  R-{{ series.metadata.ageRating }}+
                 </v-chip>
               </v-col>
               <v-col class="py-1 pe-0" cols="auto" v-if="series.metadata.language">
@@ -445,7 +445,7 @@
         </v-col>
       </v-row>
 
-      <v-row v-if="book.metadata.links.length > 0" class="align-center text-caption">
+      <v-row v-if="book.metadata.links?.length ?? 0 > 0" class="align-center text-caption">
         <v-col class="py-1 text-uppercase" cols="4" sm="3" md="2" xl="1">{{ $t('browse_book.links') }}</v-col>
         <v-col class="py-1" cols="8" sm="9" md="10" xl="11">
           <v-chip
@@ -582,6 +582,11 @@ import {
 } from '@/types/komga-search'
 
 const tags = require('language-tags')
+
+type ChipColor = {
+  text?: string
+  color?: string;
+}
 
 export default Vue.extend({
   name: 'BrowseOneshot',
@@ -731,6 +736,25 @@ export default Vue.extend({
     },
     languageDisplay(): string {
       return tags(this.series.metadata.language)?.language()?.descriptions()[0] || this.series.metadata.language
+    },
+    ageRatingChip(): ChipColor {
+      const ageRating = this.series.metadata.ageRating ?? -1
+      if (ageRating >= 0 && ageRating < 10) {
+        return {color: 'green darken-2', text: 'white'}
+      } else if (ageRating < 13) {
+        return {color: 'cyan darken-2', text: 'white'}
+      } else if (ageRating < 15) {
+        return {color: 'blue darken-2', text: 'white'}
+      } else if (ageRating === 15) {
+        return {color: 'orange darken-2', text: 'white'}
+      } else if (ageRating === 16) {
+        return {color: 'orange darken-3', text: 'white'}
+      } else if (ageRating === 17) {
+        return {color: 'deep-orange darken-2', text: 'white'}
+      } else if (ageRating >= 18) {
+        return {color: 'red darken-3', text: 'white'}
+      }
+      return {color: undefined, text: undefined}
     },
   },
   methods: {
