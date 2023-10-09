@@ -133,10 +133,10 @@
                 </v-chip>
               </v-col>
               <v-col class="py-1 pe-0" cols="auto" v-if="series.metadata.ageRating">
-                <v-chip label small link
+                <v-chip label small link :color="ageRatingChip.color" :text-color="ageRatingChip.text"
                         :to="{name:'browse-libraries', params: {libraryId: series.libraryId }, query: {ageRating: [new SearchConditionAgeRating(new SearchOperatorIs(series.metadata.ageRating.toString()))]}}"
                 >
-                  {{ series.metadata.ageRating }}+
+                  R-{{ series.metadata.ageRating }}+
                 </v-chip>
               </v-col>
               <v-col class="py-1 pe-0" cols="auto" v-if="series.metadata.language">
@@ -585,6 +585,11 @@ import {
 
 const tags = require('language-tags')
 
+type ChipColor = {
+  text?: string
+  color?: string;
+}
+
 export default Vue.extend({
   name: 'BrowseSeries',
   components: {
@@ -764,7 +769,7 @@ export default Vue.extend({
     languageDisplay(): string {
       return tags(this.series.metadata.language)?.language()?.descriptions()[0] || this.series.metadata.language
     },
-    statusChip(): object {
+    statusChip(): ChipColor {
       switch (this.series.metadata.status) {
         case SeriesStatus.ABANDONED:
           return {color: 'red darken-4', text: 'white'}
@@ -772,6 +777,25 @@ export default Vue.extend({
           return {color: 'green darken-4', text: 'white'}
         case SeriesStatus.HIATUS:
           return {color: 'orange darken-4', text: 'white'}
+      }
+      return {color: undefined, text: undefined}
+    },
+    ageRatingChip(): ChipColor {
+      const ageRating = this.series.metadata.ageRating ?? -1
+      if (ageRating >= 0 && ageRating < 10) {
+        return {color: 'green darken-2', text: 'white'}
+      } else if (ageRating < 13) {
+        return {color: 'cyan darken-2', text: 'white'}
+      } else if (ageRating < 15) {
+        return {color: 'blue darken-2', text: 'white'}
+      } else if (ageRating === 15) {
+        return {color: 'orange darken-2', text: 'white'}
+      } else if (ageRating === 16) {
+        return {color: 'orange darken-3', text: 'white'}
+      } else if (ageRating === 17) {
+        return {color: 'deep-orange darken-2', text: 'white'}
+      } else if (ageRating >= 18) {
+        return {color: 'red darken-3', text: 'white'}
       }
       return {color: undefined, text: undefined}
     },
