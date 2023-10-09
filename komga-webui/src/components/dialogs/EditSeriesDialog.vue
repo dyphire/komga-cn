@@ -190,13 +190,14 @@
                 <v-row>
                   <!--  Publisher  -->
                   <v-col cols="6">
-                    <v-text-field v-model="form.publisher"
-                                  :label="$t('dialog.edit_series.field_publisher')"
-                                  filled
-                                  dense
-                                  :placeholder="!single && mixed.publisher ? $t('dialog.edit_series.mixed') : ''"
-                                  @input="$v.form.publisher.$touch()"
-                                  @change="form.publisherLock = true"
+                    <v-combobox v-model="form.publisher"
+                                :items="publishersAvailable"
+                                :label="$t('dialog.edit_series.field_publisher')"
+                                :placeholder="!single && mixed.publisher ? $t('dialog.edit_series.mixed') : ''"
+                                @input="$v.form.publisher.$touch()"
+                                @change="form.publisherLock = true"
+                                filled
+                                dense
                     >
                       <template v-slot:prepend>
                         <v-icon :color="form.publisherLock ? 'secondary' : ''"
@@ -205,7 +206,7 @@
                           {{ form.publisherLock ? 'mdi-lock' : 'mdi-lock-open' }}
                         </v-icon>
                       </template>
-                    </v-text-field>
+                    </v-combobox>
                   </v-col>
 
                   <!--  Age Rating  -->
@@ -621,6 +622,7 @@ export default Vue.extend({
       },
       genresAvailable: [] as string[],
       tagsAvailable: [] as string[],
+      publishersAvailable: [] as string[],
       sharingLabelsAvailable: [] as string[],
     }
   },
@@ -641,6 +643,7 @@ export default Vue.extend({
         this.loadAvailableTags()
         this.loadAvailableGenres()
         this.loadAvailableSharingLabels()
+        this.loadAvailablePublishers()
       } else {
         this.dialogCancel()
       }
@@ -749,6 +752,9 @@ export default Vue.extend({
     },
     async loadAvailableSharingLabels() {
       this.sharingLabelsAvailable = await this.$komgaReferential.getSharingLabels()
+    },
+    async loadAvailablePublishers() {
+      this.publishersAvailable = await this.$komgaReferential.getPublishers()
     },
     requiredErrors(fieldName: string): string[] {
       const errors = [] as string[]
