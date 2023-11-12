@@ -181,6 +181,7 @@
     "isbn": "ISBN",
     "links": "LINKS",
     "navigation_within_readlist": "Navigation within the readlist: {name}",
+    "open_page_prompt": "Open page",
     "outdated_tooltip": "The file for this book has changed, this book must be re-analyzed",
     "read_book": "Read book",
     "read_incognito": "Read incognito",
