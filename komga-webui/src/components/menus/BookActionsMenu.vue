@@ -25,6 +25,9 @@
         <v-list-item :href="fileUrl" v-if="canDownload">
           <v-list-item-title>{{ $t('browse_book.download_file') }}</v-list-item-title>
         </v-list-item>
+        <v-list-item @click="promptOpenPageAPI">
+          <v-list-item-title>{{ $t('browse_book.open_page_prompt') }}</v-list-item-title>
+        </v-list-item>
         <v-list-item @click="promptDeleteBook" class="list-danger" v-if="isAdmin">
           <v-list-item-title>{{ $t('menu.delete') }}</v-list-item-title>
         </v-list-item>
@@ -34,7 +37,7 @@
 </template>
 <script lang="ts">
 import {getReadProgress} from '@/functions/book-progress'
-import {bookFileUrl} from '@/functions/urls'
+import {bookFileUrl, bookPageUrl} from '@/functions/urls'
 import {ReadStatus} from '@/types/enum-books'
 import Vue from 'vue'
 import {BookDto, ReadProgressUpdateDto} from '@/types/komga-books'
@@ -100,6 +103,29 @@ export default Vue.extend({
     },
     promptDeleteBook () {
       this.$store.dispatch('dialogDeleteBook', this.book)
+    },
+    promptOpenPageAPI() {
+      const inputData = prompt('Enter page number to open', '1')
+
+      if (typeof inputData === 'string' && inputData.trim().length > 0) {
+        const pageNumber = Number.parseInt(inputData)
+
+        if (Number.isNaN(pageNumber)) {
+          alert('Invalid page number')
+          return
+        } else {
+          // use window.open _blank to open in new tab
+          if (this.book.media.pagesCount < pageNumber) {
+            alert('Page number exceeds total pages')
+            return
+          } else if (pageNumber < 1) {
+            alert('Page number cannot be less than 1')
+            return
+          } else {
+            window.open(bookPageUrl(this.book.id, pageNumber), '_blank', 'noopener')
+          }
+        }
+      }
     },
   },
 })
