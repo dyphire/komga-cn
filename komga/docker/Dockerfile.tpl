@@ -1,7 +1,7 @@
 FROM eclipse-temurin:17-jre as builder
 ARG JAR={{distributionArtifactFile}}
-COPY build/libs/komga-*.jar /builder/application.jar
 WORKDIR /builder
+COPY assembly/${JAR} application.jar
 RUN java -Djarmode=tools -jar application.jar extract --layers --destination extracted
 
 # amd64 builder

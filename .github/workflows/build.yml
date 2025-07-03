@@ -2,6 +2,15 @@ name: build
 
 on:
   workflow_dispatch:
+    inputs:
+      github_release:
+        description: 'Create Github Release'
+        default: true
+        type: boolean
+      docker_release:
+        description: 'Push Docker images'
+        default: true
+        type: boolean
 
 jobs:
   test:
@@ -14,39 +23,6 @@ jobs:
           java-version: 17
           java-package: 'jdk'
           distribution: 'temurin'
-
-      - name: npm install
-        working-directory: komga-webui
-        run: npm install
-      - name: npm build
-        working-directory: komga-webui
-        run: |
-          npm run build
-          mkdir ../komga/src/main/resources/public
-          cp -r dist/* ../komga/src/main/resources/public/
-        env:
-          NODE_OPTIONS: "--max-old-space-size=4096"
-
-      - name: Build
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          arguments: :komga:prepareThymeLeaf :komga:bootJar
-      - name: ls
-        run: |
-          version=$(grep '^version=' gradle.properties | cut -d'=' -f2)
-          echo "version=v$version" >> $GITHUB_ENV
-          ls komga/build
-          cp -r komga/build/*
-      - name: Release
-        uses: softprops/action-gh-release@v1
-        with:
-          name: ${{ env.version }}
-          body: ${{ env.version }}
-          tag_name: ${{ env.version }}
-          append_body: false
-          token: ${{ secrets.GITHUB_TOKEN }}
-          files: |
-            komga/build/libs/*.jar
 
       - name: Set up QEMU (for emulating ARM)
         uses: docker/setup-qemu-action@v2
@@ -67,18 +43,44 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Docker image (multi-platform)
-        uses: docker/build-push-action@v4
-        with:
-          context: ./komga
-          file: ./komga/docker/Dockerfile.tpl
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            dyphire/komga-cn:latest
-            dyphire/komga-cn:${{ env.version }}
-            ghcr.io/${{ github.repository_owner }}/komga-cn:latest
-            ghcr.io/${{ github.repository_owner }}/komga-cn:${{ env.version }}
+      - name: npm install
+        working-directory: komga-webui
+        run: npm install
+      - name: npm build
+        working-directory: komga-webui
+        run: |
+          npm run build
+          mkdir ../komga/src/main/resources/public
+          cp -r dist/* ../komga/src/main/resources/public/
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build
+        run: ./gradlew :komga:prepareThymeLeaf :komga:bootJar :komga-tray:jar
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+
+      - name: ls
+        run: |
+          version=$(grep '^version=' gradle.properties | cut -d'=' -f2)
+          echo "version=v$version" >> $GITHUB_ENV
+          ls komga/build
+          cp -r komga/build/*
+
+      - name: JReleaser Release
+        if: inputs.github_release
+        run: ./gradlew jreleaserRelease
+        env:
+          JRELEASER_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: JReleaser Publish
+        if: inputs.docker_release
+        run: ./gradlew jreleaserPublish
+        env:
+          JRELEASER_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: DockerHub Description
         uses: peter-evans/dockerhub-description@v4.0.0
