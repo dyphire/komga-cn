@@ -36,7 +36,7 @@ docker run -d \
 version: "3"
 services:
   komga-cn:
-    image: wushuo894/komga-cn:latest
+    image: dyphire/komga-cn:latest
     container_name: komga-cn
     network_mode: bridge
     mem_limit: 8192m
