@@ -2,6 +2,15 @@ name: build
 
 on:
   workflow_dispatch:
+    inputs:
+      github_release:
+        description: 'Create Github Release'
+        default: true
+        type: boolean
+      docker_release:
+        description: 'Push Docker images'
+        default: true
+        type: boolean
 
 jobs:
   test:
@@ -15,6 +24,25 @@ jobs:
           java-package: 'jdk'
           distribution: 'temurin'
 
+      - name: Set up QEMU (for emulating ARM)
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: npm install
         working-directory: komga-webui
         run: npm install
@@ -27,42 +55,37 @@ jobs:
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
 
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Build
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          arguments: :komga:bootJar
+        run: ./gradlew :komga:prepareThymeLeaf :komga:bootJar :komga-tray:jar
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+
       - name: ls
         run: |
           version=$(grep '^version=' gradle.properties | cut -d'=' -f2)
           echo "version=v$version" >> $GITHUB_ENV
           ls komga/build
           cp -r komga/build/*
-      - name: Release
-        uses: softprops/action-gh-release@v1
-        with:
-          name: ${{ env.version }}
-          body: ${{ env.version }}
-          tag_name: ${{ env.version }}
-          append_body: false
-          token: ${{ secrets.GITHUB_TOKEN }}
-          files: |
-            komga/build/libs/*.jar
-      - name: Login to Docker Hub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v2
-        with:
-          context: ./komga
-          file: ./komga/docker/Dockerfile.tpl
-          push: true
-          tags: wushuo894/komga-cn:latest
+
+      - name: JReleaser Release
+        if: inputs.github_release
+        run: ./gradlew jreleaserRelease
+        env:
+          JRELEASER_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: JReleaser Publish
+        if: inputs.docker_release
+        run: ./gradlew jreleaserPublish
+        env:
+          JRELEASER_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: DockerHub Description
         uses: peter-evans/dockerhub-description@v4.0.0
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKERHUB_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-          DOCKERHUB_REPOSITORY: wushuo894/komga-cn:${{ env.version }}
+          DOCKERHUB_REPOSITORY: dyphire/komga-cn
           README_FILEPATH: ./README.md

@@ -1,8 +1,8 @@
 # ![app icon](https://github.com/gotson/komga/raw/master/.github/readme-images/app-icon.png) Komga
 
-[![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/wushuo894/komga-cn?color=blue&label=download&sort=semver)](https://github.com/wushuo894/komga-cn/releases/latest)
-[![GitHub all releases](https://img.shields.io/github/downloads/wushuo894/komga-cn/total?color=blue&label=github%20downloads)](https://github.com/wushuo894/komga-cn/releases)
-[![Docker Pulls](https://img.shields.io/docker/pulls/wushuo894/komga-cn)](https://hub.docker.com/r/wushuo894/komga-cn)
+[![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/dyphire/komga-cn?color=blue&label=download&sort=semver)](https://github.com/dyphire/komga-cn/releases/latest)
+[![GitHub all releases](https://img.shields.io/github/downloads/dyphire/komga-cn/total?color=blue&label=github%20downloads)](https://github.com/dyphire/komga-cn/releases)
+[![Docker Pulls](https://img.shields.io/docker/pulls/dyphire/komga-cn)](https://hub.docker.com/r/dyphire/komga-cn)
 
 在原版基础上对 MOBI 格式的漫画 做了支持
 
@@ -14,7 +14,7 @@
 
 支持繁体自动转换为简体
 
-github: https://github.com/wushuo894/komga-cn
+github: https://github.com/dyphire/komga-cn
 
 ## docker run
 
@@ -27,7 +27,7 @@ docker run -d \
     -e TZ=Asia/Shanghai \
     -e CHS=TRUE \
     --restart always \
-    wushuo894/komga-cn:latest
+    dyphire/komga-cn:latest
 ```
 
 ## docker compose
@@ -36,7 +36,7 @@ docker run -d \
 version: "3"
 services:
   komga-cn:
-    image: wushuo894/komga-cn:latest
+    image: dyphire/komga-cn:latest
     container_name: komga-cn
     network_mode: bridge
     mem_limit: 8192m

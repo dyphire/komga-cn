@@ -163,12 +163,12 @@ jreleaser {
       continueOnError = true
       templateDirectory = rootDir.resolve("komga/docker")
       repository.active = Active.NEVER
-      buildArgs = listOf("--cache-from", "gotson/komga:latest")
+      buildArgs = listOf("--cache-from", "dyphire/komga-cn:latest")
       imageNames =
         listOf(
-          "komga:latest",
-          "komga:{{projectVersion}}",
-          "komga:{{projectVersionMajor}}.x",
+          "komga-cn:latest",
+          "komga-cn:{{projectVersion}}",
+          "komga-cn:{{projectVersionMajor}}.x",
         )
       registries {
         create("docker.io") { externalLogin = true }
