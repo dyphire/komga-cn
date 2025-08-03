@@ -2,7 +2,10 @@ package org.gotson.komga.interfaces.api.kosync
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.gotson.komga.domain.model.MediaExtensionEpub
-import org.gotson.komga.domain.model.MediaProfile
+import org.gotson.komga.domain.model.MediaProfile.DIVINA
+import org.gotson.komga.domain.model.MediaProfile.EPUB
+import org.gotson.komga.domain.model.MediaProfile.MOBI
+import org.gotson.komga.domain.model.MediaProfile.PDF
 import org.gotson.komga.domain.model.R2Device
 import org.gotson.komga.domain.model.R2Locator
 import org.gotson.komga.domain.model.R2Progression
@@ -75,10 +78,13 @@ class KoreaderSyncController(
         ?.totalProgression
         ?: (readProgress.page.toFloat() / mediaRepository.findById(book.id).pageCount.toFloat())
 
+    val profile = media.profile
+      ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Book has no media profile")
+
     val progress =
-      when (media.profile) {
-        MediaProfile.DIVINA, MediaProfile.PDF -> readProgress.page.toString()
-        MediaProfile.EPUB -> {
+      when (profile) {
+        DIVINA, PDF -> readProgress.page.toString()
+        EPUB -> {
           val extension =
             mediaRepository.findExtensionByIdOrNull(book.id) as? MediaExtensionEpub
               ?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Epub extension not found")
@@ -95,7 +101,8 @@ class KoreaderSyncController(
           "/body/DocFragment[${resourceIndex + 1}].0"
         }
 
-        null -> throw ResponseStatusException(HttpStatus.NOT_FOUND, "Book has no media profile")
+        MOBI -> readProgress.page.toString()
+        else -> readProgress.page.toString()
       }
 
     return DocumentProgressDto(
@@ -128,7 +135,7 @@ class KoreaderSyncController(
     // convert the KOReader update request to an R2Progression
     val locator =
       when (media.profile) {
-        MediaProfile.DIVINA, MediaProfile.PDF ->
+        DIVINA, MOBI, PDF ->
           R2Locator(
             href = "",
             type = "",
@@ -139,7 +146,7 @@ class KoreaderSyncController(
               ),
           )
 
-        MediaProfile.EPUB -> {
+        EPUB -> {
           val resourceIndex =
             // we try to parse the progress using the 2 possible formats
             resourceRegex1
