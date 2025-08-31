@@ -21,6 +21,7 @@ import org.gotson.komga.infrastructure.hash.Hasher
 import org.gotson.komga.infrastructure.image.ImageAnalyzer
 import org.gotson.komga.infrastructure.image.ImageConverter
 import org.gotson.komga.infrastructure.image.ImageType
+import org.gotson.komga.infrastructure.image.QrCodeDetector
 import org.gotson.komga.infrastructure.mediacontainer.ContentDetector
 import org.gotson.komga.infrastructure.mediacontainer.divina.DivinaExtractor
 import org.gotson.komga.infrastructure.mediacontainer.epub.EpubExtractor
@@ -47,6 +48,7 @@ class BookAnalyzer(
   private val mobiExtractor: MobiExtractor,
   private val imageConverter: ImageConverter,
   private val imageAnalyzer: ImageAnalyzer,
+  private val qrCodeDetector: QrCodeDetector,
   private val hasher: Hasher,
   @param:Value("#{@komgaProperties.pageHashing}") private val pageHashing: Int,
   private val komgaSettingsProvider: KomgaSettingsProvider,
@@ -99,6 +101,47 @@ class BookAnalyzer(
     }.copy(bookId = book.id)
   }
 
+  private fun filterQrPages(pages: List<BookPage>, book: Book, mediaType: MediaType): List<BookPage> {
+    if (pages.size <= 10) return pages
+
+    val pagesToCheck = pages.takeLast(10)
+    val pagesToKeep = pages.dropLast(10)
+
+    val qrFlags = pagesToCheck.map { page ->
+      try {
+        val content = divinaExtractors.getValue(mediaType.type).getEntryStream(book.path, page.fileName)
+        qrCodeDetector.containsQrCode(content)
+      } catch (e: Exception) {
+        logger.error(e) { "Error while checking QR code for page: ${page.fileName} in book: $book" }
+        false
+      }
+    }.toMutableList()
+
+    for (i in 1 until qrFlags.size - 1) {
+      if (qrFlags[i - 1] && qrFlags[i + 1]) {
+        qrFlags[i] = true
+      }
+    }
+
+    var consecutiveCount = 0
+    var stopFiltering = false
+    for (i in qrFlags.indices) {
+      if (stopFiltering) {
+        qrFlags[i] = true
+        continue
+      }
+      if (qrFlags[i]) {
+        consecutiveCount++
+        if (consecutiveCount >= 2) stopFiltering = true
+      } else {
+        consecutiveCount = 0
+      }
+    }
+
+    val filteredLastPages = pagesToCheck.filterIndexed { index, _ -> !qrFlags[index] }
+    return pagesToKeep + filteredLastPages
+  }
+
   private fun analyzeMobi(
     book: Book,
     analyzeDimensions: Boolean,
@@ -134,6 +177,8 @@ class BookAnalyzer(
           )
         }
 
+    val filteredPages = filterQrPages(pages, book, mediaType)
+
     val entriesErrorSummary =
       others
         .filter { it.mediaType.isNullOrBlank() }
@@ -141,15 +186,19 @@ class BookAnalyzer(
         .ifEmpty { null }
         ?.joinToString(prefix = "ERR_1007 [", postfix = "]") { it }
 
-    if (pages.isEmpty()) {
-      logger.warn { "Book $book does not contain any pages" }
+    if (filteredPages.isEmpty()) {
+      logger.warn { "Book $book does not contain any pages after QR code filtering" }
       return Media(status = Media.Status.ERROR, comment = "ERR_1006")
     }
-    logger.info { "Book has ${pages.size} pages" }
+
+    val removedCount = pages.size - filteredPages.size
+    if (removedCount > 0) {
+      logger.info { "Removed $removedCount pages containing QR codes from book: $book" }
+    }
 
     val files = others.map { MediaFile(fileName = it.name, mediaType = it.mediaType, fileSize = it.fileSize) }
 
-    return Media(status = Media.Status.READY, pages = pages, pageCount = pages.size, files = files, comment = entriesErrorSummary)
+    return Media(status = Media.Status.READY, pages = filteredPages, pageCount = filteredPages.size, files = files, comment = entriesErrorSummary)
   }
 
   private fun analyzeEpub(
@@ -199,6 +248,8 @@ class BookAnalyzer(
           emptyList()
         }
 
+      val filteredDivinaPages = filterQrPages(divinaPages, book, MediaType.EPUB)
+
       val positions =
         try {
           epubExtractor.computePositions(epub, book.path, resources, isFixedLayout, isKepub)
@@ -222,10 +273,10 @@ class BookAnalyzer(
 
       return Media(
         status = Media.Status.READY,
-        pages = divinaPages,
+        pages = filteredDivinaPages,
         files = resources,
         pageCount = epubExtractor.computePageCount(epub),
-        epubDivinaCompatible = divinaPages.isNotEmpty(),
+        epubDivinaCompatible = filteredDivinaPages.isNotEmpty(),
         epubIsKepub = isKepub,
         extension =
           MediaExtensionEpub(
