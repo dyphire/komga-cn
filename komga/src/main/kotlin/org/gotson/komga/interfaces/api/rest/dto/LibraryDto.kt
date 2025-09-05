@@ -33,6 +33,7 @@ data class LibraryDto(
   val hashPages: Boolean,
   val hashKoreader: Boolean,
   val analyzeDimensions: Boolean,
+  val adPagesDetector: Boolean,
   val oneshotsDirectory: String?,
   val unavailable: Boolean,
 )
@@ -68,6 +69,7 @@ fun Library.toDto(includeRoot: Boolean) =
     hashPages = hashPages,
     hashKoreader = hashKoreader,
     analyzeDimensions = analyzeDimensions,
+    adPagesDetector = adPagesDetector,
     oneshotsDirectory = oneshotsDirectory,
     unavailable = unavailableDate != null,
   )
