@@ -21,6 +21,7 @@ import org.gotson.komga.infrastructure.hash.Hasher
 import org.gotson.komga.infrastructure.image.ImageAnalyzer
 import org.gotson.komga.infrastructure.image.ImageConverter
 import org.gotson.komga.infrastructure.image.ImageType
+import org.gotson.komga.infrastructure.image.QrCodeDetector
 import org.gotson.komga.infrastructure.mediacontainer.ContentDetector
 import org.gotson.komga.infrastructure.mediacontainer.divina.DivinaExtractor
 import org.gotson.komga.infrastructure.mediacontainer.epub.EpubExtractor
@@ -47,6 +48,7 @@ class BookAnalyzer(
   private val mobiExtractor: MobiExtractor,
   private val imageConverter: ImageConverter,
   private val imageAnalyzer: ImageAnalyzer,
+  private val qrCodeDetector: QrCodeDetector,
   private val hasher: Hasher,
   @param:Value("#{@komgaProperties.pageHashing}") private val pageHashing: Int,
   private val komgaSettingsProvider: KomgaSettingsProvider,
@@ -63,6 +65,7 @@ class BookAnalyzer(
   fun analyze(
     book: Book,
     analyzeDimensions: Boolean,
+    adPagesDetector: Boolean,
   ): Media {
     logger.info { "Trying to analyze book: $book" }
     return try {
@@ -82,9 +85,9 @@ class BookAnalyzer(
       }
 
       when (mediaType.profile) {
-        DIVINA -> analyzeDivina(book, mediaType, analyzeDimensions)
+        DIVINA -> analyzeDivina(book, mediaType, analyzeDimensions, adPagesDetector)
         PDF -> analyzePdf(book, analyzeDimensions)
-        EPUB -> analyzeEpub(book, analyzeDimensions)
+        EPUB -> analyzeEpub(book, analyzeDimensions, adPagesDetector)
         MOBI -> analyzeMobi(book, analyzeDimensions)
       }.copy(mediaType = mediaType.type)
     } catch (ade: AccessDeniedException) {
@@ -99,6 +102,56 @@ class BookAnalyzer(
     }.copy(bookId = book.id)
   }
 
+  private fun filterAdPages(pages: List<BookPage>, book: Book, mediaType: MediaType): List<BookPage> {
+    if (pages.size <= 10) return pages
+
+    val pagesToCheck = pages.takeLast(10)
+    val pagesToKeep = pages.dropLast(10)
+
+    val adFlags = MutableList(pagesToCheck.size) { false }
+
+    var consecutiveNormal = 0
+    for (i in pagesToCheck.size - 1 downTo 0) {
+      val page = pagesToCheck[i]
+      val isAd = try {
+          val content = divinaExtractors.getValue(mediaType.type)
+              .getEntryStream(book.path, page.fileName)
+          qrCodeDetector.containsQrCode(content)
+        } catch (e: Exception) {
+          logger.error(e) { "Error while checking QR code for page: ${page.fileName} in book: $book" }
+          false
+        }
+
+        adFlags[i] = isAd
+
+        if (!isAd) {
+          consecutiveNormal++
+          if (consecutiveNormal > 2) break
+        } else {
+            consecutiveNormal = 0
+        }
+    }
+
+    var consecutiveAd = 0
+    for (i in adFlags.indices) {
+      if (adFlags[i]) {
+          consecutiveAd++
+          continue
+      }
+
+      if (consecutiveAd >= 2) {
+          adFlags[i] = true
+      } else if ((i - 1 >= 0 && adFlags[i - 1]) && (i + 1 < adFlags.size && adFlags[i + 1])) {
+          adFlags[i] = true
+      } else {
+          consecutiveAd = 0
+      }
+    }
+
+    val filteredLastPages = pagesToCheck.filterIndexed { index, _ -> !adFlags[index] }
+    return pagesToKeep + filteredLastPages
+  }
+
   private fun analyzeMobi(
     book: Book,
     analyzeDimensions: Boolean,
@@ -111,6 +164,7 @@ class BookAnalyzer(
     book: Book,
     mediaType: MediaType,
     analyzeDimensions: Boolean,
+    adPagesDetector: Boolean,
   ): Media {
     val entries =
       try {
@@ -134,6 +188,12 @@ class BookAnalyzer(
           )
         }
 
+    val filteredPages = if (adPagesDetector) {
+        filterAdPages(pages, book, mediaType)
+      } else {
+        pages
+      }
+
     val entriesErrorSummary =
       others
         .filter { it.mediaType.isNullOrBlank() }
@@ -141,20 +201,25 @@ class BookAnalyzer(
         .ifEmpty { null }
         ?.joinToString(prefix = "ERR_1007 [", postfix = "]") { it }
 
-    if (pages.isEmpty()) {
-      logger.warn { "Book $book does not contain any pages" }
+    if (filteredPages.isEmpty()) {
+      logger.warn { "Book $book does not contain any pages after QR code filtering" }
       return Media(status = Media.Status.ERROR, comment = "ERR_1006")
     }
-    logger.info { "Book has ${pages.size} pages" }
+
+    val removedCount = pages.size - filteredPages.size
+    if (removedCount > 0) {
+      logger.info { "Removed $removedCount pages containing QR codes from book: $book" }
+    }
 
     val files = others.map { MediaFile(fileName = it.name, mediaType = it.mediaType, fileSize = it.fileSize) }
 
-    return Media(status = Media.Status.READY, pages = pages, pageCount = pages.size, files = files, comment = entriesErrorSummary)
+    return Media(status = Media.Status.READY, pages = filteredPages, pageCount = filteredPages.size, files = files, comment = entriesErrorSummary)
   }
 
   private fun analyzeEpub(
     book: Book,
     analyzeDimensions: Boolean,
+    adPagesDetector: Boolean,
   ): Media {
     book.path.epub { epub ->
       val (resources, missingResources) = epubExtractor.getResources(epub).partition { it.fileSize != null }
@@ -199,6 +264,12 @@ class BookAnalyzer(
           emptyList()
         }
 
+      val filteredDivinaPages = if (adPagesDetector) {
+          filterAdPages(divinaPages, book, MediaType.EPUB)
+        } else {
+          divinaPages
+        }
+
       val positions =
         try {
           epubExtractor.computePositions(epub, book.path, resources, isFixedLayout, isKepub)
@@ -222,10 +293,10 @@ class BookAnalyzer(
 
       return Media(
         status = Media.Status.READY,
-        pages = divinaPages,
+        pages = filteredDivinaPages,
         files = resources,
         pageCount = epubExtractor.computePageCount(epub),
-        epubDivinaCompatible = divinaPages.isNotEmpty(),
+        epubDivinaCompatible = filteredDivinaPages.isNotEmpty(),
         epubIsKepub = isKepub,
         extension =
           MediaExtensionEpub(

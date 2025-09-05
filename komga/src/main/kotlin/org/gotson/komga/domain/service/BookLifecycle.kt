@@ -83,7 +83,11 @@ class BookLifecycle(
 
   fun analyzeAndPersist(book: Book): Set<BookAction> {
     logger.info { "Analyze and persist book: $book" }
-    val media = bookAnalyzer.analyze(book, libraryRepository.findById(book.libraryId).analyzeDimensions)
+    val media = bookAnalyzer.analyze(
+          book,
+          libraryRepository.findById(book.libraryId).analyzeDimensions,
+          libraryRepository.findById(book.libraryId).adPagesDetector
+        )
 
     transactionTemplate.executeWithoutResult {
       // if the number of pages has changed, delete all read progress for that book

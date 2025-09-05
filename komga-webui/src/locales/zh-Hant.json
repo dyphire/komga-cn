@@ -462,6 +462,7 @@
       "dialog_title_add": "新增書庫",
       "dialot_title_edit": "編輯書庫",
       "field_analysis_analyze_dimensions": "分析頁面尺寸",
+      "field_analysis_ad_pages_detector": "移除廣告頁面（二維碼檢測）",
       "field_analysis_hash_files": "計算檔案雜湊",
       "field_analysis_hash_koreader": "計算 KOReader 檔案的雜湊函式",
       "field_analysis_hash_pages": "計算頁面雜湊",
