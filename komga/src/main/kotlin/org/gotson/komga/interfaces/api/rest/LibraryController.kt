@@ -119,6 +119,7 @@ class LibraryController(
             hashPages = library.hashPages,
             hashKoreader = library.hashKoreader,
             analyzeDimensions = library.analyzeDimensions,
+            adPagesDetector = library.adPagesDetector,
             oneshotsDirectory = library.oneshotsDirectory?.ifBlank { null },
           ),
         ).toDto(includeRoot = principal.user.isAdmin)
@@ -191,6 +192,7 @@ class LibraryController(
             hashPages = hashPages ?: existing.hashPages,
             hashKoreader = hashKoreader ?: existing.hashKoreader,
             analyzeDimensions = analyzeDimensions ?: existing.analyzeDimensions,
+            adPagesDetector = adPagesDetector ?: existing.adPagesDetector,
             oneshotsDirectory = if (isSet("oneshotsDirectory")) oneshotsDirectory?.ifBlank { null } else existing.oneshotsDirectory,
           )
         }

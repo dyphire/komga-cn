@@ -463,6 +463,7 @@
       "dialog_title_add": "Add Library",
       "dialot_title_edit": "Edit Library",
       "field_analysis_analyze_dimensions": "Analyze pages dimensions",
+      "field_analysis_ad_pages_detector": "Remove ad pages (QR codes detector)",
       "field_analysis_hash_files": "Compute hash for files",
       "field_analysis_hash_koreader": "Compute hash for files for KOReader",
       "field_analysis_hash_pages": "Compute hash for pages",

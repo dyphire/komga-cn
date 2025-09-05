@@ -111,6 +111,7 @@ class LibraryDao(
       .set(l.HASH_PAGES, library.hashPages)
       .set(l.HASH_KOREADER, library.hashKoreader)
       .set(l.ANALYZE_DIMENSIONS, library.analyzeDimensions)
+      .set(l.AD_PAGES_DETECTOR, library.adPagesDetector)
       .set(l.ONESHOTS_DIRECTORY, library.oneshotsDirectory)
       .set(l.UNAVAILABLE_DATE, library.unavailableDate)
       .execute()
@@ -148,6 +149,7 @@ class LibraryDao(
       .set(l.HASH_PAGES, library.hashPages)
       .set(l.HASH_KOREADER, library.hashKoreader)
       .set(l.ANALYZE_DIMENSIONS, library.analyzeDimensions)
+      .set(l.AD_PAGES_DETECTOR, library.adPagesDetector)
       .set(l.ONESHOTS_DIRECTORY, library.oneshotsDirectory)
       .set(l.UNAVAILABLE_DATE, library.unavailableDate)
       .set(l.LAST_MODIFIED_DATE, LocalDateTime.now(ZoneId.of("Z")))
@@ -204,6 +206,7 @@ class LibraryDao(
       hashPages = hashPages,
       hashKoreader = hashKoreader,
       analyzeDimensions = analyzeDimensions,
+      adPagesDetector = adPagesDetector,
       oneshotsDirectory = oneshotsDirectory,
       unavailableDate = unavailableDate,
       id = id,
