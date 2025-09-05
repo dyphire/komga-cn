@@ -30,6 +30,7 @@ export interface LibraryDto {
   hashPages: boolean,
   hashKoreader: boolean,
   analyzeDimensions: boolean,
+  adPagesDetector: boolean,
   oneshotsDirectory: string,
   unavailable: boolean,
 
@@ -66,6 +67,7 @@ export interface LibraryCreationDto {
   hashPages: boolean,
   hashKoreader: boolean,
   analyzeDimensions: boolean,
+  adPagesDetector: boolean,
   oneshotsDirectory: string,
 }
 
@@ -97,5 +99,6 @@ export interface LibraryUpdateDto {
   hashPages: boolean,
   hashKoreader: boolean,
   analyzeDimensions: boolean,
+  adPagesDetector: boolean,
   oneshotsDirectory: string,
 }
