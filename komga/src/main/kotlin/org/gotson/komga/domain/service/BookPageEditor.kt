@@ -124,7 +124,11 @@ class BookPageEditor(
         )
         ?: throw IllegalStateException("Newly created book could not be scanned: $tempFile")
 
-    val createdMedia = bookAnalyzer.analyze(createdBook, libraryRepository.findById(book.libraryId).analyzeDimensions)
+    val createdMedia = bookAnalyzer.analyze(
+          createdBook,
+          libraryRepository.findById(book.libraryId).analyzeDimensions,
+          libraryRepository.findById(book.libraryId).adPagesDetector
+        )
 
     try {
       when {

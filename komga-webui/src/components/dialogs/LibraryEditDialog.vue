@@ -246,6 +246,21 @@
                           </v-tooltip>
                         </template>
                       </v-checkbox>
+                        <v-checkbox
+                            v-model="form.adPagesDetector"
+                            :label="$t('dialog.edit_library.field_analysis_ad_pages_detector')"
+                            hide-details
+                            class="mx-4"
+                      >
+                        <template v-slot:append>
+                          <v-tooltip bottom>
+                            <template v-slot:activator="{ on }">
+                              <v-icon v-on="on" color="warning">mdi-alert-circle-outline</v-icon>
+                            </template>
+                            {{ $t('dialog.edit_library.tooltip_use_resources') }}
+                          </v-tooltip>
+                        </template>
+                      </v-checkbox>
                     </v-col>
                   </v-row>
                   <v-row>
@@ -483,6 +498,7 @@ export default Vue.extend({
         hashPages: false,
         hashKoreader: false,
         analyzeDimensions: true,
+        adPagesDetector: false,
         oneshotsDirectory: '',
       },
       validationFieldNames: new Map([]),
@@ -647,6 +663,7 @@ export default Vue.extend({
       this.form.hashPages = library ? library.hashPages : false
       this.form.hashKoreader = library ? library.hashKoreader : false
       this.form.analyzeDimensions = library ? library.analyzeDimensions : false
+      this.form.adPagesDetector = library ? library.adPagesDetector : false
       this.form.oneshotsDirectory = library ? library.oneshotsDirectory : ''
       this.$v.$reset()
     },
@@ -683,6 +700,7 @@ export default Vue.extend({
           hashPages: this.form.hashPages,
           hashKoreader: this.form.hashKoreader,
           analyzeDimensions: this.form.analyzeDimensions,
+          adPagesDetector: this.form.adPagesDetector,
           oneshotsDirectory: this.form.oneshotsDirectory,
         }
       }
