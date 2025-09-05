@@ -35,6 +35,7 @@ data class Library(
   val hashPages: Boolean = false,
   val hashKoreader: Boolean = false,
   val analyzeDimensions: Boolean = true,
+  val adPagesDetector: Boolean = false,
   val oneshotsDirectory: String? = null,
   val unavailableDate: LocalDateTime? = null,
   val id: String = TsidCreator.getTsid256().toString(),
