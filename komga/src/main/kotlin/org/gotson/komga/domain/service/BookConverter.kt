@@ -122,7 +122,11 @@ class BookConverter(
         )
         ?: throw IllegalStateException("Newly converted book could not be scanned: $destinationFilename")
 
-    val convertedMedia = bookAnalyzer.analyze(convertedBook, libraryRepository.findById(book.libraryId).analyzeDimensions)
+    val convertedMedia = bookAnalyzer.analyze(
+          convertedBook,
+          libraryRepository.findById(book.libraryId).analyzeDimensions,
+          libraryRepository.findById(book.libraryId).adPagesDetector
+        )
 
     try {
       when {

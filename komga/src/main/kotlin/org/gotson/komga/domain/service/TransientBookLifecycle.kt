@@ -56,7 +56,7 @@ class TransientBookLifecycle(
   }
 
   fun analyzeAndPersist(transientBook: TransientBook): TransientBook {
-    val media = bookAnalyzer.analyze(transientBook.book, true)
+    val media = bookAnalyzer.analyze(transientBook.book, true, true)
     val (seriesId, number) = getMetadata(transientBook.copy(media = media))
 
     val updated = transientBook.copy(media = media, metadata = TransientBook.Metadata(number, seriesId))
