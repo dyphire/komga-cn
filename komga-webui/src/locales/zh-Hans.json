@@ -462,6 +462,7 @@
       "dialog_title_add": "添加库",
       "dialot_title_edit": "编辑库",
       "field_analysis_analyze_dimensions": "分析页面尺寸",
+      "field_analysis_ad_pages_detector": "移除广告页面（二维码检测）",
       "field_analysis_hash_files": "计算文件的哈希值",
       "field_analysis_hash_koreader": "计算 KOReader 文件的哈希值",
       "field_analysis_hash_pages": "计算页面的哈希值",

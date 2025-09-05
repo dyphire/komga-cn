@@ -31,5 +31,6 @@ data class LibraryCreationDto(
   val hashPages: Boolean = false,
   val hashKoreader: Boolean = false,
   val analyzeDimensions: Boolean = true,
+  val adPagesDetector: Boolean = false,
   val oneshotsDirectory: String? = null,
 )
