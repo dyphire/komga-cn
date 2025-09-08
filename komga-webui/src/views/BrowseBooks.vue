@@ -20,6 +20,15 @@
 
       <page-size-select v-model="pageSize"/>
 
+      <v-btn
+        icon
+        :color="smartFilterActive ? 'secondary' : ''"
+        @click="showSmartFilterDialog = true"
+        class="mr-2"
+      >
+        <v-icon>mdi-filter-cog-outline</v-icon>
+      </v-btn>
+
       <v-btn icon @click="drawer = !drawer">
         <v-icon :color="sortOrFilterActive ? 'secondary' : ''">mdi-filter-variant</v-icon>
       </v-btn>
@@ -112,6 +121,16 @@
       </template>
     </v-container>
 
+    <smart-filter-dialog
+      v-model="showSmartFilterDialog"
+      :current-query="smartFilterQuery"
+      :library-ids="requestLibraryIds"
+      @apply="onSmartFilterApply"
+      @clear="onSmartFilterClear"
+      @error="onSmartFilterError"
+      @save-filter="onSmartFilterSave"
+    />
+
   </div>
 </template>
 
@@ -141,6 +160,7 @@ import FilterDrawer from '@/components/FilterDrawer.vue'
 import SortList from '@/components/SortList.vue'
 import FilterPanels from '@/components/FilterPanels.vue'
 import FilterList from '@/components/FilterList.vue'
+import SmartFilterDialog from '@/components/SmartFilterDialog.vue'
 import {
   extractFilterOptionsValues,
   mergeFilterParams,
@@ -200,6 +220,7 @@ export default Vue.extend({
     FilterPanels,
     FilterList,
     SortList,
+    SmartFilterDialog,
   },
   data: function () {
     return {
@@ -223,6 +244,9 @@ export default Vue.extend({
       filterOptions: {
         tag: [] as NameValue[],
       },
+      smartFilterQuery: '',
+      smartFilterCondition: null as any,
+      showSmartFilterDialog: false,
     }
   },
   props: {
@@ -425,7 +449,10 @@ export default Vue.extend({
       }
     },
     sortOrFilterActive(): boolean {
-      return sortOrFilterActive(this.sortActive, this.sortDefault, this.filters)
+      return sortOrFilterActive(this.sortActive, this.sortDefault, this.filters) || !!this.smartFilterCondition
+    },
+    smartFilterActive(): boolean {
+      return !!this.smartFilterCondition
     },
   },
   methods: {
@@ -435,6 +462,8 @@ export default Vue.extend({
         this.$set(this.filters, prop, [])
       }
       this.sortActive = this.sortDefault
+      this.smartFilterCondition = null
+      this.smartFilterQuery = ''
       this.$store.commit('setLibraryFilterBooks', {id: this.libraryId, filter: this.filters})
       this.$store.commit('setLibrarySortBooks', {id: this.libraryId, sort: this.sortActive})
       this.updateRouteAndReload()
@@ -601,12 +630,16 @@ export default Vue.extend({
           this.$store.getters.getLibrariesPinned.map((it: LibraryDto) => new SearchConditionLibraryId(new SearchOperatorIs(it.id))),
         ))
       }
+
+      // Add smart filter condition
+      if (this.smartFilterCondition) {
+        conditions.push(this.smartFilterCondition)
+      }
       if (this.filters.readStatus && this.filters.readStatus.length > 0) conditions.push(new SearchConditionAnyOfBook(this.filters.readStatus))
       if (this.filters.tag && this.filters.tag.length > 0) this.filtersMode?.tag?.allOf ? conditions.push(new SearchConditionAllOfBook(this.filters.tag)) : conditions.push(new SearchConditionAnyOfBook(this.filters.tag))
       if (this.filters.oneshot && this.filters.oneshot.length > 0) conditions.push(...this.filters.oneshot)
-      if (this.filters.mediaProfile && this.filters.mediaProfile.length > 0) this.filtersMode?.mediaProfile?.allOf ? conditions.push(new SearchConditionAllOfBook(this.filters.mediaProfile)) : conditions.push(new SearchConditionAnyOfBook(this.filters.mediaProfile))
       if (this.filters.deleted && this.filters.deleted.length > 0) conditions.push(...this.filters.deleted)
-      if (this.filters.mediaProfile && this.filters.mediaProfile.length > 0) conditions.push(new SearchConditionAnyOfBook(this.filters.mediaProfile))
+      if (this.filters.mediaProfile && this.filters.mediaProfile.length > 0) this.filtersMode?.mediaProfile?.allOf ? conditions.push(new SearchConditionAllOfBook(this.filters.mediaProfile)) : conditions.push(new SearchConditionAnyOfBook(this.filters.mediaProfile))
       if (this.filters.mediaStatus && this.filters.mediaStatus.length > 0) conditions.push(new SearchConditionAnyOfBook(this.filters.mediaStatus))
       authorRoles.forEach((role: string) => {
         if (role in this.filters) {
@@ -670,6 +703,27 @@ export default Vue.extend({
     },
     deleteBooks() {
       this.$store.dispatch('dialogDeleteBook', this.selectedBooks)
+    },
+    onSmartFilterApply(condition: any, query: string) {
+      this.smartFilterCondition = condition
+      this.smartFilterQuery = query
+      this.updateRouteAndReload()
+    },
+    onSmartFilterClear() {
+      this.smartFilterCondition = null
+      this.smartFilterQuery = ''
+      this.updateRouteAndReload()
+    },
+    onSmartFilterError(message: string) {
+      this.$store.dispatch('snackbar', { message, color: 'error' })
+    },
+    onSmartFilterSave(filter: {name: string, query: string}) {
+      // Handle saving filter - this will be handled by SavedFiltersDialog component
+      // The SavedFiltersDialog component will manage its own saved filters
+      this.$store.dispatch('snackbar', {
+        message: this.$t('filter.filter_saved', { name: filter.name }).toString(),
+        color: 'success',
+      })
     },
   },
 })
