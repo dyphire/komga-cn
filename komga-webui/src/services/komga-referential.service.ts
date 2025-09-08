@@ -14,7 +14,10 @@ export default class KomgaReferentialService {
 
   async getAuthors(search?: string, role?: string, libraryIds?: string[], collectionId?: string, seriesId?: string, readListId?: string): Promise<Page<AuthorDto>> {
     try {
-      const params = {} as any
+      const params: Record<string, any> = {
+        unpaged: true,
+      }
+
       if (search) params.search = search
       if (role) params.role = role
       if (libraryIds) params.library_id = libraryIds
