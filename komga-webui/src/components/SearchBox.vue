@@ -13,7 +13,8 @@
       no-filter
       return-object
       prepend-inner-icon="mdi-magnify"
-      append-icon=""
+      append-outer-icon="mdi-filter-cog-outline"
+      @click:append-outer="openSmartFilterDialog"
       item-text="id"
       auto-select-first
       :search-input.sync="search"
@@ -111,6 +112,18 @@
 
       </template>
     </v-autocomplete>
+
+    <!-- Smart Filter Dialog -->
+    <smart-filter-dialog
+      v-model="showSmartFilterDialog"
+      :current-query="search || ''"
+      :library-ids="[]"
+      :mode="mode"
+      :from-search-box="true"
+      @full-text-search="onFullTextSearch"
+      @clear="onSmartFilterClear"
+      @error="onSmartFilterError"
+    />
   </div>
 </template>
 
@@ -129,13 +142,23 @@ import {
   SearchOperatorIsFalse,
   SeriesSearch,
 } from '@/types/komga-search'
+import SmartFilterDialog from '@/components/SmartFilterDialog.vue'
 
 export default Vue.extend({
   name: 'SearchBox',
+  components: {
+    SmartFilterDialog,
+  },
+  props: {
+    mode: {
+      type: String,
+      default: 'series', // 'books' or 'series'
+    },
+  },
   data: function () {
     return {
       selectedItem: null as unknown as any,
-      search: null,
+      search: null as string | null,
       showResults: false,
       loading: false,
       series: [] as SeriesDto[],
@@ -143,6 +166,7 @@ export default Vue.extend({
       collections: [] as CollectionDto[],
       readLists: [] as ReadListDto[],
       pageSize: 10,
+      showSmartFilterDialog: false,
     }
   },
   watch: {
@@ -251,6 +275,23 @@ export default Vue.extend({
     },
     readListThumbnailUrl(readListId: string): string {
       return readListThumbnailUrl(readListId)
+    },
+    openSmartFilterDialog() {
+      this.showSmartFilterDialog = true
+    },
+    onFullTextSearch(query: string) {
+      // Handle full-text search from smart filter dialog
+      this.search = query
+      this.searchDetails()
+    },
+    onSmartFilterClear() {
+      this.clear()
+    },
+    onSmartFilterError(message: string) {
+      this.$store.dispatch('snackbar', {
+        message: message,
+        color: 'error',
+      })
     },
   },
 })
