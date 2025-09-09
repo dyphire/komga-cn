@@ -12,6 +12,10 @@ export class PageLoader<T> {
     return !this.currentPage ? false : !this.currentPage.last
   }
 
+  get currentPageData() {
+    return this.currentPage
+  }
+
   get tick() {
     return this._tick
   }
