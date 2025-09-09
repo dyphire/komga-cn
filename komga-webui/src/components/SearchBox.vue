@@ -234,7 +234,6 @@ export default Vue.extend({
         this.loading = true
         this.series = (await this.$komgaSeries.getSeriesList({
           fullTextSearch: query,
-          condition: new SearchConditionOneShot(new SearchOperatorIsFalse()),
         } as SeriesSearch, {size: this.pageSize})).content
         this.books = (await this.$komgaBooks.getBooksList({
           fullTextSearch: query,
