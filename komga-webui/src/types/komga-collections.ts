@@ -1,4 +1,4 @@
-interface CollectionDto {
+export interface CollectionDto {
   id: string,
   name: string,
   ordered: boolean,
@@ -8,19 +8,19 @@ interface CollectionDto {
   lastModifiedDate: Date
 }
 
-interface CollectionCreationDto {
+export interface CollectionCreationDto {
   name: string,
   ordered: boolean,
   seriesIds: string[]
 }
 
-interface CollectionUpdateDto {
+export interface CollectionUpdateDto {
   name?: string,
   ordered?: boolean,
   seriesIds?: string[]
 }
 
-interface CollectionThumbnailDto {
+export interface CollectionThumbnailDto {
   id: string,
   collectionId: string,
   type: string,
