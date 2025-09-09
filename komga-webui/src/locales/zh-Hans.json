@@ -181,6 +181,7 @@
     "isbn": "ISBN",
     "links": "链接",
     "navigation_within_readlist": "阅读列表 {name} 中的导航",
+    "open_page_prompt": "跳转页面",
     "outdated_tooltip": "此书的文件已更改，必须重新分析这本书",
     "read_book": "阅读书籍",
     "read_incognito": "隐私(无痕)阅读",
@@ -787,7 +788,8 @@
         "click": "单击 / 点击"
       },
       "page_margins": "页边距",
-      "viewing_theme": "查看主题"
+      "viewing_theme": "查看主题",
+      "progress_markers": "进度标记"
     },
     "shortcuts": {
       "cycle_pagination": "列数切换",
