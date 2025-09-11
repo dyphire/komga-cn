@@ -45,6 +45,7 @@ export const persistedModule: Module<any, any> = {
     importPath: '',
     duplicatesNewPageSize: 10,
     rememberMe: false,
+    dashboardSelectedLibraries: [] as string[],
   },
   getters: {
     getLocaleFirstDay: (state) => () => {
@@ -91,6 +92,9 @@ export const persistedModule: Module<any, any> = {
     },
     getLibraryRoute: (state) => (id: string) => {
       return state.library.route[id]
+    },
+    getDashboardSelectedLibraries: (state) => () => {
+      return state.dashboardSelectedLibraries
     },
   },
   mutations: {
@@ -174,6 +178,9 @@ export const persistedModule: Module<any, any> = {
     },
     setRememberMe(state, val) {
       state.rememberMe = val
+    },
+    setDashboardSelectedLibraries(state, val) {
+      state.dashboardSelectedLibraries = val
     },
   },
 }

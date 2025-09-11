@@ -298,7 +298,12 @@
     "recently_added_series": "Recently Added Series",
     "recently_read_books": "Recently Read Books",
     "recently_released_books": "Recently Released Books",
-    "recently_updated_series": "Recently Updated Series"
+    "recently_updated_series": "Recently Updated Series",
+    "library_selector": {
+      "title": "Select Libraries to display",
+      "select_libraries": "Select Libraries",
+      "hint": "Choose which libraries to display content from. If none selected, all pinned libraries will be used."
+    }
   },
   "data_import": {
     "book_number": "Book number: {name}",
