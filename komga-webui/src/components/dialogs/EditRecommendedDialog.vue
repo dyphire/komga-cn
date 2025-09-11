@@ -10,6 +10,39 @@
       </v-btn>
 
       <v-card-text :class="$vuetify.breakpoint.xsOnly ? 'px-0' : undefined">
+        <!-- Library Selection (only for home page) -->
+        <div class="mb-4">
+          <v-subheader>{{ $t('dashboard.library_selector.title') }}</v-subheader>
+          <v-select
+            v-model="selectedLibraries"
+            :items="libraryItems"
+            :label="$t('dashboard.library_selector.select_libraries')"
+            multiple
+            chips
+            deletable-chips
+            :hint="$t('dashboard.library_selector.hint')"
+            persistent-hint
+            class="mb-2"
+          >
+            <template v-slot:selection="{ item, index }">
+              <v-chip
+                v-if="index < 2"
+                small
+                :close="selectedLibraries.length > 1"
+                @click:close="removeLibrary(item.value)"
+              >
+                {{ item.text }}
+              </v-chip>
+              <span
+                v-if="index === 2"
+                class="grey--text caption"
+              >
+                (+{{ selectedLibraries.length - 2 }} others)
+              </span>
+            </template>
+          </v-select>
+        </div>
+
         <v-list>
           <draggable
             v-model="localItems"
@@ -56,6 +89,8 @@ import {
   ClientSettingsRecommendedViewSection,
   RECOMMENDED_DEFAULT,
 } from '@/types/komga-clientsettings'
+import {LibraryDto} from '@/types/komga-libraries'
+import {LIBRARIES_ALL} from '@/types/library'
 
 
 export default Vue.extend({
@@ -67,6 +102,7 @@ export default Vue.extend({
       modal: false,
       localItems: [] as ClientSettingsRecommendedViewSection[],
       enabled: {} as Record<string, boolean>,
+      selectedLibraries: [] as string[],
     }
   },
   props: {
@@ -94,15 +130,31 @@ export default Vue.extend({
         ghostClass: 'ghost',
       }
     },
+    libraries(): LibraryDto[] {
+      return this.$store.getters.getLibraries
+    },
+    libraryItems(): { text: string; value: string }[] {
+      return this.libraries.map(lib => ({
+        text: lib.name,
+        value: lib.id,
+      }))
+    },
+    isIndividualLibrary(): boolean {
+      // This component is used in DashboardView, so we need to check if it's showing all libraries
+      return this.$route.params.libraryId !== LIBRARIES_ALL
+    },
   },
   methods: {
     reset(viewConfig: ClientSettingsRecommendedView) {
       this.localItems = viewConfig?.sections || []
-      this.enabled = []
+      this.enabled = {} as Record<string, boolean>
       this.localItems.forEach(it => this.enabled[it.section] = true)
       RECOMMENDED_DEFAULT.sections
         .filter(it => !viewConfig?.sections.some(s => s.section === it.section))
         .forEach(it => this.localItems.push(it))
+
+      // Initialize selected libraries
+      this.selectedLibraries = [...this.$store.getters.getDashboardSelectedLibraries()]
     },
     dialogClose() {
       this.$emit('input', false)
@@ -117,8 +169,17 @@ export default Vue.extend({
         sections: sections,
       } as ClientSettingsRecommendedView
 
+      // Save selected libraries
+      this.$store.commit('setDashboardSelectedLibraries', this.selectedLibraries)
+
       this.$emit('update:viewConfig', updated)
       this.dialogClose()
+    },
+    removeLibrary(libraryId: string) {
+      const index = this.selectedLibraries.indexOf(libraryId)
+      if (index >= 0) {
+        this.selectedLibraries.splice(index, 1)
+      }
     },
   },
 })

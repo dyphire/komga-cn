@@ -19,7 +19,7 @@
 - 在 Divina 阅读器中添加 EPUB 目录支持
 - 在系列和书籍的上下文菜单中添加下载功能
 - 批量编辑书籍时预填充作者选择
-
+- 主页增加库选择功能，管理首页显示
 
 github: https://github.com/dyphire/komga-cn
 
