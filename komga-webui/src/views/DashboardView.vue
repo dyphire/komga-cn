@@ -11,6 +11,7 @@
 
       <v-spacer/>
 
+
       <library-navigation v-if="individualLibrary && $vuetify.breakpoint.mdAndUp" :libraryId="libraryId"/>
 
       <v-spacer/>
@@ -45,6 +46,7 @@
       @bulk-edit="bulkEditMultipleBooks"
       @delete="deleteBooks"
     />
+
 
     <v-container fluid>
       <empty-state v-if="allEmpty && !loading"
@@ -259,6 +261,14 @@ export default Vue.extend({
         if (val.length === 0) this.$router.push({name: 'no-pins'})
       },
     },
+    '$store.getters.getDashboardSelectedLibraries': {
+      handler() {
+        if (this.libraryId === LIBRARIES_ALL) {
+          this.setupLoaders(this.libraryId)
+          this.loadAll()
+        }
+      },
+    },
   },
   computed: {
     settingsKey(): string {
@@ -295,7 +305,16 @@ export default Vue.extend({
       return this.getLibraryLazy(this.libraryId)
     },
     libraryIds(): string[] {
-      return this.libraryId !== LIBRARIES_ALL ? [this.libraryId] : this.$store.getters.getLibrariesPinned.map((it: LibraryDto) => it.id)
+      if (this.libraryId !== LIBRARIES_ALL) {
+        return [this.libraryId]
+      }
+
+      const selectedLibraries = this.$store.getters.getDashboardSelectedLibraries()
+      if (selectedLibraries && selectedLibraries.length > 0) {
+        return selectedLibraries
+      }
+
+      return this.$store.getters.getLibrariesPinned.map((it: LibraryDto) => it.id)
     },
     isAdmin(): boolean {
       return this.$store.getters.meAdmin
@@ -386,7 +405,7 @@ export default Vue.extend({
       if (percent > 0.95) await loader.loadNext()
     },
     getRequestLibraryId(libraryId: string): string[] {
-      return libraryId !== LIBRARIES_ALL ? [libraryId] : this.$store.getters.getLibrariesPinned.map((it: LibraryDto) => it.id)
+      return this.libraryIds
     },
     seriesChanged(event: SeriesSseDto) {
       if (this.libraryId === LIBRARIES_ALL || event.libraryId === this.libraryId) {
@@ -582,6 +601,10 @@ export default Vue.extend({
       } else {
         return undefined
       }
+    },
+    onLibrariesChanged() {
+      this.setupLoaders(this.libraryId)
+      this.loadAll(true)
     },
   },
 })
