@@ -23,6 +23,7 @@
 - 添加阅读统计界面，可以查看全库或单库的统计信息
 - 书籍卡片右上角添加无痕阅读按钮
 - 修复 EPUB 阅读器无法跳转上/下一本
+- 自动检测 Webtoon 元数据并切换阅读模式
 
 github: https://github.com/dyphire/komga-cn
 
