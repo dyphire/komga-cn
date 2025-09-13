@@ -2,29 +2,23 @@ import {Shortcut} from '@/types/shortcuts'
 
 export const shortcutsD2Reader = [
   new Shortcut('epubreader.shortcuts.previous',
-    () => {
-    }, 'CTRL+Space', 'CTRL + SPACE'),
+    (ctx: any) => ctx.handlePreviousPage(), 'CTRL+Space', 'CTRL + SPACE'),
   new Shortcut('epubreader.shortcuts.next',
-    () => {
-    }, 'Space', 'SPACE'),
+    (ctx: any) => ctx.handleNextPage(), 'Space', 'SPACE'),
 ]
 
 export const shortcutsD2ReaderLTR = [
   new Shortcut('epubreader.shortcuts.previous',
-    () => {
-    }, 'ArrowLeft', '←'),
+    (ctx: any) => ctx.handlePreviousPage(), 'ArrowLeft', '←'),
   new Shortcut('epubreader.shortcuts.next',
-    () => {
-    }, 'ArrowRight', '→'),
+    (ctx: any) => ctx.handleNextPage(), 'ArrowRight', '→'),
 ]
 
 export const shortcutsD2ReaderRTL = [
   new Shortcut('epubreader.shortcuts.previous',
-    () => {
-    }, 'ArrowRight', '→'),
+    (ctx: any) => ctx.handlePreviousPage(), 'ArrowRight', '→'),
   new Shortcut('epubreader.shortcuts.next',
-    () => {
-    }, 'ArrowLeft', '←'),
+    (ctx: any) => ctx.handleNextPage(), 'ArrowLeft', '←'),
 ]
 
 export const epubShortcutsSettingsScroll = [
