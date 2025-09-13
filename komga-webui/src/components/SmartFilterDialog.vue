@@ -155,6 +155,7 @@
                       :items="genreSuggestions"
                       :label="$t('filter.value')"
                       :search-input.sync="condition.searchInput"
+                      :loading="loadingStates.genre"
                       dense
                       outlined
                       hide-details
@@ -168,6 +169,7 @@
                       :items="tagSuggestions"
                       :label="$t('filter.value')"
                       :search-input.sync="condition.searchInput"
+                      :loading="loadingStates.tag"
                       dense
                       outlined
                       hide-details
@@ -181,6 +183,7 @@
                       :items="publisherSuggestions"
                       :label="$t('filter.value')"
                       :search-input.sync="condition.searchInput"
+                      :loading="loadingStates.publisher"
                       dense
                       outlined
                       hide-details
@@ -197,6 +200,7 @@
                       return-object
                       :label="$t('filter.value')"
                       :search-input.sync="condition.searchInput"
+                      :loading="loadingStates.language"
                       dense
                       outlined
                       hide-details
@@ -210,6 +214,7 @@
                       :items="ageRatingSuggestions"
                       :label="$t('filter.value')"
                       :search-input.sync="condition.searchInput"
+                      :loading="loadingStates.ageRating"
                       dense
                       outlined
                       hide-details
@@ -233,6 +238,7 @@
                       :items="authorSuggestions"
                       :label="$t('filter.value')"
                       :search-input.sync="condition.searchInput"
+                      :loading="loadingStates.author"
                       dense
                       outlined
                       hide-details
@@ -384,6 +390,18 @@ export default Vue.extend({
     publisherSuggestions: [] as string[],
     languageSuggestions: [] as NameValue[],
     ageRatingSuggestions: [] as string[],
+    // 性能优化相关数据
+    loadingStates: {
+      tag: false,
+      author: false,
+      genre: false,
+      publisher: false,
+      language: false,
+      ageRating: false,
+    } as Record<string, boolean>,
+    debounceTimers: {} as Record<string, number>,
+    suggestionsCache: {} as Record<string, any>,
+    abortControllers: {} as Record<string, AbortController>,
   }),
   computed: {
     dialog: {
@@ -483,6 +501,37 @@ export default Vue.extend({
     },
   },
   methods: {
+    // 防抖处理方法
+    debounce(func: Function, delay: number, key: string) {
+      // 清除之前的定时器
+      if (this.debounceTimers[key]) {
+        clearTimeout(this.debounceTimers[key])
+      }
+      // 设置新的定时器
+      this.debounceTimers[key] = window.setTimeout(() => {
+        func()
+        delete this.debounceTimers[key]
+      }, delay)
+    },
+
+    // 取消请求方法
+    cancelRequest(key: string) {
+      if (this.abortControllers[key]) {
+        this.abortControllers[key].abort()
+        delete this.abortControllers[key]
+      }
+    },
+
+    // 获取缓存的建议
+    getCachedSuggestions(key: string) {
+      return this.suggestionsCache[key]
+    },
+
+    // 设置缓存的建议
+    setCachedSuggestions(key: string, data: any) {
+      this.suggestionsCache[key] = data
+    },
+
     applyFilter() {
       if (this.fromSearchBox) {
         // 从搜索框打开时，始终调用全文搜索
@@ -584,10 +633,10 @@ export default Vue.extend({
 
       if (validConditions.length === 0) return ''
 
-      let query = ''
-      for (let i = 0; i < validConditions.length; i++) {
-        const cond = validConditions[i]
+      // 使用更高效的字符串构建方式
+      const queryParts: string[] = []
 
+      for (const cond of validConditions) {
         // Handle different value types
         let valueStr: string = ''
         if (cond.value === null || cond.value === undefined) {
@@ -607,18 +656,31 @@ export default Vue.extend({
           ? `${cond.field}:${valueStr}`
           : `${cond.field}:${valueStr}`
 
-        if (i === 0) {
-          query = conditionStr
-        } else {
-          const logicOp = cond.logicOp || 'AND'
-          query += ` ${logicOp} ${conditionStr}`
-        }
+        queryParts.push(conditionStr)
       }
 
-      return query
+      // 使用 join 构建最终查询，比循环拼接更高效
+      return queryParts.join(' AND ')
     },
     async loadTagSuggestions(search?: string) {
+      const cacheKey = `tag_${this.$props.mode}_${this.libraryIds.join(',')}_${search || ''}`
+
+      // 检查缓存
+      const cached = this.getCachedSuggestions(cacheKey)
+      if (cached && !search) {
+        this.tagSuggestions = cached
+        return
+      }
+
+      // 取消之前的请求
+      this.cancelRequest('tag')
+
+      // 创建新的 AbortController
+      this.abortControllers['tag'] = new AbortController()
+
       try {
+        this.loadingStates.tag = true
+
         // Choose the appropriate API based on mode
         let response: string[]
         if (this.$props.mode === 'books') {
@@ -628,119 +690,322 @@ export default Vue.extend({
           // For series mode, use getSeriesAndBookTags
           response = await this.$komgaReferential.getSeriesAndBookTags(this.libraryIds)
         }
+
+        // 检查请求是否被取消
+        if (this.abortControllers['tag']?.signal.aborted) {
+          return
+        }
+
         this.tagSuggestions = Array.isArray(response) ? response : []
+
+        // 缓存结果（只缓存非搜索结果）
+        if (!search) {
+          this.setCachedSuggestions(cacheKey, this.tagSuggestions)
+        }
       } catch (error) {
+        // 检查是否是取消请求导致的错误
+        if (error.name === 'AbortError') {
+          return
+        }
         // eslint-disable-next-line no-console
         console.error('Failed to load tag suggestions:', error)
         this.tagSuggestions = []
+      } finally {
+        this.loadingStates.tag = false
+        delete this.abortControllers['tag']
       }
     },
     async loadAuthorSuggestions(role?: string) {
+      const cacheKey = `author_${role || 'all'}_${this.libraryIds.join(',')}`
+
+      // 检查缓存
+      const cached = this.getCachedSuggestions(cacheKey)
+      if (cached) {
+        this.authorSuggestions = cached
+        return
+      }
+
+      // 取消之前的请求
+      this.cancelRequest('author')
+
+      // 创建新的 AbortController
+      this.abortControllers['author'] = new AbortController()
+
       try {
+        this.loadingStates.author = true
+
         // Always reset suggestions first to prevent stale data
         this.authorSuggestions = []
 
         // Get all authors (search is always undefined)
-        const response = await this.$komgaReferential.getAuthors(undefined, role, this.libraryIds)
+        const response = await this.$komgaReferential.getAuthors(undefined, role, this.libraryIds, undefined, undefined, undefined, true)
+
+        // 检查请求是否被取消
+        if (this.abortControllers['author']?.signal.aborted) {
+          return
+        }
+
         this.authorSuggestions = response.content ? response.content.map((author: any) => author.name) : []
+
+        // 缓存结果
+        this.setCachedSuggestions(cacheKey, this.authorSuggestions)
       } catch (error) {
+        // 检查是否是取消请求导致的错误
+        if (error.name === 'AbortError') {
+          return
+        }
         // eslint-disable-next-line no-console
         console.error('Failed to load author suggestions:', error)
         this.authorSuggestions = []
+      } finally {
+        this.loadingStates.author = false
+        delete this.abortControllers['author']
       }
     },
     async loadGenreSuggestions(search?: string) {
+      const cacheKey = `genre_${this.libraryIds.join(',')}_${search || ''}`
+
+      // 检查缓存
+      const cached = this.getCachedSuggestions(cacheKey)
+      if (cached && !search) {
+        this.genreSuggestions = cached
+        return
+      }
+
+      // 取消之前的请求
+      this.cancelRequest('genre')
+
+      // 创建新的 AbortController
+      this.abortControllers['genre'] = new AbortController()
+
       try {
+        this.loadingStates.genre = true
+
         // Get all genres
         const response = await this.$komgaReferential.getGenres(this.libraryIds)
+
+        // 检查请求是否被取消
+        if (this.abortControllers['genre']?.signal.aborted) {
+          return
+        }
+
         this.genreSuggestions = Array.isArray(response) ? response : []
+
+        // 缓存结果（只缓存非搜索结果）
+        if (!search) {
+          this.setCachedSuggestions(cacheKey, this.genreSuggestions)
+        }
       } catch (error) {
+        // 检查是否是取消请求导致的错误
+        if (error.name === 'AbortError') {
+          return
+        }
         // eslint-disable-next-line no-console
         console.error('Failed to load genre suggestions:', error)
         this.genreSuggestions = []
+      } finally {
+        this.loadingStates.genre = false
+        delete this.abortControllers['genre']
       }
     },
     async loadPublisherSuggestions(search?: string) {
+      const cacheKey = `publisher_${this.libraryIds.join(',')}_${search || ''}`
+
+      // 检查缓存
+      const cached = this.getCachedSuggestions(cacheKey)
+      if (cached && !search) {
+        this.publisherSuggestions = cached
+        return
+      }
+
+      // 取消之前的请求
+      this.cancelRequest('publisher')
+
+      // 创建新的 AbortController
+      this.abortControllers['publisher'] = new AbortController()
+
       try {
+        this.loadingStates.publisher = true
+
         // Get all publishers
         const response = await this.$komgaReferential.getPublishers(this.libraryIds)
+
+        // 检查请求是否被取消
+        if (this.abortControllers['publisher']?.signal.aborted) {
+          return
+        }
+
         this.publisherSuggestions = Array.isArray(response) ? response : []
+
+        // 缓存结果（只缓存非搜索结果）
+        if (!search) {
+          this.setCachedSuggestions(cacheKey, this.publisherSuggestions)
+        }
       } catch (error) {
+        // 检查是否是取消请求导致的错误
+        if (error.name === 'AbortError') {
+          return
+        }
         // eslint-disable-next-line no-console
         console.error('Failed to load publisher suggestions:', error)
         this.publisherSuggestions = []
+      } finally {
+        this.loadingStates.publisher = false
+        delete this.abortControllers['publisher']
       }
     },
     async loadLanguageSuggestions(search?: string) {
+      const cacheKey = `language_${this.libraryIds.join(',')}_${search || ''}`
+
+      // 检查缓存
+      const cached = this.getCachedSuggestions(cacheKey)
+      if (cached && !search) {
+        this.languageSuggestions = cached
+        return
+      }
+
+      // 取消之前的请求
+      this.cancelRequest('language')
+
+      // 创建新的 AbortController
+      this.abortControllers['language'] = new AbortController()
+
       try {
+        this.loadingStates.language = true
+
         // Get all languages
         const response = await this.$komgaReferential.getLanguages(this.libraryIds)
+
+        // 检查请求是否被取消
+        if (this.abortControllers['language']?.signal.aborted) {
+          return
+        }
+
         this.languageSuggestions = Array.isArray(response) ? response : []
+
+        // 缓存结果（只缓存非搜索结果）
+        if (!search) {
+          this.setCachedSuggestions(cacheKey, this.languageSuggestions)
+        }
       } catch (error) {
+        // 检查是否是取消请求导致的错误
+        if (error.name === 'AbortError') {
+          return
+        }
         // eslint-disable-next-line no-console
         console.error('Failed to load language suggestions:', error)
         this.languageSuggestions = []
+      } finally {
+        this.loadingStates.language = false
+        delete this.abortControllers['language']
       }
     },
     async loadAgeRatingSuggestions(search?: string) {
+      const cacheKey = `ageRating_${this.libraryIds.join(',')}_${search || ''}`
+
+      // 检查缓存
+      const cached = this.getCachedSuggestions(cacheKey)
+      if (cached && !search) {
+        this.ageRatingSuggestions = cached
+        return
+      }
+
+      // 取消之前的请求
+      this.cancelRequest('ageRating')
+
+      // 创建新的 AbortController
+      this.abortControllers['ageRating'] = new AbortController()
+
       try {
+        this.loadingStates.ageRating = true
+
         // Get all age ratings
         const response = await this.$komgaReferential.getAgeRatings(this.libraryIds)
+
+        // 检查请求是否被取消
+        if (this.abortControllers['ageRating']?.signal.aborted) {
+          return
+        }
+
         this.ageRatingSuggestions = Array.isArray(response) ? response : []
+
+        // 缓存结果（只缓存非搜索结果）
+        if (!search) {
+          this.setCachedSuggestions(cacheKey, this.ageRatingSuggestions)
+        }
       } catch (error) {
+        // 检查是否是取消请求导致的错误
+        if (error.name === 'AbortError') {
+          return
+        }
         // eslint-disable-next-line no-console
         console.error('Failed to load age rating suggestions:', error)
         this.ageRatingSuggestions = []
+      } finally {
+        this.loadingStates.ageRating = false
+        delete this.abortControllers['ageRating']
       }
     },
     onTagInput(condition: any) {
-      // Load suggestions when user starts typing
-      if (condition.searchInput && condition.searchInput.length > 0) {
-        this.loadTagSuggestions(condition.searchInput)
-      } else {
-        this.loadTagSuggestions()
-      }
+      // 使用防抖处理输入
+      this.debounce(() => {
+        if (condition.searchInput && condition.searchInput.length > 0) {
+          this.loadTagSuggestions(condition.searchInput)
+        } else {
+          this.loadTagSuggestions()
+        }
+      }, 300, `tag_${condition._id}`)
     },
     onAuthorInput(condition?: any) {
-      // Load suggestions when user starts typing
-      const role = condition?.field && ['author', 'writer', 'penciller', 'letterer', 'inker', 'editor', 'cover', 'colorist'].includes(condition.field)
-        ? (condition.field === 'author' ? undefined : condition.field)
-        : undefined
+      // 使用防抖处理输入
+      this.debounce(() => {
+        const role = condition?.field && ['author', 'writer', 'penciller', 'letterer', 'inker', 'editor', 'cover', 'colorist'].includes(condition.field)
+          ? (condition.field === 'author' ? undefined : condition.field)
+          : undefined
 
-      // Always reload suggestions to prevent stale data
-      this.loadAuthorSuggestions(role)
+        // Always reload suggestions to prevent stale data
+        this.loadAuthorSuggestions(role)
+      }, 300, `author_${condition?._id || 'global'}`)
     },
     onGenreInput(condition?: any) {
-      // Load suggestions when user starts typing
-      if (condition.searchInput && condition.searchInput.length > 0) {
-        this.loadGenreSuggestions(condition.searchInput)
-      } else {
-        this.loadGenreSuggestions()
-      }
+      // 使用防抖处理输入
+      this.debounce(() => {
+        if (condition.searchInput && condition.searchInput.length > 0) {
+          this.loadGenreSuggestions(condition.searchInput)
+        } else {
+          this.loadGenreSuggestions()
+        }
+      }, 300, `genre_${condition?._id || 'global'}`)
     },
     onPublisherInput(condition?: any) {
-      // Load suggestions when user starts typing
-      if (condition.searchInput && condition.searchInput.length > 0) {
-        this.loadPublisherSuggestions(condition.searchInput)
-      } else {
-        this.loadPublisherSuggestions()
-      }
+      // 使用防抖处理输入
+      this.debounce(() => {
+        if (condition.searchInput && condition.searchInput.length > 0) {
+          this.loadPublisherSuggestions(condition.searchInput)
+        } else {
+          this.loadPublisherSuggestions()
+        }
+      }, 300, `publisher_${condition?._id || 'global'}`)
     },
     onLanguageInput(condition?: any) {
-      // Load suggestions when user starts typing
-      if (condition.searchInput && condition.searchInput.length > 0) {
-        this.loadLanguageSuggestions(condition.searchInput)
-      } else {
-        this.loadLanguageSuggestions()
-      }
+      // 使用防抖处理输入
+      this.debounce(() => {
+        if (condition.searchInput && condition.searchInput.length > 0) {
+          this.loadLanguageSuggestions(condition.searchInput)
+        } else {
+          this.loadLanguageSuggestions()
+        }
+      }, 300, `language_${condition?._id || 'global'}`)
     },
     onAgeRatingInput(condition?: any) {
-      // Load suggestions when user starts typing
-      if (condition.searchInput && condition.searchInput.length > 0) {
-        this.loadAgeRatingSuggestions(condition.searchInput)
-      } else {
-        this.loadAgeRatingSuggestions()
-      }
+      // 使用防抖处理输入
+      this.debounce(() => {
+        if (condition.searchInput && condition.searchInput.length > 0) {
+          this.loadAgeRatingSuggestions(condition.searchInput)
+        } else {
+          this.loadAgeRatingSuggestions()
+        }
+      }, 300, `ageRating_${condition?._id || 'global'}`)
     },
     onQueryInput(value: string) {
       // Handle query input changes
@@ -781,14 +1046,38 @@ export default Vue.extend({
       this.$emit('save-filter', filter)
     },
   },
-  mounted() {
-    // Load initial suggestions
-    this.loadTagSuggestions()
-    this.loadAuthorSuggestions()
-    this.loadGenreSuggestions()
-    this.loadPublisherSuggestions()
-    this.loadLanguageSuggestions()
-    this.loadAgeRatingSuggestions()
+  async mounted() {
+    // 使用并发控制加载初始建议，避免同时发起过多请求
+    const loadTasks = [
+      this.loadTagSuggestions(),
+      this.loadAuthorSuggestions(),
+    ]
+
+    // 等待前两个任务完成后再加载其他任务
+    await Promise.all(loadTasks)
+
+    // 延迟加载其他建议
+    setTimeout(() => {
+      this.loadGenreSuggestions()
+      this.loadPublisherSuggestions()
+      this.loadLanguageSuggestions()
+      this.loadAgeRatingSuggestions()
+    }, 100)
+  },
+  beforeDestroy() {
+    // 清理所有定时器
+    Object.keys(this.debounceTimers).forEach(key => {
+      if (this.debounceTimers[key]) {
+        clearTimeout(this.debounceTimers[key])
+      }
+    })
+
+    // 取消所有进行中的请求
+    Object.keys(this.abortControllers).forEach(key => {
+      if (this.abortControllers[key]) {
+        this.abortControllers[key].abort()
+      }
+    })
   },
 })
 </script>
