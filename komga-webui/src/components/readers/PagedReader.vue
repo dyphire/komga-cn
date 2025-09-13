@@ -28,11 +28,12 @@
         <div class="full-height d-flex flex-column justify-center">
           <div :class="`d-flex flex-row${flipDirection ? '-reverse' : ''} justify-center px-0 mx-0`">
             <img v-for="(page, j) in spread"
-                 :alt="`Page ${page.number}`"
-                 :key="`spread${i}-${j}`"
-                 :src="page.url"
-                 :class="imgClass(spread)"
-                 class="img-fit-all"
+                  :alt="`Page ${page.number}`"
+                  :key="`spread${i}-${j}`"
+                  :src="page.url"
+                  :class="imgClass(spread)"
+                  :style="`transform: rotate(${rotation}deg);`"
+                  class="img-fit-all"
             />
           </div>
         </div>
@@ -119,6 +120,10 @@ export default Vue.extend({
     },
     scale: {
       type: String as () => ScaleType,
+      required: true,
+    },
+    rotation: {
+      type: Number,
       required: true,
     },
   },

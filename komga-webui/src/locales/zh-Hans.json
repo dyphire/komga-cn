@@ -96,6 +96,7 @@
     "changing_reading_direction": "将阅读方向更改为",
     "cycling_page_layout": "切换页模式",
     "cycling_page_margin": "切换页边距",
+    "cycling_rotation": "切换旋转",
     "cycling_scale": "切换缩放",
     "cycling_side_padding": "切换左右边距",
     "download_current_page": "下载当前页面",
@@ -141,6 +142,7 @@
       "page_margin": "页边距",
       "paged": "分页阅读器选项",
       "reading_mode": "阅读模式",
+      "rotation": "旋转",
       "scale_type": "缩放模式",
       "side_padding": "左右边距",
       "side_padding_none": "无",
@@ -149,6 +151,7 @@
     "shortcuts": {
       "close": "关闭",
       "cycle_page_layout": "切换页模式",
+      "cycle_rotation": "切换旋转",
       "cycle_page_margin": "切换页边距",
       "cycle_scale": "切换缩放",
       "cycle_side_padding": "切换左右边距",
