@@ -138,6 +138,7 @@
         :scale="continuousScale"
         :sidePadding="sidePadding"
         :page-margin="pageMargin"
+        :rotation="rotation"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
@@ -152,6 +153,7 @@
         :scale="scale"
         :animations="animations"
         :swipe="swipe"
+        :rotation="rotation"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
@@ -227,6 +229,14 @@
                 :items="backgroundColors"
                 v-model="backgroundColor"
                 :label="$t('bookreader.settings.background_color')"
+              />
+            </v-list-item>
+
+            <v-list-item>
+              <settings-select
+                :items="rotationOptions"
+                v-model="rotation"
+                :label="$t('bookreader.settings.rotation')"
               />
             </v-list-item>
 
@@ -433,6 +443,7 @@ export default Vue.extend({
         pageMargin: 0,
         readingDirection: ReadingDirection.LEFT_TO_RIGHT,
         backgroundColor: 'black',
+        rotation: 0,
       },
       shortcuts: {} as any,
       notification: {
@@ -469,6 +480,12 @@ export default Vue.extend({
         {text: this.$t('bookreader.settings.background_colors.gray').toString(), value: '#212121'},
         {text: this.$t('bookreader.settings.background_colors.black').toString(), value: 'black'},
       ],
+      rotationOptions: [
+        {text: '0°', value: 0},
+        {text: '90°', value: 90},
+        {text: '180°', value: 180},
+        {text: '270°', value: 270},
+      ],
     }
   },
   created() {
@@ -501,6 +518,7 @@ export default Vue.extend({
     this.sidePadding = this.$store.state.persistedState.webreader.continuous.padding
     this.pageMargin = this.$store.state.persistedState.webreader.continuous.margin
     this.backgroundColor = this.$store.state.persistedState.webreader.background
+    this.rotation = this.$store.state.persistedState.webreader.rotation || 0
 
     this.setup(this.bookId, Number(this.$route.query.page))
   },
@@ -700,6 +718,17 @@ export default Vue.extend({
         this.$store.commit('setWebreaderAlwaysFullscreen', alwaysFullscreen)
         if (alwaysFullscreen) this.enterFullscreen()
         else screenfull.isEnabled && screenfull.exit()
+      },
+    },
+    rotation: {
+      get: function (): number {
+        return this.settings.rotation
+      },
+      set: function (rotation: number): void {
+        if (this.rotationOptions.map(x => x.value).includes(rotation)) {
+          this.settings.rotation = rotation
+          this.$store.commit('setWebreaderRotation', rotation)
+        }
       },
     },
   },
@@ -974,6 +1003,12 @@ export default Vue.extend({
       this.pageLayout = enumValues[i]
       const text = this.$i18n.t(this.pageLayout)
       this.sendNotification(`${this.$t('bookreader.cycling_page_layout')}: ${text}`)
+    },
+    cycleRotation() {
+      const i = (this.rotationOptions.findIndex(x => x.value === this.settings.rotation) + 1) % (this.rotationOptions.length)
+      this.rotation = this.rotationOptions[i].value
+      const text = this.rotationOptions[i].text
+      this.sendNotification(`${this.$t('bookreader.cycling_rotation')}: ${text}`)
     },
     toggleToolbars() {
       this.showToolbars = !this.showToolbars
