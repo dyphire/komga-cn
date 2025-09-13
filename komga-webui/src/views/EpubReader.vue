@@ -679,6 +679,67 @@ export default Vue.extend({
         })
       }
     },
+    handleNextPage() {
+      // Check if we're at the end of the book (last chapter and last page of that chapter)
+      const toc = this.d2Reader.tableOfContents
+      const currentHref = this.currentLocation?.href
+
+      if (toc && toc.length > 0 && currentHref) {
+        // Find current chapter index
+        const currentChapterIndex = toc.findIndex((chapter: any) => {
+          return currentHref.includes(chapter.href) || chapter.href.includes(currentHref)
+        })
+
+        // Check if this is the last chapter and we're at the last page of this chapter
+        const isLastChapter = currentChapterIndex === toc.length - 1
+        const isLastPageOfChapter = this.progressionPage && this.progressionPageCount &&
+                                   this.progressionPage >= this.progressionPageCount
+
+        if (isLastChapter && isLastPageOfChapter) {
+          this.nextBook()
+        } else {
+          this.d2Reader.nextPage()
+        }
+      } else {
+        // Fallback to progression-based detection
+        const isAtEnd = this.currentLocation?.locations?.totalProgression >= 0.99
+        if (isAtEnd) {
+          this.nextBook()
+        } else {
+          this.d2Reader.nextPage()
+        }
+      }
+    },
+    handlePreviousPage() {
+      // Check if we're at the beginning of the book (first chapter and first page of that chapter)
+      const toc = this.d2Reader.tableOfContents
+      const currentHref = this.currentLocation?.href
+
+      if (toc && toc.length > 0 && currentHref) {
+        // Find current chapter index
+        const currentChapterIndex = toc.findIndex((chapter: any) => {
+          return currentHref.includes(chapter.href) || chapter.href.includes(currentHref)
+        })
+
+        // Check if this is the first chapter and we're at the first page of this chapter
+        const isFirstChapter = currentChapterIndex === 0
+        const isFirstPageOfChapter = this.progressionPage && this.progressionPage <= 1
+
+        if (isFirstChapter && isFirstPageOfChapter) {
+          this.previousBook()
+        } else {
+          this.d2Reader.previousPage()
+        }
+      } else {
+        // Fallback to progression-based detection
+        const isAtBeginning = this.currentLocation?.locations?.totalProgression <= 0.01
+        if (isAtBeginning) {
+          this.previousBook()
+        } else {
+          this.d2Reader.previousPage()
+        }
+      }
+    },
     enterFullscreen() {
       if (screenfull.isEnabled) screenfull.request(document.documentElement, {navigationUI: 'hide'})
     },
@@ -728,13 +789,13 @@ export default Vue.extend({
     singleClick(x: number, y: number) {
       if (this.verticalScroll) {
         if (this.settings.navigationClick) {
-          if (y < this.$vuetify.breakpoint.height / 4) return this.d2Reader.previousPage()
-          if (y > this.$vuetify.breakpoint.height * .75) return this.d2Reader.nextPage()
+          if (y < this.$vuetify.breakpoint.height / 4) return this.handlePreviousPage()
+          if (y > this.$vuetify.breakpoint.height * .75) return this.handleNextPage()
         }
       } else {
         if (this.settings.navigationClick) {
-          if (x < this.$vuetify.breakpoint.width / 4) return this.isRtl ? this.d2Reader.nextPage() : this.d2Reader.previousPage()
-          if (x > this.$vuetify.breakpoint.width * .75) return this.isRtl ? this.d2Reader.previousPage() : this.d2Reader.nextPage()
+          if (x < this.$vuetify.breakpoint.width / 4) return this.isRtl ? this.handleNextPage() : this.handlePreviousPage()
+          if (x > this.$vuetify.breakpoint.width * .75) return this.isRtl ? this.handlePreviousPage() : this.handleNextPage()
         }
       }
       this.toggleToolbars()
