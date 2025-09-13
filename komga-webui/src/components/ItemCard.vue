@@ -48,6 +48,19 @@
                 }}
               </v-icon>
 
+              <!-- FAB incognito reading (top right) -->
+              <v-btn
+                v-if="showIncognitoFab"
+                fab
+                small
+                color="grey darken-3"
+                :style="'position: absolute; top: 5px; ' + ($vuetify.rtl ? 'left' : 'right') + ': 10px'"
+                :to="incognitoFabTo"
+                @click.native="$event.stopImmediatePropagation()"
+              >
+                <v-icon small>mdi-incognito</v-icon>
+              </v-btn>
+
               <!-- FAB reading (center) -->
               <v-btn
                 v-if="showFab"
@@ -341,11 +354,32 @@ export default Vue.extend({
     showFab(): boolean {
       return !this.disableFab && this.bookReady && !this.selected && !this.preselect && this.canReadPages
     },
+    showIncognitoFab(): boolean {
+      return !this.disableFab && this.bookReady && !this.selected && !this.preselect && this.canReadPages
+    },
     to(): RawLocation {
       return this.computedItem.to()
     },
     fabTo(): RawLocation {
       return this.computedItem.fabTo()
+    },
+    incognitoFabTo(): RawLocation {
+      const fabTo = this.computedItem.fabTo()
+      if (fabTo && typeof fabTo === 'object' && fabTo.query) {
+        return {
+          ...fabTo,
+          query: {
+            ...fabTo.query,
+            incognito: 'true',
+          },
+        }
+      } else if (fabTo && typeof fabTo === 'object') {
+        return {
+          ...fabTo,
+          query: { incognito: 'true' },
+        }
+      }
+      return fabTo
     },
   },
   methods: {
