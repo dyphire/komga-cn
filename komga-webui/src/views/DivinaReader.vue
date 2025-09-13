@@ -158,7 +158,6 @@
       ></paged-reader>
     </div>
 
-    
     <!-- EPUB TOC drawer (for EPUBs rendered in Divina) -->
     <v-navigation-drawer
 	  v-model="showToc"
@@ -705,7 +704,25 @@ export default Vue.extend({
     },
   },
   methods: {
-   
+    detectWebtoonFromMetadata(): boolean {
+      const bookTags = this.book?.metadata?.tags || []
+      const hasWebtoonInBookTags = bookTags.some(tag =>
+        tag.toLowerCase().includes('webtoon'),
+      )
+
+      const seriesGenres = this.series?.metadata?.genres || []
+      const hasWebtoonInSeriesGenres = seriesGenres.some(genre =>
+        genre.toLowerCase().includes('webtoon'),
+      )
+
+      const seriesTags = this.series?.metadata?.tags || []
+      const hasWebtoonInSeriesTags = seriesTags.some(tag =>
+        tag.toLowerCase().includes('webtoon'),
+      )
+
+      return hasWebtoonInBookTags || hasWebtoonInSeriesGenres || hasWebtoonInSeriesTags
+    },
+
     // Build TOC by reading the Readium manifest and mapping href -> spine index -> page#
     async loadEpubToc(bookId: string) {
       try {
@@ -803,12 +820,21 @@ export default Vue.extend({
         this.goToFirst()
       }
 
-      // set non-persistent reading direction if exists in metadata
-      if (this.series.metadata.readingDirection in ReadingDirection && this.readingDirection !== this.series.metadata.readingDirection) {
+      const isWebtoonDetected = this.detectWebtoonFromMetadata()
+      let readingDirectionChanged = false
+
+      if (isWebtoonDetected && this.readingDirection !== ReadingDirection.WEBTOON) {
+        this.settings.readingDirection = ReadingDirection.WEBTOON
+        this.sendNotification(`${this.$t('bookreader.changing_reading_direction')}: ${this.$t('enums.reading_direction.WEBTOON')} (${this.$t('bookreader.from_series_metadata')})`)
+        readingDirectionChanged = true
+      }
+
+      // set non-persistent reading direction if exists in metadata (only if not already changed by webtoon detection)
+      if (!readingDirectionChanged && this.series.metadata.readingDirection in ReadingDirection && this.readingDirection !== this.series.metadata.readingDirection) {
         // bypass setter so setting is not persisted
         this.settings.readingDirection = this.series.metadata.readingDirection as ReadingDirection
         this.sendNotificationReadingDirection(true)
-      } else {
+      } else if (!readingDirectionChanged) {
         this.sendNotificationReadingDirection(false)
       }
 
