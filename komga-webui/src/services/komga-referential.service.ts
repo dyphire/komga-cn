@@ -12,11 +12,9 @@ export default class KomgaReferentialService {
     this.http = http
   }
 
-  async getAuthors(search?: string, role?: string, libraryIds?: string[], collectionId?: string, seriesId?: string, readListId?: string): Promise<Page<AuthorDto>> {
+  async getAuthors(search?: string, role?: string, libraryIds?: string[], collectionId?: string, seriesId?: string, readListId?: string, unpaged?: boolean): Promise<Page<AuthorDto>> {
     try {
-      const params: Record<string, any> = {
-        unpaged: true,
-      }
+      const params = {} as any
 
       if (search) params.search = search
       if (role) params.role = role
@@ -24,6 +22,7 @@ export default class KomgaReferentialService {
       if (collectionId) params.collection_id = collectionId
       if (seriesId) params.series_id = seriesId
       if (readListId) params.readlist_id = readListId
+      if (unpaged) params.unpaged = true
 
       return (await this.http.get('/api/v2/authors', {
         params: params,
