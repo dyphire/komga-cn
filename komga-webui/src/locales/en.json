@@ -96,6 +96,7 @@
     "changing_reading_direction": "Changing Reading Direction to",
     "cycling_page_layout": "Cycling Page Layout",
     "cycling_page_margin": "Cycling Page Margin",
+    "cycling_rotation": "Cycling Rotation",
     "cycling_scale": "Cycling Scale",
     "cycling_side_padding": "Cycling Side Padding",
     "download_current_page": "Download current page",
@@ -141,6 +142,7 @@
       "page_margin": "Page margin",
       "paged": "Paginated Reader Options",
       "reading_mode": "Reading mode",
+      "rotation": "Rotation",
       "scale_type": "Scale type",
       "side_padding": "Side padding",
       "side_padding_none": "None",
@@ -149,6 +151,7 @@
     "shortcuts": {
       "close": "Close",
       "cycle_page_layout": "Cycle page layout",
+      "cycle_rotation": "Cycle rotation",
       "cycle_scale": "Cycle scale",
       "cycle_page_margin": "Cycle page margin",
       "cycle_side_padding": "Cycle side padding",

@@ -4,14 +4,14 @@
          v-scroll="onScroll"
     >
       <img v-for="(page, i) in pages"
-           :key="`page${i}`"
-           :alt="`Page ${page.number}`"
-           :src="shouldLoad(i) ? page.url : undefined"
-           :height="calcHeight(page)"
-           :width="calcWidth(page)"
-           :id="`page${page.number}`"
-           :style="`margin: ${i === 0 ? 0 : pageMargin}px auto;`"
-           v-intersect="onIntersect"
+            :key="`page${i}`"
+            :alt="`Page ${page.number}`"
+            :src="shouldLoad(i) ? page.url : undefined"
+            :height="calcHeight(page)"
+            :width="calcWidth(page)"
+            :id="`page${page.number}`"
+            :style="`margin: ${i === 0 ? 0 : pageMargin}px auto; transform: rotate(${rotation}deg);`"
+            v-intersect="onIntersect"
       />
     </div>
 
@@ -73,6 +73,10 @@ export default Vue.extend({
       required: true,
     },
     pageMargin: {
+      type: Number,
+      required: true,
+    },
+    rotation: {
       type: Number,
       required: true,
     },
