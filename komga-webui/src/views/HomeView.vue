@@ -217,6 +217,15 @@
             </v-list-item-content>
           </v-list-item>
 
+          <v-list-item :to="{name: 'reading-stats'}">
+            <v-list-item-icon>
+              <v-icon>mdi-chart-bar</v-icon>
+            </v-list-item-icon>
+            <v-list-item-content>
+              <v-list-item-title>{{ $t('reading_stats.title') }}</v-list-item-title>
+            </v-list-item-content>
+          </v-list-item>
+
           <!--   SETTINGS     -->
           <v-list-group v-if="isAdmin"
                         no-action
