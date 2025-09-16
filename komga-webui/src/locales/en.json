@@ -1128,6 +1128,10 @@
     "label_oauth2_hide_login": "Hide login fields if OAuth2 is enabled",
     "label_poster_blur_unread": "Blur poster for unread books and series",
     "label_poster_stretch": "Stretch poster to fit card",
+    "label_poster_stretch_mode": "Stretch mode",
+    "stretch_mode_left": "Left",
+    "stretch_mode_right": "Right",
+    "stretch_mode_center": "Center",
     "label_series_groups": "Series grouping",
     "section_oauth2": "OAuth2",
     "series_groups": {

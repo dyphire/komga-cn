@@ -1128,6 +1128,10 @@
     "label_oauth2_hide_login": "如果启用了 OAuth2，则隐藏登录字段",
     "label_poster_blur_unread": "未读书籍和系列的模糊海报",
     "label_poster_stretch": "拉伸海报以适合卡片",
+    "label_poster_stretch_mode": "拉伸模式",
+    "stretch_mode_left": "左边",
+    "stretch_mode_right": "右边",
+    "stretch_mode_center": "中间",
     "label_series_groups": "系列分组",
     "section_oauth2": "OAuth2",
     "series_groups": {

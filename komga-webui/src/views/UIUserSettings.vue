@@ -9,6 +9,16 @@
           hide-details
         />
 
+        <v-select
+          v-model="form.posterStretchMode"
+          @change="$v.form?.posterStretchMode?.$touch()"
+          :label="$t('ui_settings.label_poster_stretch_mode')"
+          :items="stretchModeItems"
+          item-text="text"
+          item-value="value"
+          hide-details
+        />
+
         <v-checkbox
           v-model="form.posterBlurUnread"
           @change="$v.form.posterBlurUnread.$touch()"
@@ -44,12 +54,16 @@ export default Vue.extend({
   data: () => ({
     form: {
       posterStretch: false,
+      posterStretchMode: 'top',
       posterBlurUnread: false,
     },
   }),
   validations: {
     form: {
       posterStretch: {},
+      posterStretchMode: {
+        required: false,
+      },
       posterBlurUnread: {},
     },
   },
@@ -63,11 +77,19 @@ export default Vue.extend({
     discardDisabled(): boolean {
       return !this.$v.form.$anyDirty
     },
+    stretchModeItems(): Array<{text: string, value: string}> {
+      return [
+        { text: String(this.$t('ui_settings.stretch_mode_left')), value: 'left' },
+        { text: String(this.$t('ui_settings.stretch_mode_right')), value: 'right' },
+        { text: String(this.$t('ui_settings.stretch_mode_center')), value: 'top' },
+      ]
+    },
   },
   methods: {
     async refreshSettings() {
       await this.$store.dispatch('getClientSettingsUser')
       this.form.posterStretch = this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_POSTER_STRETCH]?.value === 'true'
+      this.form.posterStretchMode = this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_POSTER_STRETCH_MODE]?.value || 'top'
       this.form.posterBlurUnread = this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_POSTER_BLUR_UNREAD]?.value === 'true'
       this.$v.form.$reset()
     },
@@ -77,6 +99,10 @@ export default Vue.extend({
       if (this.$v.form?.posterStretch?.$dirty)
         newSettings[CLIENT_SETTING.WEBUI_POSTER_STRETCH] = {
           value: this.form.posterStretch ? 'true' : 'false',
+        }
+      if (this.$v.form?.posterStretchMode?.$dirty && this.form.posterStretchMode)
+        newSettings[CLIENT_SETTING.WEBUI_POSTER_STRETCH_MODE] = {
+          value: this.form.posterStretchMode,
         }
       if (this.$v.form?.posterBlurUnread?.$dirty)
         newSettings[CLIENT_SETTING.WEBUI_POSTER_BLUR_UNREAD] = {
