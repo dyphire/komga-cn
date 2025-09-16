@@ -133,7 +133,8 @@
       "background_colors": {
         "black": "Black",
         "gray": "Gray",
-        "white": "White"
+        "white": "White",
+        "immersive": "Immersive"
       },
       "display": "Display",
       "general": "General",
