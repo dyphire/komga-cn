@@ -133,7 +133,8 @@
       "background_colors": {
         "black": "黑色",
         "gray": "灰色",
-        "white": "白色"
+        "white": "白色",
+        "immersive": "沉浸式"
       },
       "display": "显示",
       "general": "常规",

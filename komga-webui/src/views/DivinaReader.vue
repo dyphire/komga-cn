@@ -1,6 +1,6 @@
 <template>
   <v-container class="ma-0 pa-0 full-height" fluid v-if="pages.length > 0"
-               :style="`width: 100%; background-color: ${backgroundColor}`"
+                :style="`width: 100%; background: ${actualBackgroundColor}`"
   >
     <div>
       <v-slide-y-transition>
@@ -131,6 +131,7 @@
 
     <div class="full-height">
       <continuous-reader
+        ref="continuousReader"
         v-if="continuousReader"
         :pages="pages"
         :page.sync="page"
@@ -145,6 +146,7 @@
       ></continuous-reader>
 
       <paged-reader
+        ref="pagedReader"
         v-else
         :pages="pages"
         :page.sync="page"
@@ -405,6 +407,7 @@ export default Vue.extend({
       toc: [] as TocEntry[],
       spinePaths: [] as string[],
 
+      actualBackgroundColor: 'black',
 
       ItemTypes,
       screenfull,
@@ -479,6 +482,7 @@ export default Vue.extend({
         {text: this.$t('bookreader.settings.background_colors.white').toString(), value: 'white'},
         {text: this.$t('bookreader.settings.background_colors.gray').toString(), value: '#212121'},
         {text: this.$t('bookreader.settings.background_colors.black').toString(), value: 'black'},
+        {text: this.$t('bookreader.settings.background_colors.immersive').toString(), value: 'immersive'},
       ],
       rotationOptions: [
         {text: '0°', value: 0},
@@ -520,6 +524,24 @@ export default Vue.extend({
     this.backgroundColor = this.$store.state.persistedState.webreader.background
     this.rotation = this.$store.state.persistedState.webreader.rotation || 0
 
+    // Initialize actual background color based on stored setting
+    const validColors = ['white', '#212121', 'black', 'immersive']
+
+    if (this.settings.backgroundColor === 'immersive') {
+      this.actualBackgroundColor = '#2a2a2a' // Default fallback for immersive
+      // Delay the immersive background update to ensure images are loaded
+      setTimeout(() => {
+        this.updateImmersiveBackground()
+      }, 500)
+    } else if (validColors.includes(this.settings.backgroundColor)) {
+      this.actualBackgroundColor = this.settings.backgroundColor
+    } else {
+      // Fallback to black if stored color is invalid
+      this.actualBackgroundColor = 'black'
+      this.settings.backgroundColor = 'black'
+      this.$store.commit('setWebreaderBackground', 'black')
+    }
+
     this.setup(this.bookId, Number(this.$route.query.page))
   },
   destroyed() {
@@ -544,7 +566,14 @@ export default Vue.extend({
       // - going to previous/next book, in this case the query.page is not set, so it will default to first page
       // - pressing the back button of the browser and navigating to the previous book, in this case the query.page is set, so we honor it
       this.$debug('[beforeRouteUpdate]', 'to.query:', to.query)
-      this.setup(to.params.bookId, Number(to.query.page))
+      await this.setup(to.params.bookId, Number(to.query.page))
+
+      // Update immersive background after setup is complete
+      if (this.settings.backgroundColor === 'immersive') {
+        setTimeout(() => {
+          this.updateImmersiveBackground()
+        }, 500)
+      }
     }
     next()
   },
@@ -555,6 +584,13 @@ export default Vue.extend({
           this.markProgress(val)
           this.goToPage = val
           this.updateRoute()
+          // Only update immersive background when page changes if immersive mode is active
+          if (this.settings.backgroundColor === 'immersive') {
+            // Small delay to ensure the page has fully loaded
+            setTimeout(() => {
+              this.updateImmersiveBackground()
+            }, 200)
+          }
         }
       },
       immediate: true,
@@ -672,9 +708,21 @@ export default Vue.extend({
         return this.settings.backgroundColor
       },
       set: function (color: string): void {
-        if (this.backgroundColors.map(x => x.value).includes(color)) {
+        const validColors = ['white', '#212121', 'black', 'immersive']
+
+        if (validColors.includes(color)) {
           this.settings.backgroundColor = color
           this.$store.commit('setWebreaderBackground', color)
+
+          if (color === 'immersive') {
+            this.actualBackgroundColor = '#2a2a2a'
+            // Delay to ensure the setting change is processed and images are ready
+            setTimeout(() => {
+              this.updateImmersiveBackground()
+            }, 300)
+          } else {
+            this.actualBackgroundColor = color
+          }
         }
       },
     },
@@ -847,6 +895,22 @@ export default Vue.extend({
         this.goTo(this.book.readProgress?.page!!)
       } else {
         this.goToFirst()
+      }
+
+      const validColors = ['white', '#212121', 'black', 'immersive']
+
+      if (this.settings.backgroundColor === 'immersive') {
+        this.actualBackgroundColor = '#2a2a2a'
+        // Delay the immersive background update to ensure images are loaded
+        setTimeout(() => {
+          this.updateImmersiveBackground()
+        }, 500)
+      } else if (validColors.includes(this.settings.backgroundColor)) {
+        this.actualBackgroundColor = this.settings.backgroundColor
+      } else {
+        this.actualBackgroundColor = 'black'
+        this.settings.backgroundColor = 'black'
+        this.$store.commit('setWebreaderBackground', 'black')
       }
 
       const isWebtoonDetected = this.detectWebtoonFromMetadata()
@@ -1076,6 +1140,498 @@ export default Vue.extend({
           this.sendNotification(`${this.$t('bookreader.notification_poster_set_readlist')}`)
           break
       }
+    },
+    extractDominantColorFromLoadedImage(imageUrl: string): Promise<string> {
+      return new Promise((resolve) => {
+        // First, check if the image is already loaded
+        const existingImages = Array.from(document.querySelectorAll('img')).filter(
+          img => img.src === imageUrl || img.src === imageUrl.replace(/\/$/, ''),
+        )
+
+        if (existingImages.length > 0) {
+          const loadedImage = existingImages.find(img => img.complete && img.naturalWidth > 0) as HTMLImageElement
+
+          if (loadedImage) {
+            // Image is already loaded, analyze immediately
+            this.analyzeImageColor(loadedImage).then(color => {
+              resolve(color)
+            }).catch(() => {
+              resolve('#2a2a2a')
+            })
+            return
+          }
+
+          // Image exists but not loaded yet, add event listener
+          const targetImage = existingImages[0]
+          this.attachImageLoadListeners(targetImage, resolve)
+          return
+        }
+
+        // Image doesn't exist yet, use MutationObserver to watch for its creation
+        const observer = new MutationObserver((mutations) => {
+          for (const mutation of mutations) {
+            if (mutation.type === 'childList') {
+              const addedNodes = Array.from(mutation.addedNodes)
+              const imgElements = addedNodes.filter(node =>
+                node.nodeType === Node.ELEMENT_NODE &&
+                (node as Element).tagName === 'IMG',
+              ) as HTMLImageElement[]
+
+              for (const img of imgElements) {
+                if (img.src === imageUrl || img.src === imageUrl.replace(/\/$/, '')) {
+                  observer.disconnect()
+                  this.attachImageLoadListeners(img, resolve)
+                  return
+                }
+              }
+            } else if (mutation.type === 'attributes' && mutation.attributeName === 'src') {
+              const target = mutation.target as HTMLImageElement
+              if (target.tagName === 'IMG' && (target.src === imageUrl || target.src === imageUrl.replace(/\/$/, ''))) {
+                observer.disconnect()
+                this.attachImageLoadListeners(target, resolve)
+                return
+              }
+            }
+          }
+        })
+
+        observer.observe(document.body, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['src'],
+        })
+
+        // Fallback timeout in case the image is never created
+        setTimeout(() => {
+          observer.disconnect()
+          resolve('#2a2a2a')
+        }, 30000)
+      })
+    },
+
+    attachImageLoadListeners(img: HTMLImageElement, resolve: (value: string) => void): void {
+      if (img.complete && img.naturalWidth > 0) {
+        // Image is already loaded
+        this.analyzeImageColor(img).then(color => {
+          resolve(color)
+        }).catch(() => {
+          resolve('#2a2a2a')
+        })
+        return
+      }
+
+      const handleLoad = () => {
+        img.removeEventListener('load', handleLoad)
+        img.removeEventListener('error', handleError)
+        this.analyzeImageColor(img).then(color => {
+          resolve(color)
+        }).catch(() => {
+          resolve('#2a2a2a')
+        })
+      }
+
+      const handleError = () => {
+        img.removeEventListener('load', handleLoad)
+        img.removeEventListener('error', handleError)
+        resolve('#2a2a2a')
+      }
+
+      img.addEventListener('load', handleLoad)
+      img.addEventListener('error', handleError)
+
+      // Fallback timeout in case the image never loads
+      setTimeout(() => {
+        img.removeEventListener('load', handleLoad)
+        img.removeEventListener('error', handleError)
+        resolve('#2a2a2a')
+      }, 60000)
+    },
+
+    analyzeImageColor(img: HTMLImageElement): Promise<string> {
+      return new Promise((resolve, reject) => {
+        try {
+          const canvas = document.createElement('canvas')
+          const ctx = canvas.getContext('2d')
+          if (!ctx) {
+            reject(new Error('Could not get canvas context'))
+            return
+          }
+
+          // Use larger canvas for better edge sampling
+          const sampleSize = Math.min(150, Math.min(img.naturalWidth, img.naturalHeight))
+          canvas.width = sampleSize
+          canvas.height = sampleSize
+
+          ctx.drawImage(img, 0, 0, sampleSize, sampleSize)
+          const imageData = ctx.getImageData(0, 0, sampleSize, sampleSize)
+          const data = imageData.data
+
+          // Define edge width (fixed 1px for precise edge sampling)
+          const edgeWidth = 1
+
+          // Initialize color accumulators for each edge
+          const edges = {
+            top: { r: 0, g: 0, b: 0, count: 0 },
+            bottom: { r: 0, g: 0, b: 0, count: 0 },
+            left: { r: 0, g: 0, b: 0, count: 0 },
+            right: { r: 0, g: 0, b: 0, count: 0 },
+          }
+
+          // Sample pixels from each edge region
+          for (let y = 0; y < sampleSize; y++) {
+            for (let x = 0; x < sampleSize; x++) {
+              const index = (y * sampleSize + x) * 4
+              const alpha = data[index + 3]
+
+              if (alpha > 128) { // Skip transparent pixels
+                const r = data[index]
+                const g = data[index + 1]
+                const b = data[index + 2]
+
+                // Determine which edge region this pixel belongs to
+                if (y < edgeWidth) {
+                  // Top edge
+                  edges.top.r += r
+                  edges.top.g += g
+                  edges.top.b += b
+                  edges.top.count++
+                } else if (y >= sampleSize - edgeWidth) {
+                  // Bottom edge
+                  edges.bottom.r += r
+                  edges.bottom.g += g
+                  edges.bottom.b += b
+                  edges.bottom.count++
+                }
+
+                if (x < edgeWidth) {
+                  // Left edge
+                  edges.left.r += r
+                  edges.left.g += g
+                  edges.left.b += b
+                  edges.left.count++
+                } else if (x >= sampleSize - edgeWidth) {
+                  // Right edge
+                  edges.right.r += r
+                  edges.right.g += g
+                  edges.right.b += b
+                  edges.right.count++
+                }
+              }
+            }
+          }
+
+          // Calculate average colors for each edge
+          const getAverageColor = (edge: typeof edges.top) => {
+            if (edge.count === 0) return 'rgb(42, 42, 42)' // Default fallback
+            const avgR = Math.round(edge.r / edge.count)
+            const avgG = Math.round(edge.g / edge.count)
+            const avgB = Math.round(edge.b / edge.count)
+            return `rgb(${avgR}, ${avgG}, ${avgB})`
+          }
+
+          const topColor = getAverageColor(edges.top)
+          const bottomColor = getAverageColor(edges.bottom)
+          const leftColor = getAverageColor(edges.left)
+          const rightColor = getAverageColor(edges.right)
+
+          // Create four-directional gradient overlay
+          const fourWayGradient = `
+            linear-gradient(to bottom, ${topColor} 0%, transparent 70%),
+            linear-gradient(to top, ${bottomColor} 0%, transparent 70%),
+            linear-gradient(to right, ${leftColor} 0%, transparent 70%),
+            linear-gradient(to left, ${rightColor} 0%, transparent 70%)
+          `.trim().replace(/\s+/g, ' ')
+
+          resolve(fourWayGradient)
+        } catch (error) {
+          reject(error)
+        }
+      })
+    },
+    async updateImmersiveBackground() {
+      if (this.settings.backgroundColor !== 'immersive') {
+        return
+      }
+
+      if (!this.currentPage) {
+        return
+      }
+
+      try {
+        const currentSpread = this.getCurrentSpread()
+        const pagesToAnalyze = currentSpread && currentSpread.length > 0 ? currentSpread : [this.currentPage]
+
+        // Extract edge colors from all displayed pages
+        const pageGradients = await Promise.all(
+          pagesToAnalyze.map(page => this.extractDominantColorFromLoadedImage(page.url)),
+        )
+
+        // Merge gradients from all pages
+        const mergedGradient = this.mergePageGradients(pageGradients)
+        this.actualBackgroundColor = mergedGradient
+      } catch (error) {
+        // Fallback to a neutral background color for immersive mode
+        this.actualBackgroundColor = '#2a2a2a'
+      }
+    },
+    getCurrentSpread(): PageDtoWithUrl[] | null {
+      if (this.continuousReader) {
+        const continuousReader = this.$refs.continuousReader as any
+        if (continuousReader && continuousReader.getVisiblePages) {
+          const visiblePages = continuousReader.getVisiblePages()
+          if (visiblePages && visiblePages.length > 0) {
+            return visiblePages
+          }
+        }
+
+        const estimatedVisiblePages: PageDtoWithUrl[] = []
+        if (this.currentPage) {
+          estimatedVisiblePages.push(this.currentPage)
+        }
+
+        const currentIndex = this.page - 1
+        if (currentIndex > 0 && this.pages[currentIndex - 1]) {
+          estimatedVisiblePages.unshift(this.pages[currentIndex - 1])
+        }
+        if (currentIndex < this.pages.length - 1 && this.pages[currentIndex + 1]) {
+          estimatedVisiblePages.push(this.pages[currentIndex + 1])
+        }
+
+        return estimatedVisiblePages.length > 0 ? estimatedVisiblePages : (this.currentPage ? [this.currentPage] : null)
+      } else {
+        const pagedReader = this.$refs.pagedReader as any
+        if (pagedReader && pagedReader.spreads && pagedReader.carouselPage >= 0) {
+          const spread = pagedReader.spreads[pagedReader.carouselPage]
+          if (spread) {
+            const validPages = spread.filter((page: PageDtoWithUrl) => {
+              return page &&
+                     typeof page === 'object' &&
+                     page.number > 0 &&
+                     page.number <= this.pagesCount &&
+                     page.url
+            })
+            return validPages.length > 0 ? validPages : null
+          }
+        }
+        return null
+      }
+    },
+    mergePageGradients(gradients: string[]): string {
+      if (gradients.length === 0) {
+        return '#2a2a2a'
+      }
+
+      if (gradients.length === 1) {
+        const gradient = gradients[0]
+        if (!gradient.includes('linear-gradient')) {
+          return '#2a2a2a'
+        }
+        return gradient
+      }
+
+      const allEdgeColors: { top: string[], bottom: string[], left: string[], right: string[] } = {
+        top: [],
+        bottom: [],
+        left: [],
+        right: [],
+      }
+
+      const validGradients = gradients.filter(gradient => gradient.includes('linear-gradient'))
+      let processedGradients = [...validGradients]
+
+      if (this.continuousReader) {
+        // For continuous reader, missing pages are less critical
+      } else {
+        // For paged reader, ensure we have the correct number of gradients
+        const currentSpread = this.getCurrentSpread()
+        const expectedPages = currentSpread ? currentSpread.length : 1
+
+        if (expectedPages === 2 && validGradients.length === 1) {
+          // Double page mode but only one gradient available - use the same gradient for both pages
+          processedGradients = [validGradients[0], validGradients[0]]
+        } else if (expectedPages === 1 && validGradients.length > 0) {
+          // Single page mode - use the first available gradient
+          processedGradients = [validGradients[0]]
+        }
+        // If we have the expected number of gradients, use them as-is
+      }
+
+      processedGradients.forEach((gradient, pageIndex) => {
+        if (gradient.includes('linear-gradient')) {
+          // Extract colors from four-way gradient overlay
+          // Format: linear-gradient(to bottom, topColor 0%, transparent 70%), linear-gradient(to top, bottomColor 0%, transparent 70%), ...
+          const colorMatches = gradient.match(/rgb\(\d+,\s*\d+,\s*\d+\)/g)
+          if (colorMatches && colorMatches.length >= 4) {
+            // Map to edges: top, bottom, left, right (in order of appearance)
+            const topColor = colorMatches[0]    // First gradient: to bottom
+            const bottomColor = colorMatches[1] // Second gradient: to top
+            const leftColor = colorMatches[2]   // Third gradient: to right
+            const rightColor = colorMatches[3]  // Fourth gradient: to left
+
+            // Handle different reading modes for four-way gradient overlay
+            if (this.continuousReader) {
+              // Continuous reading mode (vertical scrolling) - exclude vertical middle edges
+              if (processedGradients.length > 1) {
+                if (pageIndex === 0) {
+                  // First page: use top, left, right edges (exclude bottom edge - vertical splice)
+                  allEdgeColors.top.push(topColor)
+                  allEdgeColors.left.push(leftColor)
+                  allEdgeColors.right.push(rightColor)
+                  // Skip bottom edge for first page
+                } else if (pageIndex === processedGradients.length - 1) {
+                  // Last page: use bottom, left, right edges (exclude top edge - vertical splice)
+                  allEdgeColors.bottom.push(bottomColor)
+                  allEdgeColors.left.push(leftColor)
+                  allEdgeColors.right.push(rightColor)
+                  // Skip top edge for last page
+                } else {
+                  // Middle pages: use left and right edges only (exclude both top and bottom)
+                  allEdgeColors.left.push(leftColor)
+                  allEdgeColors.right.push(rightColor)
+                  // Skip both top and bottom edges for middle pages
+                }
+              } else {
+                // Single page in continuous mode
+                allEdgeColors.top.push(topColor)
+                allEdgeColors.right.push(rightColor)
+                allEdgeColors.bottom.push(bottomColor)
+                allEdgeColors.left.push(leftColor)
+              }
+            } else {
+              // Paged reading mode (horizontal layout) - handle double page as single spread
+              if (processedGradients.length === 2) {
+                // Check if we're actually displaying only one page (e.g., last page of book)
+                const currentSpread = this.getCurrentSpread()
+                if (currentSpread && currentSpread.length === 1) {
+                  // Actually displaying only one page, treat as single page mode
+                  // Use all four edges from the single page
+                  allEdgeColors.top.push(topColor)
+                  allEdgeColors.right.push(rightColor)
+                  allEdgeColors.bottom.push(bottomColor)
+                  allEdgeColors.left.push(leftColor)
+                } else {
+                  // True double page mode: treat both pages as one spread
+                  // Need to consider reading direction for correct edge mapping
+                  const isRTL = this.readingDirection === 'RIGHT_TO_LEFT'
+
+                  if (isRTL) {
+                    // Right-to-left reading: first page in array is visually on the right
+                    if (pageIndex === 0) {
+                      // Right page (visually): use top, right, bottom edges
+                      allEdgeColors.top.push(topColor)
+                      allEdgeColors.bottom.push(bottomColor)
+                      allEdgeColors.right.push(rightColor)
+                    } else if (pageIndex === 1) {
+                      // Left page (visually): use top, left, bottom edges
+                      allEdgeColors.top.push(topColor)
+                      allEdgeColors.bottom.push(bottomColor)
+                      allEdgeColors.left.push(leftColor)
+                    }
+                  } else {
+                    // Left-to-right reading: first page in array is visually on the left
+                    if (pageIndex === 0) {
+                      // Left page (visually): use top, left, bottom edges
+                      allEdgeColors.top.push(topColor)
+                      allEdgeColors.bottom.push(bottomColor)
+                      allEdgeColors.left.push(leftColor)
+                    } else if (pageIndex === 1) {
+                      // Right page (visually): use top, right, bottom edges
+                      allEdgeColors.top.push(topColor)
+                      allEdgeColors.bottom.push(bottomColor)
+                      allEdgeColors.right.push(rightColor)
+                    }
+                  }
+                }
+              } else {
+                // Single page mode or fallback mode, use all edges from the single page
+                allEdgeColors.top.push(topColor)
+                allEdgeColors.right.push(rightColor)
+                allEdgeColors.bottom.push(bottomColor)
+                allEdgeColors.left.push(leftColor)
+              }
+            }
+          }
+        }
+      })
+
+      const averageEdgeColor = (colors: string[]): string => {
+        if (colors.length === 0) return 'rgb(42, 42, 42)'
+
+        const rgbValues = colors.map(color => {
+          const match = color.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/)
+          if (match) {
+            return {
+              r: parseInt(match[1]),
+              g: parseInt(match[2]),
+              b: parseInt(match[3]),
+            }
+          }
+          return { r: 0, g: 0, b: 0 }
+        })
+
+        const avgR = Math.round(rgbValues.reduce((sum, val) => sum + val.r, 0) / rgbValues.length)
+        const avgG = Math.round(rgbValues.reduce((sum, val) => sum + val.g, 0) / rgbValues.length)
+        const avgB = Math.round(rgbValues.reduce((sum, val) => sum + val.b, 0) / rgbValues.length)
+
+        return `rgb(${avgR}, ${avgG}, ${avgB})`
+      }
+
+      const mergedTop = averageEdgeColor(allEdgeColors.top)
+      const mergedRight = averageEdgeColor(allEdgeColors.right)
+      const mergedBottom = averageEdgeColor(allEdgeColors.bottom)
+      const mergedLeft = averageEdgeColor(allEdgeColors.left)
+
+      const gradientComponents: string[] = []
+
+      if (allEdgeColors.top.length > 0 && mergedTop) {
+        const topGradient = `linear-gradient(to bottom, ${mergedTop} 0%, transparent 70%)`
+        gradientComponents.push(topGradient)
+      }
+      if (allEdgeColors.bottom.length > 0 && mergedBottom) {
+        const bottomGradient = `linear-gradient(to top, ${mergedBottom} 0%, transparent 70%)`
+        gradientComponents.push(bottomGradient)
+      }
+      if (allEdgeColors.left.length > 0 && mergedLeft) {
+        const leftGradient = `linear-gradient(to right, ${mergedLeft} 0%, transparent 70%)`
+        gradientComponents.push(leftGradient)
+      }
+      if (allEdgeColors.right.length > 0 && mergedRight) {
+        const rightGradient = `linear-gradient(to left, ${mergedRight} 0%, transparent 70%)`
+        gradientComponents.push(rightGradient)
+      }
+
+      if (gradientComponents.length === 0) {
+        return '#2a2a2a'
+      }
+
+      return gradientComponents.join(', ')
+    },
+
+    averageColors(colors: string[]): string {
+      // For four-way gradients, use the first one as primary
+      if (colors.length > 0 && colors[0].includes('linear-gradient') && colors[0].includes('transparent')) {
+        return colors[0]
+      }
+
+      // Fallback for solid colors (shouldn't happen with new gradient implementation)
+      const rgbValues = colors.map(color => {
+        const match = color.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/)
+        if (match) {
+          return {
+            r: parseInt(match[1]),
+            g: parseInt(match[2]),
+            b: parseInt(match[3]),
+          }
+        }
+        return { r: 0, g: 0, b: 0 }
+      })
+
+      const avgR = Math.round(rgbValues.reduce((sum, val) => sum + val.r, 0) / rgbValues.length)
+      const avgG = Math.round(rgbValues.reduce((sum, val) => sum + val.g, 0) / rgbValues.length)
+      const avgB = Math.round(rgbValues.reduce((sum, val) => sum + val.b, 0) / rgbValues.length)
+
+      return `rgb(${avgR}, ${avgG}, ${avgB})`
     },
   },
 })
