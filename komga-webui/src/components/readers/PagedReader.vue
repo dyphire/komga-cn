@@ -135,7 +135,7 @@ export default Vue.extend({
       immediate: true,
     },
     carouselPage(val, old) {
-      this.$debug('[watch:carouselPage', `old:${old}`, `new:${val}`)
+      this.$debug('[watch:carouselPage]', `old:${old}`, `new:${val}`)
       if (this.carouselPage >= 0 && this.carouselPage < this.spreads.length && this.spreads.length > 0) {
         const currentSpread = this.spreads[this.carouselPage]
         const currentPage = currentSpread.length == 2 && currentSpread[1].mediaType ? currentSpread[1] : currentSpread[0]
@@ -147,7 +147,6 @@ export default Vue.extend({
     page(val, old) {
       this.$debug('[watch:page]', `old:${old}`, `new:${val}`)
       const spreadIndex = this.toSpreadIndex(val)
-      this.$debug('[watch:page]', `toSpreadIndex:${spreadIndex}`)
       this.carouselPage = spreadIndex
     },
     pageLayout: {
@@ -262,7 +261,6 @@ export default Vue.extend({
       }
     },
     toSpreadIndex(i: number): number {
-      this.$debug('[toSpreadIndex]', `i:${i}`, `isDoublePages:${this.isDoublePages}`)
       if (this.spreads.length > 0) {
         if (this.isDoublePages) {
           for (let j = 0; j < this.spreads.length; j++) {
