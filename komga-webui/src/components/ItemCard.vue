@@ -13,7 +13,7 @@
           :lazy-src="thumbnailError ? coverBase64 : undefined"
           aspect-ratio="0.7071"
           :contain="!isStretch"
-          :position="isStretch ? 'top' : undefined"
+          :position="isStretch ? stretchMode : undefined"
           :class="shouldBlurPoster ? 'blur' : undefined"
           @error="thumbnailError = true"
           @load="thumbnailError = false"
@@ -290,6 +290,9 @@ export default Vue.extend({
   computed: {
     isStretch(): boolean {
       return this.$store.getters.getClientSettings[CLIENT_SETTING.WEBUI_POSTER_STRETCH]?.value === 'true'
+    },
+    stretchMode(): string {
+      return this.$store.getters.getClientSettings[CLIENT_SETTING.WEBUI_POSTER_STRETCH_MODE]?.value || 'top'
     },
     isBlurUnread(): boolean {
       return this.$store.getters.getClientSettings[CLIENT_SETTING.WEBUI_POSTER_BLUR_UNREAD]?.value === 'true'
