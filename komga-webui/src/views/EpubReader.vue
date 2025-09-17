@@ -460,6 +460,14 @@ export default Vue.extend({
       screenfull.off('change', this.fullscreenChanged)
       screenfull.exit()
     }
+
+    // Restore status bar color to app theme
+    const currentTheme = this.$vuetify.theme.dark ? 'dark' : 'light'
+    const themeColor = String(this.$vuetify.theme.themes[currentTheme]['contrast-1'] || (this.$vuetify.theme.dark ? '#424242' : '#fafafa'))
+    const metaThemeColor = document.querySelector('meta[name="theme-color"]')
+    if (metaThemeColor) {
+      metaThemeColor.setAttribute('content', themeColor)
+    }
   },
   async mounted() {
     Object.assign(this.settings, this.$store.state.persistedState.epubreader)
@@ -546,6 +554,7 @@ export default Vue.extend({
           this.settings.appearance = color
           this.d2Reader.applyUserSettings({appearance: color})
           this.$store.commit('setEpubreaderSettings', this.settings)
+          this.updateReaderStatusBarColor()
         }
       },
     },
@@ -907,6 +916,16 @@ export default Vue.extend({
 
       if (this.alwaysFullscreen) this.enterFullscreen()
 
+      // Auto fullscreen in PWA mode
+      const isPWA = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+                    (window.navigator as any).standalone === true
+      if (isPWA) {
+        this.enterFullscreen()
+      }
+
+      // Update status bar color initially
+      this.updateReaderStatusBarColor()
+
       try {
         if (this?.context.origin === ContextOrigin.READLIST) {
           this.siblingNext = await this.$komgaReadLists.getBookSiblingNext(this.context.id, bookId)
@@ -1033,6 +1052,21 @@ export default Vue.extend({
       this.notification.timeout = timeout
       this.notification.message = message
       this.notification.enabled = true
+    },
+    updateReaderStatusBarColor() {
+      // Update status bar color based on reader background
+      let statusBarColor = 'white'
+
+      if (this.appearance === 'readium-sepia-on') {
+        statusBarColor = '#faf4e8' // sepia background
+      } else if (this.appearance === 'readium-night-on') {
+        statusBarColor = 'black' // night background
+      }
+
+      const metaThemeColor = document.querySelector('meta[name="theme-color"]')
+      if (metaThemeColor) {
+        metaThemeColor.setAttribute('content', statusBarColor)
+      }
     },
     markProgress: debounce(function (this: any, location: Locator) {
       if (!this.incognito) {
