@@ -553,6 +553,14 @@ export default Vue.extend({
       screenfull.off('change', this.fullscreenChanged)
       screenfull.exit()
     }
+
+    // Restore status bar color to app theme
+    const currentTheme = this.$vuetify.theme.dark ? 'dark' : 'light'
+    const themeColor = String(this.$vuetify.theme.themes[currentTheme]['contrast-1'] || (this.$vuetify.theme.dark ? '#424242' : '#fafafa'))
+    const metaThemeColor = document.querySelector('meta[name="theme-color"]')
+    if (metaThemeColor) {
+      metaThemeColor.setAttribute('content', themeColor)
+    }
   },
   props: {
     bookId: {
@@ -723,6 +731,8 @@ export default Vue.extend({
           } else {
             this.actualBackgroundColor = color
           }
+
+          this.updateReaderStatusBarColor()
         }
       },
     },
@@ -949,6 +959,16 @@ export default Vue.extend({
       } catch (e) {
         this.siblingPrevious = {} as BookDto
       }
+
+      // Auto fullscreen in PWA mode
+      const isPWA = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+                    (window.navigator as any).standalone === true
+      if (isPWA) {
+        this.enterFullscreen()
+      }
+
+      // Update status bar color initially
+      this.updateReaderStatusBarColor()
     },
     getPageUrl(page: PageDto): string {
       if (!this.supportedMediaTypes.includes(page.mediaType)) {
@@ -1109,6 +1129,40 @@ export default Vue.extend({
       this.notification.timeout = timeout
       this.notification.message = message
       this.notification.enabled = true
+    },
+    updateReaderStatusBarColor() {
+      // Update status bar color based on reader background
+      let statusBarColor = '#000000'
+
+      if (this.settings.backgroundColor === 'white') {
+        statusBarColor = 'white'   // white background
+      } else if (this.settings.backgroundColor === '#212121') {
+        statusBarColor = '#212121' // gray background
+      } else if (this.settings.backgroundColor === 'black') {
+        statusBarColor = 'black'   // black background
+      } else if (this.settings.backgroundColor === 'immersive') {
+        // Extract primary color from immersive background gradient
+        const primaryColor = this.extractPrimaryColorFromGradient(this.actualBackgroundColor)
+        statusBarColor = primaryColor || '#2a2a2a'
+      }
+
+      const metaThemeColor = document.querySelector('meta[name="theme-color"]')
+      if (metaThemeColor) {
+        metaThemeColor.setAttribute('content', statusBarColor)
+      }
+    },
+    extractPrimaryColorFromGradient(gradient: string): string | null {
+      if (!gradient || !gradient.includes('linear-gradient')) {
+        return null
+      }
+
+      // Extract the first rgb color from the gradient (typically the top edge color)
+      const rgbMatch = gradient.match(/rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)/)
+      if (rgbMatch) {
+        return rgbMatch[0]
+      }
+
+      return null
     },
     markProgress: debounce(function (this: any, page: number) {
       if (!this.incognito) {
@@ -1370,6 +1424,11 @@ export default Vue.extend({
         // Merge gradients from all pages
         const mergedGradient = this.mergePageGradients(pageGradients)
         this.actualBackgroundColor = mergedGradient
+
+        // Update status bar color when immersive background changes
+        if (this.settings.backgroundColor === 'immersive') {
+          this.updateReaderStatusBarColor()
+        }
       } catch (error) {
         // Fallback to a neutral background color for immersive mode
         this.actualBackgroundColor = '#2a2a2a'
