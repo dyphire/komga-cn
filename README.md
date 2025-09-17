@@ -26,6 +26,7 @@
 - 修复 EPUB 阅读器无法跳转上/下一本
 - 自动检测 Webtoon 元数据并切换阅读模式
 - 为漫画阅读器添加旋转、沉浸式背景等功能
+- 优化 PWA 模式下的显示效果
 
 github: https://github.com/dyphire/komga-cn
 
