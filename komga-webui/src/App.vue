@@ -55,19 +55,24 @@ export default Vue.extend({
       }
     },
     changeTheme(theme: Theme) {
+      let isDark: boolean
       switch (theme) {
         case Theme.DARK:
           this.$vuetify.theme.dark = true
+          isDark = true
           break
 
         case Theme.SYSTEM:
-          this.$vuetify.theme.dark = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          isDark = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          this.$vuetify.theme.dark = isDark
           break
 
         default:
           this.$vuetify.theme.dark = false
+          isDark = false
           break
       }
+      this.updateThemeColor(isDark)
     },
     reloadLibraries(event: LibrarySseDto) {
       this.$store.dispatch('getLibraries')
@@ -75,6 +80,21 @@ export default Vue.extend({
     logout(event: SessionExpiredDto) {
       this.$komgaUsers.logout()
       this.$router.push({name: 'login'})
+    },
+    updateThemeColor(isDark: boolean) {
+      const currentTheme = isDark ? 'dark' : 'light'
+      // Use contrast-1 color for status bar (matches toolbar/app bar background)
+      const themeColor = String(this.$vuetify.theme.themes[currentTheme]['contrast-1'] || (isDark ? '#424242' : '#fafafa'))
+      const metaThemeColor = document.querySelector('meta[name="theme-color"]')
+      if (metaThemeColor) {
+        metaThemeColor.setAttribute('content', themeColor)
+      }
+    },
+    updateReaderStatusBarColor(color: string) {
+      const metaThemeColor = document.querySelector('meta[name="theme-color"]')
+      if (metaThemeColor) {
+        metaThemeColor.setAttribute('content', color)
+      }
     },
   },
 })
