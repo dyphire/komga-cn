@@ -30,9 +30,10 @@
             <img v-for="(page, j) in spread"
                   :alt="`Page ${page.number}`"
                   :key="`spread${i}-${j}`"
-                  :src="page.url"
-                  :class="imgClass(spread)"
-                  :style="`transform: rotate(${rotation}deg);`"
+                  :src="getSplitImageUrlReactive(page)"
+                  :class="getImageClass(page, spread)"
+                  :style="`${getImageStyle(page)}; display: ${getSplitImageUrlReactive(page) ? 'block' : 'none'};`"
+                  :data-page-url="page.url"
                   class="img-fit-all"
             />
           </div>
@@ -83,6 +84,7 @@ import {PagedReaderLayout, ScaleType} from '@/types/enum-reader'
 import {shortcutsLTR, shortcutsRTL, shortcutsVertical} from '@/functions/shortcuts/paged-reader'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {buildSpreads} from '@/functions/book-spreads'
+import {LRUCache} from '@/functions/lru-cache'
 
 export default Vue.extend({
   name: 'PagedReader',
@@ -91,6 +93,9 @@ export default Vue.extend({
       logger: 'PagedReader',
       carouselPage: 0,
       spreads: [] as PageDtoWithUrl[][],
+      imageCache: new LRUCache<string, string>(30),
+      imageCacheReactive: {} as Record<string, string>,
+      processingImages: new Set<string>(),
     }
   },
   props: {
@@ -131,29 +136,41 @@ export default Vue.extend({
     pages: {
       handler(val) {
         this.spreads = buildSpreads(val, this.pageLayout)
+        this.$nextTick(() => {
+          this.preGenerateImages()
+        })
       },
       immediate: true,
     },
     carouselPage(val, old) {
-      this.$debug('[watch:carouselPage]', `old:${old}`, `new:${val}`)
       if (this.carouselPage >= 0 && this.carouselPage < this.spreads.length && this.spreads.length > 0) {
         const currentSpread = this.spreads[this.carouselPage]
-        const currentPage = currentSpread.length == 2 && currentSpread[1].mediaType ? currentSpread[1] : currentSpread[0]
+        const currentPage = (currentSpread.length == 2 && currentSpread[1] && currentSpread[1].mediaType) ? currentSpread[1] : currentSpread[0]
         this.$emit('update:page', currentPage.number)
+
+        this.preGenerateImages()
       } else {
         this.$emit('update:page', 1)
       }
     },
-    page(val, old) {
-      this.$debug('[watch:page]', `old:${old}`, `new:${val}`)
+    page(val) {
       const spreadIndex = this.toSpreadIndex(val)
-      this.carouselPage = spreadIndex
+      if (this.carouselPage !== spreadIndex) {
+        this.carouselPage = spreadIndex
+      } else {
+        this.$nextTick(() => {
+          this.preGenerateImages()
+        })
+      }
     },
     pageLayout: {
       handler(val) {
         const current = this.page
         this.spreads = buildSpreads(this.pages, val)
         this.carouselPage = this.toSpreadIndex(current)
+        this.$nextTick(() => {
+          this.preGenerateImages()
+        })
       },
       immediate: true,
     },
@@ -201,6 +218,29 @@ export default Vue.extend({
     isDoublePages(): boolean {
       return this.pageLayout === PagedReaderLayout.DOUBLE_PAGES || this.pageLayout === PagedReaderLayout.DOUBLE_NO_COVER
     },
+    getSplitImageUrlReactive(): (page: PageDtoWithUrl) => string | undefined {
+      return (page: PageDtoWithUrl) => {
+        if (!page.url) {
+          return undefined
+        }
+
+        const originalUrl = page.url.split('#')[0]
+        const fragment = page.url.split('#')[1]
+        const cacheKey = fragment ? `${originalUrl}-${fragment}` : originalUrl
+
+        // For split images, only return URL if it's already cached
+        // This prevents showing the original image before split is complete
+        if (fragment && (fragment === 'split-left' || fragment === 'split-right')) {
+          const cached = this.imageCacheReactive[cacheKey]
+          return cached || undefined
+        }
+
+        // For non-split images, return original URL immediately
+        const cached = this.imageCacheReactive[cacheKey]
+        if (cached) return cached
+        return originalUrl
+      }
+    },
   },
   methods: {
     keyPressed(e: KeyboardEvent) {
@@ -220,6 +260,9 @@ export default Vue.extend({
         default:
           return 'img-fit-original'
       }
+    },
+    getImageClass(page: PageDtoWithUrl, spread: PageDtoWithUrl[]): string {
+      return this.imgClass(spread)
     },
     eagerLoad(spreadIndex: number): boolean {
       return Math.abs(this.carouselPage - spreadIndex) <= 2
@@ -262,23 +305,101 @@ export default Vue.extend({
     },
     toSpreadIndex(i: number): number {
       if (this.spreads.length > 0) {
-        if (this.isDoublePages) {
-          for (let j = 0; j < this.spreads.length; j++) {
-            for (let k = 0; k < this.spreads[j].length; k++) {
-              if (this.spreads[j][k].number === i) {
-                return j
-              }
+        // Always search for the correct spread index by page number
+        // This handles both single page and double page layouts correctly
+        for (let j = 0; j < this.spreads.length; j++) {
+          for (let k = 0; k < this.spreads[j].length; k++) {
+            if (this.spreads[j][k].number === i) {
+              return j
             }
           }
-        } else {
-          return i - 1
         }
       }
+
+      // Fallback: assume single page layout with consecutive page numbers
       return i - 1
+    },
+    getImageStyle(page: PageDtoWithUrl): string {
+      return this.rotation ? `transform: rotate(${this.rotation}deg);` : ''
+    },
+
+    async generateImage(page: PageDtoWithUrl) {
+      if (!page.url) {
+          return
+      }
+
+      if (page.url.startsWith('data:')) {
+        const originalUrl = page.url.split('#')[0]
+        const fragment = page.url.split('#')[1]
+        const cacheKey = fragment ? `${originalUrl}-${fragment}` : originalUrl
+        this.imageCache.set(cacheKey, page.url)
+        this.$set(this.imageCacheReactive, cacheKey, page.url)
+        return
+      }
+
+      const originalUrl = page.url.split('#')[0]
+      const fragment = page.url.split('#')[1]
+      const cacheKey = fragment ? `${originalUrl}-${fragment}` : originalUrl
+
+      if (this.processingImages.has(cacheKey) || this.imageCache.has(cacheKey)) {
+        return
+      }
+      this.processingImages.add(cacheKey)
+
+      const img = new Image()
+      img.crossOrigin = 'anonymous'
+
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas')
+          const ctx = canvas.getContext('2d')!
+          if (!fragment || fragment === 'split-left') {
+            const w = fragment === 'split-left' ? Math.floor(img.naturalWidth / 2) : img.naturalWidth
+            canvas.width = w
+            canvas.height = img.naturalHeight
+            ctx.drawImage(img, fragment === 'split-left' ? 0 : 0, 0, w, img.naturalHeight, 0, 0, w, img.naturalHeight)
+          } else if (fragment === 'split-right') {
+            const half = Math.floor(img.naturalWidth / 2)
+            canvas.width = img.naturalWidth - half
+            canvas.height = img.naturalHeight
+            ctx.drawImage(img, half, 0, img.naturalWidth - half, img.naturalHeight, 0, 0, img.naturalWidth - half, img.naturalHeight)
+          }
+
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.9)
+          this.imageCache.set(cacheKey, dataUrl)
+          this.$set(this.imageCacheReactive, cacheKey, dataUrl)
+          // Force Vue to re-render the image by triggering reactivity
+          this.$forceUpdate()
+        } catch (err) {
+          this.imageCache.set(cacheKey, '')
+        } finally {
+          this.processingImages.delete(cacheKey)
+        }
+      }
+
+      img.onerror = () => {
+        this.imageCache.set(cacheKey, '')
+        this.processingImages.delete(cacheKey)
+      }
+
+      img.src = originalUrl
+    },
+
+    preGenerateImages(range: number = 2) {
+      const pagesToPreload = new Set<PageDtoWithUrl>()
+
+      for (let i = this.carouselPage - range; i <= this.carouselPage + range; i++) {
+        if (i >= 0 && i < this.spreads.length) {
+          this.spreads[i].forEach(p => pagesToPreload.add(p))
+        }
+      }
+
+      pagesToPreload.forEach(p => this.generateImage(p))
     },
   },
 })
 </script>
+
 <style scoped>
 .full-height {
   height: 100%;

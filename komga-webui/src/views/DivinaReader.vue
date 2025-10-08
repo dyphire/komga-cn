@@ -169,6 +169,7 @@
 		app
 		temporary
 		:width="$vuetify.breakpoint.smAndUp ? 420 : $vuetify.breakpoint.width - 56"
+        v-if="hasToc"
     >
       <v-toolbar dense flat>
         <v-toolbar-title>Table of contents</v-toolbar-title>
@@ -181,8 +182,8 @@
 <thumbnail-explorer-dialog
       v-model="showExplorer"
       :bookId="bookId"
-      @go="goTo"
-      :pagesCount="pagesCount"
+      @go="goToOriginal"
+      :pagesCount="originalPagesCount"
     ></thumbnail-explorer-dialog>
 
     <v-bottom-sheet
@@ -223,6 +224,14 @@
             <v-list-item>
               <settings-switch v-model="alwaysFullscreen" :label="$t('bookreader.settings.always_fullscreen')"
                                :disabled="!screenfull.isEnabled"/>
+            </v-list-item>
+
+            <v-list-item>
+              <settings-switch v-model="splitWidePages" :label="$t('bookreader.settings.split_wide_pages')"/>
+            </v-list-item>
+
+            <v-list-item v-if="splitWidePages">
+              <settings-switch v-model="swapSplitPages" :label="$t('bookreader.settings.swap_split_pages')"/>
             </v-list-item>
 
             <v-subheader class="font-weight-black text-h6">{{ $t('bookreader.settings.display') }}</v-subheader>
@@ -427,7 +436,10 @@ export default Vue.extend({
         fromMetadata: false,
       },
       pages: [] as PageDtoWithUrl[],
+      originalPagesCount: 0,
+      splitPageMapping: [] as { originalPage: number, splitPages: number[] }[],
       page: undefined as unknown as number,
+      initialized: false,
       supportedMediaTypes: ['image/jpeg', 'image/png', 'image/gif'],
       convertTo: 'jpeg',
       showExplorer: false,
@@ -447,6 +459,8 @@ export default Vue.extend({
         readingDirection: ReadingDirection.LEFT_TO_RIGHT,
         backgroundColor: 'black',
         rotation: 0,
+        splitWidePages: false,
+        swapSplitPages: false,
       },
       shortcuts: {} as any,
       notification: {
@@ -523,6 +537,8 @@ export default Vue.extend({
     this.pageMargin = this.$store.state.persistedState.webreader.continuous.margin
     this.backgroundColor = this.$store.state.persistedState.webreader.background
     this.rotation = this.$store.state.persistedState.webreader.rotation || 0
+    this.splitWidePages = this.$store.state.persistedState.webreader.splitWidePages || false
+    this.swapSplitPages = this.$store.state.persistedState.webreader.swapSplitPages || false
 
     // Initialize actual background color based on stored setting
     const validColors = ['white', '#212121', 'black', 'immersive']
@@ -532,7 +548,7 @@ export default Vue.extend({
       // Delay the immersive background update to ensure images are loaded
       setTimeout(() => {
         this.updateImmersiveBackground()
-      }, 500)
+      }, 50)
     } else if (validColors.includes(this.settings.backgroundColor)) {
       this.actualBackgroundColor = this.settings.backgroundColor
     } else {
@@ -552,6 +568,11 @@ export default Vue.extend({
     if (screenfull.isEnabled) {
       screenfull.off('change', this.fullscreenChanged)
       screenfull.exit()
+    }
+
+    // Remove system theme change listener
+    if (this.systemThemeMediaQuery) {
+      this.systemThemeMediaQuery.removeEventListener('change', this.handleSystemThemeChange)
     }
 
     // Restore status bar color to app theme
@@ -580,7 +601,7 @@ export default Vue.extend({
       if (this.settings.backgroundColor === 'immersive') {
         setTimeout(() => {
           this.updateImmersiveBackground()
-        }, 500)
+        }, 50)
       }
     }
     next()
@@ -588,7 +609,7 @@ export default Vue.extend({
   watch: {
     page: {
       handler(val, old) {
-        if (val) {
+        if (val && this.initialized) {
           this.markProgress(val)
           this.goToPage = val
           this.updateRoute()
@@ -597,8 +618,11 @@ export default Vue.extend({
             // Small delay to ensure the page has fully loaded
             setTimeout(() => {
               this.updateImmersiveBackground()
-            }, 200)
+            }, 20)
           }
+        } else if (val) {
+          this.goToPage = val
+          this.updateRoute()
         }
       },
       immediate: true,
@@ -727,7 +751,7 @@ export default Vue.extend({
             // Delay to ensure the setting change is processed and images are ready
             setTimeout(() => {
               this.updateImmersiveBackground()
-            }, 300)
+            }, 30)
           } else {
             this.actualBackgroundColor = color
           }
@@ -744,6 +768,9 @@ export default Vue.extend({
         if (Object.values(ReadingDirection).includes(readingDirection)) {
           this.settings.readingDirection = readingDirection
           this.$store.commit('setWebreaderReadingDirection', readingDirection)
+          if (this.splitWidePages) {
+            this.forceProcessPages()
+          }
         }
       },
     },
@@ -755,6 +782,7 @@ export default Vue.extend({
         if (Object.values(PagedReaderLayout).includes(pageLayout)) {
           this.settings.pageLayout = pageLayout
           this.$store.commit('setWebreaderPagedPageLayout', pageLayout)
+          this.processPages()
         }
       },
     },
@@ -786,6 +814,52 @@ export default Vue.extend({
         if (this.rotationOptions.map(x => x.value).includes(rotation)) {
           this.settings.rotation = rotation
           this.$store.commit('setWebreaderRotation', rotation)
+        }
+      },
+    },
+    splitWidePages: {
+      get: function (): boolean {
+        return this.settings.splitWidePages
+      },
+      set: function (splitWidePages: boolean): void {
+        const currentOriginalPage = this.splitPageToOriginalPage(this.page)
+
+        this.settings.splitWidePages = splitWidePages
+        this.$store.commit('setWebreaderSplitWidePages', splitWidePages)
+        this.processPages()
+
+        let targetPage = currentOriginalPage
+        if (splitWidePages) {
+          targetPage = this.originalPageToSplitPage(currentOriginalPage)
+        }
+
+        if (targetPage <= this.pagesCount) {
+          this.goTo(targetPage)
+        } else {
+          this.goToFirst()
+        }
+
+        // Update immersive background after split pages setting changes
+        if (this.settings.backgroundColor === 'immersive') {
+          setTimeout(() => {
+            this.updateImmersiveBackground()
+          }, 30)
+        }
+      },
+    },
+    swapSplitPages: {
+      get: function (): boolean {
+        return this.settings.swapSplitPages
+      },
+      set: function (swapSplitPages: boolean): void {
+        this.settings.swapSplitPages = swapSplitPages
+        this.$store.commit('setWebreaderSwapSplitPages', swapSplitPages)
+        this.forceProcessPages()
+        // Update immersive background after swap split pages setting changes
+        if (this.settings.backgroundColor === 'immersive') {
+          setTimeout(() => {
+            this.updateImmersiveBackground()
+          }, 30)
         }
       },
     },
@@ -897,12 +971,17 @@ export default Vue.extend({
       const pageDtos = (await this.$komgaBooks.getBookPages(bookId))
       pageDtos.forEach((p: any) => p['url'] = this.getPageUrl(p))
       this.pages = pageDtos as PageDtoWithUrl[]
+      this.originalPagesCount = pageDtos.length
 
-      this.$debug('[setup]', `pages count:${this.pagesCount}`, 'read progress:', this.book.readProgress)
-      if (page && page >= 1 && page <= this.pagesCount) {
-        this.goTo(page)
+      await this.processPages()
+
+      if (page && page >= 1 && page <= this.originalPagesCount) {
+        const splitPage = this.originalPageToSplitPage(page)
+        this.goTo(splitPage)
       } else if (this.book.readProgress?.completed === false) {
-        this.goTo(this.book.readProgress?.page!!)
+        const originalPage = this.book.readProgress?.page!!
+        const splitPage = this.originalPageToSplitPage(originalPage)
+        this.goTo(splitPage)
       } else {
         this.goToFirst()
       }
@@ -914,7 +993,7 @@ export default Vue.extend({
         // Delay the immersive background update to ensure images are loaded
         setTimeout(() => {
           this.updateImmersiveBackground()
-        }, 500)
+        }, 50)
       } else if (validColors.includes(this.settings.backgroundColor)) {
         this.actualBackgroundColor = this.settings.backgroundColor
       } else {
@@ -969,6 +1048,8 @@ export default Vue.extend({
 
       // Update status bar color initially
       this.updateReaderStatusBarColor()
+
+      this.initialized = true
     },
     getPageUrl(page: PageDto): string {
       if (!this.supportedMediaTypes.includes(page.mediaType)) {
@@ -1016,7 +1097,13 @@ export default Vue.extend({
     goTo(page: number) {
       this.$debug('[goTo]', `page:${page}`)
       this.page = page
-      this.markProgress(page)
+      if (this.initialized) {
+        this.markProgress(page)
+      }
+    },
+    goToOriginal(page: number) {
+      const splitPage = this.originalPageToSplitPage(page)
+      this.goTo(splitPage)
     },
     goToFirst() {
       this.goTo(1)
@@ -1025,11 +1112,12 @@ export default Vue.extend({
       this.goTo(this.pagesCount)
     },
     updateRoute() {
+      const originalPage = this.splitPageToOriginalPage(this.page)
       this.$router.replace({
         name: this.$route.name,
         params: {bookId: this.$route.params.bookId},
         query: {
-          page: this.page.toString(),
+          page: originalPage.toString(),
           context: this.context.origin,
           contextId: this.context.id,
           incognito: this.incognito.toString(),
@@ -1166,7 +1254,8 @@ export default Vue.extend({
     },
     markProgress: debounce(function (this: any, page: number) {
       if (!this.incognito) {
-        this.$komgaBooks.updateReadProgress(this.bookId, {page: page})
+        const originalPage = this.splitPageToOriginalPage(page)
+        this.$komgaBooks.updateReadProgress(this.bookId, {page: originalPage})
       }
     }, 50),
     downloadCurrentPage() {
@@ -1197,9 +1286,38 @@ export default Vue.extend({
     },
     extractDominantColorFromLoadedImage(imageUrl: string): Promise<string> {
       return new Promise((resolve) => {
+        // Extract base URL without fragment for comparison
+        const baseImageUrl = imageUrl.split('#')[0]
+
         // First, check if the image is already loaded
         const existingImages = Array.from(document.querySelectorAll('img')).filter(
-          img => img.src === imageUrl || img.src === imageUrl.replace(/\/$/, ''),
+          img => {
+            const imgBaseUrl = img.src.split('#')[0]
+            const dataPageUrl = img.dataset.pageUrl
+
+            // Match by src URL (base URL comparison)
+            if (imgBaseUrl === baseImageUrl || imgBaseUrl === baseImageUrl.replace(/\/$/, '')) {
+              return true
+            }
+
+            // Match by data-page-url attribute (for PagedReader images)
+            if (dataPageUrl) {
+              const dataPageBaseUrl = dataPageUrl.split('#')[0]
+              if (dataPageBaseUrl === baseImageUrl || dataPageBaseUrl === baseImageUrl.replace(/\/$/, '')) {
+                return true
+              }
+            }
+
+            // Match data URLs (for cached split images)
+            if (img.src.startsWith('data:') && dataPageUrl) {
+              const dataPageBaseUrl = dataPageUrl.split('#')[0]
+              if (dataPageBaseUrl === baseImageUrl || dataPageBaseUrl === baseImageUrl.replace(/\/$/, '')) {
+                return true
+              }
+            }
+
+            return false
+          },
         )
 
         if (existingImages.length > 0) {
@@ -1232,18 +1350,72 @@ export default Vue.extend({
               ) as HTMLImageElement[]
 
               for (const img of imgElements) {
-                if (img.src === imageUrl || img.src === imageUrl.replace(/\/$/, '')) {
+                const imgBaseUrl = img.src.split('#')[0]
+                const dataPageUrl = img.dataset.pageUrl
+
+                let matches = false
+
+                // Match by src URL
+                if (imgBaseUrl === baseImageUrl || imgBaseUrl === baseImageUrl.replace(/\/$/, '')) {
+                  matches = true
+                }
+
+                // Match by data-page-url attribute
+                if (!matches && dataPageUrl) {
+                  const dataPageBaseUrl = dataPageUrl.split('#')[0]
+                  if (dataPageBaseUrl === baseImageUrl || dataPageBaseUrl === baseImageUrl.replace(/\/$/, '')) {
+                    matches = true
+                  }
+                }
+
+                // Match data URLs with data-page-url
+                if (!matches && img.src.startsWith('data:') && dataPageUrl) {
+                  const dataPageBaseUrl = dataPageUrl.split('#')[0]
+                  if (dataPageBaseUrl === baseImageUrl || dataPageBaseUrl === baseImageUrl.replace(/\/$/, '')) {
+                    matches = true
+                  }
+                }
+
+                if (matches) {
                   observer.disconnect()
                   this.attachImageLoadListeners(img, resolve)
                   return
                 }
               }
-            } else if (mutation.type === 'attributes' && mutation.attributeName === 'src') {
+            } else if (mutation.type === 'attributes' && (mutation.attributeName === 'src' || mutation.attributeName === 'data-page-url')) {
               const target = mutation.target as HTMLImageElement
-              if (target.tagName === 'IMG' && (target.src === imageUrl || target.src === imageUrl.replace(/\/$/, ''))) {
-                observer.disconnect()
-                this.attachImageLoadListeners(target, resolve)
-                return
+              if (target.tagName === 'IMG') {
+                const targetBaseUrl = target.src.split('#')[0]
+                const dataPageUrl = target.dataset.pageUrl
+
+                let matches = false
+
+                // Match by src URL
+                if (targetBaseUrl === baseImageUrl || targetBaseUrl === baseImageUrl.replace(/\/$/, '')) {
+                  matches = true
+                }
+
+                // Match by data-page-url attribute
+                if (!matches && dataPageUrl) {
+                  const dataPageBaseUrl = dataPageUrl.split('#')[0]
+                  if (dataPageBaseUrl === baseImageUrl || dataPageBaseUrl === baseImageUrl.replace(/\/$/, '')) {
+                    matches = true
+                  }
+                }
+
+                // Match data URLs with data-page-url
+                if (!matches && target.src.startsWith('data:') && dataPageUrl) {
+                  const dataPageBaseUrl = dataPageUrl.split('#')[0]
+                  if (dataPageBaseUrl === baseImageUrl || dataPageBaseUrl === baseImageUrl.replace(/\/$/, '')) {
+                    matches = true
+                  }
+                }
+
+                if (matches) {
+                  observer.disconnect()
+                  this.attachImageLoadListeners(target, resolve)
+                  return
+                }
               }
             }
           }
@@ -1253,7 +1425,7 @@ export default Vue.extend({
           childList: true,
           subtree: true,
           attributes: true,
-          attributeFilter: ['src'],
+          attributeFilter: ['src', 'data-page-url'],
         })
 
         // Fallback timeout in case the image is never created
@@ -1417,8 +1589,13 @@ export default Vue.extend({
         const pagesToAnalyze = currentSpread && currentSpread.length > 0 ? currentSpread : [this.currentPage]
 
         // Extract edge colors from all displayed pages
+        // For split pages, use the original URL without fragment for color analysis
         const pageGradients = await Promise.all(
-          pagesToAnalyze.map(page => this.extractDominantColorFromLoadedImage(page.url)),
+          pagesToAnalyze.map(page => {
+            // Use original URL without fragment for color analysis
+            const originalUrl = page.url.split('#')[0]
+            return this.extractDominantColorFromLoadedImage(originalUrl)
+          }),
         )
 
         // Merge gradients from all pages
@@ -1437,8 +1614,8 @@ export default Vue.extend({
     getCurrentSpread(): PageDtoWithUrl[] | null {
       if (this.continuousReader) {
         const continuousReader = this.$refs.continuousReader as any
-        if (continuousReader && continuousReader.getVisiblePages) {
-          const visiblePages = continuousReader.getVisiblePages()
+        if (continuousReader && continuousReader.getVisiblePagesForImmersive) {
+          const visiblePages = continuousReader.getVisiblePagesForImmersive()
           if (visiblePages && visiblePages.length > 0) {
             return visiblePages
           }
@@ -1470,10 +1647,26 @@ export default Vue.extend({
                      page.number <= this.pagesCount &&
                      page.url
             })
-            return validPages.length > 0 ? validPages : null
+
+            // For immersive background, we need to ensure we have the correct page objects
+            // that match the actual displayed images, even if they have split URLs
+            if (validPages.length > 0) {
+              return validPages.map(page => {
+                // Ensure the page object has the correct URL that matches what's displayed
+                // The PagedReader might have modified URLs with fragments for split pages
+                return {
+                  ...page,
+                  // Keep the original URL structure from the PagedReader
+                  url: page.url,
+                }
+              })
+            }
+            return null
           }
         }
-        return null
+
+        // Fallback: use current page if no spread is available
+        return this.currentPage ? [this.currentPage] : null
       }
     },
     mergePageGradients(gradients: string[]): string {
@@ -1692,6 +1885,116 @@ export default Vue.extend({
 
       return `rgb(${avgR}, ${avgG}, ${avgB})`
     },
+
+    async processPages(forceReload: boolean = false) {
+      if (!this.pages || this.pages.length === 0) return
+
+      if (forceReload || (!this.splitWidePages || this.isDoublePageLayout())) {
+        const pageDtos = (await this.$komgaBooks.getBookPages(this.bookId))
+        pageDtos.forEach((p: any) => p['url'] = this.getPageUrl(p))
+        this.pages = pageDtos as PageDtoWithUrl[]
+        this.originalPagesCount = pageDtos.length
+        this.splitPageMapping = pageDtos.map((p, i) => ({ originalPage: p.number, splitPages: [p.number] }))
+      }
+
+      if (this.splitWidePages && (!this.isDoublePageLayout() || this.continuousReader)) {
+        this.pages = this.applySplitProcessing(this.pages)
+      }
+    },
+
+    applySplitProcessing(pages: PageDtoWithUrl[]): PageDtoWithUrl[] {
+      const processedPages: PageDtoWithUrl[] = []
+      this.splitPageMapping = []
+      let currentPageNumber = 1
+
+      for (let i = 0; i < pages.length; i++) {
+        const page = pages[i]
+        const isWide = this.isWidePageFromMetadata(page)
+
+        if (isWide === null || !isWide) {
+          const newPage = { ...page, number: currentPageNumber }
+          processedPages.push(newPage)
+          this.splitPageMapping.push({ originalPage: page.number, splitPages: [currentPageNumber] })
+          currentPageNumber++
+        } else {
+          const virtualPages = this.createVirtualSplitPages(page, currentPageNumber)
+          processedPages.push(...virtualPages)
+          this.splitPageMapping.push({ originalPage: page.number, splitPages: [currentPageNumber, currentPageNumber + 1] })
+          currentPageNumber += 2
+        }
+      }
+
+      return processedPages
+    },
+
+    async forceProcessPages() {
+      await this.processPages(true)
+    },
+
+    createVirtualSplitPages(page: PageDtoWithUrl, startPageNumber: number): PageDtoWithUrl[] {
+      const originalWidth = page.width || 0
+      const originalHeight = page.height || 0
+      const halfWidth = Math.floor(originalWidth / 2)
+
+      if (this.swapSplitPages || (this.readingDirection === 'RIGHT_TO_LEFT')) {
+        const page_right: PageDtoWithUrl = {
+          ...page,
+          url: `${page.url}#split-right`,
+          width: originalWidth - halfWidth,
+          height: originalHeight,
+          number: startPageNumber,
+        }
+        const page_left: PageDtoWithUrl = {
+          ...page,
+          url: `${page.url}#split-left`,
+          width: halfWidth,
+          height: originalHeight,
+          number: startPageNumber + 1,
+        }
+        return [page_right, page_left]
+      } else {
+        const page_left: PageDtoWithUrl = {
+          ...page,
+          url: `${page.url}#split-left`,
+          width: halfWidth,
+          height: originalHeight,
+          number: startPageNumber,
+        }
+        const page_right: PageDtoWithUrl = {
+          ...page,
+          url: `${page.url}#split-right`,
+          width: originalWidth - halfWidth,
+          height: originalHeight,
+          number: startPageNumber + 1,
+        }
+        return [page_left, page_right]
+      }
+    },
+
+    isDoublePageLayout(): boolean {
+      return this.pageLayout === PagedReaderLayout.DOUBLE_PAGES ||
+             this.pageLayout === PagedReaderLayout.DOUBLE_NO_COVER
+    },
+
+    isWidePageFromMetadata(page: PageDtoWithUrl): boolean | null {
+      if (!page.width || !page.height || page.width === 0 || page.height === 0) {
+        return null
+      }
+
+      const aspectRatio = page.width / page.height
+      return aspectRatio > 1
+    },
+
+    originalPageToSplitPage(originalPage: number): number {
+      const mapping = this.splitPageMapping.find(m => m.originalPage === originalPage)
+      return mapping ? mapping.splitPages[0] : originalPage
+    },
+
+    splitPageToOriginalPage(splitPage: number): number {
+      const mapping = this.splitPageMapping.find(m => m.splitPages.includes(splitPage))
+      return mapping ? mapping.originalPage : splitPage
+    },
+
   },
 })
 </script>
