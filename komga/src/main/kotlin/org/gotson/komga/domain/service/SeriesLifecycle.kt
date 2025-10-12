@@ -14,6 +14,9 @@ import org.gotson.komga.domain.model.Library
 import org.gotson.komga.domain.model.MarkSelectedPreference
 import org.gotson.komga.domain.model.Media
 import org.gotson.komga.domain.model.ReadProgress
+import org.gotson.komga.domain.model.SearchCondition
+import org.gotson.komga.domain.model.SearchContext
+import org.gotson.komga.domain.model.SearchOperator
 import org.gotson.komga.domain.model.Series
 import org.gotson.komga.domain.model.SeriesMetadata
 import org.gotson.komga.domain.model.ThumbnailSeries
@@ -68,10 +71,26 @@ class SeriesLifecycle(
   fun sortBooks(series: Series) {
     logger.info { "Sorting books for $series" }
 
-    val books = bookRepository.findAllBySeriesId(series.id)
+    // Use pagination to avoid loading too many books at once
+    val books = mutableListOf<Book>()
+    val pageSize = 1000
+    var pageNumber = 0
+
+    while (true) {
+      val page = bookRepository.findAll(
+        SearchCondition.SeriesId(SearchOperator.Is(series.id)),
+        SearchContext.empty(),
+        org.springframework.data.domain.PageRequest.of(pageNumber, pageSize)
+      )
+      if (page.content.isEmpty()) break
+      books.addAll(page.content)
+      if (!page.hasNext()) break
+      pageNumber++
+    }
+
     val metadatas = bookMetadataRepository.findAllByIds(books.map { it.id })
-    logger.debug { "Existing books: $books" }
-    logger.debug { "Existing metadata: $metadatas" }
+    logger.debug { "Existing books count: ${books.size}" }
+    logger.debug { "Existing metadata count: ${metadatas.size}" }
 
     val sorted =
       books
@@ -178,7 +197,26 @@ class SeriesLifecycle(
     val deletedDate = LocalDateTime.now()
 
     transactionTemplate.executeWithoutResult {
-      bookLifecycle.softDeleteMany(bookRepository.findAllBySeriesIds(series.map { it.id }))
+      // Use pagination to avoid loading too many books at once
+      val seriesIds = series.map { it.id }
+      val books = mutableListOf<Book>()
+      val pageSize = 1000
+      var pageNumber = 0
+
+      while (true) {
+        val page = bookRepository.findAll(
+          SearchCondition.AnyOfBook(seriesIds.map { SearchCondition.SeriesId(SearchOperator.Is(it)) }),
+          SearchContext.empty(),
+          org.springframework.data.domain.PageRequest.of(pageNumber, pageSize)
+        )
+        if (page.content.isEmpty()) break
+        books.addAll(page.content)
+        if (!page.hasNext()) break
+        pageNumber++
+      }
+
+      bookLifecycle.softDeleteMany(books)
+
       series.forEach {
         seriesRepository.update(it.copy(deletedDate = deletedDate))
       }
@@ -338,9 +376,23 @@ class SeriesLifecycle(
         .mapNotNull { it.url?.toURI()?.toPath() }
         .filter { it.exists() && it.isWritable() }
 
-    bookRepository
-      .findAllBySeriesId(series.id)
-      .forEach { bookLifecycle.deleteBookFiles(it) }
+    // Use pagination to avoid loading too many books at once
+    val pageSize = 100
+    var pageNumber = 0
+
+    while (true) {
+      val page = bookRepository.findAll(
+        SearchCondition.SeriesId(SearchOperator.Is(series.id)),
+        SearchContext.empty(),
+        org.springframework.data.domain.PageRequest.of(pageNumber, pageSize)
+      )
+      if (page.content.isEmpty()) break
+
+      page.content.forEach { bookLifecycle.deleteBookFiles(it) }
+
+      if (!page.hasNext()) break
+      pageNumber++
+    }
     thumbnails.forEach {
       if (it.deleteIfExists()) logger.info { "Deleted file: $it" }
     }

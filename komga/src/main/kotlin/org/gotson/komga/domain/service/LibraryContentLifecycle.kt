@@ -285,27 +285,43 @@ class LibraryContentLifecycle(
     logger.info { "Try to restore series: $newSeries" }
     val bookSizes = newBooks.map { it.fileSize }
 
-    val deletedCandidates =
-      seriesRepository
-        .findAll(SearchCondition.Deleted(SearchOperator.IsTrue), SearchContext.empty(), Pageable.unpaged())
-        .content
-        .mapNotNull { deletedCandidate ->
-          val deletedBooks = bookRepository.findAllBySeriesId(deletedCandidate.id)
-          val deletedBooksSizes = deletedBooks.map { it.fileSize }
-          if (newBooks.size == deletedBooks.size && bookSizes.containsAll(deletedBooksSizes) && deletedBooksSizes.containsAll(bookSizes) && deletedBooks.all { it.fileHash.isNotBlank() }) {
-            deletedCandidate to deletedBooks
-          } else {
-            null
-          }
-        }
-    logger.debug { "Deleted series candidates: $deletedCandidates" }
+    // Use pagination to avoid loading too many deleted series into memory at once
+    val deletedCandidates = mutableListOf<Pair<Series, Collection<Book>>>()
+    val pageSize = 500
+    var pageNumber = 0
 
-    if (deletedCandidates.isNotEmpty()) {
+    while (true) {
+      val page = seriesRepository.findAll(
+        SearchCondition.Deleted(SearchOperator.IsTrue),
+        SearchContext.empty(),
+        org.springframework.data.domain.PageRequest.of(pageNumber, pageSize)
+      )
+
+      if (page.content.isEmpty()) break
+
+      val candidates = page.content.mapNotNull { deletedCandidate ->
+        val deletedBooks = bookRepository.findAllBySeriesId(deletedCandidate.id)
+        val deletedBooksSizes = deletedBooks.map { it.fileSize }
+        if (newBooks.size == deletedBooks.size && bookSizes.containsAll(deletedBooksSizes) && deletedBooksSizes.containsAll(bookSizes) && deletedBooks.all { it.fileHash.isNotBlank() }) {
+          deletedCandidate to deletedBooks
+        } else {
+          null
+        }
+      }
+
+      deletedCandidates.addAll(candidates)
+      if (!page.hasNext()) break
+      pageNumber++
+    }
+    val candidates = deletedCandidates
+    logger.debug { "Deleted series candidates: $candidates" }
+
+    if (candidates.isNotEmpty()) {
       val newBooksWithHash = newBooks.map { book -> bookRepository.findByIdOrNull(book.id)!!.copy(fileHash = hasher.computeHash(book.path)) }
       bookRepository.update(newBooksWithHash)
 
       val match =
-        deletedCandidates.find { (_, books) ->
+        candidates.find { (_, books) ->
           books.map { it.fileHash }.containsAll(newBooksWithHash.map { it.fileHash }) && newBooksWithHash.map { it.fileHash }.containsAll(books.map { it.fileHash })
         }
 
@@ -434,28 +450,48 @@ class LibraryContentLifecycle(
   fun emptyTrash(library: Library) {
     logger.info { "Empty trash for library: $library" }
 
-    val seriesToDelete =
-      seriesRepository
-        .findAll(
-          SearchCondition.AllOfSeries(
-            SearchCondition.LibraryId(SearchOperator.Is(library.id)),
-            SearchCondition.Deleted(SearchOperator.IsTrue),
-          ),
-          SearchContext.empty(),
-          Pageable.unpaged(),
-        ).content
+    // Use pagination to avoid loading too many series into memory at once
+    val seriesToDelete = mutableListOf<Series>()
+    val seriesPageSize = 500
+    var seriesPageNumber = 0
+
+    while (true) {
+      val page = seriesRepository.findAll(
+        SearchCondition.AllOfSeries(
+          SearchCondition.LibraryId(SearchOperator.Is(library.id)),
+          SearchCondition.Deleted(SearchOperator.IsTrue),
+        ),
+        SearchContext.empty(),
+        org.springframework.data.domain.PageRequest.of(seriesPageNumber, seriesPageSize)
+      )
+
+      if (page.content.isEmpty()) break
+      seriesToDelete.addAll(page.content)
+      if (!page.hasNext()) break
+      seriesPageNumber++
+    }
     seriesLifecycle.deleteMany(seriesToDelete)
 
-    val booksToDelete =
-      bookRepository
-        .findAll(
-          SearchCondition.AllOfBook(
-            SearchCondition.LibraryId(SearchOperator.Is(library.id)),
-            SearchCondition.Deleted(SearchOperator.IsTrue),
-          ),
-          SearchContext.empty(),
-          Pageable.unpaged(),
-        ).content
+    // Use pagination to avoid loading too many books into memory at once
+    val booksToDelete = mutableListOf<Book>()
+    val booksPageSize = 1000
+    var booksPageNumber = 0
+
+    while (true) {
+      val page = bookRepository.findAll(
+        SearchCondition.AllOfBook(
+          SearchCondition.LibraryId(SearchOperator.Is(library.id)),
+          SearchCondition.Deleted(SearchOperator.IsTrue),
+        ),
+        SearchContext.empty(),
+        org.springframework.data.domain.PageRequest.of(booksPageNumber, booksPageSize)
+      )
+
+      if (page.content.isEmpty()) break
+      booksToDelete.addAll(page.content)
+      if (!page.hasNext()) break
+      booksPageNumber++
+    }
     bookLifecycle.deleteMany(booksToDelete)
     booksToDelete.map { it.seriesId }.distinct().forEach { seriesId ->
       seriesRepository.findByIdOrNull(seriesId)?.let { seriesLifecycle.sortBooks(it) }

@@ -2,6 +2,7 @@ package org.gotson.komga.application.tasks
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.micrometer.core.instrument.MeterRegistry
+import kotlinx.coroutines.*
 import org.gotson.komga.domain.model.BookAction
 import org.gotson.komga.domain.persistence.BookRepository
 import org.gotson.komga.domain.persistence.LibraryRepository
@@ -16,6 +17,7 @@ import org.gotson.komga.domain.service.LocalArtworkLifecycle
 import org.gotson.komga.domain.service.PageHashLifecycle
 import org.gotson.komga.domain.service.SeriesLifecycle
 import org.gotson.komga.domain.service.SeriesMetadataLifecycle
+import org.gotson.komga.infrastructure.monitoring.SystemResourceMonitor
 import org.gotson.komga.infrastructure.search.SearchIndexLifecycle
 import org.gotson.komga.interfaces.scheduler.METER_TASKS_EXECUTION
 import org.gotson.komga.interfaces.scheduler.METER_TASKS_FAILURE
@@ -44,6 +46,7 @@ class TaskHandler(
   private val searchIndexLifecycle: SearchIndexLifecycle,
   private val pageHashLifecycle: PageHashLifecycle,
   private val meterRegistry: MeterRegistry,
+  private val systemResourceMonitor: SystemResourceMonitor,
 ) {
   fun handleTask(task: Task) {
     logger.info { "Executing task: $task" }
@@ -189,6 +192,108 @@ class TaskHandler(
     } catch (e: Exception) {
       logger.error(e) { "Task $task execution failed" }
       meterRegistry.counter(METER_TASKS_FAILURE, "type", task.javaClass.simpleName).increment()
+    }
+  }
+
+  /**
+   * Handle multiple tasks concurrently, grouped by series to avoid conflicts
+   * Includes circuit breaker for resource protection
+   */
+  fun handleTasksConcurrently(tasks: List<Task>) {
+    if (tasks.isEmpty()) return
+
+    // Check circuit breaker state
+    val processingMode = systemResourceMonitor.getProcessingMode()
+    val metrics = systemResourceMonitor.getSystemMetrics()
+
+    logger.info {
+      "Starting concurrent processing of ${tasks.size} tasks. " +
+      "Circuit state: ${metrics.circuitState}, Processing mode: $processingMode"
+    }
+
+    // Record metrics
+    meterRegistry.gauge("task.batch.size", tasks.size.toDouble())
+    meterRegistry.gauge("system.memory.usage", metrics.memoryUsage)
+    meterRegistry.gauge("system.cpu.usage", metrics.cpuUsage)
+    meterRegistry.gauge("system.db.connection.usage", metrics.dbConnectionUsage)
+
+    when (processingMode) {
+      SystemResourceMonitor.ProcessingMode.SINGLE_THREADED -> {
+        logger.warn { "Circuit breaker active: falling back to single-threaded processing" }
+        // Fallback to single-threaded processing
+        tasks.forEach { task -> handleTask(task) }
+        return
+      }
+
+      SystemResourceMonitor.ProcessingMode.CONCURRENT_LIMITED -> {
+        logger.info { "Circuit breaker in half-open: using limited concurrency" }
+        // Limited concurrency for testing
+        runLimitedConcurrency(tasks, maxConcurrency = 2)
+        return
+      }
+
+      SystemResourceMonitor.ProcessingMode.CONCURRENT -> {
+        // Normal concurrent processing
+      }
+    }
+
+    runBlocking {
+      // Group by series ID to ensure tasks for the same series execute sequentially
+      val groupedTasks = tasks.groupBy { task ->
+        when (task) {
+          is Task.AnalyzeBook -> task.groupId ?: "unknown"
+          is Task.GenerateBookThumbnail -> "thumbnails" // Thumbnail tasks can be concurrent
+          is Task.RefreshBookMetadata -> task.groupId ?: "unknown"
+          is Task.ConvertBook -> task.groupId ?: "unknown"
+          is Task.RepairExtension -> task.groupId ?: "unknown"
+          is Task.HashBook -> "hashing" // Hashing tasks can be concurrent
+          is Task.HashBookPages -> "hashing"
+          else -> "other"
+        }
+      }
+
+      // Create concurrent jobs for each group with resource monitoring
+      val groupJobs = groupedTasks.map { (groupId, groupTasks) ->
+        async(Dispatchers.IO) {
+          logger.debug { "Processing ${groupTasks.size} tasks in group: $groupId" }
+
+          if (groupId == "thumbnails" || groupId == "hashing") {
+            // These tasks can be fully concurrent, but respect circuit breaker limits
+            val maxConcurrentForGroup = when (processingMode) {
+              SystemResourceMonitor.ProcessingMode.CONCURRENT_LIMITED -> 2
+              else -> groupTasks.size.coerceAtMost(Runtime.getRuntime().availableProcessors())
+            }
+
+            groupTasks.chunked(maxConcurrentForGroup).forEach { batch ->
+              batch.map { task ->
+                async(Dispatchers.IO) { handleTask(task) }
+              }.awaitAll()
+            }
+          } else {
+            // Tasks for the same series execute sequentially
+            groupTasks.forEach { task -> handleTask(task) }
+          }
+        }
+      }
+
+      // Wait for all groups to complete
+      groupJobs.awaitAll()
+      logger.info { "Completed concurrent processing of ${tasks.size} tasks" }
+    }
+  }
+
+  /**
+   * Limited concurrency processing for circuit breaker half-open state
+   */
+  private fun runLimitedConcurrency(tasks: List<Task>, maxConcurrency: Int) {
+    logger.info { "Running with limited concurrency: maxConcurrency=$maxConcurrency" }
+
+    runBlocking {
+      tasks.chunked(maxConcurrency).forEach { batch ->
+        batch.map { task ->
+          async(Dispatchers.IO) { handleTask(task) }
+        }.awaitAll()
+      }
     }
   }
 }

@@ -117,6 +117,10 @@ dependencies {
 
   implementation("com.github.ben-manes.caffeine:caffeine")
 
+  // Kotlin Coroutines for concurrent processing
+  implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+  implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor:1.10.2")
+
   implementation("org.xerial:sqlite-jdbc:${libs.versions.sqliteJdbc.get()}")
   jooqGenerator("org.xerial:sqlite-jdbc:${libs.versions.sqliteJdbc.get()}")
 
