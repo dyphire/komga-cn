@@ -70,24 +70,36 @@ class ImageConverter(
     format: String,
   ): ByteArray =
     ByteArrayOutputStream().use { baos ->
-      val image = ImageIO.read(imageBytes.inputStream())
+      var image: BufferedImage? = null
+      var result: BufferedImage? = null
 
-      val result =
-        if (!supportsTransparency.contains(format) && containsAlphaChannel(image)) {
-          if (containsTransparency(image))
-            logger.info { "Image contains alpha channel but is not opaque, visual artifacts may appear" }
-          else
-            logger.info { "Image contains alpha channel but is opaque, conversion should not generate any visual artifacts" }
-          BufferedImage(image.width, image.height, BufferedImage.TYPE_INT_RGB).also {
-            it.createGraphics().drawImage(image, 0, 0, Color.WHITE, null)
+      try {
+        image = ImageIO.read(imageBytes.inputStream())
+
+        result =
+          if (!supportsTransparency.contains(format) && containsAlphaChannel(image)) {
+            if (containsTransparency(image))
+              logger.info { "Image contains alpha channel but is not opaque, visual artifacts may appear" }
+            else
+              logger.info { "Image contains alpha channel but is opaque, conversion should not generate any visual artifacts" }
+            BufferedImage(image.width, image.height, BufferedImage.TYPE_INT_RGB).also {
+              it.createGraphics().drawImage(image, 0, 0, Color.WHITE, null)
+            }
+          } else {
+            image
           }
-        } else {
-          image
+
+        ImageIO.write(result, format, baos)
+        baos.toByteArray()
+      } finally {
+        // Manual cleanup to prevent memory leaks
+        if (result !== image) { // Only flush if result is a new image
+          result?.flush()
         }
-
-      ImageIO.write(result, format, baos)
-
-      baos.toByteArray()
+        image?.flush()
+        result = null
+        image = null
+      }
     }
 
   fun resizeImageToByteArray(
@@ -108,7 +120,18 @@ class ImageConverter(
     format: ImageType,
     size: Int,
   ): BufferedImage {
-    val builder = resizeImageBuilder(imageBytes, format, size) ?: return ImageIO.read(imageBytes.inputStream())
+    val builder = resizeImageBuilder(imageBytes, format, size)
+    if (builder == null) {
+      // Fallback: read image directly, but ensure cleanup
+      var image: BufferedImage? = null
+      try {
+        image = ImageIO.read(imageBytes.inputStream())
+        return image
+      } catch (e: Exception) {
+        image?.flush()
+        throw e
+      }
+    }
 
     return builder.asBufferedImage()
   }

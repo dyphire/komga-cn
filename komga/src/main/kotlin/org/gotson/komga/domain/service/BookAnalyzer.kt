@@ -348,27 +348,118 @@ class BookAnalyzer(
 
   fun getPoster(book: BookWithMedia): TypedBytes? =
     when (book.media.profile) {
-      DIVINA ->
-        divinaExtractors[book.media.mediaType]
-          ?.getEntryStream(
-            book.book.path,
-            book.media.pages
-              .first()
-              .fileName,
-          )?.let {
-            TypedBytes(
-              it,
-              book.media.pages
-                .first()
-                .mediaType,
-            )
-          }
-
+      DIVINA -> getDivinaPoster(book)
       PDF -> pdfExtractor.getPageContentAsImage(book.book.path, 1)
       EPUB -> epubExtractor.getCover(book.book.path)
       MOBI -> mobiExtractor.getCover(book.book.path)
       null -> null
     }
+
+  private fun getDivinaPoster(book: BookWithMedia): TypedBytes? {
+    val extractor = divinaExtractors[book.media.mediaType] ?: return null
+
+    // Try up to first 3 pages to find a suitable cover
+    for (pageIndex in 0 until minOf(3, book.media.pages.size)) {
+      val page = book.media.pages[pageIndex]
+      val pageData = extractor.getEntryStream(book.book.path, page.fileName) ?: continue
+
+      // Check if this page is suitable as cover (not mostly white/black)
+      if (isSuitableCoverImage(pageData)) {
+        return TypedBytes(pageData, page.mediaType)
+      }
+    }
+
+    // If no suitable page found, return first page as fallback
+    return book.media.pages.firstOrNull()?.let { firstPage ->
+      extractor.getEntryStream(book.book.path, firstPage.fileName)?.let {
+        TypedBytes(it, firstPage.mediaType)
+      }
+    }
+  }
+
+  private fun isSuitableCoverImage(imageData: ByteArray): Boolean {
+    // Skip analysis for very large images to prevent memory issues
+    val MAX_IMAGE_SIZE = 10 * 1024 * 1024 // 10MB limit
+    if (imageData.size > MAX_IMAGE_SIZE) {
+      logger.debug { "Skipping cover analysis for large image (${imageData.size} bytes)" }
+      return true // Assume large images are suitable
+    }
+
+    var image: java.awt.image.BufferedImage? = null
+    return try {
+      // Use stream-based reading to avoid loading entire image at once if possible
+      imageData.inputStream().use { stream ->
+        val imageInputStream = javax.imageio.ImageIO.createImageInputStream(stream)
+        if (imageInputStream == null) {
+          // Fallback to direct reading
+          image = javax.imageio.ImageIO.read(stream)
+        } else {
+          // Try to find a reader that supports streaming
+          val readers = javax.imageio.ImageIO.getImageReaders(imageInputStream)
+          if (readers.hasNext()) {
+            val reader = readers.next()
+            reader.input = imageInputStream
+            image = reader.read(0) // Read first frame only
+            reader.dispose()
+          } else {
+            // Fallback
+            image = javax.imageio.ImageIO.read(stream)
+          }
+          imageInputStream.close()
+        }
+      }
+
+      val bufferedImage = image ?: return false
+
+      val width = bufferedImage.width
+      val height = bufferedImage.height
+
+      // Skip extremely large images
+      val MAX_DIMENSION = 5000
+      if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
+        logger.debug { "Skipping cover analysis for very large image (${width}x${height})" }
+        return true
+      }
+
+      var whitePixels = 0
+      var blackPixels = 0
+
+      // Sample pixels (check every 10th pixel for performance)
+      val sampleStep = maxOf(1, minOf(width, height) / 100) // Adaptive sampling
+      val sampledPixels = ((width + sampleStep - 1) / sampleStep) * ((height + sampleStep - 1) / sampleStep)
+
+      for (y in 0 until height step sampleStep) {
+        for (x in 0 until width step sampleStep) {
+          val rgb = bufferedImage.getRGB(x, y)
+          val r = (rgb shr 16) and 0xFF
+          val g = (rgb shr 8) and 0xFF
+          val b = rgb and 0xFF
+
+          // Consider pixel as white if RGB values are all > 240
+          if (r > 240 && g > 240 && b > 240) {
+            whitePixels++
+          }
+          // Consider pixel as black if RGB values are all < 15
+          else if (r < 15 && g < 15 && b < 15) {
+            blackPixels++
+          }
+        }
+      }
+
+      val whiteRatio = whitePixels.toDouble() / sampledPixels
+      val blackRatio = blackPixels.toDouble() / sampledPixels
+
+      // Suitable if neither white nor black pixels exceed 95%
+      whiteRatio < 0.95 && blackRatio < 0.95
+    } catch (e: Exception) {
+      logger.warn(e) { "Error analyzing cover image, considering it unsuitable" }
+      false
+    } finally {
+      // Manual cleanup to help GC
+      image?.flush()
+      image = null
+    }
+  }
 
   @Throws(
     MediaNotReadyException::class,
