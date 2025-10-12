@@ -147,6 +147,8 @@
       "scale_type": "Scale type",
       "side_padding": "Side padding",
       "side_padding_none": "None",
+      "split_wide_pages": "Split wide pages",
+      "swap_split_pages": "Swap split pages",
       "webtoon": "Webtoon Reader Options"
     },
     "shortcuts": {
