@@ -2,7 +2,6 @@ package org.gotson.komga.domain.service
 
 import com.hankcs.hanlp.HanLP
 import io.github.oshai.kotlinlogging.KotlinLogging
-import net.greypanther.natsort.CaseInsensitiveSimpleNaturalComparator
 import org.gotson.komga.application.tasks.TaskEmitter
 import org.gotson.komga.domain.model.Book
 import org.gotson.komga.domain.model.BookMetadata
@@ -29,6 +28,7 @@ import org.gotson.komga.domain.persistence.SeriesCollectionRepository
 import org.gotson.komga.domain.persistence.SeriesMetadataRepository
 import org.gotson.komga.domain.persistence.SeriesRepository
 import org.gotson.komga.domain.persistence.ThumbnailSeriesRepository
+import org.gotson.komga.infrastructure.util.NaturalSortComparator
 import org.gotson.komga.language.stripAccents
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
@@ -43,7 +43,7 @@ import kotlin.io.path.notExists
 import kotlin.io.path.toPath
 
 private val logger = KotlinLogging.logger {}
-private val natSortComparator: Comparator<String> = CaseInsensitiveSimpleNaturalComparator.getInstance()
+private val natSortComparator: Comparator<String> = NaturalSortComparator
 
 @Service
 class SeriesLifecycle(
