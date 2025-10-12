@@ -1,13 +1,13 @@
 package org.gotson.komga.infrastructure.mediacontainer.divina
 
 import io.github.oshai.kotlinlogging.KotlinLogging
-import net.greypanther.natsort.CaseInsensitiveSimpleNaturalComparator
 import org.apache.commons.compress.archivers.ArchiveEntry
 import org.apache.commons.compress.archivers.zip.ZipFile
 import org.gotson.komga.domain.model.MediaContainerEntry
 import org.gotson.komga.domain.model.MediaType
 import org.gotson.komga.infrastructure.image.ImageAnalyzer
 import org.gotson.komga.infrastructure.mediacontainer.ContentDetector
+import org.gotson.komga.infrastructure.util.NaturalSortComparator
 import org.gotson.komga.infrastructure.util.getZipEntryBytes
 import org.gotson.komga.infrastructure.util.use
 import org.springframework.stereotype.Service
@@ -20,7 +20,7 @@ class ZipExtractor(
   private val contentDetector: ContentDetector,
   private val imageAnalyzer: ImageAnalyzer,
 ) : DivinaExtractor {
-  private val natSortComparator: Comparator<String> = CaseInsensitiveSimpleNaturalComparator.getInstance()
+  private val natSortComparator: Comparator<String> = NaturalSortComparator
 
   override fun mediaTypes(): List<String> = listOf(MediaType.ZIP.type)
 
