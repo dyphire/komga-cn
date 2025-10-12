@@ -45,8 +45,12 @@ class TaskEmitter(
   }
 
   fun analyzeUnknownAndOutdatedBooks(library: Library) {
-    bookRepository
-      .findAll(
+    // Use pagination to avoid loading too many books into memory at once
+    val pageSize = 1000 // Process 1000 books at a time
+    var pageNumber = 0
+
+    while (true) {
+      val page = bookRepository.findAll(
         SearchCondition.AllOfBook(
           SearchCondition.LibraryId(SearchOperator.Is(library.id)),
           SearchCondition.AnyOfBook(
@@ -55,10 +59,20 @@ class TaskEmitter(
           ),
         ),
         SearchContext.empty(),
-        UnpagedSorted(Sort.by(Sort.Order.asc("seriesId"), Sort.Order.asc("number"))),
-      ).content
-      .map { Task.AnalyzeBook(it.id, groupId = it.seriesId) }
-      .let { submitTasks(it) }
+        org.springframework.data.domain.PageRequest.of(pageNumber, pageSize,
+          Sort.by(Sort.Order.asc("seriesId"), Sort.Order.asc("number"))),
+      )
+
+      if (page.content.isEmpty()) break
+
+      val tasks = page.content.map { Task.AnalyzeBook(it.id, groupId = it.seriesId) }
+      submitTasks(tasks)
+
+      logger.info { "Submitted ${tasks.size} analysis tasks for page $pageNumber (library: ${library.name})" }
+
+      if (!page.hasNext()) break
+      pageNumber++
+    }
   }
 
   fun hashBooksWithoutHash(library: Library) {

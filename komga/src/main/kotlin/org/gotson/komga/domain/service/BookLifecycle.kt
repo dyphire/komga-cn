@@ -39,6 +39,7 @@ import org.gotson.komga.infrastructure.hash.KoreaderHasher
 import org.gotson.komga.infrastructure.image.ImageConverter
 import org.gotson.komga.infrastructure.image.ImageType
 import org.springframework.beans.factory.annotation.Qualifier
+import io.micrometer.core.annotation.Timed
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Service
@@ -81,6 +82,7 @@ class BookLifecycle(
 ) {
   private val resizeTargetFormat = ImageType.JPEG
 
+  @Timed("book.lifecycle.analyze")
   fun analyzeAndPersist(book: Book): Set<BookAction> {
     logger.info { "Analyze and persist book: $book" }
     val media = bookAnalyzer.analyze(
@@ -110,6 +112,60 @@ class BookLifecycle(
     eventPublisher.publishEvent(DomainEvent.BookUpdated(book))
 
     return if (media.status == Media.Status.READY) setOf(BookAction.GENERATE_THUMBNAIL, BookAction.REFRESH_METADATA) else emptySet()
+  }
+
+  /**
+   * Batch analyze and persist books to avoid N+1 query problems
+   */
+  fun analyzeAndPersistBatch(books: List<Book>): Map<Book, Set<BookAction>> {
+    if (books.isEmpty()) return emptyMap()
+
+    logger.info { "Batch analyze and persist ${books.size} books" }
+
+    // Preload library configurations to avoid repeated queries
+    val libraryIds = books.map { it.libraryId }.distinct()
+    val libraries = libraryRepository.findAllByIds(libraryIds).associateBy { it.id }
+
+    // Batch analyze books
+    val analysisResults = books.associateWith { book ->
+      val library = libraries[book.libraryId] ?: throw IllegalStateException("Library not found: ${book.libraryId}")
+      bookAnalyzer.analyze(book, library.analyzeDimensions, library.adPagesDetector)
+    }
+
+    // Batch process database operations
+    transactionTemplate.executeWithoutResult {
+      analysisResults.forEach { (book, media) ->
+        // Handle read progress adjustment (using existing single query method)
+        try {
+          val previous = mediaRepository.findById(book.id)
+          if (previous.status == Media.Status.OUTDATED && previous.pageCount != media.pageCount) {
+            val adjustedProgress =
+              readProgressRepository
+                .findAllByBookId(book.id)
+                .map { it.copy(page = if (it.completed) media.pageCount else 1) }
+            if (adjustedProgress.isNotEmpty()) {
+              logger.info { "Number of pages differ, adjust read progress for book ${book.id}" }
+              readProgressRepository.save(adjustedProgress)
+            }
+          }
+        } catch (e: Exception) {
+          // Media doesn't exist, which is normal
+        }
+
+        // Update media information
+        mediaRepository.update(media)
+      }
+    }
+
+    // Send events
+    books.forEach { book ->
+      eventPublisher.publishEvent(DomainEvent.BookUpdated(book))
+    }
+
+    // Return follow-up actions
+    return analysisResults.mapValues { (_, media) ->
+      if (media.status == Media.Status.READY) setOf(BookAction.GENERATE_THUMBNAIL, BookAction.REFRESH_METADATA) else emptySet()
+    }
   }
 
   fun hashAndPersist(book: Book) {
@@ -306,12 +362,33 @@ class BookLifecycle(
     }
   }
 
-  fun findBookThumbnailsToRegenerate(forBiggerResultOnly: Boolean): Collection<String> =
+  fun findBookThumbnailsToRegenerate(forBiggerResultOnly: Boolean): Collection<String> {
     if (forBiggerResultOnly) {
-      thumbnailBookRepository.findAllBookIdsByThumbnailTypeAndDimensionSmallerThan(ThumbnailBook.Type.GENERATED, komgaSettingsProvider.thumbnailSize.maxEdge)
+      return thumbnailBookRepository.findAllBookIdsByThumbnailTypeAndDimensionSmallerThan(ThumbnailBook.Type.GENERATED, komgaSettingsProvider.thumbnailSize.maxEdge)
     } else {
-      bookRepository.findAll(SearchCondition.Deleted(SearchOperator.IsFalse), SearchContext.empty(), Pageable.unpaged()).content.map { it.id }
+      // Use pagination to avoid loading too many books into memory at once
+      val bookIds = mutableListOf<String>()
+      val pageSize = 2000 // Query 2000 books at a time
+      var pageNumber = 0
+
+      while (true) {
+        val page = bookRepository.findAll(
+          SearchCondition.Deleted(SearchOperator.IsFalse),
+          SearchContext.empty(),
+          org.springframework.data.domain.PageRequest.of(pageNumber, pageSize)
+        )
+
+        if (page.content.isEmpty()) break
+
+        bookIds.addAll(page.content.map { it.id })
+
+        if (!page.hasNext()) break
+        pageNumber++
+      }
+
+      return bookIds
     }
+  }
 
   @Throws(
     ImageConversionException::class,

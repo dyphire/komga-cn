@@ -1,6 +1,7 @@
 package org.gotson.komga.domain.service
 
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.*
 import org.gotson.komga.domain.model.Book
 import org.gotson.komga.domain.model.BookPage
 import org.gotson.komga.domain.model.BookWithMedia
@@ -16,6 +17,7 @@ import org.gotson.komga.domain.model.MediaUnsupportedException
 import org.gotson.komga.domain.model.NoThumbnailFoundException
 import org.gotson.komga.domain.model.ThumbnailBook
 import org.gotson.komga.domain.model.TypedBytes
+import org.gotson.komga.infrastructure.configuration.KomgaProperties
 import org.gotson.komga.infrastructure.configuration.KomgaSettingsProvider
 import org.gotson.komga.infrastructure.hash.Hasher
 import org.gotson.komga.infrastructure.image.ImageAnalyzer
@@ -28,12 +30,15 @@ import org.gotson.komga.infrastructure.mediacontainer.epub.EpubExtractor
 import org.gotson.komga.infrastructure.mediacontainer.epub.epub
 import org.gotson.komga.infrastructure.mediacontainer.mobi.MobiExtractor
 import org.gotson.komga.infrastructure.mediacontainer.pdf.PdfExtractor
+import io.micrometer.core.annotation.Timed
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
+import com.github.benmanes.caffeine.cache.Caffeine
 import java.io.ByteArrayOutputStream
 import java.nio.file.AccessDeniedException
 import java.nio.file.NoSuchFileException
+import java.util.concurrent.TimeUnit
 import javax.imageio.ImageIO
 import kotlin.io.path.extension
 
@@ -52,6 +57,7 @@ class BookAnalyzer(
   private val hasher: Hasher,
   @param:Value("#{@komgaProperties.pageHashing}") private val pageHashing: Int,
   private val komgaSettingsProvider: KomgaSettingsProvider,
+  private val komgaProperties: KomgaProperties,
   @Qualifier("thumbnailType")
   private val thumbnailType: ImageType,
   @Qualifier("pdfImageType")
@@ -62,18 +68,47 @@ class BookAnalyzer(
       .flatMap { e -> e.mediaTypes().map { it to e } }
       .toMap()
 
+  // Cache optimization: media type detection cache
+  private val mediaTypeCache = Caffeine.newBuilder()
+    .maximumSize(komgaProperties.analysis.mediaTypeCacheSize.toLong())
+    .expireAfterWrite(komgaProperties.analysis.mediaTypeCacheExpireHours.toHours(), TimeUnit.HOURS)
+    .build<String, MediaType>()
+
+  // Image analysis result cache
+  private val imageAnalysisCache = Caffeine.newBuilder()
+    .maximumSize(komgaProperties.analysis.imageAnalysisCacheSize.toLong())
+    .expireAfterWrite(komgaProperties.analysis.imageAnalysisCacheExpireMinutes.toMinutes(), TimeUnit.MINUTES)
+    .build<String, ImageAnalysisResult>()
+
+  // Internal data class for caching image analysis results
+  private data class ImageAnalysisResult(
+    val isSuitable: Boolean,
+    val timestamp: Long = System.currentTimeMillis()
+  )
+
+  @Timed("book.analyze")
   fun analyze(
     book: Book,
     analyzeDimensions: Boolean,
     adPagesDetector: Boolean,
   ): Media {
-    logger.info { "Trying to analyze book: $book" }
+    logger.info { "Analyzing book: $book" }
+    val startTime = System.nanoTime()
+
     return try {
-      var mediaType =
-        contentDetector.detectMediaType(book.path).let {
+      // Use cache to optimize media type detection
+      val cacheKey = book.path.toString()
+      var mediaType = mediaTypeCache.getIfPresent(cacheKey)
+
+      if (mediaType == null) {
+        mediaType = contentDetector.detectMediaType(book.path).let {
           logger.info { "Detected media type: $it" }
           MediaType.fromMediaType(it) ?: return Media(mediaType = it, status = Media.Status.UNSUPPORTED, comment = "ERR_1001", bookId = book.id)
         }
+        mediaTypeCache.put(cacheKey, mediaType)
+      } else {
+        logger.debug { "Using cached media type: $mediaType for book: $book" }
+      }
 
       if (book.path.extension.lowercase() == "epub" && mediaType != MediaType.EPUB) {
         if (epubExtractor.isEpub(book.path)) {
@@ -84,20 +119,28 @@ class BookAnalyzer(
         }
       }
 
-      when (mediaType.profile) {
+      val media = when (mediaType.profile) {
         DIVINA -> analyzeDivina(book, mediaType, analyzeDimensions, adPagesDetector)
         PDF -> analyzePdf(book, analyzeDimensions)
         EPUB -> analyzeEpub(book, analyzeDimensions, adPagesDetector)
         MOBI -> analyzeMobi(book, analyzeDimensions)
       }.copy(mediaType = mediaType.type)
+
+      val duration = (System.nanoTime() - startTime) / 1_000_000 // Convert to milliseconds
+      logger.info { "Book ${book.id} analyzed successfully in ${duration}ms" }
+      media
+
     } catch (ade: AccessDeniedException) {
-      logger.error(ade) { "Error while analyzing book: $book" }
+      val duration = (System.nanoTime() - startTime) / 1_000_000
+      logger.error(ade) { "Access denied while analyzing book ${book.id} (${duration}ms)" }
       Media(status = Media.Status.ERROR, comment = "ERR_1000")
     } catch (ex: NoSuchFileException) {
-      logger.error(ex) { "Error while analyzing book: $book" }
+      val duration = (System.nanoTime() - startTime) / 1_000_000
+      logger.error(ex) { "File not found while analyzing book ${book.id} (${duration}ms)" }
       Media(status = Media.Status.ERROR, comment = "ERR_1018")
     } catch (ex: Exception) {
-      logger.error(ex) { "Error while analyzing book: $book" }
+      val duration = (System.nanoTime() - startTime) / 1_000_000
+      logger.error(ex) { "Unexpected error while analyzing book ${book.id} (${duration}ms): ${ex.message}" }
       Media(status = Media.Status.ERROR, comment = "ERR_1005")
     }.copy(bookId = book.id)
   }
@@ -105,46 +148,51 @@ class BookAnalyzer(
   private fun filterAdPages(pages: List<BookPage>, book: Book, mediaType: MediaType): List<BookPage> {
     if (pages.size <= 10) return pages
 
-    val pagesToCheck = pages.takeLast(10)
-    val pagesToKeep = pages.dropLast(10)
+    // Use configuration parameter: check last N pages
+    val pagesToCheckCount = minOf(komgaProperties.analysis.adPagesCheckCount, pages.size)
+    val pagesToCheck = pages.takeLast(pagesToCheckCount)
+    val pagesToKeep = pages.dropLast(pagesToCheckCount)
 
-    val adFlags = MutableList(pagesToCheck.size) { false }
-
+    // Early exit: reverse detection, exit if 3 consecutive pages have no ads
     var consecutiveNormal = 0
-    for (i in pagesToCheck.size - 1 downTo 0) {
-      val page = pagesToCheck[i]
+    val adFlags = BooleanArray(pagesToCheck.size) { false }
+
+    // Start detection from the last page in reverse order
+    for ((index, page) in pagesToCheck.reversed().withIndex()) {
       val isAd = try {
-          val content = divinaExtractors.getValue(mediaType.type)
-              .getEntryStream(book.path, page.fileName)
-          qrCodeDetector.containsQrCode(content)
-        } catch (e: Exception) {
-          logger.error(e) { "Error while checking QR code for page: ${page.fileName} in book: $book" }
-          false
-        }
+        val content = divinaExtractors.getValue(mediaType.type)
+            .getEntryStream(book.path, page.fileName)
+        qrCodeDetector.containsQrCode(content)
+      } catch (e: Exception) {
+        logger.error(e) { "Error while checking QR code for page: ${page.fileName} in book: $book" }
+        false
+      }
 
-        adFlags[i] = isAd
+      adFlags[pagesToCheck.size - 1 - index] = isAd
 
-        if (!isAd) {
-          consecutiveNormal++
-          if (consecutiveNormal > 2) break
-        } else {
-            consecutiveNormal = 0
+      if (!isAd) {
+        consecutiveNormal++
+        if (consecutiveNormal >= 3) {
+          return pages
         }
+      } else {
+        consecutiveNormal = 0
+      }
     }
 
     var consecutiveAd = 0
     for (i in adFlags.indices) {
       if (adFlags[i]) {
-          consecutiveAd++
-          continue
+        consecutiveAd++
+        continue
       }
 
       if (consecutiveAd >= 2) {
-          adFlags[i] = true
+        adFlags[i] = true
       } else if ((i - 1 >= 0 && adFlags[i - 1]) && (i + 1 < adFlags.size && adFlags[i + 1])) {
-          adFlags[i] = true
+        adFlags[i] = true
       } else {
-          consecutiveAd = 0
+        consecutiveAd = 0
       }
     }
 
@@ -378,13 +426,34 @@ class BookAnalyzer(
   }
 
   private fun isSuitableCoverImage(imageData: ByteArray): Boolean {
-    // Skip analysis for very large images to prevent memory issues
-    val MAX_IMAGE_SIZE = 10 * 1024 * 1024 // 10MB limit
+    // Use configuration parameter to control memory limit
+    val MAX_IMAGE_SIZE = komgaProperties.analysis.maxImageSizeForAnalysis
     if (imageData.size > MAX_IMAGE_SIZE) {
       logger.debug { "Skipping cover analysis for large image (${imageData.size} bytes)" }
       return true // Assume large images are suitable
     }
 
+    // Use cache to optimize image analysis
+    val cacheKey = hasher.computeHash(imageData.inputStream())
+    val cachedResult = imageAnalysisCache.getIfPresent(cacheKey)
+    if (cachedResult != null) {
+      logger.debug { "Using cached image analysis result for hash: $cacheKey" }
+      return cachedResult.isSuitable
+    }
+
+    // Use coroutine for async processing to avoid blocking main thread
+    val result = runBlocking {
+      withContext(Dispatchers.IO) {
+        analyzeCoverImageAsync(imageData)
+      }
+    }
+
+    // Cache result
+    imageAnalysisCache.put(cacheKey, ImageAnalysisResult(result))
+    return result
+  }
+
+  private fun analyzeCoverImageAsync(imageData: ByteArray): Boolean {
     var image: java.awt.image.BufferedImage? = null
     return try {
       // Use stream-based reading to avoid loading entire image at once if possible
@@ -424,8 +493,8 @@ class BookAnalyzer(
       var whitePixels = 0
       var blackPixels = 0
 
-      // Sample pixels (check every 10th pixel for performance)
-      val sampleStep = maxOf(1, minOf(width, height) / 100) // Adaptive sampling
+      // More aggressive sampling: sample every 50th pixel
+      val sampleStep = maxOf(1, minOf(width, height) / 50) // More aggressive sampling
       val sampledPixels = ((width + sampleStep - 1) / sampleStep) * ((height + sampleStep - 1) / sampleStep)
 
       for (y in 0 until height step sampleStep) {
