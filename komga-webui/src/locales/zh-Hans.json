@@ -134,6 +134,7 @@
         "black": "黑色",
         "gray": "灰色",
         "white": "白色",
+        "system": "系统",
         "immersive": "沉浸式"
       },
       "display": "显示",
@@ -726,7 +727,8 @@
       "appearances": {
         "day": "日间",
         "night": "夜间",
-        "sepia": "棕褐色"
+        "sepia": "棕褐色",
+        "system": "系统"
       },
       "column_count": {
         "auto": "自动",

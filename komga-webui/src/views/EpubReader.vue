@@ -390,6 +390,12 @@ export default Vue.extend({
           color: 'black',
           class: 'white--text',
         },
+        {
+          text: this.$t('enums.epubreader.appearances.system').toString(),
+          value: 'system',
+          color: this.getSystemThemeColor(),
+          class: this.getSystemThemeColor() === 'black' ? 'white--text' : 'black--text',
+        },
       ],
       columnCounts: [
         {text: this.$t('enums.epubreader.column_count.auto').toString(), value: 'auto'},
@@ -445,11 +451,16 @@ export default Vue.extend({
       progressionPageCount: undefined as number,
       effectiveDirection: 'ltr',
       fixedLayout: false,
+      systemThemeMediaQuery: null as MediaQueryList | null,
     }
   },
   created() {
     this.$vuetify.rtl = false
     if (screenfull.isEnabled) screenfull.on('change', this.fullscreenChanged)
+
+    // Listen for system theme changes
+    this.systemThemeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    this.systemThemeMediaQuery.addEventListener('change', this.handleSystemThemeChange)
   },
   beforeDestroy() {
     this.d2Reader.stop()
@@ -459,6 +470,11 @@ export default Vue.extend({
     if (screenfull.isEnabled) {
       screenfull.off('change', this.fullscreenChanged)
       screenfull.exit()
+    }
+
+    // Remove system theme change listener
+    if (this.systemThemeMediaQuery) {
+      this.systemThemeMediaQuery.removeEventListener('change', this.handleSystemThemeChange)
     }
 
     // Restore status bar color to app theme
@@ -550,7 +566,15 @@ export default Vue.extend({
         return this.settings.appearance
       },
       set: function (color: string): void {
-        if (this.appearances.map(x => x.value).includes(color)) {
+        if (color === 'system') {
+          // For system theme, map to the appropriate readium theme
+          const systemColor = this.getSystemThemeColor()
+          const readiumTheme = systemColor === 'black' ? 'readium-night-on' : 'readium-default-on'
+          this.settings.appearance = color
+          this.d2Reader.applyUserSettings({appearance: readiumTheme})
+          this.$store.commit('setEpubreaderSettings', this.settings)
+          this.updateReaderStatusBarColor()
+        } else if (this.appearances.map(x => x.value).includes(color)) {
           this.settings.appearance = color
           this.d2Reader.applyUserSettings({appearance: color})
           this.$store.commit('setEpubreaderSettings', this.settings)
@@ -666,6 +690,21 @@ export default Vue.extend({
     },
   },
   methods: {
+    getSystemThemeColor(): string {
+      const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+      return isDark ? 'black' : 'white'
+    },
+
+    handleSystemThemeChange(event: MediaQueryListEvent): void {
+      // Only update if system theme is currently selected
+      if (this.settings.appearance === 'system') {
+        const systemColor = this.getSystemThemeColor()
+        const readiumTheme = systemColor === 'black' ? 'readium-night-on' : 'readium-default-on'
+        this.d2Reader.applyUserSettings({appearance: readiumTheme})
+        this.updateReaderStatusBarColor()
+      }
+    },
+
     previousBook() {
       if (!this.$_.isEmpty(this.siblingPrevious)) {
         this.jumpToPreviousBook = false
@@ -1061,6 +1100,9 @@ export default Vue.extend({
         statusBarColor = '#faf4e8' // sepia background
       } else if (this.appearance === 'readium-night-on') {
         statusBarColor = 'black' // night background
+      } else if (this.appearance === 'system') {
+        // For system theme, use the resolved system color
+        statusBarColor = this.getSystemThemeColor()
       }
 
       const metaThemeColor = document.querySelector('meta[name="theme-color"]')

@@ -584,21 +584,19 @@ export default Vue.extend({
     },
 
     calculateLastReadDate(readBooks: BookDto[]) {
-      if (readBooks.length === 0) {
-        this.lastReadDate = null
-        return
+      let latest: Date | null = null
+
+      for (const book of readBooks) {
+        const dateStr = book.readProgress?.readDate
+        if (dateStr) {
+          const date = new Date(dateStr)
+          if (!latest || date > latest) {
+            latest = date
+          }
+        }
       }
 
-      // 找到最近的阅读日期
-      const sortedBooks = readBooks
-        .filter(book => book.readProgress?.readDate)
-        .sort((a, b) => new Date(b.readProgress!.readDate).getTime() - new Date(a.readProgress!.readDate).getTime())
-
-      if (sortedBooks.length > 0) {
-        this.lastReadDate = new Date(sortedBooks[0].readProgress!.readDate)
-      } else {
-        this.lastReadDate = null
-      }
+      this.lastReadDate = latest
     },
 
     calculateReadingStreak(readBooks: BookDto[]) {
@@ -828,9 +826,9 @@ export default Vue.extend({
         .map(([name, count]) => ({ name, count }))
         .sort((a, b) => b.count - a.count)
 
-      // 生成饼图数据（只显示前20个，其余归为"其他"）
-      const topGenresForChart = this.topGenres.slice(0, 20)
-      const otherGenres = this.topGenres.slice(20)
+      // 生成饼图数据（只显示前17个，其余归为"其他"）
+      const topGenresForChart = this.topGenres.slice(0, 17)
+      const otherGenres = this.topGenres.slice(17)
       const otherCount = otherGenres.reduce((sum, genre) => sum + genre.count, 0)
 
       this.genreChartData = topGenresForChart.map(genre => ({
@@ -845,9 +843,9 @@ export default Vue.extend({
         })
       }
 
-      // 确保总共不超过21个项目（20个具体项目 + 1个其他）
-      if (this.genreChartData.length > 21) {
-        this.genreChartData = this.genreChartData.slice(0, 21)
+      // 确保总共不超过18个项目（17个具体项目 + 1个其他）
+      if (this.genreChartData.length > 18) {
+        this.genreChartData = this.genreChartData.slice(0, 18)
       }
     },
 
@@ -915,9 +913,9 @@ export default Vue.extend({
         .map(([name, count]) => ({ name, count }))
         .sort((a, b) => b.count - a.count)
 
-      // 生成饼图数据（只显示前20个，其余归为"其他"）
-      const topTagsForChart = this.topTags.slice(0, 20)
-      const otherTags = this.topTags.slice(20)
+      // 生成饼图数据（只显示前17个，其余归为"其他"）
+      const topTagsForChart = this.topTags.slice(0, 17)
+      const otherTags = this.topTags.slice(17)
       const otherCount = otherTags.reduce((sum, tag) => sum + tag.count, 0)
 
       this.tagChartData = topTagsForChart.map(tag => ({
@@ -932,9 +930,9 @@ export default Vue.extend({
         })
       }
 
-      // 确保总共不超过21个项目（20个具体项目 + 1个其他）
-      if (this.tagChartData.length > 21) {
-        this.tagChartData = this.tagChartData.slice(0, 21)
+      // 确保总共不超过18个项目（17个具体项目 + 1个其他）
+      if (this.tagChartData.length > 18) {
+        this.tagChartData = this.tagChartData.slice(0, 18)
       }
     },
 
