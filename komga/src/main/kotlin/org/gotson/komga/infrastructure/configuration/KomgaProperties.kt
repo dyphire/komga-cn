@@ -50,6 +50,8 @@ class KomgaProperties {
 
   var kobo = Kobo()
 
+  var analysis = Analysis()
+
   val fonts = Fonts()
 
   class Cors {
@@ -109,5 +111,41 @@ class KomgaProperties {
     var syncItemLimit: Int = 100
 
     var kepubifyPath: String? = null
+  }
+
+  class Analysis {
+    @get:Positive
+    var adPagesCheckCount: Int = 10
+
+    @get:Positive
+    var maxImageSizeForAnalysis: Long = 10 * 1024 * 1024 // 10MB
+
+    @get:Positive
+    var concurrentAnalysisThreads: Int = Runtime.getRuntime().availableProcessors()
+
+    var enableAnalysisCache: Boolean = true
+
+    @get:Positive
+    var mediaTypeCacheSize: Int = 1000
+
+    @DurationUnit(ChronoUnit.HOURS)
+    var mediaTypeCacheExpireHours: Duration = Duration.ofHours(1)
+
+    @get:Positive
+    var imageAnalysisCacheSize: Int = 500
+
+    @DurationUnit(ChronoUnit.MINUTES)
+    var imageAnalysisCacheExpireMinutes: Duration = Duration.ofMinutes(30)
+
+    // Circuit breaker configuration
+    var circuitBreakerEnabled: Boolean = true
+
+    var memoryThreshold: Double = 0.8 // 80% memory usage threshold
+
+    var cpuThreshold: Double = 0.8 // 80% CPU usage threshold
+
+    var dbConnectionThreshold: Double = 0.8 // 80% DB connection pool usage
+
+    var circuitBreakerCooldownMs: Duration = Duration.ofMillis(30000) // 30 seconds cooldown
   }
 }
