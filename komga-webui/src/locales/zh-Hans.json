@@ -147,6 +147,8 @@
       "scale_type": "缩放模式",
       "side_padding": "左右边距",
       "side_padding_none": "无",
+      "split_wide_pages": "拆分宽图",
+      "swap_split_pages": "交换拆分页顺序",
       "webtoon": "Webtoon 模式"
     },
     "shortcuts": {

@@ -21,6 +21,8 @@ export const persistedModule: Module<any, any> = {
       animations: true,
       background: '',
       rotation: 0,
+      splitWidePages: false,
+      swapSplitPages: false,
     },
     epubreader: {},
     browsingPageSize: undefined as unknown as number,
@@ -137,6 +139,12 @@ export const persistedModule: Module<any, any> = {
     },
     setWebreaderRotation(state, val) {
       state.webreader.rotation = val
+    },
+    setWebreaderSplitWidePages(state, val) {
+      state.webreader.splitWidePages = val
+    },
+    setWebreaderSwapSplitPages(state, val) {
+      state.webreader.swapSplitPages = val
     },
     setEpubreaderSettings(state, val) {
       state.epubreader = val
