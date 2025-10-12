@@ -134,6 +134,7 @@
         "black": "Black",
         "gray": "Gray",
         "white": "White",
+        "system": "System",
         "immersive": "Immersive"
       },
       "display": "Display",
@@ -726,7 +727,8 @@
       "appearances": {
         "day": "Day",
         "night": "Night",
-        "sepia": "Sepia"
+        "sepia": "Sepia",
+        "system": "System"
       },
       "column_count": {
         "auto": "Auto",
