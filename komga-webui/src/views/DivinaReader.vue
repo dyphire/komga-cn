@@ -417,6 +417,7 @@ export default Vue.extend({
       spinePaths: [] as string[],
 
       actualBackgroundColor: 'black',
+      systemThemeMediaQuery: null as MediaQueryList | null,
 
       ItemTypes,
       screenfull,
@@ -496,6 +497,7 @@ export default Vue.extend({
         {text: this.$t('bookreader.settings.background_colors.white').toString(), value: 'white'},
         {text: this.$t('bookreader.settings.background_colors.gray').toString(), value: '#212121'},
         {text: this.$t('bookreader.settings.background_colors.black').toString(), value: 'black'},
+        {text: this.$t('bookreader.settings.background_colors.system').toString(), value: 'system'},
         {text: this.$t('bookreader.settings.background_colors.immersive').toString(), value: 'immersive'},
       ],
       rotationOptions: [
@@ -520,6 +522,10 @@ export default Vue.extend({
     this.shortcuts = this.$_.keyBy([...shortcutsSettings, ...shortcutsSettingsPaged, ...shortcutsSettingsContinuous, ...shortcutsMenus, ...shortcutsAll], x => x.key)
     window.addEventListener('keydown', this.keyPressed)
     if (screenfull.isEnabled) screenfull.on('change', this.fullscreenChanged)
+
+    // Listen for system theme changes
+    this.systemThemeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    this.systemThemeMediaQuery.addEventListener('change', this.handleSystemThemeChange)
   },
   async mounted() {
     document.documentElement.classList.add('html-reader')
@@ -541,7 +547,7 @@ export default Vue.extend({
     this.swapSplitPages = this.$store.state.persistedState.webreader.swapSplitPages || false
 
     // Initialize actual background color based on stored setting
-    const validColors = ['white', '#212121', 'black', 'immersive']
+    const validColors = ['white', '#212121', 'black', 'system', 'immersive']
 
     if (this.settings.backgroundColor === 'immersive') {
       this.actualBackgroundColor = '#2a2a2a' // Default fallback for immersive
@@ -549,6 +555,8 @@ export default Vue.extend({
       setTimeout(() => {
         this.updateImmersiveBackground()
       }, 50)
+    } else if (this.settings.backgroundColor === 'system') {
+      this.actualBackgroundColor = this.getSystemThemeColor()
     } else if (validColors.includes(this.settings.backgroundColor)) {
       this.actualBackgroundColor = this.settings.backgroundColor
     } else {
@@ -568,6 +576,11 @@ export default Vue.extend({
     if (screenfull.isEnabled) {
       screenfull.off('change', this.fullscreenChanged)
       screenfull.exit()
+    }
+
+    // Remove system theme change listener
+    if (this.systemThemeMediaQuery) {
+      this.systemThemeMediaQuery.removeEventListener('change', this.handleSystemThemeChange)
     }
 
     // Restore status bar color to app theme
@@ -736,7 +749,7 @@ export default Vue.extend({
         return this.settings.backgroundColor
       },
       set: function (color: string): void {
-        const validColors = ['white', '#212121', 'black', 'immersive']
+        const validColors = ['white', '#212121', 'black', 'system', 'immersive']
 
         if (validColors.includes(color)) {
           this.settings.backgroundColor = color
@@ -748,6 +761,8 @@ export default Vue.extend({
             setTimeout(() => {
               this.updateImmersiveBackground()
             }, 30)
+          } else if (color === 'system') {
+            this.actualBackgroundColor = this.getSystemThemeColor()
           } else {
             this.actualBackgroundColor = color
           }
@@ -861,6 +876,19 @@ export default Vue.extend({
     },
   },
   methods: {
+    getSystemThemeColor(): string {
+      const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+      return isDark ? 'black' : 'white'
+    },
+
+    handleSystemThemeChange(event: MediaQueryListEvent): void {
+      // Only update if system theme is currently selected
+      if (this.settings.backgroundColor === 'system') {
+        this.actualBackgroundColor = this.getSystemThemeColor()
+        this.updateReaderStatusBarColor()
+      }
+    },
+
     detectWebtoonFromMetadata(): boolean {
       const bookTags = this.book?.metadata?.tags || []
       const hasWebtoonInBookTags = bookTags.some(tag =>
@@ -982,7 +1010,7 @@ export default Vue.extend({
         this.goToFirst()
       }
 
-      const validColors = ['white', '#212121', 'black', 'immersive']
+      const validColors = ['white', '#212121', 'black', 'system', 'immersive']
 
       if (this.settings.backgroundColor === 'immersive') {
         this.actualBackgroundColor = '#2a2a2a'
@@ -990,6 +1018,8 @@ export default Vue.extend({
         setTimeout(() => {
           this.updateImmersiveBackground()
         }, 50)
+      } else if (this.settings.backgroundColor === 'system') {
+        this.actualBackgroundColor = this.getSystemThemeColor()
       } else if (validColors.includes(this.settings.backgroundColor)) {
         this.actualBackgroundColor = this.settings.backgroundColor
       } else {
@@ -1224,6 +1254,9 @@ export default Vue.extend({
         statusBarColor = '#212121' // gray background
       } else if (this.settings.backgroundColor === 'black') {
         statusBarColor = 'black'   // black background
+      } else if (this.settings.backgroundColor === 'system') {
+        // For system theme, use the actual resolved color
+        statusBarColor = this.actualBackgroundColor
       } else if (this.settings.backgroundColor === 'immersive') {
         // Extract primary color from immersive background gradient
         const primaryColor = this.extractPrimaryColorFromGradient(this.actualBackgroundColor)
