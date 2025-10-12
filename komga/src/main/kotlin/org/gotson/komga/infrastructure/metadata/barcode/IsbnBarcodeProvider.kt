@@ -47,11 +47,13 @@ class IsbnBarcodeProvider(
       }
 
     for (p in pagesToTry) {
+      var image: java.awt.image.BufferedImage? = null
       try {
         val imageBytes = bookAnalyzer.getPageContent(book, p)
-        ImageIO.read(imageBytes.inputStream())?.let { image ->
-          val pixels = image.getRGB(0, 0, image.width, image.height, null, 0, image.width)
-          val source = RGBLuminanceSource(image.width, image.height, pixels)
+        image = ImageIO.read(imageBytes.inputStream())
+        image?.let {
+          val pixels = it.getRGB(0, 0, it.width, it.height, null, 0, it.width)
+          val source = RGBLuminanceSource(it.width, it.height, pixels)
           val bitmap = BinaryBitmap(HybridBinarizer(source))
 
           val result =
@@ -74,6 +76,10 @@ class IsbnBarcodeProvider(
         }
       } catch (e: Exception) {
         logger.error(e) { "Error while processing page" }
+      } finally {
+        // Manual cleanup to prevent memory leaks
+        image?.flush()
+        image = null
       }
     }
 

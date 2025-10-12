@@ -38,9 +38,12 @@ class QrCodeDetector {
     )
 
   fun containsQrCode(imageBytes: ByteArray): Boolean {
+    var image: BufferedImage? = null
+    var scaled: BufferedImage? = null
+
     return try {
-      val image = ImageIO.read(imageBytes.inputStream()) ?: return false
-      val scaled = resizeImage(image)
+      image = ImageIO.read(imageBytes.inputStream()) ?: return false
+      scaled = resizeImage(image)
 
       if (!isColorImage(scaled)) {
         logger.debug { "Image is grayscale, skipping QR detection" }
@@ -65,6 +68,12 @@ class QrCodeDetector {
     } catch (e: Exception) {
       logger.error(e) { "Error while detecting QR code" }
       false
+    } finally {
+      // Manual cleanup to prevent memory leaks
+      scaled?.flush()
+      image?.flush()
+      scaled = null
+      image = null
     }
   }
 
