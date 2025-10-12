@@ -95,7 +95,6 @@ dependencies {
   implementation("com.github.junrar:junrar:7.6.0")
   implementation("com.github.gotson.nightcompress:nightcompress:1.1.1")
   implementation("org.apache.pdfbox:pdfbox:3.0.5")
-  implementation("net.grey-panther:natural-comparator:1.1")
   implementation("org.jsoup:jsoup:1.21.1")
 
   implementation("net.coobird:thumbnailator:0.4.20")

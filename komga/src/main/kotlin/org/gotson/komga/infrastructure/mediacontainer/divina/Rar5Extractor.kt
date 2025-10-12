@@ -5,11 +5,11 @@ import com.github.gotson.nightcompress.ReadSupportCompression
 import com.github.gotson.nightcompress.ReadSupportFilter
 import com.github.gotson.nightcompress.ReadSupportFormat
 import io.github.oshai.kotlinlogging.KotlinLogging
-import net.greypanther.natsort.CaseInsensitiveSimpleNaturalComparator
 import org.gotson.komga.domain.model.MediaContainerEntry
 import org.gotson.komga.domain.model.MediaType
 import org.gotson.komga.infrastructure.image.ImageAnalyzer
 import org.gotson.komga.infrastructure.mediacontainer.ContentDetector
+import org.gotson.komga.infrastructure.util.NaturalSortComparator
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory
 import org.springframework.beans.factory.support.BeanDefinitionBuilder
 import org.springframework.beans.factory.support.BeanDefinitionRegistry
@@ -40,7 +40,7 @@ class Rar5Extractor(
   private val contentDetector: ContentDetector,
   private val imageAnalyzer: ImageAnalyzer,
 ) : DivinaExtractor {
-  private val natSortComparator: Comparator<String> = CaseInsensitiveSimpleNaturalComparator.getInstance()
+  private val natSortComparator: Comparator<String> = NaturalSortComparator
 
   override fun mediaTypes(): List<String> = listOf(MediaType.RAR_5.type)
 

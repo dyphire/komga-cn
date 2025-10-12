@@ -2,12 +2,12 @@ package org.gotson.komga.infrastructure.mediacontainer.divina
 
 import com.github.junrar.Archive
 import io.github.oshai.kotlinlogging.KotlinLogging
-import net.greypanther.natsort.CaseInsensitiveSimpleNaturalComparator
 import org.gotson.komga.domain.model.MediaContainerEntry
 import org.gotson.komga.domain.model.MediaType
 import org.gotson.komga.domain.model.MediaUnsupportedException
 import org.gotson.komga.infrastructure.image.ImageAnalyzer
 import org.gotson.komga.infrastructure.mediacontainer.ContentDetector
+import org.gotson.komga.infrastructure.util.NaturalSortComparator
 import org.springframework.stereotype.Service
 import java.nio.file.Path
 
@@ -18,7 +18,7 @@ class RarExtractor(
   private val contentDetector: ContentDetector,
   private val imageAnalyzer: ImageAnalyzer,
 ) : DivinaExtractor {
-  private val natSortComparator: Comparator<String> = CaseInsensitiveSimpleNaturalComparator.getInstance()
+  private val natSortComparator: Comparator<String> = NaturalSortComparator
 
   override fun mediaTypes(): List<String> = listOf(MediaType.RAR_GENERIC.type, MediaType.RAR_4.type)
 
