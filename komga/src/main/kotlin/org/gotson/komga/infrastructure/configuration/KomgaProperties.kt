@@ -147,5 +147,19 @@ class KomgaProperties {
     var dbConnectionThreshold: Double = 0.8 // 80% DB connection pool usage
 
     var circuitBreakerCooldownMs: Duration = Duration.ofMillis(30000) // 30 seconds cooldown
+
+    var memory = Memory()
+  }
+
+  class Memory {
+    var enableMonitoring: Boolean = true
+
+    var heapUsageWarningThreshold: Double = 0.8 // 80% heap usage warning
+
+    var heapUsageCriticalThreshold: Double = 0.9 // 90% heap usage critical
+
+    var gcIntervalMs: Duration = Duration.ofMillis(30000) // 30 seconds GC check interval
+
+    var enableAggressiveGC: Boolean = false
   }
 }
