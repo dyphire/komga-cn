@@ -253,9 +253,65 @@ class EpubExtractor(
       .sumOf { ceil(it.compressedSize / 1024.0).toInt() }
   }
 
-  fun isFixedLayout(epub: EpubPackage) =
-    epub.opfDoc.selectFirst("*|metadata > *|meta[property=rendition:layout]")?.text() == "pre-paginated" ||
-      epub.opfDoc.selectFirst("*|metadata > *|meta[name=fixed-layout]")?.attr("content") == "true"
+  fun isFixedLayout(epub: EpubPackage): Boolean {
+    // EPUB 3
+    if (epub.opfDoc.selectFirst("metadata > *|meta[property=rendition:layout]")?.text() == "pre-paginated") return true
+
+    // EPUB 2
+    if (epub.opfDoc.selectFirst("metadata > *|meta[name=fixed-layout]")?.attr("content") == "true") return true
+
+    // Additional rules: Distinguish between illustrated novels (text-heavy with images) and image comics (image-heavy)
+    val imageTypes = setOf("image/jpeg", "image/png", "image/webp", "image/gif", "image/avif", "image/jxl")
+    val imageCount = epub.manifest.values.count { it.mediaType in imageTypes }
+    val totalCount = epub.manifest.size
+
+    if (totalCount > 0) {
+      val imageRatio = imageCount.toDouble() / totalCount
+      if (imageRatio >= 0.40) {
+        // Check if this is text-based vs image-only
+        // Sample spine pages until we find text or exhaust samples
+        val spineItems = epub.opfDoc.select("*|spine > *|itemref")
+        val maxSamples = minOf(10, spineItems.size) // Sample up to 10 pages, or all if less
+        var sampledPages = 0
+        var hasTextContent = false
+
+        for (itemref in spineItems.take(maxSamples)) {
+          if (hasTextContent) break // Early exit if we already found text
+
+          val idref = itemref.attr("idref")
+          val manifestItem = epub.manifest[idref] ?: continue
+          val href = normalizeHref(epub.opfDir, manifestItem.href)
+
+          try {
+            val doc = epub.zip.getEntryInputStream(href)?.use { Jsoup.parse(it, null, "") }
+            if (doc != null) {
+              val textLength = doc.body().text().length
+              if (textLength > 0) {
+                hasTextContent = true
+              }
+              sampledPages++
+            }
+          } catch (e: Exception) {
+            // Skip pages that can't be parsed
+          }
+        }
+
+        if (hasTextContent) {
+          logger.info { "EPUB detected as text-based (not fixed-layout): image ratio ${(imageRatio * 100).roundToInt()}%, found text in $sampledPages sampled pages" }
+          return false
+        } else if (sampledPages > 0) {
+          logger.info { "EPUB detected as image-only comic (fixed-layout): image ratio ${(imageRatio * 100).roundToInt()}%, no text found in $sampledPages sampled pages" }
+          return true
+        } else {
+          // Fallback to original logic if no pages could be sampled
+          logger.info { "EPUB detected as fixed-layout by image ratio (fallback): $imageCount/$totalCount = ${(imageRatio * 100).roundToInt()}%" }
+          return true
+        }
+      }
+    }
+
+    return false
+  }
 
   fun computePositions(
     epub: EpubPackage,
