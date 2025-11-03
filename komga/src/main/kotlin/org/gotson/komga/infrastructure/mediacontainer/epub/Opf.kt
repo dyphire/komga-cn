@@ -24,7 +24,9 @@ fun normalizeHref(
 ): String {
   val anchor = href.substringAfterLast("#", "")
   val base = href.substringBeforeLast("#")
-  val resolvedPath = (opfDir?.resolve(base)?.normalize() ?: Paths.get(base)).invariantSeparatorsPathString
+  // Decode URL-encoded characters in the href before path resolution
+  val decodedBase = URLDecoder.decode(base, Charsets.UTF_8)
+  val resolvedPath = (opfDir?.resolve(decodedBase)?.normalize() ?: Paths.get(decodedBase)).invariantSeparatorsPathString
   return resolvedPath + if (anchor.isNotBlank()) "#$anchor" else ""
 }
 
