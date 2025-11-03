@@ -69,6 +69,37 @@ class EpubExtractor(
             ?.let { manifest[it] }
           ?: // try id="cover-image"
           manifest.values.firstOrNull { it.id == "cover-image" }
+          ?: // EPUB 2 - try to get cover from guide element with type="cover"
+          opfDoc
+            .selectFirst("guide > reference[type=cover]")
+            ?.attr("href")
+            ?.ifBlank { null }
+            ?.let { normalizeHref(opfDir, it) }
+            ?.let { coverHref ->
+              // If guide points to an XHTML page, parse it to find the actual image
+              if (coverHref.endsWith(".xhtml") || coverHref.endsWith(".html")) {
+                zip.getEntryInputStream(coverHref)?.use { Jsoup.parse(it, null, "") }
+                  ?.let { doc ->
+                    // Try regular img tag first
+                    doc.selectFirst("img")?.attr("src")
+                      ?: // Try SVG image tag
+                      doc.selectFirst("svg image")?.attr("xlink:href")
+                      ?: // Try SVG image without xlink namespace
+                      doc.selectFirst("image")?.attr("href")
+                  }
+                  ?.let { imgSrc -> URLDecoder.decode(imgSrc, Charsets.UTF_8) }
+                  ?.let { decodedImgSrc -> normalizeHref(Path(coverHref).parent ?: Path(""), decodedImgSrc) }
+                  ?.let { imgPath -> manifest.values.firstOrNull { normalizeHref(opfDir, it.href) == imgPath } }
+              } else {
+                // Guide points directly to an image
+                manifest.values.firstOrNull { normalizeHref(opfDir, it.href) == coverHref }
+              }
+            }
+          ?: // Fallback: try to find any manifest item with id containing "cover"
+          manifest.values.firstOrNull { it.id.contains("cover", ignoreCase = true) && contentDetector.isImage(it.mediaType) }
+          ?: // Last resort: try to find any manifest item with href containing "cover"
+          manifest.values.firstOrNull { it.href.contains("cover", ignoreCase = true) && contentDetector.isImage(it.mediaType) }
+
       if (coverManifestItem != null) {
         val href = URLDecoder.decode(coverManifestItem.href, Charsets.UTF_8)
         val mediaType = coverManifestItem.mediaType

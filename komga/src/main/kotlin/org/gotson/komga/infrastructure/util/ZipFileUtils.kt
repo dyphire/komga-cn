@@ -22,6 +22,7 @@ fun getZipEntryBytes(
       .setPath(path)
       .setUseUnicodeExtraFields(true)
       .setIgnoreLocalFileHeader(true)
+      .setCharset(java.nio.charset.StandardCharsets.UTF_8)
   val bytes = zipBuilder.use { it.getEntryBytesClosing(entryName) }
   if (bytes != null) return bytes
 
