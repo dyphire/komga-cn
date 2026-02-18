@@ -426,11 +426,13 @@ class BookLifecycle(
       if (media.profile == EPUB) {
         require(media.epubDivinaCompatible) { "epub book is not Divina compatible" }
 
-        val extension =
-          mediaRepository.findExtensionByIdOrNull(book.id) as? MediaExtensionEpub
-            ?: throw IllegalArgumentException("Epub extension not found")
-              .also { logger.error { "Epub extension not found for book ${book.id}. Book should be re-analyzed." } }
-        extension.positions[page - 1]
+        val extension = mediaRepository.findExtensionByIdOrNull(book.id) as? MediaExtensionEpub
+        if (extension == null) {
+          logger.warn { "Epub extension not found for book ${book.id}. Book should be re-analyzed. Progress will be saved without locator." }
+          null
+        } else {
+          extension.positions.getOrNull(page - 1)
+        }
       } else {
         null
       }
@@ -521,9 +523,12 @@ class BookLifecycle(
                   // no exact match
                   val before = matchingPositions.filter { it.locations!!.progression!! < newProgression.locator.locations!!.progression!! }.maxByOrNull { it.locations!!.position!! }
                   val after = matchingPositions.filter { it.locations!!.progression!! > newProgression.locator.locations!!.progression!! }.minByOrNull { it.locations!!.position!! }
-                  if (before == null || after == null || before.locations!!.position!! > after.locations!!.position!!)
-                    throw IllegalArgumentException("Invalid progression")
-                  before
+                  when {
+                    before == null && after == null -> throw IllegalArgumentException("Invalid progression: no matching positions found")
+                    before == null -> after!!
+                    after == null -> before
+                    else -> before
+                  }
                 }
 
           val totalProgression = matchedPosition.locations?.totalProgression
