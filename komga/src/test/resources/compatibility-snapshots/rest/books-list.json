@@ -1,0 +1,78 @@
+{
+  "content": [
+    {
+      "id": "book-1",
+      "seriesId": "series-1",
+      "seriesTitle": "series",
+      "libraryId": "1",
+      "name": "book.cbr",
+      "url": "book.cbr",
+      "number": 1,
+      "created": "2024-01-02T03:04:05Z",
+      "lastModified": "2024-01-02T03:04:05Z",
+      "fileLastModified": "2024-01-02T08:04:05Z",
+      "sizeBytes": 0,
+      "size": "0 B",
+      "media": {
+        "status": "UNKNOWN",
+        "mediaType": "",
+        "pagesCount": 0,
+        "comment": "",
+        "epubDivinaCompatible": false,
+        "epubIsKepub": false,
+        "mediaProfile": ""
+      },
+      "metadata": {
+        "title": "book.cbr",
+        "titleLock": false,
+        "summary": "",
+        "summaryLock": false,
+        "number": "1",
+        "numberLock": false,
+        "numberSort": 1.0,
+        "numberSortLock": false,
+        "releaseDate": null,
+        "releaseDateLock": false,
+        "authors": [],
+        "authorsLock": false,
+        "tags": [],
+        "tagsLock": false,
+        "isbn": "",
+        "isbnLock": false,
+        "links": [],
+        "linksLock": false,
+        "created": "2024-01-02T03:04:05Z",
+        "lastModified": "2024-01-02T03:04:05Z"
+      },
+      "readProgress": null,
+      "deleted": false,
+      "fileHash": "",
+      "oneshot": false
+    }
+  ],
+  "pageable": {
+    "pageNumber": 0,
+    "pageSize": 20,
+    "sort": {
+      "empty": true,
+      "sorted": false,
+      "unsorted": true
+    },
+    "offset": 0,
+    "paged": true,
+    "unpaged": false
+  },
+  "last": true,
+  "totalElements": 1,
+  "totalPages": 1,
+  "first": true,
+  "size": 20,
+  "number": 0,
+  "sort": {
+    "empty": true,
+    "sorted": false,
+    "unsorted": true
+  },
+  "numberOfElements": 1,
+  "empty": false
+}

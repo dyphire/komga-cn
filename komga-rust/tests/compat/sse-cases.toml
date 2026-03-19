@@ -1,0 +1,31 @@
+output_dir = "target/compat-diff"
+
+[[cases]]
+id = "P0-SSE-CONNECT"
+path = "/sse/v1/events"
+
+[[cases]]
+id = "P0-SSE-ADMIN-TASKQUEUE"
+path = "/sse/v1/events"
+audience = "admin"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P0-SSE-SESSION-EXPIRED"
+path = "/sse/v1/events"
+audience = "user"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }

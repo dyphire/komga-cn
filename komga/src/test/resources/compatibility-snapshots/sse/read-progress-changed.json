@@ -1,0 +1,9 @@
+{
+  "name": "ReadProgressChanged",
+  "payload": {
+    "bookId": "book-1",
+    "userId": "user-1"
+  },
+  "adminOnly": false,
+  "userIdOnly": "user-1"
+}

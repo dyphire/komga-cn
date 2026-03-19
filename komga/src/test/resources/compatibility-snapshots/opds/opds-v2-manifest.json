@@ -1,0 +1,90 @@
+{
+  "context": "https://readium.org/webpub-manifest/context.jsonld",
+  "metadata": {
+    "title": "book.pdf",
+    "modified": "2024-01-01T22:04:05-05:00",
+    "conformsTo": "https://readium.org/webpub-manifest/profiles/pdf",
+    "numberOfPages": 1,
+    "belongsTo": {
+      "series": [
+        {
+          "name": "series",
+          "position": 0.0,
+          "links": [
+            {
+              "href": "http://localhost/opds/v2/series/series-1",
+              "type": "application/opds+json"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "links": [
+    {
+      "rel": "self",
+      "href": "http://localhost/opds/v2/books/book-1/manifest",
+      "type": "application/webpub+json",
+      "properties": {
+        "authenticate": {
+          "href": "http://localhost/opds/v2/auth",
+          "type": "application/opds-authentication+json"
+        }
+      }
+    },
+    {
+      "href": "http://localhost/opds/v2/books/book-1/manifest/divina",
+      "type": "application/divina+json",
+      "properties": {
+        "authenticate": {
+          "href": "http://localhost/opds/v2/auth",
+          "type": "application/opds-authentication+json"
+        }
+      }
+    },
+    {
+      "rel": "http://opds-spec.org/acquisition",
+      "href": "http://localhost/opds/v2/books/book-1/file",
+      "type": "application/pdf",
+      "properties": {
+        "authenticate": {
+          "href": "http://localhost/opds/v2/auth",
+          "type": "application/opds-authentication+json"
+        }
+      }
+    },
+    {
+      "rel": "http://www.cantook.com/api/progression",
+      "href": "http://localhost/opds/v2/books/book-1/progression",
+      "type": "application/vnd.readium.progression+json",
+      "properties": {
+        "authenticate": {
+          "href": "http://localhost/opds/v2/auth",
+          "type": "application/opds-authentication+json"
+        }
+      }
+    }
+  ],
+  "images": [],
+  "readingOrder": [
+    {
+      "href": "http://localhost/opds/v2/books/book-1/pages/1/raw",
+      "type": "application/pdf"
+    }
+  ],
+  "resources": [
+    {
+      "href": "http://localhost/opds/v2/books/book-1/thumbnail",
+      "type": "image/jpeg",
+      "properties": {
+        "authenticate": {
+          "href": "http://localhost/opds/v2/auth",
+          "type": "application/opds-authentication+json"
+        }
+      }
+    }
+  ],
+  "toc": [],
+  "landmarks": [],
+  "pageList": []
+}

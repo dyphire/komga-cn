@@ -1,0 +1,131 @@
+output_dir = "target/compat-diff"
+header_allowlist = ["content-type", "content-disposition", "content-length", "etag", "last-modified", "set-cookie", "x-auth-token"]
+
+[[cases]]
+id = "KOMGA-P0-LIB-01"
+method = "GET"
+path = "/api/v1/libraries"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "KOMGA-P0-SERIES-01"
+method = "GET"
+path = "/api/v1/series"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "KOMGA-P0-BOOKS-LIST-01"
+method = "GET"
+path = "/api/v1/books"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "KOMGA-P0-BOOKS-LATEST-01"
+method = "GET"
+path = "/api/v1/books/latest?unpaged=true"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "KOMGA-P0-BK-PAGES-01"
+method = "GET"
+path = "/api/v1/books/book-1/pages"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "KOMGA-P0-BK-THUMBNAIL-01"
+method = "GET"
+path = "/api/v1/books/book-1/pages/1/thumbnail"
+comparison = "binary_metadata"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "KOMGA-P0-BK-THUMBNAIL-BOOK-01"
+method = "GET"
+path = "/api/v1/books/book-1/thumbnail"
+comparison = "binary_metadata"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "KOMGA-P0-BK-READ-PROGRESS-01"
+method = "PATCH"
+path = "/api/v1/books/book-1/read-progress"
+body = "{\"completed\":true}"
+headers = { "Content-Type" = "application/json", "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P0-AUTH-SETCOOKIE"
+method = "GET"
+path = "/api/v1/login/set-cookie"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P0-AUTH-REMEMBERME"
+method = "GET"
+path = "/api/v2/users/me?remember-me=true"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "KOMGA-P0-BK-PAGE-NEGO-01"
+method = "GET"
+path = "/api/v1/books/book-1/pages/1"
+comparison = "binary_metadata"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "KOMGA-P0-BK-FILE-01"
+method = "GET"
+path = "/api/v1/books/book-1/file"
+comparison = "binary_metadata"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P0-OPDS-V2-FEED-MANIFEST"
+method = "GET"
+path = "/opds/v2/books/book-1/manifest"
+comparison = "binary_metadata"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P0-OPDS-V2-CATALOG-UNAUTH"
+method = "GET"
+path = "/opds/v2/catalog"
+
+[[cases]]
+id = "P0-OPDS-V2-AUTH-DOCUMENT"
+method = "GET"
+path = "/opds/v2/auth"

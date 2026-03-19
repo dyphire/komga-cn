@@ -1,0 +1,24 @@
+{
+  "authentication": [
+    {
+      "type": "http://opds-spec.org/auth/basic",
+      "labels": {
+        "login": "Email",
+        "password": "Password"
+      }
+    }
+  ],
+  "title": "Komga",
+  "id": "http://localhost/opds/v2/auth",
+  "description": "Enter your email and password to authenticate.",
+  "links": [
+    {
+      "rel": "help",
+      "href": "https://komga.org"
+    },
+    {
+      "rel": "logo",
+      "href": "http://localhost/android-chrome-512x512.png"
+    }
+  ]
+}

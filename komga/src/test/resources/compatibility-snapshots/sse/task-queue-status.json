@@ -1,0 +1,12 @@
+{
+  "name": "TaskQueueStatus",
+  "payload": {
+    "count": 3,
+    "countByType": {
+      "scanLibrary": 2,
+      "analyzeBook": 1
+    }
+  },
+  "adminOnly": true,
+  "userIdOnly": null
+}

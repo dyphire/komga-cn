@@ -1,5 +1,5 @@
 <template>
-  <v-item-group multiple v-model="selectedItems">
+  <v-item-group multiple v-model="selectedItems" data-testid="item-browser-root">
     <div v-if="hasItems"
          ref="content"
          v-resize="onResize"

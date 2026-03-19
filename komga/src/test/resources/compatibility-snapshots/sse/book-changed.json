@@ -1,0 +1,10 @@
+{
+  "name": "BookChanged",
+  "payload": {
+    "bookId": "book-1",
+    "seriesId": "series-1",
+    "libraryId": "library-1"
+  },
+  "adminOnly": false,
+  "userIdOnly": null
+}

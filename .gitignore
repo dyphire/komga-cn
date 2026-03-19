@@ -15,6 +15,8 @@ node_modules
 ### Temporary files
 *.tmp
 *.bak
+.slim
+.sisyphus
 
 ### SQLite databases
 *.sqlite
@@ -57,3 +59,9 @@ application-oauth2.yml
 ### Conveyor
 output/
 secret/
+
+### Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv

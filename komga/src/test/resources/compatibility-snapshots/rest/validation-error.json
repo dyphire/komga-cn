@@ -1,0 +1,12 @@
+{
+  "violations": [
+    {
+      "fieldName": "root",
+      "message": "must not be blank"
+    },
+    {
+      "fieldName": "name",
+      "message": "must not be blank"
+    }
+  ]
+}

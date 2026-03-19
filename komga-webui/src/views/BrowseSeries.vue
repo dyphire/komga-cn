@@ -1,5 +1,5 @@
 <template>
-  <div v-if="!$_.isEmpty(series)">
+  <div v-if="!$_.isEmpty(series)" data-testid="browse-series-root">
     <toolbar-sticky v-if="selectedBooks.length === 0">
       <!--   Go back to parent library   -->
       <v-tooltip bottom :disabled="!isAdmin">

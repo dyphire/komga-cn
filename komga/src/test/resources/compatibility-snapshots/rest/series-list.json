@@ -1,0 +1,85 @@
+{
+  "content": [
+    {
+      "id": "series-1",
+      "libraryId": "1",
+      "name": "series",
+      "url": "",
+      "created": "2024-01-02T03:04:05Z",
+      "lastModified": "2024-01-02T03:04:05Z",
+      "fileLastModified": "2024-01-02T03:04:05Z",
+      "booksCount": 1,
+      "booksReadCount": 0,
+      "booksUnreadCount": 1,
+      "booksInProgressCount": 0,
+      "metadata": {
+        "status": "ONGOING",
+        "statusLock": false,
+        "title": "series",
+        "titleLock": false,
+        "titleSort": "series",
+        "titleSortLock": false,
+        "summary": "",
+        "summaryLock": false,
+        "readingDirection": "",
+        "readingDirectionLock": false,
+        "publisher": "",
+        "publisherLock": false,
+        "ageRating": null,
+        "ageRatingLock": false,
+        "language": "",
+        "languageLock": false,
+        "genres": [],
+        "genresLock": false,
+        "tags": [],
+        "tagsLock": false,
+        "totalBookCount": null,
+        "totalBookCountLock": false,
+        "sharingLabels": [],
+        "sharingLabelsLock": false,
+        "links": [],
+        "linksLock": false,
+        "alternateTitles": [],
+        "alternateTitlesLock": false,
+        "created": "2024-01-02T03:04:05Z",
+        "lastModified": "2024-01-02T03:04:05Z"
+      },
+      "booksMetadata": {
+        "authors": [],
+        "tags": [],
+        "releaseDate": null,
+        "summary": "",
+        "summaryNumber": "",
+        "created": "2024-01-02T03:04:05Z",
+        "lastModified": "2024-01-02T03:04:05Z"
+      },
+      "deleted": false,
+      "oneshot": false
+    }
+  ],
+  "pageable": {
+    "pageNumber": 0,
+    "pageSize": 20,
+    "sort": {
+      "empty": true,
+      "sorted": false,
+      "unsorted": true
+    },
+    "offset": 0,
+    "paged": true,
+    "unpaged": false
+  },
+  "last": true,
+  "totalElements": 1,
+  "totalPages": 1,
+  "first": true,
+  "size": 20,
+  "number": 0,
+  "sort": {
+    "empty": true,
+    "sorted": false,
+    "unsorted": true
+  },
+  "numberOfElements": 1,
+  "empty": false
+}

@@ -1,5 +1,5 @@
 <template>
-  <div :style="$vuetify.breakpoint.xs ? 'margin-bottom: 56px' : undefined">
+  <div :style="$vuetify.breakpoint.xs ? 'margin-bottom: 56px' : undefined" data-testid="browse-libraries-root">
     <toolbar-sticky v-if="selectedSeries.length === 0">
       <!--   Action menu   -->
       <library-actions-menu v-if="isAdmin && library"
