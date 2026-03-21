@@ -595,12 +595,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "komga-benchmark-wpd3"
+version = "0.1.0"
+
+[[package]]
+name = "komga-compat-testkit"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
+name = "komga-runtime-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64",
+ "reqwest",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "komga-rust"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
  "base64",
+ "komga-benchmark-wpd3",
+ "komga-compat-testkit",
+ "komga-runtime-server",
  "reqwest",
  "serde",
  "serde_json",

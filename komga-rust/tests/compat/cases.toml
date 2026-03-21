@@ -1,5 +1,5 @@
 output_dir = "target/compat-diff"
-header_allowlist = ["content-type", "content-disposition", "content-length", "etag", "last-modified", "set-cookie", "x-auth-token"]
+header_allowlist = ["content-type", "content-disposition", "content-length", "etag", "last-modified", "set-cookie", "x-auth-token", "www-authenticate"]
 
 [[cases]]
 id = "KOMGA-P0-LIB-01"
@@ -12,6 +12,45 @@ name = "login"
 method = "GET"
 path = "/api/v2/users/me"
 headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "KOMGA-P0-LIB-01-ADMIN"
+method = "GET"
+path = "/api/v1/libraries"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH_ADMIN}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "KOMGA-P0-LIB-01-USER"
+method = "GET"
+path = "/api/v1/libraries"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH_USER}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "KOMGA-P0-LIB-01-LIMITED"
+method = "GET"
+path = "/api/v1/libraries"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH_LIMITED}", "X-Auth-Token" = "" }
 extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
 
 [[cases]]
@@ -74,6 +113,60 @@ headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token"
 extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
 
 [[cases]]
+id = "P1-BK-READ-PROGRESS-DELETE"
+method = "DELETE"
+path = "/api/v1/books/book-1/read-progress"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P1-BK-READ-PROGRESS-404"
+method = "DELETE"
+path = "/api/v1/books/book-missing/read-progress"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P1-BK-PROGRESSION-VALID"
+method = "PATCH"
+path = "/api/v1/books/book-1/progression"
+body = "{\"modified\":\"2024-01-01T00:00:00Z\",\"device\":\"compat-client\",\"locator\":{\"href\":\"OEBPS/chapter-1.xhtml\",\"type\":\"application/xhtml+xml\",\"locations\":{\"progression\":0.3}}}"
+headers = { "Content-Type" = "application/json", "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P1-BK-PROGRESSION-INVALID"
+method = "PATCH"
+path = "/api/v1/books/book-1/progression"
+body = "{\"modified\":\"2024-01-01T00:00:00Z\",\"device\":\"compat-client\",\"locator\":{\"href\":\"OEBPS/chapter-1.xhtml\",\"type\":\"application/xhtml+xml\",\"locations\":{}}}"
+headers = { "Content-Type" = "application/json", "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
 id = "P0-AUTH-SETCOOKIE"
 method = "GET"
 path = "/api/v1/login/set-cookie"
@@ -98,6 +191,24 @@ method = "GET"
 path = "/api/v2/users/me"
 headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
 extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P1-AUTH-APIKEY-UPPER"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "X-API-Key" = "${KOMGA_COMPAT_API_KEY}" }
+
+[[cases]]
+id = "P1-AUTH-APIKEY-LOWER"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "x-api-key" = "${KOMGA_COMPAT_API_KEY}" }
+
+[[cases]]
+id = "P1-AUTH-APIKEY-INVALID"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "x-api-key" = "${KOMGA_COMPAT_API_KEY_INVALID}" }
 
 [[cases]]
 id = "KOMGA-P0-BK-PAGE-NEGO-01"
@@ -129,3 +240,59 @@ path = "/opds/v2/catalog"
 id = "P0-OPDS-V2-AUTH-DOCUMENT"
 method = "GET"
 path = "/opds/v2/auth"
+
+[[cases]]
+id = "P0-OPDS-V1-SERIES"
+method = "GET"
+path = "/opds/v1.2/series"
+comparison = "xml"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH_USER}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P1-SEARCH-QUERY"
+method = "POST"
+path = "/api/v1/series/list"
+body = "{\"fullTextSearch\":\"series\"}"
+headers = { "Content-Type" = "application/json", "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P1-SEARCH-ORDERING"
+method = "POST"
+path = "/api/v1/series/list?page=0&size=20&sort=metadata.titleSort,asc"
+body = "{\"fullTextSearch\":\"series\"}"
+headers = { "Content-Type" = "application/json", "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P1-SEARCH-OWNERSHIP-SHADOW"
+method = "POST"
+path = "/api/v1/series/list"
+body = "{\"fullTextSearch\":\"series\",\"ownership\":\"shadow\"}"
+headers = { "Content-Type" = "application/json", "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }

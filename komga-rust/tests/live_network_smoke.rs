@@ -20,6 +20,11 @@ async fn live_smoke_server_handles_auth_and_cache_headers() {
 
     let me = client
         .get(format!("{base_url}/api/v2/users/me"))
+        .header(
+            reqwest::header::AUTHORIZATION,
+            "Basic dXNlckBleGFtcGxlLm9yZzp1c2Vy",
+        )
+        .header("X-Auth-Token", "")
         .send()
         .await
         .expect("users/me request");

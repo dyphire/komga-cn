@@ -1,7 +1,7 @@
 mod compat;
 
 use compat::sse::{
-    compare_event_logs, parse_event_log, write_diff_report, SseAudience, SseHarnessConfig,
+    SseAudience, SseHarnessConfig, compare_event_logs, parse_event_log, write_diff_report,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -29,11 +29,13 @@ fn sse_configuration_loads() {
     assert_eq!(connect.path, "/sse/v1/events");
     assert_eq!(connect.audience, SseAudience::Any);
     assert_eq!(admin.audience, SseAudience::Admin);
-    assert!(admin
-        .headers
-        .as_ref()
-        .and_then(|headers| headers.get("X-Auth-Token"))
-        .is_some());
+    assert!(
+        admin
+            .headers
+            .as_ref()
+            .and_then(|headers| headers.get("X-Auth-Token"))
+            .is_some()
+    );
 }
 
 #[test]
@@ -89,14 +91,18 @@ data: {"counts": {"active": 1, "pending": 2}}
     let report = compare_event_logs("P0-SSE-ADMIN-TASKQUEUE", SseAudience::Admin, &java, &rust);
 
     assert!(!report.matches);
-    assert!(report
-        .differences
-        .iter()
-        .any(|difference| difference.contains("payload mismatch")));
-    assert!(report
-        .differences
-        .iter()
-        .any(|difference| difference.contains("name mismatch")));
+    assert!(
+        report
+            .differences
+            .iter()
+            .any(|difference| difference.contains("payload mismatch"))
+    );
+    assert!(
+        report
+            .differences
+            .iter()
+            .any(|difference| difference.contains("name mismatch"))
+    );
 
     let output_root = temp_output_root();
     write_diff_report(&output_root, &report).expect("diff report should be written");
@@ -130,14 +136,19 @@ data: {"counts": {"active": 1, "pending": 2}}
     let report = compare_event_logs("P0-SSE-ADMIN-TASKQUEUE", SseAudience::Admin, &java, &rust);
 
     assert!(!report.matches);
-    assert!(report
-        .differences
-        .iter()
-        .any(|difference| difference.contains("filtered event count mismatch for admin audience")));
-    assert!(report
-        .differences
-        .iter()
-        .any(|difference| difference.contains("present only in rust")));
+    assert!(
+        report
+            .differences
+            .iter()
+            .any(|difference| difference
+                .contains("filtered event count mismatch for admin audience"))
+    );
+    assert!(
+        report
+            .differences
+            .iter()
+            .any(|difference| difference.contains("present only in rust"))
+    );
 }
 
 fn temp_output_root() -> PathBuf {

@@ -1,15 +1,14 @@
-use std::net::SocketAddr;
-
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let address = std::env::var("KOMGA_RUST_ADDR").unwrap_or_else(|_| "127.0.0.1:3000".to_string());
-    let address: SocketAddr = address.parse().expect("invalid KOMGA_RUST_ADDR");
+    let config = komga_rust::config::RuntimeConfig::from_env().expect("invalid runtime config");
 
-    let listener = tokio::net::TcpListener::bind(address)
+    let listener = tokio::net::TcpListener::bind(config.bind_address)
         .await
         .expect("failed to bind address");
 
-    komga_rust::app::serve(listener).await.expect("server error");
+    komga_rust::app::serve_with_config(listener, config)
+        .await
+        .expect("server error");
 }
