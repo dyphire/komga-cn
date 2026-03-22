@@ -26,7 +26,6 @@ pub(super) fn frozen_non_native_detail_shapes() -> BTreeSet<&'static str> {
         "GET /api/v1/readlists/{readListId}/books?unpaged=true",
         "GET /api/v1/readlists/{readListId}/books/{bookId}/previous",
         "GET /api/v1/readlists/{readListId}/books/{bookId}/next",
-        "GET /api/v1/series/{seriesId}?oneshot=true",
         "PATCH /api/v1/books/{bookId}/read-progress",
         "DELETE /api/v1/books/{bookId}/read-progress",
         "PUT /api/v1/books/{bookId}/progression",
@@ -54,17 +53,18 @@ pub(super) fn frozen_named_exclusion_proofs() -> BTreeSet<&'static str> {
 
 pub(super) fn frozen_oneshot_direct_route_shapes() -> BTreeSet<&'static str> {
     BTreeSet::from([
-        "GET /api/v1/readlists/{readListId} (newly-owned Phase 6 route)",
-        "GET /api/v1/series/{seriesId} (reused pre-owned dependency)",
-        "GET /api/v1/series/{seriesId}/collections (reused pre-owned dependency)",
-        "POST /api/v1/books/list body=SeriesId(seriesId) only (reused pre-owned dependency)",
-        "GET /api/v1/books/{bookId}/readlists (reused pre-owned dependency)",
+        "GET /api/v1/series/{seriesId}?oneshot=true (newly-owned Phase 7 exact route)",
+        "GET /api/v1/series/{seriesId} (reused pre-owned source-truth dependency)",
     ])
 }
 
 pub(super) fn frozen_oneshot_explicit_non_native_shapes() -> BTreeSet<&'static str> {
     BTreeSet::from([
-        "GET /api/v1/series/{seriesId}?oneshot=true",
+        "GET /api/v1/series/{seriesId}?oneshot=false",
+        "GET /api/v1/series/{seriesId}?oneshot=true&oneshot=true",
+        "GET /api/v1/series/{seriesId}?oneshot=true&foo=bar",
+        "GET /api/v1/series/{seriesId}?oneShot=true",
+        "GET /api/v1/series/{seriesId}?ONESHOT=true",
         "GET /api/v1/readlists/{readListId}",
         "GET /api/v1/readlists/{readListId}/books?unpaged=true",
         "GET /api/v1/readlists/{readListId}/books/{bookId}/previous",
@@ -92,8 +92,11 @@ pub(super) fn frozen_oneshot_explicit_non_native_shapes() -> BTreeSet<&'static s
 
 pub(super) fn frozen_oneshot_named_exclusion_proofs() -> BTreeSet<&'static str> {
     BTreeSet::from([
-        "oneshot query closure | BrowseOneshot.vue:779-800 | GET /api/v1/series/{seriesId}?oneshot=true stays explicit non-native",
-        "READLIST detail ownership boundary | BrowseOneshot.vue:785-842 | only GET /api/v1/readlists/{readListId} is newly owned in Phase 6; list + context siblings stay explicit non-native",
+        "oneshot query boundary | BrowseOneshot.vue:779-800 | only exact GET /api/v1/series/{seriesId}?oneshot=true is native in Phase 7; oneshot=false remains explicit non-native",
+        "oneshot query boundary | BrowseOneshot.vue:779-800 | duplicate oneshot params remain explicit non-native",
+        "oneshot query boundary | BrowseOneshot.vue:779-800 | mixed extra params remain explicit non-native",
+        "oneshot query boundary | BrowseOneshot.vue:779-800 | case-variant param names remain explicit non-native",
+        "READLIST detail/list-family boundary | BrowseOneshot.vue:785-842 | readlist detail/list/context siblings stay explicit non-native in Phase 7",
         "READLIST listing branch | BrowseOneshot.vue:785-842 | GET /api/v1/readlists stays explicit non-native",
         "READLIST books pagination/library filtering | BrowseOneshot.vue:785-842 | paged readlist books and library_id variants stay explicit non-native",
         "READLIST context siblings | BrowseOneshot.vue:785-842 | /books?unpaged=true + sibling previous/next remain explicit fallback/non-native",

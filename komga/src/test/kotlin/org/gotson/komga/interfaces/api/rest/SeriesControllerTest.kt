@@ -161,6 +161,49 @@ class SeriesControllerTest(
 
       assertJsonSnapshot(objectMapper, "series-list.json", response.contentAsString)
     }
+
+    @Test
+    @WithMockCustomUser
+    fun `given visible series when requesting oneshot true detail then payload matches plain series detail`() {
+      createStableSeriesFixture()
+
+      val plainResponse =
+        mockMvc
+          .get("/api/v1/series/series-1")
+          .andExpect { status { isOk() } }
+          .andReturn()
+          .response
+
+      val oneshotResponse =
+        mockMvc
+          .get("/api/v1/series/series-1?oneshot=true")
+          .andExpect { status { isOk() } }
+          .andReturn()
+          .response
+
+      assertThat(objectMapper.readTree(oneshotResponse.contentAsString))
+        .isEqualTo(objectMapper.readTree(plainResponse.contentAsString))
+    }
+
+    @Test
+    @WithMockCustomUser
+    fun `given missing series when requesting oneshot true detail then fail-closed status matches plain detail`() {
+      val plainResponse =
+        mockMvc
+          .get("/api/v1/series/missing-series")
+          .andExpect { status { isNotFound() } }
+          .andReturn()
+          .response
+
+      val oneshotResponse =
+        mockMvc
+          .get("/api/v1/series/missing-series?oneshot=true")
+          .andExpect { status { isNotFound() } }
+          .andReturn()
+          .response
+
+      assertThat(oneshotResponse.status).isEqualTo(plainResponse.status)
+    }
   }
 
   @Nested

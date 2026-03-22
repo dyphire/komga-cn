@@ -6,6 +6,7 @@ PHASE3_DETAIL_READ_LABEL = "phase3-detail-read"
 PHASE4_READLIST_CONTEXT_READ_LABEL = "phase4-readlist-context-read"
 PHASE5_ONESHOT_CLOSURE_LABEL = "phase5-oneshot-closure"
 PHASE6_ONESHOT_READLIST_CONTEXT_CLOSURE_LABEL = "phase6-oneshot-readlist-context-closure"
+PHASE7_SERIES_ONESHOT_QUERY_CLOSURE_LABEL = "phase7-series-oneshot-query-closure"
 
 discovery_supported_scope = [
     "GET /api/v1/libraries",
@@ -101,6 +102,34 @@ phase6_oneshot_readlist_context_out_of_slice = [
     "SSE/live-refresh parity",
     "full cutover/direct-serving approval",
 ]
+phase7_series_oneshot_query_owned_scope = [
+    "GET /api/v1/series/{seriesId}?oneshot=true",
+]
+phase7_series_oneshot_query_pre_owned_dependencies = [
+    "GET /api/v1/series/{seriesId}",
+    "GET /api/v1/series/{seriesId}/collections",
+    "POST /api/v1/books/list (exact oneshot-bootstrap SeriesId-only family)",
+    "GET /api/v1/books/{bookId}/readlists",
+    "GET /api/v1/readlists/{readListId}",
+    "GET /api/v1/readlists/{readListId}/books?unpaged=true",
+    "GET /api/v1/readlists/{readListId}/books/{bookId}/previous",
+    "GET /api/v1/readlists/{readListId}/books/{bookId}/next",
+]
+phase7_series_oneshot_query_out_of_slice = [
+    "negative/mixed oneshot query variants beyond exact ?oneshot=true",
+    "browse-oneshot page closure or browser-owned inventory promotion",
+    "GET /api/v1/readlists and other readlist list-family routes",
+    "browse-readlist page closure",
+    "paged or library_id readlist books variants",
+    "generic books/list widening beyond the exact oneshot-bootstrap SeriesId-only family",
+    "media delivery (/thumbnail, /file, /pages*, /manifest, /resource/*, /positions)",
+    "reader handoff and download branches",
+    "read-progress write/progression routes",
+    "collection/readlist removals",
+    "admin edit/delete and broader write-path claims",
+    "SSE/live-refresh parity",
+    "full cutover/direct-serving approval",
+]
 
 phase3_skipped_base_checks: dict[str, str] = {
     "auth_api_key": "Skipped for phase3-detail-read: API key parity is outside this direct-browse detail-read runbook.",
@@ -145,6 +174,16 @@ phase6_skipped_base_checks: dict[str, str] = {
     "packaging_tray": "Skipped for phase6-oneshot-readlist-context-closure: packaging/tray startup contract is outside this slice gate.",
     "external_release_credentials": "Skipped for phase6-oneshot-readlist-context-closure: release credentials are not part of oneshot READLIST-context direct-read readiness.",
 }
+phase7_skipped_base_checks: dict[str, str] = {
+    "auth_api_key": "Skipped for phase7-series-oneshot-query-closure: API key parity is outside this exact series-detail query runbook.",
+    "libraries_visibility": "Skipped for phase7-series-oneshot-query-closure: discovery libraries parity is not part of this exact series-detail query slice gate.",
+    "opds": "Skipped for phase7-series-oneshot-query-closure: OPDS parity is outside this exact series-detail query slice gate.",
+    "cache_file_headers": "Skipped for phase7-series-oneshot-query-closure: binary metadata/header parity is outside this exact series-detail query slice gate.",
+    "read_progress": "Skipped for phase7-series-oneshot-query-closure: this runbook does not claim read-progress write/progression ownership.",
+    "server_management_browser_smoke": "Skipped for phase7-series-oneshot-query-closure: server-management/browser-ops acceptance is outside this exact series-detail query slice.",
+    "packaging_tray": "Skipped for phase7-series-oneshot-query-closure: packaging/tray startup contract is outside this slice gate.",
+    "external_release_credentials": "Skipped for phase7-series-oneshot-query-closure: release credentials are not part of exact series-detail query readiness.",
+}
 
 
 def build_checks(
@@ -163,6 +202,7 @@ def build_checks(
     is_phase4_readlist_context_read = run_label == PHASE4_READLIST_CONTEXT_READ_LABEL
     is_phase5_oneshot_closure = run_label == PHASE5_ONESHOT_CLOSURE_LABEL
     is_phase6_oneshot_readlist_context_closure = run_label == PHASE6_ONESHOT_READLIST_CONTEXT_CLOSURE_LABEL
+    is_phase7_series_oneshot_query_closure = run_label == PHASE7_SERIES_ONESHOT_QUERY_CLOSURE_LABEL
 
     base_checks = [
         {
@@ -279,6 +319,19 @@ def build_checks(
             },
         },
     ]
+
+    for check in base_checks:
+        check_id = str(check["id"])
+        if check_id in phase7_skipped_base_checks:
+            profile_overrides = check.setdefault("profile_overrides", {})
+            profile_overrides[PHASE7_SERIES_ONESHOT_QUERY_CLOSURE_LABEL] = {
+                "status": "skipped",
+                "blocking": False,
+                "details": [
+                    phase7_skipped_base_checks[check_id],
+                    "This label proves exact `GET /api/v1/series/{seriesId}?oneshot=true` readiness only and does not approve browse/readlist/media/write/whole-cutover scope.",
+                ],
+            }
 
     discovery_checks: list[dict[str, object]] = []
     if is_phase2_discovery:
@@ -716,5 +769,121 @@ def build_checks(
             },
         ]
 
-    checks = base_checks + discovery_checks + phase3_checks + phase4_checks + phase5_checks + phase6_checks
+    phase7_checks: list[dict[str, object]] = []
+    if is_phase7_series_oneshot_query_closure:
+        phase7_contract = evidence_root / "task-1-contract" / "phase7-series-oneshot-exact-route.txt"
+        phase7_adjacent_contract = evidence_root / "task-1-contract" / "phase7-adjacent-query-exclusions.txt"
+        phase7_runtime_ownership = evidence_root / "task-2-runtime" / "phase7-exact-oneshot-native.txt"
+        phase7_runtime_regression = evidence_root / "task-2-runtime" / "phase7-plain-series-detail-regression.txt"
+        phase7_parity_semantics = evidence_root / "task-3-parity" / "phase7-missing-restricted-parity.txt"
+        phase7_parity_variants = evidence_root / "task-3-parity" / "phase7-query-variant-shadow.txt"
+        phase7_case_inventory = evidence_root / "task-4-compat" / "phase7-case-inventory.txt"
+        phase7_contract_vs_compat = evidence_root / "task-4-compat" / "phase7-contract-vs-compat.txt"
+        phase7_browser_summary = evidence_root / "task-5-browser-smoke" / "summary.json"
+        phase7_browser_route = evidence_root / "task-5-browser-smoke" / "browse-oneshot.json"
+
+        phase7_checks = [
+            {
+                "id": "phase7_series_oneshot_query_closure_contract",
+                "category": "phase7-series-oneshot-query-closure",
+                "refusal_condition": "Phase7 exact oneshot=true contract and compat evidence not proven",
+                "evidence": [
+                    phase7_contract,
+                    phase7_adjacent_contract,
+                    phase7_case_inventory,
+                    phase7_contract_vs_compat,
+                ],
+                "mode": "discovery_markers",
+                "marker_map": {
+                    phase7_contract: [
+                        "phase7_series_oneshot_exact_route_shape_is_frozen",
+                        "GET /api/v1/series/{seriesId}?oneshot=true",
+                    ],
+                    phase7_adjacent_contract: [
+                        "phase7_adjacent_oneshot_query_variants_remain_explicitly_non_native",
+                        "oneshot=false, duplicate oneshot=true, oneshot=TRUE, and oneshot=true&other=value stay explicit non-native",
+                    ],
+                    phase7_case_inventory: [
+                        "phase7_series_oneshot_case_inventory_loads",
+                        "P7-ONESHOT-SERIES-DETAIL-EXACT-OWNED",
+                    ],
+                    phase7_contract_vs_compat: [
+                        "phase7 contract vs compat exact-route ownership aligned",
+                        "P7-ONESHOT-SERIES-DETAIL-EXACT-OWNED",
+                    ],
+                },
+                "success_note": "Phase7 contract evidence proves only the exact `?oneshot=true` series detail shape is newly owned while adjacent query variants remain explicit non-native.",
+            },
+            {
+                "id": "phase7_series_oneshot_query_closure_shadow",
+                "category": "phase7-series-oneshot-query-closure",
+                "refusal_condition": "Phase7 runtime and parity evidence for exact oneshot=true ownership not proven",
+                "evidence": [
+                    phase7_runtime_ownership,
+                    phase7_runtime_regression,
+                    phase7_parity_semantics,
+                    phase7_parity_variants,
+                ],
+                "mode": "discovery_markers",
+                "marker_map": {
+                    phase7_runtime_ownership: [
+                        "phase7_exact_oneshot_true_series_detail_is_native",
+                        "/api/v1/series/series-1?oneshot=true => native-rust-owned",
+                    ],
+                    phase7_runtime_regression: [
+                        "series_detail_and_collections_are_native_owned",
+                        "plain series detail and collections remain native-owned",
+                    ],
+                    phase7_parity_semantics: [
+                        "phase7_missing_and_restricted_series_oneshot_detail_matches_plain_detail_semantics",
+                        "missing and restricted oneshot=true series detail semantics match plain detail",
+                    ],
+                    phase7_parity_variants: [
+                        "phase7_series_oneshot_query_variants_remain_non_native",
+                        "adjacent oneshot query variants still emit explicit non-native diagnostics",
+                    ],
+                },
+                "success_note": "Phase7 runtime/parity evidence proves exact `?oneshot=true` ownership without widening plain detail semantics or adjacent query variants.",
+            },
+            {
+                "id": "phase7_series_oneshot_query_closure_browser",
+                "category": "phase7-series-oneshot-query-closure",
+                "refusal_condition": "Phase7 browse-oneshot browser governance evidence not proven",
+                "evidence": [phase7_browser_summary, phase7_browser_route],
+                "mode": "discovery_markers",
+                "marker_map": {
+                    phase7_browser_summary: [
+                        '"route": "browse-oneshot"',
+                        '"captureMode": "source-contract-fallback"',
+                        '"type": "oneshot-readlist-fallback"',
+                        '"observedOwnershipLabel": "readlist-detail-native-owned"',
+                        '"label": "oneshot-series-detail"',
+                        '"label": "oneshot-series-collections"',
+                        '"label": "oneshot-bootstrap-books-list"',
+                        '"label": "oneshot-book-readlists"',
+                        '"label": "readlist-detail"',
+                        '"label": "readlist-books-unpaged"',
+                        '"label": "readlist-book-next"',
+                        '"label": "readlist-book-previous"',
+                    ],
+                    phase7_browser_route: [
+                        '"route": "browse-oneshot"',
+                        '"captureMode": "source-contract-fallback"',
+                        '"type": "oneshot-readlist-fallback"',
+                        '"observedOwnershipLabel": "readlist-detail-native-owned"',
+                        '"label": "oneshot-series-detail"',
+                        '"label": "oneshot-series-collections"',
+                        '"label": "oneshot-bootstrap-books-list"',
+                        '"label": "oneshot-book-readlists"',
+                        '"label": "readlist-detail"',
+                        '"label": "readlist-books-unpaged"',
+                        '"label": "readlist-book-next"',
+                        '"label": "readlist-book-previous"',
+                    ],
+                },
+                "success_note": "Phase7 browser smoke remains governance-only evidence: browse-oneshot stays `captureMode=source-contract-fallback` / `oneshot-readlist-fallback` with unchanged owned-request inventory and no browse-closure claim.",
+            },
+        ]
+
+    checks = base_checks + discovery_checks + phase3_checks + phase4_checks + phase5_checks + phase6_checks + phase7_checks
     return checks, discovery_checks, phase3_checks, phase4_checks, phase5_checks, phase6_checks

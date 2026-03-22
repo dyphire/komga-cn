@@ -434,8 +434,7 @@ async fn direct_oneshot_admin_user_limited_restricted_matrix() {
     }
 }
 
-#[tokio::test]
-async fn series_detail_and_collections_are_native_owned() {
+pub(super) async fn series_detail_and_collections_are_native_owned() {
     let app = komga_rust::app::build_router();
     let token = session_token_for_basic_auth(&app, USER_BASIC_AUTH).await;
 
@@ -494,6 +493,41 @@ async fn series_detail_and_collections_are_native_owned() {
     assert!(collections_json.is_array());
     assert_eq!(collections_json[0]["id"], "collection-1");
     assert!(collections_json.get("_compat").is_none());
+}
+
+pub(super) async fn phase7_missing_and_restricted_series_oneshot_detail_matches_plain_detail_semantics() {
+    let app = komga_rust::app::build_router();
+    let cases = [
+        ("missing series", USER_BASIC_AUTH, "series-missing"),
+        (
+            "restricted series for restricted user",
+            RESTRICTED_BASIC_AUTH,
+            "series-2",
+        ),
+    ];
+
+    for (name, basic_auth, series_id) in cases {
+        let token = session_token_for_basic_auth(&app, basic_auth).await;
+        let plain_uri = format!("/api/v1/series/{series_id}");
+        let oneshot_uri = format!("{plain_uri}?oneshot=true");
+
+        let plain_response = get_response(&app, &token, &plain_uri).await;
+        let plain_status = plain_response.status();
+        assert_native_owned(&plain_response, &format!("{name} plain detail"));
+
+        let oneshot_response = get_response(&app, &token, &oneshot_uri).await;
+        let oneshot_status = oneshot_response.status();
+        assert_native_owned(&oneshot_response, &format!("{name} oneshot detail"));
+
+        assert_eq!(
+            oneshot_status, plain_status,
+            "{name} exact oneshot route must preserve plain detail status semantics",
+        );
+        assert!(
+            matches!(plain_status, StatusCode::NOT_FOUND | StatusCode::FORBIDDEN),
+            "{name} should be an inaccessible detail status, got {plain_status}",
+        );
+    }
 }
 
 #[tokio::test]

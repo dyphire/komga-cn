@@ -713,6 +713,76 @@ pub(super) fn phase6_readlist_detail_case_inventory_loads() {
 }
 
 #[test]
+pub(super) fn phase7_series_oneshot_case_inventory_loads() {
+    let config = HarnessConfig::load_default().expect("default compat cases should load");
+
+    for id in [
+        "P7-ONESHOT-SERIES-DETAIL-EXACT-OWNED",
+        "P3-DETAIL-SERIES-DETAIL-OWNED",
+        "P3-DETAIL-EXCLUDED-ONESHOT-ROUTE-CLOSURE",
+        "P2-DISCOVERY-UNSUPPORTED-READLISTS",
+        "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-BOOKS",
+        "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-PREVIOUS",
+        "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-NEXT",
+        "P5-ONESHOT-EXCLUDED-BOOKS-LIST-WIDENED-PAGED",
+        "P3-DETAIL-EXCLUDED-BOOKS-LIST-READDATE-SORT",
+        "P3-DETAIL-EXCLUDED-BOOKS-LIST-READSTATUS-FILTER",
+        "P3-DETAIL-EXCLUDED-BOOK-PAGES",
+        "P3-DETAIL-EXCLUDED-BOOK-FILE",
+        "P3-DETAIL-EXCLUDED-BOOK-THUMBNAIL",
+        "P3-DETAIL-EXCLUDED-BOOK-MANIFEST",
+        "P3-DETAIL-EXCLUDED-BOOK-RESOURCE",
+        "P3-DETAIL-EXCLUDED-BOOK-POSITIONS",
+        "P3-DETAIL-EXCLUDED-READ-PROGRESS-PATCH",
+        "P3-DETAIL-EXCLUDED-READ-PROGRESS-DELETE",
+        "P3-DETAIL-EXCLUDED-PROGRESSION-PUT",
+        "P3-DETAIL-EXCLUDED-READLIST-PATCH",
+        "P3-DETAIL-EXCLUDED-READLIST-DELETE",
+        "P3-DETAIL-EXCLUDED-COLLECTION-PATCH",
+        "P3-DETAIL-EXCLUDED-COLLECTION-DELETE",
+        "P5-ONESHOT-EXCLUDED-SSE-LIVE-REFRESH",
+    ] {
+        let case = config
+            .cases
+            .iter()
+            .find(|it| it.id == id)
+            .unwrap_or_else(|| panic!("missing phase7 series oneshot compat case: {id}"));
+
+        assert_eq!(
+            config.cases.iter().filter(|it| it.id == id).count(),
+            1,
+            "phase7 series oneshot case id must be unique: {id}",
+        );
+
+        if id.contains("-EXCLUDED-") || id == "P2-DISCOVERY-UNSUPPORTED-READLISTS" {
+            assert_eq!(
+                case.headers
+                    .as_ref()
+                    .and_then(|headers| headers.get("X-Komga-Compat-Search-Ownership")),
+                Some(&"shadow-java-writer".to_string()),
+                "phase7 adjacent non-native case must carry shadow marker: {id}",
+            );
+        }
+    }
+
+    let owned = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P7-ONESHOT-SERIES-DETAIL-EXACT-OWNED")
+        .expect("phase7 exact oneshot route owned case should exist");
+    assert_eq!(owned.method, "GET");
+    assert_eq!(owned.path, "/api/v1/series/series-1?oneshot=true");
+    assert_eq!(owned.body, None);
+    assert_eq!(
+        owned
+            .headers
+            .as_ref()
+            .and_then(|headers| headers.get("X-Komga-Compat-Search-Ownership")),
+        None,
+    );
+}
+
+#[test]
 fn live_http_json_diff_includes_library_role_cases() {
     let case_ids = live_http_json_case_ids();
 

@@ -228,6 +228,99 @@ def seed_phase6_oneshot_readlist_context_closure_evidence(
         write_text(root / 'task-6-regression/adjacent-exclusions-stay-shadow.txt', 'cargo test: 1 passed, 0 failed (1 suite, 0.02s)')
 
 
+def seed_phase7_series_oneshot_query_closure_evidence(
+    root: Path,
+    *,
+    include_contract: bool = True,
+    include_shadow: bool = True,
+    include_browser: bool = True,
+) -> None:
+    if include_contract:
+        write_text(
+            root / 'task-1-contract/phase7-series-oneshot-exact-route.txt',
+            '\n'.join([
+                'Task: T1 exact oneshot=true route contract freeze',
+                'Scenario: only GET /api/v1/series/{seriesId}?oneshot=true is newly owned in Phase 7',
+                'phase7_series_oneshot_exact_route_shape_is_frozen',
+                'GET /api/v1/series/{seriesId}?oneshot=true',
+                'Result: PASS',
+            ]),
+        )
+        write_text(
+            root / 'task-1-contract/phase7-adjacent-query-exclusions.txt',
+            '\n'.join([
+                'Task: T1 adjacent query exclusions freeze',
+                'Scenario: negative and mixed oneshot query variants remain explicit non-native',
+                'phase7_adjacent_oneshot_query_variants_remain_explicitly_non_native',
+                'oneshot=false, duplicate oneshot=true, oneshot=TRUE, and oneshot=true&other=value stay explicit non-native',
+                'Result: PASS',
+                'shadow-java-writer',
+            ]),
+        )
+        write_text(
+            root / 'task-4-compat/phase7-case-inventory.txt',
+            '\n'.join([
+                'Task: T4 compat inventory load',
+                'phase7_series_oneshot_case_inventory_loads',
+                'P7-ONESHOT-SERIES-DETAIL-EXACT-OWNED',
+                'Result: PASS',
+            ]),
+        )
+        write_text(
+            root / 'task-4-compat/phase7-contract-vs-compat.txt',
+            '\n'.join([
+                'Task: T4 contract vs compat exact-route alignment',
+                'phase7 contract vs compat exact-route ownership aligned',
+                'P7-ONESHOT-SERIES-DETAIL-EXACT-OWNED',
+                'Result: PASS',
+            ]),
+        )
+
+    if include_shadow:
+        write_text(
+            root / 'task-2-runtime/phase7-exact-oneshot-native.txt',
+            '\n'.join([
+                'Task: T2 runtime ownership for exact oneshot query route',
+                'phase7_exact_oneshot_true_series_detail_is_native',
+                '/api/v1/series/series-1?oneshot=true => native-rust-owned',
+                'Result: PASS',
+            ]),
+        )
+        write_text(
+            root / 'task-2-runtime/phase7-plain-series-detail-regression.txt',
+            '\n'.join([
+                'Task: T2 regression proof for plain series detail',
+                'series_detail_and_collections_are_native_owned',
+                'plain series detail and collections remain native-owned',
+                'Result: PASS',
+            ]),
+        )
+        write_text(
+            root / 'task-3-parity/phase7-missing-restricted-parity.txt',
+            '\n'.join([
+                'Task: T3 missing and restricted parity evidence',
+                'phase7_missing_and_restricted_series_oneshot_detail_matches_plain_detail_semantics',
+                'missing and restricted oneshot=true series detail semantics match plain detail',
+                'Result: PASS',
+            ]),
+        )
+        write_text(
+            root / 'task-3-parity/phase7-query-variant-shadow.txt',
+            '\n'.join([
+                'Task: T3 adjacent query shadow markers stay explicit',
+                'phase7_series_oneshot_query_variants_remain_non_native',
+                'adjacent oneshot query variants still emit explicit non-native diagnostics',
+                'Result: PASS',
+                'shadow-java-writer',
+            ]),
+        )
+
+    if include_browser:
+        browse_oneshot_row = build_phase5_browser_row()
+        write_json(root / 'task-5-browser-smoke/browse-oneshot.json', browse_oneshot_row)
+        write_json(root / 'task-5-browser-smoke/summary.json', [browse_oneshot_row])
+
+
 def build_admin_queue_payload(*, status: str, can_claim_admin_queue_parity: bool) -> dict[str, object]:
     return {
         'task': 'T13 admin task endpoint parity remains executable',

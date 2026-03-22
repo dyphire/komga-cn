@@ -30,3 +30,8 @@ use helpers::{
 fn phase6_readlist_detail_case_inventory_loads() {
     config::phase6_readlist_detail_case_inventory_loads();
 }
+
+#[test]
+fn phase7_series_oneshot_case_inventory_loads() {
+    config::phase7_series_oneshot_case_inventory_loads();
+}

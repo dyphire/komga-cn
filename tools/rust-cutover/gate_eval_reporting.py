@@ -19,6 +19,7 @@ def build_governance(
     is_phase4_readlist_context_read = run_label == data.PHASE4_READLIST_CONTEXT_READ_LABEL
     is_phase5_oneshot_closure = run_label == data.PHASE5_ONESHOT_CLOSURE_LABEL
     is_phase6_oneshot_readlist_context_closure = run_label == data.PHASE6_ONESHOT_READLIST_CONTEXT_CLOSURE_LABEL
+    is_phase7_series_oneshot_query_closure = run_label == data.PHASE7_SERIES_ONESHOT_QUERY_CLOSURE_LABEL
 
     if is_phase2_discovery:
         return {
@@ -164,6 +165,34 @@ def build_governance(
             },
         }
 
+    if is_phase7_series_oneshot_query_closure:
+        return {
+            "shadow_mode": {
+                "allowed": shadow_safety_pass,
+                "rule": "Shadow mode must keep Java as stateful writer unless explicitly isolated",
+            },
+            "canary_mode": {
+                "allowed": search_task_guardrails,
+                "rule": "Search/task ownership guardrails remain required, but this phase7 label is not whole-cutover approval.",
+            },
+            "phase7_series_oneshot_query_closure_shadow": {
+                "allowed": overall_pass,
+                "scope": "Exact series-detail query slice is shadow-ready only for GET /api/v1/series/{seriesId}?oneshot=true, while browse-oneshot remains governance-only source-contract-fallback evidence.",
+            },
+            "phase7_series_oneshot_query_non_claims": {
+                "allowed": False,
+                "scope": "Refused: browse-oneshot closure or owned-inventory promotion, GET /api/v1/readlists list-family support, browse-readlist, paged/library_id readlist variants, generic books/list widening, media, reader handoff/download, read-progress/progression, removals, admin/write, SSE, and whole cutover claims remain out of slice.",
+            },
+            "cutover": {
+                "allowed": False,
+                "scope": "phase7-series-oneshot-query-closure is a slice-only runbook; whole cutover/direct-serving remains refused until broader runtime/media/write/release conditions are proven.",
+            },
+            "rollback": {
+                "ready": overall_pass,
+                "trigger": "Any exact-query regression, browser over-claim, or out-of-slice expansion forces rollback/no-cutover.",
+            },
+        }
+
     return {
         "shadow_mode": {
             "allowed": shadow_safety_pass,
@@ -210,6 +239,13 @@ def build_summary(
     is_phase4_readlist_context_read = run_label == data.PHASE4_READLIST_CONTEXT_READ_LABEL
     is_phase5_oneshot_closure = run_label == data.PHASE5_ONESHOT_CLOSURE_LABEL
     is_phase6_oneshot_readlist_context_closure = run_label == data.PHASE6_ONESHOT_READLIST_CONTEXT_CLOSURE_LABEL
+    is_phase7_series_oneshot_query_closure = run_label == data.PHASE7_SERIES_ONESHOT_QUERY_CLOSURE_LABEL
+
+    phase7_check_ids = [
+        check["id"]
+        for check in results
+        if check.get("category") == "phase7-series-oneshot-query-closure"
+    ]
 
     summary: dict[str, Any] = {
         "task": "T16",
@@ -276,6 +312,25 @@ def build_summary(
         }
         if non_blocking:
             summary["non_blocking"] = non_blocking
+    elif is_phase7_series_oneshot_query_closure:
+        summary["evaluation_scope"] = "phase7-series-oneshot-query-closure-shadow"
+        summary["series_oneshot_query_closure_slice"] = {
+            "shadow_ready": overall_pass,
+            "newly_owned_surface": data.phase7_series_oneshot_query_owned_scope[0],
+            "owned_routes": data.phase7_series_oneshot_query_owned_scope,
+            "supported_scope": data.phase7_series_oneshot_query_owned_scope,
+            "required_pre_owned_dependencies": data.phase7_series_oneshot_query_pre_owned_dependencies,
+            "excluded_branches": data.phase7_series_oneshot_query_out_of_slice,
+            "out_of_slice": data.phase7_series_oneshot_query_out_of_slice,
+            "non_claims": [
+                "This does not claim whole cutover readiness.",
+                "This does not claim browse-oneshot closure or promotion of its browser-owned inventory.",
+                "This does not claim readlist list-family/browse-readlist support, media, reader-handoff/download, read-progress/progression, removals, admin/write, or SSE ownership.",
+            ],
+            "check_ids": phase7_check_ids,
+        }
+        if non_blocking:
+            summary["non_blocking"] = non_blocking
     elif is_phase3_detail_read:
         summary["evaluation_scope"] = "phase3-detail-read-shadow"
         summary["detail_read_slice"] = {
@@ -333,6 +388,7 @@ def build_report_text(
     is_phase4_readlist_context_read = run_label == data.PHASE4_READLIST_CONTEXT_READ_LABEL
     is_phase5_oneshot_closure = run_label == data.PHASE5_ONESHOT_CLOSURE_LABEL
     is_phase6_oneshot_readlist_context_closure = run_label == data.PHASE6_ONESHOT_READLIST_CONTEXT_CLOSURE_LABEL
+    is_phase7_series_oneshot_query_closure = run_label == data.PHASE7_SERIES_ONESHOT_QUERY_CLOSURE_LABEL
 
     lines = []
     lines.append(f"# Rust Cutover Readiness Gate ({run_label})")
@@ -355,6 +411,9 @@ def build_report_text(
     elif is_phase6_oneshot_readlist_context_closure:
         lines.append("- Evaluation scope: `phase6-oneshot-readlist-context-closure-shadow`")
         lines.append("- Non-claim: this label records oneshot READLIST-context direct-read readiness only, not browse-readlist/list-family or whole cutover/direct-serving/media/write readiness")
+    elif is_phase7_series_oneshot_query_closure:
+        lines.append("- Evaluation scope: `phase7-series-oneshot-query-closure-shadow`")
+        lines.append("- Non-claim: this label records exact `GET /api/v1/series/{seriesId}?oneshot=true` readiness only, not browse-oneshot closure, readlist closure, or whole cutover/direct-serving/media/write readiness")
     lines.append("")
 
     if is_phase2_discovery:
@@ -451,6 +510,30 @@ def build_report_text(
         )
         lines.append(
             "- Browser capture note: `captureMode=source-contract-fallback` is accepted only when browser evidence proves `readlist-detail-native-owned`, the exact eight-label owned inventory, and an empty `observedFallbackRequests` array"
+        )
+        lines.append("")
+    elif is_phase7_series_oneshot_query_closure:
+        lines.append("## Phase7 Series-Oneshot-Query-Closure Runbook")
+        lines.append("")
+        lines.append(f"- Shadow-ready target: **{'PASS' if summary_overall == 'pass' else 'FAIL'}**")
+        lines.append(f"- Owned surface (newly owned exactly 1 route): {', '.join(f'`{item}`' for item in data.phase7_series_oneshot_query_owned_scope)}")
+        lines.append(
+            "- Exact query closure: **ALLOW (slice-only)** — newly owned surface is only `GET /api/v1/series/{seriesId}?oneshot=true`"
+        )
+        lines.append(
+            f"- Required pre-owned dependencies (regression-only): {', '.join(f'`{item}`' for item in data.phase7_series_oneshot_query_pre_owned_dependencies)}"
+        )
+        lines.append(
+            "- Out-of-slice governance: **REFUSE** — browse-oneshot closure/inventory promotion, `GET /api/v1/readlists` list-family support, browse-readlist, paged/library_id readlist variants, generic books/list widening, media, reader handoff/download, progress/progression, removals, admin/write, SSE, and whole cutover claims remain explicit non-native"
+        )
+        lines.append(
+            f"- Excluded branches still out of scope: {', '.join(f'`{item}`' for item in data.phase7_series_oneshot_query_out_of_slice)}"
+        )
+        lines.append(
+            "- Whole cutover/direct-serving: **REFUSE** — this label is not a full cutover approval"
+        )
+        lines.append(
+            "- Browser capture note: browse-oneshot remains source-contract-fallback / scenario-level fallback only; browser smoke is governance-only evidence with unchanged owned-request inventory, not browse closure proof"
         )
         lines.append("")
 

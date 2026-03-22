@@ -79,8 +79,7 @@ async fn oneshot_books_list_shape_is_native_owned() {
     assert!(json.get("_compat").is_none());
 }
 
-#[tokio::test]
-async fn browse_oneshot_happy_path_uses_native_bootstrap_shape() {
+pub(super) async fn browse_oneshot_happy_path_uses_native_bootstrap_shape() {
     let app = komga_rust::app::build_router();
     let token = session_token_for_basic_auth(&app, USER_BASIC_AUTH).await;
 

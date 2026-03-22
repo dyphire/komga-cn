@@ -1,21 +1,63 @@
 use super::*;
 
-#[tokio::test]
-async fn excluded_oneshot_query_parameter_emits_shadow_marker() {
+pub(super) async fn phase7_exact_oneshot_true_series_detail_is_native() {
     let app = komga_rust::app::build_router();
     let token = session_token_for_basic_auth(&app, USER_BASIC_AUTH).await;
 
-    let response = get_response(&app, &token, "/api/v1/series/series-oneshot?oneshot=true").await;
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_shadow_marker(&response, "series detail oneshot query parameter");
+    let exact_response = get_response(&app, &token, "/api/v1/series/series-oneshot?oneshot=true").await;
+    assert_eq!(exact_response.status(), StatusCode::OK);
+    assert_native_owned(&exact_response, "series detail exact oneshot=true");
 
-    let json = response_json(response).await;
-    assert_eq!(json["id"], "series-oneshot");
-    assert_eq!(json["_compat"]["discoveryOwnership"], "non-native");
-    assert_eq!(
-        json["_compat"]["shape"],
-        "UnsupportedSeriesFilter(oneshot-query-parameter)",
-    );
+    let exact_json = response_json(exact_response).await;
+    assert_eq!(exact_json["id"], "series-oneshot");
+    assert!(exact_json.get("_compat").is_none());
+}
+
+pub(super) async fn phase7_series_oneshot_query_variants_remain_non_native() {
+    let app = komga_rust::app::build_router();
+    let token = session_token_for_basic_auth(&app, USER_BASIC_AUTH).await;
+
+    let adjacent_non_native_cases = [
+        (
+            "oneshot false",
+            "/api/v1/series/series-oneshot?oneshot=false",
+        ),
+        (
+            "oneshot duplicate",
+            "/api/v1/series/series-oneshot?oneshot=true&oneshot=true",
+        ),
+        (
+            "oneshot mixed extra query parameter",
+            "/api/v1/series/series-oneshot?oneshot=true&other=value",
+        ),
+        (
+            "oneshot key case variant",
+            "/api/v1/series/series-oneshot?oneShot=true",
+        ),
+        (
+            "oneshot value case variant",
+            "/api/v1/series/series-oneshot?oneshot=TRUE",
+        ),
+    ];
+
+    for (name, uri) in adjacent_non_native_cases {
+        let response = get_response(&app, &token, uri).await;
+        assert_eq!(response.status(), StatusCode::OK, "{name} status");
+        assert_shadow_marker(&response, name);
+
+        let json = response_json(response).await;
+        assert_eq!(json["id"], "series-oneshot", "{name} id");
+        assert_eq!(
+            json["_compat"]["discoveryOwnership"],
+            "non-native",
+            "{name} ownership",
+        );
+        assert_eq!(
+            json["_compat"]["shape"],
+            "UnsupportedSeriesFilter(oneshot-query-parameter)",
+            "{name} shape",
+        );
+    }
 }
 
 pub(super) async fn phase6_adjacent_excluded_branches_still_emit_shadow_marker() {

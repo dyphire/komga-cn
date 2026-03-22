@@ -65,6 +65,32 @@ async fn phase6_adjacent_excluded_branches_still_emit_shadow_marker() {
     ownership::phase6_adjacent_excluded_branches_still_emit_shadow_marker().await;
 }
 
+#[tokio::test]
+async fn series_detail_and_collections_are_native_owned() {
+    detail::series_detail_and_collections_are_native_owned().await;
+}
+
+#[tokio::test]
+async fn phase7_exact_oneshot_true_series_detail_is_native() {
+    ownership::phase7_exact_oneshot_true_series_detail_is_native().await;
+}
+
+#[tokio::test]
+async fn phase7_series_oneshot_query_variants_remain_non_native() {
+    ownership::phase7_series_oneshot_query_variants_remain_non_native().await;
+}
+
+#[tokio::test]
+async fn phase7_missing_and_restricted_series_oneshot_detail_matches_plain_detail_semantics() {
+    detail::phase7_missing_and_restricted_series_oneshot_detail_matches_plain_detail_semantics()
+        .await;
+}
+
+#[tokio::test]
+async fn browse_oneshot_happy_path_uses_native_bootstrap_shape() {
+    helpers::browse_oneshot_happy_path_uses_native_bootstrap_shape().await;
+}
+
 async fn get_response<S>(app: &S, token: &str, uri: &str) -> axum::response::Response
 where
     S: tower::Service<Request<Body>, Response = axum::response::Response> + Clone,

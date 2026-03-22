@@ -14,7 +14,6 @@ fn excluded_media_context_and_write_shapes_remain_non_native() {
         "GET /api/v1/readlists/{readListId}/books?unpaged=true",
         "GET /api/v1/readlists/{readListId}/books/{bookId}/previous",
         "GET /api/v1/readlists/{readListId}/books/{bookId}/next",
-        "GET /api/v1/series/{seriesId}?oneshot=true",
         "PATCH /api/v1/books/{bookId}/read-progress",
         "DELETE /api/v1/books/{bookId}/read-progress",
         "PUT /api/v1/books/{bookId}/progression",
@@ -27,6 +26,10 @@ fn excluded_media_context_and_write_shapes_remain_non_native() {
     ]);
 
     assert_eq!(expected, frozen_non_native_detail_shapes());
+    assert!(
+        !frozen_non_native_detail_shapes().contains("GET /api/v1/series/{seriesId}?oneshot=true"),
+        "exact Phase 7 oneshot=true route must not be listed in generic non-native ledger",
+    );
 
     let config = HarnessConfig::load_default().expect("default compat cases should load");
     for id in [

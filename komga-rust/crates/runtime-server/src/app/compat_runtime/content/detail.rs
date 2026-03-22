@@ -23,7 +23,7 @@ use crate::app::placeholder_auth::{require_auth, resolved_auth_user};
 use super::content_java_live;
 use super::helpers::{
     apply_non_native_diagnostics, books_page_payload, detail_access_denial_response, mark_native,
-    mark_non_native, query_bool, query_value, query_values, restricted_book_url,
+    mark_non_native, query_bool, query_has_key, query_value, query_values, restricted_book_url,
     to_domain_query_context,
 };
 
@@ -83,7 +83,13 @@ pub(in crate::app::compat_runtime) async fn series_detail(
             Err(denial) => return detail_access_denial_response(denial),
         };
     let is_admin = detail_query_context.is_admin;
-    let oneshot_query_excluded = query_bool(uri.query().unwrap_or_default(), "oneshot");
+    let query_string = uri.query().unwrap_or_default();
+    let exact_oneshot_true_shape = query_has_key(query_string, "oneshot")
+        && query_values(query_string, "oneshot").as_slice() == ["true"]
+        && query_string
+            .split('&')
+            .all(|pair| pair.split('=').next().unwrap_or_default() == "oneshot");
+    let native_owned_shape = query_string.is_empty() || exact_oneshot_true_shape;
 
     let domain_context = to_domain_query_context(detail_query_context);
     let query = SeriesDetailQuery { series_id };
@@ -92,7 +98,7 @@ pub(in crate::app::compat_runtime) async fn series_detail(
         Ok(Some(series)) => {
             let mut payload = series_detail_payload(&series, is_admin);
 
-            if oneshot_query_excluded {
+            if !native_owned_shape {
                 apply_non_native_diagnostics(
                     &mut payload,
                     &DiscoveryError::NonNativeRequestShape(

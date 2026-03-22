@@ -1,24 +1,19 @@
 use super::*;
 
 #[test]
-pub(super) fn phase6_readlist_detail_route_shape_is_frozen() {
+pub(super) fn phase7_series_oneshot_exact_route_shape_is_frozen() {
     let expected = BTreeSet::from([
-        "GET /api/v1/readlists/{readListId} (newly-owned Phase 6 route)",
-        "GET /api/v1/series/{seriesId} (reused pre-owned dependency)",
-        "GET /api/v1/series/{seriesId}/collections (reused pre-owned dependency)",
-        "POST /api/v1/books/list body=SeriesId(seriesId) only (reused pre-owned dependency)",
-        "GET /api/v1/books/{bookId}/readlists (reused pre-owned dependency)",
+        "GET /api/v1/series/{seriesId}?oneshot=true (newly-owned Phase 7 exact route)",
+        "GET /api/v1/series/{seriesId} (reused pre-owned source-truth dependency)",
     ]);
 
     assert_eq!(expected, frozen_oneshot_direct_route_shapes());
 
     let config = HarnessConfig::load_default().expect("default compat cases should load");
     for id in [
-        "P6-ONESHOT-READLIST-DETAIL-OWNED",
         "P3-DETAIL-SERIES-DETAIL-OWNED",
-        "P3-DETAIL-SERIES-COLLECTIONS-OWNED",
-        "P5-ONESHOT-BOOKS-LIST-SERIESID-ONLY-OWNED",
-        "P3-DETAIL-BOOK-READLISTS-OWNED",
+        "P7-ONESHOT-SERIES-DETAIL-EXACT-OWNED",
+        "P3-DETAIL-EXCLUDED-ONESHOT-ROUTE-CLOSURE",
     ] {
         assert!(
             config.cases.iter().any(|it| it.id == id),
@@ -26,26 +21,49 @@ pub(super) fn phase6_readlist_detail_route_shape_is_frozen() {
         );
     }
 
-    let phase6_owned = config
+    let exact_owned = config
         .cases
         .iter()
-        .find(|it| it.id == "P6-ONESHOT-READLIST-DETAIL-OWNED")
-        .expect("phase6 readlist detail owned compat case should exist");
+        .find(|it| it.id == "P7-ONESHOT-SERIES-DETAIL-EXACT-OWNED")
+        .expect("phase7 exact oneshot compat case should exist");
+    assert_eq!(exact_owned.method, "GET");
+    assert_eq!(exact_owned.path, "/api/v1/series/series-1?oneshot=true");
     assert_eq!(
-        phase6_owned
+        exact_owned
             .headers
             .as_ref()
             .and_then(|headers| headers.get("X-Komga-Compat-Search-Ownership")),
         None,
-        "phase6 newly-owned route must not carry shadow marker",
+        "exact oneshot=true route must be listed as owned in Phase 7",
+    );
+
+    let closure_fallback = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P3-DETAIL-EXCLUDED-ONESHOT-ROUTE-CLOSURE")
+        .expect("oneshot closure compat case should exist");
+    assert_eq!(
+        closure_fallback.path, "/api/v1/series/series-1?oneshot=false",
+        "closure fallback should track adjacent non-native oneshot=false shape",
+    );
+    assert_eq!(
+        closure_fallback
+            .headers
+            .as_ref()
+            .and_then(|headers| headers.get("X-Komga-Compat-Search-Ownership")),
+        Some(&"shadow-java-writer".to_string()),
+        "adjacent oneshot closure case must remain explicit non-native",
     );
 }
 
 #[test]
-pub(super) fn phase6_adjacent_branches_remain_explicitly_non_native() {
+pub(super) fn phase7_adjacent_oneshot_query_variants_remain_explicitly_non_native() {
     let expected = BTreeSet::from([
-        "oneshot query closure | BrowseOneshot.vue:779-800 | GET /api/v1/series/{seriesId}?oneshot=true stays explicit non-native",
-        "READLIST detail ownership boundary | BrowseOneshot.vue:785-842 | only GET /api/v1/readlists/{readListId} is newly owned in Phase 6; list + context siblings stay explicit non-native",
+        "oneshot query boundary | BrowseOneshot.vue:779-800 | only exact GET /api/v1/series/{seriesId}?oneshot=true is native in Phase 7; oneshot=false remains explicit non-native",
+        "oneshot query boundary | BrowseOneshot.vue:779-800 | duplicate oneshot params remain explicit non-native",
+        "oneshot query boundary | BrowseOneshot.vue:779-800 | mixed extra params remain explicit non-native",
+        "oneshot query boundary | BrowseOneshot.vue:779-800 | case-variant param names remain explicit non-native",
+        "READLIST detail/list-family boundary | BrowseOneshot.vue:785-842 | readlist detail/list/context siblings stay explicit non-native in Phase 7",
         "READLIST listing branch | BrowseOneshot.vue:785-842 | GET /api/v1/readlists stays explicit non-native",
         "READLIST books pagination/library filtering | BrowseOneshot.vue:785-842 | paged readlist books and library_id variants stay explicit non-native",
         "READLIST context siblings | BrowseOneshot.vue:785-842 | /books?unpaged=true + sibling previous/next remain explicit fallback/non-native",

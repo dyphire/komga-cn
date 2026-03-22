@@ -37,11 +37,11 @@ fn phase_55_rollback_boundary_keeps_detail_owned_and_fallback_cases_available() 
 }
 
 #[test]
-fn phase6_readlist_detail_route_shape_is_frozen() {
-    oneshot::phase6_readlist_detail_route_shape_is_frozen();
+fn phase7_series_oneshot_exact_route_shape_is_frozen() {
+    oneshot::phase7_series_oneshot_exact_route_shape_is_frozen();
 }
 
 #[test]
-fn phase6_adjacent_branches_remain_explicitly_non_native() {
-    oneshot::phase6_adjacent_branches_remain_explicitly_non_native();
+fn phase7_adjacent_oneshot_query_variants_remain_explicitly_non_native() {
+    oneshot::phase7_adjacent_oneshot_query_variants_remain_explicitly_non_native();
 }

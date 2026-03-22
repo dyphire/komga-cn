@@ -336,9 +336,22 @@ headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token"
 extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
 
 [[cases]]
-id = "P3-DETAIL-EXCLUDED-ONESHOT-ROUTE-CLOSURE"
+id = "P7-ONESHOT-SERIES-DETAIL-EXACT-OWNED"
 method = "GET"
 path = "/api/v1/series/series-1?oneshot=true"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P3-DETAIL-EXCLUDED-ONESHOT-ROUTE-CLOSURE"
+method = "GET"
+path = "/api/v1/series/series-1?oneshot=false"
 headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
 
 [[cases.setup]]
