@@ -1,6 +1,9 @@
 [workspace]
 members = [
   ".",
+  "crates/domain",
+  "crates/application",
+  "crates/persistence",
   "crates/runtime-server",
   "crates/compat-testkit",
   "crates/benchmark-wpd3",
@@ -20,6 +23,7 @@ anyhow = "1.0.102"
 reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "json", "rustls"] }
 toml = "1.0.7"
 tower = { version = "0.5.2", features = ["util"] }
+rusqlite = { version = "0.32.1", features = ["bundled"] }
 
 [package]
 name = "komga-rust"
@@ -34,6 +38,9 @@ tokio.workspace = true
 tracing-subscriber.workspace = true
 komga-runtime-server = { path = "crates/runtime-server" }
 komga-benchmark-wpd3 = { path = "crates/benchmark-wpd3" }
+komga-domain = { path = "crates/domain" }
+komga-application = { path = "crates/application" }
+komga-persistence = { path = "crates/persistence" }
 
 [dev-dependencies]
 tower.workspace = true

@@ -4,6 +4,7 @@ use tokio::net::TcpListener;
 use crate::config::RuntimeConfig;
 
 mod compat_runtime;
+pub mod discovery_auth;
 mod placeholder_auth;
 mod snapshots;
 

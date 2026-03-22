@@ -1,0 +1,9 @@
+[package]
+name = "komga-persistence"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+komga-domain = { path = "../domain" }
+komga-application = { path = "../application" }
+rusqlite.workspace = true

@@ -1,19 +1,48 @@
 use axum::Json;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use komga_application::discovery::{DiscoveryQueries, LibraryListQuery};
+use komga_domain::discovery::{
+    AgeRestrictionKind as DomainAgeRestrictionKind, DiscoveryError,
+    DiscoveryQueryContext as DomainDiscoveryQueryContext, LibraryReadModel,
+    QueryRestrictions as DomainQueryRestrictions,
+};
+use komga_persistence::discovery::{LibraryRow, SqliteDiscoveryAdapter};
 use reqwest::header::{AUTHORIZATION, COOKIE};
 use serde_json::{Value, json};
 
 use crate::app::CompatProfile;
+use crate::app::discovery_auth::{
+    AgeRestrictionKind, DiscoveryAuthState, DiscoveryQueryContext, QueryRestrictions,
+};
 use crate::app::placeholder_auth::{
     PlaceholderUser, require_auth, resolved_auth_user, user_is_admin, user_shared_all_libraries,
     user_shared_library_ids,
 };
 use crate::app::snapshots::snapshot_json;
 
-pub(super) async fn response(profile: CompatProfile, headers: HeaderMap) -> Response {
+use super::{
+    DiscoveryOwnershipRoute, DiscoveryShape, discovery_ownership_route, mark_native,
+};
+
+pub(super) async fn response(
+    profile: CompatProfile,
+    headers: HeaderMap,
+    auth_state: DiscoveryAuthState,
+) -> Response {
     if let Some(response) = require_auth(&headers) {
         return response;
+    }
+
+    if discovery_ownership_route(profile, &headers, DiscoveryShape::Libraries)
+        == DiscoveryOwnershipRoute::NativeOwned
+    {
+        let context = match auth_state.resolve_query_context(&headers, None) {
+            Some(context) => context,
+            None => return StatusCode::UNAUTHORIZED.into_response(),
+        };
+
+        return native_owned_libraries_response(context);
     }
 
     let user = resolved_auth_user(&headers).expect("authorized libraries request should resolve user");
@@ -30,6 +59,103 @@ pub(super) async fn response(profile: CompatProfile, headers: HeaderMap) -> Resp
     }
 
     Json(snapshot_libraries_for_user(profile, user)).into_response()
+}
+
+fn native_owned_libraries_response(context: DiscoveryQueryContext) -> Response {
+    let mut adapter = SqliteDiscoveryAdapter::default();
+    adapter.insert_library(LibraryRow::new("1", "default").with_root("/library1"));
+
+    let queries = DiscoveryQueries::new(adapter);
+    match queries.list_libraries(&to_domain_query_context(context.clone()), LibraryListQuery {}) {
+        Ok(libraries) => {
+            let mut response = Json(libraries_payload(libraries, context.is_admin)).into_response();
+            mark_native(&mut response);
+            response
+        }
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": discovery_error_message(error) })),
+        )
+            .into_response(),
+    }
+}
+
+fn libraries_payload(libraries: Vec<LibraryReadModel>, is_admin: bool) -> Value {
+    Value::Array(
+        libraries
+            .into_iter()
+            .map(|library| {
+                let root = if is_admin { library.root } else { String::new() };
+                json!({
+                    "id": library.id,
+                    "name": library.name,
+                    "root": root,
+                    "importComicInfoBook": true,
+                    "importComicInfoSeries": true,
+                    "importComicInfoCollection": true,
+                    "importComicInfoReadList": true,
+                    "importComicInfoSeriesAppendVolume": true,
+                    "importEpubBook": true,
+                    "importEpubSeries": true,
+                    "importMylarSeries": true,
+                    "importLocalArtwork": true,
+                    "importBarcodeIsbn": true,
+                    "scanForceModifiedTime": false,
+                    "scanInterval": "EVERY_6H",
+                    "scanOnStartup": false,
+                    "scanCbx": true,
+                    "scanPdf": true,
+                    "scanEpub": true,
+                    "scanDirectoryExclusions": [],
+                    "repairExtensions": false,
+                    "convertToCbz": false,
+                    "emptyTrashAfterScan": false,
+                    "seriesCover": "FIRST",
+                    "hashFiles": true,
+                    "hashPages": false,
+                    "hashKoreader": false,
+                    "analyzeDimensions": true,
+                    "oneshotsDirectory": Value::Null,
+                    "unavailable": false,
+                })
+            })
+            .collect(),
+    )
+}
+
+fn to_domain_query_context(context: DiscoveryQueryContext) -> DomainDiscoveryQueryContext {
+    DomainDiscoveryQueryContext {
+        user_id: context.user_id,
+        is_admin: context.is_admin,
+        authorized_library_ids: context.authorized_library_ids,
+        restrictions: context.restrictions.map(to_domain_restrictions),
+    }
+}
+
+fn to_domain_restrictions(restrictions: QueryRestrictions) -> DomainQueryRestrictions {
+    DomainQueryRestrictions {
+        age: restrictions.age,
+        age_restriction: restrictions.age_restriction.map(to_domain_age_restriction_kind),
+        labels_allow: restrictions.labels_allow,
+        labels_exclude: restrictions.labels_exclude,
+    }
+}
+
+fn to_domain_age_restriction_kind(kind: AgeRestrictionKind) -> DomainAgeRestrictionKind {
+    match kind {
+        AgeRestrictionKind::AllowOnly => DomainAgeRestrictionKind::AllowOnly,
+        AgeRestrictionKind::Exclude => DomainAgeRestrictionKind::Exclude,
+    }
+}
+
+fn discovery_error_message(error: DiscoveryError) -> String {
+    match error {
+        DiscoveryError::NonNativeRequestShape(details) => {
+            format!("native libraries query shape rejected: {details:?}")
+        }
+        DiscoveryError::InvalidRequest(message) => message,
+        DiscoveryError::Persistence(message) => message,
+    }
 }
 
 fn snapshot_libraries_for_user(profile: CompatProfile, user: PlaceholderUser) -> Value {

@@ -15,6 +15,261 @@ headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token"
 extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
 
 [[cases]]
+id = "P2-DISCOVERY-LIBRARIES-OWNED"
+method = "GET"
+path = "/api/v1/libraries"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P2-DISCOVERY-SERIES-LIST-OWNED"
+method = "POST"
+path = "/api/v1/series/list?page=0&size=20&sort=metadata.titleSort,asc"
+body = "{\"fullTextSearch\":\"series\",\"condition\":{\"type\":\"LibraryId\",\"operator\":\"is\",\"value\":\"library-1\"}}"
+headers = { "Content-Type" = "application/json", "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P2-DISCOVERY-BOOKS-LIST-OWNED"
+method = "POST"
+path = "/api/v1/books/list?page=0&size=20&sort=metadata.title,asc"
+body = "{\"fullTextSearch\":\"book\",\"condition\":{\"type\":\"LibraryId\",\"operator\":\"is\",\"value\":\"library-1\"}}"
+headers = { "Content-Type" = "application/json", "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P2-DISCOVERY-BOOKS-LATEST-OWNED"
+method = "GET"
+path = "/api/v1/books/latest?page=0&size=20"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P2-DISCOVERY-PARITY-LIBRARIES-ADMIN"
+method = "GET"
+path = "/api/v1/libraries"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "native-rust-owned" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH_ADMIN}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P2-DISCOVERY-PARITY-BOOKS-LATEST-LIMITED"
+method = "GET"
+path = "/api/v1/books/latest?page=0&size=20"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "native-rust-owned" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH_LIMITED}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P2-DISCOVERY-NEGATIVE-UNSUPPORTED-SERIES-RANDOM-SORT"
+method = "POST"
+path = "/api/v1/series/list?page=0&size=20&sort=random,asc"
+body = "{\"fullTextSearch\":\"series\"}"
+headers = { "Content-Type" = "application/json", "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH_ADMIN}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P2-DISCOVERY-NEGATIVE-UNSUPPORTED-BOOK-READDATE-SORT"
+method = "POST"
+path = "/api/v1/books/list?page=0&size=20&sort=readProgress.readDate,desc"
+body = "{\"fullTextSearch\":\"book\"}"
+headers = { "Content-Type" = "application/json", "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH_ADMIN}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P2-DISCOVERY-UNSUPPORTED-SERIES-DETAIL"
+method = "GET"
+path = "/api/v1/series/series-1"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P2-DISCOVERY-UNSUPPORTED-BOOK-DETAIL"
+method = "GET"
+path = "/api/v1/books/book-1"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P2-DISCOVERY-UNSUPPORTED-BOOK-PAGES"
+method = "GET"
+path = "/api/v1/books/book-1/pages"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P2-DISCOVERY-UNSUPPORTED-BOOK-FILE"
+method = "GET"
+path = "/api/v1/books/book-1/file"
+comparison = "binary_metadata"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P2-DISCOVERY-UNSUPPORTED-BOOK-THUMBNAIL"
+method = "GET"
+path = "/api/v1/books/book-1/thumbnail"
+comparison = "binary_metadata"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P2-DISCOVERY-UNSUPPORTED-SERIES-RANDOM-SORT"
+method = "POST"
+path = "/api/v1/series/list?page=0&size=20&sort=random,asc"
+body = "{\"fullTextSearch\":\"series\"}"
+headers = { "Content-Type" = "application/json", "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P2-DISCOVERY-UNSUPPORTED-BOOK-READDATE-SORT"
+method = "POST"
+path = "/api/v1/books/list?page=0&size=20&sort=readProgress.readDate,desc"
+body = "{\"fullTextSearch\":\"book\"}"
+headers = { "Content-Type" = "application/json", "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P2-DISCOVERY-UNSUPPORTED-READLISTS"
+method = "GET"
+path = "/api/v1/readlists"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P2-DISCOVERY-UNSUPPORTED-ONDECK"
+method = "GET"
+path = "/api/v1/books/ondeck"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P2-DISCOVERY-UNSUPPORTED-DUPLICATES"
+method = "GET"
+path = "/api/v1/books/duplicates"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P2-DISCOVERY-UNSUPPORTED-COLLECTIONS-GROUPED"
+method = "GET"
+path = "/api/v1/collections/collection-1/series"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
 id = "KOMGA-P0-LIB-01-ADMIN"
 method = "GET"
 path = "/api/v1/libraries"

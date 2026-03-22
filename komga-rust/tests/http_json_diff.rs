@@ -19,6 +19,21 @@ fn p0_cases_configuration_loads() {
         "KOMGA-P0-LIB-01-ADMIN",
         "KOMGA-P0-LIB-01-USER",
         "KOMGA-P0-LIB-01-LIMITED",
+        "P2-DISCOVERY-LIBRARIES-OWNED",
+        "P2-DISCOVERY-SERIES-LIST-OWNED",
+        "P2-DISCOVERY-BOOKS-LIST-OWNED",
+        "P2-DISCOVERY-BOOKS-LATEST-OWNED",
+        "P2-DISCOVERY-UNSUPPORTED-SERIES-DETAIL",
+        "P2-DISCOVERY-UNSUPPORTED-BOOK-DETAIL",
+        "P2-DISCOVERY-UNSUPPORTED-BOOK-PAGES",
+        "P2-DISCOVERY-UNSUPPORTED-BOOK-FILE",
+        "P2-DISCOVERY-UNSUPPORTED-BOOK-THUMBNAIL",
+        "P2-DISCOVERY-UNSUPPORTED-SERIES-RANDOM-SORT",
+        "P2-DISCOVERY-UNSUPPORTED-BOOK-READDATE-SORT",
+        "P2-DISCOVERY-UNSUPPORTED-READLISTS",
+        "P2-DISCOVERY-UNSUPPORTED-ONDECK",
+        "P2-DISCOVERY-UNSUPPORTED-DUPLICATES",
+        "P2-DISCOVERY-UNSUPPORTED-COLLECTIONS-GROUPED",
         "P1-AUTH-APIKEY-UPPER",
         "P1-AUTH-APIKEY-LOWER",
         "P1-AUTH-APIKEY-INVALID",
@@ -154,6 +169,26 @@ fn p0_cases_configuration_loads() {
         .iter()
         .find(|it| it.id == "P1-SEARCH-OWNERSHIP-SHADOW")
         .expect("search ownership case should exist");
+    let discovery_supported_series_case = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P2-DISCOVERY-SERIES-LIST-OWNED")
+        .expect("discovery supported series list case should exist");
+    let discovery_supported_books_case = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P2-DISCOVERY-BOOKS-LIST-OWNED")
+        .expect("discovery supported books list case should exist");
+    let discovery_unsupported_series_detail = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P2-DISCOVERY-UNSUPPORTED-SERIES-DETAIL")
+        .expect("unsupported series detail case should exist");
+    let discovery_unsupported_books_readdate_sort = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P2-DISCOVERY-UNSUPPORTED-BOOK-READDATE-SORT")
+        .expect("unsupported books read-date sort case should exist");
     let catalog_case = config
         .cases
         .iter()
@@ -491,6 +526,52 @@ fn p0_cases_configuration_loads() {
         search_ownership_case.body.as_deref(),
         Some(r#"{"fullTextSearch":"series","ownership":"shadow"}"#)
     );
+    assert_eq!(discovery_supported_series_case.method, "POST");
+    assert_eq!(
+        discovery_supported_series_case.path,
+        "/api/v1/series/list?page=0&size=20&sort=metadata.titleSort,asc"
+    );
+    assert_eq!(
+        discovery_supported_series_case.body.as_deref(),
+        Some(
+            r#"{"fullTextSearch":"series","condition":{"type":"LibraryId","operator":"is","value":"library-1"}}"#
+        )
+    );
+    assert_eq!(discovery_supported_books_case.method, "POST");
+    assert_eq!(
+        discovery_supported_books_case.path,
+        "/api/v1/books/list?page=0&size=20&sort=metadata.title,asc"
+    );
+    assert_eq!(
+        discovery_supported_books_case.body.as_deref(),
+        Some(
+            r#"{"fullTextSearch":"book","condition":{"type":"LibraryId","operator":"is","value":"library-1"}}"#
+        )
+    );
+    assert_eq!(discovery_unsupported_series_detail.method, "GET");
+    assert_eq!(
+        discovery_unsupported_series_detail.path,
+        "/api/v1/series/series-1"
+    );
+    assert_eq!(
+        discovery_unsupported_series_detail
+            .headers
+            .as_ref()
+            .and_then(|headers| headers.get("X-Komga-Compat-Search-Ownership")),
+        Some(&"shadow-java-writer".to_string())
+    );
+    assert_eq!(discovery_unsupported_books_readdate_sort.method, "POST");
+    assert_eq!(
+        discovery_unsupported_books_readdate_sort.path,
+        "/api/v1/books/list?page=0&size=20&sort=readProgress.readDate,desc"
+    );
+    assert_eq!(
+        discovery_unsupported_books_readdate_sort
+            .headers
+            .as_ref()
+            .and_then(|headers| headers.get("X-Komga-Compat-Search-Ownership")),
+        Some(&"shadow-java-writer".to_string())
+    );
     assert_eq!(catalog_case.method, "GET");
     assert_eq!(catalog_case.path, "/opds/v2/catalog");
     assert_eq!(catalog_case.comparison, ComparisonMode::Json);
@@ -518,6 +599,116 @@ fn p0_cases_configuration_loads() {
             .and_then(|headers| headers.get("Authorization")),
         Some(&"Basic ${KOMGA_COMPAT_BASIC_AUTH_USER}".to_string())
     );
+}
+
+#[test]
+fn discovery_diff_policy_is_strict_for_status_body_page_metadata_order_and_id_sets() {
+    let allowlist = BTreeSet::from(["content-type".to_string()]);
+
+    let base = NormalizedResponse {
+        status: 200,
+        headers: BTreeMap::from([(
+            "content-type".to_string(),
+            vec!["application/json".to_string()],
+        )]),
+        body: NormalizedBody::Json(serde_json::json!({
+            "number": 0,
+            "size": 2,
+            "totalElements": 2,
+            "totalPages": 1,
+            "numberOfElements": 2,
+            "content": [
+                {"id": "book-1"},
+                {"id": "book-2"}
+            ]
+        })),
+    };
+
+    let status_diff = NormalizedResponse {
+        status: 401,
+        headers: base.headers.clone(),
+        body: base.body.clone(),
+    };
+    let status_report = compare_responses(
+        "DISCOVERY-STRICT-STATUS",
+        &base,
+        &status_diff,
+        &allowlist,
+        ComparisonMode::Json,
+    );
+    assert!(!status_report.matches);
+
+    let page_meta_diff = NormalizedResponse {
+        status: 200,
+        headers: base.headers.clone(),
+        body: NormalizedBody::Json(serde_json::json!({
+            "number": 1,
+            "size": 2,
+            "totalElements": 2,
+            "totalPages": 1,
+            "numberOfElements": 2,
+            "content": [
+                {"id": "book-1"},
+                {"id": "book-2"}
+            ]
+        })),
+    };
+    let page_meta_report = compare_responses(
+        "DISCOVERY-STRICT-PAGE-META",
+        &base,
+        &page_meta_diff,
+        &allowlist,
+        ComparisonMode::Json,
+    );
+    assert!(!page_meta_report.matches);
+
+    let order_diff = NormalizedResponse {
+        status: 200,
+        headers: base.headers.clone(),
+        body: NormalizedBody::Json(serde_json::json!({
+            "number": 0,
+            "size": 2,
+            "totalElements": 2,
+            "totalPages": 1,
+            "numberOfElements": 2,
+            "content": [
+                {"id": "book-2"},
+                {"id": "book-1"}
+            ]
+        })),
+    };
+    let order_report = compare_responses(
+        "DISCOVERY-STRICT-ORDER",
+        &base,
+        &order_diff,
+        &allowlist,
+        ComparisonMode::Json,
+    );
+    assert!(!order_report.matches);
+
+    let id_set_diff = NormalizedResponse {
+        status: 200,
+        headers: base.headers.clone(),
+        body: NormalizedBody::Json(serde_json::json!({
+            "number": 0,
+            "size": 2,
+            "totalElements": 2,
+            "totalPages": 1,
+            "numberOfElements": 2,
+            "content": [
+                {"id": "book-1"},
+                {"id": "book-3"}
+            ]
+        })),
+    };
+    let id_set_report = compare_responses(
+        "DISCOVERY-STRICT-ID-SET",
+        &base,
+        &id_set_diff,
+        &allowlist,
+        ComparisonMode::Json,
+    );
+    assert!(!id_set_report.matches);
 }
 
 #[test]

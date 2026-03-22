@@ -35,6 +35,13 @@ const PLACEHOLDER_USERS: &[PlaceholderUser] = &[
         shared_all_libraries: false,
         shared_library_ids: &["1"],
     },
+    PlaceholderUser {
+        id: "restricted",
+        email: "restricted@example.org",
+        password: "restricted",
+        shared_all_libraries: true,
+        shared_library_ids: &[],
+    },
 ];
 
 pub(super) enum AuthOutcome {
@@ -342,6 +349,17 @@ pub(super) fn placeholder_user_json(user: PlaceholderUser) -> Value {
             "sharedLibrariesIds": user.shared_library_ids,
             "labelsAllow": [],
             "labelsExclude": [],
+            "ageRestriction": null,
+        })
+    } else if user.email == "restricted@example.org" {
+        json!({
+            "id": "2R3STR1CT3D",
+            "email": user.email,
+            "roles": ["FILE_DOWNLOAD", "PAGE_STREAMING", "USER"],
+            "sharedAllLibraries": true,
+            "sharedLibrariesIds": [],
+            "labelsAllow": [],
+            "labelsExclude": ["adult"],
             "ageRestriction": null,
         })
     } else {

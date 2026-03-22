@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::config::RuntimeConfig;
+use crate::app::discovery_auth::DiscoveryAuthState;
 
 mod content;
 mod operational;
@@ -105,6 +106,7 @@ pub(super) fn build_router(config: &RuntimeConfig) -> Router {
         progress_by_token: Arc::new(Mutex::new(HashMap::new())),
     };
     let profile = config.app_compat_profile();
+    let discovery_auth = DiscoveryAuthState::default();
     let operational = OperationalState {
         runtime: config.clone(),
         settings: Arc::new(Mutex::new(OperationalSettings::from_runtime(config))),
@@ -131,6 +133,7 @@ pub(super) fn build_router(config: &RuntimeConfig) -> Router {
         .route("/api/v1/series", get(content::series))
         .route("/api/v1/series/list", post(content::series_list))
         .route("/api/v1/books", get(content::books))
+        .route("/api/v1/books/list", post(content::books_list))
         .route("/api/v1/books/latest", get(content::books_latest))
         .route("/api/v1/books/{book_id}/pages", get(content::book_pages))
         .route(
@@ -173,6 +176,7 @@ pub(super) fn build_router(config: &RuntimeConfig) -> Router {
         )
         .layer(middleware::from_fn(operational::dev_cors_middleware))
         .layer(axum::extract::Extension(state))
+        .layer(axum::extract::Extension(discovery_auth))
         .layer(axum::extract::Extension(operational))
         .layer(axum::extract::Extension(profile))
 }
