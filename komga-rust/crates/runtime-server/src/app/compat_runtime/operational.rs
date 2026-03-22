@@ -1,7 +1,7 @@
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{Extension, Path, Request};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Uri, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use serde_json::{Value, json};
@@ -13,6 +13,7 @@ use super::{
     DEFAULT_BUILD_TIME, DEFAULT_GIT_BRANCH, DEFAULT_GIT_COMMIT_ID, DEFAULT_GIT_COMMIT_TIME,
     DEFAULT_LOGFILE, DEV_CORS_ALLOW_HEADERS, DEV_CORS_ALLOW_METHODS, DEV_FRONTEND_ORIGIN,
     OperationalSettings, OperationalState,
+    SEARCH_OWNERSHIP_HEADER, SHADOW_JAVA_WRITER_MARKER,
 };
 
 pub(super) async fn dev_cors_middleware(req: Request, next: Next) -> Response {
@@ -132,12 +133,17 @@ pub(super) async fn sse_events(headers: HeaderMap) -> Response {
         ": connected\n\n"
     };
 
-    (
+    let mut response = (
         StatusCode::OK,
         [(header::CONTENT_TYPE, "text/event-stream")],
         body,
     )
-        .into_response()
+        .into_response();
+    response.headers_mut().insert(
+        HeaderName::from_static(SEARCH_OWNERSHIP_HEADER),
+        HeaderValue::from_static(SHADOW_JAVA_WRITER_MARKER),
+    );
+    response
 }
 
 pub(super) async fn update_server_settings(

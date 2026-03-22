@@ -17,6 +17,15 @@ pub struct ContentRestrictions {
     pub labels_exclude: Vec<String>,
 }
 
+impl ContentRestrictions {
+    pub fn is_restricted(&self) -> bool {
+        self.age.is_some()
+            || self.age_restriction.is_some()
+            || !self.labels_allow.is_empty()
+            || !self.labels_exclude.is_empty()
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DiscoveryPrincipal {
     pub user_id: String,
@@ -35,6 +44,14 @@ impl DiscoveryPrincipal {
         self.shared_all_libraries || self.is_admin()
     }
 
+    pub fn can_access_library(&self, library_id: &str) -> bool {
+        self.can_access_all_libraries()
+            || self
+                .shared_library_ids
+                .iter()
+                .any(|candidate| candidate == library_id)
+    }
+
     pub fn authorized_library_ids(
         &self,
         requested_library_ids: Option<&[String]>,
@@ -45,6 +62,60 @@ impl DiscoveryPrincipal {
             (true, Some(requested)) => Some(requested.to_vec()),
             (true, None) => None,
         }
+    }
+
+    pub fn is_content_allowed(&self, age_rating: Option<u16>, sharing_labels: &[String]) -> bool {
+        let labels = normalized_sharing_labels(sharing_labels);
+
+        let age_allowed =
+            if self.restrictions.age_restriction == Some(AgeRestrictionKind::AllowOnly) {
+                self.restrictions
+                    .age
+                    .map(|age_limit| age_rating.is_some_and(|age| age <= age_limit))
+            } else {
+                None
+            };
+
+        let label_allowed = if self.restrictions.labels_allow.is_empty() {
+            None
+        } else {
+            Some(
+                self.restrictions
+                    .labels_allow
+                    .iter()
+                    .any(|candidate| labels.contains(candidate)),
+            )
+        };
+
+        let allowed = match (age_allowed, label_allowed) {
+            (None, label_allowed) => label_allowed != Some(false),
+            (age_allowed, None) => age_allowed != Some(false),
+            (age_allowed, label_allowed) => {
+                age_allowed != Some(false) || label_allowed != Some(false)
+            }
+        };
+        if !allowed {
+            return false;
+        }
+
+        let age_denied = if self.restrictions.age_restriction == Some(AgeRestrictionKind::Exclude) {
+            self.restrictions
+                .age
+                .is_some_and(|age_limit| age_rating.is_some_and(|age| age >= age_limit))
+        } else {
+            false
+        };
+
+        let label_denied = if self.restrictions.labels_exclude.is_empty() {
+            false
+        } else {
+            self.restrictions
+                .labels_exclude
+                .iter()
+                .any(|candidate| labels.contains(candidate))
+        };
+
+        !age_denied && !label_denied
     }
 }
 
@@ -62,6 +133,25 @@ pub struct DiscoveryQueryContext {
     pub is_admin: bool,
     pub authorized_library_ids: Option<Vec<String>>,
     pub restrictions: Option<QueryRestrictions>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DetailContentContext {
+    pub age_rating: Option<u16>,
+    pub sharing_labels: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DetailResourceContext {
+    pub library_id: Option<String>,
+    pub content: Option<DetailContentContext>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DetailAccessDenial {
+    Unauthorized,
+    Forbidden,
+    NotFound,
 }
 
 pub fn to_query_context(
@@ -108,6 +198,52 @@ impl DiscoveryAuthState {
             .cloned()?;
 
         Some(to_query_context(&principal, requested_library_ids))
+    }
+
+    pub fn resolve_detail_query_context(
+        &self,
+        headers: &HeaderMap,
+        detail: &DetailResourceContext,
+    ) -> Result<DiscoveryQueryContext, DetailAccessDenial> {
+        let session_token =
+            session_token_from_headers(headers).ok_or(DetailAccessDenial::Unauthorized)?;
+        let principal = self
+            .principals_by_session_token
+            .lock()
+            .expect("discovery auth session store lock should not be poisoned")
+            .get(&session_token)
+            .cloned()
+            .ok_or(DetailAccessDenial::Unauthorized)?;
+
+        if !principal.can_access_all_libraries() {
+            let Some(library_id) = detail.library_id.as_deref() else {
+                return Err(DetailAccessDenial::NotFound);
+            };
+
+            if !principal.can_access_library(library_id) {
+                return Err(DetailAccessDenial::Forbidden);
+            }
+        }
+
+        if principal.restrictions.is_restricted() {
+            let Some(content) = detail.content.as_ref() else {
+                return Err(DetailAccessDenial::NotFound);
+            };
+
+            if !principal.is_content_allowed(content.age_rating, &content.sharing_labels) {
+                return Err(DetailAccessDenial::Forbidden);
+            }
+        }
+
+        let requested_library_ids = detail
+            .library_id
+            .as_ref()
+            .map(|library_id| vec![library_id.clone()]);
+
+        Ok(to_query_context(
+            &principal,
+            requested_library_ids.as_deref(),
+        ))
     }
 }
 
@@ -215,6 +351,16 @@ fn normalized_labels(labels: &[Value]) -> Vec<String> {
     labels
         .iter()
         .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+        .map(|label| label.to_ascii_lowercase())
+        .collect::<Vec<_>>()
+}
+
+fn normalized_sharing_labels(labels: &[String]) -> Vec<String> {
+    labels
+        .iter()
+        .map(String::as_str)
         .map(str::trim)
         .filter(|label| !label.is_empty())
         .map(|label| label.to_ascii_lowercase())

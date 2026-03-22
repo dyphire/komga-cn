@@ -4,19 +4,25 @@ use axum::extract::{Extension, Path};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use komga_application::discovery::{
-    BooksLatestQuery, BooksListQuery, DiscoveryQueries, SeriesListQuery,
+    BookDetailQuery, BookReadlistsQuery, BookSiblingQuery, BooksLatestQuery, BooksListQuery,
+    DiscoveryQueries, SeriesCollectionsQuery, SeriesDetailQuery, SeriesListQuery,
 };
 use komga_domain::discovery::{
     AgeRestrictionKind as DomainAgeRestrictionKind, DiscoveryError,
-    DiscoveryQueryContext as DomainDiscoveryQueryContext, NonNativeRequestShape,
-    BookReadModel, PageEnvelope, QueryRestrictions as DomainQueryRestrictions, SeriesReadModel,
+    BookDetailReadModel, BookReadModel, CollectionReadModel, DirectBrowseBooksListFamily,
+    DiscoveryQueryContext as DomainDiscoveryQueryContext, NonNativeRequestShape, PageEnvelope,
+    QueryRestrictions as DomainQueryRestrictions, ReadListReadModel, SeriesDetailReadModel,
+    SeriesReadModel,
 };
-use komga_persistence::discovery::{BookRow, SeriesRow, SqliteDiscoveryAdapter};
-use serde_json::{Value, json};
+use komga_persistence::discovery::{
+    BookRow, CollectionRow, ReadListRow, ReadProgressRow, SeriesRow, SqliteDiscoveryAdapter,
+};
+use serde_json::{Map, Value, json};
 
 use crate::app::CompatProfile;
 use crate::app::discovery_auth::{
-    AgeRestrictionKind, DiscoveryAuthState, DiscoveryQueryContext, QueryRestrictions,
+    AgeRestrictionKind, DetailAccessDenial, DetailContentContext, DetailResourceContext,
+    DiscoveryAuthState, DiscoveryQueryContext, QueryRestrictions,
 };
 use crate::app::placeholder_auth::{
     require_auth, resolved_auth_user, resolved_token,
@@ -106,6 +112,146 @@ pub(super) async fn series(
     }
 
     Json(series_json_for_request(profile, &uri, None)).into_response()
+}
+
+pub(super) async fn series_detail(
+    Extension(profile): Extension<CompatProfile>,
+    Extension(auth_state): Extension<DiscoveryAuthState>,
+    headers: HeaderMap,
+    Path(series_id): Path<String>,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if profile == CompatProfile::JavaLiveLocaldb {
+        let user =
+            resolved_auth_user(&headers).expect("authorized series detail request should resolve user");
+        let path = format!("/api/v1/series/{series_id}");
+        return match content_java_live::fetch_json(user, &path, "series detail").await {
+            Ok(series) => Json(series).into_response(),
+            Err(message) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": message })),
+            )
+                .into_response(),
+        };
+    }
+
+    let mut adapter = SqliteDiscoveryAdapter::default();
+    seed_series_detail_data(&mut adapter);
+    let queries = DiscoveryQueries::new(adapter);
+
+    let Some(resource) = (match queries.resolve_series_resource(&series_id) {
+        Ok(resource) => resource,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("series resource lookup failed: {error:?}") })),
+            )
+                .into_response();
+        }
+    }) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let detail_context = DetailResourceContext {
+        library_id: Some(resource.library_id.clone()),
+        content: Some(DetailContentContext {
+            age_rating: resource.age_rating,
+            sharing_labels: resource.labels,
+        }),
+    };
+
+    let detail_query_context = match auth_state.resolve_detail_query_context(&headers, &detail_context)
+    {
+        Ok(context) => context,
+        Err(denial) => return detail_access_denial_response(denial),
+    };
+    let is_admin = detail_query_context.is_admin;
+
+    let domain_context = to_domain_query_context(detail_query_context);
+    let query = SeriesDetailQuery { series_id };
+
+    match queries.get_series_detail(&domain_context, query) {
+        Ok(Some(series)) => Json(series_detail_payload(&series, is_admin)).into_response(),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("series detail query failed: {error:?}") })),
+        )
+            .into_response(),
+    }
+}
+
+pub(super) async fn series_collections(
+    Extension(profile): Extension<CompatProfile>,
+    Extension(auth_state): Extension<DiscoveryAuthState>,
+    headers: HeaderMap,
+    Path(series_id): Path<String>,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if profile == CompatProfile::JavaLiveLocaldb {
+        let user = resolved_auth_user(&headers)
+            .expect("authorized series collections request should resolve user");
+        let path = format!("/api/v1/series/{series_id}/collections");
+        return match content_java_live::fetch_json(user, &path, "series collections").await {
+            Ok(collections) => Json(collections).into_response(),
+            Err(message) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": message })),
+            )
+                .into_response(),
+        };
+    }
+
+    let mut adapter = SqliteDiscoveryAdapter::default();
+    seed_series_detail_data(&mut adapter);
+    let queries = DiscoveryQueries::new(adapter);
+
+    let Some(resource) = (match queries.resolve_series_resource(&series_id) {
+        Ok(resource) => resource,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("series resource lookup failed: {error:?}") })),
+            )
+                .into_response();
+        }
+    }) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let detail_context = DetailResourceContext {
+        library_id: Some(resource.library_id.clone()),
+        content: Some(DetailContentContext {
+            age_rating: resource.age_rating,
+            sharing_labels: resource.labels,
+        }),
+    };
+
+    let detail_query_context = match auth_state.resolve_detail_query_context(&headers, &detail_context)
+    {
+        Ok(context) => context,
+        Err(denial) => return detail_access_denial_response(denial),
+    };
+
+    let domain_context = to_domain_query_context(detail_query_context);
+    let query = SeriesCollectionsQuery { series_id };
+
+    match queries.list_series_collections(&domain_context, query) {
+        Ok(collections) => Json(series_collections_payload(&collections)).into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": format!("series collections query failed: {error:?}"),
+            })),
+        )
+            .into_response(),
+    }
 }
 
 pub(super) async fn series_list(
@@ -268,6 +414,280 @@ pub(super) async fn books_latest(
     Json(books).into_response()
 }
 
+pub(super) async fn book_detail(
+    Extension(profile): Extension<CompatProfile>,
+    Extension(auth_state): Extension<DiscoveryAuthState>,
+    headers: HeaderMap,
+    Path(book_id): Path<String>,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if profile == CompatProfile::JavaLiveLocaldb {
+        let user = resolved_auth_user(&headers)
+            .expect("authorized book detail request should resolve user");
+        let path = format!("/api/v1/books/{book_id}");
+        return match content_java_live::fetch_json(user, &path, "book detail").await {
+            Ok(book) => Json(book).into_response(),
+            Err(message) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": message })),
+            )
+                .into_response(),
+        };
+    }
+
+    let mut adapter = SqliteDiscoveryAdapter::default();
+    seed_series_detail_data(&mut adapter);
+    let queries = DiscoveryQueries::new(adapter);
+
+    let Some(resource) = (match queries.resolve_book_resource(&book_id) {
+        Ok(resource) => resource,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("book resource lookup failed: {error:?}") })),
+            )
+                .into_response();
+        }
+    }) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let detail_context = DetailResourceContext {
+        library_id: Some(resource.library_id.clone()),
+        content: Some(DetailContentContext {
+            age_rating: resource.age_rating,
+            sharing_labels: resource.labels,
+        }),
+    };
+
+    let detail_query_context = match auth_state.resolve_detail_query_context(&headers, &detail_context)
+    {
+        Ok(context) => context,
+        Err(denial) => return detail_access_denial_response(denial),
+    };
+    let is_admin = detail_query_context.is_admin;
+
+    let domain_context = to_domain_query_context(detail_query_context);
+    let query = BookDetailQuery { book_id };
+
+    match queries.get_book_detail(&domain_context, query) {
+        Ok(Some(book)) => Json(book_detail_payload(&book, is_admin)).into_response(),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("book detail query failed: {error:?}") })),
+        )
+            .into_response(),
+    }
+}
+
+pub(super) async fn book_sibling_previous(
+    Extension(profile): Extension<CompatProfile>,
+    Extension(auth_state): Extension<DiscoveryAuthState>,
+    headers: HeaderMap,
+    Path(book_id): Path<String>,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if profile == CompatProfile::JavaLiveLocaldb {
+        let user =
+            resolved_auth_user(&headers).expect("authorized sibling previous request should resolve user");
+        let path = format!("/api/v1/books/{book_id}/previous");
+        return match content_java_live::fetch_json(user, &path, "book previous").await {
+            Ok(book) => Json(book).into_response(),
+            Err(message) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": message })),
+            )
+                .into_response(),
+        };
+    }
+
+    let mut adapter = SqliteDiscoveryAdapter::default();
+    seed_series_detail_data(&mut adapter);
+    let queries = DiscoveryQueries::new(adapter);
+
+    let Some(resource) = (match queries.resolve_book_resource(&book_id) {
+        Ok(resource) => resource,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("book resource lookup failed: {error:?}") })),
+            )
+                .into_response();
+        }
+    }) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let detail_context = DetailResourceContext {
+        library_id: Some(resource.library_id.clone()),
+        content: Some(DetailContentContext {
+            age_rating: resource.age_rating,
+            sharing_labels: resource.labels,
+        }),
+    };
+
+    let detail_query_context = match auth_state.resolve_detail_query_context(&headers, &detail_context)
+    {
+        Ok(context) => context,
+        Err(denial) => return detail_access_denial_response(denial),
+    };
+    let is_admin = detail_query_context.is_admin;
+
+    let domain_context = to_domain_query_context(detail_query_context);
+
+    match queries.get_book_sibling_previous(&domain_context, BookSiblingQuery { book_id }) {
+        Ok(Some(book)) => Json(book_detail_payload(&book, is_admin)).into_response(),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("book previous query failed: {error:?}") })),
+        )
+            .into_response(),
+    }
+}
+
+pub(super) async fn book_sibling_next(
+    Extension(profile): Extension<CompatProfile>,
+    Extension(auth_state): Extension<DiscoveryAuthState>,
+    headers: HeaderMap,
+    Path(book_id): Path<String>,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if profile == CompatProfile::JavaLiveLocaldb {
+        let user = resolved_auth_user(&headers).expect("authorized sibling next request should resolve user");
+        let path = format!("/api/v1/books/{book_id}/next");
+        return match content_java_live::fetch_json(user, &path, "book next").await {
+            Ok(book) => Json(book).into_response(),
+            Err(message) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": message })),
+            )
+                .into_response(),
+        };
+    }
+
+    let mut adapter = SqliteDiscoveryAdapter::default();
+    seed_series_detail_data(&mut adapter);
+    let queries = DiscoveryQueries::new(adapter);
+
+    let Some(resource) = (match queries.resolve_book_resource(&book_id) {
+        Ok(resource) => resource,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("book resource lookup failed: {error:?}") })),
+            )
+                .into_response();
+        }
+    }) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let detail_context = DetailResourceContext {
+        library_id: Some(resource.library_id.clone()),
+        content: Some(DetailContentContext {
+            age_rating: resource.age_rating,
+            sharing_labels: resource.labels,
+        }),
+    };
+
+    let detail_query_context = match auth_state.resolve_detail_query_context(&headers, &detail_context)
+    {
+        Ok(context) => context,
+        Err(denial) => return detail_access_denial_response(denial),
+    };
+    let is_admin = detail_query_context.is_admin;
+
+    let domain_context = to_domain_query_context(detail_query_context);
+
+    match queries.get_book_sibling_next(&domain_context, BookSiblingQuery { book_id }) {
+        Ok(Some(book)) => Json(book_detail_payload(&book, is_admin)).into_response(),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("book next query failed: {error:?}") })),
+        )
+            .into_response(),
+    }
+}
+
+pub(super) async fn book_readlists(
+    Extension(profile): Extension<CompatProfile>,
+    Extension(auth_state): Extension<DiscoveryAuthState>,
+    headers: HeaderMap,
+    Path(book_id): Path<String>,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if profile == CompatProfile::JavaLiveLocaldb {
+        let user =
+            resolved_auth_user(&headers).expect("authorized book readlists request should resolve user");
+        let path = format!("/api/v1/books/{book_id}/readlists");
+        return match content_java_live::fetch_json(user, &path, "book readlists").await {
+            Ok(readlists) => Json(readlists).into_response(),
+            Err(message) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": message })),
+            )
+                .into_response(),
+        };
+    }
+
+    let mut adapter = SqliteDiscoveryAdapter::default();
+    seed_series_detail_data(&mut adapter);
+    let queries = DiscoveryQueries::new(adapter);
+
+    let Some(resource) = (match queries.resolve_book_resource(&book_id) {
+        Ok(resource) => resource,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("book resource lookup failed: {error:?}") })),
+            )
+                .into_response();
+        }
+    }) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let detail_context = DetailResourceContext {
+        library_id: Some(resource.library_id.clone()),
+        content: Some(DetailContentContext {
+            age_rating: resource.age_rating,
+            sharing_labels: resource.labels,
+        }),
+    };
+
+    let detail_query_context = match auth_state.resolve_detail_query_context(&headers, &detail_context)
+    {
+        Ok(context) => context,
+        Err(denial) => return detail_access_denial_response(denial),
+    };
+
+    let domain_context = to_domain_query_context(detail_query_context);
+
+    match queries.list_book_readlists(&domain_context, BookReadlistsQuery { book_id }) {
+        Ok(readlists) => Json(readlists_payload(&readlists)).into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("book readlists query failed: {error:?}") })),
+        )
+            .into_response(),
+    }
+}
+
 pub(super) async fn users_me(
     Extension(auth_state): Extension<DiscoveryAuthState>,
     headers: HeaderMap,
@@ -293,18 +713,18 @@ pub(super) async fn book_page(
         .and_then(|value| value.to_str().ok())
         == Some(LAST_MODIFIED)
     {
-        return (
+        return non_native_response((
             StatusCode::NOT_MODIFIED,
             [
                 (header::LAST_MODIFIED, LAST_MODIFIED),
                 (header::CACHE_CONTROL, CACHE_CONTROL_PRIVATE),
             ],
         )
-            .into_response();
+            .into_response());
     }
 
     if profile == CompatProfile::JavaLiveLocaldb {
-        return (
+        return non_native_response((
             StatusCode::OK,
             [
                 (header::CONTENT_TYPE, "image/png"),
@@ -317,10 +737,10 @@ pub(super) async fn book_page(
             ],
             PAGE_BODY,
         )
-            .into_response();
+            .into_response());
     }
 
-    (
+    non_native_response((
         StatusCode::OK,
         [
             (header::CONTENT_TYPE, "application/pdf"),
@@ -333,7 +753,7 @@ pub(super) async fn book_page(
         ],
         PDF_BODY,
     )
-        .into_response()
+        .into_response())
 }
 
 pub(super) async fn book_page_thumbnail(
@@ -349,17 +769,17 @@ pub(super) async fn book_page_thumbnail(
         .and_then(|value| value.to_str().ok())
         == Some(LAST_MODIFIED)
     {
-        return (
+        return non_native_response((
             StatusCode::NOT_MODIFIED,
             [
                 (header::LAST_MODIFIED, LAST_MODIFIED),
                 (header::CACHE_CONTROL, CACHE_CONTROL_PRIVATE),
             ],
         )
-            .into_response();
+            .into_response());
     }
 
-    (
+    non_native_response((
         StatusCode::OK,
         [
             (header::CONTENT_TYPE, "image/jpeg"),
@@ -369,7 +789,7 @@ pub(super) async fn book_page_thumbnail(
         ],
         THUMBNAIL_BODY,
     )
-        .into_response()
+        .into_response())
 }
 
 pub(super) async fn book_thumbnail(
@@ -381,10 +801,10 @@ pub(super) async fn book_thumbnail(
     }
 
     if profile == CompatProfile::JavaLiveLocaldb {
-        return StatusCode::NOT_FOUND.into_response();
+        return non_native_response(StatusCode::NOT_FOUND.into_response());
     }
 
-    StatusCode::NOT_FOUND.into_response()
+    non_native_response(StatusCode::NOT_FOUND.into_response())
 }
 
 pub(super) async fn book_pages(
@@ -401,7 +821,7 @@ pub(super) async fn book_pages(
         return match content_java_live::fetch_json(user, "/api/v1/books/book-1/pages", "book pages")
             .await
         {
-            Ok(pages) => Json(pages).into_response(),
+            Ok(pages) => non_native_response(Json(pages).into_response()),
             Err(message) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": message })),
@@ -410,7 +830,7 @@ pub(super) async fn book_pages(
         };
     }
 
-    Json(book_pages_json(profile)).into_response()
+    non_native_response(Json(book_pages_json(profile)).into_response())
 }
 
 pub(super) async fn book_file(
@@ -422,7 +842,7 @@ pub(super) async fn book_file(
     }
 
     if profile == CompatProfile::JavaLiveLocaldb {
-        return (
+        return non_native_response((
             StatusCode::OK,
             [
                 (header::CONTENT_TYPE, "application/zip"),
@@ -433,10 +853,10 @@ pub(super) async fn book_file(
             ],
             PAGE_BODY,
         )
-            .into_response();
+            .into_response());
     }
 
-    (
+    non_native_response((
         StatusCode::OK,
         [
             (header::CONTENT_TYPE, "application/pdf"),
@@ -447,7 +867,7 @@ pub(super) async fn book_file(
         ],
         PDF_BODY,
     )
-        .into_response()
+        .into_response())
 }
 
 pub(super) async fn book_read_progress(
@@ -462,28 +882,28 @@ pub(super) async fn book_read_progress(
     }
 
     if book_id != "book-1" {
-        return StatusCode::NOT_FOUND.into_response();
+        return non_native_response(StatusCode::NOT_FOUND.into_response());
     }
 
     let Ok(payload) = serde_json::from_slice::<Value>(&body) else {
-        return invalid_read_progress_payload();
+        return non_native_response(invalid_read_progress_payload());
     };
 
     let token = resolved_token(&headers);
 
     if payload.get("completed").and_then(|value| value.as_bool()) == Some(true) {
         set_read_progress(&state, token, book_id, 10, true);
-        return StatusCode::NO_CONTENT.into_response();
+        return non_native_response(StatusCode::NO_CONTENT.into_response());
     }
 
     if let Some(page) = payload.get("page").and_then(|value| value.as_u64())
         && (1..=10).contains(&page)
     {
         set_read_progress(&state, token, book_id, page, false);
-        return StatusCode::NO_CONTENT.into_response();
+        return non_native_response(StatusCode::NO_CONTENT.into_response());
     }
 
-    invalid_read_progress_payload()
+    non_native_response(invalid_read_progress_payload())
 }
 
 pub(super) async fn book_read_progress_get(
@@ -503,7 +923,7 @@ pub(super) async fn book_read_progress_get(
         return match content_java_live::fetch_text_response(user, &path, "book read-progress")
             .await
         {
-            Ok(response) => response,
+            Ok(response) => non_native_response(response),
             Err(message) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": message })),
@@ -512,7 +932,7 @@ pub(super) async fn book_read_progress_get(
         };
     }
 
-    method_not_allowed_json_response(&path)
+    non_native_response(method_not_allowed_json_response(&path))
 }
 
 pub(super) async fn book_read_progress_delete(
@@ -525,7 +945,7 @@ pub(super) async fn book_read_progress_delete(
     }
 
     if book_id != "book-1" {
-        return StatusCode::NOT_FOUND.into_response();
+        return non_native_response(StatusCode::NOT_FOUND.into_response());
     }
 
     let token = resolved_token(&headers);
@@ -538,7 +958,7 @@ pub(super) async fn book_read_progress_delete(
         user_progress.remove(&book_id);
     }
 
-    StatusCode::NO_CONTENT.into_response()
+    non_native_response(StatusCode::NO_CONTENT.into_response())
 }
 
 pub(super) async fn book_progression(
@@ -551,11 +971,11 @@ pub(super) async fn book_progression(
     }
 
     if book_id != "book-1" {
-        return StatusCode::NOT_FOUND.into_response();
+        return non_native_response(StatusCode::NOT_FOUND.into_response());
     }
 
     let Ok(payload) = serde_json::from_slice::<Value>(&body) else {
-        return invalid_progression_payload();
+        return non_native_response(invalid_progression_payload());
     };
 
     let progression = payload
@@ -565,9 +985,9 @@ pub(super) async fn book_progression(
         .and_then(|value| value.as_f64());
 
     if progression.is_some() {
-        StatusCode::NO_CONTENT.into_response()
+        non_native_response(StatusCode::NO_CONTENT.into_response())
     } else {
-        invalid_progression_payload()
+        non_native_response(invalid_progression_payload())
     }
 }
 
@@ -581,7 +1001,7 @@ pub(super) async fn book_progression_get(
     }
 
     if book_id != "book-1" {
-        return StatusCode::NOT_FOUND.into_response();
+        return non_native_response(StatusCode::NOT_FOUND.into_response());
     }
 
     let path = format!("/api/v1/books/{book_id}/progression");
@@ -590,7 +1010,7 @@ pub(super) async fn book_progression_get(
         let user =
             resolved_auth_user(&headers).expect("authorized progression GET should resolve user");
         return match content_java_live::fetch_text_response(user, &path, "book progression").await {
-            Ok(response) => response,
+            Ok(response) => non_native_response(response),
             Err(message) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": message })),
@@ -599,7 +1019,7 @@ pub(super) async fn book_progression_get(
         };
     }
 
-    StatusCode::NO_CONTENT.into_response()
+    non_native_response(StatusCode::NO_CONTENT.into_response())
 }
 
 pub(super) async fn opds_manifest(
@@ -803,6 +1223,7 @@ struct NativeSeriesFilters {
 
 #[derive(Clone, Debug, Default)]
 struct NativeBooksFilters {
+    direct_browse_family: Option<DirectBrowseBooksListFamily>,
     library_ids: Option<Vec<String>>,
     series_ids: Option<Vec<String>>,
     deleted: Option<bool>,
@@ -833,6 +1254,7 @@ fn native_owned_books_list_response(
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(20)
         .max(1);
+    let unpaged = query_bool(uri.query().unwrap_or_default(), "unpaged");
 
     let filters = match parse_native_books_filters(payload.and_then(|value| value.get("condition"))) {
         Ok(filters) => filters,
@@ -860,6 +1282,8 @@ fn native_owned_books_list_response(
     let query = BooksListQuery {
         page,
         size,
+        unpaged,
+        direct_browse_family: filters.direct_browse_family,
         library_ids: filters.library_ids,
         series_ids: filters.series_ids,
         deleted: filters.deleted,
@@ -873,9 +1297,16 @@ fn native_owned_books_list_response(
         sort: sorts,
         search: full_text_search,
     };
+    let is_direct_browse = query.direct_browse_family.is_some();
     let fallback_search = query.search.clone();
 
-    match queries.list_books(&domain_context, query) {
+    let result = if is_direct_browse {
+        queries.list_books_direct_browse(&domain_context, query)
+    } else {
+        queries.list_books(&domain_context, query)
+    };
+
+    match result {
         Ok(page) => {
             let mut response = Json(books_page_payload(page, is_admin, true)).into_response();
             mark_native(&mut response);
@@ -1225,6 +1656,7 @@ fn parse_books_series_id_filter(condition: &Value) -> Result<NativeBooksFilters,
     };
 
     Ok(NativeBooksFilters {
+        direct_browse_family: Some(DirectBrowseBooksListFamily::BrowseBookSiblingsUnpaged),
         series_ids: Some(vec![value.to_string()]),
         ..NativeBooksFilters::default()
     })
@@ -1433,6 +1865,8 @@ fn parse_books_composite_filters(condition: &Value, all_of: bool) -> Result<Nati
     };
 
     let mut aggregate = NativeBooksFilters::default();
+    let mut child_count = 0usize;
+    let mut series_leaf_count = 0usize;
     let mut library_groups: Vec<Vec<String>> = vec![];
     let mut series_groups: Vec<Vec<String>> = vec![];
     let mut tag_groups: Vec<Vec<String>> = vec![];
@@ -1443,7 +1877,22 @@ fn parse_books_composite_filters(condition: &Value, all_of: bool) -> Result<Nati
     let mut release_date_groups: Vec<Vec<String>> = vec![];
 
     for child in children {
+        child_count += 1;
         let parsed = parse_native_books_filters(Some(child))?;
+        let is_series_leaf = parsed.series_ids.is_some()
+            && parsed.library_ids.is_none()
+            && parsed.deleted.is_none()
+            && parsed.oneshot.is_none()
+            && parsed.tags.is_none()
+            && parsed.read_statuses.is_none()
+            && parsed.media_profiles.is_none()
+            && parsed.media_statuses.is_none()
+            && parsed.authors.is_none()
+            && parsed.release_dates.is_none();
+        if is_series_leaf {
+            series_leaf_count += 1;
+        }
+
         if let Some(ids) = parsed.library_ids {
             library_groups.push(ids);
         }
@@ -1481,6 +1930,11 @@ fn parse_books_composite_filters(condition: &Value, all_of: bool) -> Result<Nati
     aggregate.media_statuses = merge_string_groups(media_status_groups, all_of);
     aggregate.authors = merge_string_groups(author_groups, all_of);
     aggregate.release_dates = merge_string_groups(release_date_groups, all_of);
+    aggregate.direct_browse_family = if all_of && child_count == 1 && series_leaf_count == 1 {
+        Some(DirectBrowseBooksListFamily::BrowseSeriesPaged)
+    } else {
+        None
+    };
 
     Ok(aggregate)
 }
@@ -1880,8 +2334,87 @@ fn seed_books_discovery_data(adapter: &mut SqliteDiscoveryAdapter) {
             .with_last_modified("2024-01-01T03:04:05Z")
             .with_media("READY", "application/zip", 1)
             .with_media_profile("PROFILE-1")
+            .with_number_sort(1)
             .with_read_status("READ")
             .with_release_date("2024-01-01")
+            .with_tags(["safe"])
+            .with_authors(["alice"]),
+    );
+    adapter.insert_book(
+        BookRow::new("book-2", "series-2", "1", "restricted-book.cbz")
+            .with_url("/library1/restricted-book.cbz")
+            .with_last_modified("2024-01-03T03:04:05Z")
+            .with_media("READY", "application/vnd.comicbook+zip", 1)
+            .with_media_profile("PROFILE-2")
+            .with_number_sort(2)
+            .with_read_status("UNREAD")
+            .with_release_date("2023-01-01")
+            .with_tags(["adult"])
+            .with_authors(["bob"]),
+    );
+}
+
+fn seed_series_detail_data(adapter: &mut SqliteDiscoveryAdapter) {
+    adapter.insert_series(
+        SeriesRow::new("series-1", "1", "series")
+            .with_url("/library/1/series")
+            .with_labels(["safe"])
+            .with_genres(["fantasy"])
+            .with_tags(["featured"])
+            .with_language("en")
+            .with_publisher("komga")
+            .with_age_rating(16)
+            .with_release_date("2024-01-01")
+            .with_status("ONGOING")
+            .with_complete(true)
+            .with_read_status("READ")
+            .with_authors(["alice"]),
+    );
+    adapter.insert_series(
+        SeriesRow::new("series-2", "1", "restricted")
+            .with_url("/library/1/restricted")
+            .with_labels(["adult"])
+            .with_age_rating(18)
+            .with_status("ONGOING")
+            .with_read_status("UNREAD"),
+    );
+
+    adapter.insert_book(
+        BookRow::new("book-0", "series-1", "1", "book-0.cbr")
+            .with_url("/library1/book-0.cbr")
+            .with_last_modified("2023-12-01T03:04:05Z")
+            .with_size_bytes(111)
+            .with_media("READY", "application/zip", 1)
+            .with_media_profile("PROFILE-1")
+            .with_number_sort(1)
+            .with_read_status("UNREAD")
+            .with_release_date("2023-12-01")
+            .with_tags(["safe"])
+            .with_authors(["alice"]),
+    );
+    adapter.insert_book(
+        BookRow::new("book-1", "series-1", "1", "book.cbr")
+            .with_url("/library1/book.cbr")
+            .with_last_modified("2024-01-01T03:04:05Z")
+            .with_size_bytes(222)
+            .with_media("READY", "application/zip", 1)
+            .with_media_profile("PROFILE-1")
+            .with_number_sort(2)
+            .with_read_status("READ")
+            .with_release_date("2024-01-01")
+            .with_tags(["safe"])
+            .with_authors(["alice"]),
+    );
+    adapter.insert_book(
+        BookRow::new("book-3", "series-1", "1", "book-3.cbr")
+            .with_url("/library1/book-3.cbr")
+            .with_last_modified("2024-02-01T03:04:05Z")
+            .with_size_bytes(333)
+            .with_media("READY", "application/zip", 1)
+            .with_media_profile("PROFILE-1")
+            .with_number_sort(10)
+            .with_read_status("UNREAD")
+            .with_release_date("2024-02-01")
             .with_tags(["safe"])
             .with_authors(["alice"]),
     );
@@ -1895,6 +2428,31 @@ fn seed_books_discovery_data(adapter: &mut SqliteDiscoveryAdapter) {
             .with_release_date("2023-01-01")
             .with_tags(["adult"])
             .with_authors(["bob"]),
+    );
+
+    adapter.insert_collection(
+        CollectionRow::new("collection-1", "Collection 1")
+            .with_ordered(true)
+            .with_series_ids(["series-1", "series-2"]),
+    );
+
+    adapter.insert_read_list(
+        ReadListRow::new("readlist-1", "ReadList 1")
+            .with_summary("Visible readlist")
+            .with_book_ids(["book-1"]),
+    );
+    adapter.insert_read_list(
+        ReadListRow::new("readlist-2", "ReadList 2")
+            .with_summary("Mixed visibility readlist")
+            .with_book_ids(["book-1", "book-2"]),
+    );
+
+    adapter.insert_read_progress(
+        ReadProgressRow::new("book-1", "0PV32486S7X3J", 7, false)
+            .with_read_date("2024-01-04T03:04:05Z")
+            .with_created("2024-01-04T03:04:05Z")
+            .with_last_modified("2024-01-04T03:04:05Z")
+            .with_device("device-android", "Android"),
     );
 }
 
@@ -2068,11 +2626,7 @@ fn books_latest_json_for_request(profile: CompatProfile, uri: &Uri) -> Value {
 }
 
 fn book_payload(book: &BookReadModel, is_admin: bool) -> Value {
-    let url = if is_admin {
-        book.url.clone()
-    } else {
-        book.title.clone()
-    };
+    let url = restricted_book_url(&book.url, is_admin);
 
     json!({
         "id": book.id,
@@ -2122,6 +2676,319 @@ fn book_payload(book: &BookReadModel, is_admin: bool) -> Value {
         "deleted": book.deleted,
         "fileHash": "",
         "oneshot": book.oneshot
+    })
+}
+
+fn book_detail_payload(book: &BookDetailReadModel, is_admin: bool) -> Value {
+    let url = restricted_book_url(&book.url, is_admin);
+    let media_profile = media_profile_for_media_type(&book.media_type);
+
+    json!({
+        "id": book.id,
+        "seriesId": book.series_id,
+        "seriesTitle": book.series_title,
+        "libraryId": book.library_id,
+        "name": book.name,
+        "url": url,
+        "number": book.number,
+        "created": book.created,
+        "lastModified": book.last_modified,
+        "fileLastModified": book.file_last_modified,
+        "sizeBytes": book.size_bytes,
+        "size": format_size_bytes(book.size_bytes),
+        "media": {
+            "status": book.media_status,
+            "mediaType": book.media_type,
+            "pagesCount": book.media_pages_count,
+            "comment": book.media_comment,
+            "epubDivinaCompatible": false,
+            "epubIsKepub": false,
+            "mediaProfile": media_profile
+        },
+        "metadata": {
+            "title": book.metadata_title,
+            "titleLock": false,
+            "summary": book.metadata_summary,
+            "summaryLock": false,
+            "number": book.metadata_number,
+            "numberLock": false,
+            "numberSort": book.metadata_number_sort,
+            "numberSortLock": false,
+            "releaseDate": book.metadata_release_date,
+            "releaseDateLock": false,
+            "authors": book.metadata_authors.iter().map(|name| json!({ "name": name, "role": "writer" })).collect::<Vec<_>>(),
+            "authorsLock": false,
+            "tags": book.metadata_tags,
+            "tagsLock": false,
+            "isbn": book.metadata_isbn,
+            "isbnLock": false,
+            "links": [],
+            "linksLock": false,
+            "created": book.metadata_created,
+            "lastModified": book.metadata_last_modified
+        },
+        "readProgress": book.read_progress.as_ref().map_or(Value::Null, |progress| json!({
+            "page": progress.page,
+            "completed": progress.completed,
+            "readDate": progress.read_date,
+            "created": progress.created,
+            "lastModified": progress.last_modified,
+            "deviceId": progress.device_id,
+            "deviceName": progress.device_name,
+        })),
+        "deleted": book.deleted,
+        "fileHash": book.file_hash,
+        "oneshot": book.oneshot
+    })
+}
+
+fn format_size_bytes(size_bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+
+    if size_bytes < 1024 {
+        return format!("{size_bytes} B");
+    }
+
+    let mut size = size_bytes as f64;
+    let mut unit_index = 0usize;
+    while size >= 1024.0 && unit_index < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit_index += 1;
+    }
+
+    if (size - size.round()).abs() < 0.05 {
+        format!("{} {}", size.round() as u64, UNITS[unit_index])
+    } else {
+        format!("{size:.1} {}", UNITS[unit_index])
+    }
+}
+
+fn media_profile_for_media_type(media_type: &str) -> &'static str {
+    match media_type {
+        "application/zip"
+        | "application/x-rar-compressed"
+        | "application/x-rar-compressed; version=4"
+        | "application/x-rar-compressed; version=5" => "DIVINA",
+        "application/epub+zip" => "EPUB",
+        "application/pdf" => "PDF",
+        _ => "",
+    }
+}
+
+fn restricted_book_url(url: &str, is_admin: bool) -> String {
+    if is_admin {
+        return url.to_string();
+    }
+
+    url.rsplit('/')
+        .find(|segment| !segment.is_empty())
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn series_detail_payload(series: &SeriesDetailReadModel, is_admin: bool) -> Value {
+    let url = if is_admin {
+        series.url.clone()
+    } else {
+        String::new()
+    };
+
+    let mut metadata = Map::new();
+    metadata.insert("status".to_string(), Value::String(series.status.clone()));
+    metadata.insert("statusLock".to_string(), Value::Bool(false));
+    metadata.insert("title".to_string(), Value::String(series.title.clone()));
+    metadata.insert("titleLock".to_string(), Value::Bool(false));
+    metadata.insert("titleSort".to_string(), Value::String(series.title.clone()));
+    metadata.insert("titleSortLock".to_string(), Value::Bool(false));
+    metadata.insert("summary".to_string(), Value::String(series.summary.clone()));
+    metadata.insert("summaryLock".to_string(), Value::Bool(false));
+    metadata.insert(
+        "readingDirection".to_string(),
+        Value::String(series.reading_direction.clone()),
+    );
+    metadata.insert("readingDirectionLock".to_string(), Value::Bool(false));
+    metadata.insert(
+        "publisher".to_string(),
+        Value::String(series.publisher.clone()),
+    );
+    metadata.insert("publisherLock".to_string(), Value::Bool(false));
+    metadata.insert(
+        "ageRating".to_string(),
+        series.age_rating.map_or(Value::Null, |it| Value::Number(it.into())),
+    );
+    metadata.insert("ageRatingLock".to_string(), Value::Bool(false));
+    metadata.insert(
+        "language".to_string(),
+        Value::String(series.language.clone()),
+    );
+    metadata.insert("languageLock".to_string(), Value::Bool(false));
+    metadata.insert(
+        "genres".to_string(),
+        Value::Array(
+            series
+                .genres
+                .iter()
+                .cloned()
+                .map(Value::String)
+                .collect(),
+        ),
+    );
+    metadata.insert("genresLock".to_string(), Value::Bool(false));
+    metadata.insert(
+        "tags".to_string(),
+        Value::Array(series.tags.iter().cloned().map(Value::String).collect()),
+    );
+    metadata.insert("tagsLock".to_string(), Value::Bool(false));
+    metadata.insert(
+        "totalBookCount".to_string(),
+        series
+            .total_book_count
+            .map_or(Value::Null, |it| Value::Number(it.into())),
+    );
+    metadata.insert("totalBookCountLock".to_string(), Value::Bool(false));
+    metadata.insert(
+        "sharingLabels".to_string(),
+        Value::Array(
+            series
+                .sharing_labels
+                .iter()
+                .cloned()
+                .map(Value::String)
+                .collect(),
+        ),
+    );
+    metadata.insert("sharingLabelsLock".to_string(), Value::Bool(false));
+    metadata.insert("links".to_string(), Value::Array(vec![]));
+    metadata.insert("linksLock".to_string(), Value::Bool(false));
+    metadata.insert(
+        "alternateTitles".to_string(),
+        Value::Array(
+            series
+                .alternate_titles
+                .iter()
+                .cloned()
+                .map(Value::String)
+                .collect(),
+        ),
+    );
+    metadata.insert("alternateTitlesLock".to_string(), Value::Bool(false));
+    metadata.insert(
+        "created".to_string(),
+        Value::String(series.metadata_created.clone()),
+    );
+    metadata.insert(
+        "lastModified".to_string(),
+        Value::String(series.metadata_last_modified.clone()),
+    );
+
+    let mut books_metadata = Map::new();
+    books_metadata.insert("authors".to_string(), Value::Array(vec![]));
+    books_metadata.insert(
+        "tags".to_string(),
+        Value::Array(
+            series
+                .books_metadata_tags
+                .iter()
+                .cloned()
+                .map(Value::String)
+                .collect(),
+        ),
+    );
+    books_metadata.insert(
+        "releaseDate".to_string(),
+        series
+            .books_metadata_release_date
+            .clone()
+            .map_or(Value::Null, Value::String),
+    );
+    books_metadata.insert(
+        "summary".to_string(),
+        Value::String(series.books_metadata_summary.clone()),
+    );
+    books_metadata.insert(
+        "summaryNumber".to_string(),
+        Value::String(series.books_metadata_summary_number.clone()),
+    );
+    books_metadata.insert(
+        "created".to_string(),
+        Value::String(series.books_metadata_created.clone()),
+    );
+    books_metadata.insert(
+        "lastModified".to_string(),
+        Value::String(series.books_metadata_last_modified.clone()),
+    );
+
+    let mut payload = Map::new();
+    payload.insert("id".to_string(), Value::String(series.id.clone()));
+    payload.insert(
+        "libraryId".to_string(),
+        Value::String(series.library_id.clone()),
+    );
+    payload.insert("name".to_string(), Value::String(series.title.clone()));
+    payload.insert("url".to_string(), Value::String(url));
+    payload.insert("created".to_string(), Value::String(series.created.clone()));
+    payload.insert(
+        "lastModified".to_string(),
+        Value::String(series.last_modified.clone()),
+    );
+    payload.insert(
+        "fileLastModified".to_string(),
+        Value::String(series.file_last_modified.clone()),
+    );
+    payload.insert(
+        "booksCount".to_string(),
+        Value::Number(series.books_count.into()),
+    );
+    payload.insert(
+        "booksReadCount".to_string(),
+        Value::Number(series.books_read_count.into()),
+    );
+    payload.insert(
+        "booksUnreadCount".to_string(),
+        Value::Number(series.books_unread_count.into()),
+    );
+    payload.insert(
+        "booksInProgressCount".to_string(),
+        Value::Number(series.books_in_progress_count.into()),
+    );
+    payload.insert("metadata".to_string(), Value::Object(metadata));
+    payload.insert("booksMetadata".to_string(), Value::Object(books_metadata));
+    payload.insert("deleted".to_string(), Value::Bool(series.deleted));
+    payload.insert("oneshot".to_string(), Value::Bool(series.oneshot));
+
+    Value::Object(payload)
+}
+
+fn series_collections_payload(collections: &[CollectionReadModel]) -> Value {
+    Value::Array(collections.iter().map(collection_payload).collect())
+}
+
+fn readlists_payload(readlists: &[ReadListReadModel]) -> Value {
+    Value::Array(readlists.iter().map(readlist_payload).collect())
+}
+
+fn collection_payload(collection: &CollectionReadModel) -> Value {
+    json!({
+        "id": collection.id,
+        "name": collection.name,
+        "ordered": collection.ordered,
+        "seriesIds": collection.series_ids,
+        "createdDate": collection.created_date,
+        "lastModifiedDate": collection.last_modified_date,
+        "filtered": collection.filtered,
+    })
+}
+
+fn readlist_payload(readlist: &ReadListReadModel) -> Value {
+    json!({
+        "id": readlist.id,
+        "name": readlist.name,
+        "summary": readlist.summary,
+        "ordered": readlist.ordered,
+        "bookIds": readlist.book_ids,
+        "createdDate": readlist.created_date,
+        "lastModifiedDate": readlist.last_modified_date,
+        "filtered": readlist.filtered,
     })
 }
 
@@ -2220,6 +3087,11 @@ fn mark_non_native(response: &mut Response) {
     );
 }
 
+fn non_native_response(mut response: Response) -> Response {
+    mark_non_native(&mut response);
+    response
+}
+
 fn mark_native(response: &mut Response) {
     response.headers_mut().insert(
         HeaderName::from_static(SEARCH_OWNERSHIP_HEADER),
@@ -2295,6 +3167,14 @@ fn matches_search_pattern(candidate: &str, pattern: &str) -> bool {
         text.ends_with(&expected)
     } else {
         text.contains(&expected)
+    }
+}
+
+fn detail_access_denial_response(denial: DetailAccessDenial) -> Response {
+    match denial {
+        DetailAccessDenial::Unauthorized => StatusCode::UNAUTHORIZED.into_response(),
+        DetailAccessDenial::Forbidden => StatusCode::FORBIDDEN.into_response(),
+        DetailAccessDenial::NotFound => StatusCode::NOT_FOUND.into_response(),
     }
 }
 

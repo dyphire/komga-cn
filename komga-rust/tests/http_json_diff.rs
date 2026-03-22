@@ -23,8 +23,8 @@ fn p0_cases_configuration_loads() {
         "P2-DISCOVERY-SERIES-LIST-OWNED",
         "P2-DISCOVERY-BOOKS-LIST-OWNED",
         "P2-DISCOVERY-BOOKS-LATEST-OWNED",
-        "P2-DISCOVERY-UNSUPPORTED-SERIES-DETAIL",
-        "P2-DISCOVERY-UNSUPPORTED-BOOK-DETAIL",
+        "P3-DETAIL-SERIES-DETAIL-OWNED",
+        "P3-DETAIL-BOOK-DETAIL-OWNED",
         "P2-DISCOVERY-UNSUPPORTED-BOOK-PAGES",
         "P2-DISCOVERY-UNSUPPORTED-BOOK-FILE",
         "P2-DISCOVERY-UNSUPPORTED-BOOK-THUMBNAIL",
@@ -179,11 +179,11 @@ fn p0_cases_configuration_loads() {
         .iter()
         .find(|it| it.id == "P2-DISCOVERY-BOOKS-LIST-OWNED")
         .expect("discovery supported books list case should exist");
-    let discovery_unsupported_series_detail = config
+    let detail_owned_series_case = config
         .cases
         .iter()
-        .find(|it| it.id == "P2-DISCOVERY-UNSUPPORTED-SERIES-DETAIL")
-        .expect("unsupported series detail case should exist");
+        .find(|it| it.id == "P3-DETAIL-SERIES-DETAIL-OWNED")
+        .expect("detail owned series case should exist");
     let discovery_unsupported_books_readdate_sort = config
         .cases
         .iter()
@@ -548,17 +548,17 @@ fn p0_cases_configuration_loads() {
             r#"{"fullTextSearch":"book","condition":{"type":"LibraryId","operator":"is","value":"library-1"}}"#
         )
     );
-    assert_eq!(discovery_unsupported_series_detail.method, "GET");
+    assert_eq!(detail_owned_series_case.method, "GET");
     assert_eq!(
-        discovery_unsupported_series_detail.path,
+        detail_owned_series_case.path,
         "/api/v1/series/series-1"
     );
     assert_eq!(
-        discovery_unsupported_series_detail
+        detail_owned_series_case
             .headers
             .as_ref()
             .and_then(|headers| headers.get("X-Komga-Compat-Search-Ownership")),
-        Some(&"shadow-java-writer".to_string())
+        None
     );
     assert_eq!(discovery_unsupported_books_readdate_sort.method, "POST");
     assert_eq!(
@@ -599,6 +599,65 @@ fn p0_cases_configuration_loads() {
             .and_then(|headers| headers.get("Authorization")),
         Some(&"Basic ${KOMGA_COMPAT_BASIC_AUTH_USER}".to_string())
     );
+}
+
+#[test]
+fn phase3_detail_case_inventory_loads() {
+    let config = HarnessConfig::load_default().expect("default compat cases should load");
+
+    for id in [
+        "P3-DETAIL-SERIES-DETAIL-OWNED",
+        "P3-DETAIL-SERIES-COLLECTIONS-OWNED",
+        "P3-DETAIL-BOOKS-LIST-PAGED-SERIES-OWNED",
+        "P3-DETAIL-BOOKS-LIST-UNPAGED-SIBLINGS-OWNED",
+        "P3-DETAIL-BOOK-DETAIL-OWNED",
+        "P3-DETAIL-BOOK-PREVIOUS-OWNED",
+        "P3-DETAIL-BOOK-NEXT-OWNED",
+        "P3-DETAIL-BOOK-READLISTS-OWNED",
+        "P3-DETAIL-EXCLUDED-BOOK-PAGES",
+        "P3-DETAIL-EXCLUDED-BOOK-FILE",
+        "P3-DETAIL-EXCLUDED-BOOK-THUMBNAIL",
+        "P3-DETAIL-EXCLUDED-BOOK-MANIFEST",
+        "P3-DETAIL-EXCLUDED-BOOK-RESOURCE",
+        "P3-DETAIL-EXCLUDED-BOOK-POSITIONS",
+        "P3-DETAIL-EXCLUDED-SERIES-THUMBNAIL",
+        "P3-DETAIL-EXCLUDED-SERIES-FILE",
+        "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-BOOKS",
+        "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-PREVIOUS",
+        "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-NEXT",
+        "P3-DETAIL-EXCLUDED-ONESHOT-ROUTE-CLOSURE",
+        "P3-DETAIL-EXCLUDED-READ-PROGRESS-PATCH",
+        "P3-DETAIL-EXCLUDED-READ-PROGRESS-DELETE",
+        "P3-DETAIL-EXCLUDED-PROGRESSION-PUT",
+        "P3-DETAIL-EXCLUDED-READLIST-PATCH",
+        "P3-DETAIL-EXCLUDED-READLIST-DELETE",
+        "P3-DETAIL-EXCLUDED-COLLECTION-PATCH",
+        "P3-DETAIL-EXCLUDED-COLLECTION-DELETE",
+        "P3-DETAIL-EXCLUDED-BOOKS-LIST-READDATE-SORT",
+        "P3-DETAIL-EXCLUDED-BOOKS-LIST-READSTATUS-FILTER",
+    ] {
+        let case = config
+            .cases
+            .iter()
+            .find(|it| it.id == id)
+            .unwrap_or_else(|| panic!("missing phase3 detail compat case: {id}"));
+
+        assert_eq!(
+            config.cases.iter().filter(|it| it.id == id).count(),
+            1,
+            "phase3 detail case id must be unique: {id}",
+        );
+
+        if id.contains("-EXCLUDED-") {
+            assert_eq!(
+                case.headers
+                    .as_ref()
+                    .and_then(|headers| headers.get("X-Komga-Compat-Search-Ownership")),
+                Some(&"shadow-java-writer".to_string()),
+                "excluded phase3 detail case must carry shadow marker: {id}",
+            );
+        }
+    }
 }
 
 #[test]

@@ -76,7 +76,9 @@ run_label = sys.argv[4]
 timestamp = datetime.now(timezone.utc).isoformat()
 
 PHASE2_DISCOVERY_LABEL = "phase2-catalog-discovery"
+PHASE3_DETAIL_READ_LABEL = "phase3-detail-read"
 is_phase2_discovery = run_label == PHASE2_DISCOVERY_LABEL
+is_phase3_detail_read = run_label == PHASE3_DETAIL_READ_LABEL
 discovery_supported_scope = [
     "GET /api/v1/libraries",
     "POST /api/v1/series/list",
@@ -89,6 +91,23 @@ discovery_out_of_slice = [
     "binary/file/thumbnail delivery",
     "read-progress",
     "write paths",
+]
+phase3_detail_supported_scope = [
+    "GET /api/v1/series/{seriesId}",
+    "GET /api/v1/series/{seriesId}/collections",
+    "POST /api/v1/books/list (direct-browse page-scoped families only)",
+    "GET /api/v1/books/{bookId}",
+    "GET /api/v1/books/{bookId}/previous",
+    "GET /api/v1/books/{bookId}/next",
+    "GET /api/v1/books/{bookId}/readlists",
+]
+phase3_detail_out_of_slice = [
+    "whole cutover/direct-serving approval",
+    "media delivery (/thumbnail, /file, /pages*, /manifest, /resource/*, /positions)",
+    "contextual READLIST closure",
+    "oneshot closure",
+    "read-progress write/progression routes",
+    "write-path and mutation claims",
 ]
 
 
@@ -217,6 +236,92 @@ def eval_browser_smoke(summary_path: Path) -> tuple[bool, list[str], list[str]]:
         return False, [f"Browser smoke regressions: {'; '.join(reasons)}"], []
 
     return True, ["Browser smoke routes passed required acceptance slice"], []
+
+
+def eval_phase3_browser_smoke(summary_path: Path) -> tuple[bool, list[str], list[str]]:
+    ok, payload, error = read_json_file(summary_path)
+    if not ok:
+        return False, [error], []
+
+    if not isinstance(payload, list):
+        return False, [f"Phase3 browser summary must be a JSON array: {rel(summary_path)}"], []
+
+    rows = payload
+    required_routes = {
+        "browse-series": {
+            "signals": ["rootFound", "detailMetadataVisible", "collectionsPanelFound"],
+            "expected_owned_labels": ["series-detail", "series-collections", "series-books-list"],
+        },
+        "browse-book": {
+            "signals": ["rootFound", "detailMetadataVisible", "readlistsPanelFound", "siblingNavigationFound"],
+            "expected_owned_labels": [
+                "book-detail",
+                "book-readlists",
+                "book-siblings-list",
+                "book-sibling-next",
+                "book-sibling-previous",
+            ],
+        },
+    }
+
+    by_route = {row.get("route"): row for row in rows if isinstance(row, dict)}
+    missing_routes = [route for route in required_routes.keys() if route not in by_route]
+    if missing_routes:
+        return False, [f"Missing phase3 detail browser routes in summary: {', '.join(missing_routes)}"], []
+
+    failures: list[str] = []
+    details: list[str] = []
+
+    for route, expectations in required_routes.items():
+        row = by_route[route]
+        if not bool(row.get("pass")):
+            err = row.get("error") or "route did not pass"
+            failures.append(f"{route}: {err}")
+            continue
+
+        capture_mode = row.get("captureMode")
+        if not capture_mode:
+            failures.append(f"{route}: captureMode is missing")
+        elif capture_mode != "source-contract-fallback":
+            details.append(f"{route} captureMode={capture_mode}")
+        else:
+            details.append(f"{route} captureMode=source-contract-fallback (accepted in this environment)")
+
+        signals = row.get("signals")
+        if not isinstance(signals, dict):
+            failures.append(f"{route}: signals object is missing")
+        else:
+            for signal in expectations["signals"]:
+                if not bool(signals.get(signal)):
+                    failures.append(f"{route}: required signal {signal}=true not observed")
+
+        expected_requests = row.get("expectedOwnedRequests")
+        if not isinstance(expected_requests, list):
+            failures.append(f"{route}: expectedOwnedRequests array is missing")
+            continue
+
+        by_label = {
+            item.get("label"): item
+            for item in expected_requests
+            if isinstance(item, dict) and "label" in item
+        }
+        missing_labels = [label for label in expectations["expected_owned_labels"] if label not in by_label]
+        if missing_labels:
+            failures.append(f"{route}: missing expectedOwnedRequests labels {', '.join(missing_labels)}")
+            continue
+
+        failed_labels = [label for label in expectations["expected_owned_labels"] if not bool(by_label[label].get("pass"))]
+        if failed_labels:
+            failures.append(f"{route}: expectedOwnedRequests failed for {', '.join(failed_labels)}")
+            continue
+
+        details.append(f"{route} includes all required owned request labels")
+
+    if failures:
+        return False, [f"Phase3 direct-route browser smoke regressions: {'; '.join(failures)}"], []
+
+    details.append("Phase3 browser smoke proves direct-browse detail-read route readiness without over-claiming richer capture")
+    return True, details, []
 
 
 def eval_task_ownership(task_ownership_path: Path, admin_queue_path: Path) -> tuple[bool, list[str], list[str]]:
@@ -493,6 +598,102 @@ if is_phase2_discovery:
 
 checks = base_checks + discovery_checks
 
+phase3_skipped_base_checks: dict[str, str] = {
+    "auth_api_key": "Skipped for phase3-detail-read: API key parity is outside this direct-browse detail-read runbook.",
+    "libraries_visibility": "Skipped for phase3-detail-read: discovery libraries parity is not part of this detail-read slice gate.",
+    "opds": "Skipped for phase3-detail-read: OPDS parity is outside this detail-read slice gate.",
+    "cache_file_headers": "Skipped for phase3-detail-read: binary metadata/header parity is outside this detail-read slice gate.",
+    "read_progress": "Skipped for phase3-detail-read: this runbook does not claim read-progress write/progression ownership.",
+    "server_management_browser_smoke": "Skipped for phase3-detail-read: server-management/browser-ops acceptance is outside this direct-browse detail slice.",
+    "packaging_tray": "Skipped for phase3-detail-read: packaging/tray startup contract is outside this slice gate.",
+    "external_release_credentials": "Skipped for phase3-detail-read: release credentials are not part of direct-browse detail-read readiness.",
+}
+
+phase3_checks = []
+if is_phase3_detail_read:
+    detail_direct_browse_contract = evidence_root / "task-1-contract-matrix" / "direct-browse-contract.txt"
+    detail_excluded_branches = evidence_root / "task-1-contract-matrix" / "excluded-branches.txt"
+    detail_parity_inventory = evidence_root / "task-9-browser-smoke" / "summary.json"
+    detail_browser_series = evidence_root / "task-9-browser-smoke" / "browse-series.json"
+    detail_browser_book = evidence_root / "task-9-browser-smoke" / "browse-book.json"
+    detail_exclusion_matrix = evidence_root / "task-8-exclusions" / "ui-visible-non-native.txt"
+    detail_exclusion_verification = evidence_root / "task-8-exclusions" / "excluded-branch-markers.txt"
+
+    phase3_checks = [
+        {
+            "id": "phase3_detail_contract",
+            "category": "phase3-detail-read",
+            "refusal_condition": "Direct-browse detail contract evidence not proven",
+            "evidence": [detail_direct_browse_contract, detail_excluded_branches],
+            "mode": "discovery_markers",
+            "marker_map": {
+                detail_direct_browse_contract: [
+                    "in_scope_direct_browse_shapes_are_frozen",
+                    "Result: PASS",
+                ],
+                detail_excluded_branches: [
+                    "excluded_media_context_and_write_shapes_remain_non_native",
+                    "Result: PASS",
+                    "shadow-java-writer",
+                ],
+            },
+            "success_note": "Phase3 detail gate consumes the plan-correct direct-browse contract and excluded-branch evidence without broadening default cutover semantics.",
+        },
+        {
+            "id": "phase3_detail_parity",
+            "category": "phase3-detail-read",
+            "refusal_condition": "Direct-browse detail parity inventory not proven",
+            "evidence": [detail_parity_inventory, detail_browser_series, detail_browser_book],
+            "mode": "discovery_markers",
+            "marker_map": {
+                detail_parity_inventory: ["browse-series", "browse-book", "expectedOwnedRequests"],
+                detail_browser_series: ["series-detail", "series-collections", "series-books-list"],
+                detail_browser_book: [
+                    "book-detail",
+                    "book-readlists",
+                    "book-siblings-list",
+                    "book-sibling-next",
+                    "book-sibling-previous",
+                ],
+            },
+            "success_note": "Detail parity evidence covers series detail/collections/page-scoped books-list and book detail/prev/next/readlists owned request inventory.",
+        },
+        {
+            "id": "phase3_detail_browser",
+            "category": "phase3-detail-read",
+            "refusal_condition": "Direct-browse detail browser smoke not proven",
+            "evidence": [detail_parity_inventory],
+            "mode": "phase3_browser_smoke",
+        },
+        {
+            "id": "phase3_detail_exclusions",
+            "category": "phase3-detail-read",
+            "refusal_condition": "Detail-slice exclusion governance not proven",
+            "evidence": [detail_exclusion_matrix, detail_exclusion_verification],
+            "mode": "discovery_markers",
+            "marker_map": {
+                detail_exclusion_matrix: [
+                    "catalog_detail_contract contextual_media_and_write_branches_are_explicitly_non_native",
+                    "browse-oneshot closure",
+                    "READLIST context routing",
+                    "pages / thumbnails / file media delivery",
+                    "read-progress mutation / progression",
+                    "collection / readlist removal actions",
+                    "admin edit/delete affordances",
+                    "SSE / live-refresh parity",
+                ],
+                detail_exclusion_verification: [
+                    "catalog_detail_shadow excluded_detail_branches_emit_shadow_marker",
+                    "Result: PASS",
+                    "shadow-java-writer",
+                ],
+            },
+            "success_note": "Exclusion governance remains explicit: contextual/readlist/oneshot/media/progress-write and broader write-path claims stay non-native.",
+        },
+    ]
+
+checks = checks + phase3_checks
+
 results = []
 refusals = []
 non_blocking = []
@@ -508,6 +709,14 @@ for check in checks:
         status = override["status"]
         messages = list(override.get("details", []))
         blocking = override.get("blocking", blocking)
+    elif is_phase3_detail_read and check["id"] in phase3_skipped_base_checks:
+        ok = False
+        status = "skipped"
+        blocking = False
+        messages = [
+            phase3_skipped_base_checks[check["id"]],
+            "This label proves direct-browse detail-read readiness only and does not approve whole-cutover/media/write scope.",
+        ]
     else:
         if mode == "browser_ops":
             browser_summary = evidence_paths[0]
@@ -515,6 +724,8 @@ for check in checks:
             ops_ok, ops_msgs, _ = eval_ops_server_management(evidence_paths[1])
             ok = browser_ok and ops_ok
             messages = browser_msgs + ops_msgs
+        elif mode == "phase3_browser_smoke":
+            ok, messages, _ = eval_phase3_browser_smoke(evidence_paths[0])
         elif mode == "task_ownership":
             ok, messages, _ = eval_task_ownership(evidence_paths[0], evidence_paths[1])
         elif mode == "packaging":
@@ -569,6 +780,13 @@ if is_phase2_discovery:
         for check in discovery_checks
     ) and shadow_safety_pass and search_task_guardrails
 
+phase3_detail_shadow_pass = False
+if is_phase3_detail_read:
+    phase3_detail_shadow_pass = all(
+        next(r for r in results if r["id"] == check["id"])["status"] == "pass"
+        for check in phase3_checks
+    ) and shadow_safety_pass and search_task_guardrails
+
 if is_phase2_discovery:
     governance = {
         "shadow_mode": {
@@ -594,6 +812,37 @@ if is_phase2_discovery:
         "rollback": {
             "ready": discovery_shadow_pass,
             "trigger": "Any discovery-slice regression or out-of-slice expansion forces rollback/no-cutover.",
+        },
+    }
+elif is_phase3_detail_read:
+    governance = {
+        "shadow_mode": {
+            "allowed": shadow_safety_pass,
+            "rule": "Shadow mode must keep Java as stateful writer unless explicitly isolated",
+        },
+        "canary_mode": {
+            "allowed": search_task_guardrails,
+            "rule": "Search/task ownership guardrails remain required, but this phase3 label is not whole-cutover approval.",
+        },
+        "phase3_detail_read_shadow": {
+            "allowed": phase3_detail_shadow_pass,
+            "scope": "Direct BrowseSeries/BrowseBook detail-read slice is shadow-ready for series detail, collections, page-scoped books/list, book detail, previous/next, and readlists.",
+        },
+        "phase3_contextual_closure": {
+            "allowed": False,
+            "scope": "Refused: READLIST-context closure and browse-oneshot closure remain outside this direct-browse detail-read slice.",
+        },
+        "phase3_media_and_write": {
+            "allowed": False,
+            "scope": "Refused: media delivery (thumbnail/file/pages/manifest/resource/positions), read-progress writes/progression, and write-path claims remain out of slice.",
+        },
+        "cutover": {
+            "allowed": False,
+            "scope": "phase3-detail-read is a slice-only runbook; whole cutover/direct-serving remains refused until broader runtime/media/write/release conditions are proven.",
+        },
+        "rollback": {
+            "ready": phase3_detail_shadow_pass,
+            "trigger": "Any detail-slice regression or out-of-slice expansion forces rollback/no-cutover.",
         },
     }
 else:
@@ -643,6 +892,21 @@ if is_phase2_discovery:
     }
     if non_blocking:
         summary["non_blocking"] = non_blocking
+elif is_phase3_detail_read:
+    summary["evaluation_scope"] = "phase3-detail-read-shadow"
+    summary["detail_read_slice"] = {
+        "shadow_ready": phase3_detail_shadow_pass,
+        "supported_scope": phase3_detail_supported_scope,
+        "out_of_slice": phase3_detail_out_of_slice,
+        "non_claims": [
+            "This does not claim whole cutover readiness.",
+            "This does not claim generic direct-serving/media delivery readiness.",
+            "This does not claim contextual READLIST closure, oneshot closure, read-progress writes, or broader write-path ownership.",
+        ],
+        "check_ids": [check["id"] for check in phase3_checks],
+    }
+    if non_blocking:
+        summary["non_blocking"] = non_blocking
 
 output_dir.mkdir(parents=True, exist_ok=True)
 summary_latest = output_dir / "summary.json"
@@ -660,6 +924,9 @@ lines.append(f"- Overall result: **{summary['overall'].upper()}**")
 if is_phase2_discovery:
     lines.append("- Evaluation scope: `phase2-catalog-discovery-shadow`")
     lines.append("- Non-claim: this label records shadow readiness for the selected discovery slice only, not whole cutover readiness")
+elif is_phase3_detail_read:
+    lines.append("- Evaluation scope: `phase3-detail-read-shadow`")
+    lines.append("- Non-claim: this label records direct-browse detail-read readiness only, not whole cutover/direct-serving/media/write readiness")
 lines.append("")
 if is_phase2_discovery:
     lines.append("## Discovery Slice Runbook")
@@ -671,6 +938,24 @@ if is_phase2_discovery:
     )
     lines.append(
         "- Packaging/release credentials: **NOT CLAIMED** — `JRELEASER_GITHUB_TOKEN` is not part of this shadow-slice pass condition and still must be proven for broader cutover/release"
+    )
+    lines.append("")
+elif is_phase3_detail_read:
+    lines.append("## Phase3 Detail-Read Runbook")
+    lines.append("")
+    lines.append(f"- Shadow-ready target: **{'PASS' if phase3_detail_shadow_pass else 'FAIL'}**")
+    lines.append(f"- Supported scope: {', '.join(f'`{item}`' for item in phase3_detail_supported_scope)}")
+    lines.append(
+        "- Direct-browse closure only: **ALLOW (slice-only)** — series detail/collections/page-scoped books-list + book detail/prev/next/readlists with browser smoke evidence"
+    )
+    lines.append(
+        "- Whole cutover/direct-serving: **REFUSE** — this label is not a full cutover approval"
+    )
+    lines.append(
+        "- Media/context/write closure: **REFUSE** — contextual READLIST closure, oneshot closure, media delivery, read-progress writes/progression, and write-path claims remain out of slice"
+    )
+    lines.append(
+        "- Browser capture note: `captureMode=source-contract-fallback` is accepted and recorded as honest environment evidence, not richer runtime capture"
     )
     lines.append("")
 lines.append("## Check Results")

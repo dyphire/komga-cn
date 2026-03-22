@@ -51,6 +51,47 @@ def build_pass_server_management() -> dict[str, object]:
     }
 
 
+def build_phase3_browser_row(*, route: str, capture_mode: str = 'source-contract-fallback') -> dict[str, object]:
+    if route == 'browse-series':
+        return {
+            'route': 'browse-series',
+            'pass': True,
+            'captureMode': capture_mode,
+            'signals': {
+                'rootFound': True,
+                'detailMetadataVisible': True,
+                'collectionsPanelFound': True,
+            },
+            'expectedOwnedRequests': [
+                {'label': 'series-detail', 'pass': True},
+                {'label': 'series-collections', 'pass': True},
+                {'label': 'series-books-list', 'pass': True},
+            ],
+        }
+
+    if route == 'browse-book':
+        return {
+            'route': 'browse-book',
+            'pass': True,
+            'captureMode': capture_mode,
+            'signals': {
+                'rootFound': True,
+                'detailMetadataVisible': True,
+                'readlistsPanelFound': True,
+                'siblingNavigationFound': True,
+            },
+            'expectedOwnedRequests': [
+                {'label': 'book-detail', 'pass': True},
+                {'label': 'book-readlists', 'pass': True},
+                {'label': 'book-siblings-list', 'pass': True},
+                {'label': 'book-sibling-next', 'pass': True},
+                {'label': 'book-sibling-previous', 'pass': True},
+            ],
+        }
+
+    raise AssertionError(f'Unsupported phase3 browser route fixture: {route}')
+
+
 def build_admin_queue_payload(*, status: str, can_claim_admin_queue_parity: bool) -> dict[str, object]:
     return {
         'task': 'T13 admin task endpoint parity remains executable',
@@ -82,6 +123,69 @@ def seed_common_evidence(root: Path, *, neutral_transcripts: bool, admin_queue_p
     write_json(root / 'task-11-browser-smoke/summary.json', build_pass_browser_summary())
     write_json(root / 'task-14-ops/server-management.json', build_pass_server_management())
     write_json(root / 'task-13-tasks/admin-task-queue.json', admin_queue_payload)
+
+
+def seed_phase3_detail_evidence(root: Path, *, include_browse_book: bool = True) -> None:
+    write_text(
+        root / 'task-1-contract-matrix/direct-browse-contract.txt',
+        '\n'.join([
+            'Task: T1 direct-browse contract freeze',
+            'Scenario: Phase 3 direct-browse contract is frozen',
+            'Command:',
+            '  cargo test --manifest-path komga-rust/Cargo.toml --test catalog_detail_contract in_scope_direct_browse_shapes_are_frozen -- --exact --nocapture',
+            'Observed:',
+            '  - cargo test: 1 passed, 3 filtered out (1 suite, 0.01s)',
+            'Result: PASS',
+        ]),
+    )
+    write_text(
+        root / 'task-1-contract-matrix/excluded-branches.txt',
+        '\n'.join([
+            'Task: T1 excluded branches freeze',
+            'Scenario: Excluded branches still emit explicit non-native markers',
+            'Command:',
+            '  cargo test --manifest-path komga-rust/Cargo.toml --test catalog_detail_contract excluded_media_context_and_write_shapes_remain_non_native -- --exact --nocapture',
+            'Observed:',
+            '  - cargo test: 1 passed, 3 filtered out (1 suite, 0.00s)',
+            'Result: PASS',
+            'Notes:',
+            '  - The excluded branches remain Phase 3 non-native and stay on the `shadow-java-writer` path.',
+        ]),
+    )
+
+    write_text(
+        root / 'task-8-exclusions/ui-visible-non-native.txt',
+        '\n'.join([
+            'catalog_detail_contract contextual_media_and_write_branches_are_explicitly_non_native',
+            'browse-oneshot closure',
+            'READLIST context routing',
+            'pages / thumbnails / file media delivery',
+            'read-progress mutation / progression',
+            'collection / readlist removal actions',
+            'admin edit/delete affordances',
+            'SSE / live-refresh parity',
+        ]),
+    )
+    write_text(
+        root / 'task-8-exclusions/excluded-branch-markers.txt',
+        '\n'.join([
+            'catalog_detail_contract contextual_media_and_write_branches_are_explicitly_non_native',
+            'catalog_detail_shadow excluded_detail_branches_emit_shadow_marker',
+            'Result: PASS',
+            'shadow-java-writer',
+        ]),
+    )
+
+    series_row = build_phase3_browser_row(route='browse-series')
+    write_json(root / 'task-9-browser-smoke/browse-series.json', series_row)
+
+    summary_rows = [series_row]
+    if include_browse_book:
+        book_row = build_phase3_browser_row(route='browse-book')
+        write_json(root / 'task-9-browser-smoke/browse-book.json', book_row)
+        summary_rows.append(book_row)
+
+    write_json(root / 'task-9-browser-smoke/summary.json', summary_rows)
 
 
 def run_gate(evidence_root: Path, output_dir: Path, *, label: str) -> subprocess.CompletedProcess[str]:
@@ -187,6 +291,68 @@ class GateRegressionTests(unittest.TestCase):
             summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
             self.assertEqual(summary['overall'], 'pass')
             self.assertTrue((output_dir / 'report.md').exists())
+
+    def test_phase3_detail_read_label_passes_with_slice_evidence_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            evidence_root = temp_path / 'evidence'
+            output_dir = temp_path / 'output'
+            seed_common_evidence(
+                evidence_root,
+                neutral_transcripts=True,
+                admin_queue_payload=build_admin_queue_payload(
+                    status='action-exercised-parity-ok',
+                    can_claim_admin_queue_parity=True,
+                ),
+            )
+            seed_phase3_detail_evidence(evidence_root, include_browse_book=True)
+
+            result = run_gate(evidence_root, output_dir, label='phase3-detail-read')
+
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=f'gate unexpectedly failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}',
+            )
+
+            summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
+            self.assertEqual(summary['overall'], 'pass')
+            self.assertEqual(summary.get('evaluation_scope'), 'phase3-detail-read-shadow')
+            self.assertFalse(summary['governance']['cutover']['allowed'])
+            self.assertFalse(summary['governance']['phase3_media_and_write']['allowed'])
+
+            phase3_browser_check = next(item for item in summary['checks'] if item['id'] == 'phase3_detail_browser')
+            self.assertEqual(phase3_browser_check['status'], 'pass')
+            self.assertTrue(any('source-contract-fallback' in detail for detail in phase3_browser_check['details']))
+
+    def test_phase3_detail_read_label_fails_closed_when_required_artifact_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            evidence_root = temp_path / 'evidence'
+            output_dir = temp_path / 'output'
+            seed_common_evidence(
+                evidence_root,
+                neutral_transcripts=True,
+                admin_queue_payload=build_admin_queue_payload(
+                    status='action-exercised-parity-ok',
+                    can_claim_admin_queue_parity=True,
+                ),
+            )
+            seed_phase3_detail_evidence(evidence_root, include_browse_book=False)
+
+            result = run_gate(evidence_root, output_dir, label='phase3-detail-read')
+
+            self.assertEqual(
+                result.returncode,
+                1,
+                msg=f'gate unexpectedly passed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}',
+            )
+
+            summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
+            self.assertEqual(summary['overall'], 'fail')
+            failing_check = next(item for item in summary['checks'] if item['id'] == 'phase3_detail_parity')
+            self.assertEqual(failing_check['status'], 'fail')
+            self.assertTrue(any('Missing evidence file' in detail for detail in failing_check['details']))
 
 
 if __name__ == '__main__':

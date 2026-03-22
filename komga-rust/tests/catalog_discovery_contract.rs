@@ -112,8 +112,6 @@ fn native_owned_request_matrix_is_frozen() {
 #[test]
 fn unsupported_request_shapes_are_explicitly_non_native() {
     let expected = BTreeSet::from([
-        "GET /api/v1/series/{id}",
-        "GET /api/v1/books/{id}",
         "GET /api/v1/books/{id}/pages",
         "GET /api/v1/books/{id}/file",
         "GET /api/v1/books/{id}/thumbnail",
@@ -129,8 +127,6 @@ fn unsupported_request_shapes_are_explicitly_non_native() {
 
     let config = HarnessConfig::load_default().expect("default compat cases should load");
     for id in [
-        "P2-DISCOVERY-UNSUPPORTED-SERIES-DETAIL",
-        "P2-DISCOVERY-UNSUPPORTED-BOOK-DETAIL",
         "P2-DISCOVERY-UNSUPPORTED-BOOK-PAGES",
         "P2-DISCOVERY-UNSUPPORTED-BOOK-FILE",
         "P2-DISCOVERY-UNSUPPORTED-BOOK-THUMBNAIL",
@@ -239,8 +235,6 @@ fn frozen_native_owned_request_contract() -> Vec<NativeOwnedRequestContract> {
 
 fn frozen_non_native_request_shapes() -> BTreeSet<&'static str> {
     BTreeSet::from([
-        "GET /api/v1/series/{id}",
-        "GET /api/v1/books/{id}",
         "GET /api/v1/books/{id}/pages",
         "GET /api/v1/books/{id}/file",
         "GET /api/v1/books/{id}/thumbnail",

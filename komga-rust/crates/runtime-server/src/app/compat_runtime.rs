@@ -131,10 +131,25 @@ pub(super) fn build_router(config: &RuntimeConfig) -> Router {
         .route("/api/v1/tasks", delete(operational::delete_tasks))
         .route("/api/v1/libraries", get(content::libraries))
         .route("/api/v1/series", get(content::series))
+        .route("/api/v1/series/{series_id}", get(content::series_detail))
+        .route(
+            "/api/v1/series/{series_id}/collections",
+            get(content::series_collections),
+        )
         .route("/api/v1/series/list", post(content::series_list))
         .route("/api/v1/books", get(content::books))
         .route("/api/v1/books/list", post(content::books_list))
         .route("/api/v1/books/latest", get(content::books_latest))
+        .route("/api/v1/books/{book_id}", get(content::book_detail))
+        .route(
+            "/api/v1/books/{book_id}/previous",
+            get(content::book_sibling_previous),
+        )
+        .route("/api/v1/books/{book_id}/next", get(content::book_sibling_next))
+        .route(
+            "/api/v1/books/{book_id}/readlists",
+            get(content::book_readlists),
+        )
         .route("/api/v1/books/{book_id}/pages", get(content::book_pages))
         .route(
             "/api/v1/books/{book_id}/pages/{page_number}",

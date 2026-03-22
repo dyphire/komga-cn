@@ -444,7 +444,7 @@
       </v-row>
 
       <v-row>
-        <v-col>
+        <v-col data-testid="browse-series-collections-panel">
           <collections-expansion-panels :collections="collections">
             <template v-slot:prepend="props">
               <v-tooltip bottom>
