@@ -1,5 +1,5 @@
 <template>
-  <div v-if="!$_.isEmpty(book) && !$_.isEmpty(series)">
+  <div v-if="!$_.isEmpty(book) && !$_.isEmpty(series)" data-testid="browse-oneshot-root">
     <toolbar-sticky>
       <v-tooltip bottom :disabled="!isAdmin">
         <template v-slot:activator="{ on }">
@@ -55,6 +55,7 @@
         offset-y
         :max-height="$vuetify.breakpoint.height * .7"
         :max-width="250"
+        data-testid="browse-oneshot-readlist-context-navigation"
       >
         <template v-slot:activator="{ on }">
           <v-btn icon v-on="on">
@@ -415,7 +416,7 @@
 
 
       <v-row>
-        <v-col cols="12" class="pb-1">
+        <v-col cols="12" class="pb-1" data-testid="browse-oneshot-collections-panel">
           <collections-expansion-panels :collections="collections">
             <template v-slot:prepend="props">
               <v-tooltip bottom>
@@ -429,7 +430,7 @@
             </template>
           </collections-expansion-panels>
         </v-col>
-        <v-col cols="12" class="pt-1">
+        <v-col cols="12" class="pt-1" data-testid="browse-oneshot-readlists-panel">
           <read-lists-expansion-panels :read-lists="readLists">
             <template v-slot:prepend="props">
               <v-tooltip bottom>

@@ -234,6 +234,7 @@ pub enum BookSort {
 pub enum DirectBrowseBooksListFamily {
     BrowseSeriesPaged,
     BrowseBookSiblingsUnpaged,
+    BrowseOneshotBootstrap,
 }
 
 pub const SUPPORTED_SERIES_CONDITION_TYPES: &[&str] = &[

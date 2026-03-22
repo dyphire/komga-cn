@@ -120,6 +120,7 @@ pub(super) async fn series_detail(
     Extension(auth_state): Extension<DiscoveryAuthState>,
     headers: HeaderMap,
     Path(series_id): Path<String>,
+    uri: Uri,
 ) -> Response {
     if let Some(response) = require_auth(&headers) {
         return response;
@@ -170,12 +171,30 @@ pub(super) async fn series_detail(
         Err(denial) => return detail_access_denial_response(denial),
     };
     let is_admin = detail_query_context.is_admin;
+    let oneshot_query_excluded = query_bool(uri.query().unwrap_or_default(), "oneshot");
 
     let domain_context = to_domain_query_context(detail_query_context);
     let query = SeriesDetailQuery { series_id };
 
     match queries.get_series_detail(&domain_context, query) {
-        Ok(Some(series)) => Json(series_detail_payload(&series, is_admin)).into_response(),
+        Ok(Some(series)) => {
+            let mut payload = series_detail_payload(&series, is_admin);
+
+            if oneshot_query_excluded {
+                apply_non_native_diagnostics(
+                    &mut payload,
+                    &DiscoveryError::NonNativeRequestShape(NonNativeRequestShape::UnsupportedSeriesFilter(
+                        "oneshot-query-parameter".to_string(),
+                    )),
+                );
+
+                let mut response = Json(payload).into_response();
+                mark_non_native(&mut response);
+                response
+            } else {
+                Json(payload).into_response()
+            }
+        }
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -342,9 +361,11 @@ pub(super) async fn books_list(
 
     let payload = serde_json::from_slice::<Value>(&body).ok();
     let full_text_search = payload.as_ref().and_then(extract_full_text_search);
+    let is_exact_oneshot_bootstrap = exact_oneshot_bootstrap_series_id(payload.as_ref()).is_some();
 
-    if discovery_ownership_route(profile, &headers, DiscoveryShape::BooksList)
+    if (discovery_ownership_route(profile, &headers, DiscoveryShape::BooksList)
         == DiscoveryOwnershipRoute::NativeOwned
+        || is_exact_oneshot_bootstrap)
         && let Some(native_response) = native_owned_books_list_response(
             &headers,
             &uri,
@@ -1463,20 +1484,33 @@ fn native_owned_books_list_response(
     full_text_search: Option<String>,
     auth_state: &DiscoveryAuthState,
 ) -> Option<Response> {
-    let sorts = query_values(uri.query().unwrap_or_default(), "sort")
+    let query_string = uri.query().unwrap_or_default();
+    let sorts = query_values(query_string, "sort")
         .into_iter()
         .map(str::to_string)
         .collect::<Vec<_>>();
-    let page = query_value(uri.query().unwrap_or_default(), "page")
+    let page = query_value(query_string, "page")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
-    let size = query_value(uri.query().unwrap_or_default(), "size")
+    let size = query_value(query_string, "size")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(20)
         .max(1);
-    let unpaged = query_bool(uri.query().unwrap_or_default(), "unpaged");
+    let unpaged = query_bool(query_string, "unpaged");
+    let oneshot_bootstrap_series_id = exact_oneshot_bootstrap_series_id(payload);
 
-    let filters = match parse_native_books_filters(payload.and_then(|value| value.get("condition"))) {
+    if oneshot_bootstrap_series_id.is_some() && !query_string.trim().is_empty() {
+        return Some(non_native_books_list_response(
+            DiscoveryError::NonNativeRequestShape(NonNativeRequestShape::UnsupportedBookFilter(
+                "oneshot-bootstrap.query-params".to_string(),
+            )),
+            uri,
+            full_text_search,
+            payload,
+        ));
+    }
+
+    let mut filters = match parse_native_books_filters(payload.and_then(|value| value.get("condition"))) {
         Ok(filters) => filters,
         Err(error) => {
             return Some(non_native_books_list_response(
@@ -1493,12 +1527,95 @@ fn native_owned_books_list_response(
         None => return Some(StatusCode::UNAUTHORIZED.into_response()),
     };
 
+    if let Some(series_id) = oneshot_bootstrap_series_id.clone() {
+        filters.direct_browse_family = Some(DirectBrowseBooksListFamily::BrowseOneshotBootstrap);
+        filters.series_ids = Some(vec![series_id]);
+    }
+
     let mut adapter = SqliteDiscoveryAdapter::default();
     seed_books_discovery_data(&mut adapter);
 
     let is_admin = context.is_admin;
     let queries = DiscoveryQueries::new(adapter);
     let domain_context = to_domain_query_context(context);
+
+    if let Some(series_id) = oneshot_bootstrap_series_id {
+        let visible_series = match queries.get_series_detail(
+            &domain_context,
+            SeriesDetailQuery {
+                series_id: series_id.clone(),
+            },
+        ) {
+            Ok(series) => series,
+            Err(error) => {
+                return Some(non_native_books_list_response(
+                    error,
+                    uri,
+                    full_text_search,
+                    payload,
+                ));
+            }
+        };
+
+        if visible_series
+            .as_ref()
+            .map(|series| !series.oneshot)
+            .unwrap_or(false)
+        {
+            return Some(non_native_books_list_response(
+                DiscoveryError::NonNativeRequestShape(NonNativeRequestShape::UnsupportedBookFilter(
+                    "oneshot-bootstrap.series-not-oneshot".to_string(),
+                )),
+                uri,
+                full_text_search,
+                payload,
+            ));
+        }
+
+        let visible_books = match queries.list_books(
+            &domain_context,
+            BooksListQuery {
+                page: 0,
+                size: 20,
+                unpaged: true,
+                direct_browse_family: None,
+                library_ids: None,
+                series_ids: Some(vec![series_id]),
+                deleted: None,
+                oneshot: None,
+                tags: None,
+                read_statuses: None,
+                media_profiles: None,
+                media_statuses: None,
+                authors: None,
+                release_dates: None,
+                sort: vec![],
+                search: None,
+            },
+        ) {
+            Ok(page) => page,
+            Err(error) => {
+                return Some(non_native_books_list_response(
+                    error,
+                    uri,
+                    full_text_search,
+                    payload,
+                ));
+            }
+        };
+
+        if visible_series.is_none() || visible_books.total_elements != 1 {
+            return Some(non_native_books_list_response(
+                DiscoveryError::NonNativeRequestShape(NonNativeRequestShape::UnsupportedBookFilter(
+                    "oneshot-bootstrap.visible-single-book".to_string(),
+                )),
+                uri,
+                full_text_search,
+                payload,
+            ));
+        }
+    }
+
     let query = BooksListQuery {
         page,
         size,
@@ -1846,6 +1963,36 @@ fn parse_native_books_filters(condition: Option<&Value>) -> Result<NativeBooksFi
             NonNativeRequestShape::UnsupportedBookFilter(unsupported.to_string()),
         )),
     }
+}
+
+fn exact_oneshot_bootstrap_series_id(payload: Option<&Value>) -> Option<String> {
+    let payload = payload?.as_object()?;
+    if payload.len() != 1 {
+        return None;
+    }
+
+    let condition = payload.get("condition")?.as_object()?;
+    if condition.len() != 3 {
+        return None;
+    }
+
+    if condition.get("type").and_then(Value::as_str) != Some("SeriesId") {
+        return None;
+    }
+
+    if !condition
+        .get("operator")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .eq_ignore_ascii_case("is")
+    {
+        return None;
+    }
+
+    condition
+        .get("value")
+        .and_then(Value::as_str)
+        .map(str::to_string)
 }
 
 fn parse_books_library_id_filter(condition: &Value) -> Result<NativeBooksFilters, DiscoveryError> {
@@ -2562,6 +2709,21 @@ fn seed_books_discovery_data(adapter: &mut SqliteDiscoveryAdapter) {
     adapter.insert_series(
         SeriesRow::new("series-2", "1", "restricted").with_labels(["adult"]),
     );
+    adapter.insert_series(
+        SeriesRow::new("series-oneshot", "1", "oneshot")
+            .with_labels(["safe"])
+            .with_oneshot(true),
+    );
+    adapter.insert_series(
+        SeriesRow::new("series-oneshot-multi", "1", "oneshot-multi")
+            .with_labels(["safe"])
+            .with_oneshot(true),
+    );
+    adapter.insert_series(
+        SeriesRow::new("series-oneshot-restricted", "1", "oneshot-restricted")
+            .with_labels(["adult"])
+            .with_oneshot(true),
+    );
 
     adapter.insert_book(
         BookRow::new("book-1", "series-1", "1", "book.cbr")
@@ -2587,6 +2749,59 @@ fn seed_books_discovery_data(adapter: &mut SqliteDiscoveryAdapter) {
             .with_tags(["adult"])
             .with_authors(["bob"]),
     );
+    adapter.insert_book(
+        BookRow::new("book-oneshot", "series-oneshot", "1", "oneshot-book.cbz")
+            .with_url("/library1/oneshot-book.cbz")
+            .with_last_modified("2024-02-01T03:04:05Z")
+            .with_media("READY", "application/vnd.comicbook+zip", 1)
+            .with_media_profile("PROFILE-ONESHOT")
+            .with_number_sort(1)
+            .with_read_status("UNREAD")
+            .with_release_date("2024-02-01")
+            .with_tags(["safe"])
+            .with_authors(["alice"]),
+    );
+    adapter.insert_book(
+        BookRow::new("book-oneshot-multi-1", "series-oneshot-multi", "1", "oneshot-multi-1.cbz")
+            .with_url("/library1/oneshot-multi-1.cbz")
+            .with_last_modified("2024-02-02T03:04:05Z")
+            .with_media("READY", "application/vnd.comicbook+zip", 1)
+            .with_media_profile("PROFILE-ONESHOT")
+            .with_number_sort(1)
+            .with_read_status("UNREAD")
+            .with_release_date("2024-02-02")
+            .with_tags(["safe"])
+            .with_authors(["alice"]),
+    );
+    adapter.insert_book(
+        BookRow::new("book-oneshot-multi-2", "series-oneshot-multi", "1", "oneshot-multi-2.cbz")
+            .with_url("/library1/oneshot-multi-2.cbz")
+            .with_last_modified("2024-02-03T03:04:05Z")
+            .with_media("READY", "application/vnd.comicbook+zip", 1)
+            .with_media_profile("PROFILE-ONESHOT")
+            .with_number_sort(2)
+            .with_read_status("UNREAD")
+            .with_release_date("2024-02-03")
+            .with_tags(["safe"])
+            .with_authors(["alice"]),
+    );
+    adapter.insert_book(
+        BookRow::new(
+            "book-oneshot-restricted",
+            "series-oneshot-restricted",
+            "1",
+            "oneshot-restricted.cbz",
+        )
+        .with_url("/library1/oneshot-restricted.cbz")
+        .with_last_modified("2024-02-04T03:04:05Z")
+        .with_media("READY", "application/vnd.comicbook+zip", 1)
+        .with_media_profile("PROFILE-ONESHOT")
+        .with_number_sort(1)
+        .with_read_status("UNREAD")
+        .with_release_date("2024-02-04")
+        .with_tags(["adult"])
+        .with_authors(["bob"]),
+    );
 }
 
 fn seed_series_detail_data(adapter: &mut SqliteDiscoveryAdapter) {
@@ -2611,6 +2826,14 @@ fn seed_series_detail_data(adapter: &mut SqliteDiscoveryAdapter) {
             .with_labels(["adult"])
             .with_age_rating(18)
             .with_status("ONGOING")
+            .with_read_status("UNREAD"),
+    );
+    adapter.insert_series(
+        SeriesRow::new("series-oneshot", "1", "oneshot")
+            .with_url("/library/1/oneshot")
+            .with_labels(["safe"])
+            .with_oneshot(true)
+            .with_status("ENDED")
             .with_read_status("UNREAD"),
     );
 
@@ -2663,6 +2886,19 @@ fn seed_series_detail_data(adapter: &mut SqliteDiscoveryAdapter) {
             .with_release_date("2023-01-01")
             .with_tags(["adult"])
             .with_authors(["bob"]),
+    );
+    adapter.insert_book(
+        BookRow::new("book-oneshot", "series-oneshot", "1", "oneshot-book.cbz")
+            .with_url("/library1/oneshot-book.cbz")
+            .with_last_modified("2024-02-01T03:04:05Z")
+            .with_size_bytes(150)
+            .with_media("READY", "application/vnd.comicbook+zip", 1)
+            .with_media_profile("PROFILE-ONESHOT")
+            .with_number_sort(1)
+            .with_read_status("UNREAD")
+            .with_release_date("2024-02-01")
+            .with_tags(["safe"])
+            .with_authors(["alice"]),
     );
 
     adapter.insert_collection(

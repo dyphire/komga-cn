@@ -1,3 +1,5 @@
+use axum::body::Body;
+use axum::http::{Request, StatusCode, header};
 use komga_rust::application::discovery::{
     BookDetailQuery, BookReadlistsQuery, BookSiblingQuery, BooksListQuery, DiscoveryQueries,
     ReadListBooksQuery, SeriesCollectionsQuery, SeriesDetailQuery,
@@ -10,6 +12,13 @@ use komga_rust::persistence::discovery::{
     BookRow, CollectionRow, LibraryRow, ReadListRow, ReadProgressRow, SeriesRow,
     SqliteDiscoveryAdapter,
 };
+use serde_json::Value;
+use tower::util::ServiceExt;
+
+const SEARCH_OWNERSHIP_HEADER: &str = "x-komga-compat-search-ownership";
+const NATIVE_OWNERSHIP_MARKER: &str = "native-rust-owned";
+const USER_BASIC_AUTH: &str = "dXNlckBleGFtcGxlLm9yZzp1c2Vy";
+const RESTRICTED_BASIC_AUTH: &str = "cmVzdHJpY3RlZEBleGFtcGxlLm9yZzpyZXN0cmljdGVk";
 
 #[test]
 fn series_detail_applies_library_and_restrictions() {
@@ -721,4 +730,193 @@ fn readlist_books_cover_restricted_and_empty_fixtures() {
         )
         .expect("fully filtered readlist books query should succeed");
     assert!(fully_filtered.content.is_empty());
+}
+
+#[tokio::test]
+async fn oneshot_bootstrap_requires_visible_oneshot_series() {
+    let app = komga_rust::app::build_router();
+    let user_token = session_token_for_basic_auth(&app, USER_BASIC_AUTH).await;
+    let restricted_token = session_token_for_basic_auth(&app, RESTRICTED_BASIC_AUTH).await;
+
+    let owned = post_books_list(
+        &app,
+        &user_token,
+        "/api/v1/books/list",
+        r#"{"condition":{"type":"SeriesId","operator":"is","value":"series-oneshot"}}"#,
+    )
+    .await;
+    assert_eq!(owned.status(), StatusCode::OK);
+    assert_eq!(
+        owned
+            .headers()
+            .get(SEARCH_OWNERSHIP_HEADER)
+            .and_then(|v| v.to_str().ok()),
+        Some(NATIVE_OWNERSHIP_MARKER),
+    );
+    let owned_json = response_json(owned).await;
+    assert_eq!(page_content_ids(&owned_json), vec!["book-oneshot"]);
+    assert!(owned_json.get("_compat").is_none());
+
+    let hidden = post_books_list(
+        &app,
+        &restricted_token,
+        "/api/v1/books/list",
+        r#"{"condition":{"type":"SeriesId","operator":"is","value":"series-oneshot-restricted"}}"#,
+    )
+    .await;
+    assert_eq!(hidden.status(), StatusCode::OK);
+    let hidden_json = response_json(hidden).await;
+    assert_eq!(
+        hidden_json["_compat"]["shape"],
+        "UnsupportedBookFilter(oneshot-bootstrap.visible-single-book)",
+    );
+}
+
+#[tokio::test]
+async fn oneshot_bootstrap_rejects_non_oneshot_and_wide_books_list_shapes() {
+    let app = komga_rust::app::build_router();
+    let token = session_token_for_basic_auth(&app, USER_BASIC_AUTH).await;
+
+    let non_oneshot = post_books_list(
+        &app,
+        &token,
+        "/api/v1/books/list",
+        r#"{"condition":{"type":"SeriesId","operator":"is","value":"series-1"}}"#,
+    )
+    .await;
+    assert_eq!(non_oneshot.status(), StatusCode::OK);
+    let non_oneshot_json = response_json(non_oneshot).await;
+    assert_eq!(
+        non_oneshot_json["_compat"]["shape"],
+        "UnsupportedBookFilter(oneshot-bootstrap.series-not-oneshot)",
+    );
+
+    let multi_book = post_books_list(
+        &app,
+        &token,
+        "/api/v1/books/list",
+        r#"{"condition":{"type":"SeriesId","operator":"is","value":"series-oneshot-multi"}}"#,
+    )
+    .await;
+    assert_eq!(multi_book.status(), StatusCode::OK);
+    let multi_book_json = response_json(multi_book).await;
+    assert_eq!(
+        multi_book_json["_compat"]["shape"],
+        "UnsupportedBookFilter(oneshot-bootstrap.visible-single-book)",
+    );
+
+    let query_params = post_books_list(
+        &app,
+        &token,
+        "/api/v1/books/list?page=0&size=20",
+        r#"{"condition":{"type":"SeriesId","operator":"is","value":"series-oneshot"}}"#,
+    )
+    .await;
+    assert_eq!(query_params.status(), StatusCode::OK);
+    let query_params_json = response_json(query_params).await;
+    assert_eq!(
+        query_params_json["_compat"]["shape"],
+        "UnsupportedBookFilter(oneshot-bootstrap.query-params)",
+    );
+
+    let readlist_context = post_books_list(
+        &app,
+        &token,
+        "/api/v1/books/list?context=READLIST&contextId=readlist-2",
+        r#"{"condition":{"type":"SeriesId","operator":"is","value":"series-oneshot"}}"#,
+    )
+    .await;
+    assert_eq!(readlist_context.status(), StatusCode::OK);
+    let readlist_context_json = response_json(readlist_context).await;
+    assert_eq!(
+        readlist_context_json["_compat"]["shape"],
+        "UnsupportedBookFilter(oneshot-bootstrap.query-params)",
+    );
+
+    let wide_filter = post_books_list(
+        &app,
+        &token,
+        "/api/v1/books/list",
+        r#"{"condition":{"type":"AllOfBook","conditions":[{"type":"SeriesId","operator":"is","value":"series-oneshot"}]}}"#,
+    )
+    .await;
+    assert_eq!(wide_filter.status(), StatusCode::OK);
+    let wide_filter_json = response_json(wide_filter).await;
+    assert!(
+        wide_filter_json["_compat"]["shape"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("UnsupportedBook"),
+        "wide books-list shape should stay explicit non-native",
+    );
+}
+
+async fn session_token_for_basic_auth<S>(app: &S, basic_auth: &str) -> String
+where
+    S: tower::Service<Request<Body>, Response = axum::response::Response> + Clone,
+    S::Error: std::fmt::Debug,
+    S::Future: Send,
+{
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v2/users/me")
+                .header(header::AUTHORIZATION, format!("Basic {basic_auth}"))
+                .header("X-Auth-Token", "")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    response
+        .headers()
+        .get("x-auth-token")
+        .expect("login response should include x-auth-token")
+        .to_str()
+        .expect("x-auth-token should be valid UTF-8")
+        .to_string()
+}
+
+async fn post_books_list<S>(app: &S, token: &str, uri: &str, body: &str) -> axum::response::Response
+where
+    S: tower::Service<Request<Body>, Response = axum::response::Response> + Clone,
+    S::Error: std::fmt::Debug,
+    S::Future: Send,
+{
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header("X-Auth-Token", token)
+                .header(SEARCH_OWNERSHIP_HEADER, NATIVE_OWNERSHIP_MARKER)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+
+async fn response_json(response: axum::response::Response) -> Value {
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    serde_json::from_slice(&body).unwrap()
+}
+
+fn page_content_ids(value: &Value) -> Vec<&str> {
+    value["content"]
+        .as_array()
+        .expect("page payload should expose array content")
+        .iter()
+        .map(|it| {
+            it.get("id")
+                .and_then(Value::as_str)
+                .expect("page item id should be a string")
+        })
+        .collect()
 }

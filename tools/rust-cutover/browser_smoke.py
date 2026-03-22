@@ -8,714 +8,16 @@ import json
 import subprocess
 import sys
 import tempfile
-import textwrap
 import urllib.error
 import urllib.request
 from pathlib import Path
 
+from browser_smoke_routes import ROUTES
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-ROUTES: dict[str, dict[str, object]] = {
-    'browse-readlist': {
-        'route': 'browse-readlist',
-        'path': '/readlists/readlist-2',
-        'selector': '[data-testid="item-browser-root"]',
-        'panelSelector': '[data-testid="item-browser-root"]',
-        'panelKey': 'itemBrowserFound',
-        'panelExpected': True,
-        'siblingNavigationSelector': '[data-testid="browse-book-sibling-navigation"]',
-        'siblingNavigationExpected': False,
-        'sourceFile': 'komga-webui/src/views/BrowseReadList.vue',
-        'sourceFiles': [
-            'komga-webui/src/views/BrowseReadList.vue',
-            'komga-webui/src/components/ItemBrowser.vue',
-            'komga-webui/src/components/ItemCard.vue',
-            'komga-webui/src/types/items.ts',
-            'komga-webui/src/types/context.ts',
-        ],
-        'scenarioSourceFiles': [
-            'komga-webui/src/views/BrowseReadList.vue',
-            'komga-webui/src/views/BrowseBook.vue',
-            'komga-webui/src/components/ItemBrowser.vue',
-            'komga-webui/src/components/ItemCard.vue',
-            'komga-webui/src/types/items.ts',
-            'komga-webui/src/types/context.ts',
-        ],
-        'sourceMetadataFragments': [
-            'readList.name',
-            'readList.summary',
-            'origin: ContextOrigin.READLIST, id: readListId',
-            "query: {context: this.item?.context?.origin, contextId: this.item?.context?.id}",
-        ],
-        'metadataFragments': ['ReadList 2', 'Download'],
-        'metadataMinimumMatches': 2,
-        'ownedRequests': [],
-        'scenario': {
-            'type': 'readlist-origin-entry',
-            'contextOrigin': 'READLIST',
-            'contextId': 'readlist-2',
-            'readListName': 'ReadList 2',
-            'entryBookId': 'book-1',
-            'entryBookPath': '/book/book-1?context=READLIST&contextId=readlist-2',
-        },
-    },
-    'browse-series': {
-        'route': 'browse-series',
-        'path': '/series/series-1',
-        'selector': '[data-testid="browse-series-root"]',
-        'panelSelector': '[data-testid="browse-series-collections-panel"]',
-        'panelKey': 'collectionsPanelFound',
-        'panelExpected': True,
-        'siblingNavigationSelector': '[data-testid="browse-book-sibling-navigation"]',
-        'siblingNavigationExpected': False,
-        'sourceFile': 'komga-webui/src/views/BrowseSeries.vue',
-        'sourceMetadataFragments': ['series.metadata.title', 'series.metadata.summary', 'authorsByRole'],
-        'metadataFragments': ['series', 'featured', 'fantasy', 'alice'],
-        'metadataMinimumMatches': 2,
-        'ownedRequests': [
-            {
-                'label': 'series-detail',
-                'method': 'GET',
-                'urlEndsWith': '/api/v1/series/series-1',
-                'requestPath': '/api/v1/series/series-1',
-            },
-            {
-                'label': 'series-collections',
-                'method': 'GET',
-                'urlEndsWith': '/api/v1/series/series-1/collections',
-                'requestPath': '/api/v1/series/series-1/collections',
-            },
-            {
-                'label': 'series-books-list',
-                'method': 'POST',
-                'urlContains': '/api/v1/books/list?page=0&size=20&sort=metadata.numberSort',
-                'postDataIncludes': ['AllOfBook', 'SeriesId', 'series-1'],
-                'requestPath': '/api/v1/books/list?page=0&size=20&sort=metadata.numberSort,asc',
-                'body': '{"condition":{"type":"AllOfBook","conditions":[{"type":"SeriesId","operator":"is","value":"series-1"}]}}',
-            },
-        ],
-    },
-    'browse-book': {
-        'route': 'browse-book',
-        'path': '/book/book-1?context=READLIST&contextId=readlist-2',
-        'selector': '[data-testid="browse-book-root"]',
-        'panelSelector': '[data-testid="browse-book-readlists-panel"]',
-        'panelKey': 'readlistsPanelFound',
-        'panelExpected': True,
-        'siblingNavigationSelector': '[data-testid="browse-book-sibling-navigation"]',
-        'siblingNavigationExpected': True,
-        'sourceFile': 'komga-webui/src/views/BrowseBook.vue',
-        'sourceFiles': [
-            'komga-webui/src/views/BrowseBook.vue',
-            'komga-webui/src/services/komga-readlists.service.ts',
-            'komga-webui/src/types/context.ts',
-            'komga-webui/src/types/items.ts',
-        ],
-        'sourceMetadataFragments': [
-            'book.seriesTitle',
-            'book.metadata.title',
-            'book.size',
-            "this.$komgaReadLists.getBooks(this.context.id, {unpaged: true} as PageRequest)",
-            'this.$komgaReadLists.getBookSiblingNext(this.context.id, bookId)',
-            'this.$komgaReadLists.getBookSiblingPrevious(this.context.id, bookId)',
-        ],
-        'metadataFragments': ['book.cbr', '222 b', 'alice', '2024'],
-        'metadataMinimumMatches': 2,
-        'ownedRequests': [
-            {
-                'label': 'readlist-books-unpaged',
-                'method': 'GET',
-                'urlEndsWith': '/api/v1/readlists/readlist-2/books?unpaged=true',
-                'requestPath': '/api/v1/readlists/readlist-2/books?unpaged=true',
-                'responseStatuses': [200],
-            },
-            {
-                'label': 'readlist-book-next',
-                'method': 'GET',
-                'urlEndsWith': '/api/v1/readlists/readlist-2/books/book-1/next',
-                'requestPath': '/api/v1/readlists/readlist-2/books/book-1/next',
-                'responseStatuses': [200],
-            },
-            {
-                'label': 'readlist-book-previous',
-                'method': 'GET',
-                'urlEndsWith': '/api/v1/readlists/readlist-2/books/book-1/previous',
-                'requestPath': '/api/v1/readlists/readlist-2/books/book-1/previous',
-                'responseStatuses': [404],
-            },
-        ],
-        'scenario': {
-            'type': 'readlist-sibling-navigation',
-            'contextOrigin': 'READLIST',
-            'contextId': 'readlist-2',
-            'readListName': 'ReadList 2',
-            'entryBookId': 'book-1',
-            'entryBookPath': '/book/book-1?context=READLIST&contextId=readlist-2',
-            'nextBookId': 'book-2',
-            'nextBookPath': '/book/book-2?context=READLIST&contextId=readlist-2',
-            'seriesNextBookId': 'book-3',
-        },
-    },
-}
-
-
-NODE_RUNNER = textwrap.dedent(
-    r"""
-    import fs from 'node:fs/promises'
-    import path from 'node:path'
-
-    async function loadPlaywright() {
-      try {
-        return await import('playwright')
-      } catch (playwrightError) {
-        try {
-          return await import('playwright-core')
-        } catch (coreError) {
-          const error = new Error(
-            `Unable to load Playwright. playwright: ${playwrightError.message}; playwright-core: ${coreError.message}`,
-          )
-          error.cause = { playwrightError, coreError }
-          throw error
-        }
-      }
-    }
-
-    function matchesRequest(spec, request) {
-      if (request.method !== spec.method) return false
-      if (spec.urlContains && !request.url.includes(spec.urlContains)) return false
-      if (spec.urlEndsWith && !request.url.endsWith(spec.urlEndsWith)) return false
-      if (spec.postDataIncludes && spec.postDataIncludes.length > 0) {
-        const postData = request.postData || ''
-        for (const fragment of spec.postDataIncludes) {
-          if (!postData.includes(fragment)) return false
-        }
-      }
-      return true
-    }
-
-    function responsePasses(spec, response) {
-      if (!response) return false
-      if (spec.responseStatuses && spec.responseStatuses.length > 0) {
-        return spec.responseStatuses.includes(response.status)
-      }
-      return true
-    }
-
-    function summarizeExpectedRequests(specs, requests, responses) {
-      return specs.map(spec => {
-        const matchedRequest = requests.find(request => matchesRequest(spec, request)) || null
-        const matchedResponse = matchedRequest
-          ? responses.find(response => response.url === matchedRequest.url && responsePasses(spec, response)) || null
-          : null
-        const requiresResponseMatch = spec.responseStatuses && spec.responseStatuses.length > 0
-        return {
-          label: spec.label,
-          method: spec.method,
-          urlContains: spec.urlContains || null,
-          urlEndsWith: spec.urlEndsWith || null,
-          postDataIncludes: spec.postDataIncludes || [],
-          responseStatuses: spec.responseStatuses || [],
-          pass: matchedRequest !== null && (!requiresResponseMatch || matchedResponse !== null),
-          matchedRequest,
-          matchedResponse,
-        }
-      })
-    }
-
-    function summarizeObservedUnownedRequests(specs, requests, ownershipLabel) {
-      return requests
-        .filter(request => !specs.some(spec => matchesRequest(spec, request)))
-        .map(request => ({
-          ownership: ownershipLabel,
-          method: request.method,
-          url: request.url,
-          resourceType: request.resourceType,
-          postData: request.postData,
-        }))
-    }
-
-    function hasExpectedContext(url, scenario) {
-      try {
-        const parsed = new URL(url)
-        return parsed.searchParams.get('context') === scenario.contextOrigin
-          && parsed.searchParams.get('contextId') === scenario.contextId
-      } catch {
-        return false
-      }
-    }
-
-    async function runReadlistOriginEntryScenario(page, route) {
-      const scenario = route.scenario
-      const linkLocator = page.locator(`${route.selector} .item-card a.link-underline[href*="/book/"]`).first()
-      const linkCount = await linkLocator.count()
-      const failures = []
-
-      if (linkCount === 0) {
-        return {
-          scenario: {
-            type: scenario.type,
-            entryBookLinkFound: false,
-          },
-          signals: {
-            entryBookLinkFound: false,
-            entryBookContextRetained: false,
-          },
-          failures: ['readlist entry book link was not found'],
-        }
-      }
-
-      const entryBookHref = await linkLocator.getAttribute('href')
-      const expectedHrefFragment = `${scenario.entryBookPath}`
-      const entryBookLinkFound = Boolean(entryBookHref && entryBookHref.includes(expectedHrefFragment))
-
-      if (!entryBookLinkFound) {
-        failures.push(`readlist entry book link did not keep expected context (${expectedHrefFragment})`)
-      }
-
-      await linkLocator.click()
-      await page.waitForURL(`**${scenario.entryBookPath.replace('?', '\\?')}*`, { timeout: 30000 })
-      await page.waitForSelector('[data-testid="browse-book-root"]', { timeout: 30000 })
-      await page.waitForLoadState('networkidle')
-
-      const navigatedUrl = page.url()
-      const entryBookContextRetained = hasExpectedContext(navigatedUrl, scenario)
-      if (!entryBookContextRetained) {
-        failures.push('readlist-origin navigation lost context query parameters')
-      }
-
-      const contextBannerText = compactText(await page.locator('[data-testid="browse-book-root"]').textContent())
-      const contextBannerVisible = contextBannerText.includes(scenario.readListName)
-      if (!contextBannerVisible) {
-        failures.push(`browse-book did not surface readlist name ${scenario.readListName}`)
-      }
-
-      await page.goBack({ waitUntil: 'domcontentloaded' })
-      await page.waitForURL(`**${route.path.replace('?', '\\?')}*`, { timeout: 30000 })
-      await page.waitForSelector(route.selector, { timeout: 30000 })
-      await page.waitForLoadState('networkidle')
-
-      return {
-        scenario: {
-          type: scenario.type,
-          entryBookHref,
-          expectedEntryBookPath: scenario.entryBookPath,
-          navigatedBookUrl: navigatedUrl,
-          contextBannerVisible,
-          returnedToReadlist: true,
-        },
-        signals: {
-          entryBookLinkFound,
-          entryBookContextRetained,
-          contextBannerVisible,
-          returnedToReadlist: true,
-        },
-        failures,
-      }
-    }
-
-    function buttonState(button) {
-      if (!button) return { href: null, disabled: false }
-      const href = button.getAttribute('href') || button.href || null
-      const disabled = button.hasAttribute('disabled')
-        || button.getAttribute('aria-disabled') === 'true'
-        || button.classList.contains('v-btn--disabled')
-      return { href, disabled }
-    }
-
-    async function siblingNavigationState(page, selector, scenario) {
-      return page.evaluate(({ selector: navSelector, scenarioConfig }) => {
-        const navigation = document.querySelector(navSelector)
-        const buttons = Array.from(navigation?.querySelectorAll('.v-btn') || [])
-        const previous = buttons[0]
-        const next = buttons[2]
-        const rootText = (document.querySelector('[data-testid="browse-book-root"]')?.textContent || '').replace(/\s+/g, ' ').trim()
-
-        const describe = button => {
-          if (!button) return { href: null, disabled: false }
-          return {
-            href: button.getAttribute('href') || button.href || null,
-            disabled: button.hasAttribute('disabled')
-              || button.getAttribute('aria-disabled') === 'true'
-              || button.classList.contains('v-btn--disabled'),
-          }
-        }
-
-        return {
-          previous: describe(previous),
-          next: describe(next),
-          readListNameVisible: rootText.includes(scenarioConfig.readListName),
-        }
-      }, { selector, scenarioConfig: scenario })
-    }
-
-    async function runReadlistSiblingNavigationScenario(page, route) {
-      const scenario = route.scenario
-      const failures = []
-      const initialState = await siblingNavigationState(page, route.siblingNavigationSelector, scenario)
-      const initialContextRetained = hasExpectedContext(page.url(), scenario)
-      const initialPreviousBoundary = initialState.previous.disabled && !initialState.previous.href
-      const initialNextWithinReadlist = Boolean(
-        initialState.next.href
-        && initialState.next.href.includes(`/book/${scenario.nextBookId}`)
-        && initialState.next.href.includes(`context=${scenario.contextOrigin}`)
-        && initialState.next.href.includes(`contextId=${scenario.contextId}`)
-        && !initialState.next.href.includes(`/book/${scenario.seriesNextBookId}`),
-      )
-
-      if (!initialContextRetained) {
-        failures.push('browse-book entry lost readlist context query parameters')
-      }
-      if (!initialState.readListNameVisible) {
-        failures.push(`browse-book did not surface readlist name ${scenario.readListName}`)
-      }
-      if (!initialPreviousBoundary) {
-        failures.push('readlist previous boundary was not preserved on the first book')
-      }
-      if (!initialNextWithinReadlist) {
-        failures.push(`readlist next navigation did not stay inside readlist order (expected ${scenario.nextBookId})`)
-      }
-
-      const nextLocator = page.locator(`${route.siblingNavigationSelector} a[href*="/book/${scenario.nextBookId}"]`).first()
-      if (await nextLocator.count() === 0) {
-        failures.push(`next navigation link to ${scenario.nextBookId} was not rendered`)
-        return {
-          scenario: {
-            type: scenario.type,
-            initialState,
-          },
-          signals: {
-            initialContextRetained,
-            initialPreviousBoundary,
-            initialNextWithinReadlist,
-            readListNameVisible: initialState.readListNameVisible,
-            nextNavigationRetainedContext: false,
-            previousNavigationRetainedContext: false,
-            nextThenPreviousLoopClosed: false,
-          },
-          failures,
-        }
-      }
-
-      await nextLocator.click()
-      await page.waitForURL(`**${scenario.nextBookPath.replace('?', '\\?')}*`, { timeout: 30000 })
-      await page.waitForSelector(route.selector, { timeout: 30000 })
-      await page.waitForLoadState('networkidle')
-
-      const nextVisitedUrl = page.url()
-      const nextNavigationRetainedContext = hasExpectedContext(nextVisitedUrl, scenario)
-      const nextState = await siblingNavigationState(page, route.siblingNavigationSelector, scenario)
-      const previousBackWithinReadlist = Boolean(
-        nextState.previous.href
-        && nextState.previous.href.includes(`/book/${scenario.entryBookId}`)
-        && nextState.previous.href.includes(`context=${scenario.contextOrigin}`)
-        && nextState.previous.href.includes(`contextId=${scenario.contextId}`),
-      )
-
-      if (!nextNavigationRetainedContext) {
-        failures.push('next navigation lost readlist context query parameters')
-      }
-      if (!previousBackWithinReadlist) {
-        failures.push(`previous navigation from ${scenario.nextBookId} did not return to ${scenario.entryBookId}`)
-      }
-
-      const previousLocator = page.locator(`${route.siblingNavigationSelector} a[href*="/book/${scenario.entryBookId}"]`).first()
-      if (await previousLocator.count() === 0) {
-        failures.push(`previous navigation link back to ${scenario.entryBookId} was not rendered on ${scenario.nextBookId}`)
-        return {
-          scenario: {
-            type: scenario.type,
-            initialState,
-            nextState,
-            nextVisitedUrl,
-          },
-          signals: {
-            initialContextRetained,
-            initialPreviousBoundary,
-            initialNextWithinReadlist,
-            readListNameVisible: initialState.readListNameVisible,
-            nextNavigationRetainedContext,
-            previousNavigationRetainedContext: false,
-            nextThenPreviousLoopClosed: false,
-          },
-          failures,
-        }
-      }
-
-      await previousLocator.click()
-      await page.waitForURL(`**${scenario.entryBookPath.replace('?', '\\?')}*`, { timeout: 30000 })
-      await page.waitForSelector(route.selector, { timeout: 30000 })
-      await page.waitForLoadState('networkidle')
-
-      const previousVisitedUrl = page.url()
-      const previousNavigationRetainedContext = hasExpectedContext(previousVisitedUrl, scenario)
-      const nextThenPreviousLoopClosed = previousVisitedUrl.includes(scenario.entryBookPath)
-
-      if (!previousNavigationRetainedContext) {
-        failures.push('previous navigation lost readlist context query parameters')
-      }
-      if (!nextThenPreviousLoopClosed) {
-        failures.push('next then previous navigation did not return to the anchor readlist book')
-      }
-
-      return {
-        scenario: {
-          type: scenario.type,
-          initialState,
-          nextState,
-          nextVisitedUrl,
-          previousVisitedUrl,
-          expectedSeriesNextBookId: scenario.seriesNextBookId,
-        },
-        signals: {
-          initialContextRetained,
-          initialPreviousBoundary,
-          initialNextWithinReadlist,
-          readListNameVisible: initialState.readListNameVisible,
-          nextNavigationRetainedContext,
-          previousNavigationRetainedContext,
-          nextThenPreviousLoopClosed,
-        },
-        failures,
-      }
-    }
-
-    async function runRouteScenario(page, route) {
-      if (!route.scenario) return { scenario: null, signals: {}, failures: [] }
-      if (route.scenario.type === 'readlist-origin-entry') {
-        return runReadlistOriginEntryScenario(page, route)
-      }
-      if (route.scenario.type === 'readlist-sibling-navigation') {
-        return runReadlistSiblingNavigationScenario(page, route)
-      }
-      return { scenario: null, signals: {}, failures: [] }
-    }
-
-    function compactText(value) {
-      return (value || '').replace(/\s+/g, ' ').trim()
-    }
-
-    const configPath = process.argv[2]
-    const config = JSON.parse(await fs.readFile(configPath, 'utf8'))
-    const outputDir = path.resolve(config.outputDir)
-    await fs.mkdir(outputDir, { recursive: true })
-
-    const playwright = await loadPlaywright()
-    const browser = await playwright.chromium.launch({ headless: true })
-    const context = await browser.newContext({ viewport: { width: 1440, height: 1100 } })
-    const page = await context.newPage()
-
-    const globalRequests = []
-    const globalResponses = []
-    const pageErrors = []
-    let currentRouteName = null
-    const routeRequestLog = new Map()
-    const routeResponseLog = new Map()
-    const routeErrorLog = new Map()
-
-    function routeBucket(map, routeName) {
-      if (!map.has(routeName)) map.set(routeName, [])
-      return map.get(routeName)
-    }
-
-    page.on('request', request => {
-      const entry = {
-        method: request.method(),
-        url: request.url(),
-        resourceType: request.resourceType(),
-        postData: request.postData() || null,
-      }
-      globalRequests.push(entry)
-      if (currentRouteName) routeBucket(routeRequestLog, currentRouteName).push(entry)
-    })
-
-    page.on('response', response => {
-      const entry = {
-        status: response.status(),
-        url: response.url(),
-        contentType: response.headers()['content-type'] || null,
-      }
-      globalResponses.push(entry)
-      if (currentRouteName) routeBucket(routeResponseLog, currentRouteName).push(entry)
-    })
-
-    page.on('pageerror', error => {
-      const entry = {
-        route: currentRouteName,
-        message: error.stack || String(error),
-      }
-      pageErrors.push(entry)
-      if (currentRouteName) routeBucket(routeErrorLog, currentRouteName).push(entry.message)
-    })
-
-    const backendOnly = entry => (
-      entry.url.includes(config.apiUrl)
-      || entry.url.includes('/sse/v1/events')
-    )
-
-    try {
-      await page.goto(`${config.appUrl}/`, { waitUntil: 'domcontentloaded' })
-      await page.waitForSelector('input[autocomplete="username"]', { timeout: 30000 })
-      await page.locator('input[autocomplete="username"]').fill(config.login.username)
-      await page.locator('input[autocomplete="current-password"]').fill(config.login.password)
-      await page.getByRole('button', { name: 'Login' }).click()
-      await page.waitForLoadState('networkidle')
-
-      const loginState = {
-        captureMode: 'playwright',
-        finalUrl: page.url(),
-        title: await page.title(),
-      }
-      await fs.writeFile(path.join(outputDir, 'login-state.json'), `${JSON.stringify(loginState, null, 2)}\n`)
-      await fs.writeFile(path.join(outputDir, 'login-post-submit.html'), await page.content())
-      await page.screenshot({ path: path.join(outputDir, 'login-post-submit.png'), fullPage: true })
-
-      const summary = []
-
-      for (const route of config.routes) {
-        currentRouteName = route.route
-        routeRequestLog.set(route.route, [])
-        routeResponseLog.set(route.route, [])
-        routeErrorLog.set(route.route, [])
-
-        let routeResult = null
-
-        try {
-          await page.goto(`${config.appUrl}${route.path}`, { waitUntil: 'domcontentloaded' })
-          await page.waitForURL(`**${route.path.replace('?', '\\?')}*`, { timeout: 30000 })
-          await page.waitForSelector(route.selector, { timeout: 30000 })
-          await page.waitForLoadState('networkidle')
-          const scenarioResult = await runRouteScenario(page, route)
-
-          const dom = await page.evaluate(routeConfig => {
-            const normalizeText = value => (value || '').replace(/\s+/g, ' ').trim()
-            const root = document.querySelector(routeConfig.selector)
-            const panel = document.querySelector(routeConfig.panelSelector)
-            const siblingNavigation = document.querySelector(routeConfig.siblingNavigationSelector)
-            const fullText = normalizeText(root?.textContent || '')
-            const metadataFragmentsFound = routeConfig.metadataFragments.filter(fragment =>
-              fullText.toLowerCase().includes(fragment.toLowerCase()),
-            )
-
-            return {
-              title: document.title,
-              location: window.location.href,
-              rootFound: Boolean(root),
-              textSample: fullText.slice(0, 400),
-              rootHtml: root?.outerHTML?.slice(0, 4000) || null,
-              detailMetadataVisible: metadataFragmentsFound.length >= routeConfig.metadataMinimumMatches,
-              metadataFragmentsFound,
-              panelFound: Boolean(panel),
-              siblingNavigationFound: Boolean(siblingNavigation),
-            }
-          }, route)
-
-          const routeRequests = (routeRequestLog.get(route.route) || []).filter(backendOnly)
-          const routeResponses = (routeResponseLog.get(route.route) || []).filter(backendOnly)
-          const routePageErrors = routeErrorLog.get(route.route) || []
-          const expectedOwnedRequests = summarizeExpectedRequests(route.ownedRequests, routeRequests, routeResponses)
-          const unownedObservedRequests = summarizeObservedUnownedRequests(route.ownedRequests, routeRequests, 'non-native-observed')
-          const signals = {
-            rootFound: dom.rootFound,
-            detailMetadataVisible: dom.detailMetadataVisible,
-            [route.panelKey]: dom.panelFound,
-            siblingNavigationFound: dom.siblingNavigationFound,
-            siblingNavigationExpected: route.siblingNavigationExpected,
-            ...scenarioResult.signals,
-          }
-          const failures = [...scenarioResult.failures]
-
-          if (!signals.rootFound) failures.push(`missing root selector ${route.selector}`)
-          if (!signals.detailMetadataVisible) failures.push('detail metadata fragments were not visible')
-          if (dom.panelFound !== route.panelExpected) failures.push(`panel expectation failed for ${route.panelSelector}`)
-          if (dom.siblingNavigationFound !== route.siblingNavigationExpected) {
-            failures.push(`sibling navigation expectation failed for ${route.siblingNavigationSelector}`)
-          }
-          for (const requestCheck of expectedOwnedRequests) {
-            if (!requestCheck.pass) failures.push(`missing expected owned request ${requestCheck.label}`)
-          }
-
-          routeResult = {
-            route: route.route,
-            path: route.path,
-            selector: route.selector,
-            visitedUrl: page.url(),
-            captureMode: 'playwright',
-            pass: failures.length === 0,
-            error: failures.length === 0 ? null : failures.join('; '),
-            dom: {
-              title: dom.title,
-              location: dom.location,
-              rootFound: dom.rootFound,
-              textSample: dom.textSample,
-              rootHtml: dom.rootHtml,
-            },
-            signals,
-            scenario: scenarioResult.scenario,
-            metadataFragmentsFound: dom.metadataFragmentsFound,
-            expectedOwnedRequests,
-            ownedRequestInventory: expectedOwnedRequests,
-            unownedObservedRequests,
-            requests: routeRequests,
-            responses: routeResponses,
-            pageErrors: routePageErrors,
-          }
-        } catch (error) {
-          routeResult = {
-            route: route.route,
-            path: route.path,
-            selector: route.selector,
-            visitedUrl: page.url(),
-            captureMode: 'playwright',
-            pass: false,
-            error: error.stack || String(error),
-            dom: {
-              title: await page.title().catch(() => null),
-              location: page.url(),
-              rootFound: false,
-              textSample: null,
-              rootHtml: null,
-            },
-            signals: {
-              rootFound: false,
-              detailMetadataVisible: false,
-              [route.panelKey]: false,
-              siblingNavigationFound: false,
-              siblingNavigationExpected: route.siblingNavigationExpected,
-            },
-            scenario: null,
-            metadataFragmentsFound: [],
-            expectedOwnedRequests: [],
-            ownedRequestInventory: [],
-            unownedObservedRequests: [],
-            requests: (routeRequestLog.get(route.route) || []).filter(backendOnly),
-            responses: (routeResponseLog.get(route.route) || []).filter(backendOnly),
-            pageErrors: routeErrorLog.get(route.route) || [],
-          }
-        } finally {
-          summary.push(routeResult)
-          await fs.writeFile(path.join(outputDir, `${route.route}.json`), `${JSON.stringify(routeResult, null, 2)}\n`)
-          await fs.writeFile(path.join(outputDir, `${route.route}.html`), await page.content())
-          await page.screenshot({ path: path.join(outputDir, `${route.route}.png`), fullPage: true })
-          currentRouteName = null
-        }
-      }
-
-      await fs.writeFile(path.join(outputDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`)
-      await fs.writeFile(
-        path.join(outputDir, 'requests-all.json'),
-        `${JSON.stringify({ requests: globalRequests, responses: globalResponses, routes: summary }, null, 2)}\n`,
-      )
-      await fs.writeFile(path.join(outputDir, 'page-errors.json'), `${JSON.stringify(pageErrors, null, 2)}\n`)
-
-      if (!summary.every(route => route.pass)) {
-        process.exitCode = 1
-      }
-    } finally {
-      await browser.close()
-    }
-    """,
-).strip()
+NODE_RUNNER_PATH = Path(__file__).with_name('browser_smoke_runner.mjs')
+NODE_RUNNER = NODE_RUNNER_PATH.read_text(encoding='utf-8')
 
 
 def parse_args() -> argparse.Namespace:
@@ -817,6 +119,10 @@ def selector_in_source(source_text: str, selector: str) -> bool:
 def selector_marker(selector: str) -> str:
     marker = selector.removeprefix('[data-testid="').removesuffix('"]')
     return f'data-testid="{marker}"'
+
+
+def capture_ownership_label(capture_mode: str) -> str:
+    return 'contract-fallback' if capture_mode == 'source-contract-fallback' else 'non-native-observed'
 
 
 def auth_header(username: str, password: str) -> str:
@@ -997,6 +303,45 @@ def fallback_navigation_scenario(route: dict[str, object], source_texts: dict[st
         }
         return scenario_result, signals, failures
 
+    if scenario.get('type') == 'oneshot-readlist-fallback':
+        context_parse_found = 'this.$route.query.contextId' in combined_source and 'ContextOrigin.READLIST' in combined_source
+        context_name_request_found = 'this.$komgaReadLists.getOneReadList(this.context.id)' in combined_source
+        list_request_found = "this.$komgaReadLists.getBooks(this.context.id, {unpaged: true} as PageRequest)" in combined_source
+        next_request_found = 'this.$komgaReadLists.getBookSiblingNext(this.context.id, this.book.id)' in combined_source
+        previous_request_found = 'this.$komgaReadLists.getBookSiblingPrevious(this.context.id, this.book.id)' in combined_source
+        readlist_context_navigation_found = selector_in_source(
+            combined_source,
+            str(scenario['readlistContextNavigationSelector']),
+        )
+        readlist_name_visible = 'navigation_within_readlist' in combined_source
+        signals = {
+            'readlistContextRetained': context_parse_found,
+            'readlistContextBannerVisible': context_parse_found and context_name_request_found and readlist_name_visible,
+            'readlistContextNavigationFound': readlist_context_navigation_found,
+            'returnedToDirectOneshot': capture_mode != 'playwright',
+        }
+        if not signals['readlistContextRetained']:
+            failures.append('source fallback could not prove oneshot route consumes readlist context query parameters')
+        if not signals['readlistContextBannerVisible']:
+            failures.append('source fallback could not prove oneshot route surfaces readlist navigation context')
+        if not signals['readlistContextNavigationFound']:
+            failures.append('source fallback could not prove oneshot route renders readlist context navigation selector')
+        if not (list_request_found and next_request_found and previous_request_found):
+            failures.append('source fallback could not prove oneshot route triggers readlist-scoped fallback requests')
+        scenario_result = {
+            'type': scenario['type'],
+            'captureMode': capture_mode,
+            'readlistContextPath': scenario['readlistContextPath'],
+            'observedOwnershipLabel': capture_ownership_label(capture_mode),
+            'contextParseFound': context_parse_found,
+            'contextNameRequestFound': context_name_request_found,
+            'readlistBooksRequestFound': list_request_found,
+            'readlistNextRequestFound': next_request_found,
+            'readlistPreviousRequestFound': previous_request_found,
+            'readlistContextNavigationFound': readlist_context_navigation_found,
+        }
+        return scenario_result, signals, failures
+
     return None, {}, []
 
 
@@ -1039,6 +384,8 @@ def build_fallback_route_result(
     root_selector = str(route['selector'])
     panel_selector = str(route['panelSelector'])
     sibling_selector = str(route['siblingNavigationSelector'])
+    extra_selectors = list(route.get('extraSelectors', []))
+    observed_specs = list(route.get('observedRequests', []))
     metadata_fragments_found = [
         fragment
         for fragment in route['sourceMetadataFragments']
@@ -1048,10 +395,15 @@ def build_fallback_route_result(
     root_found = any(selector_in_source(text, root_selector) for text in source_texts.values())
     panel_found = any(selector_in_source(text, panel_selector) for text in source_texts.values())
     sibling_navigation_found = any(selector_in_source(text, sibling_selector) for text in source_texts.values())
+    extra_signal_states = {
+        str(extra['signalKey']): any(selector_in_source(text, str(extra['selector'])) for text in source_texts.values())
+        for extra in extra_selectors
+    }
     snippet = source_snippet(source_text, selector_marker(root_selector))
     requests: list[dict[str, object]] = []
     responses: list[dict[str, object]] = []
     expected_owned_requests: list[dict[str, object]] = []
+    observed_fallback_requests: list[dict[str, object]] = []
 
     for request_spec in route['ownedRequests']:
         if token is None:
@@ -1068,12 +420,30 @@ def build_fallback_route_result(
         responses.append(response_entry)
         expected_owned_requests.append(expected_entry)
 
+    for request_spec in observed_specs:
+        if token is None:
+            request_entry = contract_request_entry(api_url, request_spec)
+            response_entry = {
+                'status': None,
+                'url': request_entry['url'],
+                'contentType': None,
+            }
+            expected_entry = contract_expected_entry(api_url, request_spec)
+        else:
+            request_entry, response_entry, expected_entry = execute_api_request(api_url, token, request_spec)
+        requests.append(request_entry)
+        responses.append(response_entry)
+        observed_fallback_requests.append({
+            **expected_entry,
+            'ownership': capture_ownership_label(capture_mode),
+        })
+
     scenario_texts = read_source_texts(route, 'scenarioSourceFiles') if route.get('scenarioSourceFiles') else source_texts
     scenario_result, scenario_signals, scenario_failures = fallback_navigation_scenario(route, scenario_texts, capture_mode)
     unowned_observed_requests = unexpected_requests(
         requests,
-        list(route['ownedRequests']),
-        'contract-fallback' if capture_mode == 'source-contract-fallback' else 'non-native-observed',
+        list(route['ownedRequests']) + observed_specs,
+        capture_ownership_label(capture_mode),
     )
 
     signals = {
@@ -1082,6 +452,7 @@ def build_fallback_route_result(
         str(route['panelKey']): panel_found,
         'siblingNavigationFound': sibling_navigation_found,
         'siblingNavigationExpected': route['siblingNavigationExpected'],
+        **extra_signal_states,
         **scenario_signals,
     }
 
@@ -1094,9 +465,19 @@ def build_fallback_route_result(
         failures.append(f'panel expectation failed for {panel_selector}')
     if sibling_navigation_found is not bool(route['siblingNavigationExpected']):
         failures.append(f'sibling navigation expectation failed for {sibling_selector}')
+    for extra in extra_selectors:
+        signal_key = str(extra['signalKey'])
+        if signals.get(signal_key) is not bool(extra['expected']):
+            failures.append(f'extra selector expectation failed for {extra["selector"]}')
     for expected_request in expected_owned_requests:
         if not expected_request['pass']:
             failures.append(f'missing expected owned request {expected_request["label"]}')
+    for expected_request in observed_fallback_requests:
+        if not expected_request['pass']:
+            failures.append(f'missing expected fallback request {expected_request["label"]}')
+    for signal_key, expected_value in dict(route.get('scenarioSignalExpectations', {})).items():
+        if signals.get(signal_key) is not expected_value:
+            failures.append(f'scenario expectation failed for {signal_key}')
 
     return {
         'route': route['route'],
@@ -1118,6 +499,7 @@ def build_fallback_route_result(
         'metadataFragmentsFound': metadata_fragments_found,
         'expectedOwnedRequests': expected_owned_requests,
         'ownedRequestInventory': expected_owned_requests,
+        'observedFallbackRequests': observed_fallback_requests,
         'unownedObservedRequests': unowned_observed_requests,
         'requests': requests,
         'responses': responses,

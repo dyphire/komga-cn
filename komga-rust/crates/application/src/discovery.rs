@@ -424,8 +424,6 @@ fn native_books_list_query(query: BooksListQuery) -> NativeBooksListQuery {
 }
 
 fn classify_direct_browse_books_list_query(query: &BooksListQuery) -> Result<(), DiscoveryError> {
-    classify_direct_browse_books_list_sort(&query.sort)?;
-
     let Some(family) = query.direct_browse_family else {
         return Err(DiscoveryError::NonNativeRequestShape(
             komga_domain::discovery::NonNativeRequestShape::UnsupportedBookFilter(
@@ -468,7 +466,26 @@ fn classify_direct_browse_books_list_query(query: &BooksListQuery) -> Result<(),
     }
 
     match family {
+        DirectBrowseBooksListFamily::BrowseOneshotBootstrap => {
+            if !query.sort.is_empty() {
+                return Err(DiscoveryError::NonNativeRequestShape(
+                    komga_domain::discovery::NonNativeRequestShape::UnsupportedBookSort(
+                        query.sort[0].clone(),
+                    ),
+                ));
+            }
+            if query.unpaged {
+                return Err(DiscoveryError::NonNativeRequestShape(
+                    komga_domain::discovery::NonNativeRequestShape::UnsupportedBookFilter(
+                        "unpaged".to_string(),
+                    ),
+                ));
+            }
+
+            Ok(())
+        }
         DirectBrowseBooksListFamily::BrowseSeriesPaged if query.unpaged => {
+            classify_direct_browse_books_list_sort(&query.sort)?;
             Err(DiscoveryError::NonNativeRequestShape(
                 komga_domain::discovery::NonNativeRequestShape::UnsupportedBookFilter(
                     "unpaged".to_string(),
@@ -476,12 +493,16 @@ fn classify_direct_browse_books_list_query(query: &BooksListQuery) -> Result<(),
             ))
         }
         DirectBrowseBooksListFamily::BrowseBookSiblingsUnpaged if !query.unpaged => {
+            classify_direct_browse_books_list_sort(&query.sort)?;
             Err(DiscoveryError::NonNativeRequestShape(
                 komga_domain::discovery::NonNativeRequestShape::UnsupportedBookFilter(
                     "paged".to_string(),
                 ),
             ))
         }
-        _ => Ok(()),
+        _ => {
+            classify_direct_browse_books_list_sort(&query.sort)?;
+            Ok(())
+        }
     }
 }

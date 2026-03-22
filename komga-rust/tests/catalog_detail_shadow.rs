@@ -4,6 +4,7 @@ use komga_rust::application::discovery::{DiscoveryQueries, ReadListBooksQuery};
 use komga_rust::domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 use komga_rust::persistence::discovery::SqliteDiscoveryAdapter;
 use serde_json::Value;
+use std::collections::BTreeSet;
 use tower::util::ServiceExt;
 
 const SEARCH_OWNERSHIP_HEADER: &str = "x-komga-compat-search-ownership";
@@ -20,6 +21,13 @@ struct DirectBrowsePrincipalCase<'a> {
     expected_book_url: &'a str,
     expect_filtered_collection: bool,
     expect_filtered_readlist: bool,
+}
+
+struct DirectOneshotPrincipalCase<'a> {
+    name: &'a str,
+    basic_auth: &'a str,
+    expected_series_url: &'a str,
+    expected_book_url: &'a str,
 }
 
 #[tokio::test]
@@ -220,6 +228,118 @@ async fn admin_user_limited_restricted_direct_browse_matrix() {
                 vec!["book-1", "book-2"]
             },
             "{} mixed readlist visible book ids",
+            case.name,
+        );
+    }
+}
+
+#[tokio::test]
+async fn direct_oneshot_admin_user_limited_restricted_matrix() {
+    let app = komga_rust::app::build_router();
+    let cases = [
+        DirectOneshotPrincipalCase {
+            name: "admin",
+            basic_auth: ADMIN_BASIC_AUTH,
+            expected_series_url: "/library/1/oneshot",
+            expected_book_url: "/library1/oneshot-book.cbz",
+        },
+        DirectOneshotPrincipalCase {
+            name: "user",
+            basic_auth: USER_BASIC_AUTH,
+            expected_series_url: "",
+            expected_book_url: "oneshot-book.cbz",
+        },
+        DirectOneshotPrincipalCase {
+            name: "limited",
+            basic_auth: LIMITED_BASIC_AUTH,
+            expected_series_url: "",
+            expected_book_url: "oneshot-book.cbz",
+        },
+        DirectOneshotPrincipalCase {
+            name: "restricted",
+            basic_auth: RESTRICTED_BASIC_AUTH,
+            expected_series_url: "",
+            expected_book_url: "oneshot-book.cbz",
+        },
+    ];
+
+    for case in cases {
+        let token = session_token_for_basic_auth(&app, case.basic_auth).await;
+
+        let series_detail = get_response(&app, &token, "/api/v1/series/series-oneshot").await;
+        assert_eq!(series_detail.status(), StatusCode::OK, "{} oneshot series detail status", case.name);
+        assert_native_owned(&series_detail, &format!("{} oneshot series detail", case.name));
+        let series_detail_json = response_json(series_detail).await;
+        assert_eq!(series_detail_json["id"], "series-oneshot", "{} oneshot series detail id", case.name);
+        assert_eq!(
+            series_detail_json["url"],
+            case.expected_series_url,
+            "{} oneshot series url parity",
+            case.name,
+        );
+        assert_eq!(series_detail_json["oneshot"], true, "{} oneshot series flag", case.name);
+
+        let collections = get_response(&app, &token, "/api/v1/series/series-oneshot/collections").await;
+        assert_eq!(collections.status(), StatusCode::OK, "{} oneshot collections status", case.name);
+        assert_native_owned(&collections, &format!("{} oneshot collections", case.name));
+        let collections_json = response_json(collections).await;
+        assert!(collections_json.is_array(), "{} oneshot collections payload type", case.name);
+        assert!(
+            collections_json.as_array().is_some_and(|items| items.is_empty()),
+            "{} direct oneshot collections should stay empty",
+            case.name,
+        );
+
+        let bootstrap = post_response(
+            &app,
+            &token,
+            "/api/v1/books/list",
+            r#"{"condition":{"type":"SeriesId","operator":"is","value":"series-oneshot"}}"#,
+            None,
+        )
+        .await;
+        assert_eq!(bootstrap.status(), StatusCode::OK, "{} oneshot bootstrap status", case.name);
+        assert_eq!(
+            bootstrap
+                .headers()
+                .get(SEARCH_OWNERSHIP_HEADER)
+                .and_then(|value| value.to_str().ok()),
+            Some(NATIVE_OWNERSHIP_MARKER),
+            "{} oneshot bootstrap should stay natively owned",
+            case.name,
+        );
+        let bootstrap_json = response_json(bootstrap).await;
+        assert_eq!(page_content_ids(&bootstrap_json), vec!["book-oneshot"], "{} oneshot bootstrap ids", case.name);
+        assert!(bootstrap_json.get("_compat").is_none(), "{} oneshot bootstrap compat payload", case.name);
+
+        let book_detail = get_response(&app, &token, "/api/v1/books/book-oneshot").await;
+        assert_eq!(book_detail.status(), StatusCode::OK, "{} oneshot book detail status", case.name);
+        assert_native_owned(&book_detail, &format!("{} oneshot book detail", case.name));
+        let book_detail_json = response_json(book_detail).await;
+        assert_eq!(book_detail_json["id"], "book-oneshot", "{} oneshot book detail id", case.name);
+        assert_eq!(
+            book_detail_json["url"],
+            case.expected_book_url,
+            "{} oneshot book detail url",
+            case.name,
+        );
+        assert_eq!(book_detail_json["sizeBytes"], 150, "{} oneshot book size bytes", case.name);
+        assert_eq!(book_detail_json["size"], "150 B", "{} oneshot book size", case.name);
+        assert_eq!(
+            book_detail_json["media"]["mediaProfile"],
+            "",
+            "{} oneshot book media profile",
+            case.name,
+        );
+
+        let readlists = get_response(&app, &token, "/api/v1/books/book-oneshot/readlists").await;
+        assert_eq!(readlists.status(), StatusCode::OK, "{} oneshot readlists status", case.name);
+        assert_native_owned(&readlists, &format!("{} oneshot readlists", case.name));
+        let readlists_json = response_json(readlists).await;
+        assert!(readlists_json.is_array(), "{} oneshot readlists payload type", case.name);
+        assert!(
+            readlists_json.as_array().is_some_and(|items| items.is_empty()),
+            "{} direct oneshot readlists should stay empty",
             case.name,
         );
     }
@@ -451,6 +571,152 @@ async fn page_scoped_books_list_is_native_owned() {
 }
 
 #[tokio::test]
+async fn oneshot_books_list_shape_is_native_owned() {
+    let app = komga_rust::app::build_router();
+    let token = session_token_for_basic_auth(&app, USER_BASIC_AUTH).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/books/list")
+                .header("X-Auth-Token", &token)
+                .header(SEARCH_OWNERSHIP_HEADER, NATIVE_OWNERSHIP_MARKER)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"condition":{"type":"SeriesId","operator":"is","value":"series-oneshot"}}"#.to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(SEARCH_OWNERSHIP_HEADER)
+            .and_then(|v| v.to_str().ok()),
+        Some(NATIVE_OWNERSHIP_MARKER),
+    );
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(page_content_ids(&json), vec!["book-oneshot"]);
+    assert!(json.get("_compat").is_none());
+}
+
+#[tokio::test]
+async fn browse_oneshot_happy_path_uses_native_bootstrap_shape() {
+    let app = komga_rust::app::build_router();
+    let token = session_token_for_basic_auth(&app, USER_BASIC_AUTH).await;
+
+    let series_detail = get_response(&app, &token, "/api/v1/series/series-oneshot").await;
+    assert_eq!(series_detail.status(), StatusCode::OK);
+    assert_native_owned(&series_detail, "oneshot series detail");
+    let series_detail_json = response_json(series_detail).await;
+    assert_eq!(series_detail_json["id"], "series-oneshot");
+    assert!(series_detail_json.get("_compat").is_none());
+
+    let collections = get_response(&app, &token, "/api/v1/series/series-oneshot/collections").await;
+    assert_eq!(collections.status(), StatusCode::OK);
+    assert_native_owned(&collections, "oneshot series collections");
+    let collections_json = response_json(collections).await;
+    assert!(collections_json.is_array());
+    assert!(collections_json.get("_compat").is_none());
+
+    let bootstrap = post_response(
+        &app,
+        &token,
+        "/api/v1/books/list",
+        r#"{"condition":{"type":"SeriesId","operator":"is","value":"series-oneshot"}}"#,
+        None,
+    )
+    .await;
+    assert_eq!(bootstrap.status(), StatusCode::OK);
+    assert_eq!(
+        bootstrap
+            .headers()
+            .get(SEARCH_OWNERSHIP_HEADER)
+            .and_then(|value| value.to_str().ok()),
+        Some(NATIVE_OWNERSHIP_MARKER),
+        "oneshot bootstrap books/list should return native marker without request marker hack",
+    );
+    let bootstrap_json = response_json(bootstrap).await;
+    assert_eq!(page_content_ids(&bootstrap_json), vec!["book-oneshot"]);
+    assert!(bootstrap_json.get("_compat").is_none());
+
+    let readlists = get_response(&app, &token, "/api/v1/books/book-oneshot/readlists").await;
+    assert_eq!(readlists.status(), StatusCode::OK);
+    assert_native_owned(&readlists, "oneshot book readlists");
+    let readlists_json = response_json(readlists).await;
+    assert!(readlists_json.is_array());
+    assert!(readlists_json.get("_compat").is_none());
+}
+
+#[tokio::test]
+async fn phase3_phase4_owned_routes_do_not_regress_with_oneshot_bootstrap() {
+    let app = komga_rust::app::build_router();
+    let token = session_token_for_basic_auth(&app, USER_BASIC_AUTH).await;
+
+    let oneshot_bootstrap = post_response(
+        &app,
+        &token,
+        "/api/v1/books/list",
+        r#"{"condition":{"type":"SeriesId","operator":"is","value":"series-oneshot"}}"#,
+        None,
+    )
+    .await;
+    assert_eq!(oneshot_bootstrap.status(), StatusCode::OK);
+    assert_eq!(
+        oneshot_bootstrap
+            .headers()
+            .get(SEARCH_OWNERSHIP_HEADER)
+            .and_then(|value| value.to_str().ok()),
+        Some(NATIVE_OWNERSHIP_MARKER),
+        "oneshot bootstrap should stay native without request marker hack",
+    );
+
+    let phase3_books = post_response(
+        &app,
+        &token,
+        "/api/v1/books/list?page=0&size=20&sort=metadata.numberSort,asc",
+        r#"{"condition":{"type":"AllOfBook","conditions":[{"type":"SeriesId","operator":"is","value":"series-1"}]}}"#,
+        Some(NATIVE_OWNERSHIP_MARKER),
+    )
+    .await;
+    assert_eq!(phase3_books.status(), StatusCode::OK);
+    assert_eq!(
+        phase3_books
+            .headers()
+            .get(SEARCH_OWNERSHIP_HEADER)
+            .and_then(|value| value.to_str().ok()),
+        Some(NATIVE_OWNERSHIP_MARKER),
+        "phase3 page-scoped books/list marker propagation must stay unchanged",
+    );
+    let phase3_books_json = response_json(phase3_books).await;
+    assert_eq!(phase3_books_json["content"][0]["id"], "book-1");
+    assert!(phase3_books_json.get("_compat").is_none());
+
+    let phase4_readlist_books = get_response(&app, &token, "/api/v1/readlists/readlist-2/books?unpaged=true").await;
+    assert_eq!(phase4_readlist_books.status(), StatusCode::OK);
+    assert_eq!(
+        phase4_readlist_books
+            .headers()
+            .get(SEARCH_OWNERSHIP_HEADER)
+            .and_then(|value| value.to_str().ok()),
+        Some(NATIVE_OWNERSHIP_MARKER),
+        "phase4 readlist unpaged route marker propagation must stay unchanged",
+    );
+    let phase4_readlist_books_json = response_json(phase4_readlist_books).await;
+    assert_eq!(page_content_ids(&phase4_readlist_books_json), vec!["book-1", "book-2"]);
+    assert!(phase4_readlist_books_json.get("_compat").is_none());
+}
+
+#[tokio::test]
 async fn book_detail_is_native_owned() {
     let app = komga_rust::app::build_router();
     let token = session_token_for_basic_auth(&app, USER_BASIC_AUTH).await;
@@ -486,9 +752,47 @@ async fn book_detail_is_native_owned() {
 }
 
 #[tokio::test]
-async fn excluded_detail_branches_emit_shadow_marker() {
+async fn excluded_oneshot_query_parameter_emits_shadow_marker() {
     let app = komga_rust::app::build_router();
     let token = session_token_for_basic_auth(&app, USER_BASIC_AUTH).await;
+
+    let response = get_response(&app, &token, "/api/v1/series/series-oneshot?oneshot=true").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_shadow_marker(&response, "series detail oneshot query parameter");
+
+    let json = response_json(response).await;
+    assert_eq!(json["id"], "series-oneshot");
+    assert_eq!(json["_compat"]["discoveryOwnership"], "non-native");
+    assert_eq!(
+        json["_compat"]["shape"],
+        "UnsupportedSeriesFilter(oneshot-query-parameter)",
+    );
+}
+
+#[tokio::test]
+async fn excluded_oneshot_branches_emit_shadow_marker() {
+    let app = komga_rust::app::build_router();
+    let token = session_token_for_basic_auth(&app, USER_BASIC_AUTH).await;
+    let expected = BTreeSet::from([
+        "oneshot bootstrap widening",
+        "media delivery",
+        "reader download adjacency",
+        "progress routes",
+        "SSE live-refresh",
+    ]);
+    let mut observed = BTreeSet::new();
+
+    let widened_bootstrap = post_response(
+        &app,
+        &token,
+        "/api/v1/books/list?page=0&size=20&sort=metadata.numberSort,asc",
+        r#"{"condition":{"type":"AllOfBook","conditions":[{"type":"SeriesId","operator":"is","value":"series-oneshot"}]}}"#,
+        Some("shadow-java-writer"),
+    )
+    .await;
+    assert_eq!(widened_bootstrap.status(), StatusCode::OK);
+    assert_shadow_marker(&widened_bootstrap, "oneshot bootstrap widening");
+    observed.insert("oneshot bootstrap widening");
 
     let native_detail = app
         .clone()
@@ -525,6 +829,7 @@ async fn excluded_detail_branches_emit_shadow_marker() {
         .unwrap();
     assert_eq!(book_pages.status(), StatusCode::OK);
     assert_shadow_marker(&book_pages, "book pages inventory");
+    observed.insert("media delivery");
 
     let page_asset = app
         .clone()
@@ -582,6 +887,7 @@ async fn excluded_detail_branches_emit_shadow_marker() {
     assert_eq!(download.status(), StatusCode::OK);
     assert_shadow_marker(&download, "book file download");
     assert!(download.headers().get(header::CONTENT_DISPOSITION).is_some());
+    observed.insert("reader download adjacency");
 
     let read_progress_patch = app
         .clone()
@@ -598,6 +904,7 @@ async fn excluded_detail_branches_emit_shadow_marker() {
         .unwrap();
     assert_eq!(read_progress_patch.status(), StatusCode::NO_CONTENT);
     assert_shadow_marker(&read_progress_patch, "read-progress patch");
+    observed.insert("progress routes");
 
     let read_progress_delete = app
         .clone()
@@ -648,6 +955,9 @@ async fn excluded_detail_branches_emit_shadow_marker() {
         live_refresh.headers().get(header::CONTENT_TYPE).unwrap(),
         "text/event-stream",
     );
+    observed.insert("SSE live-refresh");
+
+    assert_eq!(expected, observed);
 }
 
 #[tokio::test]
@@ -795,13 +1105,14 @@ async fn book_navigation_and_readlists_are_native_owned() {
 }
 
 fn assert_shadow_marker(response: &axum::response::Response, branch: &str) {
+    let marker = response
+        .headers()
+        .get(SEARCH_OWNERSHIP_HEADER)
+        .and_then(|value| value.to_str().ok());
     assert_eq!(
-        response
-            .headers()
-            .get(SEARCH_OWNERSHIP_HEADER)
-            .and_then(|value| value.to_str().ok()),
+        marker,
         Some("shadow-java-writer"),
-        "excluded detail branch should emit explicit non-native marker: {branch}",
+        "branch {branch} should emit explicit non-native marker, got {marker:?}",
     );
 }
 

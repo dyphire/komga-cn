@@ -661,6 +661,78 @@ fn phase3_detail_case_inventory_loads() {
 }
 
 #[test]
+fn phase5_oneshot_case_inventory_loads() {
+    let config = HarnessConfig::load_default().expect("default compat cases should load");
+
+    for id in [
+        "P5-ONESHOT-BOOKS-LIST-SERIESID-ONLY-OWNED",
+        "P5-ONESHOT-EXCLUDED-READLIST-DETAIL",
+        "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-BOOKS",
+        "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-PREVIOUS",
+        "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-NEXT",
+        "P3-DETAIL-EXCLUDED-ONESHOT-ROUTE-CLOSURE",
+        "P5-ONESHOT-EXCLUDED-BOOKS-LIST-WIDENED-PAGED",
+        "P3-DETAIL-EXCLUDED-BOOKS-LIST-READDATE-SORT",
+        "P3-DETAIL-EXCLUDED-BOOKS-LIST-READSTATUS-FILTER",
+        "P3-DETAIL-EXCLUDED-BOOK-PAGES",
+        "P3-DETAIL-EXCLUDED-BOOK-FILE",
+        "P3-DETAIL-EXCLUDED-BOOK-THUMBNAIL",
+        "P3-DETAIL-EXCLUDED-BOOK-MANIFEST",
+        "P3-DETAIL-EXCLUDED-BOOK-RESOURCE",
+        "P3-DETAIL-EXCLUDED-BOOK-POSITIONS",
+        "P3-DETAIL-EXCLUDED-READ-PROGRESS-PATCH",
+        "P3-DETAIL-EXCLUDED-READ-PROGRESS-DELETE",
+        "P3-DETAIL-EXCLUDED-PROGRESSION-PUT",
+        "P3-DETAIL-EXCLUDED-READLIST-PATCH",
+        "P3-DETAIL-EXCLUDED-READLIST-DELETE",
+        "P3-DETAIL-EXCLUDED-COLLECTION-PATCH",
+        "P3-DETAIL-EXCLUDED-COLLECTION-DELETE",
+        "P5-ONESHOT-EXCLUDED-SSE-LIVE-REFRESH",
+    ] {
+        let case = config
+            .cases
+            .iter()
+            .find(|it| it.id == id)
+            .unwrap_or_else(|| panic!("missing phase5 oneshot compat case: {id}"));
+
+        assert_eq!(
+            config.cases.iter().filter(|it| it.id == id).count(),
+            1,
+            "phase5 oneshot case id must be unique: {id}",
+        );
+
+        if id.contains("-EXCLUDED-") {
+            assert_eq!(
+                case.headers
+                    .as_ref()
+                    .and_then(|headers| headers.get("X-Komga-Compat-Search-Ownership")),
+                Some(&"shadow-java-writer".to_string()),
+                "excluded phase5 oneshot case must carry shadow marker: {id}",
+            );
+        }
+    }
+
+    let owned = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P5-ONESHOT-BOOKS-LIST-SERIESID-ONLY-OWNED")
+        .expect("phase5 oneshot owned books/list case should exist");
+    assert_eq!(owned.method, "POST");
+    assert_eq!(owned.path, "/api/v1/books/list");
+    assert_eq!(
+        owned.body.as_deref(),
+        Some(r#"{"condition":{"type":"SeriesId","operator":"is","value":"series-oneshot"}}"#),
+    );
+    assert_eq!(
+        owned
+            .headers
+            .as_ref()
+            .and_then(|headers| headers.get("X-Komga-Compat-Search-Ownership")),
+        None,
+    );
+}
+
+#[test]
 fn discovery_diff_policy_is_strict_for_status_body_page_metadata_order_and_id_sets() {
     let allowlist = BTreeSet::from(["content-type".to_string()]);
 

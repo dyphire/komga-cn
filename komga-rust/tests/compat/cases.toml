@@ -166,7 +166,7 @@ extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
 id = "P3-DETAIL-BOOKS-LIST-UNPAGED-SIBLINGS-OWNED"
 method = "POST"
 path = "/api/v1/books/list?unpaged=true&sort=metadata.numberSort,asc"
-body = "{\"condition\":{\"type\":\"SeriesId\",\"operator\":\"is\",\"value\":\"series-1\"}}"
+ body = "{\"condition\":{\"type\":\"SeriesId\",\"operator\":\"is\",\"value\":\"series-oneshot\"}}"
 headers = { "Content-Type" = "application/json", "X-Auth-Token" = "${SESSION_TOKEN}" }
 
 [[cases.setup]]
@@ -447,7 +447,7 @@ extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
 id = "P3-DETAIL-EXCLUDED-BOOKS-LIST-READDATE-SORT"
 method = "POST"
 path = "/api/v1/books/list?page=0&size=20&sort=readProgress.readDate,desc"
-body = "{\"condition\":{\"type\":\"SeriesId\",\"operator\":\"is\",\"value\":\"series-1\"}}"
+ body = "{\"condition\":{\"type\":\"SeriesId\",\"operator\":\"is\",\"value\":\"series-oneshot\"}}"
 headers = { "Content-Type" = "application/json", "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
 
 [[cases.setup]]
@@ -503,6 +503,60 @@ id = "P3-DETAIL-EXCLUDED-BOOK-THUMBNAIL"
 method = "GET"
 path = "/api/v1/books/book-1/thumbnail"
 comparison = "binary_metadata"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P5-ONESHOT-BOOKS-LIST-SERIESID-ONLY-OWNED"
+method = "POST"
+path = "/api/v1/books/list"
+body = "{\"condition\":{\"type\":\"SeriesId\",\"operator\":\"is\",\"value\":\"series-oneshot\"}}"
+headers = { "Content-Type" = "application/json", "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P5-ONESHOT-EXCLUDED-READLIST-DETAIL"
+method = "GET"
+path = "/api/v1/readlists/readlist-1"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P5-ONESHOT-EXCLUDED-BOOKS-LIST-WIDENED-PAGED"
+method = "POST"
+path = "/api/v1/books/list?page=0&size=20&sort=metadata.numberSort,asc"
+body = "{\"condition\":{\"type\":\"AllOfBook\",\"conditions\":[{\"type\":\"SeriesId\",\"operator\":\"is\",\"value\":\"series-1\"}]}}"
+headers = { "Content-Type" = "application/json", "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases.setup]]
+name = "login"
+method = "GET"
+path = "/api/v2/users/me"
+headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
+extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
+
+[[cases]]
+id = "P5-ONESHOT-EXCLUDED-SSE-LIVE-REFRESH"
+method = "GET"
+path = "/sse/v1/events"
 headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
 
 [[cases.setup]]
