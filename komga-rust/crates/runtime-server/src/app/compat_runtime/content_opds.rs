@@ -8,9 +8,7 @@ use crate::app::CompatProfile;
 use crate::app::placeholder_auth::{
     require_auth, resolved_auth_user, user_is_admin, user_shared_all_libraries,
 };
-use crate::app::snapshots::{
-    java_live_opds_manifest, opds_auth_json, request_host, snapshot_json,
-};
+use crate::app::snapshots::{java_live_opds_manifest, opds_auth_json, request_host, snapshot_json};
 
 pub(super) async fn opds_manifest(profile: CompatProfile, headers: HeaderMap) -> Response {
     if let Some(response) = require_auth(&headers) {
@@ -33,7 +31,10 @@ pub(super) async fn opds_manifest(profile: CompatProfile, headers: HeaderMap) ->
     (
         StatusCode::OK,
         [(header::CONTENT_TYPE, "application/opds-publication+json")],
-        Json(snapshot_json("opds-v2-manifest.json", CompatProfile::SnapshotAligned)),
+        Json(snapshot_json(
+            "opds-v2-manifest.json",
+            CompatProfile::SnapshotAligned,
+        )),
     )
         .into_response()
 }
@@ -83,7 +84,10 @@ pub(super) async fn opds_v1_series(profile: CompatProfile, headers: HeaderMap) -
 
     (
         StatusCode::OK,
-        [(header::CONTENT_TYPE, HeaderValue::from_static("application/atom+xml"))],
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/atom+xml"),
+        )],
         opds_v1_series_xml(profile, &headers),
     )
         .into_response()
@@ -114,7 +118,10 @@ async fn fetch_java_live_manifest(headers: &HeaderMap) -> Option<Value> {
     ));
     let manifest = match extract_java_live_session_cookie(bootstrap.headers()) {
         Some(cookie) => manifest_request.header(COOKIE, cookie),
-        None => manifest_request.header("X-Auth-Token", extract_java_live_session_token(bootstrap.headers())?),
+        None => manifest_request.header(
+            "X-Auth-Token",
+            extract_java_live_session_token(bootstrap.headers())?,
+        ),
     }
     .send()
     .await
@@ -134,7 +141,9 @@ async fn fetch_java_live_manifest(headers: &HeaderMap) -> Option<Value> {
     Some(manifest)
 }
 
-fn java_live_basic_auth_header(user: crate::app::placeholder_auth::PlaceholderUser) -> &'static str {
+fn java_live_basic_auth_header(
+    user: crate::app::placeholder_auth::PlaceholderUser,
+) -> &'static str {
     if user_is_admin(user) {
         "Basic YWRtaW5AZXhhbXBsZS5vcmc6YWRtaW4="
     } else if user_shared_all_libraries(user) {
@@ -145,15 +154,18 @@ fn java_live_basic_auth_header(user: crate::app::placeholder_auth::PlaceholderUs
 }
 
 fn extract_java_live_session_cookie(headers: &reqwest::header::HeaderMap) -> Option<String> {
-    headers.get_all(header::SET_COOKIE).iter().find_map(|value| {
-        value.to_str().ok().and_then(|cookie| {
-            cookie
-                .split(';')
-                .map(str::trim)
-                .find(|part| part.starts_with("KOMGA-SESSION="))
-                .map(str::to_string)
+    headers
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .find_map(|value| {
+            value.to_str().ok().and_then(|cookie| {
+                cookie
+                    .split(';')
+                    .map(str::trim)
+                    .find(|part| part.starts_with("KOMGA-SESSION="))
+                    .map(str::to_string)
+            })
         })
-    })
 }
 
 fn extract_java_live_session_token(headers: &reqwest::header::HeaderMap) -> Option<String> {

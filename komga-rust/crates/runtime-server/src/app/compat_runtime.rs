@@ -5,8 +5,8 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use crate::config::RuntimeConfig;
 use crate::app::discovery_auth::DiscoveryAuthState;
+use crate::config::RuntimeConfig;
 
 mod content;
 mod operational;
@@ -27,8 +27,7 @@ const DEFAULT_LOGFILE: &str =
     "komga-rust operational logfile\nINFO server started in compat mode\n";
 const DEV_FRONTEND_ORIGIN: &str = "http://127.0.0.1:8081";
 const DEV_CORS_ALLOW_METHODS: &str = "GET,POST,PATCH,DELETE,OPTIONS";
-const DEV_CORS_ALLOW_HEADERS: &str =
-    "authorization,x-auth-token,content-type,x-api-key,x-komga-email,x-komga-password,x-requested-with";
+const DEV_CORS_ALLOW_HEADERS: &str = "authorization,x-auth-token,content-type,x-api-key,x-komga-email,x-komga-password,x-requested-with";
 
 #[derive(Clone)]
 struct OperationalState {
@@ -127,7 +126,10 @@ pub(super) fn build_router(config: &RuntimeConfig) -> Router {
             "/api/v1/client-settings/user/list",
             get(operational::get_client_settings_user),
         )
-        .route("/api/v1/oauth2/providers", get(operational::get_oauth2_providers))
+        .route(
+            "/api/v1/oauth2/providers",
+            get(operational::get_oauth2_providers),
+        )
         .route("/api/v1/tasks", delete(operational::delete_tasks))
         .route("/api/v1/libraries", get(content::libraries))
         .route("/api/v1/series", get(content::series))
@@ -145,7 +147,10 @@ pub(super) fn build_router(config: &RuntimeConfig) -> Router {
             "/api/v1/books/{book_id}/previous",
             get(content::book_sibling_previous),
         )
-        .route("/api/v1/books/{book_id}/next", get(content::book_sibling_next))
+        .route(
+            "/api/v1/books/{book_id}/next",
+            get(content::book_sibling_next),
+        )
         .route(
             "/api/v1/books/{book_id}/readlists",
             get(content::book_readlists),
@@ -171,7 +176,10 @@ pub(super) fn build_router(config: &RuntimeConfig) -> Router {
             "/api/v1/books/{book_id}/pages/{page_number}/thumbnail",
             get(content::book_page_thumbnail),
         )
-        .route("/api/v1/books/{book_id}/thumbnail", get(content::book_thumbnail))
+        .route(
+            "/api/v1/books/{book_id}/thumbnail",
+            get(content::book_thumbnail),
+        )
         .route("/api/v1/books/{book_id}/file", get(content::book_file))
         .route(
             "/api/v1/books/{book_id}/read-progress",
@@ -187,7 +195,10 @@ pub(super) fn build_router(config: &RuntimeConfig) -> Router {
         .route("/opds/v1.2/series", get(content::opds_v1_series))
         .route("/opds/v2/auth", get(content::opds_auth))
         .route("/opds/v2/catalog", get(content::opds_catalog))
-        .route("/opds/v2/books/{book_id}/manifest", get(content::opds_manifest))
+        .route(
+            "/opds/v2/books/{book_id}/manifest",
+            get(content::opds_manifest),
+        )
         .route("/api/v1/login/set-cookie", get(content::login_set_cookie))
         .route("/sse/v1/events", get(operational::sse_events))
         .route("/actuator", get(operational::actuator_root))
@@ -196,7 +207,10 @@ pub(super) fn build_router(config: &RuntimeConfig) -> Router {
         .route("/actuator/info", get(operational::actuator_info))
         .route("/actuator/logfile", get(operational::actuator_logfile))
         .route("/actuator/shutdown", post(operational::actuator_shutdown))
-        .route("/actuator/metrics", get(operational::actuator_metrics_index))
+        .route(
+            "/actuator/metrics",
+            get(operational::actuator_metrics_index),
+        )
         .route(
             "/actuator/metrics/{metric_name}",
             get(operational::actuator_metric_detail),

@@ -21,9 +21,7 @@ use crate::app::placeholder_auth::{
 };
 use crate::app::snapshots::snapshot_json;
 
-use super::{
-    DiscoveryOwnershipRoute, DiscoveryShape, discovery_ownership_route, mark_native,
-};
+use super::{DiscoveryOwnershipRoute, DiscoveryShape, discovery_ownership_route, mark_native};
 
 pub(super) async fn response(
     profile: CompatProfile,
@@ -45,7 +43,8 @@ pub(super) async fn response(
         return native_owned_libraries_response(context);
     }
 
-    let user = resolved_auth_user(&headers).expect("authorized libraries request should resolve user");
+    let user =
+        resolved_auth_user(&headers).expect("authorized libraries request should resolve user");
 
     if profile == CompatProfile::JavaLiveLocaldb {
         return match fetch_java_live_libraries(user).await {
@@ -66,7 +65,10 @@ fn native_owned_libraries_response(context: DiscoveryQueryContext) -> Response {
     adapter.insert_library(LibraryRow::new("1", "default").with_root("/library1"));
 
     let queries = DiscoveryQueries::new(adapter);
-    match queries.list_libraries(&to_domain_query_context(context.clone()), LibraryListQuery {}) {
+    match queries.list_libraries(
+        &to_domain_query_context(context.clone()),
+        LibraryListQuery {},
+    ) {
         Ok(libraries) => {
             let mut response = Json(libraries_payload(libraries, context.is_admin)).into_response();
             mark_native(&mut response);
@@ -85,7 +87,11 @@ fn libraries_payload(libraries: Vec<LibraryReadModel>, is_admin: bool) -> Value 
         libraries
             .into_iter()
             .map(|library| {
-                let root = if is_admin { library.root } else { String::new() };
+                let root = if is_admin {
+                    library.root
+                } else {
+                    String::new()
+                };
                 json!({
                     "id": library.id,
                     "name": library.name,
@@ -135,7 +141,9 @@ fn to_domain_query_context(context: DiscoveryQueryContext) -> DomainDiscoveryQue
 fn to_domain_restrictions(restrictions: QueryRestrictions) -> DomainQueryRestrictions {
     DomainQueryRestrictions {
         age: restrictions.age,
-        age_restriction: restrictions.age_restriction.map(to_domain_age_restriction_kind),
+        age_restriction: restrictions
+            .age_restriction
+            .map(to_domain_age_restriction_kind),
         labels_allow: restrictions.labels_allow,
         labels_exclude: restrictions.labels_exclude,
     }
@@ -213,11 +221,10 @@ async fn fetch_java_live_libraries(user: PlaceholderUser) -> Result<Value, Strin
     let libraries = match extract_java_live_session_cookie(bootstrap_headers) {
         Some(cookie) => libraries_request.header(COOKIE, cookie),
         None => {
-            let token = extract_java_live_session_token(bootstrap_headers)
-                .ok_or_else(|| {
-                    "java live libraries bootstrap missing KOMGA-SESSION cookie and X-Auth-Token"
-                        .to_string()
-                })?;
+            let token = extract_java_live_session_token(bootstrap_headers).ok_or_else(|| {
+                "java live libraries bootstrap missing KOMGA-SESSION cookie and X-Auth-Token"
+                    .to_string()
+            })?;
             libraries_request.header("X-Auth-Token", token)
         }
     }
@@ -249,15 +256,18 @@ fn java_live_basic_auth_header(user: PlaceholderUser) -> &'static str {
 }
 
 fn extract_java_live_session_cookie(headers: &reqwest::header::HeaderMap) -> Option<String> {
-    headers.get_all(header::SET_COOKIE).iter().find_map(|value| {
-        value.to_str().ok().and_then(|cookie| {
-            cookie
-                .split(';')
-                .map(str::trim)
-                .find(|part| part.starts_with("KOMGA-SESSION="))
-                .map(str::to_string)
+    headers
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .find_map(|value| {
+            value.to_str().ok().and_then(|cookie| {
+                cookie
+                    .split(';')
+                    .map(str::trim)
+                    .find(|part| part.starts_with("KOMGA-SESSION="))
+                    .map(str::to_string)
+            })
         })
-    })
 }
 
 fn extract_java_live_session_token(headers: &reqwest::header::HeaderMap) -> Option<String> {

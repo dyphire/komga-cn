@@ -1,5 +1,5 @@
 use crate::cases::SetupStep;
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, SET_COOKIE};
 use std::collections::BTreeMap;

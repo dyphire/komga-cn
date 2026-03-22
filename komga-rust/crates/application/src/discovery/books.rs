@@ -1,0 +1,232 @@
+use komga_domain::discovery::{
+    BookDetailReadModel, BookReadModel, BookResourceReadModel, DirectBrowseBooksListFamily,
+    DiscoveryError, DiscoveryQueryContext, PageEnvelope, ReadListReadModel, classify_book_sorts,
+    classify_direct_browse_books_list_sort,
+};
+
+use super::core::{DiscoveryQueries, DiscoveryQueryRepository};
+use super::helpers::{unsupported_book_filter, unsupported_book_sort};
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BooksListQuery {
+    pub page: usize,
+    pub size: usize,
+    pub unpaged: bool,
+    pub direct_browse_family: Option<DirectBrowseBooksListFamily>,
+    pub library_ids: Option<Vec<String>>,
+    pub series_ids: Option<Vec<String>>,
+    pub deleted: Option<bool>,
+    pub oneshot: Option<bool>,
+    pub tags: Option<Vec<String>>,
+    pub read_statuses: Option<Vec<String>>,
+    pub media_profiles: Option<Vec<String>>,
+    pub media_statuses: Option<Vec<String>>,
+    pub authors: Option<Vec<String>>,
+    pub release_dates: Option<Vec<String>>,
+    pub sort: Vec<String>,
+    pub search: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BooksLatestQuery {
+    pub page: usize,
+    pub size: usize,
+    pub unpaged: bool,
+    pub library_ids: Option<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BookDetailQuery {
+    pub book_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BookSiblingQuery {
+    pub book_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BookReadlistsQuery {
+    pub book_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeBooksListQuery {
+    pub page: usize,
+    pub size: usize,
+    pub unpaged: bool,
+    pub library_ids: Option<Vec<String>>,
+    pub series_ids: Option<Vec<String>>,
+    pub deleted: Option<bool>,
+    pub oneshot: Option<bool>,
+    pub tags: Option<Vec<String>>,
+    pub read_statuses: Option<Vec<String>>,
+    pub media_profiles: Option<Vec<String>>,
+    pub media_statuses: Option<Vec<String>>,
+    pub authors: Option<Vec<String>>,
+    pub release_dates: Option<Vec<String>>,
+    pub sort: Vec<String>,
+    pub search: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeBooksLatestQuery {
+    pub page: usize,
+    pub size: usize,
+    pub unpaged: bool,
+    pub library_ids: Option<Vec<String>>,
+}
+
+impl<R> DiscoveryQueries<R>
+where
+    R: DiscoveryQueryRepository,
+{
+    pub fn list_books(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: BooksListQuery,
+    ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
+        let _ = classify_book_sorts(&query.sort)?;
+        self.repository
+            .list_books(context, native_books_list_query(query))
+    }
+
+    pub fn list_books_direct_browse(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: BooksListQuery,
+    ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
+        classify_direct_browse_books_list_query(&query)?;
+        self.repository
+            .list_books(context, native_books_list_query(query))
+    }
+
+    pub fn list_books_latest(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: BooksLatestQuery,
+    ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
+        self.repository.list_books_latest(
+            context,
+            NativeBooksLatestQuery {
+                page: query.page,
+                size: query.size,
+                unpaged: query.unpaged,
+                library_ids: query.library_ids,
+            },
+        )
+    }
+
+    pub fn resolve_book_resource(
+        &self,
+        book_id: &str,
+    ) -> Result<Option<BookResourceReadModel>, DiscoveryError> {
+        self.repository.resolve_book_resource(book_id)
+    }
+
+    pub fn get_book_detail(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: BookDetailQuery,
+    ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
+        self.repository.get_book_detail(context, query)
+    }
+
+    pub fn get_book_sibling_previous(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: BookSiblingQuery,
+    ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
+        self.repository.get_book_sibling_previous(context, query)
+    }
+
+    pub fn get_book_sibling_next(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: BookSiblingQuery,
+    ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
+        self.repository.get_book_sibling_next(context, query)
+    }
+
+    pub fn list_book_readlists(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: BookReadlistsQuery,
+    ) -> Result<Vec<ReadListReadModel>, DiscoveryError> {
+        self.repository.list_book_readlists(context, query)
+    }
+}
+
+pub(in crate::discovery) fn native_books_list_query(query: BooksListQuery) -> NativeBooksListQuery {
+    NativeBooksListQuery {
+        page: query.page,
+        size: query.size,
+        unpaged: query.unpaged,
+        library_ids: query.library_ids,
+        series_ids: query.series_ids,
+        deleted: query.deleted,
+        oneshot: query.oneshot,
+        tags: query.tags,
+        read_statuses: query.read_statuses,
+        media_profiles: query.media_profiles,
+        media_statuses: query.media_statuses,
+        authors: query.authors,
+        release_dates: query.release_dates,
+        sort: query.sort,
+        search: query.search,
+    }
+}
+
+pub(in crate::discovery) fn classify_direct_browse_books_list_query(
+    query: &BooksListQuery,
+) -> Result<(), DiscoveryError> {
+    let Some(family) = query.direct_browse_family else {
+        return Err(unsupported_book_filter("direct-browse-family"));
+    };
+
+    let Some(series_ids) = query.series_ids.as_ref() else {
+        return Err(unsupported_book_filter("SeriesId"));
+    };
+    if series_ids.len() != 1 {
+        return Err(unsupported_book_filter("SeriesId"));
+    }
+
+    let has_extra_filters = query.library_ids.is_some()
+        || query.deleted.is_some()
+        || query.oneshot.is_some()
+        || query.tags.is_some()
+        || query.read_statuses.is_some()
+        || query.media_profiles.is_some()
+        || query.media_statuses.is_some()
+        || query.authors.is_some()
+        || query.release_dates.is_some()
+        || query.search.is_some();
+    if has_extra_filters {
+        return Err(unsupported_book_filter("extra-filters"));
+    }
+
+    match family {
+        DirectBrowseBooksListFamily::BrowseOneshotBootstrap => {
+            if !query.sort.is_empty() {
+                return Err(unsupported_book_sort(query.sort[0].clone()));
+            }
+            if query.unpaged {
+                return Err(unsupported_book_filter("unpaged"));
+            }
+
+            Ok(())
+        }
+        DirectBrowseBooksListFamily::BrowseSeriesPaged if query.unpaged => {
+            classify_direct_browse_books_list_sort(&query.sort)?;
+            Err(unsupported_book_filter("unpaged"))
+        }
+        DirectBrowseBooksListFamily::BrowseBookSiblingsUnpaged if !query.unpaged => {
+            classify_direct_browse_books_list_sort(&query.sort)?;
+            Err(unsupported_book_filter("paged"))
+        }
+        _ => {
+            classify_direct_browse_books_list_sort(&query.sort)?;
+            Ok(())
+        }
+    }
+}

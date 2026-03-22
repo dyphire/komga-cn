@@ -21,8 +21,12 @@ pub fn build_router() -> Router {
 
 pub fn build_router_with_profile(profile: CompatProfile) -> Router {
     let config = match profile {
-        CompatProfile::SnapshotAligned => RuntimeConfig::for_compat_profile(crate::config::CompatProfile::SnapshotAligned),
-        CompatProfile::JavaLiveLocaldb => RuntimeConfig::for_compat_profile(crate::config::CompatProfile::JavaLiveLocaldb),
+        CompatProfile::SnapshotAligned => {
+            RuntimeConfig::for_compat_profile(crate::config::CompatProfile::SnapshotAligned)
+        }
+        CompatProfile::JavaLiveLocaldb => {
+            RuntimeConfig::for_compat_profile(crate::config::CompatProfile::JavaLiveLocaldb)
+        }
     };
     compat_runtime::build_router(&config)
 }
@@ -36,6 +40,9 @@ pub async fn serve(listener: TcpListener) -> std::io::Result<()> {
     serve_with_config(listener, config).await
 }
 
-pub async fn serve_with_config(listener: TcpListener, config: RuntimeConfig) -> std::io::Result<()> {
+pub async fn serve_with_config(
+    listener: TcpListener,
+    config: RuntimeConfig,
+) -> std::io::Result<()> {
     axum::serve(listener, build_router_with_config(&config)).await
 }

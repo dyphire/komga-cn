@@ -5,7 +5,11 @@ use serde_json::Value;
 
 use crate::app::placeholder_auth::{PlaceholderUser, user_is_admin, user_shared_all_libraries};
 
-pub(super) async fn fetch_json(user: PlaceholderUser, path: &str, request_label: &str) -> Result<Value, String> {
+pub(super) async fn fetch_json(
+    user: PlaceholderUser,
+    path: &str,
+    request_label: &str,
+) -> Result<Value, String> {
     let base_url = java_live_base_url();
     let request_url = format!("{}{}", base_url, path);
     let client = reqwest::Client::builder()
@@ -131,15 +135,18 @@ fn java_live_basic_auth_header(user: PlaceholderUser) -> &'static str {
 }
 
 fn extract_java_live_session_cookie(headers: &reqwest::header::HeaderMap) -> Option<String> {
-    headers.get_all(header::SET_COOKIE).iter().find_map(|value| {
-        value.to_str().ok().and_then(|cookie| {
-            cookie
-                .split(';')
-                .map(str::trim)
-                .find(|part| part.starts_with("KOMGA-SESSION="))
-                .map(str::to_string)
+    headers
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .find_map(|value| {
+            value.to_str().ok().and_then(|cookie| {
+                cookie
+                    .split(';')
+                    .map(str::trim)
+                    .find(|part| part.starts_with("KOMGA-SESSION="))
+                    .map(str::to_string)
+            })
         })
-    })
 }
 
 fn extract_java_live_session_token(headers: &reqwest::header::HeaderMap) -> Option<String> {

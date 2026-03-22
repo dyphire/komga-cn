@@ -1,5 +1,5 @@
-use axum::http::{header, HeaderMap};
-use serde_json::{json, Value};
+use axum::http::{HeaderMap, header};
+use serde_json::{Value, json};
 
 use crate::app::CompatProfile;
 
@@ -12,10 +12,14 @@ pub(super) fn snapshot_json(path: &str, profile: CompatProfile) -> Value {
             "../../../../../komga/src/test/resources/compatibility-snapshots/rest/libraries-list-user.json"
         ),
         "series-list.json" => {
-            include_str!("../../../../../komga/src/test/resources/compatibility-snapshots/rest/series-list.json")
+            include_str!(
+                "../../../../../komga/src/test/resources/compatibility-snapshots/rest/series-list.json"
+            )
         }
         "books-list.json" => {
-            include_str!("../../../../../komga/src/test/resources/compatibility-snapshots/rest/books-list.json")
+            include_str!(
+                "../../../../../komga/src/test/resources/compatibility-snapshots/rest/books-list.json"
+            )
         }
         "opds-v2-manifest.json" => include_str!(
             "../../../../../komga/src/test/resources/compatibility-snapshots/opds/opds-v2-manifest.json"

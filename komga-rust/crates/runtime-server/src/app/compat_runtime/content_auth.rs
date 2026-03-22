@@ -4,14 +4,17 @@ use axum::response::{IntoResponse, Response};
 
 use crate::app::discovery_auth::{DiscoveryAuthState, principal_from_user_payload};
 use crate::app::placeholder_auth::{
-    AuthOutcome, api_key_user, auth_token_user, basic_user, bootstrap_api_key_user,
-    bootstrap_user, bootstrap_user_with_remember_me_cookies, bootstrap_user_with_remember_me_token,
+    AuthOutcome, api_key_user, auth_token_user, basic_user, bootstrap_api_key_user, bootstrap_user,
+    bootstrap_user_with_remember_me_cookies, bootstrap_user_with_remember_me_token,
     empty_auth_token_supplied, remember_me_requested, require_auth, resolved_token,
-    session_token_for_user,
-    unauthorized_json_response,
+    session_token_for_user, unauthorized_json_response,
 };
 
-pub(super) async fn users_me(headers: HeaderMap, uri: Uri, auth_state: DiscoveryAuthState) -> Response {
+pub(super) async fn users_me(
+    headers: HeaderMap,
+    uri: Uri,
+    auth_state: DiscoveryAuthState,
+) -> Response {
     match api_key_user(&headers) {
         AuthOutcome::Valid(user) => {
             register_discovery_principal(
@@ -85,7 +88,11 @@ pub(super) async fn login_set_cookie(headers: HeaderMap) -> Response {
         .into_response()
 }
 
-fn register_discovery_principal(auth_state: &DiscoveryAuthState, payload: &serde_json::Value, token: &str) {
+fn register_discovery_principal(
+    auth_state: &DiscoveryAuthState,
+    payload: &serde_json::Value,
+    token: &str,
+) {
     if let Some(principal) = principal_from_user_payload(payload) {
         auth_state.register_session_principal(token, principal);
     }
