@@ -10,7 +10,9 @@ use komga_domain::discovery::{
     DirectBrowseBooksListFamily, DiscoveryError, NonNativeRequestShape, PageEnvelope,
     SeriesReadModel,
 };
-use komga_persistence::discovery::{BookRow, SeriesRow, SqliteDiscoveryAdapter};
+use komga_persistence::discovery::{
+    BookRow, SeriesRow, SqlxRuntimeDiscoveryAdapter, SqlxRuntimeDiscoveryStore,
+};
 use serde_json::{Value, json};
 
 use crate::app::CompatProfile;
@@ -78,6 +80,7 @@ pub(in crate::app::compat_runtime) async fn series_list(
             full_text_search.clone(),
             &auth_state,
         )
+        .await
     {
         return native_response;
     }
@@ -156,6 +159,7 @@ pub(in crate::app::compat_runtime) async fn books_list(
             full_text_search.clone(),
             &auth_state,
         )
+        .await
     {
         return native_response;
     }
@@ -184,7 +188,7 @@ pub(in crate::app::compat_runtime) async fn books_latest(
     if discovery_ownership_route(profile, &headers, DiscoveryShape::BooksLatest)
         == DiscoveryOwnershipRoute::NativeOwned
         && let Some(native_response) =
-            native_owned_books_latest_response(&headers, &uri, &auth_state)
+            native_owned_books_latest_response(&headers, &uri, &auth_state).await
     {
         return native_response;
     }
@@ -423,7 +427,7 @@ struct NativeBooksFilters {
     release_dates: Option<Vec<String>>,
 }
 
-fn native_owned_books_list_response(
+async fn native_owned_books_list_response(
     headers: &HeaderMap,
     uri: &Uri,
     payload: Option<&Value>,
@@ -479,120 +483,95 @@ fn native_owned_books_list_response(
         filters.series_ids = Some(vec![series_id]);
     }
 
-    let mut adapter = SqliteDiscoveryAdapter::default();
-    seed_books_discovery_data(&mut adapter);
-
     let is_admin = context.is_admin;
-    let queries = DiscoveryQueries::new(adapter);
     let domain_context = to_domain_query_context(context);
+    let fallback_search = full_text_search.clone();
 
-    if let Some(series_id) = oneshot_bootstrap_series_id {
-        let visible_series = match queries.get_series_detail(
-            &domain_context,
-            SeriesDetailQuery {
-                series_id: series_id.clone(),
-            },
-        ) {
-            Ok(series) => series,
-            Err(error) => {
-                return Some(non_native_books_list_response(
-                    error,
-                    uri,
-                    full_text_search,
-                    payload,
-                ));
-            }
-        };
+    let result = with_seeded_books_discovery_queries(|queries| async move {
+        if let Some(series_id) = oneshot_bootstrap_series_id.clone() {
+            let visible_series = queries
+                .get_series_detail(
+                    &domain_context,
+                    SeriesDetailQuery {
+                        series_id: series_id.clone(),
+                    },
+                )
+                .await?;
 
-        if visible_series
-            .as_ref()
-            .map(|series| !series.oneshot)
-            .unwrap_or(false)
-        {
-            return Some(non_native_books_list_response(
-                DiscoveryError::NonNativeRequestShape(
+            if visible_series
+                .as_ref()
+                .map(|series| !series.oneshot)
+                .unwrap_or(false)
+            {
+                return Err(DiscoveryError::NonNativeRequestShape(
                     NonNativeRequestShape::UnsupportedBookFilter(
                         "oneshot-bootstrap.series-not-oneshot".to_string(),
                     ),
-                ),
-                uri,
-                full_text_search,
-                payload,
-            ));
-        }
-
-        let visible_books = match queries.list_books(
-            &domain_context,
-            BooksListQuery {
-                page: 0,
-                size: 20,
-                unpaged: true,
-                direct_browse_family: None,
-                library_ids: None,
-                series_ids: Some(vec![series_id]),
-                deleted: None,
-                oneshot: None,
-                tags: None,
-                read_statuses: None,
-                media_profiles: None,
-                media_statuses: None,
-                authors: None,
-                release_dates: None,
-                sort: vec![],
-                search: None,
-            },
-        ) {
-            Ok(page) => page,
-            Err(error) => {
-                return Some(non_native_books_list_response(
-                    error,
-                    uri,
-                    full_text_search,
-                    payload,
                 ));
             }
-        };
 
-        if visible_series.is_none() || visible_books.total_elements != 1 {
-            return Some(non_native_books_list_response(
-                DiscoveryError::NonNativeRequestShape(
+            let visible_books = queries
+                .list_books(
+                    &domain_context,
+                    BooksListQuery {
+                        page: 0,
+                        size: 20,
+                        unpaged: true,
+                        direct_browse_family: None,
+                        library_ids: None,
+                        series_ids: Some(vec![series_id]),
+                        deleted: None,
+                        oneshot: None,
+                        tags: None,
+                        read_statuses: None,
+                        media_profiles: None,
+                        media_statuses: None,
+                        authors: None,
+                        release_dates: None,
+                        sort: vec![],
+                        search: None,
+                    },
+                )
+                .await?;
+
+            if visible_series.is_none() || visible_books.total_elements != 1 {
+                return Err(DiscoveryError::NonNativeRequestShape(
                     NonNativeRequestShape::UnsupportedBookFilter(
                         "oneshot-bootstrap.visible-single-book".to_string(),
                     ),
-                ),
-                uri,
-                full_text_search,
-                payload,
-            ));
+                ));
+            }
         }
-    }
 
-    let query = BooksListQuery {
-        page,
-        size,
-        unpaged,
-        direct_browse_family: filters.direct_browse_family,
-        library_ids: filters.library_ids,
-        series_ids: filters.series_ids,
-        deleted: filters.deleted,
-        oneshot: filters.oneshot,
-        tags: filters.tags,
-        read_statuses: filters.read_statuses,
-        media_profiles: filters.media_profiles,
-        media_statuses: filters.media_statuses,
-        authors: filters.authors,
-        release_dates: filters.release_dates,
-        sort: sorts,
-        search: full_text_search,
-    };
-    let is_direct_browse = query.direct_browse_family.is_some();
-    let fallback_search = query.search.clone();
+        let query = BooksListQuery {
+            page,
+            size,
+            unpaged,
+            direct_browse_family: filters.direct_browse_family,
+            library_ids: filters.library_ids,
+            series_ids: filters.series_ids,
+            deleted: filters.deleted,
+            oneshot: filters.oneshot,
+            tags: filters.tags,
+            read_statuses: filters.read_statuses,
+            media_profiles: filters.media_profiles,
+            media_statuses: filters.media_statuses,
+            authors: filters.authors,
+            release_dates: filters.release_dates,
+            sort: sorts,
+            search: full_text_search,
+        };
+        let is_direct_browse = query.direct_browse_family.is_some();
 
-    let result = if is_direct_browse {
-        queries.list_books_direct_browse(&domain_context, query)
-    } else {
-        queries.list_books(&domain_context, query)
-    };
+        let page = if is_direct_browse {
+            queries.list_books_direct_browse(&domain_context, query).await?
+        } else {
+            queries.list_books(&domain_context, query).await?
+        };
+
+        Ok(page)
+    })
+    .await;
 
     match result {
         Ok(page) => {
@@ -618,7 +597,7 @@ fn native_owned_books_list_response(
     }
 }
 
-fn native_owned_books_latest_response(
+async fn native_owned_books_latest_response(
     headers: &HeaderMap,
     uri: &Uri,
     auth_state: &DiscoveryAuthState,
@@ -647,11 +626,7 @@ fn native_owned_books_latest_response(
         None => return Some(StatusCode::UNAUTHORIZED.into_response()),
     };
 
-    let mut adapter = SqliteDiscoveryAdapter::default();
-    seed_books_discovery_data(&mut adapter);
-
     let is_admin = context.is_admin;
-    let queries = DiscoveryQueries::new(adapter);
     let domain_context = to_domain_query_context(context);
     let query = BooksLatestQuery {
         page,
@@ -660,7 +635,11 @@ fn native_owned_books_latest_response(
         library_ids: None,
     };
 
-    match queries.list_books_latest(&domain_context, query) {
+    match with_seeded_books_discovery_queries(|queries| async move {
+        queries.list_books_latest(&domain_context, query).await
+    })
+    .await
+    {
         Ok(page) => {
             let mut response = Json(books_page_payload(page, is_admin, !unpaged)).into_response();
             mark_native(&mut response);
@@ -679,7 +658,7 @@ fn native_owned_books_latest_response(
     }
 }
 
-fn native_owned_series_list_response(
+async fn native_owned_series_list_response(
     headers: &HeaderMap,
     uri: &Uri,
     payload: Option<&Value>,
@@ -715,10 +694,6 @@ fn native_owned_series_list_response(
         None => return Some(StatusCode::UNAUTHORIZED.into_response()),
     };
 
-    let mut adapter = SqliteDiscoveryAdapter::default();
-    seed_series_discovery_data(&mut adapter);
-
-    let queries = DiscoveryQueries::new(adapter);
     let domain_context = to_domain_query_context(context);
     let query = SeriesListQuery {
         page,
@@ -742,7 +717,11 @@ fn native_owned_series_list_response(
     };
     let fallback_search = query.search.clone();
 
-    match queries.list_series(&domain_context, query) {
+    match with_seeded_series_discovery_queries(|queries| async move {
+        queries.list_series(&domain_context, query).await
+    })
+    .await
+    {
         Ok(page) => {
             let mut response = Json(series_page_payload(page)).into_response();
             mark_native(&mut response);
@@ -800,6 +779,44 @@ fn non_native_books_latest_response(error: DiscoveryError, uri: &Uri) -> Respons
     let mut response = Json(payload).into_response();
     mark_non_native(&mut response);
     response
+}
+
+async fn with_seeded_books_discovery_queries<T, F, Fut>(
+    operation: F,
+) -> Result<T, DiscoveryError>
+where
+    F: FnOnce(DiscoveryQueries<SqlxRuntimeDiscoveryAdapter>) -> Fut,
+    Fut: std::future::Future<Output = Result<T, DiscoveryError>>,
+{
+    let store = SqlxRuntimeDiscoveryStore::new("compat-runtime-books").await?;
+    let seed_result = seed_books_discovery_data(&store).await;
+    if let Err(error) = seed_result {
+        store.cleanup().await;
+        return Err(error);
+    }
+
+    let result = operation(DiscoveryQueries::new(store.adapter())).await;
+    store.cleanup().await;
+    result
+}
+
+async fn with_seeded_series_discovery_queries<T, F, Fut>(
+    operation: F,
+) -> Result<T, DiscoveryError>
+where
+    F: FnOnce(DiscoveryQueries<SqlxRuntimeDiscoveryAdapter>) -> Fut,
+    Fut: std::future::Future<Output = Result<T, DiscoveryError>>,
+{
+    let store = SqlxRuntimeDiscoveryStore::new("compat-runtime-series").await?;
+    let seed_result = seed_series_discovery_data(&store).await;
+    if let Err(error) = seed_result {
+        store.cleanup().await;
+        return Err(error);
+    }
+
+    let result = operation(DiscoveryQueries::new(store.adapter())).await;
+    store.cleanup().await;
+    result
 }
 
 fn parse_native_series_filters(
@@ -1603,8 +1620,9 @@ fn merge_boolean_filter(
     }
 }
 
-fn seed_series_discovery_data(adapter: &mut SqliteDiscoveryAdapter) {
-    adapter.insert_series(
+async fn seed_series_discovery_data(store: &SqlxRuntimeDiscoveryStore) -> Result<(), DiscoveryError> {
+    store
+        .insert_series(
         SeriesRow::new("series-1", "1", "series")
             .with_labels(["safe"])
             .with_genres(["fantasy"])
@@ -1617,29 +1635,41 @@ fn seed_series_discovery_data(adapter: &mut SqliteDiscoveryAdapter) {
             .with_complete(true)
             .with_read_status("READ")
             .with_authors(["alice"]),
-    );
+        )
+        .await
 }
 
-fn seed_books_discovery_data(adapter: &mut SqliteDiscoveryAdapter) {
-    adapter.insert_series(SeriesRow::new("series-1", "1", "series").with_labels(["safe"]));
-    adapter.insert_series(SeriesRow::new("series-2", "1", "restricted").with_labels(["adult"]));
-    adapter.insert_series(
+async fn seed_books_discovery_data(store: &SqlxRuntimeDiscoveryStore) -> Result<(), DiscoveryError> {
+    store
+        .insert_series(SeriesRow::new("series-1", "1", "series").with_labels(["safe"]))
+        .await?;
+    store
+        .insert_series(SeriesRow::new("series-2", "1", "restricted").with_labels(["adult"]))
+        .await?;
+    store
+        .insert_series(
         SeriesRow::new("series-oneshot", "1", "oneshot")
             .with_labels(["safe"])
             .with_oneshot(true),
-    );
-    adapter.insert_series(
+        )
+        .await?;
+    store
+        .insert_series(
         SeriesRow::new("series-oneshot-multi", "1", "oneshot-multi")
             .with_labels(["safe"])
             .with_oneshot(true),
-    );
-    adapter.insert_series(
+        )
+        .await?;
+    store
+        .insert_series(
         SeriesRow::new("series-oneshot-restricted", "1", "oneshot-restricted")
             .with_labels(["adult"])
             .with_oneshot(true),
-    );
+        )
+        .await?;
 
-    adapter.insert_book(
+    store
+        .insert_book(
         BookRow::new("book-1", "series-1", "1", "book.cbr")
             .with_url("/library1/book.cbr")
             .with_last_modified("2024-01-01T03:04:05Z")
@@ -1650,8 +1680,10 @@ fn seed_books_discovery_data(adapter: &mut SqliteDiscoveryAdapter) {
             .with_release_date("2024-01-01")
             .with_tags(["safe"])
             .with_authors(["alice"]),
-    );
-    adapter.insert_book(
+        )
+        .await?;
+    store
+        .insert_book(
         BookRow::new("book-2", "series-2", "1", "restricted-book.cbz")
             .with_url("/library1/restricted-book.cbz")
             .with_last_modified("2024-01-03T03:04:05Z")
@@ -1662,8 +1694,10 @@ fn seed_books_discovery_data(adapter: &mut SqliteDiscoveryAdapter) {
             .with_release_date("2023-01-01")
             .with_tags(["adult"])
             .with_authors(["bob"]),
-    );
-    adapter.insert_book(
+        )
+        .await?;
+    store
+        .insert_book(
         BookRow::new("book-oneshot", "series-oneshot", "1", "oneshot-book.cbz")
             .with_url("/library1/oneshot-book.cbz")
             .with_last_modified("2024-02-01T03:04:05Z")
@@ -1674,8 +1708,10 @@ fn seed_books_discovery_data(adapter: &mut SqliteDiscoveryAdapter) {
             .with_release_date("2024-02-01")
             .with_tags(["safe"])
             .with_authors(["alice"]),
-    );
-    adapter.insert_book(
+        )
+        .await?;
+    store
+        .insert_book(
         BookRow::new(
             "book-oneshot-multi-1",
             "series-oneshot-multi",
@@ -1691,8 +1727,10 @@ fn seed_books_discovery_data(adapter: &mut SqliteDiscoveryAdapter) {
         .with_release_date("2024-02-02")
         .with_tags(["safe"])
         .with_authors(["alice"]),
-    );
-    adapter.insert_book(
+        )
+        .await?;
+    store
+        .insert_book(
         BookRow::new(
             "book-oneshot-multi-2",
             "series-oneshot-multi",
@@ -1708,8 +1746,10 @@ fn seed_books_discovery_data(adapter: &mut SqliteDiscoveryAdapter) {
         .with_release_date("2024-02-03")
         .with_tags(["safe"])
         .with_authors(["alice"]),
-    );
-    adapter.insert_book(
+        )
+        .await?;
+    store
+        .insert_book(
         BookRow::new(
             "book-oneshot-restricted",
             "series-oneshot-restricted",
@@ -1725,7 +1765,10 @@ fn seed_books_discovery_data(adapter: &mut SqliteDiscoveryAdapter) {
         .with_release_date("2024-02-04")
         .with_tags(["adult"])
         .with_authors(["bob"]),
-    );
+        )
+        .await?;
+
+    Ok(())
 }
 
 fn series_page_payload(page: PageEnvelope<SeriesReadModel>) -> Value {

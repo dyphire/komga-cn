@@ -3,8 +3,8 @@ use super::{
     SqliteDiscoveryAdapter, restricted_context,
 };
 
-#[test]
-fn readlist_books_follow_legacy_ordered_and_unordered_semantics() {
+#[tokio::test]
+async fn readlist_books_follow_legacy_ordered_and_unordered_semantics() {
     let mut adapter = SqliteDiscoveryAdapter::default();
     adapter.insert_library(LibraryRow::new("lib-1", "Library 1"));
     adapter.insert_series(SeriesRow::new("series-1", "lib-1", "Series 1").with_labels(["safe"]));
@@ -46,6 +46,7 @@ fn readlist_books_follow_legacy_ordered_and_unordered_semantics() {
                 library_ids: None,
             },
         )
+        .await
         .expect("ordered readlist books query should succeed");
     assert_eq!(
         ordered
@@ -67,6 +68,7 @@ fn readlist_books_follow_legacy_ordered_and_unordered_semantics() {
                 library_ids: None,
             },
         )
+        .await
         .expect("unordered readlist books query should succeed");
     assert_eq!(
         unordered
@@ -78,8 +80,8 @@ fn readlist_books_follow_legacy_ordered_and_unordered_semantics() {
     );
 }
 
-#[test]
-fn readlist_books_cover_restricted_and_empty_fixtures() {
+#[tokio::test]
+async fn readlist_books_cover_restricted_and_empty_fixtures() {
     let mut adapter = SqliteDiscoveryAdapter::default();
     adapter.insert_library(LibraryRow::new("lib-1", "Library 1"));
     adapter.insert_series(
@@ -135,6 +137,7 @@ fn readlist_books_cover_restricted_and_empty_fixtures() {
                 library_ids: None,
             },
         )
+        .await
         .expect("mixed readlist books query should succeed");
     assert_eq!(
         mixed
@@ -156,6 +159,7 @@ fn readlist_books_cover_restricted_and_empty_fixtures() {
                 library_ids: None,
             },
         )
+        .await
         .expect("empty readlist books query should succeed");
     assert!(empty.content.is_empty());
 
@@ -170,6 +174,7 @@ fn readlist_books_cover_restricted_and_empty_fixtures() {
                 library_ids: None,
             },
         )
+        .await
         .expect("fully filtered readlist books query should succeed");
     assert!(fully_filtered.content.is_empty());
 }

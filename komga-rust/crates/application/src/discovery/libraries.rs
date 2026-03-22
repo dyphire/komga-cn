@@ -9,11 +9,11 @@ impl<R> DiscoveryQueries<R>
 where
     R: DiscoveryQueryRepository,
 {
-    pub fn list_libraries(
+    pub async fn list_libraries(
         &self,
         context: &DiscoveryQueryContext,
         _query: LibraryListQuery,
     ) -> Result<Vec<LibraryReadModel>, DiscoveryError> {
-        self.repository.list_libraries(context)
+        self.repository.list_libraries(context).await
     }
 }

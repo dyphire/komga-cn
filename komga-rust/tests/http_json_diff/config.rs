@@ -206,12 +206,16 @@ fn p0_cases_configuration_loads() {
 
     assert_eq!(config.output_dir, "target/compat-diff");
     assert!(config.header_allowlist.contains(&"set-cookie".to_string()));
-    assert!(config
-        .header_allowlist
-        .contains(&"x-auth-token".to_string()));
-    assert!(config
-        .header_allowlist
-        .contains(&"www-authenticate".to_string()));
+    assert!(
+        config
+            .header_allowlist
+            .contains(&"x-auth-token".to_string())
+    );
+    assert!(
+        config
+            .header_allowlist
+            .contains(&"www-authenticate".to_string())
+    );
     assert!(case_ids.contains(&"KOMGA-P0-LIB-01"));
     assert!(case_ids.contains(&"KOMGA-P0-SERIES-01"));
     assert!(case_ids.contains(&"KOMGA-P0-BOOKS-LIST-01"));

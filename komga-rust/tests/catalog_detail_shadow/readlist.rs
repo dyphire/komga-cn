@@ -1,20 +1,22 @@
 use super::*;
 
-#[test]
-fn readlist_books_paged_variant_remains_non_native() {
+#[tokio::test]
+async fn readlist_books_paged_variant_remains_non_native() {
     let queries = DiscoveryQueries::new(SqliteDiscoveryAdapter::default());
     let context = DiscoveryQueryContext::allow_all();
 
-    let result = queries.list_readlist_books(
-        &context,
-        ReadListBooksQuery {
-            readlist_id: "readlist-1".to_string(),
-            page: 0,
-            size: 20,
-            unpaged: false,
-            library_ids: None,
-        },
-    );
+    let result = queries
+        .list_readlist_books(
+            &context,
+            ReadListBooksQuery {
+                readlist_id: "readlist-1".to_string(),
+                page: 0,
+                size: 20,
+                unpaged: false,
+                library_ids: None,
+            },
+        )
+        .await;
 
     assert!(matches!(
         result,
@@ -22,21 +24,23 @@ fn readlist_books_paged_variant_remains_non_native() {
     ));
 }
 
-#[test]
-fn readlist_books_library_id_variant_remains_non_native() {
+#[tokio::test]
+async fn readlist_books_library_id_variant_remains_non_native() {
     let queries = DiscoveryQueries::new(SqliteDiscoveryAdapter::default());
     let context = DiscoveryQueryContext::allow_all();
 
-    let result = queries.list_readlist_books(
-        &context,
-        ReadListBooksQuery {
-            readlist_id: "readlist-1".to_string(),
-            page: 0,
-            size: 20,
-            unpaged: true,
-            library_ids: Some(vec!["1".to_string()]),
-        },
-    );
+    let result = queries
+        .list_readlist_books(
+            &context,
+            ReadListBooksQuery {
+                readlist_id: "readlist-1".to_string(),
+                page: 0,
+                size: 20,
+                unpaged: true,
+                library_ids: Some(vec!["1".to_string()]),
+            },
+        )
+        .await;
 
     assert!(matches!(
         result,

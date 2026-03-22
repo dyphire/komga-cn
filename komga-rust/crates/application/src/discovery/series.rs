@@ -64,7 +64,7 @@ impl<R> DiscoveryQueries<R>
 where
     R: DiscoveryQueryRepository,
 {
-    pub fn list_series(
+    pub async fn list_series(
         &self,
         context: &DiscoveryQueryContext,
         query: SeriesListQuery,
@@ -93,28 +93,29 @@ where
                 search: query.search,
             },
         )
+        .await
     }
 
-    pub fn resolve_series_resource(
+    pub async fn resolve_series_resource(
         &self,
         series_id: &str,
     ) -> Result<Option<SeriesResourceReadModel>, DiscoveryError> {
-        self.repository.resolve_series_resource(series_id)
+        self.repository.resolve_series_resource(series_id).await
     }
 
-    pub fn get_series_detail(
+    pub async fn get_series_detail(
         &self,
         context: &DiscoveryQueryContext,
         query: SeriesDetailQuery,
     ) -> Result<Option<SeriesDetailReadModel>, DiscoveryError> {
-        self.repository.get_series_detail(context, query)
+        self.repository.get_series_detail(context, query).await
     }
 
-    pub fn list_series_collections(
+    pub async fn list_series_collections(
         &self,
         context: &DiscoveryQueryContext,
         query: SeriesCollectionsQuery,
     ) -> Result<Vec<CollectionReadModel>, DiscoveryError> {
-        self.repository.list_series_collections(context, query)
+        self.repository.list_series_collections(context, query).await
     }
 }

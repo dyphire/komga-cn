@@ -3,8 +3,8 @@ use super::{
     restricted_context, restricted_library_series_adapter,
 };
 
-#[test]
-fn series_conditions_apply_authorized_libraries_and_restrictions() {
+#[tokio::test]
+async fn series_conditions_apply_authorized_libraries_and_restrictions() {
     let adapter = restricted_library_series_adapter();
 
     let use_cases = DiscoveryQueries::new(adapter);
@@ -34,14 +34,15 @@ fn series_conditions_apply_authorized_libraries_and_restrictions() {
                 search: None,
             },
         )
+        .await
         .expect("series query should succeed");
 
     let ids: Vec<&str> = result.content.iter().map(|it| it.id.as_str()).collect();
     assert_eq!(ids, vec!["series-safe"]);
 }
 
-#[test]
-fn book_conditions_apply_authorized_libraries_and_restrictions() {
+#[tokio::test]
+async fn book_conditions_apply_authorized_libraries_and_restrictions() {
     let mut adapter = restricted_library_series_adapter();
     adapter.insert_book(BookRow::new(
         "book-safe",
@@ -87,6 +88,7 @@ fn book_conditions_apply_authorized_libraries_and_restrictions() {
                 search: None,
             },
         )
+        .await
         .expect("books query should succeed");
 
     let ids: Vec<&str> = result.content.iter().map(|it| it.id.as_str()).collect();

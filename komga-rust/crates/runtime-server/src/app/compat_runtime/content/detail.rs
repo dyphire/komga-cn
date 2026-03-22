@@ -55,7 +55,7 @@ pub(in crate::app::compat_runtime) async fn series_detail(
     seed_series_detail_data(&mut adapter);
     let queries = DiscoveryQueries::new(adapter);
 
-    let Some(resource) = (match queries.resolve_series_resource(&series_id) {
+    let Some(resource) = (match queries.resolve_series_resource(&series_id).await {
         Ok(resource) => resource,
         Err(error) => {
             return (
@@ -87,7 +87,7 @@ pub(in crate::app::compat_runtime) async fn series_detail(
     let domain_context = to_domain_query_context(detail_query_context);
     let query = SeriesDetailQuery { series_id };
 
-    match queries.get_series_detail(&domain_context, query) {
+    match queries.get_series_detail(&domain_context, query).await {
         Ok(Some(series)) => {
             let mut payload = series_detail_payload(&series, is_admin);
 
@@ -145,7 +145,7 @@ pub(in crate::app::compat_runtime) async fn series_collections(
     seed_series_detail_data(&mut adapter);
     let queries = DiscoveryQueries::new(adapter);
 
-    let Some(resource) = (match queries.resolve_series_resource(&series_id) {
+    let Some(resource) = (match queries.resolve_series_resource(&series_id).await {
         Ok(resource) => resource,
         Err(error) => {
             return (
@@ -175,7 +175,7 @@ pub(in crate::app::compat_runtime) async fn series_collections(
     let domain_context = to_domain_query_context(detail_query_context);
     let query = SeriesCollectionsQuery { series_id };
 
-    match queries.list_series_collections(&domain_context, query) {
+    match queries.list_series_collections(&domain_context, query).await {
         Ok(collections) => Json(series_collections_payload(&collections)).into_response(),
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -215,7 +215,7 @@ pub(in crate::app::compat_runtime) async fn book_detail(
     seed_series_detail_data(&mut adapter);
     let queries = DiscoveryQueries::new(adapter);
 
-    let Some(resource) = (match queries.resolve_book_resource(&book_id) {
+    let Some(resource) = (match queries.resolve_book_resource(&book_id).await {
         Ok(resource) => resource,
         Err(error) => {
             return (
@@ -246,7 +246,7 @@ pub(in crate::app::compat_runtime) async fn book_detail(
     let domain_context = to_domain_query_context(detail_query_context);
     let query = BookDetailQuery { book_id };
 
-    match queries.get_book_detail(&domain_context, query) {
+    match queries.get_book_detail(&domain_context, query).await {
         Ok(Some(book)) => Json(book_detail_payload(&book, is_admin)).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => (
@@ -285,7 +285,7 @@ pub(in crate::app::compat_runtime) async fn book_sibling_previous(
     seed_series_detail_data(&mut adapter);
     let queries = DiscoveryQueries::new(adapter);
 
-    let Some(resource) = (match queries.resolve_book_resource(&book_id) {
+    let Some(resource) = (match queries.resolve_book_resource(&book_id).await {
         Ok(resource) => resource,
         Err(error) => {
             return (
@@ -315,7 +315,10 @@ pub(in crate::app::compat_runtime) async fn book_sibling_previous(
 
     let domain_context = to_domain_query_context(detail_query_context);
 
-    match queries.get_book_sibling_previous(&domain_context, BookSiblingQuery { book_id }) {
+    match queries
+        .get_book_sibling_previous(&domain_context, BookSiblingQuery { book_id })
+        .await
+    {
         Ok(Some(book)) => Json(book_detail_payload(&book, is_admin)).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => (
@@ -354,7 +357,7 @@ pub(in crate::app::compat_runtime) async fn book_sibling_next(
     seed_series_detail_data(&mut adapter);
     let queries = DiscoveryQueries::new(adapter);
 
-    let Some(resource) = (match queries.resolve_book_resource(&book_id) {
+    let Some(resource) = (match queries.resolve_book_resource(&book_id).await {
         Ok(resource) => resource,
         Err(error) => {
             return (
@@ -384,7 +387,10 @@ pub(in crate::app::compat_runtime) async fn book_sibling_next(
 
     let domain_context = to_domain_query_context(detail_query_context);
 
-    match queries.get_book_sibling_next(&domain_context, BookSiblingQuery { book_id }) {
+    match queries
+        .get_book_sibling_next(&domain_context, BookSiblingQuery { book_id })
+        .await
+    {
         Ok(Some(book)) => Json(book_detail_payload(&book, is_admin)).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => (
@@ -423,7 +429,7 @@ pub(in crate::app::compat_runtime) async fn book_readlists(
     seed_series_detail_data(&mut adapter);
     let queries = DiscoveryQueries::new(adapter);
 
-    let Some(resource) = (match queries.resolve_book_resource(&book_id) {
+    let Some(resource) = (match queries.resolve_book_resource(&book_id).await {
         Ok(resource) => resource,
         Err(error) => {
             return (
@@ -452,7 +458,10 @@ pub(in crate::app::compat_runtime) async fn book_readlists(
 
     let domain_context = to_domain_query_context(detail_query_context);
 
-    match queries.list_book_readlists(&domain_context, BookReadlistsQuery { book_id }) {
+    match queries
+        .list_book_readlists(&domain_context, BookReadlistsQuery { book_id })
+        .await
+    {
         Ok(readlists) => Json(readlists_payload(&readlists)).into_response(),
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -526,19 +535,22 @@ pub(in crate::app::compat_runtime) async fn readlist_books(
         library_ids,
     };
 
-    match queries.list_readlist_books(&domain_context, query) {
+    match queries.list_readlist_books(&domain_context, query).await {
         Ok(page) => {
             let mut response = Json(books_page_payload(page, is_admin, !unpaged)).into_response();
             mark_native(&mut response);
             response
         }
-        Err(DiscoveryError::NonNativeRequestShape(details)) => non_native_readlist_books_response(
-            DiscoveryError::NonNativeRequestShape(details),
-            &queries,
-            &domain_context,
-            &readlist_id,
-            is_admin,
-        ),
+        Err(DiscoveryError::NonNativeRequestShape(details)) => {
+            non_native_readlist_books_response(
+                DiscoveryError::NonNativeRequestShape(details),
+                &queries,
+                &domain_context,
+                &readlist_id,
+                is_admin,
+            )
+            .await
+        }
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": format!("readlist books query failed: {error:?}") })),
@@ -574,7 +586,7 @@ pub(in crate::app::compat_runtime) async fn readlist_book_sibling_previous(
     let mut adapter = SqliteDiscoveryAdapter::default();
     seed_series_detail_data(&mut adapter);
 
-    let Some(resource) = (match adapter.resolve_book_resource(&book_id) {
+    let Some(resource) = (match adapter.resolve_book_resource(&book_id).await {
         Ok(resource) => resource,
         Err(error) => {
             return (
@@ -604,7 +616,10 @@ pub(in crate::app::compat_runtime) async fn readlist_book_sibling_previous(
 
     let domain_context = to_domain_query_context(detail_query_context);
 
-    match adapter.get_readlist_book_sibling_previous(&domain_context, &readlist_id, &book_id) {
+    match adapter
+        .get_readlist_book_sibling_previous(&domain_context, &readlist_id, &book_id)
+        .await
+    {
         Ok(Some(book)) => Json(book_detail_payload(&book, is_admin)).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => (
@@ -642,7 +657,7 @@ pub(in crate::app::compat_runtime) async fn readlist_book_sibling_next(
     let mut adapter = SqliteDiscoveryAdapter::default();
     seed_series_detail_data(&mut adapter);
 
-    let Some(resource) = (match adapter.resolve_book_resource(&book_id) {
+    let Some(resource) = (match adapter.resolve_book_resource(&book_id).await {
         Ok(resource) => resource,
         Err(error) => {
             return (
@@ -672,7 +687,10 @@ pub(in crate::app::compat_runtime) async fn readlist_book_sibling_next(
 
     let domain_context = to_domain_query_context(detail_query_context);
 
-    match adapter.get_readlist_book_sibling_next(&domain_context, &readlist_id, &book_id) {
+    match adapter
+        .get_readlist_book_sibling_next(&domain_context, &readlist_id, &book_id)
+        .await
+    {
         Ok(Some(book)) => Json(book_detail_payload(&book, is_admin)).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => (
@@ -683,14 +701,15 @@ pub(in crate::app::compat_runtime) async fn readlist_book_sibling_next(
     }
 }
 
-fn non_native_readlist_books_response(
+async fn non_native_readlist_books_response(
     error: DiscoveryError,
     queries: &DiscoveryQueries<SqliteDiscoveryAdapter>,
     domain_context: &komga_domain::discovery::DiscoveryQueryContext,
     readlist_id: &str,
     is_admin: bool,
 ) -> Response {
-    let mut payload = compat_readlist_books_payload(queries, domain_context, readlist_id, is_admin);
+    let mut payload =
+        compat_readlist_books_payload(queries, domain_context, readlist_id, is_admin).await;
     apply_non_native_diagnostics(&mut payload, &error);
 
     let mut response = Json(payload).into_response();
@@ -698,22 +717,25 @@ fn non_native_readlist_books_response(
     response
 }
 
-fn compat_readlist_books_payload(
+async fn compat_readlist_books_payload(
     queries: &DiscoveryQueries<SqliteDiscoveryAdapter>,
     domain_context: &komga_domain::discovery::DiscoveryQueryContext,
     readlist_id: &str,
     is_admin: bool,
 ) -> Value {
-    match queries.list_readlist_books(
-        domain_context,
-        ReadListBooksQuery {
-            readlist_id: readlist_id.to_string(),
-            page: 0,
-            size: 20,
-            unpaged: true,
-            library_ids: None,
-        },
-    ) {
+    match queries
+        .list_readlist_books(
+            domain_context,
+            ReadListBooksQuery {
+                readlist_id: readlist_id.to_string(),
+                page: 0,
+                size: 20,
+                unpaged: true,
+                library_ids: None,
+            },
+        )
+        .await
+    {
         Ok(page) => books_page_payload(page, is_admin, false),
         Err(_) => books_page_payload(
             PageEnvelope::from_slice(Vec::new(), 0, 1, 0),

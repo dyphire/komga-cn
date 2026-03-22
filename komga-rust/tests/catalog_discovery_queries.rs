@@ -43,3 +43,38 @@ fn restricted_library_series_adapter() -> SqliteDiscoveryAdapter {
     );
     adapter
 }
+
+#[tokio::test]
+async fn phase_55_contract_keeps_sqlite_discovery_request_shape_baseline() {
+    let use_cases = DiscoveryQueries::new(SqliteDiscoveryAdapter::default());
+    let context = DiscoveryQueryContext::allow_all();
+
+    let result = use_cases
+        .list_books(
+            &context,
+            BooksListQuery {
+                page: 0,
+                size: 20,
+                unpaged: false,
+                direct_browse_family: Some(DirectBrowseBooksListFamily::BrowseSeriesPaged),
+                library_ids: None,
+                series_ids: None,
+                deleted: None,
+                oneshot: None,
+                tags: None,
+                read_statuses: None,
+                media_profiles: None,
+                media_statuses: None,
+                authors: None,
+                release_dates: None,
+                sort: vec!["readProgress.readDate,desc".to_string()],
+                search: None,
+            },
+        )
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(DiscoveryError::NonNativeRequestShape(_))
+    ));
+}

@@ -3,8 +3,8 @@ use super::{
     SqliteDiscoveryAdapter,
 };
 
-#[test]
-fn books_list_honors_metadata_title_sort_for_generic_discovery() {
+#[tokio::test]
+async fn books_list_honors_metadata_title_sort_for_generic_discovery() {
     let mut adapter = SqliteDiscoveryAdapter::default();
     adapter.insert_library(LibraryRow::new("lib-1", "Library 1"));
     adapter.insert_series(SeriesRow::new("series-1", "lib-1", "Series 1").with_labels(["safe"]));
@@ -45,6 +45,7 @@ fn books_list_honors_metadata_title_sort_for_generic_discovery() {
                 search: None,
             },
         )
+        .await
         .expect("books query should succeed");
 
     let ids: Vec<&str> = result.content.iter().map(|it| it.id.as_str()).collect();

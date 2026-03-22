@@ -3,8 +3,8 @@ use super::{
     LibraryRow, SeriesListQuery, SeriesRow, SqliteDiscoveryAdapter,
 };
 
-#[test]
-fn series_t1_extended_filters_are_applied_in_query_layer() {
+#[tokio::test]
+async fn series_t1_extended_filters_are_applied_in_query_layer() {
     let mut adapter = SqliteDiscoveryAdapter::default();
     adapter.insert_library(LibraryRow::new("lib-1", "Library 1"));
 
@@ -65,14 +65,15 @@ fn series_t1_extended_filters_are_applied_in_query_layer() {
                 search: None,
             },
         )
+        .await
         .expect("series query should succeed");
 
     let ids: Vec<&str> = result.content.iter().map(|it| it.id.as_str()).collect();
     assert_eq!(ids, vec!["series-match"]);
 }
 
-#[test]
-fn books_t1_extended_filters_are_applied_in_query_layer() {
+#[tokio::test]
+async fn books_t1_extended_filters_are_applied_in_query_layer() {
     let mut adapter = SqliteDiscoveryAdapter::default();
     adapter.insert_library(LibraryRow::new("lib-1", "Library 1"));
     adapter.insert_series(SeriesRow::new("series-1", "lib-1", "Series 1").with_labels(["safe"]));
@@ -119,6 +120,7 @@ fn books_t1_extended_filters_are_applied_in_query_layer() {
                 search: None,
             },
         )
+        .await
         .expect("books query should succeed");
 
     let ids: Vec<&str> = result.content.iter().map(|it| it.id.as_str()).collect();

@@ -1,356 +1,563 @@
-use std::cell::RefCell;
+use std::mem;
+use std::sync::Mutex;
 
-use komga_domain::discovery::{BookDetailReadModel, DiscoveryError, DiscoveryQueryContext};
-use rusqlite::{Connection, params};
+use komga_application::discovery::{
+    BookDetailQuery, BookReadlistsQuery, BookSiblingQuery, DiscoveryQueryRepository,
+    NativeBooksLatestQuery, NativeBooksListQuery, NativeReadListBooksQuery, NativeSeriesListQuery,
+    SeriesCollectionsQuery, SeriesDetailQuery,
+};
+use komga_domain::discovery::{
+    BookDetailReadModel, BookReadModel, BookResourceReadModel, CollectionReadModel, DiscoveryError,
+    DiscoveryQueryContext, LibraryReadModel, PageEnvelope, ReadListReadModel,
+    SeriesDetailReadModel, SeriesReadModel, SeriesResourceReadModel,
+};
+use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
 
-use super::queries::get_readlist_book_sibling;
+use super::queries;
+use super::queries::{book_detail, books, readlists};
 use super::rows::{BookRow, CollectionRow, LibraryRow, ReadListRow, ReadProgressRow, SeriesRow};
+use crate::sqlite::setup;
+
+#[derive(Default)]
+struct PendingRows {
+    libraries: Vec<LibraryRow>,
+    series: Vec<SeriesRow>,
+    collections: Vec<CollectionRow>,
+    read_lists: Vec<ReadListRow>,
+    books: Vec<BookRow>,
+    read_progress: Vec<ReadProgressRow>,
+}
 
 pub struct SqliteDiscoveryAdapter {
-    pub(super) connection: RefCell<Connection>,
+    pending: Mutex<PendingRows>,
+    pool: Mutex<Option<SqlitePool>>,
 }
 
 impl Default for SqliteDiscoveryAdapter {
     fn default() -> Self {
-        let connection =
-            Connection::open_in_memory().expect("sqlite in-memory open should succeed");
-        bootstrap_schema(&connection).expect("sqlite schema bootstrap should succeed");
-        Self {
-            connection: RefCell::new(connection),
-        }
+        Self::new()
     }
 }
 
 impl SqliteDiscoveryAdapter {
+    pub fn new() -> Self {
+        Self {
+            pending: Mutex::new(PendingRows::default()),
+            pool: Mutex::new(None),
+        }
+    }
+
     pub fn insert_library(&mut self, row: LibraryRow) {
-        let connection = self.connection.borrow_mut();
-        connection
-            .execute(
-                "INSERT INTO libraries (id, name, root) VALUES (?1, ?2, ?3)",
-                params![row.id, row.name, row.root],
-            )
-            .expect("library insert should succeed");
+        self.pending
+            .lock()
+            .expect("pending rows lock should not be poisoned")
+            .libraries
+            .push(row);
     }
 
     pub fn insert_series(&mut self, row: SeriesRow) {
-        let connection = self.connection.borrow_mut();
-        connection
-            .execute(
-                "INSERT INTO series (id, library_id, title, age_rating, language, publisher, release_date, status, complete, read_status, deleted, oneshot, created, last_modified, file_last_modified, url) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
-                params![
-                    row.id,
-                    row.library_id,
-                    row.title,
-                    row.age_rating,
-                    row.language,
-                    row.publisher,
-                    row.release_date,
-                    row.status,
-                    row.complete,
-                    row.read_status,
-                    row.deleted,
-                    row.oneshot,
-                    row.created,
-                    row.last_modified,
-                    row.file_last_modified,
-                    row.url,
-                ],
-            )
-            .expect("series insert should succeed");
-
-        for label in row.labels {
-            connection
-                .execute(
-                    "INSERT INTO series_labels (series_id, label) VALUES (?1, ?2)",
-                    params![row.id, label],
-                )
-                .expect("series label insert should succeed");
-        }
-
-        for genre in row.genres {
-            connection
-                .execute(
-                    "INSERT INTO series_genres (series_id, genre) VALUES (?1, ?2)",
-                    params![row.id, genre],
-                )
-                .expect("series genre insert should succeed");
-        }
-
-        for tag in row.tags {
-            connection
-                .execute(
-                    "INSERT INTO series_tags (series_id, tag) VALUES (?1, ?2)",
-                    params![row.id, tag],
-                )
-                .expect("series tag insert should succeed");
-        }
-
-        for author in row.authors {
-            connection
-                .execute(
-                    "INSERT INTO series_authors (series_id, author) VALUES (?1, ?2)",
-                    params![row.id, author],
-                )
-                .expect("series author insert should succeed");
-        }
+        self.pending
+            .lock()
+            .expect("pending rows lock should not be poisoned")
+            .series
+            .push(row);
     }
 
     pub fn insert_collection(&mut self, row: CollectionRow) {
-        let connection = self.connection.borrow_mut();
-        connection
-            .execute(
-                "INSERT INTO collections (id, name, ordered, created_date, last_modified_date) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![
-                    row.id,
-                    row.name,
-                    row.ordered,
-                    row.created_date,
-                    row.last_modified_date,
-                ],
-            )
-            .expect("collection insert should succeed");
-
-        for (index, series_id) in row.series_ids.iter().enumerate() {
-            connection
-                .execute(
-                    "INSERT INTO collection_series (collection_id, series_id, position) VALUES (?1, ?2, ?3)",
-                    params![row.id, series_id, index as i64],
-                )
-                .expect("collection series insert should succeed");
-        }
+        self.pending
+            .lock()
+            .expect("pending rows lock should not be poisoned")
+            .collections
+            .push(row);
     }
 
     pub fn insert_read_list(&mut self, row: ReadListRow) {
-        let connection = self.connection.borrow_mut();
-        connection
-            .execute(
-                "INSERT INTO readlists (id, name, summary, ordered, created_date, last_modified_date) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    row.id,
-                    row.name,
-                    row.summary,
-                    row.ordered,
-                    row.created_date,
-                    row.last_modified_date,
-                ],
-            )
-            .expect("readlist insert should succeed");
-
-        for (index, book_id) in row.book_ids.iter().enumerate() {
-            connection
-                .execute(
-                    "INSERT INTO readlist_books (readlist_id, book_id, position) VALUES (?1, ?2, ?3)",
-                    params![row.id, book_id, index as i64],
-                )
-                .expect("readlist book insert should succeed");
-        }
+        self.pending
+            .lock()
+            .expect("pending rows lock should not be poisoned")
+            .read_lists
+            .push(row);
     }
 
     pub fn insert_book(&mut self, row: BookRow) {
-        let connection = self.connection.borrow_mut();
-        connection
-            .execute(
-                "INSERT INTO books (id, series_id, library_id, title, url, created, last_modified, file_last_modified, size_bytes, media_status, media_profile, media_type, media_pages_count, metadata_release_date, number_sort, read_status, deleted, oneshot) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
-                params![
-                    row.id,
-                    row.series_id,
-                    row.library_id,
-                    row.title,
-                    row.url,
-                    row.created,
-                    row.last_modified,
-                    row.file_last_modified,
-                    row.size_bytes,
-                    row.media_status,
-                    row.media_profile,
-                    row.media_type,
-                    row.media_pages_count,
-                    row.metadata_release_date,
-                    row.number_sort,
-                    row.read_status,
-                    row.deleted,
-                    row.oneshot,
-                ],
-            )
-            .expect("book insert should succeed");
-
-        for tag in row.tags {
-            connection
-                .execute(
-                    "INSERT INTO book_tags (book_id, tag) VALUES (?1, ?2)",
-                    params![row.id, tag],
-                )
-                .expect("book tag insert should succeed");
-        }
-
-        for author in row.authors {
-            connection
-                .execute(
-                    "INSERT INTO book_authors (book_id, author) VALUES (?1, ?2)",
-                    params![row.id, author],
-                )
-                .expect("book author insert should succeed");
-        }
+        self.pending
+            .lock()
+            .expect("pending rows lock should not be poisoned")
+            .books
+            .push(row);
     }
 
     pub fn insert_read_progress(&mut self, row: ReadProgressRow) {
-        let connection = self.connection.borrow_mut();
-        connection
-            .execute(
-                "INSERT INTO read_progress (book_id, user_id, page, completed, read_date, created, last_modified, device_id, device_name) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                params![
-                    row.book_id,
-                    row.user_id,
-                    row.page,
-                    row.completed,
-                    row.read_date,
-                    row.created,
-                    row.last_modified,
-                    row.device_id,
-                    row.device_name,
-                ],
+        self.pending
+            .lock()
+            .expect("pending rows lock should not be poisoned")
+            .read_progress
+            .push(row);
+    }
+
+    pub async fn get_readlist_book_sibling_previous(
+        &self,
+        context: &DiscoveryQueryContext,
+        readlist_id: &str,
+        book_id: &str,
+    ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
+        let pool = self.ready_pool().await?;
+        readlists::get_readlist_book_sibling_sqlx(pool, context, readlist_id, book_id, false).await
+    }
+
+    pub async fn get_readlist_book_sibling_next(
+        &self,
+        context: &DiscoveryQueryContext,
+        readlist_id: &str,
+        book_id: &str,
+    ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
+        let pool = self.ready_pool().await?;
+        readlists::get_readlist_book_sibling_sqlx(pool, context, readlist_id, book_id, true).await
+    }
+
+    async fn ready_pool(&self) -> Result<SqlitePool, DiscoveryError> {
+        self.ensure_pool_initialized().await?;
+        self.flush_pending_rows().await?;
+
+        let pool_guard = self
+            .pool
+            .lock()
+            .expect("discovery pool lock should not be poisoned");
+        Ok(pool_guard
+            .as_ref()
+            .expect("pool should be initialized")
+            .clone())
+    }
+
+    async fn ensure_pool_initialized(&self) -> Result<(), DiscoveryError> {
+        let needs_init = self
+            .pool
+            .lock()
+            .expect("discovery pool lock should not be poisoned")
+            .is_none();
+        if !needs_init {
+            return Ok(());
+        }
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .map_err(map_sqlx_error)?;
+        setup::bootstrap_pool(&pool).await.map_err(map_sqlx_error)?;
+
+        let mut pool_guard = self
+            .pool
+            .lock()
+            .expect("discovery pool lock should not be poisoned");
+        if pool_guard.is_none() {
+            *pool_guard = Some(pool);
+        }
+        Ok(())
+    }
+
+    async fn flush_pending_rows(&self) -> Result<(), DiscoveryError> {
+        let pending = {
+            let mut guard = self
+                .pending
+                .lock()
+                .expect("pending rows lock should not be poisoned");
+            mem::take(&mut *guard)
+        };
+
+        if pending.libraries.is_empty()
+            && pending.series.is_empty()
+            && pending.collections.is_empty()
+            && pending.read_lists.is_empty()
+            && pending.books.is_empty()
+            && pending.read_progress.is_empty()
+        {
+            return Ok(());
+        }
+
+        let pool = {
+            let pool_guard = self
+                .pool
+                .lock()
+                .expect("discovery pool lock should not be poisoned");
+            pool_guard
+                .as_ref()
+                .expect("pool should be initialized before flush")
+                .clone()
+        };
+
+        for row in pending.libraries {
+            sqlx::query("INSERT INTO libraries (id, name, root) VALUES (?1, ?2, ?3)")
+                .bind(row.id)
+                .bind(row.name)
+                .bind(row.root)
+                .execute(&pool)
+                .await
+                .map_err(map_sqlx_error)?;
+        }
+
+        for row in pending.series {
+            let SeriesRow {
+                id,
+                library_id,
+                title,
+                labels,
+                genres,
+                tags,
+                language,
+                publisher,
+                age_rating,
+                release_date,
+                status,
+                complete,
+                read_status,
+                authors,
+                deleted,
+                oneshot,
+                created,
+                last_modified,
+                file_last_modified,
+                url,
+            } = row;
+
+            sqlx::query(
+                "INSERT INTO series (id, library_id, title, age_rating, language, publisher, release_date, status, complete, read_status, deleted, oneshot, created, last_modified, file_last_modified, url) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             )
-            .expect("read progress insert should succeed");
-    }
+            .bind(&id)
+            .bind(&library_id)
+            .bind(&title)
+            .bind(age_rating)
+            .bind(&language)
+            .bind(&publisher)
+            .bind(release_date)
+            .bind(&status)
+            .bind(complete)
+            .bind(&read_status)
+            .bind(deleted)
+            .bind(oneshot)
+            .bind(&created)
+            .bind(&last_modified)
+            .bind(&file_last_modified)
+            .bind(&url)
+            .execute(&pool)
+            .await
+            .map_err(map_sqlx_error)?;
 
-    pub fn get_readlist_book_sibling_previous(
-        &self,
-        context: &DiscoveryQueryContext,
-        readlist_id: &str,
-        book_id: &str,
-    ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
-        get_readlist_book_sibling(&self.connection, context, readlist_id, book_id, false)
-    }
+            for label in labels {
+                sqlx::query("INSERT INTO series_labels (series_id, label) VALUES (?1, ?2)")
+                    .bind(&id)
+                    .bind(label)
+                    .execute(&pool)
+                    .await
+                    .map_err(map_sqlx_error)?;
+            }
 
-    pub fn get_readlist_book_sibling_next(
-        &self,
-        context: &DiscoveryQueryContext,
-        readlist_id: &str,
-        book_id: &str,
-    ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
-        get_readlist_book_sibling(&self.connection, context, readlist_id, book_id, true)
+            for genre in genres {
+                sqlx::query("INSERT INTO series_genres (series_id, genre) VALUES (?1, ?2)")
+                    .bind(&id)
+                    .bind(genre)
+                    .execute(&pool)
+                    .await
+                    .map_err(map_sqlx_error)?;
+            }
+
+            for tag in tags {
+                sqlx::query("INSERT INTO series_tags (series_id, tag) VALUES (?1, ?2)")
+                    .bind(&id)
+                    .bind(tag)
+                    .execute(&pool)
+                    .await
+                    .map_err(map_sqlx_error)?;
+            }
+
+            for author in authors {
+                sqlx::query("INSERT INTO series_authors (series_id, author) VALUES (?1, ?2)")
+                    .bind(&id)
+                    .bind(author)
+                    .execute(&pool)
+                    .await
+                    .map_err(map_sqlx_error)?;
+            }
+        }
+
+        for row in pending.collections {
+            let CollectionRow {
+                id,
+                name,
+                ordered,
+                series_ids,
+                created_date,
+                last_modified_date,
+            } = row;
+
+            sqlx::query(
+                "INSERT INTO collections (id, name, ordered, created_date, last_modified_date) VALUES (?1, ?2, ?3, ?4, ?5)",
+            )
+            .bind(&id)
+            .bind(name)
+            .bind(ordered)
+            .bind(created_date)
+            .bind(last_modified_date)
+            .execute(&pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+            for (index, series_id) in series_ids.iter().enumerate() {
+                sqlx::query(
+                    "INSERT INTO collection_series (collection_id, series_id, position) VALUES (?1, ?2, ?3)",
+                )
+                .bind(&id)
+                .bind(series_id)
+                .bind(index as i64)
+                .execute(&pool)
+                .await
+                .map_err(map_sqlx_error)?;
+            }
+        }
+
+        for row in pending.read_lists {
+            let ReadListRow {
+                id,
+                name,
+                summary,
+                ordered,
+                book_ids,
+                created_date,
+                last_modified_date,
+            } = row;
+
+            sqlx::query(
+                "INSERT INTO readlists (id, name, summary, ordered, created_date, last_modified_date) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )
+            .bind(&id)
+            .bind(name)
+            .bind(summary)
+            .bind(ordered)
+            .bind(created_date)
+            .bind(last_modified_date)
+            .execute(&pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+            for (index, book_id) in book_ids.iter().enumerate() {
+                sqlx::query(
+                    "INSERT INTO readlist_books (readlist_id, book_id, position) VALUES (?1, ?2, ?3)",
+                )
+                .bind(&id)
+                .bind(book_id)
+                .bind(index as i64)
+                .execute(&pool)
+                .await
+                .map_err(map_sqlx_error)?;
+            }
+        }
+
+        for row in pending.books {
+            let BookRow {
+                id,
+                series_id,
+                library_id,
+                title,
+                url,
+                created,
+                last_modified,
+                file_last_modified,
+                size_bytes,
+                media_status,
+                media_profile,
+                media_type,
+                media_pages_count,
+                metadata_release_date,
+                number_sort,
+                deleted,
+                oneshot,
+                tags,
+                read_status,
+                authors,
+            } = row;
+
+            sqlx::query(
+                "INSERT INTO books (id, series_id, library_id, title, url, created, last_modified, file_last_modified, size_bytes, media_status, media_profile, media_type, media_pages_count, metadata_release_date, number_sort, read_status, deleted, oneshot) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+            )
+            .bind(&id)
+            .bind(&series_id)
+            .bind(&library_id)
+            .bind(&title)
+            .bind(&url)
+            .bind(&created)
+            .bind(&last_modified)
+            .bind(&file_last_modified)
+            .bind(size_bytes as i64)
+            .bind(&media_status)
+            .bind(&media_profile)
+            .bind(&media_type)
+            .bind(media_pages_count as i64)
+            .bind(metadata_release_date)
+            .bind(number_sort)
+            .bind(&read_status)
+            .bind(deleted)
+            .bind(oneshot)
+            .execute(&pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+            for tag in tags {
+                sqlx::query("INSERT INTO book_tags (book_id, tag) VALUES (?1, ?2)")
+                    .bind(&id)
+                    .bind(tag)
+                    .execute(&pool)
+                    .await
+                    .map_err(map_sqlx_error)?;
+            }
+
+            for author in authors {
+                sqlx::query("INSERT INTO book_authors (book_id, author) VALUES (?1, ?2)")
+                    .bind(&id)
+                    .bind(author)
+                    .execute(&pool)
+                    .await
+                    .map_err(map_sqlx_error)?;
+            }
+        }
+
+        for row in pending.read_progress {
+            sqlx::query(
+                "INSERT INTO read_progress (book_id, user_id, page, completed, read_date, created, last_modified, device_id, device_name) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            )
+            .bind(row.book_id)
+            .bind(row.user_id)
+            .bind(row.page)
+            .bind(row.completed)
+            .bind(row.read_date)
+            .bind(row.created)
+            .bind(row.last_modified)
+            .bind(row.device_id)
+            .bind(row.device_name)
+            .execute(&pool)
+            .await
+            .map_err(map_sqlx_error)?;
+        }
+
+        Ok(())
     }
 }
 
-fn bootstrap_schema(connection: &Connection) -> rusqlite::Result<()> {
-    connection.execute_batch(
-        "
-        CREATE TABLE IF NOT EXISTS libraries (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          root TEXT NOT NULL DEFAULT ''
-        );
+impl DiscoveryQueryRepository for SqliteDiscoveryAdapter {
+    async fn list_libraries(
+        &self,
+        context: &DiscoveryQueryContext,
+    ) -> Result<Vec<LibraryReadModel>, DiscoveryError> {
+        let pool = self.ready_pool().await?;
+        queries::list_libraries_sqlx(pool, context).await
+    }
 
-        CREATE TABLE IF NOT EXISTS series (
-          id TEXT PRIMARY KEY,
-          library_id TEXT NOT NULL,
-          title TEXT NOT NULL,
-          age_rating INTEGER NULL,
-          language TEXT NOT NULL DEFAULT '',
-          publisher TEXT NOT NULL DEFAULT '',
-          release_date TEXT NULL,
-          status TEXT NOT NULL DEFAULT '',
-          complete INTEGER NOT NULL DEFAULT 0,
-          read_status TEXT NOT NULL DEFAULT '',
-          deleted INTEGER NOT NULL DEFAULT 0,
-          oneshot INTEGER NOT NULL DEFAULT 0,
-          created TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
-          last_modified TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
-          file_last_modified TEXT NOT NULL DEFAULT '2024-01-02T03:04:05Z',
-          url TEXT NOT NULL DEFAULT ''
-        );
+    async fn list_series(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: NativeSeriesListQuery,
+    ) -> Result<PageEnvelope<SeriesReadModel>, DiscoveryError> {
+        let pool = self.ready_pool().await?;
+        queries::list_series_sqlx(pool, context, &query).await
+    }
 
-        CREATE TABLE IF NOT EXISTS collections (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          ordered INTEGER NOT NULL DEFAULT 0,
-          created_date TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
-          last_modified_date TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z'
-        );
+    async fn list_books(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: NativeBooksListQuery,
+    ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
+        let pool = self.ready_pool().await?;
+        books::list_books_sqlx(pool, context, &query).await
+    }
 
-        CREATE TABLE IF NOT EXISTS collection_series (
-          collection_id TEXT NOT NULL,
-          series_id TEXT NOT NULL,
-          position INTEGER NOT NULL DEFAULT 0
-        );
+    async fn list_books_latest(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: NativeBooksLatestQuery,
+    ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
+        let pool = self.ready_pool().await?;
+        books::list_books_latest_sqlx(pool, context, &query).await
+    }
 
-        CREATE TABLE IF NOT EXISTS series_labels (
-          series_id TEXT NOT NULL,
-          label TEXT NOT NULL
-        );
+    async fn list_readlist_books(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: NativeReadListBooksQuery,
+    ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
+        let pool = self.ready_pool().await?;
+        readlists::list_readlist_books_sqlx(pool, context, &query).await
+    }
 
-        CREATE TABLE IF NOT EXISTS series_genres (
-          series_id TEXT NOT NULL,
-          genre TEXT NOT NULL
-        );
+    async fn resolve_series_resource(
+        &self,
+        series_id: &str,
+    ) -> Result<Option<SeriesResourceReadModel>, DiscoveryError> {
+        let pool = self.ready_pool().await?;
+        queries::resolve_series_resource_sqlx(pool, series_id).await
+    }
 
-        CREATE TABLE IF NOT EXISTS series_tags (
-          series_id TEXT NOT NULL,
-          tag TEXT NOT NULL
-        );
+    async fn get_series_detail(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: SeriesDetailQuery,
+    ) -> Result<Option<SeriesDetailReadModel>, DiscoveryError> {
+        let pool = self.ready_pool().await?;
+        queries::get_series_detail_sqlx(pool, context, &query).await
+    }
 
-        CREATE TABLE IF NOT EXISTS series_authors (
-          series_id TEXT NOT NULL,
-          author TEXT NOT NULL
-        );
+    async fn resolve_book_resource(
+        &self,
+        book_id: &str,
+    ) -> Result<Option<BookResourceReadModel>, DiscoveryError> {
+        let pool = self.ready_pool().await?;
+        queries::resolve_book_resource_sqlx(pool, book_id).await
+    }
 
-        CREATE TABLE IF NOT EXISTS books (
-          id TEXT PRIMARY KEY,
-          series_id TEXT NOT NULL,
-          library_id TEXT NOT NULL,
-          title TEXT NOT NULL,
-          url TEXT NOT NULL DEFAULT '',
-          created TEXT NOT NULL DEFAULT '2024-01-02T03:04:05Z',
-          last_modified TEXT NOT NULL DEFAULT '2024-01-02T03:04:05Z',
-          file_last_modified TEXT NOT NULL DEFAULT '2024-01-02T08:04:05Z',
-          size_bytes INTEGER NOT NULL DEFAULT 0,
-          media_status TEXT NOT NULL DEFAULT 'UNKNOWN',
-          media_profile TEXT NOT NULL DEFAULT '',
-          media_type TEXT NOT NULL DEFAULT '',
-          media_pages_count INTEGER NOT NULL DEFAULT 0,
-          metadata_release_date TEXT NULL,
-          number_sort INTEGER NOT NULL DEFAULT 1,
-          read_status TEXT NOT NULL DEFAULT '',
-          deleted INTEGER NOT NULL DEFAULT 0,
-          oneshot INTEGER NOT NULL DEFAULT 0
-        );
+    async fn get_book_detail(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: BookDetailQuery,
+    ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
+        let pool = self.ready_pool().await?;
+        book_detail::get_book_detail_sqlx(pool, context, &query).await
+    }
 
-        CREATE TABLE IF NOT EXISTS book_tags (
-          book_id TEXT NOT NULL,
-          tag TEXT NOT NULL
-        );
+    async fn get_book_sibling_previous(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: BookSiblingQuery,
+    ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
+        let pool = self.ready_pool().await?;
+        book_detail::get_book_sibling_previous_sqlx(pool, context, &query).await
+    }
 
-        CREATE TABLE IF NOT EXISTS book_authors (
-          book_id TEXT NOT NULL,
-          author TEXT NOT NULL
-        );
+    async fn get_book_sibling_next(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: BookSiblingQuery,
+    ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
+        let pool = self.ready_pool().await?;
+        book_detail::get_book_sibling_next_sqlx(pool, context, &query).await
+    }
 
-        CREATE TABLE IF NOT EXISTS read_progress (
-          book_id TEXT NOT NULL,
-          user_id TEXT NOT NULL,
-          page INTEGER NOT NULL,
-          completed INTEGER NOT NULL DEFAULT 0,
-          read_date TEXT NOT NULL,
-          created TEXT NOT NULL,
-          last_modified TEXT NOT NULL,
-          device_id TEXT NOT NULL DEFAULT '',
-          device_name TEXT NOT NULL DEFAULT ''
-        );
+    async fn list_book_readlists(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: BookReadlistsQuery,
+    ) -> Result<Vec<ReadListReadModel>, DiscoveryError> {
+        let pool = self.ready_pool().await?;
+        readlists::list_book_readlists_sqlx(pool, context, &query).await
+    }
 
-        CREATE TABLE IF NOT EXISTS readlists (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          summary TEXT NOT NULL DEFAULT '',
-          ordered INTEGER NOT NULL DEFAULT 1,
-          created_date TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
-          last_modified_date TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z'
-        );
+    async fn list_series_collections(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: SeriesCollectionsQuery,
+    ) -> Result<Vec<CollectionReadModel>, DiscoveryError> {
+        let pool = self.ready_pool().await?;
+        queries::list_series_collections_sqlx(pool, context, &query).await
+    }
+}
 
-        CREATE TABLE IF NOT EXISTS readlist_books (
-          readlist_id TEXT NOT NULL,
-          book_id TEXT NOT NULL,
-          position INTEGER NOT NULL DEFAULT 0
-        );
-        ",
-    )
+fn map_sqlx_error(error: sqlx::Error) -> DiscoveryError {
+    DiscoveryError::Persistence(error.to_string())
 }

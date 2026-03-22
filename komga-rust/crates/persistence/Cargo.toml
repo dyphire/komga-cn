@@ -6,4 +6,4 @@ edition.workspace = true
 [dependencies]
 komga-domain = { path = "../domain" }
 komga-application = { path = "../application" }
-rusqlite.workspace = true
+sqlx.workspace = true

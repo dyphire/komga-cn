@@ -4,8 +4,8 @@ use super::{
     SqliteDiscoveryAdapter,
 };
 
-#[test]
-fn page_scoped_books_list_rejects_extra_filters_and_sorts() {
+#[tokio::test]
+async fn page_scoped_books_list_rejects_extra_filters_and_sorts() {
     let mut adapter = SqliteDiscoveryAdapter::default();
     adapter.insert_series(SeriesRow::new("series-1", "1", "Series 1").with_labels(["safe"]));
     adapter.insert_book(BookRow::new("book-1", "series-1", "1", "Book 1").with_number_sort(1));
@@ -33,6 +33,7 @@ fn page_scoped_books_list_rejects_extra_filters_and_sorts() {
 
     let ok = use_cases
         .list_books_direct_browse(&context, base.clone())
+        .await
         .expect("page-scoped direct browse shape should be accepted");
     assert_eq!(ok.total_elements, 1);
 
@@ -41,7 +42,7 @@ fn page_scoped_books_list_rejects_extra_filters_and_sorts() {
         ..base.clone()
     };
     assert!(matches!(
-        use_cases.list_books_direct_browse(&context, with_extra_filter),
+        use_cases.list_books_direct_browse(&context, with_extra_filter).await,
         Err(DiscoveryError::NonNativeRequestShape(_))
     ));
 
@@ -50,13 +51,15 @@ fn page_scoped_books_list_rejects_extra_filters_and_sorts() {
         ..base
     };
     assert!(matches!(
-        use_cases.list_books_direct_browse(&context, with_alternate_sort),
+        use_cases
+            .list_books_direct_browse(&context, with_alternate_sort)
+            .await,
         Err(DiscoveryError::NonNativeRequestShape(_))
     ));
 }
 
-#[test]
-fn sibling_navigation_uses_number_sort_seek() {
+#[tokio::test]
+async fn sibling_navigation_uses_number_sort_seek() {
     let mut adapter = SqliteDiscoveryAdapter::default();
     adapter.insert_library(LibraryRow::new("lib-1", "Library 1"));
     adapter.insert_series(SeriesRow::new("series-1", "lib-1", "Series 1").with_labels(["safe"]));
@@ -97,6 +100,7 @@ fn sibling_navigation_uses_number_sort_seek() {
                 book_id: "book-2".to_string(),
             },
         )
+        .await
         .expect("book previous sibling query should succeed")
         .expect("book previous sibling should exist");
     assert_eq!(previous.id, "book-1");
@@ -108,6 +112,7 @@ fn sibling_navigation_uses_number_sort_seek() {
                 book_id: "book-2".to_string(),
             },
         )
+        .await
         .expect("book next sibling query should succeed")
         .expect("book next sibling should exist");
     assert_eq!(next.id, "book-3");
@@ -119,12 +124,13 @@ fn sibling_navigation_uses_number_sort_seek() {
                 book_id: "book-1".to_string(),
             },
         )
+        .await
         .expect("book previous boundary query should succeed");
     assert_eq!(no_previous, None);
 }
 
-#[test]
-fn readlist_sibling_navigation_uses_visible_readlist_order() {
+#[tokio::test]
+async fn readlist_sibling_navigation_uses_visible_readlist_order() {
     let mut adapter = SqliteDiscoveryAdapter::default();
     adapter.insert_library(LibraryRow::new("lib-1", "Library 1"));
     adapter.insert_series(
@@ -172,60 +178,71 @@ fn readlist_sibling_navigation_uses_visible_readlist_order() {
 
     let ordered_next_hidden_middle = adapter
         .get_readlist_book_sibling_next(&restricted_context, "readlist-ordered", "book-1")
+        .await
         .expect("ordered hidden-middle next query should succeed")
         .expect("ordered hidden-middle next sibling should exist");
     assert_eq!(ordered_next_hidden_middle.id, "book-3");
 
     let ordered_prev_hidden_middle = adapter
         .get_readlist_book_sibling_previous(&restricted_context, "readlist-ordered", "book-3")
+        .await
         .expect("ordered hidden-middle previous query should succeed")
         .expect("ordered hidden-middle previous sibling should exist");
     assert_eq!(ordered_prev_hidden_middle.id, "book-1");
 
     let ordered_first_previous = adapter
         .get_readlist_book_sibling_previous(&restricted_context, "readlist-ordered", "book-1")
+        .await
         .expect("ordered first previous boundary query should succeed");
     assert_eq!(ordered_first_previous, None);
 
     let ordered_last_next = adapter
         .get_readlist_book_sibling_next(&restricted_context, "readlist-ordered", "book-4")
+        .await
         .expect("ordered last next boundary query should succeed");
     assert_eq!(ordered_last_next, None);
 
     let ordered_hidden_anchor = adapter
         .get_readlist_book_sibling_next(&restricted_context, "readlist-ordered", "book-2")
+        .await
         .expect("ordered hidden anchor query should succeed");
     assert_eq!(ordered_hidden_anchor, None);
 
     let ordered_non_member = adapter
         .get_readlist_book_sibling_next(&restricted_context, "readlist-ordered", "book-out")
+        .await
         .expect("ordered non-member query should succeed");
     assert_eq!(ordered_non_member, None);
 
     let unordered_next = adapter
         .get_readlist_book_sibling_next(&restricted_context, "readlist-unordered", "book-1")
+        .await
         .expect("unordered next query should succeed")
         .expect("unordered next sibling should exist");
     assert_eq!(unordered_next.id, "book-3");
 
     let unordered_previous = adapter
         .get_readlist_book_sibling_previous(&restricted_context, "readlist-unordered", "book-3")
+        .await
         .expect("unordered previous query should succeed")
         .expect("unordered previous sibling should exist");
     assert_eq!(unordered_previous.id, "book-1");
 
     let unordered_first_previous = adapter
         .get_readlist_book_sibling_previous(&restricted_context, "readlist-unordered", "book-1")
+        .await
         .expect("unordered first previous boundary query should succeed");
     assert_eq!(unordered_first_previous, None);
 
     let unordered_last_next = adapter
         .get_readlist_book_sibling_next(&restricted_context, "readlist-unordered", "book-4")
+        .await
         .expect("unordered last next boundary query should succeed");
     assert_eq!(unordered_last_next, None);
 
     let unordered_non_member = adapter
         .get_readlist_book_sibling_next(&restricted_context, "readlist-unordered", "book-out")
+        .await
         .expect("unordered non-member query should succeed");
     assert_eq!(unordered_non_member, None);
 }

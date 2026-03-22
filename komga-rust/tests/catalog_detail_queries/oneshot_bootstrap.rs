@@ -4,7 +4,7 @@ use super::{
     session_token_for_basic_auth,
 };
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn oneshot_bootstrap_requires_visible_oneshot_series() {
     let app = komga_rust::app::build_router();
     let user_token = session_token_for_basic_auth(&app, USER_BASIC_AUTH).await;
@@ -44,7 +44,7 @@ async fn oneshot_bootstrap_requires_visible_oneshot_series() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn oneshot_bootstrap_rejects_non_oneshot_and_wide_books_list_shapes() {
     let app = komga_rust::app::build_router();
     let token = session_token_for_basic_auth(&app, USER_BASIC_AUTH).await;

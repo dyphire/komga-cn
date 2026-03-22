@@ -21,7 +21,7 @@ impl<R> DiscoveryQueries<R>
 where
     R: DiscoveryQueryRepository,
 {
-    pub fn list_readlist_books(
+    pub async fn list_readlist_books(
         &self,
         context: &DiscoveryQueryContext,
         query: ReadListBooksQuery,
@@ -40,5 +40,6 @@ where
                 readlist_id: query.readlist_id,
             },
         )
+        .await
     }
 }

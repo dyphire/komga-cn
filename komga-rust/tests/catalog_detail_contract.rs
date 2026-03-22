@@ -15,3 +15,23 @@ use helpers::{
     frozen_non_native_detail_shapes, frozen_oneshot_direct_route_shapes,
     frozen_oneshot_named_exclusion_proofs,
 };
+
+#[test]
+fn phase_55_rollback_boundary_keeps_detail_owned_and_fallback_cases_available() {
+    let config = HarnessConfig::load_default().expect("default compat cases should load");
+
+    for id in [
+        "P3-DETAIL-SERIES-DETAIL-OWNED",
+        "P3-DETAIL-BOOK-DETAIL-OWNED",
+        "P3-DETAIL-BOOK-READLISTS-OWNED",
+        "P3-DETAIL-EXCLUDED-BOOK-PAGES",
+        "P3-DETAIL-EXCLUDED-BOOK-FILE",
+        "P3-DETAIL-EXCLUDED-READ-PROGRESS-PATCH",
+        "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-BOOKS",
+    ] {
+        assert!(
+            config.cases.iter().any(|it| it.id == id),
+            "rollback boundary requires compat case to remain available: {id}",
+        );
+    }
+}

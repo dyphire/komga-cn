@@ -40,7 +40,7 @@ pub(super) async fn response(
             None => return StatusCode::UNAUTHORIZED.into_response(),
         };
 
-        return native_owned_libraries_response(context);
+        return native_owned_libraries_response(context).await;
     }
 
     let user =
@@ -60,15 +60,15 @@ pub(super) async fn response(
     Json(snapshot_libraries_for_user(profile, user)).into_response()
 }
 
-fn native_owned_libraries_response(context: DiscoveryQueryContext) -> Response {
+async fn native_owned_libraries_response(context: DiscoveryQueryContext) -> Response {
     let mut adapter = SqliteDiscoveryAdapter::default();
     adapter.insert_library(LibraryRow::new("1", "default").with_root("/library1"));
 
     let queries = DiscoveryQueries::new(adapter);
-    match queries.list_libraries(
-        &to_domain_query_context(context.clone()),
-        LibraryListQuery {},
-    ) {
+    match queries
+        .list_libraries(&to_domain_query_context(context.clone()), LibraryListQuery {})
+        .await
+    {
         Ok(libraries) => {
             let mut response = Json(libraries_payload(libraries, context.is_admin)).into_response();
             mark_native(&mut response);

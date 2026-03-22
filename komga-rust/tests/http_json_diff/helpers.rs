@@ -283,7 +283,10 @@ fn seeded_localdb_smoke_case(id: &str, path: &str, comparison: ComparisonMode) -
     }
 }
 
-pub(super) fn seeded_localdb_session_vars(client: &Client, base_url: &str) -> BTreeMap<String, String> {
+pub(super) fn seeded_localdb_session_vars(
+    client: &Client,
+    base_url: &str,
+) -> BTreeMap<String, String> {
     let basic_auth =
         std::env::var("KOMGA_COMPAT_BASIC_AUTH").expect("missing KOMGA_COMPAT_BASIC_AUTH");
     let response = client

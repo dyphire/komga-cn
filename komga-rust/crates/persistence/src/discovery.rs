@@ -6,6 +6,9 @@ mod filters;
 mod queries;
 #[path = "discovery/rows.rs"]
 mod rows;
+#[path = "discovery/runtime_sqlx.rs"]
+mod runtime_sqlx;
 
 pub use adapter::SqliteDiscoveryAdapter;
+pub use runtime_sqlx::{SqlxRuntimeDiscoveryAdapter, SqlxRuntimeDiscoveryStore};
 pub use rows::{BookRow, CollectionRow, LibraryRow, ReadListRow, ReadProgressRow, SeriesRow};

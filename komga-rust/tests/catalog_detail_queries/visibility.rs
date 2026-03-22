@@ -4,8 +4,8 @@ use super::{
     SqliteDiscoveryAdapter, restricted_context,
 };
 
-#[test]
-fn series_detail_applies_library_and_restrictions() {
+#[tokio::test]
+async fn series_detail_applies_library_and_restrictions() {
     let mut adapter = SqliteDiscoveryAdapter::default();
     adapter.insert_library(LibraryRow::new("lib-1", "Library 1"));
     adapter.insert_library(LibraryRow::new("lib-2", "Library 2"));
@@ -38,6 +38,7 @@ fn series_detail_applies_library_and_restrictions() {
                 series_id: "series-safe".to_string(),
             },
         )
+        .await
         .expect("safe series detail query should succeed");
     assert_eq!(safe.as_ref().map(|it| it.id.as_str()), Some("series-safe"));
 
@@ -48,6 +49,7 @@ fn series_detail_applies_library_and_restrictions() {
                 series_id: "series-adult".to_string(),
             },
         )
+        .await
         .expect("restricted series detail query should succeed");
     assert_eq!(restricted, None);
 
@@ -58,12 +60,13 @@ fn series_detail_applies_library_and_restrictions() {
                 series_id: "series-other-lib".to_string(),
             },
         )
+        .await
         .expect("out-of-library series detail query should succeed");
     assert_eq!(out_of_library, None);
 }
 
-#[test]
-fn book_detail_applies_library_and_restrictions() {
+#[tokio::test]
+async fn book_detail_applies_library_and_restrictions() {
     let mut adapter = SqliteDiscoveryAdapter::default();
     adapter.insert_library(LibraryRow::new("lib-1", "Library 1"));
     adapter.insert_library(LibraryRow::new("lib-2", "Library 2"));
@@ -115,6 +118,7 @@ fn book_detail_applies_library_and_restrictions() {
                 book_id: "book-safe".to_string(),
             },
         )
+        .await
         .expect("safe book detail query should succeed");
     assert_eq!(safe.as_ref().map(|it| it.id.as_str()), Some("book-safe"));
     assert_eq!(
@@ -131,6 +135,7 @@ fn book_detail_applies_library_and_restrictions() {
                 book_id: "book-adult".to_string(),
             },
         )
+        .await
         .expect("restricted book detail query should succeed");
     assert_eq!(restricted, None);
 
@@ -141,12 +146,13 @@ fn book_detail_applies_library_and_restrictions() {
                 book_id: "book-other-lib".to_string(),
             },
         )
+        .await
         .expect("out-of-library book detail query should succeed");
     assert_eq!(out_of_library, None);
 }
 
-#[test]
-fn series_collections_apply_visibility_filters() {
+#[tokio::test]
+async fn series_collections_apply_visibility_filters() {
     let mut adapter = SqliteDiscoveryAdapter::default();
     adapter.insert_library(LibraryRow::new("lib-1", "Library 1"));
     adapter.insert_series(
@@ -182,6 +188,7 @@ fn series_collections_apply_visibility_filters() {
                 series_id: "series-target".to_string(),
             },
         )
+        .await
         .expect("series collections query should succeed");
 
     assert_eq!(
@@ -197,8 +204,8 @@ fn series_collections_apply_visibility_filters() {
     assert_eq!(collections[1].filtered, true);
 }
 
-#[test]
-fn book_readlists_apply_visibility_filters() {
+#[tokio::test]
+async fn book_readlists_apply_visibility_filters() {
     let mut adapter = SqliteDiscoveryAdapter::default();
     adapter.insert_library(LibraryRow::new("lib-1", "Library 1"));
     adapter.insert_series(
@@ -244,6 +251,7 @@ fn book_readlists_apply_visibility_filters() {
                 book_id: "book-safe".to_string(),
             },
         )
+        .await
         .expect("book readlists query should succeed");
 
     assert_eq!(

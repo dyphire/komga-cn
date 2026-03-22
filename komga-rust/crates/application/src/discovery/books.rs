@@ -81,7 +81,7 @@ impl<R> DiscoveryQueries<R>
 where
     R: DiscoveryQueryRepository,
 {
-    pub fn list_books(
+    pub async fn list_books(
         &self,
         context: &DiscoveryQueryContext,
         query: BooksListQuery,
@@ -89,9 +89,10 @@ where
         let _ = classify_book_sorts(&query.sort)?;
         self.repository
             .list_books(context, native_books_list_query(query))
+            .await
     }
 
-    pub fn list_books_direct_browse(
+    pub async fn list_books_direct_browse(
         &self,
         context: &DiscoveryQueryContext,
         query: BooksListQuery,
@@ -99,9 +100,10 @@ where
         classify_direct_browse_books_list_query(&query)?;
         self.repository
             .list_books(context, native_books_list_query(query))
+            .await
     }
 
-    pub fn list_books_latest(
+    pub async fn list_books_latest(
         &self,
         context: &DiscoveryQueryContext,
         query: BooksLatestQuery,
@@ -115,45 +117,46 @@ where
                 library_ids: query.library_ids,
             },
         )
+        .await
     }
 
-    pub fn resolve_book_resource(
+    pub async fn resolve_book_resource(
         &self,
         book_id: &str,
     ) -> Result<Option<BookResourceReadModel>, DiscoveryError> {
-        self.repository.resolve_book_resource(book_id)
+        self.repository.resolve_book_resource(book_id).await
     }
 
-    pub fn get_book_detail(
+    pub async fn get_book_detail(
         &self,
         context: &DiscoveryQueryContext,
         query: BookDetailQuery,
     ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
-        self.repository.get_book_detail(context, query)
+        self.repository.get_book_detail(context, query).await
     }
 
-    pub fn get_book_sibling_previous(
+    pub async fn get_book_sibling_previous(
         &self,
         context: &DiscoveryQueryContext,
         query: BookSiblingQuery,
     ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
-        self.repository.get_book_sibling_previous(context, query)
+        self.repository.get_book_sibling_previous(context, query).await
     }
 
-    pub fn get_book_sibling_next(
+    pub async fn get_book_sibling_next(
         &self,
         context: &DiscoveryQueryContext,
         query: BookSiblingQuery,
     ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
-        self.repository.get_book_sibling_next(context, query)
+        self.repository.get_book_sibling_next(context, query).await
     }
 
-    pub fn list_book_readlists(
+    pub async fn list_book_readlists(
         &self,
         context: &DiscoveryQueryContext,
         query: BookReadlistsQuery,
     ) -> Result<Vec<ReadListReadModel>, DiscoveryError> {
-        self.repository.list_book_readlists(context, query)
+        self.repository.list_book_readlists(context, query).await
     }
 }
 
