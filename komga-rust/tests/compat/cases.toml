@@ -527,10 +527,10 @@ headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token"
 extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
 
 [[cases]]
-id = "P5-ONESHOT-EXCLUDED-READLIST-DETAIL"
+id = "P6-ONESHOT-READLIST-DETAIL-OWNED"
 method = "GET"
 path = "/api/v1/readlists/readlist-1"
-headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
 
 [[cases.setup]]
 name = "login"

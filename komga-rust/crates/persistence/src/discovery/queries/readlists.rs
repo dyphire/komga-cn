@@ -1,4 +1,6 @@
-use komga_application::discovery::{BookDetailQuery, BookReadlistsQuery, NativeReadListBooksQuery};
+use komga_application::discovery::{
+    BookDetailQuery, BookReadlistsQuery, NativeReadListBooksQuery, ReadListDetailQuery,
+};
 use komga_domain::discovery::{
     BookDetailReadModel, BookReadModel, DiscoveryError, DiscoveryQueryContext, PageEnvelope,
     ReadListReadModel,
@@ -208,6 +210,58 @@ pub(in crate::discovery) async fn list_book_readlists_sqlx(
     }
 
     Ok(readlists)
+}
+
+pub(in crate::discovery) async fn get_readlist_detail_sqlx(
+    pool: SqlitePool,
+    context: &DiscoveryQueryContext,
+    query: &ReadListDetailQuery,
+) -> Result<Option<ReadListReadModel>, DiscoveryError> {
+    let allowed = effective_library_ids(context, None);
+    if allowed.as_ref().is_some_and(Vec::is_empty) {
+        return Ok(None);
+    }
+
+    let candidate = sqlx::query_as::<_, SqlxReadListCandidateRow>(
+        "SELECT id, name, summary, ordered, created_date, last_modified_date FROM readlists WHERE id = ?",
+    )
+    .bind(&query.readlist_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(map_sqlx_error)?;
+    let Some(candidate) = candidate else {
+        return Ok(None);
+    };
+
+    let visible_book_ids = visible_readlist_book_ids_sqlx(
+        pool.clone(),
+        context,
+        &candidate.id,
+        allowed.as_ref(),
+    )
+    .await?;
+
+    let total_count =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM readlist_books WHERE readlist_id = ?")
+            .bind(candidate.id.clone())
+            .fetch_one(&pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+    if visible_book_ids.is_empty() && total_count > 0 {
+        return Ok(None);
+    }
+
+    Ok(Some(ReadListReadModel {
+        id: candidate.id,
+        name: candidate.name,
+        summary: candidate.summary,
+        ordered: candidate.ordered,
+        created_date: candidate.created_date,
+        last_modified_date: candidate.last_modified_date,
+        filtered: (visible_book_ids.len() as i64) < total_count,
+        book_ids: visible_book_ids,
+    }))
 }
 
 pub(in crate::discovery) async fn get_readlist_book_sibling_sqlx(

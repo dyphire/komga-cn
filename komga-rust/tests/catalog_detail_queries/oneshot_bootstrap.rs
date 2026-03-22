@@ -3,9 +3,9 @@ use super::{
     USER_BASIC_AUTH, page_content_ids, post_books_list, response_json,
     session_token_for_basic_auth,
 };
+use tower::util::ServiceExt;
 
-#[tokio::test(flavor = "multi_thread")]
-async fn oneshot_bootstrap_requires_visible_oneshot_series() {
+pub(super) async fn oneshot_bootstrap_requires_visible_oneshot_series() {
     let app = komga_rust::app::build_router();
     let user_token = session_token_for_basic_auth(&app, USER_BASIC_AUTH).await;
     let restricted_token = session_token_for_basic_auth(&app, RESTRICTED_BASIC_AUTH).await;
@@ -29,6 +29,29 @@ async fn oneshot_bootstrap_requires_visible_oneshot_series() {
     assert_eq!(page_content_ids(&owned_json), vec!["book-oneshot"]);
     assert!(owned_json.get("_compat").is_none());
 
+    let readlist_detail_owned = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/api/v1/readlists/readlist-2")
+                .header("X-Auth-Token", &user_token)
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(readlist_detail_owned.status(), StatusCode::OK);
+    assert!(
+        readlist_detail_owned
+            .headers()
+            .get(SEARCH_OWNERSHIP_HEADER)
+            .is_none(),
+        "native readlist detail branch must stay unmarked during oneshot bootstrap closure",
+    );
+    let readlist_detail_owned_json = response_json(readlist_detail_owned).await;
+    assert_eq!(readlist_detail_owned_json["id"], "readlist-2");
+    assert_eq!(readlist_detail_owned_json["filtered"], false);
+
     let hidden = post_books_list(
         &app,
         &restricted_token,
@@ -42,6 +65,34 @@ async fn oneshot_bootstrap_requires_visible_oneshot_series() {
         hidden_json["_compat"]["shape"],
         "UnsupportedBookFilter(oneshot-bootstrap.visible-single-book)",
     );
+
+    let readlist_detail_restricted = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/api/v1/readlists/readlist-2")
+                .header("X-Auth-Token", &restricted_token)
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(readlist_detail_restricted.status(), StatusCode::OK);
+    assert!(
+        readlist_detail_restricted
+            .headers()
+            .get(SEARCH_OWNERSHIP_HEADER)
+            .is_none(),
+        "restricted native readlist detail branch must stay unmarked",
+    );
+    let readlist_detail_restricted_json = response_json(readlist_detail_restricted).await;
+    assert_eq!(readlist_detail_restricted_json["id"], "readlist-2");
+    assert_eq!(readlist_detail_restricted_json["filtered"], true);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn oneshot_bootstrap_requires_visible_oneshot_series_regression() {
+    oneshot_bootstrap_requires_visible_oneshot_series().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

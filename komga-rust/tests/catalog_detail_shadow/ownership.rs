@@ -18,8 +18,7 @@ async fn excluded_oneshot_query_parameter_emits_shadow_marker() {
     );
 }
 
-#[tokio::test]
-async fn excluded_oneshot_branches_emit_shadow_marker() {
+pub(super) async fn phase6_adjacent_excluded_branches_still_emit_shadow_marker() {
     let app = komga_rust::app::build_router();
     let token = session_token_for_basic_auth(&app, USER_BASIC_AUTH).await;
     let expected = BTreeSet::from([
@@ -215,6 +214,11 @@ async fn excluded_oneshot_branches_emit_shadow_marker() {
     observed.insert("SSE live-refresh");
 
     assert_eq!(expected, observed);
+}
+
+#[tokio::test]
+async fn excluded_oneshot_branches_emit_shadow_marker() {
+    phase6_adjacent_excluded_branches_still_emit_shadow_marker().await;
 }
 
 #[tokio::test]

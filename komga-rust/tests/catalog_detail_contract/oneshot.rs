@@ -1,21 +1,23 @@
 use super::*;
 
 #[test]
-fn oneshot_direct_route_shape_is_frozen() {
+pub(super) fn phase6_readlist_detail_route_shape_is_frozen() {
     let expected = BTreeSet::from([
-        "GET /api/v1/series/{seriesId}",
-        "GET /api/v1/series/{seriesId}/collections",
-        "POST /api/v1/books/list body=SeriesId(seriesId) only",
-        "GET /api/v1/books/{bookId}/readlists",
+        "GET /api/v1/readlists/{readListId} (newly-owned Phase 6 route)",
+        "GET /api/v1/series/{seriesId} (reused pre-owned dependency)",
+        "GET /api/v1/series/{seriesId}/collections (reused pre-owned dependency)",
+        "POST /api/v1/books/list body=SeriesId(seriesId) only (reused pre-owned dependency)",
+        "GET /api/v1/books/{bookId}/readlists (reused pre-owned dependency)",
     ]);
 
     assert_eq!(expected, frozen_oneshot_direct_route_shapes());
 
     let config = HarnessConfig::load_default().expect("default compat cases should load");
     for id in [
-        "P5-ONESHOT-BOOKS-LIST-SERIESID-ONLY-OWNED",
+        "P6-ONESHOT-READLIST-DETAIL-OWNED",
         "P3-DETAIL-SERIES-DETAIL-OWNED",
         "P3-DETAIL-SERIES-COLLECTIONS-OWNED",
+        "P5-ONESHOT-BOOKS-LIST-SERIESID-ONLY-OWNED",
         "P3-DETAIL-BOOK-READLISTS-OWNED",
     ] {
         assert!(
@@ -23,16 +25,33 @@ fn oneshot_direct_route_shape_is_frozen() {
             "missing oneshot direct-route compat case: {id}",
         );
     }
+
+    let phase6_owned = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P6-ONESHOT-READLIST-DETAIL-OWNED")
+        .expect("phase6 readlist detail owned compat case should exist");
+    assert_eq!(
+        phase6_owned
+            .headers
+            .as_ref()
+            .and_then(|headers| headers.get("X-Komga-Compat-Search-Ownership")),
+        None,
+        "phase6 newly-owned route must not carry shadow marker",
+    );
 }
 
 #[test]
-fn oneshot_context_media_reader_and_write_branches_are_explicitly_non_native() {
+pub(super) fn phase6_adjacent_branches_remain_explicitly_non_native() {
     let expected = BTreeSet::from([
         "oneshot query closure | BrowseOneshot.vue:779-800 | GET /api/v1/series/{seriesId}?oneshot=true stays explicit non-native",
-        "READLIST context input | BrowseOneshot.vue:785-842 | GET /api/v1/readlists/{readListId} + /books?unpaged=true + sibling previous/next stay explicit fallback",
+        "READLIST detail ownership boundary | BrowseOneshot.vue:785-842 | only GET /api/v1/readlists/{readListId} is newly owned in Phase 6; list + context siblings stay explicit non-native",
+        "READLIST listing branch | BrowseOneshot.vue:785-842 | GET /api/v1/readlists stays explicit non-native",
+        "READLIST books pagination/library filtering | BrowseOneshot.vue:785-842 | paged readlist books and library_id variants stay explicit non-native",
+        "READLIST context siblings | BrowseOneshot.vue:785-842 | /books?unpaged=true + sibling previous/next remain explicit fallback/non-native",
         "oneshot bootstrap widening guards | BrowseOneshot.vue:798-800 | paged/unpaged/read-status/read-date books/list variants stay explicit non-native",
         "media delivery adjacency | BrowseOneshot.vue:118-125 + 497-499 | /pages + /thumbnail + /manifest + /resource/* + /positions stay explicit non-native",
-        "reader handoff + download affordances | BrowseOneshot.vue:215-249 + 261-295 | readRouteName/fileUrl visible in page but not native-owned in Phase 5",
+        "reader handoff + download affordances | BrowseOneshot.vue:215-249 + 261-295 | readRouteName/fileUrl visible in page but not newly owned in Phase 6",
         "progress visibility vs route ownership | BrowseOneshot.vue:126-136 + 689-710 | embedded read progress is visible, but read-progress/progression routes stay non-native",
         "collection/readlist removal affordances | BrowseOneshot.vue:417-445 | PATCH/DELETE collection/readlist routes stay explicit non-native",
         "OneshotActionsMenu write/admin affordances | OneshotActionsMenu.vue:10-29 + 85-110 | analyze/refresh/add/remove/mark-read/delete visibility is not a native claim",
@@ -44,7 +63,7 @@ fn oneshot_context_media_reader_and_write_branches_are_explicitly_non_native() {
     let config = HarnessConfig::load_default().expect("default compat cases should load");
     for id in [
         "P3-DETAIL-EXCLUDED-ONESHOT-ROUTE-CLOSURE",
-        "P5-ONESHOT-EXCLUDED-READLIST-DETAIL",
+        "P2-DISCOVERY-UNSUPPORTED-READLISTS",
         "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-BOOKS",
         "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-PREVIOUS",
         "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-NEXT",

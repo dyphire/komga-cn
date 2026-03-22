@@ -206,16 +206,12 @@ fn p0_cases_configuration_loads() {
 
     assert_eq!(config.output_dir, "target/compat-diff");
     assert!(config.header_allowlist.contains(&"set-cookie".to_string()));
-    assert!(
-        config
-            .header_allowlist
-            .contains(&"x-auth-token".to_string())
-    );
-    assert!(
-        config
-            .header_allowlist
-            .contains(&"www-authenticate".to_string())
-    );
+    assert!(config
+        .header_allowlist
+        .contains(&"x-auth-token".to_string()));
+    assert!(config
+        .header_allowlist
+        .contains(&"www-authenticate".to_string()));
     assert!(case_ids.contains(&"KOMGA-P0-LIB-01"));
     assert!(case_ids.contains(&"KOMGA-P0-SERIES-01"));
     assert!(case_ids.contains(&"KOMGA-P0-BOOKS-LIST-01"));
@@ -647,12 +643,13 @@ fn phase3_detail_case_inventory_loads() {
 }
 
 #[test]
-fn phase5_oneshot_case_inventory_loads() {
+pub(super) fn phase6_readlist_detail_case_inventory_loads() {
     let config = HarnessConfig::load_default().expect("default compat cases should load");
 
     for id in [
+        "P6-ONESHOT-READLIST-DETAIL-OWNED",
         "P5-ONESHOT-BOOKS-LIST-SERIESID-ONLY-OWNED",
-        "P5-ONESHOT-EXCLUDED-READLIST-DETAIL",
+        "P2-DISCOVERY-UNSUPPORTED-READLISTS",
         "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-BOOKS",
         "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-PREVIOUS",
         "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-NEXT",
@@ -679,21 +676,21 @@ fn phase5_oneshot_case_inventory_loads() {
             .cases
             .iter()
             .find(|it| it.id == id)
-            .unwrap_or_else(|| panic!("missing phase5 oneshot compat case: {id}"));
+            .unwrap_or_else(|| panic!("missing phase6 readlist-detail compat case: {id}"));
 
         assert_eq!(
             config.cases.iter().filter(|it| it.id == id).count(),
             1,
-            "phase5 oneshot case id must be unique: {id}",
+            "phase6 readlist-detail case id must be unique: {id}",
         );
 
-        if id.contains("-EXCLUDED-") {
+        if id.contains("-EXCLUDED-") || id == "P2-DISCOVERY-UNSUPPORTED-READLISTS" {
             assert_eq!(
                 case.headers
                     .as_ref()
                     .and_then(|headers| headers.get("X-Komga-Compat-Search-Ownership")),
                 Some(&"shadow-java-writer".to_string()),
-                "excluded phase5 oneshot case must carry shadow marker: {id}",
+                "phase6 adjacent non-native case must carry shadow marker: {id}",
             );
         }
     }
@@ -701,14 +698,11 @@ fn phase5_oneshot_case_inventory_loads() {
     let owned = config
         .cases
         .iter()
-        .find(|it| it.id == "P5-ONESHOT-BOOKS-LIST-SERIESID-ONLY-OWNED")
-        .expect("phase5 oneshot owned books/list case should exist");
-    assert_eq!(owned.method, "POST");
-    assert_eq!(owned.path, "/api/v1/books/list");
-    assert_eq!(
-        owned.body.as_deref(),
-        Some(r#"{"condition":{"type":"SeriesId","operator":"is","value":"series-oneshot"}}"#),
-    );
+        .find(|it| it.id == "P6-ONESHOT-READLIST-DETAIL-OWNED")
+        .expect("phase6 readlist detail owned case should exist");
+    assert_eq!(owned.method, "GET");
+    assert_eq!(owned.path, "/api/v1/readlists/readlist-1");
+    assert_eq!(owned.body, None);
     assert_eq!(
         owned
             .headers

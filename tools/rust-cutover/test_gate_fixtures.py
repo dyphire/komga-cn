@@ -168,21 +168,64 @@ def build_phase5_browser_row(*, capture_mode: str = 'source-contract-fallback') 
             'readlistNextRequestFound': True,
             'readlistPreviousRequestFound': True,
             'readlistContextNavigationFound': True,
-            'observedOwnershipLabel': 'contract-fallback',
+            'observedOwnershipLabel': 'readlist-detail-native-owned',
         },
         'expectedOwnedRequests': [
             {'label': 'oneshot-series-detail', 'pass': True},
             {'label': 'oneshot-series-collections', 'pass': True},
             {'label': 'oneshot-bootstrap-books-list', 'pass': True},
             {'label': 'oneshot-book-readlists', 'pass': True},
+            {'label': 'readlist-detail', 'pass': True},
+            {'label': 'readlist-books-unpaged', 'pass': True},
+            {'label': 'readlist-book-next', 'pass': True},
+            {'label': 'readlist-book-previous', 'pass': True},
         ],
-        'observedFallbackRequests': [
-            {'label': 'readlist-detail-fallback', 'pass': True, 'ownership': 'contract-fallback'},
-            {'label': 'readlist-books-unpaged-fallback', 'pass': True, 'ownership': 'contract-fallback'},
-            {'label': 'readlist-book-next-fallback', 'pass': True, 'ownership': 'contract-fallback'},
-            {'label': 'readlist-book-previous-fallback', 'pass': True, 'ownership': 'contract-fallback'},
-        ],
+        'observedFallbackRequests': [],
     }
+
+
+def seed_phase6_oneshot_readlist_context_closure_evidence(
+    root: Path,
+    *,
+    include_contract: bool = True,
+    include_browser: bool = True,
+    include_regression: bool = True,
+) -> None:
+    if include_contract:
+        write_text(root / 'task-1-contract-matrix/phase6_readlist_detail_route_shape_is_frozen.txt', 'cargo test: 1 passed, 8 filtered out (1 suite, 0.01s)')
+        write_text(root / 'task-1-contract-matrix/phase6_readlist_detail_case_inventory_loads.txt', 'cargo test: 1 passed, 19 filtered out (1 suite, 0.01s)')
+        write_text(root / 'task-1-contract-matrix/phase6_adjacent_branches_remain_explicitly_non_native.txt', 'cargo test: 1 passed, 8 filtered out (1 suite, 0.01s)')
+
+    write_text(root / 'task-2-query/readlist-detail-query-contract.txt', 'cargo test: 2 passed, 0 failed (1 suite, 0.01s)')
+    write_text(root / 'task-2-query/readlist-detail-visible-filtered-not-found.txt', 'cargo test: 2 passed, 0 failed (1 suite, 0.02s)')
+    write_text(root / 'task-3-runtime/phase6_readlist_detail_runtime_ownership_is_native.txt', 'cargo test: 1 passed, 16 filtered out (1 suite, 0.03s)')
+    write_text(root / 'task-3-runtime/phase6_readlist_detail_404_and_filtered_semantics_match_contract.txt', 'cargo test: 1 passed, 16 filtered out (1 suite, 0.02s)')
+
+    if include_browser:
+        browse_oneshot_row = build_phase5_browser_row()
+        write_json(root / 'task-4-browser-smoke/browse-oneshot.json', browse_oneshot_row)
+        write_json(root / 'task-4-browser-smoke/summary.json', [browse_oneshot_row])
+        write_text(
+            root / 'task-4-browser-smoke/browse-oneshot-smoke-selectors.log',
+            '\n'.join([
+                'PASS tests/unit/views/browse-oneshot-smoke-selectors.spec.ts',
+                'given oneshot readlist context smoke contract when enumerated then it should keep exact owned inventory and exclude fallback-only branches',
+                'given oneshot readlist context source flow when inspected then it should keep native readlist detail and sibling requests wired from route context',
+            ]),
+        )
+        write_text(
+            root / 'task-4-browser-smoke/gate-evaluator-check.log',
+            '\n'.join([
+                'ok=True',
+                'DETAIL: browse-oneshot captureMode=source-contract-fallback (accepted in this environment)',
+                'DETAIL: browse-oneshot proves exact owned labels: oneshot-series-detail, oneshot-series-collections, oneshot-bootstrap-books-list, oneshot-book-readlists, readlist-detail, readlist-books-unpaged, readlist-book-next, readlist-book-previous',
+                'DETAIL: browse-oneshot keeps READLIST-context fallback inventory empty after readlist detail promotion',
+            ]),
+        )
+
+    if include_regression:
+        write_text(root / 'task-6-regression/phase4-phase5-regression.txt', 'cargo test: 2 passed, 0 failed (1 suite, 0.03s)')
+        write_text(root / 'task-6-regression/adjacent-exclusions-stay-shadow.txt', 'cargo test: 1 passed, 0 failed (1 suite, 0.02s)')
 
 
 def build_admin_queue_payload(*, status: str, can_claim_admin_queue_parity: bool) -> dict[str, object]:

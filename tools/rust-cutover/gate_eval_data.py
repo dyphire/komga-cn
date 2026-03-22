@@ -5,6 +5,7 @@ PHASE2_DISCOVERY_LABEL = "phase2-catalog-discovery"
 PHASE3_DETAIL_READ_LABEL = "phase3-detail-read"
 PHASE4_READLIST_CONTEXT_READ_LABEL = "phase4-readlist-context-read"
 PHASE5_ONESHOT_CLOSURE_LABEL = "phase5-oneshot-closure"
+PHASE6_ONESHOT_READLIST_CONTEXT_CLOSURE_LABEL = "phase6-oneshot-readlist-context-closure"
 
 discovery_supported_scope = [
     "GET /api/v1/libraries",
@@ -74,6 +75,32 @@ phase5_oneshot_out_of_slice = [
     "SSE/live-refresh parity",
     "full cutover/direct-serving approval",
 ]
+phase6_oneshot_readlist_context_owned_scope = [
+    "GET /api/v1/readlists/{readListId} (oneshot READLIST-context direct-read closure only)",
+]
+phase6_oneshot_readlist_context_pre_owned_dependencies = [
+    "GET /api/v1/series/{seriesId}",
+    "GET /api/v1/series/{seriesId}/collections",
+    "POST /api/v1/books/list (exact oneshot-bootstrap SeriesId-only family)",
+    "GET /api/v1/books/{bookId}/readlists",
+    "GET /api/v1/readlists/{readListId}/books?unpaged=true",
+    "GET /api/v1/readlists/{readListId}/books/{bookId}/previous",
+    "GET /api/v1/readlists/{readListId}/books/{bookId}/next",
+]
+phase6_oneshot_readlist_context_out_of_slice = [
+    "GET /api/v1/series/{seriesId}?oneshot=true",
+    "GET /api/v1/readlists and other readlist list-family routes",
+    "paged or library_id readlist books variants",
+    "browse-readlist page closure",
+    "generic books/list widening beyond the exact oneshot-bootstrap SeriesId-only family",
+    "media delivery (/thumbnail, /file, /pages*, /manifest, /resource/*, /positions)",
+    "reader handoff and download branches",
+    "read-progress write/progression routes",
+    "collection/readlist removals",
+    "admin edit/delete and broader write-path claims",
+    "SSE/live-refresh parity",
+    "full cutover/direct-serving approval",
+]
 
 phase3_skipped_base_checks: dict[str, str] = {
     "auth_api_key": "Skipped for phase3-detail-read: API key parity is outside this direct-browse detail-read runbook.",
@@ -108,15 +135,34 @@ phase5_skipped_base_checks: dict[str, str] = {
     "external_release_credentials": "Skipped for phase5-oneshot-closure: release credentials are not part of oneshot-closure readiness.",
 }
 
+phase6_skipped_base_checks: dict[str, str] = {
+    "auth_api_key": "Skipped for phase6-oneshot-readlist-context-closure: API key parity is outside this oneshot READLIST-context direct-read runbook.",
+    "libraries_visibility": "Skipped for phase6-oneshot-readlist-context-closure: discovery libraries parity is not part of this oneshot READLIST-context direct-read slice gate.",
+    "opds": "Skipped for phase6-oneshot-readlist-context-closure: OPDS parity is outside this oneshot READLIST-context direct-read slice gate.",
+    "cache_file_headers": "Skipped for phase6-oneshot-readlist-context-closure: binary metadata/header parity is outside this oneshot READLIST-context direct-read slice gate.",
+    "read_progress": "Skipped for phase6-oneshot-readlist-context-closure: this runbook does not claim read-progress write/progression ownership.",
+    "server_management_browser_smoke": "Skipped for phase6-oneshot-readlist-context-closure: server-management/browser-ops acceptance is outside this oneshot READLIST-context direct-read slice.",
+    "packaging_tray": "Skipped for phase6-oneshot-readlist-context-closure: packaging/tray startup contract is outside this slice gate.",
+    "external_release_credentials": "Skipped for phase6-oneshot-readlist-context-closure: release credentials are not part of oneshot READLIST-context direct-read readiness.",
+}
+
 
 def build_checks(
     run_label: str,
     evidence_root: Path,
-) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
+) -> tuple[
+    list[dict[str, object]],
+    list[dict[str, object]],
+    list[dict[str, object]],
+    list[dict[str, object]],
+    list[dict[str, object]],
+    list[dict[str, object]],
+]:
     is_phase2_discovery = run_label == PHASE2_DISCOVERY_LABEL
     is_phase3_detail_read = run_label == PHASE3_DETAIL_READ_LABEL
     is_phase4_readlist_context_read = run_label == PHASE4_READLIST_CONTEXT_READ_LABEL
     is_phase5_oneshot_closure = run_label == PHASE5_ONESHOT_CLOSURE_LABEL
+    is_phase6_oneshot_readlist_context_closure = run_label == PHASE6_ONESHOT_READLIST_CONTEXT_CLOSURE_LABEL
 
     base_checks = [
         {
@@ -588,5 +634,87 @@ def build_checks(
             },
         ]
 
-    checks = base_checks + discovery_checks + phase3_checks + phase4_checks + phase5_checks
-    return checks, discovery_checks, phase3_checks, phase4_checks, phase5_checks
+    phase6_checks: list[dict[str, object]] = []
+    if is_phase6_oneshot_readlist_context_closure:
+        phase6_contract = evidence_root / "task-1-contract-matrix" / "phase6_readlist_detail_route_shape_is_frozen.txt"
+        phase6_case_inventory = evidence_root / "task-1-contract-matrix" / "phase6_readlist_detail_case_inventory_loads.txt"
+        phase6_query_contract = evidence_root / "task-2-query" / "readlist-detail-query-contract.txt"
+        phase6_query_semantics = evidence_root / "task-2-query" / "readlist-detail-visible-filtered-not-found.txt"
+        phase6_runtime_ownership = evidence_root / "task-3-runtime" / "phase6_readlist_detail_runtime_ownership_is_native.txt"
+        phase6_runtime_semantics = evidence_root / "task-3-runtime" / "phase6_readlist_detail_404_and_filtered_semantics_match_contract.txt"
+        phase6_browser_summary = evidence_root / "task-4-browser-smoke" / "summary.json"
+        phase6_browser_route = evidence_root / "task-4-browser-smoke" / "browse-oneshot.json"
+        phase6_browser_selectors = evidence_root / "task-4-browser-smoke" / "browse-oneshot-smoke-selectors.log"
+        phase6_browser_gate_check = evidence_root / "task-4-browser-smoke" / "gate-evaluator-check.log"
+        phase6_adjacent_contract = evidence_root / "task-1-contract-matrix" / "phase6_adjacent_branches_remain_explicitly_non_native.txt"
+        phase6_regression = evidence_root / "task-6-regression" / "phase4-phase5-regression.txt"
+        phase6_adjacent_regression = evidence_root / "task-6-regression" / "adjacent-exclusions-stay-shadow.txt"
+
+        phase6_checks = [
+            {
+                "id": "phase6_oneshot_readlist_context_closure_contract",
+                "category": "phase6-oneshot-readlist-context-closure",
+                "refusal_condition": "Phase6 readlist-detail contract evidence not proven",
+                "evidence": [phase6_contract, phase6_case_inventory],
+                "mode": "text",
+            },
+            {
+                "id": "phase6_oneshot_readlist_context_closure_shadow",
+                "category": "phase6-oneshot-readlist-context-closure",
+                "refusal_condition": "Phase6 readlist-detail query/runtime ownership evidence not proven",
+                "evidence": [
+                    phase6_query_contract,
+                    phase6_query_semantics,
+                    phase6_runtime_ownership,
+                    phase6_runtime_semantics,
+                ],
+                "mode": "text",
+            },
+            {
+                "id": "phase6_oneshot_readlist_context_closure_browser",
+                "category": "phase6-oneshot-readlist-context-closure",
+                "refusal_condition": "Phase6 oneshot READLIST-context direct-read browser evidence not proven",
+                "evidence": [
+                    phase6_browser_summary,
+                    phase6_browser_route,
+                    phase6_browser_selectors,
+                    phase6_browser_gate_check,
+                ],
+                "mode": "discovery_markers",
+                "marker_map": {
+                    phase6_browser_summary: [
+                        '"route": "browse-oneshot"',
+                        '"observedOwnershipLabel": "readlist-detail-native-owned"',
+                        '"label": "readlist-detail"',
+                        '"observedFallbackRequests": []',
+                    ],
+                    phase6_browser_route: [
+                        '"route": "browse-oneshot"',
+                        '"observedOwnershipLabel": "readlist-detail-native-owned"',
+                        '"label": "readlist-detail"',
+                        '"observedFallbackRequests": []',
+                    ],
+                    phase6_browser_selectors: [
+                        'PASS tests/unit/views/browse-oneshot-smoke-selectors.spec.ts',
+                        'given oneshot readlist context smoke contract when enumerated then it should keep exact owned inventory and exclude fallback-only branches',
+                        'given oneshot readlist context source flow when inspected then it should keep native readlist detail and sibling requests wired from route context',
+                    ],
+                    phase6_browser_gate_check: [
+                        'ok=True',
+                        'browse-oneshot proves exact owned labels: oneshot-series-detail, oneshot-series-collections, oneshot-bootstrap-books-list, oneshot-book-readlists, readlist-detail, readlist-books-unpaged, readlist-book-next, readlist-book-previous',
+                        'browse-oneshot keeps READLIST-context fallback inventory empty after readlist detail promotion',
+                    ],
+                },
+                "success_note": "Phase6 browser evidence proves exact eight-label owned inventory while keeping READLIST-context fallback empty after readlist-detail promotion.",
+            },
+            {
+                "id": "phase6_oneshot_readlist_context_closure_regression",
+                "category": "phase6-oneshot-readlist-context-closure",
+                "refusal_condition": "Phase6 regression and exclusion containment evidence not proven",
+                "evidence": [phase6_regression, phase6_adjacent_regression, phase6_adjacent_contract],
+                "mode": "text",
+            },
+        ]
+
+    checks = base_checks + discovery_checks + phase3_checks + phase4_checks + phase5_checks + phase6_checks
+    return checks, discovery_checks, phase3_checks, phase4_checks, phase5_checks, phase6_checks

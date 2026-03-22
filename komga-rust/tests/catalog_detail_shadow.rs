@@ -42,6 +42,28 @@ mod helpers;
 mod ownership;
 #[path = "catalog_detail_shadow/readlist.rs"]
 mod readlist;
+#[path = "catalog_detail_shadow/readlist_detail.rs"]
+mod readlist_detail;
+
+#[tokio::test]
+async fn phase6_readlist_detail_runtime_ownership_is_native() {
+    readlist_detail::phase6_readlist_detail_runtime_ownership_is_native().await;
+}
+
+#[tokio::test]
+async fn phase6_readlist_detail_404_and_filtered_semantics_match_contract() {
+    readlist_detail::phase6_readlist_detail_404_and_filtered_semantics_match_contract().await;
+}
+
+#[tokio::test]
+async fn phase6_regression_phase4_phase5_routes_remain_stable() {
+    readlist::phase6_regression_phase4_phase5_routes_remain_stable().await;
+}
+
+#[tokio::test]
+async fn phase6_adjacent_excluded_branches_still_emit_shadow_marker() {
+    ownership::phase6_adjacent_excluded_branches_still_emit_shadow_marker().await;
+}
 
 async fn get_response<S>(app: &S, token: &str, uri: &str) -> axum::response::Response
 where

@@ -22,6 +22,7 @@ seed_common_evidence = fixtures.seed_common_evidence
 seed_phase3_detail_evidence = fixtures.seed_phase3_detail_evidence
 seed_phase4_readlist_context_evidence = fixtures.seed_phase4_readlist_context_evidence
 seed_phase5_oneshot_closure_evidence = fixtures.seed_phase5_oneshot_closure_evidence
+seed_phase6_oneshot_readlist_context_closure_evidence = fixtures.seed_phase6_oneshot_readlist_context_closure_evidence
 
 
 def run_gate(evidence_root: Path, output_dir: Path, *, label: str) -> subprocess.CompletedProcess[str]:
@@ -531,6 +532,175 @@ class GateRegressionTests(unittest.TestCase):
             summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
             self.assertEqual(summary['overall'], 'fail')
             failing_check = next(item for item in summary['checks'] if item['id'] == 'phase5_oneshot_closure_browser')
+            self.assertEqual(failing_check['status'], 'fail')
+            self.assertTrue(any('Missing evidence file' in detail for detail in failing_check['details']))
+
+    def test_phase6_oneshot_readlist_context_closure_label_passes_with_complete_seeded_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            evidence_root = temp_path / 'evidence'
+            output_dir = temp_path / 'output'
+            seed_common_evidence(
+                evidence_root,
+                neutral_transcripts=True,
+                admin_queue_payload=build_admin_queue_payload(
+                    status='action-exercised-parity-ok',
+                    can_claim_admin_queue_parity=True,
+                ),
+            )
+            seed_phase6_oneshot_readlist_context_closure_evidence(evidence_root)
+
+            result = run_gate(evidence_root, output_dir, label='phase6-oneshot-readlist-context-closure')
+
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=f'gate unexpectedly failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}',
+            )
+
+            summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
+            self.assertEqual(summary['overall'], 'pass')
+            self.assertEqual(summary.get('evaluation_scope'), 'phase6-oneshot-readlist-context-closure-shadow')
+            self.assertFalse(summary['governance']['cutover']['allowed'])
+            self.assertFalse(summary['governance']['phase6_oneshot_readlist_context_non_claims']['allowed'])
+            self.assertEqual(
+                summary['oneshot_readlist_context_closure_slice']['owned_routes'],
+                ['GET /api/v1/readlists/{readListId} (oneshot READLIST-context direct-read closure only)'],
+            )
+            self.assertEqual(
+                summary['oneshot_readlist_context_closure_slice']['required_pre_owned_dependencies'],
+                [
+                    'GET /api/v1/series/{seriesId}',
+                    'GET /api/v1/series/{seriesId}/collections',
+                    'POST /api/v1/books/list (exact oneshot-bootstrap SeriesId-only family)',
+                    'GET /api/v1/books/{bookId}/readlists',
+                    'GET /api/v1/readlists/{readListId}/books?unpaged=true',
+                    'GET /api/v1/readlists/{readListId}/books/{bookId}/previous',
+                    'GET /api/v1/readlists/{readListId}/books/{bookId}/next',
+                ],
+            )
+            self.assertEqual(
+                summary['oneshot_readlist_context_closure_slice']['excluded_branches'],
+                [
+                    'GET /api/v1/series/{seriesId}?oneshot=true',
+                    'GET /api/v1/readlists and other readlist list-family routes',
+                    'paged or library_id readlist books variants',
+                    'browse-readlist page closure',
+                    'generic books/list widening beyond the exact oneshot-bootstrap SeriesId-only family',
+                    'media delivery (/thumbnail, /file, /pages*, /manifest, /resource/*, /positions)',
+                    'reader handoff and download branches',
+                    'read-progress write/progression routes',
+                    'collection/readlist removals',
+                    'admin edit/delete and broader write-path claims',
+                    'SSE/live-refresh parity',
+                    'full cutover/direct-serving approval',
+                ],
+            )
+
+            browser_check = next(
+                item for item in summary['checks'] if item['id'] == 'phase6_oneshot_readlist_context_closure_browser'
+            )
+            self.assertEqual(browser_check['status'], 'pass')
+            self.assertTrue(any('readlist-detail' in detail for detail in browser_check['details']))
+
+            report = (output_dir / 'report.md').read_text(encoding='utf-8')
+            self.assertIn('Owned surface (newly owned exactly 1 route)', report)
+            self.assertIn('`GET /api/v1/readlists/{readListId}`', report)
+            self.assertIn('oneshot READLIST-context direct-read', report)
+            self.assertIn('`GET /api/v1/readlists`', report)
+            self.assertIn('browse-readlist', report)
+            self.assertIn('whole cutover/direct-serving', report)
+
+    def test_phase6_oneshot_readlist_context_closure_label_fails_closed_when_contract_artifact_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            evidence_root = temp_path / 'evidence'
+            output_dir = temp_path / 'output'
+            seed_common_evidence(
+                evidence_root,
+                neutral_transcripts=True,
+                admin_queue_payload=build_admin_queue_payload(
+                    status='action-exercised-parity-ok',
+                    can_claim_admin_queue_parity=True,
+                ),
+            )
+            seed_phase6_oneshot_readlist_context_closure_evidence(evidence_root, include_contract=False)
+
+            result = run_gate(evidence_root, output_dir, label='phase6-oneshot-readlist-context-closure')
+
+            self.assertEqual(
+                result.returncode,
+                1,
+                msg=f'gate unexpectedly passed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}',
+            )
+
+            summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
+            self.assertEqual(summary['overall'], 'fail')
+            failing_check = next(
+                item for item in summary['checks'] if item['id'] == 'phase6_oneshot_readlist_context_closure_contract'
+            )
+            self.assertEqual(failing_check['status'], 'fail')
+            self.assertTrue(any('Missing evidence file' in detail for detail in failing_check['details']))
+
+    def test_phase6_oneshot_readlist_context_closure_label_fails_closed_when_browser_artifact_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            evidence_root = temp_path / 'evidence'
+            output_dir = temp_path / 'output'
+            seed_common_evidence(
+                evidence_root,
+                neutral_transcripts=True,
+                admin_queue_payload=build_admin_queue_payload(
+                    status='action-exercised-parity-ok',
+                    can_claim_admin_queue_parity=True,
+                ),
+            )
+            seed_phase6_oneshot_readlist_context_closure_evidence(evidence_root, include_browser=False)
+
+            result = run_gate(evidence_root, output_dir, label='phase6-oneshot-readlist-context-closure')
+
+            self.assertEqual(
+                result.returncode,
+                1,
+                msg=f'gate unexpectedly passed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}',
+            )
+
+            summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
+            self.assertEqual(summary['overall'], 'fail')
+            failing_check = next(
+                item for item in summary['checks'] if item['id'] == 'phase6_oneshot_readlist_context_closure_browser'
+            )
+            self.assertEqual(failing_check['status'], 'fail')
+            self.assertTrue(any('Missing evidence file' in detail for detail in failing_check['details']))
+
+    def test_phase6_oneshot_readlist_context_closure_label_fails_closed_when_regression_artifact_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            evidence_root = temp_path / 'evidence'
+            output_dir = temp_path / 'output'
+            seed_common_evidence(
+                evidence_root,
+                neutral_transcripts=True,
+                admin_queue_payload=build_admin_queue_payload(
+                    status='action-exercised-parity-ok',
+                    can_claim_admin_queue_parity=True,
+                ),
+            )
+            seed_phase6_oneshot_readlist_context_closure_evidence(evidence_root, include_regression=False)
+
+            result = run_gate(evidence_root, output_dir, label='phase6-oneshot-readlist-context-closure')
+
+            self.assertEqual(
+                result.returncode,
+                1,
+                msg=f'gate unexpectedly passed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}',
+            )
+
+            summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
+            self.assertEqual(summary['overall'], 'fail')
+            failing_check = next(
+                item for item in summary['checks'] if item['id'] == 'phase6_oneshot_readlist_context_closure_regression'
+            )
             self.assertEqual(failing_check['status'], 'fail')
             self.assertTrue(any('Missing evidence file' in detail for detail in failing_check['details']))
 

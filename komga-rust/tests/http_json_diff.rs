@@ -25,3 +25,8 @@ use helpers::{
     seeded_localdb_binary_manifest_smoke_harness_config, seeded_localdb_session_vars,
     seeded_localdb_smoke_harness_config, smoke_harness_config, temp_output_root,
 };
+
+#[test]
+fn phase6_readlist_detail_case_inventory_loads() {
+    config::phase6_readlist_detail_case_inventory_loads();
+}

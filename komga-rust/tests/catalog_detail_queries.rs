@@ -2,7 +2,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use komga_rust::application::discovery::{
     BookDetailQuery, BookReadlistsQuery, BookSiblingQuery, BooksListQuery, DiscoveryQueries,
-    ReadListBooksQuery, SeriesCollectionsQuery, SeriesDetailQuery,
+    ReadListBooksQuery, ReadListDetailQuery, SeriesCollectionsQuery, SeriesDetailQuery,
 };
 use komga_rust::domain::discovery::{
     AgeRestrictionKind, DirectBrowseBooksListFamily, DiscoveryError, DiscoveryQueryContext,
@@ -30,6 +30,8 @@ mod navigation;
 mod oneshot_bootstrap;
 #[path = "catalog_detail_queries/readlist_books.rs"]
 mod readlist_books;
+#[path = "catalog_detail_queries/readlist_detail.rs"]
+mod readlist_detail;
 #[path = "catalog_detail_queries/visibility.rs"]
 mod visibility;
 
@@ -66,4 +68,24 @@ where
         )
         .await
         .unwrap()
+}
+
+#[tokio::test]
+async fn phase6_readlist_detail_visible_filtered_and_not_found_parity() {
+    readlist_detail::phase6_readlist_detail_visible_filtered_and_not_found_parity().await;
+}
+
+#[tokio::test]
+async fn phase6_readlist_detail_uses_existing_visibility_rules() {
+    readlist_detail::phase6_readlist_detail_uses_existing_visibility_rules().await;
+}
+
+#[tokio::test]
+async fn phase6_readlist_detail_empty_accessible_readlist_remains_visible() {
+    readlist_detail::phase6_readlist_detail_empty_accessible_readlist_remains_visible().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn oneshot_bootstrap_requires_visible_oneshot_series() {
+    oneshot_bootstrap::oneshot_bootstrap_requires_visible_oneshot_series().await;
 }

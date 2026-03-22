@@ -12,11 +12,13 @@ def build_governance(
     phase3_detail_shadow_pass: bool,
     phase4_readlist_context_shadow_pass: bool,
     phase5_oneshot_closure_shadow_pass: bool,
+    phase6_oneshot_readlist_context_closure_shadow_pass: bool,
 ) -> dict[str, Any]:
     is_phase2_discovery = run_label == data.PHASE2_DISCOVERY_LABEL
     is_phase3_detail_read = run_label == data.PHASE3_DETAIL_READ_LABEL
     is_phase4_readlist_context_read = run_label == data.PHASE4_READLIST_CONTEXT_READ_LABEL
     is_phase5_oneshot_closure = run_label == data.PHASE5_ONESHOT_CLOSURE_LABEL
+    is_phase6_oneshot_readlist_context_closure = run_label == data.PHASE6_ONESHOT_READLIST_CONTEXT_CLOSURE_LABEL
 
     if is_phase2_discovery:
         return {
@@ -134,6 +136,34 @@ def build_governance(
             },
         }
 
+    if is_phase6_oneshot_readlist_context_closure:
+        return {
+            "shadow_mode": {
+                "allowed": shadow_safety_pass,
+                "rule": "Shadow mode must keep Java as stateful writer unless explicitly isolated",
+            },
+            "canary_mode": {
+                "allowed": search_task_guardrails,
+                "rule": "Search/task ownership guardrails remain required, but this phase6 label is not whole-cutover approval.",
+            },
+            "phase6_oneshot_readlist_context_closure_shadow": {
+                "allowed": phase6_oneshot_readlist_context_closure_shadow_pass,
+                "scope": "Oneshot READLIST-context direct-read slice is shadow-ready only for GET /api/v1/readlists/{readListId}, while all supporting oneshot/readlist sibling routes remain regression-only pre-owned dependencies.",
+            },
+            "phase6_oneshot_readlist_context_non_claims": {
+                "allowed": False,
+                "scope": "Refused: GET /api/v1/series/{seriesId}?oneshot=true, GET /api/v1/readlists and browse-readlist/list-family support, paged/library_id readlist variants, generic books/list widening, media, reader handoff/download, read-progress/progression, removals, admin/write, SSE, and whole cutover claims remain out of slice.",
+            },
+            "cutover": {
+                "allowed": False,
+                "scope": "phase6-oneshot-readlist-context-closure is a slice-only runbook; whole cutover/direct-serving remains refused until broader runtime/media/write/release conditions are proven.",
+            },
+            "rollback": {
+                "ready": phase6_oneshot_readlist_context_closure_shadow_pass,
+                "trigger": "Any oneshot READLIST-context direct-read slice regression or out-of-slice expansion forces rollback/no-cutover.",
+            },
+        }
+
     return {
         "shadow_mode": {
             "allowed": shadow_safety_pass,
@@ -168,15 +198,18 @@ def build_summary(
     phase3_checks: list[dict[str, Any]],
     phase4_checks: list[dict[str, Any]],
     phase5_checks: list[dict[str, Any]],
+    phase6_checks: list[dict[str, Any]],
     discovery_shadow_pass: bool,
     phase3_detail_shadow_pass: bool,
     phase4_readlist_context_shadow_pass: bool,
     phase5_oneshot_closure_shadow_pass: bool,
+    phase6_oneshot_readlist_context_closure_shadow_pass: bool,
 ) -> dict[str, Any]:
     is_phase2_discovery = run_label == data.PHASE2_DISCOVERY_LABEL
     is_phase3_detail_read = run_label == data.PHASE3_DETAIL_READ_LABEL
     is_phase4_readlist_context_read = run_label == data.PHASE4_READLIST_CONTEXT_READ_LABEL
     is_phase5_oneshot_closure = run_label == data.PHASE5_ONESHOT_CLOSURE_LABEL
+    is_phase6_oneshot_readlist_context_closure = run_label == data.PHASE6_ONESHOT_READLIST_CONTEXT_CLOSURE_LABEL
 
     summary: dict[str, Any] = {
         "task": "T16",
@@ -221,6 +254,25 @@ def build_summary(
                 "This does not claim media, reader-handoff/download, read-progress/progression, removals, admin/write, or SSE ownership.",
             ],
             "check_ids": [check["id"] for check in phase5_checks],
+        }
+        if non_blocking:
+            summary["non_blocking"] = non_blocking
+    elif is_phase6_oneshot_readlist_context_closure:
+        summary["evaluation_scope"] = "phase6-oneshot-readlist-context-closure-shadow"
+        summary["oneshot_readlist_context_closure_slice"] = {
+            "shadow_ready": phase6_oneshot_readlist_context_closure_shadow_pass,
+            "newly_owned_surface": data.phase6_oneshot_readlist_context_owned_scope[0],
+            "owned_routes": data.phase6_oneshot_readlist_context_owned_scope,
+            "supported_scope": data.phase6_oneshot_readlist_context_owned_scope,
+            "required_pre_owned_dependencies": data.phase6_oneshot_readlist_context_pre_owned_dependencies,
+            "excluded_branches": data.phase6_oneshot_readlist_context_out_of_slice,
+            "out_of_slice": data.phase6_oneshot_readlist_context_out_of_slice,
+            "non_claims": [
+                "This does not claim whole cutover readiness.",
+                "This does not claim browse-readlist or GET /api/v1/readlists list-family ownership.",
+                "This does not claim media, reader-handoff/download, read-progress/progression, removals, admin/write, or SSE ownership.",
+            ],
+            "check_ids": [check["id"] for check in phase6_checks],
         }
         if non_blocking:
             summary["non_blocking"] = non_blocking
@@ -274,11 +326,13 @@ def build_report_text(
     phase3_detail_shadow_pass: bool,
     phase4_readlist_context_shadow_pass: bool,
     phase5_oneshot_closure_shadow_pass: bool,
+    phase6_oneshot_readlist_context_closure_shadow_pass: bool,
 ) -> str:
     is_phase2_discovery = run_label == data.PHASE2_DISCOVERY_LABEL
     is_phase3_detail_read = run_label == data.PHASE3_DETAIL_READ_LABEL
     is_phase4_readlist_context_read = run_label == data.PHASE4_READLIST_CONTEXT_READ_LABEL
     is_phase5_oneshot_closure = run_label == data.PHASE5_ONESHOT_CLOSURE_LABEL
+    is_phase6_oneshot_readlist_context_closure = run_label == data.PHASE6_ONESHOT_READLIST_CONTEXT_CLOSURE_LABEL
 
     lines = []
     lines.append(f"# Rust Cutover Readiness Gate ({run_label})")
@@ -298,6 +352,9 @@ def build_report_text(
     elif is_phase5_oneshot_closure:
         lines.append("- Evaluation scope: `phase5-oneshot-closure-shadow`")
         lines.append("- Non-claim: this label records direct oneshot closure readiness only, not whole cutover/direct-serving/media/write readiness")
+    elif is_phase6_oneshot_readlist_context_closure:
+        lines.append("- Evaluation scope: `phase6-oneshot-readlist-context-closure-shadow`")
+        lines.append("- Non-claim: this label records oneshot READLIST-context direct-read readiness only, not browse-readlist/list-family or whole cutover/direct-serving/media/write readiness")
     lines.append("")
 
     if is_phase2_discovery:
@@ -370,6 +427,30 @@ def build_report_text(
         )
         lines.append(
             "- Browser capture note: `captureMode=source-contract-fallback` is accepted only when owned labels and READLIST-context fallback labels are both explicitly proven"
+        )
+        lines.append("")
+    elif is_phase6_oneshot_readlist_context_closure:
+        lines.append("## Phase6 Oneshot-Readlist-Context-Closure Runbook")
+        lines.append("")
+        lines.append(f"- Shadow-ready target: **{'PASS' if phase6_oneshot_readlist_context_closure_shadow_pass else 'FAIL'}**")
+        lines.append(f"- Owned surface (newly owned exactly 1 route): {', '.join(f'`{item}`' for item in data.phase6_oneshot_readlist_context_owned_scope)}")
+        lines.append(
+            "- User-visible closure: **ALLOW (slice-only)** — oneshot READLIST-context direct-read closure owns only `GET /api/v1/readlists/{readListId}` and does not claim browse-readlist or readlist list-family support"
+        )
+        lines.append(
+            f"- Required pre-owned dependencies (regression-only): {', '.join(f'`{item}`' for item in data.phase6_oneshot_readlist_context_pre_owned_dependencies)}"
+        )
+        lines.append(
+            "- Out-of-slice governance: **REFUSE** — `GET /api/v1/series/{seriesId}?oneshot=true`, `GET /api/v1/readlists`, browse-readlist/page closure, paged/library_id variants, generic books/list widening, media, reader handoff/download, progress/progression, removals, admin/write, SSE, and whole cutover claims remain explicit non-native"
+        )
+        lines.append(
+            f"- Excluded branches still out of scope: {', '.join(f'`{item}`' for item in data.phase6_oneshot_readlist_context_out_of_slice)}"
+        )
+        lines.append(
+            "- Whole cutover/direct-serving: **REFUSE** — this label is not a full cutover approval"
+        )
+        lines.append(
+            "- Browser capture note: `captureMode=source-contract-fallback` is accepted only when browser evidence proves `readlist-detail-native-owned`, the exact eight-label owned inventory, and an empty `observedFallbackRequests` array"
         )
         lines.append("")
 

@@ -54,10 +54,11 @@ pub(super) fn frozen_named_exclusion_proofs() -> BTreeSet<&'static str> {
 
 pub(super) fn frozen_oneshot_direct_route_shapes() -> BTreeSet<&'static str> {
     BTreeSet::from([
-        "GET /api/v1/series/{seriesId}",
-        "GET /api/v1/series/{seriesId}/collections",
-        "POST /api/v1/books/list body=SeriesId(seriesId) only",
-        "GET /api/v1/books/{bookId}/readlists",
+        "GET /api/v1/readlists/{readListId} (newly-owned Phase 6 route)",
+        "GET /api/v1/series/{seriesId} (reused pre-owned dependency)",
+        "GET /api/v1/series/{seriesId}/collections (reused pre-owned dependency)",
+        "POST /api/v1/books/list body=SeriesId(seriesId) only (reused pre-owned dependency)",
+        "GET /api/v1/books/{bookId}/readlists (reused pre-owned dependency)",
     ])
 }
 
@@ -92,10 +93,13 @@ pub(super) fn frozen_oneshot_explicit_non_native_shapes() -> BTreeSet<&'static s
 pub(super) fn frozen_oneshot_named_exclusion_proofs() -> BTreeSet<&'static str> {
     BTreeSet::from([
         "oneshot query closure | BrowseOneshot.vue:779-800 | GET /api/v1/series/{seriesId}?oneshot=true stays explicit non-native",
-        "READLIST context input | BrowseOneshot.vue:785-842 | GET /api/v1/readlists/{readListId} + /books?unpaged=true + sibling previous/next stay explicit fallback",
+        "READLIST detail ownership boundary | BrowseOneshot.vue:785-842 | only GET /api/v1/readlists/{readListId} is newly owned in Phase 6; list + context siblings stay explicit non-native",
+        "READLIST listing branch | BrowseOneshot.vue:785-842 | GET /api/v1/readlists stays explicit non-native",
+        "READLIST books pagination/library filtering | BrowseOneshot.vue:785-842 | paged readlist books and library_id variants stay explicit non-native",
+        "READLIST context siblings | BrowseOneshot.vue:785-842 | /books?unpaged=true + sibling previous/next remain explicit fallback/non-native",
         "oneshot bootstrap widening guards | BrowseOneshot.vue:798-800 | paged/unpaged/read-status/read-date books/list variants stay explicit non-native",
         "media delivery adjacency | BrowseOneshot.vue:118-125 + 497-499 | /pages + /thumbnail + /manifest + /resource/* + /positions stay explicit non-native",
-        "reader handoff + download affordances | BrowseOneshot.vue:215-249 + 261-295 | readRouteName/fileUrl visible in page but not native-owned in Phase 5",
+        "reader handoff + download affordances | BrowseOneshot.vue:215-249 + 261-295 | readRouteName/fileUrl visible in page but not newly owned in Phase 6",
         "progress visibility vs route ownership | BrowseOneshot.vue:126-136 + 689-710 | embedded read progress is visible, but read-progress/progression routes stay non-native",
         "collection/readlist removal affordances | BrowseOneshot.vue:417-445 | PATCH/DELETE collection/readlist routes stay explicit non-native",
         "OneshotActionsMenu write/admin affordances | OneshotActionsMenu.vue:10-29 + 85-110 | analyze/refresh/add/remove/mark-read/delete visibility is not a native claim",

@@ -4,7 +4,8 @@ use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use komga_application::discovery::{
     BookDetailQuery, BookReadlistsQuery, BookSiblingQuery, DiscoveryQueries,
-    DiscoveryQueryRepository, ReadListBooksQuery, SeriesCollectionsQuery, SeriesDetailQuery,
+    DiscoveryQueryRepository, ReadListBooksQuery, ReadListDetailQuery, SeriesCollectionsQuery,
+    SeriesDetailQuery,
 };
 use komga_domain::discovery::{
     BookDetailReadModel, CollectionReadModel, DiscoveryError, PageEnvelope, ReadListReadModel,
@@ -559,6 +560,56 @@ pub(in crate::app::compat_runtime) async fn readlist_books(
     }
 }
 
+pub(in crate::app::compat_runtime) async fn readlist_detail(
+    Extension(profile): Extension<CompatProfile>,
+    Extension(auth_state): Extension<DiscoveryAuthState>,
+    headers: HeaderMap,
+    Path(readlist_id): Path<String>,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if profile == CompatProfile::JavaLiveLocaldb {
+        let user = resolved_auth_user(&headers)
+            .expect("authorized readlist detail request should resolve user");
+        let path = format!("/api/v1/readlists/{readlist_id}");
+        return match content_java_live::fetch_json(user, &path, "readlist detail").await {
+            Ok(readlist) => Json(readlist).into_response(),
+            Err(message) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": message })),
+            )
+                .into_response(),
+        };
+    }
+
+    let context = match auth_state.resolve_query_context(&headers, None) {
+        Some(context) => context,
+        None => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+
+    let mut adapter = SqliteDiscoveryAdapter::default();
+    seed_series_detail_data(&mut adapter);
+    let queries = DiscoveryQueries::new(adapter);
+    let domain_context = to_domain_query_context(context);
+
+    match queries
+        .get_readlist_detail(&domain_context, ReadListDetailQuery { readlist_id })
+        .await
+    {
+        Ok(Some(readlist)) => Json(readlist_payload(&readlist)).into_response(),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": format!("readlist detail query failed: {error:?}"),
+            })),
+        )
+            .into_response(),
+    }
+}
+
 pub(in crate::app::compat_runtime) async fn readlist_book_sibling_previous(
     Extension(profile): Extension<CompatProfile>,
     Extension(auth_state): Extension<DiscoveryAuthState>,
@@ -856,6 +907,11 @@ fn seed_series_detail_data(adapter: &mut SqliteDiscoveryAdapter) {
         ReadListRow::new("readlist-2", "ReadList 2")
             .with_summary("Mixed visibility readlist")
             .with_book_ids(["book-1", "book-2"]),
+    );
+    adapter.insert_read_list(
+        ReadListRow::new("readlist-3", "ReadList 3")
+            .with_summary("Restricted-only readlist")
+            .with_book_ids(["book-2"]),
     );
 
     adapter.insert_read_progress(

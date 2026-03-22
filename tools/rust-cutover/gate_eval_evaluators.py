@@ -449,72 +449,58 @@ class GateEvaluators:
                     failures.append(f"browse-oneshot: required scenario flag {signal}=true not observed")
 
             observed_ownership = str(scenario.get("observedOwnershipLabel", ""))
-            if "fallback" not in observed_ownership:
-                failures.append("browse-oneshot: scenario.observedOwnershipLabel must explicitly report fallback")
+            if capture_mode == "source-contract-fallback" and "native-owned" not in observed_ownership:
+                failures.append(
+                    "browse-oneshot: source-contract fallback must positively report native readlist detail ownership"
+                )
+            elif not observed_ownership:
+                failures.append("browse-oneshot: scenario.observedOwnershipLabel is missing")
 
         expected_requests = summary_row.get("expectedOwnedRequests")
         if not isinstance(expected_requests, list):
             failures.append("browse-oneshot: expectedOwnedRequests array is missing")
         else:
-            by_label = {
-                item.get("label"): item
-                for item in expected_requests
-                if isinstance(item, dict) and "label" in item
-            }
             expected_labels = [
                 "oneshot-series-detail",
                 "oneshot-series-collections",
                 "oneshot-bootstrap-books-list",
                 "oneshot-book-readlists",
+                "readlist-detail",
+                "readlist-books-unpaged",
+                "readlist-book-next",
+                "readlist-book-previous",
             ]
-            missing_labels = [label for label in expected_labels if label not in by_label]
-            if missing_labels:
-                failures.append(f"browse-oneshot: missing expectedOwnedRequests labels {', '.join(missing_labels)}")
+            observed_labels = [
+                item.get("label")
+                for item in expected_requests
+                if isinstance(item, dict) and "label" in item
+            ]
+            if observed_labels != expected_labels:
+                failures.append(
+                    "browse-oneshot: expectedOwnedRequests must exactly equal "
+                    f"{', '.join(expected_labels)}"
+                )
             else:
+                by_label = {
+                    item.get("label"): item
+                    for item in expected_requests
+                    if isinstance(item, dict) and "label" in item
+                }
                 failed_labels = [label for label in expected_labels if not bool(by_label[label].get("pass"))]
                 if failed_labels:
                     failures.append(f"browse-oneshot: expectedOwnedRequests failed for {', '.join(failed_labels)}")
                 else:
                     details.append(
-                        "browse-oneshot proves exact owned labels: oneshot-series-detail, oneshot-series-collections, oneshot-bootstrap-books-list, oneshot-book-readlists"
+                        "browse-oneshot proves exact owned labels: oneshot-series-detail, oneshot-series-collections, oneshot-bootstrap-books-list, oneshot-book-readlists, readlist-detail, readlist-books-unpaged, readlist-book-next, readlist-book-previous"
                     )
 
         fallback_requests = summary_row.get("observedFallbackRequests")
         if not isinstance(fallback_requests, list):
             failures.append("browse-oneshot: observedFallbackRequests array is missing")
+        elif fallback_requests:
+            failures.append("browse-oneshot: observedFallbackRequests must stay empty for READLIST-context oneshot evidence")
         else:
-            by_label = {
-                item.get("label"): item
-                for item in fallback_requests
-                if isinstance(item, dict) and "label" in item
-            }
-            fallback_labels = [
-                "readlist-detail-fallback",
-                "readlist-books-unpaged-fallback",
-                "readlist-book-next-fallback",
-                "readlist-book-previous-fallback",
-            ]
-            missing_fallback_labels = [label for label in fallback_labels if label not in by_label]
-            if missing_fallback_labels:
-                failures.append(
-                    f"browse-oneshot: missing observedFallbackRequests labels {', '.join(missing_fallback_labels)}"
-                )
-            else:
-                bad_fallback_labels = [
-                    label
-                    for label in fallback_labels
-                    if not bool(by_label[label].get("pass"))
-                    or "fallback" not in str(by_label[label].get("ownership", ""))
-                ]
-                if bad_fallback_labels:
-                    failures.append(
-                        "browse-oneshot: fallback labels must pass with explicit fallback ownership for "
-                        f"{', '.join(bad_fallback_labels)}"
-                    )
-                else:
-                    details.append(
-                        "browse-oneshot keeps READLIST-context labels explicit fallback: readlist-detail-fallback, readlist-books-unpaged-fallback, readlist-book-next-fallback, readlist-book-previous-fallback"
-                    )
+            details.append("browse-oneshot keeps READLIST-context fallback inventory empty after readlist detail promotion")
 
         ok_text, text_messages, _ = self.eval_text_evidence_with_markers(
             [direct_parity_path],
@@ -535,7 +521,7 @@ class GateEvaluators:
             return False, [f"Phase5 oneshot browser smoke regressions: {'; '.join(failures)}"], []
 
         details.append(
-            "Phase5 browser smoke proves direct /oneshot/:seriesId closure with exact oneshot-bootstrap owned surface while READLIST-context remains explicit fallback."
+            "Phase5 browser smoke proves direct /oneshot/:seriesId closure with exact READLIST-context owned surface while excluded media, reader, progress, write, and SSE branches remain out of owned inventory."
         )
         return True, details, []
 

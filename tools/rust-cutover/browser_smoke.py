@@ -125,6 +125,12 @@ def capture_ownership_label(capture_mode: str) -> str:
     return 'contract-fallback' if capture_mode == 'source-contract-fallback' else 'non-native-observed'
 
 
+def scenario_ownership_label(route: dict[str, object], capture_mode: str) -> str:
+    if route.get('route') == 'browse-oneshot' and capture_mode == 'source-contract-fallback':
+        return 'readlist-detail-native-owned'
+    return capture_ownership_label(capture_mode)
+
+
 def auth_header(username: str, password: str) -> str:
     token = base64.b64encode(f'{username}:{password}'.encode('utf-8')).decode('ascii')
     return f'Basic {token}'
@@ -327,12 +333,12 @@ def fallback_navigation_scenario(route: dict[str, object], source_texts: dict[st
         if not signals['readlistContextNavigationFound']:
             failures.append('source fallback could not prove oneshot route renders readlist context navigation selector')
         if not (list_request_found and next_request_found and previous_request_found):
-            failures.append('source fallback could not prove oneshot route triggers readlist-scoped fallback requests')
+            failures.append('source fallback could not prove oneshot route triggers readlist-scoped owned requests')
         scenario_result = {
             'type': scenario['type'],
             'captureMode': capture_mode,
             'readlistContextPath': scenario['readlistContextPath'],
-            'observedOwnershipLabel': capture_ownership_label(capture_mode),
+            'observedOwnershipLabel': scenario_ownership_label(route, capture_mode),
             'contextParseFound': context_parse_found,
             'contextNameRequestFound': context_name_request_found,
             'readlistBooksRequestFound': list_request_found,

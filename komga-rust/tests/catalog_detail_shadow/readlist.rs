@@ -48,10 +48,53 @@ async fn readlist_books_library_id_variant_remains_non_native() {
     ));
 }
 
-#[tokio::test]
-async fn readlist_books_runtime_ownership_stays_narrow() {
+pub(super) async fn phase6_regression_phase4_phase5_routes_remain_stable() {
     let app = komga_rust::app::build_router();
     let token = session_token_for_basic_auth(&app, USER_BASIC_AUTH).await;
+    let restricted_token = session_token_for_basic_auth(&app, RESTRICTED_BASIC_AUTH).await;
+
+    let oneshot_bootstrap = post_response(
+        &app,
+        &token,
+        "/api/v1/books/list",
+        r#"{"condition":{"type":"SeriesId","operator":"is","value":"series-oneshot"}}"#,
+        Some(NATIVE_OWNERSHIP_MARKER),
+    )
+    .await;
+    assert_eq!(oneshot_bootstrap.status(), StatusCode::OK);
+    assert_eq!(
+        oneshot_bootstrap
+            .headers()
+            .get(SEARCH_OWNERSHIP_HEADER)
+            .and_then(|value| value.to_str().ok()),
+        Some(NATIVE_OWNERSHIP_MARKER),
+    );
+    let oneshot_bootstrap_json = response_json(oneshot_bootstrap).await;
+    assert_eq!(page_content_ids(&oneshot_bootstrap_json), vec!["book-oneshot"]);
+    assert!(oneshot_bootstrap_json.get("_compat").is_none());
+
+    let readlist_detail = get_response(&app, &token, "/api/v1/readlists/readlist-2").await;
+    assert_eq!(readlist_detail.status(), StatusCode::OK);
+    assert_native_owned(&readlist_detail, "readlist detail sibling");
+    let readlist_detail_json = response_json(readlist_detail).await;
+    assert_eq!(readlist_detail_json["id"], "readlist-2");
+    assert_eq!(string_array(&readlist_detail_json["bookIds"]), vec!["book-1", "book-2"]);
+    assert_eq!(readlist_detail_json["filtered"], false);
+
+    let restricted_readlist_detail =
+        get_response(&app, &restricted_token, "/api/v1/readlists/readlist-2").await;
+    assert_eq!(restricted_readlist_detail.status(), StatusCode::OK);
+    assert_native_owned(
+        &restricted_readlist_detail,
+        "restricted readlist detail sibling",
+    );
+    let restricted_readlist_detail_json = response_json(restricted_readlist_detail).await;
+    assert_eq!(restricted_readlist_detail_json["id"], "readlist-2");
+    assert_eq!(
+        string_array(&restricted_readlist_detail_json["bookIds"]),
+        vec!["book-1"],
+    );
+    assert_eq!(restricted_readlist_detail_json["filtered"], true);
 
     let previous_response = get_response(
         &app,
@@ -127,4 +170,9 @@ async fn readlist_books_runtime_ownership_stays_narrow() {
         library_scoped_json["_compat"]["shape"],
         "UnsupportedBookFilter(LibraryId)",
     );
+}
+
+#[tokio::test]
+async fn readlist_books_runtime_ownership_stays_narrow() {
+    phase6_regression_phase4_phase5_routes_remain_stable().await;
 }

@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use komga_application::discovery::{
     BookDetailQuery, BookReadlistsQuery, BookSiblingQuery, DiscoveryQueryRepository,
     NativeBooksLatestQuery, NativeBooksListQuery, NativeReadListBooksQuery, NativeSeriesListQuery,
-    SeriesCollectionsQuery, SeriesDetailQuery,
+    ReadListDetailQuery, SeriesCollectionsQuery, SeriesDetailQuery,
 };
 use komga_domain::discovery::{
     BookDetailReadModel, BookReadModel, BookResourceReadModel, CollectionReadModel, DiscoveryError,
@@ -546,6 +546,15 @@ impl DiscoveryQueryRepository for SqliteDiscoveryAdapter {
     ) -> Result<Vec<ReadListReadModel>, DiscoveryError> {
         let pool = self.ready_pool().await?;
         readlists::list_book_readlists_sqlx(pool, context, &query).await
+    }
+
+    async fn get_readlist_detail(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: ReadListDetailQuery,
+    ) -> Result<Option<ReadListReadModel>, DiscoveryError> {
+        let pool = self.ready_pool().await?;
+        readlists::get_readlist_detail_sqlx(pool, context, &query).await
     }
 
     async fn list_series_collections(
