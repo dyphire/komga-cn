@@ -2,7 +2,8 @@ use std::cell::RefCell;
 
 use komga_application::discovery::{
     BookDetailQuery, BookReadlistsQuery, BookSiblingQuery, DiscoveryQueryRepository,
-    NativeBooksLatestQuery, NativeBooksListQuery, NativeSeriesListQuery,
+    NativeBooksLatestQuery, NativeBooksListQuery, NativeReadListBooksQuery,
+    NativeSeriesListQuery,
     SeriesCollectionsQuery, SeriesDetailQuery,
 };
 use komga_domain::discovery::{
@@ -664,6 +665,24 @@ impl SqliteDiscoveryAdapter {
             )
             .expect("read progress insert should succeed");
     }
+
+    pub fn get_readlist_book_sibling_previous(
+        &self,
+        context: &DiscoveryQueryContext,
+        readlist_id: &str,
+        book_id: &str,
+    ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
+        get_readlist_book_sibling(&self.connection, context, readlist_id, book_id, false)
+    }
+
+    pub fn get_readlist_book_sibling_next(
+        &self,
+        context: &DiscoveryQueryContext,
+        readlist_id: &str,
+        book_id: &str,
+    ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
+        get_readlist_book_sibling(&self.connection, context, readlist_id, book_id, true)
+    }
 }
 
 impl DiscoveryQueryRepository for SqliteDiscoveryAdapter {
@@ -917,6 +936,14 @@ impl DiscoveryQueryRepository for SqliteDiscoveryAdapter {
             query.unpaged,
             BookOrdering::LastModifiedDesc,
         )
+    }
+
+    fn list_readlist_books(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: NativeReadListBooksQuery,
+    ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
+        list_readlist_books(&self.connection, context, &query.readlist_id)
     }
 
     fn resolve_series_resource(
@@ -1323,6 +1350,39 @@ fn get_book_sibling(
     fetch_book_detail(connection, context, sibling_id)
 }
 
+fn get_readlist_book_sibling(
+    connection: &RefCell<Connection>,
+    context: &DiscoveryQueryContext,
+    readlist_id: &str,
+    book_id: &str,
+    next: bool,
+) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
+    let page = list_readlist_books(connection, context, readlist_id)?;
+    let visible_book_ids = page
+        .content
+        .iter()
+        .map(|it| it.id.as_str())
+        .collect::<Vec<_>>();
+
+    let Some(current_index) = visible_book_ids.iter().position(|id| *id == book_id) else {
+        return Ok(None);
+    };
+
+    let sibling_id = if next {
+        visible_book_ids.get(current_index + 1)
+    } else if current_index == 0 {
+        None
+    } else {
+        visible_book_ids.get(current_index - 1)
+    };
+
+    let Some(sibling_id) = sibling_id else {
+        return Ok(None);
+    };
+
+    fetch_book_detail(connection, context, (*sibling_id).to_string())
+}
+
 fn fetch_book_detail(
     connection: &RefCell<Connection>,
     context: &DiscoveryQueryContext,
@@ -1580,6 +1640,121 @@ fn visible_readlist_book_ids(
         book_ids.push(row.map_err(|err| DiscoveryError::Persistence(err.to_string()))?);
     }
     Ok(book_ids)
+}
+
+fn list_readlist_books(
+    connection: &RefCell<Connection>,
+    context: &DiscoveryQueryContext,
+    readlist_id: &str,
+) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
+    let allowed = effective_library_ids(context, None);
+    if allowed.as_ref().is_some_and(Vec::is_empty) {
+        return Ok(PageEnvelope::from_slice(vec![], 0, 1, 0));
+    }
+
+    let connection = connection.borrow();
+
+    let ordered = connection
+        .query_row(
+            "SELECT ordered FROM readlists WHERE id = ?",
+            params![readlist_id],
+            |row| row.get::<_, bool>(0),
+        )
+        .ok();
+    let Some(ordered) = ordered else {
+        return Ok(PageEnvelope::from_slice(vec![], 0, 1, 0));
+    };
+
+    let filters = query_filters(
+        "b.library_id",
+        allowed.as_ref(),
+        None,
+        None,
+        context.restrictions.as_ref(),
+        "s",
+    );
+    let mut where_clause = filters.where_clause;
+    let mut params = filters.params;
+    append_clause("rlb.readlist_id = ?", &mut where_clause);
+    params.push(SqlValue::Text(readlist_id.to_string()));
+
+    let count_sql = format!(
+        "SELECT COUNT(DISTINCT b.id) \
+         FROM readlist_books rlb \
+         JOIN books b ON b.id = rlb.book_id \
+         JOIN series s ON s.id = b.series_id{}",
+        where_clause
+    );
+
+    let select_sql = format!(
+        "SELECT \
+            b.id, b.series_id, b.library_id, b.title, b.url, b.created, b.last_modified, b.file_last_modified, \
+            b.size_bytes, b.media_status, b.media_type, b.media_pages_count, b.metadata_release_date, b.deleted, b.oneshot, \
+            s.title, COALESCE(GROUP_CONCAT(DISTINCT sl.label), ''), MIN(rlb.position) \
+         FROM readlist_books rlb \
+         JOIN books b ON b.id = rlb.book_id \
+         JOIN series s ON s.id = b.series_id \
+         LEFT JOIN series_labels sl ON sl.series_id = s.id{} \
+         GROUP BY b.id, b.series_id, b.library_id, b.title, b.url, b.created, b.last_modified, b.file_last_modified, \
+             b.size_bytes, b.media_status, b.media_type, b.media_pages_count, b.metadata_release_date, b.deleted, b.oneshot, s.title \
+         ORDER BY {}",
+        where_clause,
+        readlist_book_order_sql(ordered),
+    );
+
+    let total_elements = connection
+        .query_row(&count_sql, params_from_iter(params.clone()), |row| {
+            row.get::<_, i64>(0)
+        })
+        .map_err(|err| DiscoveryError::Persistence(err.to_string()))?
+        as usize;
+
+    let mut stmt = connection
+        .prepare(&select_sql)
+        .map_err(|err| DiscoveryError::Persistence(err.to_string()))?;
+    let rows = stmt
+        .query_map(params_from_iter(params), |row| {
+            Ok(BookReadModel {
+                id: row.get(0)?,
+                series_id: row.get(1)?,
+                library_id: row.get(2)?,
+                title: row.get(3)?,
+                url: row.get(4)?,
+                created: row.get(5)?,
+                last_modified: row.get(6)?,
+                file_last_modified: row.get(7)?,
+                size_bytes: row.get(8)?,
+                media_status: row.get(9)?,
+                media_type: row.get(10)?,
+                media_pages_count: row.get(11)?,
+                metadata_release_date: row.get(12)?,
+                deleted: row.get(13)?,
+                oneshot: row.get(14)?,
+                series_title: row.get(15)?,
+                labels: parse_labels(&row.get::<_, String>(16)?),
+            })
+        })
+        .map_err(|err| DiscoveryError::Persistence(err.to_string()))?;
+
+    let mut content = vec![];
+    for row in rows {
+        content.push(row.map_err(|err| DiscoveryError::Persistence(err.to_string()))?);
+    }
+
+    Ok(PageEnvelope::from_slice(
+        content,
+        0,
+        total_elements.max(1),
+        total_elements,
+    ))
+}
+
+fn readlist_book_order_sql(ordered: bool) -> &'static str {
+    if ordered {
+        "MIN(rlb.position) ASC"
+    } else {
+        "b.metadata_release_date ASC, b.title COLLATE NOCASE ASC"
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

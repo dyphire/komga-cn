@@ -77,8 +77,10 @@ timestamp = datetime.now(timezone.utc).isoformat()
 
 PHASE2_DISCOVERY_LABEL = "phase2-catalog-discovery"
 PHASE3_DETAIL_READ_LABEL = "phase3-detail-read"
+PHASE4_READLIST_CONTEXT_READ_LABEL = "phase4-readlist-context-read"
 is_phase2_discovery = run_label == PHASE2_DISCOVERY_LABEL
 is_phase3_detail_read = run_label == PHASE3_DETAIL_READ_LABEL
+is_phase4_readlist_context_read = run_label == PHASE4_READLIST_CONTEXT_READ_LABEL
 discovery_supported_scope = [
     "GET /api/v1/libraries",
     "POST /api/v1/series/list",
@@ -108,6 +110,24 @@ phase3_detail_out_of_slice = [
     "oneshot closure",
     "read-progress write/progression routes",
     "write-path and mutation claims",
+]
+phase4_readlist_context_supported_scope = [
+    "GET /api/v1/readlists/{readlistId}/books?unpaged=true",
+    "GET /api/v1/readlists/{readlistId}/books/{bookId}/previous",
+    "GET /api/v1/readlists/{readlistId}/books/{bookId}/next",
+]
+phase4_readlist_context_out_of_slice = [
+    "paged readlist books variants",
+    "library_id readlist-context variants",
+    "readlist list/detail routes",
+    "media delivery (/thumbnail, /file, /pages*, /manifest, /resource/*, /positions)",
+    "read-progress write/progression routes",
+    "oneshot closure",
+    "reader handoff and download branches",
+    "SSE/live-refresh parity",
+    "collection/readlist removals",
+    "admin edit/delete and broader write-path claims",
+    "full cutover/direct-serving approval",
 ]
 
 
@@ -321,6 +341,165 @@ def eval_phase3_browser_smoke(summary_path: Path) -> tuple[bool, list[str], list
         return False, [f"Phase3 direct-route browser smoke regressions: {'; '.join(failures)}"], []
 
     details.append("Phase3 browser smoke proves direct-browse detail-read route readiness without over-claiming richer capture")
+    return True, details, []
+
+
+def eval_phase4_browser_smoke(
+    summary_path: Path,
+    browse_readlist_path: Path,
+    browse_book_path: Path,
+) -> tuple[bool, list[str], list[str]]:
+    ok_summary, payload, error = read_json_file(summary_path)
+    if not ok_summary:
+        return False, [error], []
+
+    ok_readlist, browse_readlist_payload, readlist_error = read_json_file(browse_readlist_path)
+    if not ok_readlist:
+        return False, [readlist_error], []
+
+    ok_book, browse_book_payload, book_error = read_json_file(browse_book_path)
+    if not ok_book:
+        return False, [book_error], []
+
+    if not isinstance(payload, list):
+        return False, [f"Phase4 browser summary must be a JSON array: {rel(summary_path)}"], []
+
+    rows = payload
+    by_route = {row.get("route"): row for row in rows if isinstance(row, dict)}
+    required_routes = ["browse-readlist", "browse-book"]
+    missing_routes = [route for route in required_routes if route not in by_route]
+    if missing_routes:
+        return False, [f"Missing phase4 readlist-context browser routes in summary: {', '.join(missing_routes)}"], []
+
+    details: list[str] = []
+    failures: list[str] = []
+
+    route_rows = {
+        "browse-readlist": browse_readlist_payload,
+        "browse-book": browse_book_payload,
+    }
+    expected_route_shapes = {
+        "browse-readlist": {
+            "signals": [
+                "rootFound",
+                "detailMetadataVisible",
+                "itemBrowserFound",
+                "entryBookLinkFound",
+                "entryBookContextRetained",
+                "contextBannerVisible",
+                "returnedToReadlist",
+            ],
+            "scenario": [
+                "contextPropagationFound",
+                "bookLinkQueryFound",
+                "contextEnumFound",
+            ],
+            "owned_labels": [],
+        },
+        "browse-book": {
+            "signals": [
+                "rootFound",
+                "detailMetadataVisible",
+                "readlistsPanelFound",
+                "siblingNavigationFound",
+                "initialContextRetained",
+                "initialPreviousBoundary",
+                "initialNextWithinReadlist",
+                "readListNameVisible",
+                "nextNavigationRetainedContext",
+                "previousNavigationRetainedContext",
+                "nextThenPreviousLoopClosed",
+            ],
+            "scenario": [
+                "contextParseFound",
+                "readlistListRequestFound",
+                "readlistNextRequestFound",
+                "readlistPreviousRequestFound",
+            ],
+            "owned_labels": [
+                "readlist-books-unpaged",
+                "readlist-book-next",
+                "readlist-book-previous",
+            ],
+        },
+    }
+
+    for route, expectations in expected_route_shapes.items():
+        summary_row = by_route[route]
+        detail_row = route_rows[route]
+
+        if not isinstance(detail_row, dict):
+            failures.append(f"{route}: route artifact is not a JSON object")
+            continue
+
+        if summary_row != detail_row:
+            failures.append(f"{route}: summary row does not exactly match {rel(browse_readlist_path if route == 'browse-readlist' else browse_book_path)}")
+            continue
+
+        if not bool(summary_row.get("pass")):
+            err = summary_row.get("error") or "route did not pass"
+            failures.append(f"{route}: {err}")
+            continue
+
+        capture_mode = summary_row.get("captureMode")
+        if not capture_mode:
+            failures.append(f"{route}: captureMode is missing")
+        elif capture_mode != "source-contract-fallback":
+            details.append(f"{route} captureMode={capture_mode}")
+        else:
+            details.append(f"{route} captureMode=source-contract-fallback (accepted in this environment)")
+
+        signals = summary_row.get("signals")
+        if not isinstance(signals, dict):
+            failures.append(f"{route}: signals object is missing")
+        else:
+            for signal in expectations["signals"]:
+                if not bool(signals.get(signal)):
+                    failures.append(f"{route}: required signal {signal}=true not observed")
+
+        scenario = summary_row.get("scenario")
+        if not isinstance(scenario, dict):
+            failures.append(f"{route}: scenario object is missing")
+        else:
+            for signal in expectations["scenario"]:
+                if not bool(scenario.get(signal)):
+                    failures.append(f"{route}: required scenario flag {signal}=true not observed")
+
+        expected_requests = summary_row.get("expectedOwnedRequests")
+        if not isinstance(expected_requests, list):
+            failures.append(f"{route}: expectedOwnedRequests array is missing")
+            continue
+
+        if route == "browse-readlist":
+            if expected_requests:
+                failures.append("browse-readlist: expectedOwnedRequests must stay empty because ownership is proven from readlist entry into browse-book")
+            else:
+                details.append("browse-readlist keeps entry/context retention explicit without over-claiming extra owned requests")
+            continue
+
+        by_label = {
+            item.get("label"): item
+            for item in expected_requests
+            if isinstance(item, dict) and "label" in item
+        }
+        missing_labels = [label for label in expectations["owned_labels"] if label not in by_label]
+        if missing_labels:
+            failures.append(f"{route}: missing expectedOwnedRequests labels {', '.join(missing_labels)}")
+            continue
+
+        failed_labels = [label for label in expectations["owned_labels"] if not bool(by_label[label].get("pass"))]
+        if failed_labels:
+            failures.append(f"{route}: expectedOwnedRequests failed for {', '.join(failed_labels)}")
+            continue
+
+        details.append(
+            "browse-book proves exactly the three owned phase4 requests: readlist-books-unpaged, readlist-book-next, readlist-book-previous"
+        )
+
+    if failures:
+        return False, [f"Phase4 readlist-context browser smoke regressions: {'; '.join(failures)}"], []
+
+    details.append("Phase4 browser smoke proves readlist-origin context retention and the exact three owned readlist-context routes without over-claiming media or writer scope")
     return True, details, []
 
 
@@ -609,6 +788,17 @@ phase3_skipped_base_checks: dict[str, str] = {
     "external_release_credentials": "Skipped for phase3-detail-read: release credentials are not part of direct-browse detail-read readiness.",
 }
 
+phase4_skipped_base_checks: dict[str, str] = {
+    "auth_api_key": "Skipped for phase4-readlist-context-read: API key parity is outside this readlist-context runbook.",
+    "libraries_visibility": "Skipped for phase4-readlist-context-read: discovery libraries parity is not part of this readlist-context slice gate.",
+    "opds": "Skipped for phase4-readlist-context-read: OPDS parity is outside this readlist-context slice gate.",
+    "cache_file_headers": "Skipped for phase4-readlist-context-read: binary metadata/header parity is outside this readlist-context slice gate.",
+    "read_progress": "Skipped for phase4-readlist-context-read: this runbook does not claim read-progress write/progression ownership.",
+    "server_management_browser_smoke": "Skipped for phase4-readlist-context-read: server-management/browser-ops acceptance is outside this readlist-context slice.",
+    "packaging_tray": "Skipped for phase4-readlist-context-read: packaging/tray startup contract is outside this slice gate.",
+    "external_release_credentials": "Skipped for phase4-readlist-context-read: release credentials are not part of readlist-context-read readiness.",
+}
+
 phase3_checks = []
 if is_phase3_detail_read:
     detail_direct_browse_contract = evidence_root / "task-1-contract-matrix" / "direct-browse-contract.txt"
@@ -694,6 +884,101 @@ if is_phase3_detail_read:
 
 checks = checks + phase3_checks
 
+phase4_checks = []
+if is_phase4_readlist_context_read:
+    readlist_context_contract = evidence_root / "task-1-contract-matrix" / "readlist-context-contract.txt"
+    readlist_context_excluded = evidence_root / "task-1-contract-matrix" / "readlist-context-excluded-branches.txt"
+    readlist_books_shadow = evidence_root / "task-4-shadow" / "readlist-books-runtime-ownership.txt"
+    readlist_prev_next_shadow = evidence_root / "task-5-shadow" / "readlist-prev-next-runtime-ownership.txt"
+    readlist_prev_next_legacy = evidence_root / "task-5-shadow" / "readlist-prev-next-legacy-parity.txt"
+    readlist_browser_summary = evidence_root / "task-6-browser-smoke" / "summary.json"
+    readlist_browser_readlist = evidence_root / "task-6-browser-smoke" / "browse-readlist.json"
+    readlist_browser_book = evidence_root / "task-6-browser-smoke" / "browse-book.json"
+
+    phase4_checks = [
+        {
+            "id": "phase4_readlist_context_contract",
+            "category": "phase4-readlist-context-read",
+            "refusal_condition": "Readlist-context contract evidence not proven",
+            "evidence": [readlist_context_contract],
+            "mode": "discovery_markers",
+            "marker_map": {
+                readlist_context_contract: [
+                    "in_scope_readlist_context_shapes_are_frozen",
+                    "GET /api/v1/readlists/{readlistId}/books?unpaged=true",
+                    "GET /api/v1/readlists/{readlistId}/books/{bookId}/previous",
+                    "GET /api/v1/readlists/{readlistId}/books/{bookId}/next",
+                    "Result: PASS",
+                ],
+            },
+            "success_note": "Phase4 readlist-context gate remains fail-closed and allows only the frozen unpaged readlist books + previous/next owned routes.",
+        },
+        {
+            "id": "phase4_readlist_context_shadow",
+            "category": "phase4-readlist-context-read",
+            "refusal_condition": "Readlist-context shadow/runtime ownership evidence not proven",
+            "evidence": [readlist_books_shadow, readlist_prev_next_shadow, readlist_prev_next_legacy],
+            "mode": "discovery_markers",
+            "marker_map": {
+                readlist_books_shadow: [
+                    "readlist_books_runtime_ownership_stays_narrow",
+                    "books?unpaged=true",
+                    "native-rust-owned",
+                    "books?page=0&size=20",
+                    "books?unpaged=true&library_id=1",
+                    "shadow-java-writer",
+                    "_compat.discoveryOwnership = non-native",
+                    "UnsupportedBookFilter(paged)",
+                    "UnsupportedBookFilter(LibraryId)",
+                ],
+                readlist_prev_next_shadow: [
+                    "books/book-1/previous",
+                    "404 without shadow marker",
+                    "books/book-1/next",
+                    "Only readlist-context previous/next were newly wired to native ownership.",
+                ],
+                readlist_prev_next_legacy: [
+                    "ReadListControllerTest",
+                    "boundary, membership, library filtering, and unordered ordering semantics",
+                    "BUILD SUCCESSFUL",
+                ],
+            },
+            "success_note": "Phase4 shadow evidence proves native ownership stays narrow: unpaged readlist books plus readlist previous/next only, while boundary 404s stay native-owned and excluded shapes remain shadow-java-writer.",
+        },
+        {
+            "id": "phase4_readlist_context_browser",
+            "category": "phase4-readlist-context-read",
+            "refusal_condition": "Readlist-context browser smoke not proven",
+            "evidence": [readlist_browser_summary, readlist_browser_readlist, readlist_browser_book],
+            "mode": "phase4_browser_smoke",
+        },
+        {
+            "id": "phase4_readlist_context_exclusions",
+            "category": "phase4-readlist-context-read",
+            "refusal_condition": "Readlist-context exclusion governance not proven",
+            "evidence": [readlist_context_excluded],
+            "mode": "discovery_markers",
+            "marker_map": {
+                readlist_context_excluded: [
+                    "excluded_readlist_context_and_write_shapes_remain_non_native",
+                    "paged readlist books stay explicit non-native",
+                    "readlist list/detail routes stay explicit non-native",
+                    "library_id variants stay explicit non-native",
+                    "media routes stay explicit non-native",
+                    "read-progress/progression stay explicit non-native",
+                    "oneshot + reader handoff stay explicit non-native",
+                    "SSE stays explicit non-native",
+                    "removal/admin write branches stay explicit non-native",
+                    "Result: PASS",
+                    "shadow-java-writer",
+                ],
+            },
+            "success_note": "Phase4 exclusions stay explicit: paged/library_id/context/list-detail/media/progress/oneshot/reader/SSE/removal/admin-write branches remain non-native.",
+        },
+    ]
+
+checks = checks + phase4_checks
+
 results = []
 refusals = []
 non_blocking = []
@@ -717,6 +1002,14 @@ for check in checks:
             phase3_skipped_base_checks[check["id"]],
             "This label proves direct-browse detail-read readiness only and does not approve whole-cutover/media/write scope.",
         ]
+    elif is_phase4_readlist_context_read and check["id"] in phase4_skipped_base_checks:
+        ok = False
+        status = "skipped"
+        blocking = False
+        messages = [
+            phase4_skipped_base_checks[check["id"]],
+            "This label proves readlist-context-read readiness only and does not approve whole-cutover/media/write scope.",
+        ]
     else:
         if mode == "browser_ops":
             browser_summary = evidence_paths[0]
@@ -726,6 +1019,8 @@ for check in checks:
             messages = browser_msgs + ops_msgs
         elif mode == "phase3_browser_smoke":
             ok, messages, _ = eval_phase3_browser_smoke(evidence_paths[0])
+        elif mode == "phase4_browser_smoke":
+            ok, messages, _ = eval_phase4_browser_smoke(evidence_paths[0], evidence_paths[1], evidence_paths[2])
         elif mode == "task_ownership":
             ok, messages, _ = eval_task_ownership(evidence_paths[0], evidence_paths[1])
         elif mode == "packaging":
@@ -787,6 +1082,13 @@ if is_phase3_detail_read:
         for check in phase3_checks
     ) and shadow_safety_pass and search_task_guardrails
 
+phase4_readlist_context_shadow_pass = False
+if is_phase4_readlist_context_read:
+    phase4_readlist_context_shadow_pass = all(
+        next(r for r in results if r["id"] == check["id"])["status"] == "pass"
+        for check in phase4_checks
+    ) and shadow_safety_pass and search_task_guardrails
+
 if is_phase2_discovery:
     governance = {
         "shadow_mode": {
@@ -843,6 +1145,33 @@ elif is_phase3_detail_read:
         "rollback": {
             "ready": phase3_detail_shadow_pass,
             "trigger": "Any detail-slice regression or out-of-slice expansion forces rollback/no-cutover.",
+        },
+    }
+elif is_phase4_readlist_context_read:
+    governance = {
+        "shadow_mode": {
+            "allowed": shadow_safety_pass,
+            "rule": "Shadow mode must keep Java as stateful writer unless explicitly isolated",
+        },
+        "canary_mode": {
+            "allowed": search_task_guardrails,
+            "rule": "Search/task ownership guardrails remain required, but this phase4 label is not whole-cutover approval.",
+        },
+        "phase4_readlist_context_read_shadow": {
+            "allowed": phase4_readlist_context_shadow_pass,
+            "scope": "Readlist-context read slice is shadow-ready only for unpaged readlist books and readlist previous/next routes.",
+        },
+        "phase4_readlist_context_non_claims": {
+            "allowed": False,
+            "scope": "Refused: paged readlist books, readlist list/detail, library_id variants, media delivery, read-progress writes/progression, oneshot/reader handoff, SSE, removals, and admin/write claims remain out of slice.",
+        },
+        "cutover": {
+            "allowed": False,
+            "scope": "phase4-readlist-context-read is a slice-only runbook; whole cutover/direct-serving remains refused until broader runtime/media/write/release conditions are proven.",
+        },
+        "rollback": {
+            "ready": phase4_readlist_context_shadow_pass,
+            "trigger": "Any readlist-context slice regression or out-of-slice expansion forces rollback/no-cutover.",
         },
     }
 else:
@@ -907,6 +1236,23 @@ elif is_phase3_detail_read:
     }
     if non_blocking:
         summary["non_blocking"] = non_blocking
+elif is_phase4_readlist_context_read:
+    summary["evaluation_scope"] = "phase4-readlist-context-read-shadow"
+    summary["readlist_context_read_slice"] = {
+        "shadow_ready": phase4_readlist_context_shadow_pass,
+        "owned_routes": phase4_readlist_context_supported_scope,
+        "supported_scope": phase4_readlist_context_supported_scope,
+        "excluded_branches": phase4_readlist_context_out_of_slice,
+        "out_of_slice": phase4_readlist_context_out_of_slice,
+        "non_claims": [
+            "This does not claim whole cutover readiness.",
+            "This does not claim paged readlist/list-detail/library_id variant ownership.",
+            "This does not claim media, read-progress/progression, oneshot/reader-handoff, SSE, removal, or broader write-path ownership.",
+        ],
+        "check_ids": [check["id"] for check in phase4_checks],
+    }
+    if non_blocking:
+        summary["non_blocking"] = non_blocking
 
 output_dir.mkdir(parents=True, exist_ok=True)
 summary_latest = output_dir / "summary.json"
@@ -927,6 +1273,9 @@ if is_phase2_discovery:
 elif is_phase3_detail_read:
     lines.append("- Evaluation scope: `phase3-detail-read-shadow`")
     lines.append("- Non-claim: this label records direct-browse detail-read readiness only, not whole cutover/direct-serving/media/write readiness")
+elif is_phase4_readlist_context_read:
+    lines.append("- Evaluation scope: `phase4-readlist-context-read-shadow`")
+    lines.append("- Non-claim: this label records readlist-context-read readiness only, not whole cutover/direct-serving/media/write readiness")
 lines.append("")
 if is_phase2_discovery:
     lines.append("## Discovery Slice Runbook")
@@ -956,6 +1305,24 @@ elif is_phase3_detail_read:
     )
     lines.append(
         "- Browser capture note: `captureMode=source-contract-fallback` is accepted and recorded as honest environment evidence, not richer runtime capture"
+    )
+    lines.append("")
+elif is_phase4_readlist_context_read:
+    lines.append("## Phase4 Readlist-Context-Read Runbook")
+    lines.append("")
+    lines.append(f"- Shadow-ready target: **{'PASS' if phase4_readlist_context_shadow_pass else 'FAIL'}**")
+    lines.append(f"- Owned routes (exactly 3): {', '.join(f'`{item}`' for item in phase4_readlist_context_supported_scope)}")
+    lines.append(
+        "- Slice closure: **ALLOW (slice-only)** — unpaged readlist books + readlist previous/next only"
+    )
+    lines.append(
+        "- Out-of-slice governance: **REFUSE** — paged/list-detail/library_id/media/progress/oneshot/reader-handoff/SSE/removal/admin-write branches stay explicit non-native"
+    )
+    lines.append(
+        f"- Excluded branches still out of scope: {', '.join(f'`{item}`' for item in phase4_readlist_context_out_of_slice)}"
+    )
+    lines.append(
+        "- Whole cutover/direct-serving: **REFUSE** — this label is not a full cutover approval"
     )
     lines.append("")
 lines.append("## Check Results")

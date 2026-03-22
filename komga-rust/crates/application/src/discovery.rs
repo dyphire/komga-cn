@@ -85,6 +85,15 @@ pub struct BookReadlistsQuery {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReadListBooksQuery {
+    pub readlist_id: String,
+    pub page: usize,
+    pub size: usize,
+    pub unpaged: bool,
+    pub library_ids: Option<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeSeriesListQuery {
     pub page: usize,
     pub size: usize,
@@ -133,6 +142,11 @@ pub struct NativeBooksLatestQuery {
     pub library_ids: Option<Vec<String>>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeReadListBooksQuery {
+    pub readlist_id: String,
+}
+
 pub trait DiscoveryQueryRepository {
     fn list_libraries(
         &self,
@@ -155,6 +169,12 @@ pub trait DiscoveryQueryRepository {
         &self,
         context: &DiscoveryQueryContext,
         query: NativeBooksLatestQuery,
+    ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError>;
+
+    fn list_readlist_books(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: NativeReadListBooksQuery,
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError>;
 
     fn resolve_series_resource(
@@ -287,6 +307,35 @@ where
                 size: query.size,
                 unpaged: query.unpaged,
                 library_ids: query.library_ids,
+            },
+        )
+    }
+
+    pub fn list_readlist_books(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: ReadListBooksQuery,
+    ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
+        if !query.unpaged {
+            return Err(DiscoveryError::NonNativeRequestShape(
+                komga_domain::discovery::NonNativeRequestShape::UnsupportedBookFilter(
+                    "paged".to_string(),
+                ),
+            ));
+        }
+
+        if query.library_ids.is_some() {
+            return Err(DiscoveryError::NonNativeRequestShape(
+                komga_domain::discovery::NonNativeRequestShape::UnsupportedBookFilter(
+                    "LibraryId".to_string(),
+                ),
+            ));
+        }
+
+        self.repository.list_readlist_books(
+            context,
+            NativeReadListBooksQuery {
+                readlist_id: query.readlist_id,
             },
         )
     }

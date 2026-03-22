@@ -5,7 +5,8 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use komga_application::discovery::{
     BookDetailQuery, BookReadlistsQuery, BookSiblingQuery, BooksLatestQuery, BooksListQuery,
-    DiscoveryQueries, SeriesCollectionsQuery, SeriesDetailQuery, SeriesListQuery,
+    DiscoveryQueries, DiscoveryQueryRepository, ReadListBooksQuery, SeriesCollectionsQuery, SeriesDetailQuery,
+    SeriesListQuery,
 };
 use komga_domain::discovery::{
     AgeRestrictionKind as DomainAgeRestrictionKind, DiscoveryError,
@@ -683,6 +684,225 @@ pub(super) async fn book_readlists(
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": format!("book readlists query failed: {error:?}") })),
+        )
+            .into_response(),
+    }
+}
+
+pub(super) async fn readlist_books(
+    Extension(profile): Extension<CompatProfile>,
+    Extension(auth_state): Extension<DiscoveryAuthState>,
+    headers: HeaderMap,
+    Path(readlist_id): Path<String>,
+    uri: Uri,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if profile == CompatProfile::JavaLiveLocaldb {
+        let user =
+            resolved_auth_user(&headers).expect("authorized readlist books request should resolve user");
+        let path = uri.path_and_query().map_or(uri.path(), |value| value.as_str());
+        return match content_java_live::fetch_json(user, path, "readlist books").await {
+            Ok(books) => Json(books).into_response(),
+            Err(message) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": message })),
+            )
+                .into_response(),
+        };
+    }
+
+    let query_string = uri.query().unwrap_or_default();
+    let page = query_value(query_string, "page")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
+    let size = query_value(query_string, "size")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(20)
+        .max(1);
+    let unpaged = query_bool(query_string, "unpaged");
+    let library_ids = {
+        let values = query_values(query_string, "library_id")
+            .into_iter()
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        (!values.is_empty()).then_some(values)
+    };
+
+    let context = match auth_state.resolve_query_context(&headers, library_ids.as_deref()) {
+        Some(context) => context,
+        None => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+
+    let mut adapter = SqliteDiscoveryAdapter::default();
+    seed_series_detail_data(&mut adapter);
+
+    let is_admin = context.is_admin;
+    let queries = DiscoveryQueries::new(adapter);
+    let domain_context = to_domain_query_context(context);
+    let query = ReadListBooksQuery {
+        readlist_id: readlist_id.clone(),
+        page,
+        size,
+        unpaged,
+        library_ids,
+    };
+
+    match queries.list_readlist_books(&domain_context, query) {
+        Ok(page) => {
+            let mut response = Json(books_page_payload(page, is_admin, !unpaged)).into_response();
+            mark_native(&mut response);
+            response
+        }
+        Err(DiscoveryError::NonNativeRequestShape(details)) => non_native_readlist_books_response(
+            DiscoveryError::NonNativeRequestShape(details),
+            &queries,
+            &domain_context,
+            &readlist_id,
+            is_admin,
+        ),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("readlist books query failed: {error:?}") })),
+        )
+            .into_response(),
+    }
+}
+
+pub(super) async fn readlist_book_sibling_previous(
+    Extension(profile): Extension<CompatProfile>,
+    Extension(auth_state): Extension<DiscoveryAuthState>,
+    headers: HeaderMap,
+    Path((readlist_id, book_id)): Path<(String, String)>,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if profile == CompatProfile::JavaLiveLocaldb {
+        let user = resolved_auth_user(&headers)
+            .expect("authorized readlist sibling previous request should resolve user");
+        let path = format!("/api/v1/readlists/{readlist_id}/books/{book_id}/previous");
+        return match content_java_live::fetch_json(user, &path, "readlist book previous").await {
+            Ok(book) => Json(book).into_response(),
+            Err(message) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": message })),
+            )
+                .into_response(),
+        };
+    }
+
+    let mut adapter = SqliteDiscoveryAdapter::default();
+    seed_series_detail_data(&mut adapter);
+
+    let Some(resource) = (match adapter.resolve_book_resource(&book_id) {
+        Ok(resource) => resource,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("book resource lookup failed: {error:?}") })),
+            )
+                .into_response();
+        }
+    }) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let detail_context = DetailResourceContext {
+        library_id: Some(resource.library_id.clone()),
+        content: Some(DetailContentContext {
+            age_rating: resource.age_rating,
+            sharing_labels: resource.labels,
+        }),
+    };
+
+    let detail_query_context = match auth_state.resolve_detail_query_context(&headers, &detail_context)
+    {
+        Ok(context) => context,
+        Err(denial) => return detail_access_denial_response(denial),
+    };
+    let is_admin = detail_query_context.is_admin;
+
+    let domain_context = to_domain_query_context(detail_query_context);
+
+    match adapter.get_readlist_book_sibling_previous(&domain_context, &readlist_id, &book_id) {
+        Ok(Some(book)) => Json(book_detail_payload(&book, is_admin)).into_response(),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("readlist book previous query failed: {error:?}") })),
+        )
+            .into_response(),
+    }
+}
+
+pub(super) async fn readlist_book_sibling_next(
+    Extension(profile): Extension<CompatProfile>,
+    Extension(auth_state): Extension<DiscoveryAuthState>,
+    headers: HeaderMap,
+    Path((readlist_id, book_id)): Path<(String, String)>,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if profile == CompatProfile::JavaLiveLocaldb {
+        let user = resolved_auth_user(&headers)
+            .expect("authorized readlist sibling next request should resolve user");
+        let path = format!("/api/v1/readlists/{readlist_id}/books/{book_id}/next");
+        return match content_java_live::fetch_json(user, &path, "readlist book next").await {
+            Ok(book) => Json(book).into_response(),
+            Err(message) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": message })),
+            )
+                .into_response(),
+        };
+    }
+
+    let mut adapter = SqliteDiscoveryAdapter::default();
+    seed_series_detail_data(&mut adapter);
+
+    let Some(resource) = (match adapter.resolve_book_resource(&book_id) {
+        Ok(resource) => resource,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("book resource lookup failed: {error:?}") })),
+            )
+                .into_response();
+        }
+    }) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let detail_context = DetailResourceContext {
+        library_id: Some(resource.library_id.clone()),
+        content: Some(DetailContentContext {
+            age_rating: resource.age_rating,
+            sharing_labels: resource.labels,
+        }),
+    };
+
+    let detail_query_context = match auth_state.resolve_detail_query_context(&headers, &detail_context)
+    {
+        Ok(context) => context,
+        Err(denial) => return detail_access_denial_response(denial),
+    };
+    let is_admin = detail_query_context.is_admin;
+
+    let domain_context = to_domain_query_context(detail_query_context);
+
+    match adapter.get_readlist_book_sibling_next(&domain_context, &readlist_id, &book_id) {
+        Ok(Some(book)) => Json(book_detail_payload(&book, is_admin)).into_response(),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("readlist book next query failed: {error:?}") })),
         )
             .into_response(),
     }
@@ -1509,6 +1729,21 @@ fn non_native_books_list_response(
 
 fn non_native_books_latest_response(error: DiscoveryError, uri: &Uri) -> Response {
     let mut payload = books_latest_json_for_request(CompatProfile::SnapshotAligned, uri);
+    apply_non_native_diagnostics(&mut payload, &error);
+
+    let mut response = Json(payload).into_response();
+    mark_non_native(&mut response);
+    response
+}
+
+fn non_native_readlist_books_response(
+    error: DiscoveryError,
+    queries: &DiscoveryQueries<SqliteDiscoveryAdapter>,
+    domain_context: &DomainDiscoveryQueryContext,
+    readlist_id: &str,
+    is_admin: bool,
+) -> Response {
+    let mut payload = compat_readlist_books_payload(queries, domain_context, readlist_id, is_admin);
     apply_non_native_diagnostics(&mut payload, &error);
 
     let mut response = Json(payload).into_response();
@@ -2540,6 +2775,27 @@ fn books_page_payload(page: PageEnvelope<BookReadModel>, is_admin: bool, paged: 
         "numberOfElements": number_of_elements,
         "empty": number_of_elements == 0
     })
+}
+
+fn compat_readlist_books_payload(
+    queries: &DiscoveryQueries<SqliteDiscoveryAdapter>,
+    domain_context: &DomainDiscoveryQueryContext,
+    readlist_id: &str,
+    is_admin: bool,
+) -> Value {
+    match queries.list_readlist_books(
+        domain_context,
+        ReadListBooksQuery {
+            readlist_id: readlist_id.to_string(),
+            page: 0,
+            size: 20,
+            unpaged: true,
+            library_ids: None,
+        },
+    ) {
+        Ok(page) => books_page_payload(page, is_admin, false),
+        Err(_) => books_page_payload(PageEnvelope::from_slice(Vec::<BookReadModel>::new(), 0, 1, 0), is_admin, false),
+    }
 }
 
 fn books_latest_json_for_request(profile: CompatProfile, uri: &Uri) -> Value {

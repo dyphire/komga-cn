@@ -150,6 +150,18 @@ pub(super) fn build_router(config: &RuntimeConfig) -> Router {
             "/api/v1/books/{book_id}/readlists",
             get(content::book_readlists),
         )
+        .route(
+            "/api/v1/readlists/{readlist_id}/books",
+            get(content::readlist_books),
+        )
+        .route(
+            "/api/v1/readlists/{readlist_id}/books/{book_id}/previous",
+            get(content::readlist_book_sibling_previous),
+        )
+        .route(
+            "/api/v1/readlists/{readlist_id}/books/{book_id}/next",
+            get(content::readlist_book_sibling_next),
+        )
         .route("/api/v1/books/{book_id}/pages", get(content::book_pages))
         .route(
             "/api/v1/books/{book_id}/pages/{page_number}",

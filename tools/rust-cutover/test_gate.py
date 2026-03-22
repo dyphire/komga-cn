@@ -92,6 +92,68 @@ def build_phase3_browser_row(*, route: str, capture_mode: str = 'source-contract
     raise AssertionError(f'Unsupported phase3 browser route fixture: {route}')
 
 
+def build_phase4_browser_row(*, route: str, capture_mode: str = 'source-contract-fallback') -> dict[str, object]:
+    if route == 'browse-readlist':
+        return {
+            'route': 'browse-readlist',
+            'pass': True,
+            'captureMode': capture_mode,
+            'signals': {
+                'rootFound': True,
+                'detailMetadataVisible': True,
+                'itemBrowserFound': True,
+                'entryBookLinkFound': True,
+                'entryBookContextRetained': True,
+                'contextBannerVisible': True,
+                'returnedToReadlist': True,
+            },
+            'scenario': {
+                'type': 'readlist-origin-entry',
+                'captureMode': capture_mode,
+                'contextPropagationFound': True,
+                'bookLinkQueryFound': True,
+                'contextEnumFound': True,
+            },
+            'expectedOwnedRequests': [],
+        }
+
+    if route == 'browse-book':
+        return {
+            'route': 'browse-book',
+            'pass': True,
+            'captureMode': capture_mode,
+            'signals': {
+                'rootFound': True,
+                'detailMetadataVisible': True,
+                'readlistsPanelFound': True,
+                'siblingNavigationFound': True,
+                'initialContextRetained': True,
+                'initialPreviousBoundary': True,
+                'initialNextWithinReadlist': True,
+                'readListNameVisible': True,
+                'nextNavigationRetainedContext': True,
+                'previousNavigationRetainedContext': True,
+                'nextThenPreviousLoopClosed': True,
+            },
+            'scenario': {
+                'type': 'readlist-sibling-navigation',
+                'captureMode': capture_mode,
+                'contextParseFound': True,
+                'readlistListRequestFound': True,
+                'readlistNextRequestFound': True,
+                'readlistPreviousRequestFound': True,
+                'expectedReadlistNextBookId': 'book-2',
+            },
+            'expectedOwnedRequests': [
+                {'label': 'readlist-books-unpaged', 'pass': True},
+                {'label': 'readlist-book-next', 'pass': True},
+                {'label': 'readlist-book-previous', 'pass': True},
+            ],
+        }
+
+    raise AssertionError(f'Unsupported phase4 browser route fixture: {route}')
+
+
 def build_admin_queue_payload(*, status: str, can_claim_admin_queue_parity: bool) -> dict[str, object]:
     return {
         'task': 'T13 admin task endpoint parity remains executable',
@@ -186,6 +248,96 @@ def seed_phase3_detail_evidence(root: Path, *, include_browse_book: bool = True)
         summary_rows.append(book_row)
 
     write_json(root / 'task-9-browser-smoke/summary.json', summary_rows)
+
+
+def seed_phase4_readlist_context_evidence(
+    root: Path,
+    *,
+    include_exclusions: bool = True,
+    include_shadow: bool = True,
+    include_browser: bool = True,
+) -> None:
+    write_text(
+        root / 'task-1-contract-matrix/readlist-context-contract.txt',
+        '\n'.join([
+            'Task: T1 readlist-context contract freeze',
+            'Scenario: Phase 4 readlist-context contract is frozen',
+            'Command:',
+            '  cargo test --manifest-path komga-rust/Cargo.toml --test catalog_detail_contract in_scope_readlist_context_shapes_are_frozen -- --exact --nocapture',
+            'Owned route matrix:',
+            '  - GET /api/v1/readlists/{readlistId}/books?unpaged=true',
+            '  - GET /api/v1/readlists/{readlistId}/books/{bookId}/previous',
+            '  - GET /api/v1/readlists/{readlistId}/books/{bookId}/next',
+            'in_scope_readlist_context_shapes_are_frozen',
+            'Result: PASS',
+        ]),
+    )
+
+    if include_exclusions:
+        write_text(
+            root / 'task-1-contract-matrix/readlist-context-excluded-branches.txt',
+            '\n'.join([
+                'Task: T1 readlist-context exclusions freeze',
+                'Scenario: Readlist-context excluded branches still emit explicit non-native markers',
+                'Command:',
+                '  cargo test --manifest-path komga-rust/Cargo.toml --test catalog_detail_contract excluded_readlist_context_and_write_shapes_remain_non_native -- --exact --nocapture',
+                'excluded_readlist_context_and_write_shapes_remain_non_native',
+                'paged readlist books stay explicit non-native',
+                'readlist list/detail routes stay explicit non-native',
+                'library_id variants stay explicit non-native',
+                'media routes stay explicit non-native',
+                'read-progress/progression stay explicit non-native',
+                'oneshot + reader handoff stay explicit non-native',
+                'SSE stays explicit non-native',
+                'removal/admin write branches stay explicit non-native',
+                'Result: PASS',
+            'shadow-java-writer',
+        ]),
+    )
+
+    if include_shadow:
+        write_text(
+            root / 'task-4-shadow/readlist-books-runtime-ownership.txt',
+            '\n'.join([
+                'Task 4 shadow evidence: readlist books runtime ownership',
+                'readlist_books_runtime_ownership_stays_narrow',
+                '/api/v1/readlists/readlist-2/books?unpaged=true => native-rust-owned',
+                '/api/v1/readlists/readlist-2/books?page=0&size=20 => shadow-java-writer',
+                '/api/v1/readlists/readlist-2/books?unpaged=true&library_id=1 => shadow-java-writer',
+                '_compat.discoveryOwnership = non-native',
+                'UnsupportedBookFilter(paged)',
+                'UnsupportedBookFilter(LibraryId)',
+                'Result: PASS',
+            ]),
+        )
+        write_text(
+            root / 'task-5-shadow/readlist-prev-next-runtime-ownership.txt',
+            '\n'.join([
+                'Task 5 shadow evidence: readlist previous/next runtime ownership',
+                '/api/v1/readlists/readlist-2/books/book-1/previous => 404 without shadow marker',
+                '/api/v1/readlists/readlist-2/books/book-1/next => 200 without _compat',
+                'Only readlist-context previous/next were newly wired to native ownership.',
+                'Result: PASS',
+            ]),
+        )
+        write_text(
+            root / 'task-5-shadow/readlist-prev-next-legacy-parity.txt',
+            '\n'.join([
+                'Task 5 JVM parity evidence: readlist previous/next legacy controller behavior',
+                'ReadListControllerTest',
+                'boundary, membership, library filtering, and unordered ordering semantics',
+                'BUILD SUCCESSFUL',
+                'Result: PASS',
+            ]),
+        )
+
+    if include_browser:
+        browse_readlist_row = build_phase4_browser_row(route='browse-readlist')
+        browse_book_row = build_phase4_browser_row(route='browse-book')
+
+        write_json(root / 'task-6-browser-smoke/browse-readlist.json', browse_readlist_row)
+        write_json(root / 'task-6-browser-smoke/browse-book.json', browse_book_row)
+        write_json(root / 'task-6-browser-smoke/summary.json', [browse_readlist_row, browse_book_row])
 
 
 def run_gate(evidence_root: Path, output_dir: Path, *, label: str) -> subprocess.CompletedProcess[str]:
@@ -351,6 +503,174 @@ class GateRegressionTests(unittest.TestCase):
             summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
             self.assertEqual(summary['overall'], 'fail')
             failing_check = next(item for item in summary['checks'] if item['id'] == 'phase3_detail_parity')
+            self.assertEqual(failing_check['status'], 'fail')
+            self.assertTrue(any('Missing evidence file' in detail for detail in failing_check['details']))
+
+    def test_phase4_readlist_context_label_passes_with_slice_evidence_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            evidence_root = temp_path / 'evidence'
+            output_dir = temp_path / 'output'
+            seed_common_evidence(
+                evidence_root,
+                neutral_transcripts=True,
+                admin_queue_payload=build_admin_queue_payload(
+                    status='action-exercised-parity-ok',
+                    can_claim_admin_queue_parity=True,
+                ),
+            )
+            seed_phase4_readlist_context_evidence(evidence_root, include_exclusions=True)
+
+            result = run_gate(evidence_root, output_dir, label='phase4-readlist-context-read')
+
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=f'gate unexpectedly failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}',
+            )
+
+            summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
+            self.assertEqual(summary['overall'], 'pass')
+            self.assertEqual(summary.get('evaluation_scope'), 'phase4-readlist-context-read-shadow')
+            self.assertFalse(summary['governance']['cutover']['allowed'])
+            self.assertFalse(summary['governance']['phase4_readlist_context_non_claims']['allowed'])
+            self.assertEqual(
+                summary['readlist_context_read_slice']['owned_routes'],
+                [
+                    'GET /api/v1/readlists/{readlistId}/books?unpaged=true',
+                    'GET /api/v1/readlists/{readlistId}/books/{bookId}/previous',
+                    'GET /api/v1/readlists/{readlistId}/books/{bookId}/next',
+                ],
+            )
+            self.assertEqual(
+                summary['readlist_context_read_slice']['out_of_slice'],
+                [
+                    'paged readlist books variants',
+                    'library_id readlist-context variants',
+                    'readlist list/detail routes',
+                    'media delivery (/thumbnail, /file, /pages*, /manifest, /resource/*, /positions)',
+                    'read-progress write/progression routes',
+                    'oneshot closure',
+                    'reader handoff and download branches',
+                    'SSE/live-refresh parity',
+                    'collection/readlist removals',
+                    'admin edit/delete and broader write-path claims',
+                    'full cutover/direct-serving approval',
+                ],
+            )
+
+            contract_check = next(item for item in summary['checks'] if item['id'] == 'phase4_readlist_context_contract')
+            self.assertEqual(contract_check['status'], 'pass')
+            self.assertTrue(any('readlist-context' in detail for detail in contract_check['details']))
+
+            shadow_check = next(item for item in summary['checks'] if item['id'] == 'phase4_readlist_context_shadow')
+            self.assertEqual(shadow_check['status'], 'pass')
+            self.assertTrue(any('native ownership' in detail.lower() for detail in shadow_check['details']))
+
+            browser_check = next(item for item in summary['checks'] if item['id'] == 'phase4_readlist_context_browser')
+            self.assertEqual(browser_check['status'], 'pass')
+            self.assertTrue(any('source-contract-fallback' in detail for detail in browser_check['details']))
+
+            report = (output_dir / 'report.md').read_text(encoding='utf-8')
+            self.assertIn('Owned routes (exactly 3)', report)
+            self.assertIn('`GET /api/v1/readlists/{readlistId}/books?unpaged=true`', report)
+            self.assertIn('`GET /api/v1/readlists/{readlistId}/books/{bookId}/previous`', report)
+            self.assertIn('`GET /api/v1/readlists/{readlistId}/books/{bookId}/next`', report)
+            self.assertIn('Excluded branches still out of scope', report)
+            self.assertIn('full cutover/direct-serving approval', report)
+
+    def test_phase4_readlist_context_label_fails_closed_when_exclusion_artifact_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            evidence_root = temp_path / 'evidence'
+            output_dir = temp_path / 'output'
+            seed_common_evidence(
+                evidence_root,
+                neutral_transcripts=True,
+                admin_queue_payload=build_admin_queue_payload(
+                    status='action-exercised-parity-ok',
+                    can_claim_admin_queue_parity=True,
+                ),
+            )
+            seed_phase4_readlist_context_evidence(evidence_root, include_exclusions=False)
+
+            result = run_gate(evidence_root, output_dir, label='phase4-readlist-context-read')
+
+            self.assertEqual(
+                result.returncode,
+                1,
+                msg=f'gate unexpectedly passed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}',
+            )
+
+            summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
+            self.assertEqual(summary['overall'], 'fail')
+            failing_check = next(item for item in summary['checks'] if item['id'] == 'phase4_readlist_context_exclusions')
+            self.assertEqual(failing_check['status'], 'fail')
+            self.assertTrue(any('Missing evidence file' in detail for detail in failing_check['details']))
+
+    def test_phase4_readlist_context_label_fails_closed_when_shadow_artifact_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            evidence_root = temp_path / 'evidence'
+            output_dir = temp_path / 'output'
+            seed_common_evidence(
+                evidence_root,
+                neutral_transcripts=True,
+                admin_queue_payload=build_admin_queue_payload(
+                    status='action-exercised-parity-ok',
+                    can_claim_admin_queue_parity=True,
+                ),
+            )
+            seed_phase4_readlist_context_evidence(
+                evidence_root,
+                include_exclusions=True,
+                include_shadow=False,
+            )
+
+            result = run_gate(evidence_root, output_dir, label='phase4-readlist-context-read')
+
+            self.assertEqual(
+                result.returncode,
+                1,
+                msg=f'gate unexpectedly passed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}',
+            )
+
+            summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
+            self.assertEqual(summary['overall'], 'fail')
+            failing_check = next(item for item in summary['checks'] if item['id'] == 'phase4_readlist_context_shadow')
+            self.assertEqual(failing_check['status'], 'fail')
+            self.assertTrue(any('Missing evidence file' in detail for detail in failing_check['details']))
+
+    def test_phase4_readlist_context_label_fails_closed_when_browser_artifact_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            evidence_root = temp_path / 'evidence'
+            output_dir = temp_path / 'output'
+            seed_common_evidence(
+                evidence_root,
+                neutral_transcripts=True,
+                admin_queue_payload=build_admin_queue_payload(
+                    status='action-exercised-parity-ok',
+                    can_claim_admin_queue_parity=True,
+                ),
+            )
+            seed_phase4_readlist_context_evidence(
+                evidence_root,
+                include_exclusions=True,
+                include_browser=False,
+            )
+
+            result = run_gate(evidence_root, output_dir, label='phase4-readlist-context-read')
+
+            self.assertEqual(
+                result.returncode,
+                1,
+                msg=f'gate unexpectedly passed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}',
+            )
+
+            summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
+            self.assertEqual(summary['overall'], 'fail')
+            failing_check = next(item for item in summary['checks'] if item['id'] == 'phase4_readlist_context_browser')
             self.assertEqual(failing_check['status'], 'fail')
             self.assertTrue(any('Missing evidence file' in detail for detail in failing_check['details']))
 

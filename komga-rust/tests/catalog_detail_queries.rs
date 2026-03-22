@@ -1,6 +1,6 @@
 use komga_rust::application::discovery::{
     BookDetailQuery, BookReadlistsQuery, BookSiblingQuery, BooksListQuery, DiscoveryQueries,
-    SeriesCollectionsQuery, SeriesDetailQuery,
+    ReadListBooksQuery, SeriesCollectionsQuery, SeriesDetailQuery,
 };
 use komga_rust::domain::discovery::{
     AgeRestrictionKind, DirectBrowseBooksListFamily, DiscoveryError, DiscoveryQueryContext,
@@ -354,6 +354,123 @@ fn sibling_navigation_uses_number_sort_seek() {
 }
 
 #[test]
+fn readlist_sibling_navigation_uses_visible_readlist_order() {
+    let mut adapter = SqliteDiscoveryAdapter::default();
+    adapter.insert_library(LibraryRow::new("lib-1", "Library 1"));
+    adapter.insert_series(
+        SeriesRow::new("series-safe", "lib-1", "Series Safe")
+            .with_labels(["safe"])
+            .with_age_rating(12),
+    );
+    adapter.insert_series(
+        SeriesRow::new("series-hidden", "lib-1", "Series Hidden")
+            .with_labels(["adult"])
+            .with_age_rating(18),
+    );
+    adapter.insert_book(
+        BookRow::new("book-1", "series-safe", "lib-1", "Book 1")
+            .with_release_date("2020-01-01")
+            .with_url("/library/lib-1/book-1.cbz"),
+    );
+    adapter.insert_book(
+        BookRow::new("book-2", "series-hidden", "lib-1", "Book 2")
+            .with_release_date("2020-01-02")
+            .with_url("/library/lib-1/book-2.cbz"),
+    );
+    adapter.insert_book(
+        BookRow::new("book-3", "series-safe", "lib-1", "Book 3")
+            .with_release_date("2020-01-03")
+            .with_url("/library/lib-1/book-3.cbz"),
+    );
+    adapter.insert_book(
+        BookRow::new("book-4", "series-safe", "lib-1", "Book 4")
+            .with_release_date("2020-01-04")
+            .with_url("/library/lib-1/book-4.cbz"),
+    );
+    adapter.insert_read_list(
+        ReadListRow::new("readlist-ordered", "ReadList Ordered")
+            .with_ordered(true)
+            .with_book_ids(["book-1", "book-2", "book-3", "book-4"]),
+    );
+    adapter.insert_read_list(
+        ReadListRow::new("readlist-unordered", "ReadList Unordered")
+            .with_ordered(false)
+            .with_book_ids(["book-4", "book-2", "book-1", "book-3"]),
+    );
+
+    let restricted_context = DiscoveryQueryContext {
+        user_id: Some("user-1".to_string()),
+        is_admin: false,
+        authorized_library_ids: Some(vec!["lib-1".to_string()]),
+        restrictions: Some(QueryRestrictions {
+            age: Some(16),
+            age_restriction: Some(AgeRestrictionKind::Exclude),
+            labels_allow: vec![],
+            labels_exclude: vec!["adult".to_string()],
+        }),
+    };
+
+    let ordered_next_hidden_middle = adapter
+        .get_readlist_book_sibling_next(&restricted_context, "readlist-ordered", "book-1")
+        .expect("ordered hidden-middle next query should succeed")
+        .expect("ordered hidden-middle next sibling should exist");
+    assert_eq!(ordered_next_hidden_middle.id, "book-3");
+
+    let ordered_prev_hidden_middle = adapter
+        .get_readlist_book_sibling_previous(&restricted_context, "readlist-ordered", "book-3")
+        .expect("ordered hidden-middle previous query should succeed")
+        .expect("ordered hidden-middle previous sibling should exist");
+    assert_eq!(ordered_prev_hidden_middle.id, "book-1");
+
+    let ordered_first_previous = adapter
+        .get_readlist_book_sibling_previous(&restricted_context, "readlist-ordered", "book-1")
+        .expect("ordered first previous boundary query should succeed");
+    assert_eq!(ordered_first_previous, None);
+
+    let ordered_last_next = adapter
+        .get_readlist_book_sibling_next(&restricted_context, "readlist-ordered", "book-4")
+        .expect("ordered last next boundary query should succeed");
+    assert_eq!(ordered_last_next, None);
+
+    let ordered_hidden_anchor = adapter
+        .get_readlist_book_sibling_next(&restricted_context, "readlist-ordered", "book-2")
+        .expect("ordered hidden anchor query should succeed");
+    assert_eq!(ordered_hidden_anchor, None);
+
+    let ordered_non_member = adapter
+        .get_readlist_book_sibling_next(&restricted_context, "readlist-ordered", "book-out")
+        .expect("ordered non-member query should succeed");
+    assert_eq!(ordered_non_member, None);
+
+    let unordered_next = adapter
+        .get_readlist_book_sibling_next(&restricted_context, "readlist-unordered", "book-1")
+        .expect("unordered next query should succeed")
+        .expect("unordered next sibling should exist");
+    assert_eq!(unordered_next.id, "book-3");
+
+    let unordered_previous = adapter
+        .get_readlist_book_sibling_previous(&restricted_context, "readlist-unordered", "book-3")
+        .expect("unordered previous query should succeed")
+        .expect("unordered previous sibling should exist");
+    assert_eq!(unordered_previous.id, "book-1");
+
+    let unordered_first_previous = adapter
+        .get_readlist_book_sibling_previous(&restricted_context, "readlist-unordered", "book-1")
+        .expect("unordered first previous boundary query should succeed");
+    assert_eq!(unordered_first_previous, None);
+
+    let unordered_last_next = adapter
+        .get_readlist_book_sibling_next(&restricted_context, "readlist-unordered", "book-4")
+        .expect("unordered last next boundary query should succeed");
+    assert_eq!(unordered_last_next, None);
+
+    let unordered_non_member = adapter
+        .get_readlist_book_sibling_next(&restricted_context, "readlist-unordered", "book-out")
+        .expect("unordered non-member query should succeed");
+    assert_eq!(unordered_non_member, None);
+}
+
+#[test]
 fn book_readlists_apply_visibility_filters() {
     let mut adapter = SqliteDiscoveryAdapter::default();
     adapter.insert_library(LibraryRow::new("lib-1", "Library 1"));
@@ -423,4 +540,185 @@ fn book_readlists_apply_visibility_filters() {
     assert_eq!(readlists[0].book_ids, vec!["book-safe".to_string()]);
     assert_eq!(readlists[1].filtered, true);
     assert_eq!(readlists[1].book_ids, vec!["book-safe".to_string()]);
+}
+
+#[test]
+fn readlist_books_follow_legacy_ordered_and_unordered_semantics() {
+    let mut adapter = SqliteDiscoveryAdapter::default();
+    adapter.insert_library(LibraryRow::new("lib-1", "Library 1"));
+    adapter.insert_series(SeriesRow::new("series-1", "lib-1", "Series 1").with_labels(["safe"]));
+
+    adapter.insert_book(
+        BookRow::new("book-a", "series-1", "lib-1", "Book A")
+            .with_number_sort(10)
+            .with_release_date("2024-01-03"),
+    );
+    adapter.insert_book(
+        BookRow::new("book-b", "series-1", "lib-1", "Book B")
+            .with_number_sort(20)
+            .with_release_date("2024-01-01"),
+    );
+    adapter.insert_book(BookRow::new("book-c", "series-1", "lib-1", "Book C").with_number_sort(30));
+
+    adapter.insert_read_list(
+        ReadListRow::new("readlist-ordered", "ReadList Ordered")
+            .with_ordered(true)
+            .with_book_ids(["book-a", "book-b", "book-c"]),
+    );
+    adapter.insert_read_list(
+        ReadListRow::new("readlist-unordered", "ReadList Unordered")
+            .with_ordered(false)
+            .with_book_ids(["book-a", "book-b", "book-c"]),
+    );
+
+    let queries = DiscoveryQueries::new(adapter);
+    let context = DiscoveryQueryContext::allow_all();
+
+    let ordered = queries
+        .list_readlist_books(
+            &context,
+            ReadListBooksQuery {
+                readlist_id: "readlist-ordered".to_string(),
+                page: 0,
+                size: 20,
+                unpaged: true,
+                library_ids: None,
+            },
+        )
+        .expect("ordered readlist books query should succeed");
+    assert_eq!(
+        ordered
+            .content
+            .iter()
+            .map(|it| it.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["book-a", "book-b", "book-c"],
+    );
+
+    let unordered = queries
+        .list_readlist_books(
+            &context,
+            ReadListBooksQuery {
+                readlist_id: "readlist-unordered".to_string(),
+                page: 0,
+                size: 20,
+                unpaged: true,
+                library_ids: None,
+            },
+        )
+        .expect("unordered readlist books query should succeed");
+    assert_eq!(
+        unordered
+            .content
+            .iter()
+            .map(|it| it.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["book-c", "book-b", "book-a"],
+    );
+}
+
+#[test]
+fn readlist_books_cover_restricted_and_empty_fixtures() {
+    let mut adapter = SqliteDiscoveryAdapter::default();
+    adapter.insert_library(LibraryRow::new("lib-1", "Library 1"));
+    adapter.insert_series(
+        SeriesRow::new("series-safe", "lib-1", "Safe Series")
+            .with_labels(["safe"])
+            .with_age_rating(12),
+    );
+    adapter.insert_series(
+        SeriesRow::new("series-adult", "lib-1", "Adult Series")
+            .with_labels(["adult"])
+            .with_age_rating(18),
+    );
+    adapter.insert_book(BookRow::new(
+        "book-safe",
+        "series-safe",
+        "lib-1",
+        "Book Safe",
+    ));
+    adapter.insert_book(BookRow::new(
+        "book-adult",
+        "series-adult",
+        "lib-1",
+        "Book Adult",
+    ));
+
+    adapter.insert_read_list(
+        ReadListRow::new("readlist-mixed", "ReadList Mixed")
+            .with_ordered(true)
+            .with_book_ids(["book-safe", "book-adult"]),
+    );
+    adapter.insert_read_list(
+        ReadListRow::new("readlist-empty", "ReadList Empty")
+            .with_ordered(true)
+            .with_book_ids::<[&str; 0], &str>([]),
+    );
+    adapter.insert_read_list(
+        ReadListRow::new("readlist-fully-filtered", "ReadList Fully Filtered")
+            .with_ordered(true)
+            .with_book_ids(["book-adult"]),
+    );
+
+    let queries = DiscoveryQueries::new(adapter);
+    let restricted_context = DiscoveryQueryContext {
+        user_id: Some("user-1".to_string()),
+        is_admin: false,
+        authorized_library_ids: Some(vec!["lib-1".to_string()]),
+        restrictions: Some(QueryRestrictions {
+            age: Some(16),
+            age_restriction: Some(AgeRestrictionKind::Exclude),
+            labels_allow: vec![],
+            labels_exclude: vec!["adult".to_string()],
+        }),
+    };
+
+    let mixed = queries
+        .list_readlist_books(
+            &restricted_context,
+            ReadListBooksQuery {
+                readlist_id: "readlist-mixed".to_string(),
+                page: 0,
+                size: 20,
+                unpaged: true,
+                library_ids: None,
+            },
+        )
+        .expect("mixed readlist books query should succeed");
+    assert_eq!(
+        mixed
+            .content
+            .iter()
+            .map(|it| it.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["book-safe"],
+    );
+
+    let empty = queries
+        .list_readlist_books(
+            &restricted_context,
+            ReadListBooksQuery {
+                readlist_id: "readlist-empty".to_string(),
+                page: 0,
+                size: 20,
+                unpaged: true,
+                library_ids: None,
+            },
+        )
+        .expect("empty readlist books query should succeed");
+    assert!(empty.content.is_empty());
+
+    let fully_filtered = queries
+        .list_readlist_books(
+            &restricted_context,
+            ReadListBooksQuery {
+                readlist_id: "readlist-fully-filtered".to_string(),
+                page: 0,
+                size: 20,
+                unpaged: true,
+                library_ids: None,
+            },
+        )
+        .expect("fully filtered readlist books query should succeed");
+    assert!(fully_filtered.content.is_empty());
 }
