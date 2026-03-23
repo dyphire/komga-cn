@@ -24,6 +24,7 @@ seed_phase4_readlist_context_evidence = fixtures.seed_phase4_readlist_context_ev
 seed_phase5_oneshot_closure_evidence = fixtures.seed_phase5_oneshot_closure_evidence
 seed_phase6_oneshot_readlist_context_closure_evidence = fixtures.seed_phase6_oneshot_readlist_context_closure_evidence
 seed_phase7_series_oneshot_query_closure_evidence = fixtures.seed_phase7_series_oneshot_query_closure_evidence
+seed_phase8_readlist_books_family_closure_evidence = fixtures.seed_phase8_readlist_books_family_closure_evidence
 
 
 def run_gate(evidence_root: Path, output_dir: Path, *, label: str) -> subprocess.CompletedProcess[str]:
@@ -876,6 +877,213 @@ class GateRegressionTests(unittest.TestCase):
             )
             self.assertEqual(failing_check['status'], 'fail')
             self.assertTrue(any('Missing evidence file' in detail for detail in failing_check['details']))
+
+    def test_phase8_readlist_books_family_closure_label_passes_with_slice_evidence_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            evidence_root = temp_path / 'evidence'
+            output_dir = temp_path / 'output'
+            seed_common_evidence(
+                evidence_root,
+                neutral_transcripts=True,
+                admin_queue_payload=build_admin_queue_payload(
+                    status='action-exercised-parity-ok',
+                    can_claim_admin_queue_parity=True,
+                ),
+            )
+            seed_phase8_readlist_books_family_closure_evidence(evidence_root)
+
+            result = run_gate(evidence_root, output_dir, label='phase8-readlist-books-family-closure')
+
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=f'gate unexpectedly failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}',
+            )
+
+            summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
+            self.assertEqual(summary['overall'], 'pass')
+            self.assertEqual(summary.get('evaluation_scope'), 'phase8-readlist-books-family-closure-shadow')
+            self.assertFalse(summary['governance']['cutover']['allowed'])
+            self.assertFalse(summary['governance']['phase8_readlist_books_family_non_claims']['allowed'])
+            self.assertEqual(
+                summary['readlist_books_family_closure_slice']['required_pre_owned_dependencies'],
+                [
+                    'GET /api/v1/readlists/{readListId} (Phase 6, regression-only here)',
+                    'GET /api/v1/readlists/{readListId}/books?unpaged=true (Phase 4, regression-only here)',
+                    'GET /api/v1/readlists/{readListId}/books/{bookId}/previous (Phase 4, regression-only here)',
+                    'GET /api/v1/readlists/{readListId}/books/{bookId}/next (Phase 4, regression-only here)',
+                    'GET /api/v1/books/{bookId}/readlists (Phase 3, regression-only here)',
+                ],
+            )
+            self.assertIn(
+                'GET /api/v1/readlists and every list-family variant (search/unpaged/paging/library filters)',
+                summary['readlist_books_family_closure_slice']['excluded_branches'],
+            )
+            self.assertIn(
+                'GET /api/v1/readlists/{readListId}/read-progress/tachiyomi',
+                summary['readlist_books_family_closure_slice']['excluded_branches'],
+            )
+
+            browser_check = next(
+                item for item in summary['checks'] if item['id'] == 'phase8_readlist_books_family_browser'
+            )
+            self.assertEqual(browser_check['status'], 'pass')
+            self.assertTrue(any('browse-readlist' in detail for detail in browser_check['details']))
+            self.assertTrue(any('source-contract-fallback' in detail for detail in browser_check['details']))
+
+            compat_check = next(
+                item for item in summary['checks'] if item['id'] == 'phase8_readlist_books_family_compat'
+            )
+            self.assertEqual(compat_check['status'], 'pass')
+
+            regression_check = next(
+                item for item in summary['checks'] if item['id'] == 'phase8_readlist_books_family_regression'
+            )
+            self.assertEqual(regression_check['status'], 'pass')
+
+            report = (output_dir / 'report.md').read_text(encoding='utf-8')
+            self.assertIn('Phase8 Readlist-Books-Family-Closure Runbook', report)
+            self.assertIn('`GET /api/v1/readlists/{readListId}/books`', report)
+            self.assertIn('`GET /api/v1/readlists` list-family', report)
+            self.assertIn('`GET /api/v1/readlists/{readListId}/read-progress/tachiyomi`', report)
+            self.assertIn('BrowseReadList evidence stays limited', report)
+
+    def test_phase8_readlist_books_family_closure_label_fails_closed_when_exclusion_artifact_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            evidence_root = temp_path / 'evidence'
+            output_dir = temp_path / 'output'
+            seed_common_evidence(
+                evidence_root,
+                neutral_transcripts=True,
+                admin_queue_payload=build_admin_queue_payload(
+                    status='action-exercised-parity-ok',
+                    can_claim_admin_queue_parity=True,
+                ),
+            )
+            seed_phase8_readlist_books_family_closure_evidence(
+                evidence_root,
+                include_exclusions=False,
+            )
+
+            result = run_gate(evidence_root, output_dir, label='phase8-readlist-books-family-closure')
+
+            self.assertEqual(
+                result.returncode,
+                1,
+                msg=f'gate unexpectedly passed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}',
+            )
+
+            summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
+            self.assertEqual(summary['overall'], 'fail')
+            failing_check = next(
+                item for item in summary['checks'] if item['id'] == 'phase8_readlist_books_family_exclusions'
+            )
+            self.assertEqual(failing_check['status'], 'fail')
+            self.assertTrue(any('Missing evidence file' in detail for detail in failing_check['details']))
+
+    def test_phase8_readlist_books_family_closure_label_fails_closed_when_browser_artifact_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            evidence_root = temp_path / 'evidence'
+            output_dir = temp_path / 'output'
+            seed_common_evidence(
+                evidence_root,
+                neutral_transcripts=True,
+                admin_queue_payload=build_admin_queue_payload(
+                    status='action-exercised-parity-ok',
+                    can_claim_admin_queue_parity=True,
+                ),
+            )
+            seed_phase8_readlist_books_family_closure_evidence(
+                evidence_root,
+                include_browser=False,
+            )
+
+            result = run_gate(evidence_root, output_dir, label='phase8-readlist-books-family-closure')
+
+            self.assertEqual(
+                result.returncode,
+                1,
+                msg=f'gate unexpectedly passed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}',
+            )
+
+            summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
+            self.assertEqual(summary['overall'], 'fail')
+            failing_check = next(
+                item for item in summary['checks'] if item['id'] == 'phase8_readlist_books_family_browser'
+            )
+            self.assertEqual(failing_check['status'], 'fail')
+            self.assertTrue(any('Missing evidence file' in detail for detail in failing_check['details']))
+
+    def test_phase8_readlist_books_family_closure_label_fails_closed_when_compat_artifact_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            evidence_root = temp_path / 'evidence'
+            output_dir = temp_path / 'output'
+            seed_common_evidence(
+                evidence_root,
+                neutral_transcripts=True,
+                admin_queue_payload=build_admin_queue_payload(
+                    status='action-exercised-parity-ok',
+                    can_claim_admin_queue_parity=True,
+                ),
+            )
+            seed_phase8_readlist_books_family_closure_evidence(
+                evidence_root,
+                include_compat=False,
+            )
+
+            result = run_gate(evidence_root, output_dir, label='phase8-readlist-books-family-closure')
+
+            self.assertEqual(
+                result.returncode,
+                1,
+                msg=f'gate unexpectedly passed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}',
+            )
+
+            summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
+            self.assertEqual(summary['overall'], 'fail')
+            failing_check = next(
+                item for item in summary['checks'] if item['id'] == 'phase8_readlist_books_family_compat'
+            )
+            self.assertEqual(failing_check['status'], 'fail')
+            self.assertTrue(any('Missing evidence file' in detail for detail in failing_check['details']))
+
+    def test_phase8_readlist_books_family_closure_label_fails_closed_when_contract_matrix_is_incomplete(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            evidence_root = temp_path / 'evidence'
+            output_dir = temp_path / 'output'
+            seed_common_evidence(
+                evidence_root,
+                neutral_transcripts=True,
+                admin_queue_payload=build_admin_queue_payload(
+                    status='action-exercised-parity-ok',
+                    can_claim_admin_queue_parity=True,
+                ),
+            )
+            seed_phase8_readlist_books_family_closure_evidence(
+                evidence_root,
+                complete_contract_matrix=False,
+            )
+
+            result = run_gate(evidence_root, output_dir, label='phase8-readlist-books-family-closure')
+
+            self.assertEqual(
+                result.returncode,
+                1,
+                msg=f'gate unexpectedly passed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}',
+            )
+
+            summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
+            self.assertEqual(summary['overall'], 'fail')
+            failing_check = next(
+                item for item in summary['checks'] if item['id'] == 'phase8_readlist_books_family_contract'
+            )
+            self.assertEqual(failing_check['status'], 'fail')
+            self.assertTrue(any('missing required discovery markers' in detail for detail in failing_check['details']))
 
 
 if __name__ == '__main__':

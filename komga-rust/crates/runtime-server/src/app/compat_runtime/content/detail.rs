@@ -4,11 +4,12 @@ use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use komga_application::discovery::{
     BookDetailQuery, BookReadlistsQuery, BookSiblingQuery, DiscoveryQueries,
-    DiscoveryQueryRepository, ReadListBooksQuery, ReadListDetailQuery, SeriesCollectionsQuery,
-    SeriesDetailQuery,
+    DiscoveryQueryRepository, NativeReadListBooksQuery, ReadListBooksOwnership,
+    ReadListBooksQuery, ReadListDetailQuery, SeriesCollectionsQuery, SeriesDetailQuery,
+    classify_readlist_books_query,
 };
 use komga_domain::discovery::{
-    BookDetailReadModel, CollectionReadModel, DiscoveryError, PageEnvelope, ReadListReadModel,
+    BookDetailReadModel, CollectionReadModel, DiscoveryError, ReadListReadModel,
     SeriesDetailReadModel,
 };
 use komga_persistence::discovery::{
@@ -522,6 +523,11 @@ pub(in crate::app::compat_runtime) async fn readlist_books(
             .collect::<Vec<_>>();
         (!values.is_empty()).then_some(values)
     };
+    let read_statuses = readlist_query_values(query_string, "read_status");
+    let media_statuses = readlist_query_values(query_string, "media_status");
+    let tags = readlist_query_values(query_string, "tag");
+    let authors = readlist_author_query_values(query_string);
+    let deleted = query_value(query_string, "deleted").and_then(parse_optional_query_bool);
 
     let context = match auth_state.resolve_query_context(&headers, library_ids.as_deref()) {
         Some(context) => context,
@@ -532,7 +538,6 @@ pub(in crate::app::compat_runtime) async fn readlist_books(
     seed_series_detail_data(&mut adapter);
 
     let is_admin = context.is_admin;
-    let queries = DiscoveryQueries::new(adapter);
     let domain_context = to_domain_query_context(context);
     let query = ReadListBooksQuery {
         readlist_id: readlist_id.clone(),
@@ -540,24 +545,57 @@ pub(in crate::app::compat_runtime) async fn readlist_books(
         size,
         unpaged,
         library_ids,
+        deleted,
+        tags,
+        read_statuses,
+        media_statuses,
+        authors,
+    };
+    let ownership = classify_readlist_books_query(&query);
+    let native_query = NativeReadListBooksQuery {
+        readlist_id: query.readlist_id.clone(),
+        page: query.page,
+        size: query.size,
+        unpaged: query.unpaged,
+        library_ids: query.library_ids.clone(),
+        deleted: query.deleted,
+        tags: query.tags.clone(),
+        read_statuses: query.read_statuses.clone(),
+        media_statuses: query.media_statuses.clone(),
+        authors: query.authors.clone(),
     };
 
-    match queries.list_readlist_books(&domain_context, query).await {
-        Ok(page) => {
-            let mut response = Json(books_page_payload(page, is_admin, !unpaged)).into_response();
-            mark_native(&mut response);
-            response
-        }
-        Err(DiscoveryError::NonNativeRequestShape(details)) => {
-            non_native_readlist_books_response(
-                DiscoveryError::NonNativeRequestShape(details),
-                &queries,
-                &domain_context,
-                &readlist_id,
-                is_admin,
+    match adapter.list_readlist_books(&domain_context, native_query).await {
+        Ok(page) => match ownership {
+            Ok(ReadListBooksOwnership::NativeOwned) => {
+                let mut response =
+                    Json(books_page_payload(page, is_admin, !unpaged)).into_response();
+                mark_native(&mut response);
+                response
+            }
+            Ok(ReadListBooksOwnership::DependencyOnly) => {
+                let mut response =
+                    Json(books_page_payload(page, is_admin, !unpaged)).into_response();
+                mark_native(&mut response);
+                response
+            }
+            Err(DiscoveryError::NonNativeRequestShape(details)) => {
+                let mut payload = books_page_payload(page, is_admin, !unpaged);
+                apply_non_native_diagnostics(
+                    &mut payload,
+                    &DiscoveryError::NonNativeRequestShape(details),
+                );
+
+                let mut response = Json(payload).into_response();
+                mark_non_native(&mut response);
+                response
+            }
+            Err(error) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("readlist books classification failed: {error:?}") })),
             )
-            .await
-        }
+                .into_response(),
+        },
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": format!("readlist books query failed: {error:?}") })),
@@ -758,50 +796,6 @@ pub(in crate::app::compat_runtime) async fn readlist_book_sibling_next(
     }
 }
 
-async fn non_native_readlist_books_response(
-    error: DiscoveryError,
-    queries: &DiscoveryQueries<SqliteDiscoveryAdapter>,
-    domain_context: &komga_domain::discovery::DiscoveryQueryContext,
-    readlist_id: &str,
-    is_admin: bool,
-) -> Response {
-    let mut payload =
-        compat_readlist_books_payload(queries, domain_context, readlist_id, is_admin).await;
-    apply_non_native_diagnostics(&mut payload, &error);
-
-    let mut response = Json(payload).into_response();
-    mark_non_native(&mut response);
-    response
-}
-
-async fn compat_readlist_books_payload(
-    queries: &DiscoveryQueries<SqliteDiscoveryAdapter>,
-    domain_context: &komga_domain::discovery::DiscoveryQueryContext,
-    readlist_id: &str,
-    is_admin: bool,
-) -> Value {
-    match queries
-        .list_readlist_books(
-            domain_context,
-            ReadListBooksQuery {
-                readlist_id: readlist_id.to_string(),
-                page: 0,
-                size: 20,
-                unpaged: true,
-                library_ids: None,
-            },
-        )
-        .await
-    {
-        Ok(page) => books_page_payload(page, is_admin, false),
-        Err(_) => books_page_payload(
-            PageEnvelope::from_slice(Vec::new(), 0, 1, 0),
-            is_admin,
-            false,
-        ),
-    }
-}
-
 fn seed_series_detail_data(adapter: &mut SqliteDiscoveryAdapter) {
     adapter.insert_series(
         SeriesRow::new("series-1", "1", "series")
@@ -816,7 +810,7 @@ fn seed_series_detail_data(adapter: &mut SqliteDiscoveryAdapter) {
             .with_status("ONGOING")
             .with_complete(true)
             .with_read_status("READ")
-            .with_authors(["alice"]),
+        .with_authors(["alice"]),
     );
     adapter.insert_series(
         SeriesRow::new("series-2", "1", "restricted")
@@ -927,6 +921,62 @@ fn seed_series_detail_data(adapter: &mut SqliteDiscoveryAdapter) {
             .with_last_modified("2024-01-04T03:04:05Z")
             .with_device("device-android", "Android"),
     );
+}
+
+fn readlist_query_values(query: &str, key: &str) -> Option<Vec<String>> {
+    let values = query_values(query, key)
+        .into_iter()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    (!values.is_empty()).then_some(values)
+}
+
+fn readlist_author_query_values(query: &str) -> Option<Vec<String>> {
+    let raw_values = query_values(query, "author");
+    if raw_values.is_empty() {
+        return None;
+    }
+
+    let authors = raw_values
+        .into_iter()
+        .filter_map(parse_readlist_author_query_value)
+        .collect::<Vec<_>>();
+
+    if authors.is_empty() {
+        Some(vec!["__komga_rust_unsupported_author_role__".to_string()])
+    } else {
+        Some(authors)
+    }
+}
+
+fn parse_readlist_author_query_value(value: &str) -> Option<String> {
+    let mut parts = value.splitn(2, ',');
+    let name = parts.next()?.trim();
+    if name.is_empty() {
+        return None;
+    }
+
+    let Some(role) = parts.next() else {
+        return Some(name.to_ascii_lowercase());
+    };
+    let role = role.trim();
+    if role.is_empty() || role.eq_ignore_ascii_case("writer") {
+        Some(name.to_ascii_lowercase())
+    } else {
+        None
+    }
+}
+
+fn parse_optional_query_bool(value: &str) -> Option<bool> {
+    if value.eq_ignore_ascii_case("true") {
+        Some(true)
+    } else if value.eq_ignore_ascii_case("false") {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 fn book_detail_payload(book: &BookDetailReadModel, is_admin: bool) -> Value {

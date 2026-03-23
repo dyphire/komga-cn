@@ -65,7 +65,7 @@ pub(super) fn phase7_adjacent_oneshot_query_variants_remain_explicitly_non_nativ
         "oneshot query boundary | BrowseOneshot.vue:779-800 | case-variant param names remain explicit non-native",
         "READLIST detail/list-family boundary | BrowseOneshot.vue:785-842 | readlist detail/list/context siblings stay explicit non-native in Phase 7",
         "READLIST listing branch | BrowseOneshot.vue:785-842 | GET /api/v1/readlists stays explicit non-native",
-        "READLIST books pagination/library filtering | BrowseOneshot.vue:785-842 | paged readlist books and library_id variants stay explicit non-native",
+        "READLIST books family boundary | BrowseOneshot.vue:785-842 | Phase 8 promotes paged/filter books queries; bare unpaged=true stays dependency-only and list-family stays explicit non-native",
         "READLIST context siblings | BrowseOneshot.vue:785-842 | /books?unpaged=true + sibling previous/next remain explicit fallback/non-native",
         "oneshot bootstrap widening guards | BrowseOneshot.vue:798-800 | paged/unpaged/read-status/read-date books/list variants stay explicit non-native",
         "media delivery adjacency | BrowseOneshot.vue:118-125 + 497-499 | /pages + /thumbnail + /manifest + /resource/* + /positions stay explicit non-native",

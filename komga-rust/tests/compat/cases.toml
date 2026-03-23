@@ -15,6 +15,102 @@ headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token"
 extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
 
 [[cases]]
+id = "P8-READLIST-BOOKS-PAGED-DEFAULT-OWNED"
+method = "GET"
+path = "/api/v1/readlists/readlist-2/books"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P8-READLIST-BOOKS-PAGED-EXPLICIT-OWNED"
+method = "GET"
+path = "/api/v1/readlists/readlist-2/books?page=1&size=1"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P8-READLIST-BOOKS-LIBRARY-FILTER-OWNED"
+method = "GET"
+path = "/api/v1/readlists/readlist-2/books?page=0&size=20&library_id=1"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P8-READLIST-BOOKS-READ-STATUS-FILTER-OWNED"
+method = "GET"
+path = "/api/v1/readlists/readlist-2/books?page=0&size=20&read_status=READ"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P8-READLIST-BOOKS-MEDIA-STATUS-FILTER-OWNED"
+method = "GET"
+path = "/api/v1/readlists/readlist-2/books?page=0&size=20&media_status=UNSUPPORTED"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P8-READLIST-BOOKS-REPEATED-TAG-FILTER-OWNED"
+method = "GET"
+path = "/api/v1/readlists/readlist-2/books?page=0&size=20&tag=safe&tag=missing"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P8-READLIST-BOOKS-REPEATED-AUTHOR-FILTER-OWNED"
+method = "GET"
+path = "/api/v1/readlists/readlist-2/books?page=0&size=20&author=alice,writer&author=charlie,writer"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P8-READLIST-BOOKS-DELETED-TRUE-FILTER-OWNED"
+method = "GET"
+path = "/api/v1/readlists/readlist-2/books?page=0&size=20&deleted=true"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P8-READLIST-BOOKS-DELETED-FALSE-FILTER-OWNED"
+method = "GET"
+path = "/api/v1/readlists/readlist-2/books?page=0&size=20&deleted=false"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P8-READLIST-BOOKS-COMBINED-FILTERS-OWNED"
+method = "GET"
+path = "/api/v1/readlists/readlist-2/books?page=0&size=20&read_status=READ&media_status=READY&tag=safe&author=alice,writer&deleted=false"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P8-READLIST-BOOKS-COMBINED-REPEATED-FILTERS-OWNED"
+method = "GET"
+path = "/api/v1/readlists/readlist-2/books?page=0&size=20&read_status=READ&media_status=READY&tag=safe&tag=missing&author=alice,writer&author=charlie,writer&deleted=false"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P8-READLIST-BOOKS-UNPAGED-FALSE-OWNED"
+method = "GET"
+path = "/api/v1/readlists/readlist-2/books?unpaged=false"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P8-READLIST-BOOKS-DEPENDENCY-UNPAGED-PREOWNED"
+method = "GET"
+path = "/api/v1/readlists/readlist-2/books?unpaged=true"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P8-READLIST-BOOKS-DEPENDENCY-UNPAGED-WIDENED-SHADOW"
+method = "GET"
+path = "/api/v1/readlists/readlist-2/books?unpaged=true&library_id=1"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases]]
+id = "P8-READLIST-BOOKS-EXCLUDED-READLISTS-LIST-FAMILY"
+method = "GET"
+path = "/api/v1/readlists"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases]]
+id = "P8-READLIST-BOOKS-EXCLUDED-TACHIYOMI"
+method = "GET"
+path = "/api/v1/readlists/readlist-2/read-progress/tachiyomi"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases]]
 id = "P2-DISCOVERY-LIBRARIES-OWNED"
 method = "GET"
 path = "/api/v1/libraries"

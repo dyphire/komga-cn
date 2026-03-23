@@ -17,7 +17,10 @@ pub use books::{
 };
 pub use core::{DiscoveryQueries, DiscoveryQueryRepository};
 pub use libraries::LibraryListQuery;
-pub use readlists::{NativeReadListBooksQuery, ReadListBooksQuery, ReadListDetailQuery};
+pub use readlists::{
+    NativeReadListBooksQuery, ReadListBooksOwnership, ReadListBooksQuery, ReadListDetailQuery,
+    classify_readlist_books_query,
+};
 pub use series::{
     NativeSeriesListQuery, SeriesCollectionsQuery, SeriesDetailQuery, SeriesListQuery,
 };

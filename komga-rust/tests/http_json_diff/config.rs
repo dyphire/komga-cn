@@ -783,6 +783,223 @@ pub(super) fn phase7_series_oneshot_case_inventory_loads() {
 }
 
 #[test]
+pub(super) fn phase8_readlist_books_family_case_inventory_loads() {
+    let config = HarnessConfig::load_default().expect("default compat cases should load");
+    let owned_case_ids: BTreeSet<&str> = phase8_readlist_books_family_owned_case_ids()
+        .iter()
+        .copied()
+        .collect();
+    let negative_case_ids: BTreeSet<&str> = phase8_readlist_books_family_negative_case_ids()
+        .iter()
+        .copied()
+        .collect();
+    let all_case_ids: BTreeSet<&str> = phase8_readlist_books_family_all_case_ids()
+        .iter()
+        .copied()
+        .collect();
+
+    assert!(
+        owned_case_ids.is_disjoint(&negative_case_ids),
+        "phase8 owned and negative compat inventory buckets must stay disjoint",
+    );
+    assert_eq!(
+        owned_case_ids
+            .union(&negative_case_ids)
+            .copied()
+            .collect::<BTreeSet<_>>(),
+        all_case_ids,
+        "phase8 owned + negative compat inventory buckets must explain the full case inventory",
+    );
+
+    for id in phase8_readlist_books_family_all_case_ids() {
+        let case = config
+            .cases
+            .iter()
+            .find(|it| it.id == *id)
+            .unwrap_or_else(|| panic!("missing phase8 readlist-books compat case: {id}"));
+
+        assert_eq!(
+            config.cases.iter().filter(|it| it.id == *id).count(),
+            1,
+            "phase8 readlist-books case id must be unique: {id}",
+        );
+        assert_eq!(
+            case.method, "GET",
+            "phase8 readlist-books cases stay GET-only: {id}"
+        );
+        assert_eq!(
+            case.body, None,
+            "phase8 readlist-books cases must stay body-less: {id}"
+        );
+        assert!(
+            case.setup.is_none(),
+            "phase8 readlist-books compat cases must stay self-contained without setup blocks: {id}",
+        );
+        assert_eq!(
+            PathBuf::from(&config.output_dir).join(format!("{id}.json")),
+            PathBuf::from("target/compat-diff").join(format!("{id}.json")),
+            "phase8 readlist-books diff evidence path contract changed for {id}",
+        );
+        assert_eq!(
+            case.headers
+                .as_ref()
+                .and_then(|headers| headers.get("X-Auth-Token")),
+            Some(&"${SESSION_TOKEN}".to_string()),
+            "phase8 readlist-books compat cases must use explicit session-token wiring: {id}",
+        );
+
+        let ownership_header = case
+            .headers
+            .as_ref()
+            .and_then(|headers| headers.get("X-Komga-Compat-Search-Ownership"));
+
+        if owned_case_ids.contains(id) || *id == "P8-READLIST-BOOKS-DEPENDENCY-UNPAGED-PREOWNED" {
+            assert_eq!(
+                ownership_header, None,
+                "phase8 owned/dependency case must not carry a shadow marker: {id}",
+            );
+        } else {
+            assert_eq!(
+                ownership_header,
+                Some(&"shadow-java-writer".to_string()),
+                "phase8 negative case must carry shadow marker: {id}",
+            );
+        }
+    }
+
+    let default_paged = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P8-READLIST-BOOKS-PAGED-DEFAULT-OWNED")
+        .expect("phase8 default paged case should exist");
+    let explicit_paged = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P8-READLIST-BOOKS-PAGED-EXPLICIT-OWNED")
+        .expect("phase8 explicit paged case should exist");
+    let library_filter = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P8-READLIST-BOOKS-LIBRARY-FILTER-OWNED")
+        .expect("phase8 library filter case should exist");
+    let read_status = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P8-READLIST-BOOKS-READ-STATUS-FILTER-OWNED")
+        .expect("phase8 read status case should exist");
+    let media_status = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P8-READLIST-BOOKS-MEDIA-STATUS-FILTER-OWNED")
+        .expect("phase8 media status case should exist");
+    let repeated_tag = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P8-READLIST-BOOKS-REPEATED-TAG-FILTER-OWNED")
+        .expect("phase8 repeated tag case should exist");
+    let repeated_author = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P8-READLIST-BOOKS-REPEATED-AUTHOR-FILTER-OWNED")
+        .expect("phase8 repeated author case should exist");
+    let deleted_true = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P8-READLIST-BOOKS-DELETED-TRUE-FILTER-OWNED")
+        .expect("phase8 deleted=true case should exist");
+    let deleted_false = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P8-READLIST-BOOKS-DELETED-FALSE-FILTER-OWNED")
+        .expect("phase8 deleted=false case should exist");
+    let combined_filters = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P8-READLIST-BOOKS-COMBINED-FILTERS-OWNED")
+        .expect("phase8 combined filters case should exist");
+    let combined_repeated_filters = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P8-READLIST-BOOKS-COMBINED-REPEATED-FILTERS-OWNED")
+        .expect("phase8 combined repeated filters case should exist");
+    let unpaged_false = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P8-READLIST-BOOKS-UNPAGED-FALSE-OWNED")
+        .expect("phase8 unpaged=false case should exist");
+    let dependency_unpaged = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P8-READLIST-BOOKS-DEPENDENCY-UNPAGED-PREOWNED")
+        .expect("phase8 dependency unpaged case should exist");
+    let widened_unpaged = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P8-READLIST-BOOKS-DEPENDENCY-UNPAGED-WIDENED-SHADOW")
+        .expect("phase8 widened unpaged case should exist");
+    let readlists = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P8-READLIST-BOOKS-EXCLUDED-READLISTS-LIST-FAMILY")
+        .expect("phase8 readlists exclusion case should exist");
+    let tachiyomi = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P8-READLIST-BOOKS-EXCLUDED-TACHIYOMI")
+        .expect("phase8 tachiyomi exclusion case should exist");
+
+    assert_eq!(default_paged.path, "/api/v1/readlists/readlist-2/books");
+    assert_eq!(
+        explicit_paged.path,
+        "/api/v1/readlists/readlist-2/books?page=1&size=1"
+    );
+    assert_eq!(
+        library_filter.path,
+        "/api/v1/readlists/readlist-2/books?page=0&size=20&library_id=1"
+    );
+    assert_eq!(
+        read_status.path,
+        "/api/v1/readlists/readlist-2/books?page=0&size=20&read_status=READ"
+    );
+    assert_eq!(
+        media_status.path,
+        "/api/v1/readlists/readlist-2/books?page=0&size=20&media_status=UNSUPPORTED"
+    );
+    assert_eq!(
+        repeated_tag.path,
+        "/api/v1/readlists/readlist-2/books?page=0&size=20&tag=safe&tag=missing"
+    );
+    assert_eq!(repeated_author.path, "/api/v1/readlists/readlist-2/books?page=0&size=20&author=alice,writer&author=charlie,writer");
+    assert_eq!(
+        deleted_true.path,
+        "/api/v1/readlists/readlist-2/books?page=0&size=20&deleted=true"
+    );
+    assert_eq!(
+        deleted_false.path,
+        "/api/v1/readlists/readlist-2/books?page=0&size=20&deleted=false"
+    );
+    assert_eq!(combined_filters.path, "/api/v1/readlists/readlist-2/books?page=0&size=20&read_status=READ&media_status=READY&tag=safe&author=alice,writer&deleted=false");
+    assert_eq!(combined_repeated_filters.path, "/api/v1/readlists/readlist-2/books?page=0&size=20&read_status=READ&media_status=READY&tag=safe&tag=missing&author=alice,writer&author=charlie,writer&deleted=false");
+    assert_eq!(
+        unpaged_false.path,
+        "/api/v1/readlists/readlist-2/books?unpaged=false"
+    );
+    assert_eq!(
+        dependency_unpaged.path,
+        "/api/v1/readlists/readlist-2/books?unpaged=true"
+    );
+    assert_eq!(
+        widened_unpaged.path,
+        "/api/v1/readlists/readlist-2/books?unpaged=true&library_id=1"
+    );
+    assert_eq!(readlists.path, "/api/v1/readlists");
+    assert_eq!(
+        tachiyomi.path,
+        "/api/v1/readlists/readlist-2/read-progress/tachiyomi"
+    );
+}
+
+#[test]
 fn live_http_json_diff_includes_library_role_cases() {
     let case_ids = live_http_json_case_ids();
 

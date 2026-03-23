@@ -44,6 +44,11 @@ async fn readlist_books_follow_legacy_ordered_and_unordered_semantics() {
                 size: 20,
                 unpaged: true,
                 library_ids: None,
+                deleted: None,
+                tags: None,
+                read_statuses: None,
+                media_statuses: None,
+                authors: None,
             },
         )
         .await
@@ -66,6 +71,11 @@ async fn readlist_books_follow_legacy_ordered_and_unordered_semantics() {
                 size: 20,
                 unpaged: true,
                 library_ids: None,
+                deleted: None,
+                tags: None,
+                read_statuses: None,
+                media_statuses: None,
+                authors: None,
             },
         )
         .await
@@ -135,6 +145,11 @@ async fn readlist_books_cover_restricted_and_empty_fixtures() {
                 size: 20,
                 unpaged: true,
                 library_ids: None,
+                deleted: None,
+                tags: None,
+                read_statuses: None,
+                media_statuses: None,
+                authors: None,
             },
         )
         .await
@@ -157,6 +172,11 @@ async fn readlist_books_cover_restricted_and_empty_fixtures() {
                 size: 20,
                 unpaged: true,
                 library_ids: None,
+                deleted: None,
+                tags: None,
+                read_statuses: None,
+                media_statuses: None,
+                authors: None,
             },
         )
         .await
@@ -172,6 +192,11 @@ async fn readlist_books_cover_restricted_and_empty_fixtures() {
                 size: 20,
                 unpaged: true,
                 library_ids: None,
+                deleted: None,
+                tags: None,
+                read_statuses: None,
+                media_statuses: None,
+                authors: None,
             },
         )
         .await

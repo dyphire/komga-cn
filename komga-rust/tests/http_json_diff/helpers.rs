@@ -1,5 +1,52 @@
 use super::*;
 
+pub(super) fn phase8_readlist_books_family_owned_case_ids() -> &'static [&'static str] {
+    &[
+        "P8-READLIST-BOOKS-PAGED-DEFAULT-OWNED",
+        "P8-READLIST-BOOKS-PAGED-EXPLICIT-OWNED",
+        "P8-READLIST-BOOKS-LIBRARY-FILTER-OWNED",
+        "P8-READLIST-BOOKS-READ-STATUS-FILTER-OWNED",
+        "P8-READLIST-BOOKS-MEDIA-STATUS-FILTER-OWNED",
+        "P8-READLIST-BOOKS-REPEATED-TAG-FILTER-OWNED",
+        "P8-READLIST-BOOKS-REPEATED-AUTHOR-FILTER-OWNED",
+        "P8-READLIST-BOOKS-DELETED-TRUE-FILTER-OWNED",
+        "P8-READLIST-BOOKS-DELETED-FALSE-FILTER-OWNED",
+        "P8-READLIST-BOOKS-COMBINED-FILTERS-OWNED",
+        "P8-READLIST-BOOKS-COMBINED-REPEATED-FILTERS-OWNED",
+        "P8-READLIST-BOOKS-UNPAGED-FALSE-OWNED",
+    ]
+}
+
+pub(super) fn phase8_readlist_books_family_negative_case_ids() -> &'static [&'static str] {
+    &[
+        "P8-READLIST-BOOKS-DEPENDENCY-UNPAGED-PREOWNED",
+        "P8-READLIST-BOOKS-DEPENDENCY-UNPAGED-WIDENED-SHADOW",
+        "P8-READLIST-BOOKS-EXCLUDED-READLISTS-LIST-FAMILY",
+        "P8-READLIST-BOOKS-EXCLUDED-TACHIYOMI",
+    ]
+}
+
+pub(super) fn phase8_readlist_books_family_all_case_ids() -> &'static [&'static str] {
+    &[
+        "P8-READLIST-BOOKS-PAGED-DEFAULT-OWNED",
+        "P8-READLIST-BOOKS-PAGED-EXPLICIT-OWNED",
+        "P8-READLIST-BOOKS-LIBRARY-FILTER-OWNED",
+        "P8-READLIST-BOOKS-READ-STATUS-FILTER-OWNED",
+        "P8-READLIST-BOOKS-MEDIA-STATUS-FILTER-OWNED",
+        "P8-READLIST-BOOKS-REPEATED-TAG-FILTER-OWNED",
+        "P8-READLIST-BOOKS-REPEATED-AUTHOR-FILTER-OWNED",
+        "P8-READLIST-BOOKS-DELETED-TRUE-FILTER-OWNED",
+        "P8-READLIST-BOOKS-DELETED-FALSE-FILTER-OWNED",
+        "P8-READLIST-BOOKS-COMBINED-FILTERS-OWNED",
+        "P8-READLIST-BOOKS-COMBINED-REPEATED-FILTERS-OWNED",
+        "P8-READLIST-BOOKS-UNPAGED-FALSE-OWNED",
+        "P8-READLIST-BOOKS-DEPENDENCY-UNPAGED-PREOWNED",
+        "P8-READLIST-BOOKS-DEPENDENCY-UNPAGED-WIDENED-SHADOW",
+        "P8-READLIST-BOOKS-EXCLUDED-READLISTS-LIST-FAMILY",
+        "P8-READLIST-BOOKS-EXCLUDED-TACHIYOMI",
+    ]
+}
+
 pub(super) fn live_http_json_case_ids() -> &'static [&'static str] {
     &[
         "KOMGA-P0-LIB-01-ADMIN",
@@ -144,6 +191,85 @@ pub(super) async fn execute_case_async(
         headers,
         body,
     })
+}
+
+pub(super) async fn apply_setup_steps_async(
+    client: &reqwest::Client,
+    base_url: &str,
+    steps: &[komga_compat_testkit::cases::SetupStep],
+    vars: &mut BTreeMap<String, String>,
+) -> anyhow::Result<()> {
+    for step in steps {
+        let mut request = match step.method.as_str() {
+            "GET" => client.get(format!(
+                "{}{}",
+                base_url.trim_end_matches('/'),
+                step.path.as_str()
+            )),
+            other => anyhow::bail!("unsupported setup method in skeleton: {other}"),
+        };
+
+        if let Some(headers) = resolve_headers(&step.headers, vars)? {
+            let mut header_map = HeaderMap::new();
+            for (name, value) in headers {
+                header_map.insert(
+                    HeaderName::from_bytes(name.as_bytes())?,
+                    HeaderValue::from_str(&value)?,
+                );
+            }
+            request = request.headers(header_map);
+        }
+
+        let response = request.send().await?;
+
+        if !response.status().is_success() {
+            anyhow::bail!(
+                "setup step '{}' returned HTTP {}",
+                step.name,
+                response.status().as_u16()
+            );
+        }
+
+        if let Some(extract_headers) = &step.extract_headers {
+            for (var_name, header_name) in extract_headers {
+                let value = if header_name.eq_ignore_ascii_case("X-Auth-Token") {
+                    extract_session_cookie_token(response.headers()).unwrap_or_else(|| {
+                        response
+                            .headers()
+                            .get(header_name)
+                            .and_then(|value| value.to_str().ok())
+                            .expect("setup response should include extractable x-auth-token")
+                            .to_string()
+                    })
+                } else {
+                    response
+                        .headers()
+                        .get(header_name)
+                        .and_then(|value| value.to_str().ok())
+                        .expect("setup response should include requested extract header")
+                        .to_string()
+                };
+                vars.insert(var_name.clone(), value);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn extract_session_cookie_token(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    headers
+        .get_all(reqwest::header::SET_COOKIE)
+        .iter()
+        .find_map(|value| {
+            value.to_str().ok().and_then(|cookie| {
+                cookie
+                    .split(';')
+                    .map(str::trim)
+                    .find_map(|part| part.strip_prefix("KOMGA-SESSION="))
+                    .map(str::to_string)
+            })
+        })
 }
 
 pub(super) fn smoke_harness_config() -> HarnessConfig {

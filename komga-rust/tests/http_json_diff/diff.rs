@@ -1,5 +1,7 @@
 use super::*;
 
+const USER_BASIC_AUTH: &str = "dXNlckBleGFtcGxlLm9yZzp1c2Vy";
+
 #[test]
 fn discovery_diff_policy_is_strict_for_status_body_page_metadata_order_and_id_sets() {
     let allowlist = BTreeSet::from(["content-type".to_string()]);
@@ -253,6 +255,156 @@ fn binary_metadata_comparison_ignores_body_differences() {
     assert!(report.matches);
 }
 
+#[tokio::test]
+async fn phase8_readlist_books_family_owned_cases_self_diff_clean() {
+    let config = HarnessConfig::load_default().expect("default compat cases should load");
+
+    let responses =
+        run_cases_against_self(&config, phase8_readlist_books_family_owned_case_ids()).await;
+
+    assert_eq!(
+        responses.len(),
+        phase8_readlist_books_family_owned_case_ids().len(),
+        "phase8 owned compat self-diff must cover the full owned inventory",
+    );
+
+    for (case_id, response) in responses {
+        assert_eq!(
+            response.status, 200,
+            "owned readlist-books compat case should stay HTTP 200: {case_id}",
+        );
+
+        match response.body {
+            NormalizedBody::Json(body) => {
+                assert!(
+                    body.get("_compat").is_none(),
+                    "owned readlist-books compat case must not emit _compat diagnostics: {case_id}",
+                );
+            }
+            other => panic!("owned readlist-books compat case must stay JSON: {case_id} => {other:?}"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn phase8_readlist_books_family_negative_inventory_is_explicit_and_self_consistent() {
+    let config = HarnessConfig::load_default().expect("default compat cases should load");
+
+    let dependency = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P8-READLIST-BOOKS-DEPENDENCY-UNPAGED-PREOWNED")
+        .expect("dependency case should exist");
+    let widened = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P8-READLIST-BOOKS-DEPENDENCY-UNPAGED-WIDENED-SHADOW")
+        .expect("widened dependency case should exist");
+    let readlists = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P8-READLIST-BOOKS-EXCLUDED-READLISTS-LIST-FAMILY")
+        .expect("readlists exclusion case should exist");
+    let tachiyomi = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P8-READLIST-BOOKS-EXCLUDED-TACHIYOMI")
+        .expect("tachiyomi exclusion case should exist");
+
+    assert_eq!(
+        dependency
+            .headers
+            .as_ref()
+            .and_then(|headers| headers.get("X-Komga-Compat-Search-Ownership")),
+        None,
+        "bare unpaged dependency case must stay pre-owned inventory, not shadow inventory",
+    );
+    assert_eq!(
+        widened
+            .headers
+            .as_ref()
+            .and_then(|headers| headers.get("X-Komga-Compat-Search-Ownership")),
+        Some(&"shadow-java-writer".to_string()),
+        "widened unpaged dependency case must stay explicit shadow inventory",
+    );
+    assert_eq!(
+        readlists
+            .headers
+            .as_ref()
+            .and_then(|headers| headers.get("X-Komga-Compat-Search-Ownership")),
+        Some(&"shadow-java-writer".to_string()),
+        "list-family exclusion must stay explicit shadow inventory",
+    );
+    assert_eq!(
+        tachiyomi
+            .headers
+            .as_ref()
+            .and_then(|headers| headers.get("X-Komga-Compat-Search-Ownership")),
+        Some(&"shadow-java-writer".to_string()),
+        "tachiyomi exclusion must stay explicit shadow inventory",
+    );
+
+    let responses = run_cases_against_self(&config, phase8_readlist_books_family_negative_case_ids()).await;
+
+    assert_eq!(
+        responses.len(),
+        phase8_readlist_books_family_negative_case_ids().len(),
+        "phase8 negative compat self-diff must cover the full explicit non-owned inventory",
+    );
+
+    for (case_id, response) in responses {
+        match case_id.as_str() {
+            "P8-READLIST-BOOKS-DEPENDENCY-UNPAGED-PREOWNED"
+            | "P8-READLIST-BOOKS-DEPENDENCY-UNPAGED-WIDENED-SHADOW" => {
+                assert_eq!(
+                    response.status, 200,
+                    "negative inventory case should stay HTTP 200: {case_id}"
+                );
+
+                let body = match response.body {
+                    NormalizedBody::Json(body) => body,
+                    other => panic!(
+                        "dependency inventory case must stay JSON for explicit shadow evidence: {case_id} => {other:?}"
+                    ),
+                };
+
+                if case_id == "P8-READLIST-BOOKS-DEPENDENCY-UNPAGED-PREOWNED" {
+                    assert!(
+                        body.get("_compat").is_none(),
+                        "pre-owned dependency case must stay native-clean instead of shadow-inferred: {case_id}",
+                    );
+                    assert_eq!(
+                        body["pageable"]["unpaged"],
+                        serde_json::Value::Bool(true),
+                        "pre-owned dependency case must stay on the unpaged route shape: {case_id}",
+                    );
+                } else {
+                    assert_eq!(
+                        body["_compat"]["discoveryOwnership"],
+                        serde_json::Value::String("non-native".to_string()),
+                        "widened dependency case must stay explicit shadow inventory: {case_id}",
+                    );
+                    assert_eq!(
+                        body["_compat"]["shape"],
+                        serde_json::Value::String(
+                            "UnsupportedBookFilter(LibraryId)".to_string()
+                        ),
+                        "widened dependency case must stay explicit about the rejected ownership shape: {case_id}",
+                    );
+                }
+            }
+            "P8-READLIST-BOOKS-EXCLUDED-READLISTS-LIST-FAMILY"
+            | "P8-READLIST-BOOKS-EXCLUDED-TACHIYOMI" => {
+                assert_eq!(
+                    response.status, 404,
+                    "excluded inventory case should stay HTTP 404: {case_id}"
+                );
+            }
+            _ => panic!("unexpected phase8 negative compat case id: {case_id}"),
+        }
+    }
+}
+
 #[test]
 #[ignore = "requires running Java and Rust servers via KOMGA_COMPAT_JAVA_BASE_URL and KOMGA_COMPAT_RUST_BASE_URL"]
 fn live_http_json_diff_smoke() {
@@ -407,4 +559,82 @@ async fn rust_http_json_diff_smoke_against_self() {
 
     server.abort();
     let _ = server.await;
+}
+
+async fn run_cases_against_self(
+    config: &HarnessConfig,
+    case_ids: &[&str],
+) -> Vec<(String, NormalizedResponse)> {
+    let listener = tokio::net::TcpListener::bind(std::net::SocketAddr::from(([127, 0, 0, 1], 0)))
+        .await
+        .expect("bind test listener");
+    let address = listener.local_addr().expect("listener address");
+    let server = tokio::spawn(async move {
+        komga_rust::app::serve(listener)
+            .await
+            .expect("server should run");
+    });
+
+    let base_url = format!("http://{address}");
+    let allowlist: BTreeSet<String> = config.header_allowlist.iter().cloned().collect();
+    let client = reqwest::Client::builder()
+        .build()
+        .expect("reqwest client should build");
+    let session_token = fetch_session_token(&client, &base_url).await;
+    let mut responses = Vec::with_capacity(case_ids.len());
+
+    for case_id in case_ids {
+        let case = config
+            .cases
+            .iter()
+            .find(|it| it.id == *case_id)
+            .unwrap_or_else(|| panic!("missing phase8 readlist-books compat case: {case_id}"));
+        let vars = BTreeMap::from([("SESSION_TOKEN".to_string(), session_token.clone())]);
+
+        let left = execute_case_async(&client, &base_url, case, &vars)
+            .await
+            .unwrap_or_else(|error| panic!("left case should execute for {case_id}: {error:#}"));
+        let right = execute_case_async(&client, &base_url, case, &vars)
+            .await
+            .unwrap_or_else(|error| panic!("right case should execute for {case_id}: {error:#}"));
+        let report = compare_responses(&case.id, &left, &right, &allowlist, case.comparison);
+
+        if !report.matches {
+            write_diff_report(&temp_output_root(), &report)
+                .unwrap_or_else(|error| panic!("report should be written on mismatch for {case_id}: {error:#}"));
+        }
+
+        assert!(report.matches, "compat diff failed for {case_id}");
+        assert!(
+            report.differences.is_empty(),
+            "unexpected diffs for {case_id}: {:?}",
+            report.differences,
+        );
+
+        responses.push((case.id.clone(), left));
+    }
+
+    server.abort();
+    let _ = server.await;
+    responses
+}
+
+async fn fetch_session_token(client: &reqwest::Client, base_url: &str) -> String {
+    let response = client
+        .get(format!("{}{}", base_url.trim_end_matches('/'), "/api/v2/users/me"))
+        .header("Authorization", format!("Basic {USER_BASIC_AUTH}"))
+        .header("X-Auth-Token", "")
+        .send()
+        .await
+        .expect("login request should send");
+
+    assert!(response.status().is_success(), "login should succeed");
+
+    response
+        .headers()
+        .get("X-Auth-Token")
+        .expect("login response should include X-Auth-Token")
+        .to_str()
+        .expect("X-Auth-Token should be valid UTF-8")
+        .to_string()
 }

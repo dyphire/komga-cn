@@ -12,16 +12,36 @@ pub struct ReadListBooksQuery {
     pub size: usize,
     pub unpaged: bool,
     pub library_ids: Option<Vec<String>>,
+    pub deleted: Option<bool>,
+    pub tags: Option<Vec<String>>,
+    pub read_statuses: Option<Vec<String>>,
+    pub media_statuses: Option<Vec<String>>,
+    pub authors: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeReadListBooksQuery {
     pub readlist_id: String,
+    pub page: usize,
+    pub size: usize,
+    pub unpaged: bool,
+    pub library_ids: Option<Vec<String>>,
+    pub deleted: Option<bool>,
+    pub tags: Option<Vec<String>>,
+    pub read_statuses: Option<Vec<String>>,
+    pub media_statuses: Option<Vec<String>>,
+    pub authors: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReadListDetailQuery {
     pub readlist_id: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReadListBooksOwnership {
+    NativeOwned,
+    DependencyOnly,
 }
 
 impl<R> DiscoveryQueries<R>
@@ -41,20 +61,49 @@ where
         context: &DiscoveryQueryContext,
         query: ReadListBooksQuery,
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
-        if !query.unpaged {
-            return Err(unsupported_book_filter("paged"));
-        }
+        classify_readlist_books_query(&query)?;
+        self.repository
+            .list_readlist_books(context, native_readlist_books_query(query))
+            .await
+    }
+}
 
-        if query.library_ids.is_some() {
-            return Err(unsupported_book_filter("LibraryId"));
-        }
+pub fn classify_readlist_books_query(
+    query: &ReadListBooksQuery,
+) -> Result<ReadListBooksOwnership, DiscoveryError> {
+    if !query.unpaged {
+        return Ok(ReadListBooksOwnership::NativeOwned);
+    }
 
-        self.repository.list_readlist_books(
-            context,
-            NativeReadListBooksQuery {
-                readlist_id: query.readlist_id,
-            },
-        )
-        .await
+    if query.library_ids.is_some() {
+        return Err(unsupported_book_filter("LibraryId"));
+    }
+
+    let has_extra_filters = query.deleted.is_some()
+        || query.tags.is_some()
+        || query.read_statuses.is_some()
+        || query.media_statuses.is_some()
+        || query.authors.is_some();
+    if has_extra_filters {
+        return Err(unsupported_book_filter("extra-filters"));
+    }
+
+    Ok(ReadListBooksOwnership::DependencyOnly)
+}
+
+pub(in crate::discovery) fn native_readlist_books_query(
+    query: ReadListBooksQuery,
+) -> NativeReadListBooksQuery {
+    NativeReadListBooksQuery {
+        readlist_id: query.readlist_id,
+        page: query.page,
+        size: query.size,
+        unpaged: query.unpaged,
+        library_ids: query.library_ids,
+        deleted: query.deleted,
+        tags: query.tags,
+        read_statuses: query.read_statuses,
+        media_statuses: query.media_statuses,
+        authors: query.authors,
     }
 }

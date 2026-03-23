@@ -41,12 +41,17 @@ pub(super) async fn phase6_readlist_detail_runtime_ownership_is_native() {
     )
     .await;
     assert_eq!(paged_readlist_books.status(), StatusCode::OK);
-    assert_shadow_marker(&paged_readlist_books, "paged readlist books");
-    let paged_readlist_books_json = response_json(paged_readlist_books).await;
     assert_eq!(
-        paged_readlist_books_json["_compat"]["discoveryOwnership"],
-        "non-native",
+        paged_readlist_books
+            .headers()
+            .get(SEARCH_OWNERSHIP_HEADER)
+            .and_then(|value| value.to_str().ok()),
+        Some(NATIVE_OWNERSHIP_MARKER),
+        "paged readlist books should carry the Phase 8 native ownership marker",
     );
+    let paged_readlist_books_json = response_json(paged_readlist_books).await;
+    assert!(paged_readlist_books_json.get("_compat").is_none());
+    assert_eq!(page_content_ids(&paged_readlist_books_json), vec!["book-1", "book-2"]);
 }
 
 pub(super) async fn phase6_readlist_detail_404_and_filtered_semantics_match_contract() {

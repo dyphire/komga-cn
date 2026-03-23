@@ -160,6 +160,47 @@ def parse_json_payload(payload: bytes) -> object | None:
         return None
 
 
+def page_content_ids(payload: object | None) -> list[str]:
+    if not isinstance(payload, dict):
+        return []
+    content = payload.get('content')
+    if not isinstance(content, list):
+        return []
+    return [str(item.get('id')) for item in content if isinstance(item, dict) and item.get('id') is not None]
+
+
+def json_path_value(payload: object | None, path: str) -> object | None:
+    current = payload
+    for part in path.split('.'):
+        if not isinstance(current, dict) or part not in current:
+            return None
+        current = current[part]
+    return current
+
+
+def response_expectation_failures(spec: dict[str, object], payload: object | None) -> list[str]:
+    failures: list[str] = []
+    expected_content_ids = spec.get('expectedContentIds')
+    if isinstance(expected_content_ids, list):
+        actual_ids = page_content_ids(payload)
+        if actual_ids != [str(item) for item in expected_content_ids]:
+            failures.append(f'expected content ids {expected_content_ids}, got {actual_ids}')
+
+    assertions = spec.get('jsonAssertions')
+    if isinstance(assertions, list):
+        for assertion in assertions:
+            if not isinstance(assertion, dict):
+                continue
+            path = assertion.get('path')
+            if not isinstance(path, str) or 'value' not in assertion:
+                continue
+            actual_value = json_path_value(payload, path)
+            if actual_value != assertion['value']:
+                failures.append(f'expected {path}={assertion["value"]!r}, got {actual_value!r}')
+
+    return failures
+
+
 def execute_api_request(api_url: str, token: str, spec: dict[str, object]) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
     url = f'{api_url}{spec["requestPath"]}'
     body = spec.get('body')
@@ -174,6 +215,7 @@ def execute_api_request(api_url: str, token: str, spec: dict[str, object]) -> tu
     response_entry: dict[str, object]
     passed = False
     allowed_statuses = [int(status) for status in spec.get('responseStatuses', [])]
+    expectation_failures: list[str] = []
 
     try:
         with urllib.request.urlopen(request) as response:
@@ -185,6 +227,9 @@ def execute_api_request(api_url: str, token: str, spec: dict[str, object]) -> tu
                 'json': parse_json_payload(payload),
             }
             passed = response.status in allowed_statuses if allowed_statuses else 200 <= response.status < 300
+            if passed:
+                expectation_failures = response_expectation_failures(spec, response_entry.get('json'))
+                passed = len(expectation_failures) == 0
     except urllib.error.HTTPError as error:
         payload = error.read()
         response_entry = {
@@ -194,6 +239,9 @@ def execute_api_request(api_url: str, token: str, spec: dict[str, object]) -> tu
             'json': parse_json_payload(payload),
         }
         passed = error.code in allowed_statuses
+        if passed:
+            expectation_failures = response_expectation_failures(spec, response_entry.get('json'))
+            passed = len(expectation_failures) == 0
 
     request_entry = {
         'method': spec['method'],
@@ -210,8 +258,13 @@ def execute_api_request(api_url: str, token: str, spec: dict[str, object]) -> tu
         'postDataIncludes': spec.get('postDataIncludes', []),
         'responseStatuses': allowed_statuses,
         'pass': passed,
+        'requestPath': spec['requestPath'],
+        'purpose': spec.get('purpose'),
+        'ownershipClass': spec.get('ownershipClass'),
+        'persona': (spec.get('auth') or {}).get('username') if isinstance(spec.get('auth'), dict) else None,
+        'expectationFailures': expectation_failures,
         'matchedRequest': request_entry if passed else None,
-        'matchedResponse': response_entry if passed else None,
+        'matchedResponse': response_entry,
     }
     return request_entry, response_entry, expected_entry
 
@@ -235,9 +288,298 @@ def contract_expected_entry(api_url: str, spec: dict[str, object]) -> dict[str, 
         'postDataIncludes': spec.get('postDataIncludes', []),
         'responseStatuses': [int(status) for status in spec.get('responseStatuses', [])],
         'pass': True,
+        'requestPath': spec['requestPath'],
+        'purpose': spec.get('purpose'),
+        'ownershipClass': spec.get('ownershipClass'),
+        'persona': (spec.get('auth') or {}).get('username') if isinstance(spec.get('auth'), dict) else None,
+        'expectationFailures': [],
         'matchedRequest': request_entry,
         'matchedResponse': None,
     }
+
+
+def parse_error_messages(error: object) -> list[str]:
+    if not isinstance(error, str) or not error:
+        return []
+    return [item.strip() for item in error.split(';') if item.strip()]
+
+
+def append_unique_failures(failures: list[str], additions: list[str]) -> list[str]:
+    seen = set(failures)
+    for item in additions:
+        if item not in seen:
+            failures.append(item)
+            seen.add(item)
+    return failures
+
+
+def combined_source_for_route(route: dict[str, object]) -> str:
+    return '\n'.join(read_source_texts(route).values())
+
+
+def evaluate_contract_signals(route: dict[str, object]) -> tuple[dict[str, bool], dict[str, dict[str, object]]]:
+    definitions = route.get('contractSignals')
+    if not isinstance(definitions, list) or not definitions:
+        return {}, {}
+
+    combined_source = combined_source_for_route(route)
+    signals: dict[str, bool] = {}
+    evidence: dict[str, dict[str, object]] = {}
+
+    for definition in definitions:
+        if not isinstance(definition, dict):
+            continue
+        signal_key = definition.get('signalKey')
+        if not isinstance(signal_key, str):
+            continue
+
+        all_of = [str(item) for item in definition.get('allOf', []) if isinstance(item, str)]
+        any_of = [str(item) for item in definition.get('anyOf', []) if isinstance(item, str)]
+        all_of_pass = all(fragment in combined_source for fragment in all_of) if all_of else True
+        any_of_pass = any(fragment in combined_source for fragment in any_of) if any_of else True
+        passed = all_of_pass and any_of_pass
+
+        signals[signal_key] = passed
+        evidence[signal_key] = {
+            'allOf': all_of,
+            'anyOf': any_of,
+            'allOfMatched': [fragment for fragment in all_of if fragment in combined_source],
+            'anyOfMatched': [fragment for fragment in any_of if fragment in combined_source],
+            'pass': passed,
+        }
+
+    return signals, evidence
+
+
+def request_token(
+    api_url: str,
+    default_login: dict[str, str],
+    token_cache: dict[tuple[str, str], str | None],
+    spec: dict[str, object],
+) -> str | None:
+    auth = spec.get('auth') if isinstance(spec.get('auth'), dict) else None
+    username = str(auth.get('username')) if auth and auth.get('username') else str(default_login['username'])
+    password = str(auth.get('password')) if auth and auth.get('password') else str(default_login['password'])
+    key = (username, password)
+    if key in token_cache:
+        return token_cache[key]
+    try:
+        token_cache[key] = login_token(api_url, username, password)
+    except (urllib.error.URLError, OSError, RuntimeError, urllib.error.HTTPError):
+        token_cache[key] = None
+    return token_cache[key]
+
+
+def capture_governance_requests(
+    route: dict[str, object],
+    *,
+    api_url: str,
+    default_login: dict[str, str],
+    token_cache: dict[tuple[str, str], str | None],
+    capture_mode: str,
+) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]], list[str]]:
+    specs = route.get('governanceEvidenceRequests')
+    if not isinstance(specs, list) or not specs:
+        return [], [], [], []
+
+    requests: list[dict[str, object]] = []
+    responses: list[dict[str, object]] = []
+    entries: list[dict[str, object]] = []
+    failures: list[str] = []
+
+    for spec in specs:
+        if not isinstance(spec, dict):
+            continue
+        token = request_token(api_url, default_login, token_cache, spec)
+        if token is None:
+            request_entry = contract_request_entry(api_url, spec)
+            response_entry = {
+                'status': None,
+                'url': request_entry['url'],
+                'contentType': None,
+                'json': None,
+            }
+            expected_entry = contract_expected_entry(api_url, spec)
+            expected_entry['ownershipObservation'] = capture_ownership_label(capture_mode)
+            expected_entry['contractOnly'] = True
+        else:
+            request_entry, response_entry, expected_entry = execute_api_request(api_url, token, spec)
+            expected_entry['ownershipObservation'] = 'native-rust-owned'
+            expected_entry['contractOnly'] = False
+        requests.append(request_entry)
+        responses.append(response_entry)
+        entries.append(expected_entry)
+        if not expected_entry['pass']:
+            failures.append(f'missing governance evidence request {expected_entry["label"]}')
+
+    return requests, responses, entries, failures
+
+
+def enrich_route_result(
+    route_result: dict[str, object],
+    route: dict[str, object],
+    *,
+    api_url: str,
+    default_login: dict[str, str],
+    token_cache: dict[tuple[str, str], str | None],
+) -> dict[str, object]:
+    failures = parse_error_messages(route_result.get('error'))
+    signals = dict(route_result.get('signals', {})) if isinstance(route_result.get('signals'), dict) else {}
+    contract_signals, contract_evidence = evaluate_contract_signals(route)
+    signals.update(contract_signals)
+    route_result['signals'] = signals
+    route_result['contractEvidence'] = contract_evidence
+
+    expected_signals = route.get('contractSignalExpectations')
+    if isinstance(expected_signals, dict):
+        for signal_key, expected_value in expected_signals.items():
+            if signals.get(str(signal_key)) is not expected_value:
+                failures.append(f'contract signal expectation failed for {signal_key}')
+
+    governance_requests, governance_responses, governance_entries, governance_failures = capture_governance_requests(
+        route,
+        api_url=api_url,
+        default_login=default_login,
+        token_cache=token_cache,
+        capture_mode=str(route_result.get('captureMode', 'unknown')),
+    )
+    route_result['governanceOwnedRequests'] = governance_entries
+
+    requests = list(route_result.get('requests', [])) if isinstance(route_result.get('requests'), list) else []
+    responses = list(route_result.get('responses', [])) if isinstance(route_result.get('responses'), list) else []
+    requests.extend(governance_requests)
+    responses.extend(governance_responses)
+    route_result['requests'] = requests
+    route_result['responses'] = responses
+
+    append_unique_failures(failures, governance_failures)
+    route_result['pass'] = len(failures) == 0
+    route_result['error'] = None if not failures else '; '.join(failures)
+    return route_result
+
+
+def load_summary(output_dir: Path) -> list[dict[str, object]]:
+    payload = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
+    if not isinstance(payload, list):
+        raise RuntimeError('browser smoke summary.json must be a JSON array')
+    return [row for row in payload if isinstance(row, dict)]
+
+
+def write_summary(output_dir: Path, summary: list[dict[str, object]]) -> None:
+    (output_dir / 'summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    requests_all: list[dict[str, object]] = []
+    responses_all: list[dict[str, object]] = []
+    for route_result in summary:
+        route_name = route_result.get('route')
+        if isinstance(route_name, str):
+            (output_dir / f'{route_name}.json').write_text(
+                json.dumps(route_result, ensure_ascii=False, indent=2) + '\n',
+                encoding='utf-8',
+            )
+        if isinstance(route_result.get('requests'), list):
+            requests_all.extend(route_result['requests'])
+        if isinstance(route_result.get('responses'), list):
+            responses_all.extend(route_result['responses'])
+    (output_dir / 'requests-all.json').write_text(
+        json.dumps({'requests': requests_all, 'responses': responses_all, 'routes': summary}, ensure_ascii=False, indent=2)
+        + '\n',
+        encoding='utf-8',
+    )
+
+
+def summarize_page_payload(payload: object | None) -> str:
+    if not isinstance(payload, dict):
+        return 'status=contract-only'
+    ids = page_content_ids(payload)
+    total_elements = payload.get('totalElements')
+    number_of_elements = payload.get('numberOfElements')
+    return f'totalElements={total_elements} numberOfElements={number_of_elements} ids={ids}'
+
+
+def request_path_for_summary(entry: dict[str, object]) -> str:
+    matched_request = entry.get('matchedRequest')
+    if isinstance(matched_request, dict) and matched_request.get('url'):
+        return str(matched_request['url'])
+    if entry.get('requestPath'):
+        return str(entry['requestPath'])
+    return 'unknown-request'
+
+
+def emit_route_summary(route_result: dict[str, object]) -> None:
+    route_name = route_result.get('route')
+    capture_mode = route_result.get('captureMode')
+    print(f'route={route_name} captureMode={capture_mode} pass={route_result.get("pass")}')
+
+    if route_name != 'browse-readlist':
+        return
+
+    signals = route_result.get('signals', {}) if isinstance(route_result.get('signals'), dict) else {}
+    print(
+        'page-load: '
+        f'rootFound={signals.get("rootFound")} '
+        f'itemBrowserFound={signals.get("itemBrowserFound")} '
+        f'detailMetadataVisible={signals.get("detailMetadataVisible")} '
+        f'readListPageLoadFound={signals.get("readListPageLoadFound")} '
+        f'pagedBooksFetchFound={signals.get("pagedBooksFetchFound")}'
+    )
+    print(
+        'filter-governance: '
+        f'filterStateRestoreFound={signals.get("filterStateRestoreFound")} '
+        f'emptyStateRenderingFound={signals.get("emptyStateRenderingFound")}'
+    )
+
+    governance_requests = route_result.get('governanceOwnedRequests')
+    if isinstance(governance_requests, list):
+        for entry in governance_requests:
+            if not isinstance(entry, dict):
+                continue
+            matched_response = entry.get('matchedResponse') if isinstance(entry.get('matchedResponse'), dict) else {}
+            status = matched_response.get('status')
+            payload_summary = summarize_page_payload(matched_response.get('json'))
+            ownership_class = entry.get('ownershipClass') or 'unknown-ownership'
+            purpose = entry.get('purpose') or 'unspecified-purpose'
+            persona = entry.get('persona') or 'admin@example.org'
+            contract_only = entry.get('contractOnly') is True
+            observation = entry.get('ownershipObservation') or 'unknown-observation'
+            expectation_failures = entry.get('expectationFailures')
+            expectation_text = ''
+            if isinstance(expectation_failures, list) and expectation_failures:
+                expectation_text = f' expectationFailures={expectation_failures}'
+            print(
+                f'- {purpose}: label={entry.get("label")} ownershipClass={ownership_class} '
+                f'persona={persona} pass={entry.get("pass")} observation={observation} '
+                f'contractOnly={contract_only} status={status} request={request_path_for_summary(entry)} {payload_summary}{expectation_text}'
+            )
+
+    print('non-claims: edit/live-refresh/admin/list-family/Tachiyomi remain outside this browse-readlist paged/filter closure evidence')
+
+
+def enrich_and_emit_summary(config: dict[str, object]) -> int:
+    output_dir = Path(str(config['outputDir']))
+    summary = load_summary(output_dir)
+    route_map = {str(route['route']): route for route in config['routes']}
+    token_cache: dict[tuple[str, str], str | None] = {}
+    enriched_summary: list[dict[str, object]] = []
+    for route_result in summary:
+        route_name = route_result.get('route')
+        route = route_map.get(str(route_name))
+        if route is not None:
+            route_result = enrich_route_result(
+                route_result,
+                route,
+                api_url=str(config['apiUrl']),
+                default_login={
+                    'username': str(config['login']['username']),
+                    'password': str(config['login']['password']),
+                },
+                token_cache=token_cache,
+            )
+        enriched_summary.append(route_result)
+
+    write_summary(output_dir, enriched_summary)
+    for route_result in enriched_summary:
+        emit_route_summary(route_result)
+    return 0 if all(bool(route_result.get('pass')) for route_result in enriched_summary) else 1
 
 
 def fallback_navigation_scenario(route: dict[str, object], source_texts: dict[str, str], capture_mode: str) -> tuple[dict[str, object] | None, dict[str, object], list[str]]:
@@ -581,9 +923,16 @@ def main() -> int:
     node_result = run_node_runner(config)
     if node_result.returncode == 0:
         emit_process_output(node_result)
-        return 0
+        return enrich_and_emit_summary(config)
     if playwright_missing(node_result):
-        return run_fallback_capture(config)
+        fallback_code = run_fallback_capture(config)
+        if fallback_code not in (0, 1):
+            return fallback_code
+        return enrich_and_emit_summary(config)
+    summary_path = output_dir / 'summary.json'
+    if node_result.returncode == 1 and summary_path.exists():
+        emit_process_output(node_result)
+        return enrich_and_emit_summary(config)
 
     emit_process_output(node_result)
     return node_result.returncode

@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-async fn readlist_books_paged_variant_remains_non_native() {
+async fn readlist_books_paged_variant_is_phase8_native_owned() {
     let queries = DiscoveryQueries::new(SqliteDiscoveryAdapter::default());
     let context = DiscoveryQueryContext::allow_all();
 
@@ -14,14 +14,16 @@ async fn readlist_books_paged_variant_remains_non_native() {
                 size: 20,
                 unpaged: false,
                 library_ids: None,
+                deleted: None,
+                tags: None,
+                read_statuses: None,
+                media_statuses: None,
+                authors: None,
             },
         )
         .await;
 
-    assert!(matches!(
-        result,
-        Err(DiscoveryError::NonNativeRequestShape(_))
-    ));
+    assert!(result.is_ok());
 }
 
 #[tokio::test]
@@ -38,6 +40,11 @@ async fn readlist_books_library_id_variant_remains_non_native() {
                 size: 20,
                 unpaged: true,
                 library_ids: Some(vec!["1".to_string()]),
+                deleted: None,
+                tags: None,
+                read_statuses: None,
+                media_statuses: None,
+                authors: None,
             },
         )
         .await;
@@ -130,7 +137,7 @@ pub(super) async fn phase6_regression_phase4_phase5_routes_remain_stable() {
             .get(SEARCH_OWNERSHIP_HEADER)
             .and_then(|value| value.to_str().ok()),
         Some(NATIVE_OWNERSHIP_MARKER),
-        "bare unpaged readlist books route should be native-owned",
+        "bare unpaged readlist books pre-owned marker must stay unchanged",
     );
     let native_json = response_json(native_response).await;
     assert_eq!(page_content_ids(&native_json), vec!["book-1", "book-2"]);
@@ -145,13 +152,19 @@ pub(super) async fn phase6_regression_phase4_phase5_routes_remain_stable() {
     )
     .await;
     assert_eq!(paged_response.status(), StatusCode::OK);
-    assert_shadow_marker(&paged_response, "paged readlist books");
-    let paged_json = response_json(paged_response).await;
-    assert_eq!(paged_json["_compat"]["discoveryOwnership"], "non-native");
     assert_eq!(
-        paged_json["_compat"]["shape"],
-        "UnsupportedBookFilter(paged)"
+        paged_response
+            .headers()
+            .get(SEARCH_OWNERSHIP_HEADER)
+            .and_then(|value| value.to_str().ok()),
+        Some(NATIVE_OWNERSHIP_MARKER),
+        "paged readlist books should carry the Phase 8 native ownership marker",
     );
+    let paged_json = response_json(paged_response).await;
+    assert!(paged_json.get("_compat").is_none());
+    assert_eq!(page_content_ids(&paged_json), vec!["book-1", "book-2"]);
+    assert_eq!(paged_json["pageable"]["paged"], true);
+    assert_eq!(paged_json["pageable"]["unpaged"], false);
 
     let library_scoped_response = get_response(
         &app,

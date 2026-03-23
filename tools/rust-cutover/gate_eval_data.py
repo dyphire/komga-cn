@@ -7,6 +7,7 @@ PHASE4_READLIST_CONTEXT_READ_LABEL = "phase4-readlist-context-read"
 PHASE5_ONESHOT_CLOSURE_LABEL = "phase5-oneshot-closure"
 PHASE6_ONESHOT_READLIST_CONTEXT_CLOSURE_LABEL = "phase6-oneshot-readlist-context-closure"
 PHASE7_SERIES_ONESHOT_QUERY_CLOSURE_LABEL = "phase7-series-oneshot-query-closure"
+PHASE8_READLIST_BOOKS_FAMILY_CLOSURE_LABEL = "phase8-readlist-books-family-closure"
 
 discovery_supported_scope = [
     "GET /api/v1/libraries",
@@ -130,6 +131,36 @@ phase7_series_oneshot_query_out_of_slice = [
     "SSE/live-refresh parity",
     "full cutover/direct-serving approval",
 ]
+phase8_readlist_books_family_owned_scope = [
+    "GET /api/v1/readlists/{readListId}/books (default paged; unpaged omitted)",
+    "GET /api/v1/readlists/{readListId}/books?page={page}&size={size}",
+    "GET /api/v1/readlists/{readListId}/books?library_id={libraryId}",
+    "GET /api/v1/readlists/{readListId}/books?read_status={status}",
+    "GET /api/v1/readlists/{readListId}/books?media_status={status}",
+    "GET /api/v1/readlists/{readListId}/books?tag={tag} (including repeated tag)",
+    "GET /api/v1/readlists/{readListId}/books?author={name,role} (including repeated author)",
+    "GET /api/v1/readlists/{readListId}/books?deleted={true|false}",
+    "GET /api/v1/readlists/{readListId}/books with supported filter combinations + default paging or explicit page/size",
+    "GET /api/v1/readlists/{readListId}/books?unpaged=false",
+]
+phase8_readlist_books_family_pre_owned_dependencies = [
+    "GET /api/v1/readlists/{readListId} (Phase 6, regression-only here)",
+    "GET /api/v1/readlists/{readListId}/books?unpaged=true (Phase 4, regression-only here)",
+    "GET /api/v1/readlists/{readListId}/books/{bookId}/previous (Phase 4, regression-only here)",
+    "GET /api/v1/readlists/{readListId}/books/{bookId}/next (Phase 4, regression-only here)",
+    "GET /api/v1/books/{bookId}/readlists (Phase 3, regression-only here)",
+]
+phase8_readlist_books_family_out_of_slice = [
+    "GET /api/v1/readlists and every list-family variant (search/unpaged/paging/library filters)",
+    "GET /api/v1/readlists/{readListId}/read-progress/tachiyomi",
+    "readlist write/admin routes (POST/PATCH/DELETE, thumbnail mutation, ComicRack match/import, file/download)",
+    "media delivery (/thumbnail, /file, /pages*, /manifest, /resource/*, /positions)",
+    "reader handoff and download branches",
+    "read-progress/progression write routes",
+    "collection/readlist removals and admin-write flows",
+    "SSE/live-refresh parity",
+    "whole cutover/direct-serving approval",
+]
 
 phase3_skipped_base_checks: dict[str, str] = {
     "auth_api_key": "Skipped for phase3-detail-read: API key parity is outside this direct-browse detail-read runbook.",
@@ -184,12 +215,23 @@ phase7_skipped_base_checks: dict[str, str] = {
     "packaging_tray": "Skipped for phase7-series-oneshot-query-closure: packaging/tray startup contract is outside this slice gate.",
     "external_release_credentials": "Skipped for phase7-series-oneshot-query-closure: release credentials are not part of exact series-detail query readiness.",
 }
+phase8_skipped_base_checks: dict[str, str] = {
+    "auth_api_key": "Skipped for phase8-readlist-books-family-closure: API key parity is outside this readlist-books family runbook.",
+    "libraries_visibility": "Skipped for phase8-readlist-books-family-closure: discovery libraries parity is not part of this direct readlist-books family slice gate.",
+    "opds": "Skipped for phase8-readlist-books-family-closure: OPDS parity is outside this direct readlist-books family slice gate.",
+    "cache_file_headers": "Skipped for phase8-readlist-books-family-closure: binary metadata/header parity is outside this direct readlist-books family slice gate.",
+    "read_progress": "Skipped for phase8-readlist-books-family-closure: this runbook does not claim read-progress/progression ownership.",
+    "server_management_browser_smoke": "Skipped for phase8-readlist-books-family-closure: server-management/browser-ops acceptance is outside this direct readlist-books family slice.",
+    "packaging_tray": "Skipped for phase8-readlist-books-family-closure: packaging/tray startup contract is outside this slice gate.",
+    "external_release_credentials": "Skipped for phase8-readlist-books-family-closure: release credentials are not part of direct readlist-books family readiness.",
+}
 
 
 def build_checks(
     run_label: str,
     evidence_root: Path,
 ) -> tuple[
+    list[dict[str, object]],
     list[dict[str, object]],
     list[dict[str, object]],
     list[dict[str, object]],
@@ -203,6 +245,7 @@ def build_checks(
     is_phase5_oneshot_closure = run_label == PHASE5_ONESHOT_CLOSURE_LABEL
     is_phase6_oneshot_readlist_context_closure = run_label == PHASE6_ONESHOT_READLIST_CONTEXT_CLOSURE_LABEL
     is_phase7_series_oneshot_query_closure = run_label == PHASE7_SERIES_ONESHOT_QUERY_CLOSURE_LABEL
+    is_phase8_readlist_books_family_closure = run_label == PHASE8_READLIST_BOOKS_FAMILY_CLOSURE_LABEL
 
     base_checks = [
         {
@@ -330,6 +373,16 @@ def build_checks(
                 "details": [
                     phase7_skipped_base_checks[check_id],
                     "This label proves exact `GET /api/v1/series/{seriesId}?oneshot=true` readiness only and does not approve browse/readlist/media/write/whole-cutover scope.",
+                ],
+            }
+        if check_id in phase8_skipped_base_checks:
+            profile_overrides = check.setdefault("profile_overrides", {})
+            profile_overrides[PHASE8_READLIST_BOOKS_FAMILY_CLOSURE_LABEL] = {
+                "status": "skipped",
+                "blocking": False,
+                "details": [
+                    phase8_skipped_base_checks[check_id],
+                    "This label proves direct readlist-books paged/filter closure readiness only and does not approve readlist list-family/Tachiyomi/admin/media/write/whole-cutover scope.",
                 ],
             }
 
@@ -885,5 +938,108 @@ def build_checks(
             },
         ]
 
-    checks = base_checks + discovery_checks + phase3_checks + phase4_checks + phase5_checks + phase6_checks + phase7_checks
-    return checks, discovery_checks, phase3_checks, phase4_checks, phase5_checks, phase6_checks
+    phase8_checks: list[dict[str, object]] = []
+    if is_phase8_readlist_books_family_closure:
+        phase8_contract = evidence_root / "task-1-contract-matrix" / "phase8-readlist-books-family-contract.txt"
+        phase8_exclusions = evidence_root / "task-1-contract-matrix" / "phase8-readlist-books-family-exclusions.txt"
+        phase8_runtime_green = evidence_root / "task-3-native-query-runtime" / "readlist-books-family-green.txt"
+        phase8_runtime_restrictions = evidence_root / "task-3-native-query-runtime" / "restrictions.txt"
+        phase8_shadow_routing = evidence_root / "task-4-http-parity" / "shadow-routing.txt"
+        phase8_shadow_exclusions = evidence_root / "task-4-http-parity" / "exclusion-routing.txt"
+        phase8_http_diff = evidence_root / "task-5-compat-shadow" / "http-json-diff.txt"
+        phase8_negative_inventory = evidence_root / "task-5-compat-shadow" / "negative-inventory.txt"
+        phase8_browser_summary_text = evidence_root / "task-6-browser-smoke" / "browser-summary.txt"
+        phase8_browser_summary_json = evidence_root / "task-6-browser-smoke" / "summary.json"
+        phase8_browser_route = evidence_root / "task-6-browser-smoke" / "browse-readlist.json"
+
+        phase8_checks = [
+            {
+                "id": "phase8_readlist_books_family_contract",
+                "category": "phase8-readlist-books-family-closure",
+                "refusal_condition": "Phase8 readlist-books family contract matrix is not frozen",
+                "evidence": [phase8_contract],
+                "mode": "discovery_markers",
+                "marker_map": {
+                    phase8_contract: [
+                        "phase8_readlist_books_family_matrix_is_frozen",
+                        "New ownership (Phase 8 only)",
+                        "GET /api/v1/readlists/{readListId}/books",
+                        "GET /api/v1/readlists/{readListId}/books?tag={tag} (including repeated tag)",
+                        "GET /api/v1/readlists/{readListId}/books?author={name,role} (including repeated author)",
+                        "supported filter combinations with default paging or explicit page/size",
+                        "GET /api/v1/readlists/{readListId}/books?unpaged=false",
+                        "Dependency-only (regression-only, not reopened)",
+                        "GET /api/v1/readlists/{readListId}/books?unpaged=true",
+                        "GET /api/v1/readlists/{readListId}",
+                        "GET /api/v1/books/{bookId}/readlists (Phase 3)",
+                        "Boundary rule:",
+                        "Result: PASS",
+                    ],
+                },
+                "success_note": "Phase8 contract evidence freezes exact direct readlist-books paged/filter ownership while keeping Phase 4/6 routes dependency-only/regression-only.",
+            },
+            {
+                "id": "phase8_readlist_books_family_exclusions",
+                "category": "phase8-readlist-books-family-closure",
+                "refusal_condition": "Phase8 exclusion ledger is incomplete or drifted",
+                "evidence": [phase8_exclusions],
+                "mode": "discovery_markers",
+                "marker_map": {
+                    phase8_exclusions: [
+                        "phase8_adjacent_routes_remain_explicitly_non_native",
+                        "GET /api/v1/readlists",
+                        "GET /api/v1/readlists/{readListId}/read-progress/tachiyomi",
+                        "no list-family ownership",
+                        "no Tachiyomi ownership",
+                        "no admin/write/media/reader/SSE/whole-cutover claims",
+                        "Result: PASS",
+                        "shadow-java-writer",
+                    ],
+                },
+                "success_note": "Phase8 exclusion ledger keeps list-family, Tachiyomi, admin/write/media/reader/SSE, and whole-cutover branches explicit non-native.",
+            },
+            {
+                "id": "phase8_readlist_books_family_runtime",
+                "category": "phase8-readlist-books-family-closure",
+                "refusal_condition": "Phase8 paged/filter readlist-books runtime parity evidence not proven",
+                "evidence": [
+                    phase8_runtime_green,
+                    phase8_runtime_restrictions,
+                ],
+                "mode": "text",
+            },
+            {
+                "id": "phase8_readlist_books_family_compat",
+                "category": "phase8-readlist-books-family-closure",
+                "refusal_condition": "Phase8 compat inventory/diff evidence not proven",
+                "evidence": [
+                    phase8_http_diff,
+                    phase8_negative_inventory,
+                ],
+                "mode": "text",
+            },
+            {
+                "id": "phase8_readlist_books_family_browser",
+                "category": "phase8-readlist-books-family-closure",
+                "refusal_condition": "Phase8 BrowseReadList paged/filter browser evidence not proven",
+                "evidence": [
+                    phase8_browser_summary_text,
+                    phase8_browser_summary_json,
+                    phase8_browser_route,
+                ],
+                "mode": "phase8_browser_smoke",
+            },
+            {
+                "id": "phase8_readlist_books_family_regression",
+                "category": "phase8-readlist-books-family-closure",
+                "refusal_condition": "Phase8 dependency-only routing and excluded-route protections are not proven",
+                "evidence": [
+                    phase8_shadow_routing,
+                    phase8_shadow_exclusions,
+                ],
+                "mode": "text",
+            },
+        ]
+
+    checks = base_checks + discovery_checks + phase3_checks + phase4_checks + phase5_checks + phase6_checks + phase7_checks + phase8_checks
+    return checks, discovery_checks, phase3_checks, phase4_checks, phase5_checks, phase6_checks, phase8_checks

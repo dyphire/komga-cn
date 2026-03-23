@@ -22,6 +22,8 @@ mod helpers;
 
 use helpers::{
     execute_case, execute_case_async, live_http_json_case_ids,
+    phase8_readlist_books_family_all_case_ids, phase8_readlist_books_family_negative_case_ids,
+    phase8_readlist_books_family_owned_case_ids,
     seeded_localdb_binary_manifest_smoke_harness_config, seeded_localdb_session_vars,
     seeded_localdb_smoke_harness_config, smoke_harness_config, temp_output_root,
 };
@@ -34,4 +36,9 @@ fn phase6_readlist_detail_case_inventory_loads() {
 #[test]
 fn phase7_series_oneshot_case_inventory_loads() {
     config::phase7_series_oneshot_case_inventory_loads();
+}
+
+#[test]
+fn phase8_readlist_books_family_case_inventory_loads() {
+    config::phase8_readlist_books_family_case_inventory_loads();
 }

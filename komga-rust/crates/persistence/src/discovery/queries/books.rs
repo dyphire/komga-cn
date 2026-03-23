@@ -233,7 +233,7 @@ async fn list_books_sqlx_common(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn apply_books_filters_sqlx<'args>(
+pub(super) fn apply_books_filters_sqlx<'args>(
     builder: &mut QueryBuilder<'args, Sqlite>,
     state: &mut SqlxWhereState,
     context: &DiscoveryQueryContext,
