@@ -187,6 +187,131 @@ class ReadListControllerTest(
 
   @Nested
   inner class ContentRestriction {
+    @Nested
+    inner class BrowseListQueryShapes {
+      @Test
+      @WithMockCustomUser
+      fun `given read lists when getting browse list with explicit page and size then results stay name sorted and paged`() {
+        makeReadLists()
+
+        mockMvc
+          .get("/api/v1/readlists") {
+            param("page", "1")
+            param("size", "1")
+          }.andExpect {
+            status { isOk() }
+            jsonPath("$.size") { value(1) }
+            jsonPath("$.number") { value(1) }
+            jsonPath("$.totalElements") { value(3) }
+            jsonPath("$.content.length()") { value(1) }
+            jsonPath("$.content[0].name") { value("Lib1+2") }
+            jsonPath("$.content[0].filtered") { value(false) }
+          }
+      }
+
+      @Test
+      @WithMockCustomUser
+      fun `given read lists when getting browse list with repeated library ids then it matches the current all-libraries contract`() {
+        makeReadLists()
+
+        mockMvc
+          .get("/api/v1/readlists") {
+            param("library_id", "1", "2")
+          }.andExpect {
+            status { isOk() }
+            jsonPath("$.size") { value(20) }
+            jsonPath("$.number") { value(0) }
+            jsonPath("$.totalElements") { value(3) }
+            jsonPath("$.content[0].name") { value("Lib1") }
+            jsonPath("$.content[1].name") { value("Lib1+2") }
+            jsonPath("$.content[2].name") { value("Lib2") }
+            jsonPath("$.content[?(@.name == 'Lib1')].filtered") { value(false) }
+            jsonPath("$.content[?(@.name == 'Lib2')].filtered") { value(false) }
+            jsonPath("$.content[?(@.name == 'Lib1+2')].filtered") { value(false) }
+          }
+      }
+
+      @Test
+      @WithMockCustomUser
+      fun `given read lists when getting browse list with repeated library ids and paging then it matches the current paged contract`() {
+        makeReadLists()
+
+        mockMvc
+          .get("/api/v1/readlists") {
+            param("library_id", "1", "2")
+            param("page", "1")
+            param("size", "1")
+          }.andExpect {
+            status { isOk() }
+            jsonPath("$.size") { value(1) }
+            jsonPath("$.number") { value(1) }
+            jsonPath("$.totalElements") { value(3) }
+            jsonPath("$.content.length()") { value(1) }
+            jsonPath("$.content[0].name") { value("Lib1+2") }
+            jsonPath("$.content[0].filtered") { value(false) }
+          }
+      }
+
+      @Test
+      @WithMockCustomUser
+      fun `given read lists when getting browse list with size zero then it matches current JVM pageable semantics exactly`() {
+        makeReadLists()
+
+        mockMvc
+          .get("/api/v1/readlists") {
+            param("size", "0")
+          }.andExpect {
+            status { isOk() }
+            jsonPath("$.size") { value(20) }
+            jsonPath("$.number") { value(0) }
+            jsonPath("$.totalElements") { value(3) }
+            jsonPath("$.content.length()") { value(3) }
+            jsonPath("$.content[0].name") { value("Lib1") }
+            jsonPath("$.content[1].name") { value("Lib1+2") }
+            jsonPath("$.content[2].name") { value("Lib2") }
+          }
+      }
+
+      @Test
+      @WithMockCustomUser(sharedAllLibraries = false, sharedLibraries = ["1"])
+      fun `given limited user when getting browse list with repeated library ids then unauthorized libraries do not widen visible results`() {
+        makeReadLists()
+
+        mockMvc
+          .get("/api/v1/readlists") {
+            param("library_id", "1", "2")
+          }.andExpect {
+            status { isOk() }
+            jsonPath("$.size") { value(20) }
+            jsonPath("$.number") { value(0) }
+            jsonPath("$.totalElements") { value(2) }
+            jsonPath("$.content.length()") { value(2) }
+            jsonPath("$.content[0].name") { value("Lib1") }
+            jsonPath("$.content[1].name") { value("Lib1+2") }
+            jsonPath("$.content[?(@.name == 'Lib1')].filtered") { value(false) }
+            jsonPath("$.content[?(@.name == 'Lib1+2')].filtered") { value(true) }
+          }
+      }
+
+      @Test
+      @WithMockCustomUser
+      fun `given read lists when getting browse list past the last page then result content is empty but totals stay intact`() {
+        makeReadLists()
+
+        mockMvc
+          .get("/api/v1/readlists") {
+            param("page", "2")
+            param("size", "2")
+          }.andExpect {
+            status { isOk() }
+            jsonPath("$.size") { value(2) }
+            jsonPath("$.number") { value(2) }
+            jsonPath("$.totalElements") { value(3) }
+            jsonPath("$.content.length()") { value(0) }
+          }
+      }
+    }
+
     @Test
     @WithMockCustomUser(allowAgeUnder = 10)
     fun `given user only allowed content with specific age rating when getting read lists then only get read lists that satisfies this criteria`() {

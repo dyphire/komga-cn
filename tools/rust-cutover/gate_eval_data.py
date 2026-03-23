@@ -8,6 +8,7 @@ PHASE5_ONESHOT_CLOSURE_LABEL = "phase5-oneshot-closure"
 PHASE6_ONESHOT_READLIST_CONTEXT_CLOSURE_LABEL = "phase6-oneshot-readlist-context-closure"
 PHASE7_SERIES_ONESHOT_QUERY_CLOSURE_LABEL = "phase7-series-oneshot-query-closure"
 PHASE8_READLIST_BOOKS_FAMILY_CLOSURE_LABEL = "phase8-readlist-books-family-closure"
+PHASE9_READLISTS_LIST_BROWSE_CLOSURE_LABEL = "phase9-readlists-list-browse-closure"
 
 discovery_supported_scope = [
     "GET /api/v1/libraries",
@@ -161,6 +162,30 @@ phase8_readlist_books_family_out_of_slice = [
     "SSE/live-refresh parity",
     "whole cutover/direct-serving approval",
 ]
+phase9_readlists_list_browse_owned_scope = [
+    "GET /api/v1/readlists (default browse; search/unpaged/explicit sort omitted)",
+    "GET /api/v1/readlists?page={page}&size={size} (explicit browse paging)",
+    "GET /api/v1/readlists?page={page}&size=0 (matches JVM exactly)",
+    "GET /api/v1/readlists?library_id={libraryId} (single or repeated library_id; default paging)",
+    "GET /api/v1/readlists?library_id={libraryId...}&page={page}&size={size} (single or repeated library_id with explicit browse paging)",
+]
+phase9_readlists_list_browse_pre_owned_dependencies = [
+    "GET /api/v1/readlists/{readListId} (Phase 6, regression-only here)",
+    "GET /api/v1/readlists/{readListId}/books?unpaged=true (Phase 4, regression-only here)",
+    "GET /api/v1/readlists/{readListId}/books/{bookId}/previous (Phase 4, regression-only here)",
+    "GET /api/v1/readlists/{readListId}/books/{bookId}/next (Phase 4, regression-only here)",
+    "Direct paged/filter GET /api/v1/readlists/{readListId}/books family (Phase 8, regression-only here)",
+]
+phase9_readlists_list_browse_out_of_slice = [
+    "GET /api/v1/readlists?search={term} and every search-bearing variant",
+    "GET /api/v1/readlists?unpaged=true",
+    "GET /api/v1/readlists?unpaged=false",
+    "GET /api/v1/readlists?sort=... and every explicit custom-sort/relevance variant",
+    "mixed variants that add search/unpaged/explicit sort onto the Phase 9 browse subset",
+    "GET /api/v1/readlists/{readListId}/read-progress/tachiyomi",
+    "readlist dialogs/import/edit/delete admin actions",
+    "write/media/reader/SSE/whole-cutover claims",
+]
 
 phase3_skipped_base_checks: dict[str, str] = {
     "auth_api_key": "Skipped for phase3-detail-read: API key parity is outside this direct-browse detail-read runbook.",
@@ -225,12 +250,23 @@ phase8_skipped_base_checks: dict[str, str] = {
     "packaging_tray": "Skipped for phase8-readlist-books-family-closure: packaging/tray startup contract is outside this slice gate.",
     "external_release_credentials": "Skipped for phase8-readlist-books-family-closure: release credentials are not part of direct readlist-books family readiness.",
 }
+phase9_skipped_base_checks: dict[str, str] = {
+    "auth_api_key": "Skipped for phase9-readlists-list-browse-closure: API key parity is outside this readlists browse/list runbook.",
+    "libraries_visibility": "Skipped for phase9-readlists-list-browse-closure: discovery libraries parity is not part of this browse/list slice gate.",
+    "opds": "Skipped for phase9-readlists-list-browse-closure: OPDS parity is outside this browse/list slice gate.",
+    "cache_file_headers": "Skipped for phase9-readlists-list-browse-closure: binary metadata/header parity is outside this browse/list slice gate.",
+    "read_progress": "Skipped for phase9-readlists-list-browse-closure: this runbook does not claim Tachiyomi/read-progress ownership.",
+    "server_management_browser_smoke": "Skipped for phase9-readlists-list-browse-closure: server-management/browser-ops acceptance is outside this browse/list slice.",
+    "packaging_tray": "Skipped for phase9-readlists-list-browse-closure: packaging/tray startup contract is outside this slice gate.",
+    "external_release_credentials": "Skipped for phase9-readlists-list-browse-closure: release credentials are not part of browse/list closure readiness.",
+}
 
 
 def build_checks(
     run_label: str,
     evidence_root: Path,
 ) -> tuple[
+    list[dict[str, object]],
     list[dict[str, object]],
     list[dict[str, object]],
     list[dict[str, object]],
@@ -246,6 +282,7 @@ def build_checks(
     is_phase6_oneshot_readlist_context_closure = run_label == PHASE6_ONESHOT_READLIST_CONTEXT_CLOSURE_LABEL
     is_phase7_series_oneshot_query_closure = run_label == PHASE7_SERIES_ONESHOT_QUERY_CLOSURE_LABEL
     is_phase8_readlist_books_family_closure = run_label == PHASE8_READLIST_BOOKS_FAMILY_CLOSURE_LABEL
+    is_phase9_readlists_list_browse_closure = run_label == PHASE9_READLISTS_LIST_BROWSE_CLOSURE_LABEL
 
     base_checks = [
         {
@@ -383,6 +420,16 @@ def build_checks(
                 "details": [
                     phase8_skipped_base_checks[check_id],
                     "This label proves direct readlist-books paged/filter closure readiness only and does not approve readlist list-family/Tachiyomi/admin/media/write/whole-cutover scope.",
+                ],
+            }
+        if check_id in phase9_skipped_base_checks:
+            profile_overrides = check.setdefault("profile_overrides", {})
+            profile_overrides[PHASE9_READLISTS_LIST_BROWSE_CLOSURE_LABEL] = {
+                "status": "skipped",
+                "blocking": False,
+                "details": [
+                    phase9_skipped_base_checks[check_id],
+                    "This label proves readlists browse/list closure readiness only and does not approve search/dialog/admin/Tachiyomi/media/write/whole-cutover scope.",
                 ],
             }
 
@@ -1041,5 +1088,89 @@ def build_checks(
             },
         ]
 
-    checks = base_checks + discovery_checks + phase3_checks + phase4_checks + phase5_checks + phase6_checks + phase7_checks + phase8_checks
-    return checks, discovery_checks, phase3_checks, phase4_checks, phase5_checks, phase6_checks, phase8_checks
+    phase9_checks: list[dict[str, object]] = []
+    if is_phase9_readlists_list_browse_closure:
+        phase9_contract = evidence_root / "task-1-contract-matrix" / "phase9-readlists-list-browse-contract.txt"
+        phase9_exclusions = evidence_root / "task-1-contract-matrix" / "phase9-readlists-list-browse-exclusions.txt"
+        phase9_compat = evidence_root / "task-6-compat-shadow" / "readlists_list_browse.txt"
+        phase9_compat_negative = evidence_root / "task-6-compat-shadow" / "readlists_list_browse_negative.txt"
+        phase9_browser_summary_text = evidence_root / "task-7-browser-smoke" / "browser-summary.txt"
+        phase9_browser_summary_json = evidence_root / "task-7-browser-smoke" / "summary.json"
+        phase9_browser_route = evidence_root / "task-7-browser-smoke" / "browse-readlists.json"
+
+        phase9_checks = [
+            {
+                "id": "phase9_readlists_list_browse_contract",
+                "category": "phase9-readlists-list-browse-closure",
+                "refusal_condition": "Phase9 readlists browse/list contract matrix is not frozen",
+                "evidence": [phase9_contract],
+                "mode": "discovery_markers",
+                "marker_map": {
+                    phase9_contract: [
+                        "phase9_readlists_list_browse_matrix_is_frozen",
+                        "GET /api/v1/readlists (default browse; search/unpaged/explicit sort omitted)",
+                        "GET /api/v1/readlists?page={page}&size=0 (matches JVM exactly)",
+                        "GET /api/v1/readlists?library_id={libraryId...}&page={page}&size={size}",
+                        "Pre-owned dependencies (regression-only, not reopened):",
+                        "Direct paged/filter GET /api/v1/readlists/{readListId}/books family (Phase 8, regression-only here)",
+                        "Boundary rule:",
+                        "Result: PASS",
+                    ],
+                },
+                "success_note": "Phase9 contract evidence freezes exact browse/list ownership and keeps Phase 6/8 direct readlist surfaces dependency-only/regression-only.",
+            },
+            {
+                "id": "phase9_readlists_list_browse_exclusions",
+                "category": "phase9-readlists-list-browse-closure",
+                "refusal_condition": "Phase9 readlists browse/list exclusion ledger is incomplete or drifted",
+                "evidence": [phase9_exclusions],
+                "mode": "discovery_markers",
+                "marker_map": {
+                    phase9_exclusions: [
+                        "phase9_adjacent_routes_remain_explicitly_non_native",
+                        "GET /api/v1/readlists?search={term} and every search-bearing variant",
+                        "GET /api/v1/readlists?unpaged=true",
+                        "GET /api/v1/readlists?sort=... and every explicit custom-sort/relevance variant",
+                        "GET /api/v1/readlists/{readListId}/read-progress/tachiyomi",
+                        "no search/unpaged/explicit-sort ownership",
+                        "no Tachiyomi ownership",
+                        "no write/media/reader/SSE/whole-cutover claims",
+                        "Result: PASS",
+                        "shadow-java-writer",
+                    ],
+                },
+                "success_note": "Phase9 exclusion ledger keeps search, unpaged, sort, Tachiyomi, dialogs/admin, and broader write/media/reader/SSE branches explicit non-native.",
+            },
+            {
+                "id": "phase9_readlists_list_browse_compat",
+                "category": "phase9-readlists-list-browse-closure",
+                "refusal_condition": "Phase9 compat inventory/diff evidence for readlists browse/list ownership is not proven",
+                "evidence": [phase9_compat, phase9_compat_negative],
+                "mode": "discovery_markers",
+                "marker_map": {
+                    phase9_compat: [
+                        'readlists_list_browse',
+                        'COMMAND_EXIT_CODE="0"',
+                    ],
+                    phase9_compat_negative: [
+                        'readlists_list_browse_negative',
+                        'COMMAND_EXIT_CODE="0"',
+                    ],
+                },
+                "success_note": "Phase9 compat evidence proves the exact five browse/list owned shapes and negative browse exclusions are both represented in http_json_diff inventory.",
+            },
+            {
+                "id": "phase9_readlists_list_browse_browser",
+                "category": "phase9-readlists-list-browse-closure",
+                "refusal_condition": "Phase9 BrowseReadLists browser governance evidence is not proven",
+                "evidence": [
+                    phase9_browser_summary_text,
+                    phase9_browser_summary_json,
+                    phase9_browser_route,
+                ],
+                "mode": "phase9_browser_smoke",
+            },
+        ]
+
+    checks = base_checks + discovery_checks + phase3_checks + phase4_checks + phase5_checks + phase6_checks + phase7_checks + phase8_checks + phase9_checks
+    return checks, discovery_checks, phase3_checks, phase4_checks, phase5_checks, phase6_checks, phase8_checks, phase9_checks

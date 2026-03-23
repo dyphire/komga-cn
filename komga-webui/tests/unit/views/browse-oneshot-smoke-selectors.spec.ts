@@ -63,7 +63,7 @@ const readViewSource = (sourceFile: BrowseOneshotSmokeSelectorInventoryEntry['so
 const readBrowserSmokeRoutesSource = (): string => fs.readFileSync(browserSmokeRoutesPath, 'utf8')
 
 const browseOneshotRouteSection = (source: string): string => {
-  const routeStart = source.indexOf("    'browse-oneshot': {")
+  const routeStart = source.indexOf('    \'browse-oneshot\': {')
 
   expect(routeStart).toBeGreaterThanOrEqual(0)
 
@@ -148,7 +148,7 @@ describe('browse oneshot smoke selectors', () => {
     expect(source).toContain('this.$route.query.contextId')
     expect(source).toContain('ContextOrigin.READLIST')
     expect(source).toContain('this.$komgaReadLists.getOneReadList(this.context.id)')
-    expect(source).toContain("this.$komgaReadLists.getBooks(this.context.id, {unpaged: true} as PageRequest)")
+    expect(source).toContain('this.$komgaReadLists.getBooks(this.context.id, {unpaged: true} as PageRequest)')
     expect(source).toContain('this.$komgaReadLists.getBookSiblingNext(this.context.id, this.book.id)')
     expect(source).toContain('this.$komgaReadLists.getBookSiblingPrevious(this.context.id, this.book.id)')
   })

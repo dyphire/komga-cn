@@ -8,8 +8,8 @@ use komga_domain::discovery::{
 
 use super::{
     BookDetailQuery, BookReadlistsQuery, BookSiblingQuery, NativeBooksLatestQuery,
-    NativeBooksListQuery, NativeReadListBooksQuery, NativeSeriesListQuery, ReadListDetailQuery,
-    SeriesCollectionsQuery, SeriesDetailQuery,
+    NativeBooksListQuery, NativeReadListBooksQuery, NativeReadListsQuery, NativeSeriesListQuery,
+    ReadListDetailQuery, SeriesCollectionsQuery, SeriesDetailQuery,
 };
 
 pub trait DiscoveryQueryRepository {
@@ -41,6 +41,12 @@ pub trait DiscoveryQueryRepository {
         context: &DiscoveryQueryContext,
         query: NativeReadListBooksQuery,
     ) -> impl Future<Output = Result<PageEnvelope<BookReadModel>, DiscoveryError>>;
+
+    fn list_readlists(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: NativeReadListsQuery,
+    ) -> impl Future<Output = Result<PageEnvelope<ReadListReadModel>, DiscoveryError>>;
 
     fn get_readlist_detail(
         &self,

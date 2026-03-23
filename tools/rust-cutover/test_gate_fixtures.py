@@ -259,6 +259,72 @@ def build_phase8_browser_row(*, capture_mode: str = 'source-contract-fallback') 
     }
 
 
+def build_phase9_browser_row(*, capture_mode: str = 'source-contract-fallback') -> dict[str, object]:
+    return {
+        'route': 'browse-readlists',
+        'path': '/libraries/all/readlists?page=2&pageSize=1',
+        'selector': '[data-testid="item-browser-root"]',
+        'visitedUrl': 'http://127.0.0.1:8081/libraries/all/readlists?page=2&pageSize=1',
+        'captureMode': capture_mode,
+        'pass': True,
+        'error': None,
+        'signals': {
+            'rootFound': True,
+            'detailMetadataVisible': True,
+            'itemBrowserFound': True,
+            'siblingNavigationFound': False,
+            'siblingNavigationExpected': False,
+            'routePaginationStateFound': True,
+            'browseRequestFound': True,
+            'repeatedLibraryBrowseFound': True,
+            'paginationControlsFound': True,
+            'totalCountChipFound': True,
+            'countFlowFound': True,
+        },
+        'expectedOwnedRequests': [],
+        'ownedRequestInventory': [],
+        'observedFallbackRequests': [],
+        'unownedObservedRequests': [],
+        'governanceOwnedRequests': [
+            {
+                'label': 'readlists-browse-default',
+                'pass': True,
+                'purpose': 'default-browse',
+                'ownershipClass': 'phase9-owned',
+                'persona': None,
+            },
+            {
+                'label': 'readlists-browse-paged',
+                'pass': True,
+                'purpose': 'paged-browse',
+                'ownershipClass': 'phase9-owned',
+                'persona': None,
+            },
+            {
+                'label': 'readlists-browse-repeated-library-id',
+                'pass': True,
+                'purpose': 'repeated-library-browse',
+                'ownershipClass': 'phase9-owned',
+                'persona': None,
+            },
+            {
+                'label': 'readlists-browse-repeated-library-id-paged',
+                'pass': True,
+                'purpose': 'repeated-library-paged-browse',
+                'ownershipClass': 'phase9-owned',
+                'persona': None,
+            },
+            {
+                'label': 'readlists-browse-size-zero-count',
+                'pass': True,
+                'purpose': 'count-flow',
+                'ownershipClass': 'phase9-owned',
+                'persona': None,
+            },
+        ],
+    }
+
+
 def seed_phase6_oneshot_readlist_context_closure_evidence(
     root: Path,
     *,
@@ -507,6 +573,123 @@ def seed_phase8_readlist_books_family_closure_evidence(
         )
         write_json(root / 'task-6-browser-smoke/browse-readlist.json', browse_readlist_row)
         write_json(root / 'task-6-browser-smoke/summary.json', [browse_readlist_row])
+
+
+def seed_phase9_readlists_list_browse_closure_evidence(
+    root: Path,
+    *,
+    include_contract: bool = True,
+    include_exclusions: bool = True,
+    include_compat: bool = True,
+    include_browser: bool = True,
+    complete_contract_matrix: bool = True,
+) -> None:
+    if include_contract:
+        contract_lines = [
+            'Task: T1 Phase 9 contract matrix freeze',
+            'Scenario: readlists list browse ownership stays exact and fail-closed',
+            'phase9_readlists_list_browse_matrix_is_frozen',
+            '',
+            'New ownership (Phase 9 only):',
+            '  - GET /api/v1/readlists (default browse; search/unpaged/explicit sort omitted)',
+            '  - GET /api/v1/readlists?page={page}&size={size} (explicit browse paging)',
+            '  - GET /api/v1/readlists?page={page}&size=0 (matches JVM exactly)',
+            '  - GET /api/v1/readlists?library_id={libraryId} (single or repeated library_id; default paging)',
+            '  - GET /api/v1/readlists?library_id={libraryId...}&page={page}&size={size} (single or repeated library_id with explicit browse paging)',
+            '',
+            'Pre-owned dependencies (regression-only, not reopened):',
+            '  - GET /api/v1/readlists/{readListId} (Phase 6, regression-only here)',
+            '  - GET /api/v1/readlists/{readListId}/books?unpaged=true (Phase 4, regression-only here)',
+            '  - GET /api/v1/readlists/{readListId}/books/{bookId}/previous (Phase 4, regression-only here)',
+            '  - GET /api/v1/readlists/{readListId}/books/{bookId}/next (Phase 4, regression-only here)',
+            '  - Direct paged/filter GET /api/v1/readlists/{readListId}/books family (Phase 8, regression-only here)',
+            '',
+            'Boundary rule:',
+            '  - No route/query shape can exist in more than one bucket.',
+            'Result: PASS',
+        ]
+        if not complete_contract_matrix:
+            contract_lines = [
+                line
+                for line in contract_lines
+                if line not in {
+                    '  - GET /api/v1/readlists?page={page}&size=0 (matches JVM exactly)',
+                    '  - GET /api/v1/readlists?library_id={libraryId...}&page={page}&size={size} (single or repeated library_id with explicit browse paging)',
+                    '  - Direct paged/filter GET /api/v1/readlists/{readListId}/books family (Phase 8, regression-only here)',
+                    'Boundary rule:',
+                }
+            ]
+        write_text(
+            root / 'task-1-contract-matrix/phase9-readlists-list-browse-contract.txt',
+            '\n'.join(contract_lines),
+        )
+
+    if include_exclusions:
+        write_text(
+            root / 'task-1-contract-matrix/phase9-readlists-list-browse-exclusions.txt',
+            '\n'.join([
+                'Task: T1 Phase 9 exclusion ledger freeze',
+                'Scenario: adjacent routes remain explicit non-native with no ownership overlap',
+                'phase9_adjacent_routes_remain_explicitly_non_native',
+                '',
+                'Dependency-only (regression-only, not Phase 9 ownership):',
+                '  - GET /api/v1/readlists/{readListId} (Phase 6, regression-only here)',
+                '  - Direct paged/filter GET /api/v1/readlists/{readListId}/books family (Phase 8, regression-only here)',
+                '',
+                'Explicit exclusions (must stay non-native):',
+                '  - GET /api/v1/readlists?search={term} and every search-bearing variant',
+                '  - GET /api/v1/readlists?unpaged=true',
+                '  - GET /api/v1/readlists?unpaged=false',
+                '  - GET /api/v1/readlists?sort=... and every explicit custom-sort/relevance variant',
+                '  - mixed variants that add search/unpaged/explicit sort onto the Phase 9 browse subset',
+                '  - GET /api/v1/readlists/{readListId}/read-progress/tachiyomi',
+                '  - size=0 note: matches JVM exactly (parity-only wording; no inferred count-only semantics)',
+                '  - no search/unpaged/explicit-sort ownership',
+                '  - no Tachiyomi ownership',
+                '  - no write/media/reader/SSE/whole-cutover claims',
+                'Result: PASS',
+                'shadow-java-writer',
+            ]),
+        )
+
+    if include_compat:
+        write_text(
+            root / 'task-6-compat-shadow/readlists_list_browse.txt',
+            '\n'.join([
+                'Script started on 2026-03-22 23:42:27-04:00 [COMMAND="rtk cargo test --manifest-path "komga-rust/Cargo.toml" --test http_json_diff -- readlists_list_browse" <not executed on terminal>]',
+                'cargo test: 3 passed, 26 filtered out (1 suite, 0.18s)',
+                '',
+                'Script done on 2026-03-22 23:42:28-04:00 [COMMAND_EXIT_CODE="0"]',
+            ]),
+        )
+        write_text(
+            root / 'task-6-compat-shadow/readlists_list_browse_negative.txt',
+            '\n'.join([
+                'Script started on 2026-03-22 23:42:27-04:00 [COMMAND="rtk cargo test --manifest-path "komga-rust/Cargo.toml" --test http_json_diff -- readlists_list_browse_negative" <not executed on terminal>]',
+                'cargo test: 1 passed, 28 filtered out (1 suite, 0.13s)',
+                '',
+                'Script done on 2026-03-22 23:42:27-04:00 [COMMAND_EXIT_CODE="0"]',
+            ]),
+        )
+
+    if include_browser:
+        browse_readlists_row = build_phase9_browser_row()
+        write_text(
+            root / 'task-7-browser-smoke/browser-summary.txt',
+            '\n'.join([
+                'route=browse-readlists captureMode=source-contract-fallback pass=True',
+                'page-load: rootFound=True itemBrowserFound=True detailMetadataVisible=True paginationControlsFound=True totalCountChipFound=True',
+                'browse-governance: routePaginationStateFound=True browseRequestFound=True repeatedLibraryBrowseFound=True countFlowFound=True',
+                '- default-browse: label=readlists-browse-default ownershipClass=phase9-owned persona=admin@example.org pass=True',
+                '- paged-browse: label=readlists-browse-paged ownershipClass=phase9-owned persona=admin@example.org pass=True',
+                '- repeated-library-browse: label=readlists-browse-repeated-library-id ownershipClass=phase9-owned persona=admin@example.org pass=True',
+                '- repeated-library-paged-browse: label=readlists-browse-repeated-library-id-paged ownershipClass=phase9-owned persona=admin@example.org pass=True',
+                '- count-flow: label=readlists-browse-size-zero-count ownershipClass=phase9-owned persona=admin@example.org pass=True',
+                'non-claims: search/unpaged=true/dialogs/admin-actions/Tachiyomi remain outside this browse-readlists browse/list closure evidence',
+            ]),
+        )
+        write_json(root / 'task-7-browser-smoke/browse-readlists.json', browse_readlists_row)
+        write_json(root / 'task-7-browser-smoke/summary.json', [browse_readlists_row])
 
 
 def build_admin_queue_payload(*, status: str, can_claim_admin_queue_parity: bool) -> dict[str, object]:

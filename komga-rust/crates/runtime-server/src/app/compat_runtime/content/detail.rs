@@ -4,13 +4,14 @@ use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use komga_application::discovery::{
     BookDetailQuery, BookReadlistsQuery, BookSiblingQuery, DiscoveryQueries,
-    DiscoveryQueryRepository, NativeReadListBooksQuery, ReadListBooksOwnership,
-    ReadListBooksQuery, ReadListDetailQuery, SeriesCollectionsQuery, SeriesDetailQuery,
-    classify_readlist_books_query,
+    DiscoveryQueryRepository, NativeReadListBooksQuery, NativeReadListsQuery,
+    ReadListBooksOwnership, ReadListBooksQuery, ReadListDetailQuery, ReadListsQuery,
+    SeriesCollectionsQuery, SeriesDetailQuery, classify_readlist_books_query,
+    classify_readlists_browse_query,
 };
 use komga_domain::discovery::{
-    BookDetailReadModel, CollectionReadModel, DiscoveryError, ReadListReadModel,
-    SeriesDetailReadModel,
+    BookDetailReadModel, CollectionReadModel, DiscoveryError, NonNativeRequestShape,
+    PageEnvelope, ReadListReadModel, SeriesDetailReadModel,
 };
 use komga_persistence::discovery::{
     BookRow, CollectionRow, ReadListRow, ReadProgressRow, SeriesRow, SqliteDiscoveryAdapter,
@@ -474,6 +475,113 @@ pub(in crate::app::compat_runtime) async fn book_readlists(
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": format!("book readlists query failed: {error:?}") })),
+        )
+            .into_response(),
+    }
+}
+
+pub(in crate::app::compat_runtime) async fn readlists(
+    Extension(profile): Extension<CompatProfile>,
+    Extension(auth_state): Extension<DiscoveryAuthState>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if profile == CompatProfile::JavaLiveLocaldb {
+        let user = resolved_auth_user(&headers).expect("authorized readlists request should resolve user");
+        let path = uri.path_and_query().map_or(uri.path(), |value| value.as_str());
+        return match content_java_live::fetch_json(user, path, "readlists").await {
+            Ok(readlists) => Json(readlists).into_response(),
+            Err(message) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": message })),
+            )
+                .into_response(),
+        };
+    }
+
+    let query_string = uri.query().unwrap_or_default();
+    let page = query_value(query_string, "page")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
+    let size = query_value(query_string, "size")
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(20);
+    let library_ids = {
+        let values = query_values(query_string, "library_id")
+            .into_iter()
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        (!values.is_empty()).then_some(values)
+    };
+    let search = query_value(query_string, "search")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let sort = query_values(query_string, "sort")
+        .into_iter()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let unpaged = query_bool(query_string, "unpaged");
+
+    let context = match auth_state.resolve_query_context(&headers, None) {
+        Some(context) => context,
+        None => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+
+    let mut adapter = SqliteDiscoveryAdapter::default();
+    seed_series_detail_data(&mut adapter);
+
+    let domain_context = to_domain_query_context(context);
+    let query = ReadListsQuery {
+        page,
+        size,
+        library_ids,
+        search,
+        unpaged,
+        sort,
+    };
+    let ownership = classify_readlists_browse_request(query_string, &query);
+    let native_query = NativeReadListsQuery {
+        page: query.page,
+        size: query.size,
+        library_ids: query.library_ids.clone(),
+    };
+
+    match adapter.list_readlists(&domain_context, native_query).await {
+        Ok(page) => match ownership {
+            Ok(()) => {
+                let mut response = Json(readlists_page_payload(page)).into_response();
+                mark_native(&mut response);
+                response
+            }
+            Err(DiscoveryError::NonNativeRequestShape(details)) => {
+                let mut payload = readlists_page_payload(page);
+                apply_non_native_diagnostics(
+                    &mut payload,
+                    &DiscoveryError::NonNativeRequestShape(details),
+                );
+
+                let mut response = Json(payload).into_response();
+                mark_non_native(&mut response);
+                response
+            }
+            Err(error) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("readlists classification failed: {error:?}") })),
+            )
+                .into_response(),
+        },
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("readlists query failed: {error:?}") })),
         )
             .into_response(),
     }
@@ -979,6 +1087,65 @@ fn parse_optional_query_bool(value: &str) -> Option<bool> {
     }
 }
 
+fn classify_readlists_browse_request(
+    query_string: &str,
+    query: &ReadListsQuery,
+) -> Result<(), DiscoveryError> {
+    let mut page_count = 0usize;
+    let mut size_count = 0usize;
+
+    for pair in query_string.split('&').filter(|segment| !segment.is_empty()) {
+        let key = pair.split('=').next().unwrap_or_default();
+        match key {
+            "page" => {
+                page_count += 1;
+                if page_count > 1 {
+                    return Err(DiscoveryError::NonNativeRequestShape(
+                        NonNativeRequestShape::UnsupportedBookFilter("page".to_string()),
+                    ));
+                }
+            }
+            "size" => {
+                size_count += 1;
+                if size_count > 1 {
+                    return Err(DiscoveryError::NonNativeRequestShape(
+                        NonNativeRequestShape::UnsupportedBookFilter("size".to_string()),
+                    ));
+                }
+            }
+            "library_id" => {}
+            "search" => {
+                return Err(DiscoveryError::NonNativeRequestShape(
+                    NonNativeRequestShape::UnsupportedBookFilter("search".to_string()),
+                ));
+            }
+            "unpaged" => {
+                return Err(DiscoveryError::NonNativeRequestShape(
+                    NonNativeRequestShape::UnsupportedBookFilter("unpaged".to_string()),
+                ));
+            }
+            "sort" => {
+                let requested_sort = query_values(query_string, "sort")
+                    .into_iter()
+                    .next()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                return Err(DiscoveryError::NonNativeRequestShape(
+                    NonNativeRequestShape::UnsupportedBookSort(requested_sort),
+                ));
+            }
+            other => {
+                return Err(DiscoveryError::NonNativeRequestShape(
+                    NonNativeRequestShape::UnsupportedBookFilter(other.to_string()),
+                ));
+            }
+        }
+    }
+
+    classify_readlists_browse_query(query)
+}
+
 fn book_detail_payload(book: &BookDetailReadModel, is_admin: bool) -> Value {
     let url = restricted_book_url(&book.url, is_admin);
     let media_profile = media_profile_for_media_type(&book.media_type);
@@ -1249,6 +1416,43 @@ fn series_collections_payload(collections: &[CollectionReadModel]) -> Value {
 
 fn readlists_payload(readlists: &[ReadListReadModel]) -> Value {
     Value::Array(readlists.iter().map(readlist_payload).collect())
+}
+
+fn readlists_page_payload(page: PageEnvelope<ReadListReadModel>) -> Value {
+    let content = page.content.iter().map(readlist_payload).collect::<Vec<_>>();
+    let number_of_elements = content.len();
+    let first = page.page == 0;
+    let last = page.total_pages == 0 || page.page + 1 >= page.total_pages;
+    let offset = page.page.saturating_mul(page.size);
+
+    json!({
+        "content": content,
+        "pageable": {
+            "pageNumber": page.page,
+            "pageSize": page.size,
+            "sort": {
+                "empty": false,
+                "sorted": true,
+                "unsorted": false
+            },
+            "offset": offset,
+            "paged": true,
+            "unpaged": false
+        },
+        "last": last,
+        "totalElements": page.total_elements,
+        "totalPages": page.total_pages,
+        "first": first,
+        "size": page.size,
+        "number": page.page,
+        "sort": {
+            "empty": false,
+            "sorted": true,
+            "unsorted": false
+        },
+        "numberOfElements": number_of_elements,
+        "empty": number_of_elements == 0
+    })
 }
 
 fn collection_payload(collection: &CollectionReadModel) -> Value {

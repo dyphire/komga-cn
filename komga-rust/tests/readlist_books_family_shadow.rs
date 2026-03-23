@@ -211,10 +211,6 @@ async fn phase8_list_family_and_tachiyomi_routes_remain_excluded() {
     let app = komga_rust::app::build_router();
     let token = session_token_for_basic_auth(&app, USER_BASIC_AUTH).await;
 
-    let readlists = get_response(&app, &token, "/api/v1/readlists").await;
-    assert_eq!(readlists.status(), StatusCode::NOT_FOUND);
-    assert_eq!(ownership_header(&readlists), None);
-
     let tachiyomi = get_response(
         &app,
         &token,

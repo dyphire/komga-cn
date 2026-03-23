@@ -335,16 +335,30 @@ def evaluate_contract_signals(route: dict[str, object]) -> tuple[dict[str, bool]
 
         all_of = [str(item) for item in definition.get('allOf', []) if isinstance(item, str)]
         any_of = [str(item) for item in definition.get('anyOf', []) if isinstance(item, str)]
+        count_at_least = []
+        for item in definition.get('countAtLeast', []):
+            if not isinstance(item, dict):
+                continue
+            fragment = item.get('fragment')
+            count = item.get('count')
+            if isinstance(fragment, str) and isinstance(count, int):
+                count_at_least.append({'fragment': fragment, 'count': count})
         all_of_pass = all(fragment in combined_source for fragment in all_of) if all_of else True
         any_of_pass = any(fragment in combined_source for fragment in any_of) if any_of else True
-        passed = all_of_pass and any_of_pass
+        count_at_least_pass = all(combined_source.count(item['fragment']) >= item['count'] for item in count_at_least)
+        passed = all_of_pass and any_of_pass and count_at_least_pass
 
         signals[signal_key] = passed
         evidence[signal_key] = {
             'allOf': all_of,
             'anyOf': any_of,
+            'countAtLeast': count_at_least,
             'allOfMatched': [fragment for fragment in all_of if fragment in combined_source],
             'anyOfMatched': [fragment for fragment in any_of if fragment in combined_source],
+            'countMatches': {
+                item['fragment']: combined_source.count(item['fragment'])
+                for item in count_at_least
+            },
             'pass': passed,
         }
 
@@ -509,6 +523,52 @@ def emit_route_summary(route_result: dict[str, object]) -> None:
     route_name = route_result.get('route')
     capture_mode = route_result.get('captureMode')
     print(f'route={route_name} captureMode={capture_mode} pass={route_result.get("pass")}')
+
+    if route_name == 'browse-readlists':
+        signals = route_result.get('signals', {}) if isinstance(route_result.get('signals'), dict) else {}
+        print(
+            'page-load: '
+            f'rootFound={signals.get("rootFound")} '
+            f'itemBrowserFound={signals.get("itemBrowserFound")} '
+            f'detailMetadataVisible={signals.get("detailMetadataVisible")} '
+            f'paginationControlsFound={signals.get("paginationControlsFound")} '
+            f'totalCountChipFound={signals.get("totalCountChipFound")}'
+        )
+        print(
+            'browse-governance: '
+            f'routePaginationStateFound={signals.get("routePaginationStateFound")} '
+            f'browseRequestFound={signals.get("browseRequestFound")} '
+            f'repeatedLibraryBrowseFound={signals.get("repeatedLibraryBrowseFound")} '
+            f'countFlowFound={signals.get("countFlowFound")}'
+        )
+
+        governance_requests = route_result.get('governanceOwnedRequests')
+        if isinstance(governance_requests, list):
+            for entry in governance_requests:
+                if not isinstance(entry, dict):
+                    continue
+                matched_response = entry.get('matchedResponse') if isinstance(entry.get('matchedResponse'), dict) else {}
+                status = matched_response.get('status')
+                payload_summary = summarize_page_payload(matched_response.get('json'))
+                ownership_class = entry.get('ownershipClass') or 'unknown-ownership'
+                purpose = entry.get('purpose') or 'unspecified-purpose'
+                persona = entry.get('persona') or 'admin@example.org'
+                contract_only = entry.get('contractOnly') is True
+                observation = entry.get('ownershipObservation') or 'unknown-observation'
+                expectation_failures = entry.get('expectationFailures')
+                expectation_text = ''
+                if isinstance(expectation_failures, list) and expectation_failures:
+                    expectation_text = f' expectationFailures={expectation_failures}'
+                print(
+                    f'- {purpose}: label={entry.get("label")} ownershipClass={ownership_class} '
+                    f'persona={persona} pass={entry.get("pass")} observation={observation} '
+                    f'contractOnly={contract_only} status={status} request={request_path_for_summary(entry)} {payload_summary}{expectation_text}'
+                )
+
+        print(
+            'non-claims: search/unpaged=true/dialogs/admin-actions/Tachiyomi remain outside this browse-readlists browse/list closure evidence'
+        )
+        return
 
     if route_name != 'browse-readlist':
         return

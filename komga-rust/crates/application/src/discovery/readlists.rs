@@ -3,7 +3,24 @@ use komga_domain::discovery::{
 };
 
 use super::core::{DiscoveryQueries, DiscoveryQueryRepository};
-use super::helpers::unsupported_book_filter;
+use super::helpers::{unsupported_book_filter, unsupported_book_sort};
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReadListsQuery {
+    pub page: usize,
+    pub size: usize,
+    pub library_ids: Option<Vec<String>>,
+    pub search: Option<String>,
+    pub unpaged: bool,
+    pub sort: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeReadListsQuery {
+    pub page: usize,
+    pub size: usize,
+    pub library_ids: Option<Vec<String>>,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReadListBooksQuery {
@@ -89,6 +106,22 @@ pub fn classify_readlist_books_query(
     }
 
     Ok(ReadListBooksOwnership::DependencyOnly)
+}
+
+pub fn classify_readlists_browse_query(query: &ReadListsQuery) -> Result<(), DiscoveryError> {
+    if query.search.is_some() {
+        return Err(unsupported_book_filter("search"));
+    }
+
+    if query.unpaged {
+        return Err(unsupported_book_filter("unpaged"));
+    }
+
+    if let Some(sort) = query.sort.first() {
+        return Err(unsupported_book_sort(sort.clone()));
+    }
+
+    Ok(())
 }
 
 pub(in crate::discovery) fn native_readlist_books_query(

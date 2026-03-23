@@ -24,8 +24,8 @@ mod media;
 
 pub(super) use detail::{
     book_detail, book_readlists, book_sibling_next, book_sibling_previous, readlist_detail,
-    readlist_book_sibling_next, readlist_book_sibling_previous, readlist_books, series_collections,
-    series_detail,
+    readlist_book_sibling_next, readlist_book_sibling_previous, readlist_books, readlists,
+    series_collections, series_detail,
 };
 pub(super) use discovery::{books, books_latest, books_list, series, series_list};
 pub(super) use helpers::{

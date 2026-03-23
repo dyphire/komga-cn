@@ -14,6 +14,7 @@ def build_governance(
     phase5_oneshot_closure_shadow_pass: bool,
     phase6_oneshot_readlist_context_closure_shadow_pass: bool,
     phase8_readlist_books_family_closure_shadow_pass: bool,
+    phase9_readlists_list_browse_closure_shadow_pass: bool,
 ) -> dict[str, Any]:
     is_phase2_discovery = run_label == data.PHASE2_DISCOVERY_LABEL
     is_phase3_detail_read = run_label == data.PHASE3_DETAIL_READ_LABEL
@@ -22,6 +23,7 @@ def build_governance(
     is_phase6_oneshot_readlist_context_closure = run_label == data.PHASE6_ONESHOT_READLIST_CONTEXT_CLOSURE_LABEL
     is_phase7_series_oneshot_query_closure = run_label == data.PHASE7_SERIES_ONESHOT_QUERY_CLOSURE_LABEL
     is_phase8_readlist_books_family_closure = run_label == data.PHASE8_READLIST_BOOKS_FAMILY_CLOSURE_LABEL
+    is_phase9_readlists_list_browse_closure = run_label == data.PHASE9_READLISTS_LIST_BROWSE_CLOSURE_LABEL
 
     if is_phase2_discovery:
         return {
@@ -223,6 +225,34 @@ def build_governance(
             },
         }
 
+    if is_phase9_readlists_list_browse_closure:
+        return {
+            "shadow_mode": {
+                "allowed": shadow_safety_pass,
+                "rule": "Shadow mode must keep Java as stateful writer unless explicitly isolated",
+            },
+            "canary_mode": {
+                "allowed": search_task_guardrails,
+                "rule": "Search/task ownership guardrails remain required, but this phase9 label is not whole-cutover approval.",
+            },
+            "phase9_readlists_list_browse_closure_shadow": {
+                "allowed": phase9_readlists_list_browse_closure_shadow_pass,
+                "scope": "Readlists browse/list slice is shadow-ready only for the exact default/page-size/repeated-library browse matrix plus JVM-equivalent size=0 count flow.",
+            },
+            "phase9_readlists_list_browse_non_claims": {
+                "allowed": False,
+                "scope": "Refused: search, unpaged=true, explicit sort, dialogs/import/edit/delete admin actions, Tachiyomi, and whole cutover claims remain out of slice.",
+            },
+            "cutover": {
+                "allowed": False,
+                "scope": "phase9-readlists-list-browse-closure is a slice-only runbook; whole cutover/direct-serving remains refused until broader runtime/media/write/release conditions are proven.",
+            },
+            "rollback": {
+                "ready": phase9_readlists_list_browse_closure_shadow_pass,
+                "trigger": "Any readlists browse/list regression, browser over-claim, or out-of-slice expansion forces rollback/no-cutover.",
+            },
+        }
+
     return {
         "shadow_mode": {
             "allowed": shadow_safety_pass,
@@ -259,6 +289,7 @@ def build_summary(
     phase5_checks: list[dict[str, Any]],
     phase6_checks: list[dict[str, Any]],
     phase8_checks: list[dict[str, Any]],
+    phase9_readlists_list_browse_closure_shadow_pass: bool,
     discovery_shadow_pass: bool,
     phase3_detail_shadow_pass: bool,
     phase4_readlist_context_shadow_pass: bool,
@@ -273,6 +304,7 @@ def build_summary(
     is_phase6_oneshot_readlist_context_closure = run_label == data.PHASE6_ONESHOT_READLIST_CONTEXT_CLOSURE_LABEL
     is_phase7_series_oneshot_query_closure = run_label == data.PHASE7_SERIES_ONESHOT_QUERY_CLOSURE_LABEL
     is_phase8_readlist_books_family_closure = run_label == data.PHASE8_READLIST_BOOKS_FAMILY_CLOSURE_LABEL
+    is_phase9_readlists_list_browse_closure = run_label == data.PHASE9_READLISTS_LIST_BROWSE_CLOSURE_LABEL
 
     phase7_check_ids = [
         check["id"]
@@ -283,6 +315,11 @@ def build_summary(
         check["id"]
         for check in results
         if check.get("category") == "phase8-readlist-books-family-closure"
+    ]
+    phase9_check_ids = [
+        check["id"]
+        for check in results
+        if check.get("category") == "phase9-readlists-list-browse-closure"
     ]
 
     summary: dict[str, Any] = {
@@ -388,6 +425,25 @@ def build_summary(
         }
         if non_blocking:
             summary["non_blocking"] = non_blocking
+    elif is_phase9_readlists_list_browse_closure:
+        summary["evaluation_scope"] = "phase9-readlists-list-browse-closure-shadow"
+        summary["readlists_list_browse_closure_slice"] = {
+            "shadow_ready": phase9_readlists_list_browse_closure_shadow_pass,
+            "newly_owned_surface": data.phase9_readlists_list_browse_owned_scope[0],
+            "owned_routes": data.phase9_readlists_list_browse_owned_scope,
+            "supported_scope": data.phase9_readlists_list_browse_owned_scope,
+            "required_pre_owned_dependencies": data.phase9_readlists_list_browse_pre_owned_dependencies,
+            "excluded_branches": data.phase9_readlists_list_browse_out_of_slice,
+            "out_of_slice": data.phase9_readlists_list_browse_out_of_slice,
+            "non_claims": [
+                "This does not claim whole cutover readiness.",
+                "This does not claim search, unpaged=true, or explicit sort ownership.",
+                "This does not claim dialogs/import/edit/delete admin actions, Tachiyomi, or broader media/write/reader/SSE ownership.",
+            ],
+            "check_ids": phase9_check_ids,
+        }
+        if non_blocking:
+            summary["non_blocking"] = non_blocking
     elif is_phase3_detail_read:
         summary["evaluation_scope"] = "phase3-detail-read-shadow"
         summary["detail_read_slice"] = {
@@ -440,6 +496,7 @@ def build_report_text(
     phase5_oneshot_closure_shadow_pass: bool,
     phase6_oneshot_readlist_context_closure_shadow_pass: bool,
     phase8_readlist_books_family_closure_shadow_pass: bool,
+    phase9_readlists_list_browse_closure_shadow_pass: bool,
 ) -> str:
     is_phase2_discovery = run_label == data.PHASE2_DISCOVERY_LABEL
     is_phase3_detail_read = run_label == data.PHASE3_DETAIL_READ_LABEL
@@ -448,6 +505,7 @@ def build_report_text(
     is_phase6_oneshot_readlist_context_closure = run_label == data.PHASE6_ONESHOT_READLIST_CONTEXT_CLOSURE_LABEL
     is_phase7_series_oneshot_query_closure = run_label == data.PHASE7_SERIES_ONESHOT_QUERY_CLOSURE_LABEL
     is_phase8_readlist_books_family_closure = run_label == data.PHASE8_READLIST_BOOKS_FAMILY_CLOSURE_LABEL
+    is_phase9_readlists_list_browse_closure = run_label == data.PHASE9_READLISTS_LIST_BROWSE_CLOSURE_LABEL
 
     lines = []
     lines.append(f"# Rust Cutover Readiness Gate ({run_label})")
@@ -476,6 +534,9 @@ def build_report_text(
     elif is_phase8_readlist_books_family_closure:
         lines.append("- Evaluation scope: `phase8-readlist-books-family-closure-shadow`")
         lines.append("- Non-claim: this label records direct readlist-books paged/filter readiness only, not readlist list-family/Tachiyomi/admin/media/reader/write or whole cutover/direct-serving readiness")
+    elif is_phase9_readlists_list_browse_closure:
+        lines.append("- Evaluation scope: `phase9-readlists-list-browse-closure-shadow`")
+        lines.append("- Non-claim: this label records exact readlists browse/list readiness only, not search/unpaged/dialogs/admin/Tachiyomi/media/write or whole cutover/direct-serving readiness")
     lines.append("")
 
     if is_phase2_discovery:
@@ -620,6 +681,30 @@ def build_report_text(
         )
         lines.append(
             "- Browser capture note: `captureMode=source-contract-fallback` is accepted only when BrowseReadList evidence stays limited to the pre-owned readlist-detail dependency plus the exact four paged/filter/empty/restricted `governanceOwnedRequests` entries"
+        )
+        lines.append("")
+    elif is_phase9_readlists_list_browse_closure:
+        lines.append("## Phase9 Readlists-List-Browse-Closure Runbook")
+        lines.append("")
+        lines.append(f"- Shadow-ready target: **{'PASS' if phase9_readlists_list_browse_closure_shadow_pass else 'FAIL'}**")
+        lines.append(f"- Owned surface (newly owned browse/list shapes): {', '.join(f'`{item}`' for item in data.phase9_readlists_list_browse_owned_scope)}")
+        lines.append(
+            "- Exact browse/list closure: **ALLOW (slice-only)** — newly owned surface is only the exact `GET /api/v1/readlists` default/page-size/repeated-library browse matrix plus JVM-equivalent `size=0` count flow"
+        )
+        lines.append(
+            f"- Required pre-owned dependencies (regression-only): {', '.join(f'`{item}`' for item in data.phase9_readlists_list_browse_pre_owned_dependencies)}"
+        )
+        lines.append(
+            "- Out-of-slice governance: **REFUSE** — search, `unpaged=true`, explicit sort, dialogs/import/edit/delete admin actions, Tachiyomi, and whole cutover claims remain explicit non-native"
+        )
+        lines.append(
+            f"- Excluded branches still out of scope: {', '.join(f'`{item}`' for item in data.phase9_readlists_list_browse_out_of_slice)}"
+        )
+        lines.append(
+            "- Whole cutover/direct-serving: **REFUSE** — this label is not a full cutover approval"
+        )
+        lines.append(
+            "- Browser capture note: `captureMode=source-contract-fallback` is accepted only when BrowseReadLists evidence stays limited to the exact five `governanceOwnedRequests` browse/list entries and explicit non-claims for search/unpaged/dialogs/admin-actions/Tachiyomi"
         )
         lines.append("")
 

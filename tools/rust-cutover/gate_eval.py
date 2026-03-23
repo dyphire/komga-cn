@@ -17,7 +17,7 @@ def main() -> int:
     timestamp = datetime.now(timezone.utc).isoformat()
     evaluators = GateEvaluators(repo_root)
 
-    checks, discovery_checks, phase3_checks, phase4_checks, phase5_checks, phase6_checks, phase8_checks = data.build_checks(run_label, evidence_root)
+    checks, discovery_checks, phase3_checks, phase4_checks, phase5_checks, phase6_checks, phase8_checks, phase9_checks = data.build_checks(run_label, evidence_root)
 
     is_phase2_discovery = run_label == data.PHASE2_DISCOVERY_LABEL
     is_phase3_detail_read = run_label == data.PHASE3_DETAIL_READ_LABEL
@@ -25,6 +25,7 @@ def main() -> int:
     is_phase5_oneshot_closure = run_label == data.PHASE5_ONESHOT_CLOSURE_LABEL
     is_phase6_oneshot_readlist_context_closure = run_label == data.PHASE6_ONESHOT_READLIST_CONTEXT_CLOSURE_LABEL
     is_phase8_readlist_books_family_closure = run_label == data.PHASE8_READLIST_BOOKS_FAMILY_CLOSURE_LABEL
+    is_phase9_readlists_list_browse_closure = run_label == data.PHASE9_READLISTS_LIST_BROWSE_CLOSURE_LABEL
 
     results = []
     refusals = []
@@ -73,6 +74,14 @@ def main() -> int:
                 data.phase6_skipped_base_checks[check["id"]],
                 "This label proves oneshot READLIST-context direct-read readiness only and does not approve browse-readlist/list-family/media/write/whole-cutover scope.",
             ]
+        elif is_phase9_readlists_list_browse_closure and check["id"] in data.phase9_skipped_base_checks:
+            ok = False
+            status = "skipped"
+            blocking = False
+            messages = [
+                data.phase9_skipped_base_checks[check["id"]],
+                "This label proves readlists browse/list closure readiness only and does not approve search/dialog/admin/Tachiyomi/media/write/whole-cutover scope.",
+            ]
         else:
             if mode == "browser_ops":
                 browser_summary = evidence_paths[0]
@@ -88,6 +97,12 @@ def main() -> int:
                 ok, messages, _ = evaluators.eval_phase5_browser_smoke(evidence_paths[0], evidence_paths[1], evidence_paths[2])
             elif mode == "phase8_browser_smoke":
                 ok, messages, _ = evaluators.eval_phase8_browser_smoke(
+                    evidence_paths[0],
+                    evidence_paths[1],
+                    evidence_paths[2],
+                )
+            elif mode == "phase9_browser_smoke":
+                ok, messages, _ = evaluators.eval_phase9_browser_smoke(
                     evidence_paths[0],
                     evidence_paths[1],
                     evidence_paths[2],
@@ -181,6 +196,13 @@ def main() -> int:
             for check in phase8_checks
         ) and shadow_safety_pass and search_task_guardrails
 
+    phase9_readlists_list_browse_closure_shadow_pass = False
+    if is_phase9_readlists_list_browse_closure:
+        phase9_readlists_list_browse_closure_shadow_pass = all(
+            next(r for r in results if r["id"] == check["id"])["status"] == "pass"
+            for check in phase9_checks
+        ) and shadow_safety_pass and search_task_guardrails
+
     governance = reporting.build_governance(
         run_label=run_label,
         overall_pass=overall_pass,
@@ -192,6 +214,7 @@ def main() -> int:
         phase5_oneshot_closure_shadow_pass=phase5_oneshot_closure_shadow_pass,
         phase6_oneshot_readlist_context_closure_shadow_pass=phase6_oneshot_readlist_context_closure_shadow_pass,
         phase8_readlist_books_family_closure_shadow_pass=phase8_readlist_books_family_closure_shadow_pass,
+        phase9_readlists_list_browse_closure_shadow_pass=phase9_readlists_list_browse_closure_shadow_pass,
     )
 
     summary = reporting.build_summary(
@@ -209,6 +232,7 @@ def main() -> int:
         phase5_checks=phase5_checks,
         phase6_checks=phase6_checks,
         phase8_checks=phase8_checks,
+        phase9_readlists_list_browse_closure_shadow_pass=phase9_readlists_list_browse_closure_shadow_pass,
         discovery_shadow_pass=discovery_shadow_pass,
         phase3_detail_shadow_pass=phase3_detail_shadow_pass,
         phase4_readlist_context_shadow_pass=phase4_readlist_context_shadow_pass,
@@ -239,6 +263,7 @@ def main() -> int:
         phase5_oneshot_closure_shadow_pass=phase5_oneshot_closure_shadow_pass,
         phase6_oneshot_readlist_context_closure_shadow_pass=phase6_oneshot_readlist_context_closure_shadow_pass,
         phase8_readlist_books_family_closure_shadow_pass=phase8_readlist_books_family_closure_shadow_pass,
+        phase9_readlists_list_browse_closure_shadow_pass=phase9_readlists_list_browse_closure_shadow_pass,
     )
     report_latest = output_dir / "report.md"
     report_labeled = output_dir / f"report-{run_label}.md"

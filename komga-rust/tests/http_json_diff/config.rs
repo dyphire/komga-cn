@@ -19,10 +19,18 @@ fn p0_cases_configuration_loads() {
         "P2-DISCOVERY-UNSUPPORTED-BOOK-THUMBNAIL",
         "P2-DISCOVERY-UNSUPPORTED-SERIES-RANDOM-SORT",
         "P2-DISCOVERY-UNSUPPORTED-BOOK-READDATE-SORT",
-        "P2-DISCOVERY-UNSUPPORTED-READLISTS",
         "P2-DISCOVERY-UNSUPPORTED-ONDECK",
         "P2-DISCOVERY-UNSUPPORTED-DUPLICATES",
         "P2-DISCOVERY-UNSUPPORTED-COLLECTIONS-GROUPED",
+        "P9-READLISTS-LIST-BROWSE-DEFAULT-OWNED",
+        "P9-READLISTS-LIST-BROWSE-PAGE-SIZE-OWNED",
+        "P9-READLISTS-LIST-BROWSE-REPEATED-LIBRARY-ID-OWNED",
+        "P9-READLISTS-LIST-BROWSE-REPEATED-LIBRARY-ID-PAGE-SIZE-OWNED",
+        "P9-READLISTS-LIST-BROWSE-SIZE-ZERO-OWNED",
+        "P9-READLISTS-LIST-BROWSE-NEGATIVE-SEARCH",
+        "P9-READLISTS-LIST-BROWSE-NEGATIVE-UNPAGED-TRUE",
+        "P9-READLISTS-LIST-BROWSE-NEGATIVE-SORT",
+        "P9-READLISTS-LIST-BROWSE-NEGATIVE-TACHIYOMI",
         "P1-AUTH-APIKEY-UPPER",
         "P1-AUTH-APIKEY-LOWER",
         "P1-AUTH-APIKEY-INVALID",
@@ -649,7 +657,7 @@ pub(super) fn phase6_readlist_detail_case_inventory_loads() {
     for id in [
         "P6-ONESHOT-READLIST-DETAIL-OWNED",
         "P5-ONESHOT-BOOKS-LIST-SERIESID-ONLY-OWNED",
-        "P2-DISCOVERY-UNSUPPORTED-READLISTS",
+        "P9-READLISTS-LIST-BROWSE-NEGATIVE-SEARCH",
         "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-BOOKS",
         "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-PREVIOUS",
         "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-NEXT",
@@ -684,7 +692,7 @@ pub(super) fn phase6_readlist_detail_case_inventory_loads() {
             "phase6 readlist-detail case id must be unique: {id}",
         );
 
-        if id.contains("-EXCLUDED-") || id == "P2-DISCOVERY-UNSUPPORTED-READLISTS" {
+        if id.contains("-EXCLUDED-") || id == "P9-READLISTS-LIST-BROWSE-NEGATIVE-SEARCH" {
             assert_eq!(
                 case.headers
                     .as_ref()
@@ -720,7 +728,7 @@ pub(super) fn phase7_series_oneshot_case_inventory_loads() {
         "P7-ONESHOT-SERIES-DETAIL-EXACT-OWNED",
         "P3-DETAIL-SERIES-DETAIL-OWNED",
         "P3-DETAIL-EXCLUDED-ONESHOT-ROUTE-CLOSURE",
-        "P2-DISCOVERY-UNSUPPORTED-READLISTS",
+        "P9-READLISTS-LIST-BROWSE-NEGATIVE-SEARCH",
         "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-BOOKS",
         "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-PREVIOUS",
         "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-NEXT",
@@ -754,7 +762,7 @@ pub(super) fn phase7_series_oneshot_case_inventory_loads() {
             "phase7 series oneshot case id must be unique: {id}",
         );
 
-        if id.contains("-EXCLUDED-") || id == "P2-DISCOVERY-UNSUPPORTED-READLISTS" {
+        if id.contains("-EXCLUDED-") || id == "P9-READLISTS-LIST-BROWSE-NEGATIVE-SEARCH" {
             assert_eq!(
                 case.headers
                     .as_ref()
@@ -993,6 +1001,156 @@ pub(super) fn phase8_readlist_books_family_case_inventory_loads() {
         "/api/v1/readlists/readlist-2/books?unpaged=true&library_id=1"
     );
     assert_eq!(readlists.path, "/api/v1/readlists");
+    assert_eq!(
+        tachiyomi.path,
+        "/api/v1/readlists/readlist-2/read-progress/tachiyomi"
+    );
+}
+
+pub(super) fn readlists_list_browse_case_inventory_loads() {
+    let config = HarnessConfig::load_default().expect("default compat cases should load");
+    let owned_case_ids: BTreeSet<&str> = phase9_readlists_list_browse_owned_case_ids()
+        .iter()
+        .copied()
+        .collect();
+    let negative_case_ids: BTreeSet<&str> = phase9_readlists_list_browse_negative_case_ids()
+        .iter()
+        .copied()
+        .collect();
+    let all_case_ids: BTreeSet<&str> = phase9_readlists_list_browse_all_case_ids()
+        .iter()
+        .copied()
+        .collect();
+
+    assert!(
+        owned_case_ids.is_disjoint(&negative_case_ids),
+        "phase9 owned and negative compat inventory buckets must stay disjoint",
+    );
+    assert_eq!(
+        owned_case_ids
+            .union(&negative_case_ids)
+            .copied()
+            .collect::<BTreeSet<_>>(),
+        all_case_ids,
+        "phase9 owned + negative compat inventory buckets must explain the full case inventory",
+    );
+
+    for id in phase9_readlists_list_browse_all_case_ids() {
+        let case = config
+            .cases
+            .iter()
+            .find(|it| it.id == *id)
+            .unwrap_or_else(|| panic!("missing phase9 readlists-list browse compat case: {id}"));
+
+        assert_eq!(
+            config.cases.iter().filter(|it| it.id == *id).count(),
+            1,
+            "phase9 readlists-list browse case id must be unique: {id}",
+        );
+        assert_eq!(
+            case.method, "GET",
+            "phase9 readlists-list browse cases stay GET-only: {id}",
+        );
+        assert_eq!(
+            case.body, None,
+            "phase9 readlists-list browse cases must stay body-less: {id}",
+        );
+        assert!(
+            case.setup.is_none(),
+            "phase9 readlists-list browse compat cases must stay self-contained without setup blocks: {id}",
+        );
+        assert_eq!(
+            PathBuf::from(&config.output_dir).join(format!("{id}.json")),
+            PathBuf::from("target/compat-diff").join(format!("{id}.json")),
+            "phase9 readlists-list browse diff evidence path contract changed for {id}",
+        );
+        assert_eq!(
+            case.headers
+                .as_ref()
+                .and_then(|headers| headers.get("X-Auth-Token")),
+            Some(&"${SESSION_TOKEN}".to_string()),
+            "phase9 readlists-list browse compat cases must use explicit session-token wiring: {id}",
+        );
+
+        let ownership_header = case
+            .headers
+            .as_ref()
+            .and_then(|headers| headers.get("X-Komga-Compat-Search-Ownership"));
+
+        if owned_case_ids.contains(id) {
+            assert_eq!(
+                ownership_header, None,
+                "phase9 owned browse case must not carry a shadow marker: {id}",
+            );
+        } else {
+            assert_eq!(
+                ownership_header,
+                Some(&"shadow-java-writer".to_string()),
+                "phase9 negative browse case must carry a shadow marker: {id}",
+            );
+        }
+    }
+
+    let default_browse = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P9-READLISTS-LIST-BROWSE-DEFAULT-OWNED")
+        .expect("phase9 default browse case should exist");
+    let page_size = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P9-READLISTS-LIST-BROWSE-PAGE-SIZE-OWNED")
+        .expect("phase9 page/size browse case should exist");
+    let repeated_library = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P9-READLISTS-LIST-BROWSE-REPEATED-LIBRARY-ID-OWNED")
+        .expect("phase9 repeated library browse case should exist");
+    let repeated_library_page_size = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P9-READLISTS-LIST-BROWSE-REPEATED-LIBRARY-ID-PAGE-SIZE-OWNED")
+        .expect("phase9 repeated library + page/size browse case should exist");
+    let size_zero = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P9-READLISTS-LIST-BROWSE-SIZE-ZERO-OWNED")
+        .expect("phase9 size=0 browse case should exist");
+    let search = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P9-READLISTS-LIST-BROWSE-NEGATIVE-SEARCH")
+        .expect("phase9 search browse exclusion case should exist");
+    let unpaged_true = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P9-READLISTS-LIST-BROWSE-NEGATIVE-UNPAGED-TRUE")
+        .expect("phase9 unpaged=true browse exclusion case should exist");
+    let sort = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P9-READLISTS-LIST-BROWSE-NEGATIVE-SORT")
+        .expect("phase9 sort browse exclusion case should exist");
+    let tachiyomi = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P9-READLISTS-LIST-BROWSE-NEGATIVE-TACHIYOMI")
+        .expect("phase9 tachiyomi browse exclusion case should exist");
+
+    assert_eq!(default_browse.path, "/api/v1/readlists");
+    assert_eq!(page_size.path, "/api/v1/readlists?page=1&size=1");
+    assert_eq!(
+        repeated_library.path,
+        "/api/v1/readlists?library_id=1&library_id=2"
+    );
+    assert_eq!(
+        repeated_library_page_size.path,
+        "/api/v1/readlists?library_id=1&library_id=2&page=1&size=1"
+    );
+    assert_eq!(size_zero.path, "/api/v1/readlists?size=0");
+    assert_eq!(search.path, "/api/v1/readlists?search=ReadList");
+    assert_eq!(unpaged_true.path, "/api/v1/readlists?unpaged=true");
+    assert_eq!(sort.path, "/api/v1/readlists?sort=name,desc");
     assert_eq!(
         tachiyomi.path,
         "/api/v1/readlists/readlist-2/read-progress/tachiyomi"

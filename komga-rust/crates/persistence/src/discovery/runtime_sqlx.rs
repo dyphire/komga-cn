@@ -1,7 +1,7 @@
 use komga_application::discovery::{
     BookDetailQuery, BookReadlistsQuery, BookSiblingQuery, DiscoveryQueryRepository,
-    NativeBooksLatestQuery, NativeBooksListQuery, NativeReadListBooksQuery, NativeSeriesListQuery,
-    SeriesCollectionsQuery, SeriesDetailQuery,
+    NativeBooksLatestQuery, NativeBooksListQuery, NativeReadListBooksQuery, NativeReadListsQuery,
+    NativeSeriesListQuery, SeriesCollectionsQuery, SeriesDetailQuery,
 };
 use komga_domain::discovery::{
     BookDetailReadModel, BookReadModel, BookResourceReadModel, CollectionReadModel, DiscoveryError,
@@ -253,6 +253,14 @@ impl DiscoveryQueryRepository for SqlxRuntimeDiscoveryAdapter {
         query: NativeReadListBooksQuery,
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
         readlists::list_readlist_books_sqlx(self.pool.clone(), context, &query).await
+    }
+
+    async fn list_readlists(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: NativeReadListsQuery,
+    ) -> Result<PageEnvelope<ReadListReadModel>, DiscoveryError> {
+        readlists::list_readlists_sqlx(self.pool.clone(), context, &query).await
     }
 
     async fn resolve_series_resource(

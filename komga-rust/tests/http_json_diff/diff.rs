@@ -405,6 +405,108 @@ async fn phase8_readlist_books_family_negative_inventory_is_explicit_and_self_co
     }
 }
 
+#[tokio::test]
+async fn readlists_list_browse_owned_cases_self_diff_clean() {
+    let config = HarnessConfig::load_default().expect("default compat cases should load");
+
+    let responses =
+        run_cases_against_self(&config, phase9_readlists_list_browse_owned_case_ids()).await;
+
+    assert_eq!(
+        responses.len(),
+        phase9_readlists_list_browse_owned_case_ids().len(),
+        "phase9 owned compat self-diff must cover the full owned inventory",
+    );
+
+    for (case_id, response) in responses {
+        assert_eq!(
+            response.status, 200,
+            "owned readlists-list browse compat case should stay HTTP 200: {case_id}",
+        );
+
+        match response.body {
+            NormalizedBody::Json(body) => {
+                assert!(
+                    body.get("_compat").is_none(),
+                    "owned readlists-list browse compat case must not emit _compat diagnostics: {case_id}",
+                );
+
+                match case_id.as_str() {
+                    "P9-READLISTS-LIST-BROWSE-DEFAULT-OWNED" => {
+                        assert_eq!(body["size"], serde_json::Value::from(20));
+                        assert_eq!(body["number"], serde_json::Value::from(0));
+                    }
+                    "P9-READLISTS-LIST-BROWSE-PAGE-SIZE-OWNED"
+                    | "P9-READLISTS-LIST-BROWSE-REPEATED-LIBRARY-ID-PAGE-SIZE-OWNED" => {
+                        assert_eq!(body["size"], serde_json::Value::from(1));
+                        assert_eq!(body["number"], serde_json::Value::from(1));
+                    }
+                    "P9-READLISTS-LIST-BROWSE-REPEATED-LIBRARY-ID-OWNED"
+                    | "P9-READLISTS-LIST-BROWSE-SIZE-ZERO-OWNED" => {
+                        assert_eq!(body["size"], serde_json::Value::from(20));
+                        assert_eq!(body["number"], serde_json::Value::from(0));
+                    }
+                    other => panic!("unexpected phase9 owned compat case id: {other}"),
+                }
+            }
+            other => panic!(
+                "owned readlists-list browse compat case must stay JSON: {case_id} => {other:?}"
+            ),
+        }
+    }
+}
+
+#[tokio::test]
+async fn readlists_list_browse_negative_inventory_is_explicit_and_self_consistent() {
+    let config = HarnessConfig::load_default().expect("default compat cases should load");
+    let responses =
+        run_cases_against_self(&config, phase9_readlists_list_browse_negative_case_ids()).await;
+
+    assert_eq!(
+        responses.len(),
+        phase9_readlists_list_browse_negative_case_ids().len(),
+        "phase9 negative compat self-diff must cover the full explicit non-owned inventory",
+    );
+
+    for (case_id, response) in responses {
+        match case_id.as_str() {
+            "P9-READLISTS-LIST-BROWSE-NEGATIVE-SEARCH"
+            | "P9-READLISTS-LIST-BROWSE-NEGATIVE-UNPAGED-TRUE"
+            | "P9-READLISTS-LIST-BROWSE-NEGATIVE-SORT" => {
+                assert_eq!(
+                    response.status, 200,
+                    "negative inventory case should stay HTTP 200 explicit non-native: {case_id}",
+                );
+
+                let body = match response.body {
+                    NormalizedBody::Json(body) => body,
+                    other => panic!(
+                        "negative browse inventory case must stay JSON for explicit shadow evidence: {case_id} => {other:?}"
+                    ),
+                };
+
+                assert_eq!(
+                    body["_compat"]["discoveryOwnership"],
+                    serde_json::Value::String("non-native".to_string()),
+                    "negative browse inventory case must stay explicit shadow evidence: {case_id}",
+                );
+                assert_eq!(
+                    body["_compat"]["reason"],
+                    serde_json::Value::String("unsupported-request-shape".to_string()),
+                    "negative browse inventory case must keep unsupported-request-shape diagnostics: {case_id}",
+                );
+            }
+            "P9-READLISTS-LIST-BROWSE-NEGATIVE-TACHIYOMI" => {
+                assert_eq!(
+                    response.status, 404,
+                    "tachiyomi exclusion inventory case should stay HTTP 404: {case_id}",
+                );
+            }
+            _ => panic!("unexpected phase9 negative compat case id: {case_id}"),
+        }
+    }
+}
+
 #[test]
 #[ignore = "requires running Java and Rust servers via KOMGA_COMPAT_JAVA_BASE_URL and KOMGA_COMPAT_RUST_BASE_URL"]
 fn live_http_json_diff_smoke() {
@@ -588,7 +690,7 @@ async fn run_cases_against_self(
             .cases
             .iter()
             .find(|it| it.id == *case_id)
-            .unwrap_or_else(|| panic!("missing phase8 readlist-books compat case: {case_id}"));
+            .unwrap_or_else(|| panic!("missing compat case: {case_id}"));
         let vars = BTreeMap::from([("SESSION_TOKEN".to_string(), session_token.clone())]);
 
         let left = execute_case_async(&client, &base_url, case, &vars)

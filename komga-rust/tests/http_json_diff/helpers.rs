@@ -47,6 +47,39 @@ pub(super) fn phase8_readlist_books_family_all_case_ids() -> &'static [&'static 
     ]
 }
 
+pub(super) fn phase9_readlists_list_browse_owned_case_ids() -> &'static [&'static str] {
+    &[
+        "P9-READLISTS-LIST-BROWSE-DEFAULT-OWNED",
+        "P9-READLISTS-LIST-BROWSE-PAGE-SIZE-OWNED",
+        "P9-READLISTS-LIST-BROWSE-REPEATED-LIBRARY-ID-OWNED",
+        "P9-READLISTS-LIST-BROWSE-REPEATED-LIBRARY-ID-PAGE-SIZE-OWNED",
+        "P9-READLISTS-LIST-BROWSE-SIZE-ZERO-OWNED",
+    ]
+}
+
+pub(super) fn phase9_readlists_list_browse_negative_case_ids() -> &'static [&'static str] {
+    &[
+        "P9-READLISTS-LIST-BROWSE-NEGATIVE-SEARCH",
+        "P9-READLISTS-LIST-BROWSE-NEGATIVE-UNPAGED-TRUE",
+        "P9-READLISTS-LIST-BROWSE-NEGATIVE-SORT",
+        "P9-READLISTS-LIST-BROWSE-NEGATIVE-TACHIYOMI",
+    ]
+}
+
+pub(super) fn phase9_readlists_list_browse_all_case_ids() -> &'static [&'static str] {
+    &[
+        "P9-READLISTS-LIST-BROWSE-DEFAULT-OWNED",
+        "P9-READLISTS-LIST-BROWSE-PAGE-SIZE-OWNED",
+        "P9-READLISTS-LIST-BROWSE-REPEATED-LIBRARY-ID-OWNED",
+        "P9-READLISTS-LIST-BROWSE-REPEATED-LIBRARY-ID-PAGE-SIZE-OWNED",
+        "P9-READLISTS-LIST-BROWSE-SIZE-ZERO-OWNED",
+        "P9-READLISTS-LIST-BROWSE-NEGATIVE-SEARCH",
+        "P9-READLISTS-LIST-BROWSE-NEGATIVE-UNPAGED-TRUE",
+        "P9-READLISTS-LIST-BROWSE-NEGATIVE-SORT",
+        "P9-READLISTS-LIST-BROWSE-NEGATIVE-TACHIYOMI",
+    ]
+}
+
 pub(super) fn live_http_json_case_ids() -> &'static [&'static str] {
     &[
         "KOMGA-P0-LIB-01-ADMIN",

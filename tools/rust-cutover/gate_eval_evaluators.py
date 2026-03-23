@@ -699,6 +699,168 @@ class GateEvaluators:
         )
         return True, details, []
 
+    def eval_phase9_browser_smoke(
+        self,
+        browser_summary_path: Path,
+        summary_json_path: Path,
+        browse_readlists_path: Path,
+    ) -> tuple[bool, list[str], list[str]]:
+        ok_text, text_messages, _ = self.eval_text_evidence_with_markers(
+            [browser_summary_path],
+            {
+                browser_summary_path: [
+                    'route=browse-readlists',
+                    'captureMode=source-contract-fallback',
+                    'default-browse: label=readlists-browse-default',
+                    'paged-browse: label=readlists-browse-paged',
+                    'repeated-library-browse: label=readlists-browse-repeated-library-id',
+                    'repeated-library-paged-browse: label=readlists-browse-repeated-library-id-paged',
+                    'count-flow: label=readlists-browse-size-zero-count',
+                    'non-claims: search/unpaged=true/dialogs/admin-actions/Tachiyomi remain outside this browse-readlists browse/list closure evidence',
+                ],
+            },
+            'Phase9 browser summary text stays scoped to BrowseReadLists browse/list evidence only, with exact five-request governance inventory and explicit non-claims.',
+        )
+        if not ok_text:
+            return False, text_messages, []
+
+        ok_summary, summary_payload, summary_error = self.read_json_file(summary_json_path)
+        if not ok_summary:
+            return False, text_messages + [summary_error], []
+
+        ok_route, browse_readlists_payload, route_error = self.read_json_file(browse_readlists_path)
+        if not ok_route:
+            return False, text_messages + [route_error], []
+
+        if not isinstance(summary_payload, list):
+            return False, text_messages + [f"Phase9 browser summary must be a JSON array: {self.rel(summary_json_path)}"], []
+
+        if len(summary_payload) != 1:
+            return False, text_messages + ['Phase9 browser summary must contain exactly one BrowseReadLists route row'], []
+
+        summary_row = summary_payload[0]
+        if not isinstance(summary_row, dict):
+            return False, text_messages + ['Phase9 browser summary row must be a JSON object'], []
+
+        if not isinstance(browse_readlists_payload, dict):
+            return False, text_messages + [f"{self.rel(browse_readlists_path)} must be a JSON object"], []
+
+        if summary_row != browse_readlists_payload:
+            return False, text_messages + [
+                f"browse-readlists: summary row does not exactly match {self.rel(browse_readlists_path)}"
+            ], []
+
+        failures: list[str] = []
+        details = list(text_messages)
+
+        if summary_row.get('route') != 'browse-readlists':
+            failures.append('browse-readlists: route field must equal browse-readlists')
+
+        if not bool(summary_row.get('pass')):
+            err = summary_row.get('error') or 'route did not pass'
+            failures.append(f'browse-readlists: {err}')
+
+        capture_mode = summary_row.get('captureMode')
+        if not capture_mode:
+            failures.append('browse-readlists: captureMode is missing')
+        elif capture_mode == 'source-contract-fallback':
+            details.append('browse-readlists captureMode=source-contract-fallback (accepted in this environment)')
+        else:
+            details.append(f'browse-readlists captureMode={capture_mode}')
+
+        signals = summary_row.get('signals')
+        required_signals = [
+            'rootFound',
+            'detailMetadataVisible',
+            'itemBrowserFound',
+            'routePaginationStateFound',
+            'browseRequestFound',
+            'repeatedLibraryBrowseFound',
+            'paginationControlsFound',
+            'totalCountChipFound',
+            'countFlowFound',
+        ]
+        if not isinstance(signals, dict):
+            failures.append('browse-readlists: signals object is missing')
+        else:
+            for signal in required_signals:
+                if not bool(signals.get(signal)):
+                    failures.append(f'browse-readlists: required signal {signal}=true not observed')
+            if signals.get('siblingNavigationExpected') not in (False, None):
+                failures.append('browse-readlists: sibling navigation must remain outside this browse/list browser slice')
+
+        expected_owned_requests = summary_row.get('expectedOwnedRequests')
+        if not isinstance(expected_owned_requests, list):
+            failures.append('browse-readlists: expectedOwnedRequests array is missing')
+        elif expected_owned_requests:
+            failures.append('browse-readlists: expectedOwnedRequests must stay empty for Phase9 governance-only browser evidence')
+        else:
+            details.append('browse-readlists keeps expectedOwnedRequests empty and records the owned inventory only in governanceOwnedRequests')
+
+        owned_request_inventory = summary_row.get('ownedRequestInventory')
+        if not isinstance(owned_request_inventory, list):
+            failures.append('browse-readlists: ownedRequestInventory array is missing')
+        elif owned_request_inventory:
+            failures.append('browse-readlists: ownedRequestInventory must stay empty for Phase9 governance-only browser evidence')
+
+        fallback_requests = summary_row.get('observedFallbackRequests')
+        if not isinstance(fallback_requests, list):
+            failures.append('browse-readlists: observedFallbackRequests array is missing')
+        elif fallback_requests:
+            failures.append('browse-readlists: observedFallbackRequests must stay empty')
+
+        governance_requests = summary_row.get('governanceOwnedRequests')
+        if not isinstance(governance_requests, list):
+            failures.append('browse-readlists: governanceOwnedRequests array is missing')
+        else:
+            expected_requests = [
+                ('readlists-browse-default', 'default-browse', 'phase9-owned', None),
+                ('readlists-browse-paged', 'paged-browse', 'phase9-owned', None),
+                ('readlists-browse-repeated-library-id', 'repeated-library-browse', 'phase9-owned', None),
+                ('readlists-browse-repeated-library-id-paged', 'repeated-library-paged-browse', 'phase9-owned', None),
+                ('readlists-browse-size-zero-count', 'count-flow', 'phase9-owned', None),
+            ]
+            observed_labels = [
+                item.get('label')
+                for item in governance_requests
+                if isinstance(item, dict) and 'label' in item
+            ]
+            expected_labels = [item[0] for item in expected_requests]
+            if observed_labels != expected_labels:
+                failures.append(
+                    'browse-readlists: governanceOwnedRequests must exactly equal '
+                    f"{', '.join(expected_labels)}"
+                )
+            else:
+                by_label = {
+                    item.get('label'): item
+                    for item in governance_requests
+                    if isinstance(item, dict) and 'label' in item
+                }
+                for label, purpose, ownership_class, persona in expected_requests:
+                    request = by_label[label]
+                    if not bool(request.get('pass')):
+                        failures.append(f'browse-readlists: governanceOwnedRequests failed for {label}')
+                    if request.get('purpose') != purpose:
+                        failures.append(f'browse-readlists: {label} purpose must equal {purpose}')
+                    if request.get('ownershipClass') != ownership_class:
+                        failures.append(
+                            f'browse-readlists: {label} ownershipClass must equal {ownership_class}'
+                        )
+                    if persona is not None and request.get('persona') != persona:
+                        failures.append(f'browse-readlists: {label} persona must equal {persona}')
+                details.append(
+                    'browse-readlists proves exactly five phase9-owned browse/list governance requests and keeps search, unpaged=true, dialogs, admin actions, and Tachiyomi outside claim scope'
+                )
+
+        if failures:
+            return False, [f"Phase9 browse-readlists browser smoke regressions: {'; '.join(failures)}"], []
+
+        details.append(
+            'Phase9 browser evidence stays limited to BrowseReadLists browse/list load, route-driven pagination state, repeated-library browse, and LibraryNavigation size=0 count flow only.'
+        )
+        return True, details, []
+
     def eval_task_ownership(self, task_ownership_path: Path, admin_queue_path: Path) -> tuple[bool, list[str], list[str]]:
         ok_text, text_messages, _ = self.eval_text_evidence([task_ownership_path])
 
