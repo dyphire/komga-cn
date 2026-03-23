@@ -101,7 +101,7 @@ headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownershi
 [[cases]]
 id = "P8-READLIST-BOOKS-EXCLUDED-READLISTS-LIST-FAMILY"
 method = "GET"
-path = "/api/v1/readlists"
+path = "/api/v1/readlists?search=alpha&sort=name,asc"
 headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
 
 [[cases]]
@@ -143,7 +143,7 @@ headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
 [[cases]]
 id = "P9-READLISTS-LIST-BROWSE-NEGATIVE-SEARCH"
 method = "GET"
-path = "/api/v1/readlists?search=ReadList"
+path = "/api/v1/readlists?search="
 headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
 
 [[cases]]
@@ -162,6 +162,90 @@ headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownershi
 id = "P9-READLISTS-LIST-BROWSE-NEGATIVE-TACHIYOMI"
 method = "GET"
 path = "/api/v1/readlists/readlist-2/read-progress/tachiyomi"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases]]
+id = "P10-READLISTS-SEARCH-DEFAULT-OWNED"
+method = "GET"
+path = "/api/v1/readlists?search=alpha"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P10-READLISTS-SEARCH-PAGE-SIZE-OWNED"
+method = "GET"
+path = "/api/v1/readlists?search=alpha&page=1&size=1"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P10-READLISTS-SEARCH-REPEATED-LIBRARY-ID-OWNED"
+method = "GET"
+path = "/api/v1/readlists?search=alpha&library_id=1&library_id=2"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P10-READLISTS-SEARCH-REPEATED-LIBRARY-ID-PAGE-SIZE-OWNED"
+method = "GET"
+path = "/api/v1/readlists?search=alpha&library_id=1&library_id=2&page=1&size=1"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P10-READLISTS-SEARCH-SIZE-ZERO-OWNED"
+method = "GET"
+path = "/api/v1/readlists?search=alpha&size=0"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P10-READLISTS-SEARCH-REPEATED-LIBRARY-ID-SIZE-ZERO-OWNED"
+method = "GET"
+path = "/api/v1/readlists?search=alpha&library_id=1&library_id=2&size=0"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P10-READLISTS-SEARCH-NO-RESULTS-OWNED"
+method = "GET"
+path = "/api/v1/readlists?search=zzzz-no-match"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P10-READLISTS-SEARCH-NEGATIVE-BLANK"
+method = "GET"
+path = "/api/v1/readlists?search="
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases]]
+id = "P10-READLISTS-SEARCH-NEGATIVE-WHITESPACE"
+method = "GET"
+path = "/api/v1/readlists?search=%20%20"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases]]
+id = "P10-READLISTS-SEARCH-NEGATIVE-SORT"
+method = "GET"
+path = "/api/v1/readlists?search=alpha&sort=name,asc"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases]]
+id = "P10-READLISTS-SEARCH-NEGATIVE-UNPAGED-TRUE"
+method = "GET"
+path = "/api/v1/readlists?search=alpha&unpaged=true"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases]]
+id = "P10-READLISTS-SEARCH-NEGATIVE-DUPLICATE-PAGE"
+method = "GET"
+path = "/api/v1/readlists?search=alpha&page=0&page=1"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases]]
+id = "P10-READLISTS-SEARCH-NEGATIVE-DUPLICATE-SIZE"
+method = "GET"
+path = "/api/v1/readlists?search=alpha&size=20&size=1"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases]]
+id = "P10-READLISTS-SEARCH-NEGATIVE-UNSUPPORTED-EXTRA"
+method = "GET"
+path = "/api/v1/readlists?search=alpha&foo=bar"
 headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
 
 [[cases]]
@@ -797,12 +881,6 @@ method = "GET"
 path = "/api/v2/users/me"
 headers = { "Authorization" = "Basic ${KOMGA_COMPAT_BASIC_AUTH}", "X-Auth-Token" = "" }
 extract_headers = { "SESSION_TOKEN" = "X-Auth-Token" }
-
-[[cases]]
-id = "P2-DISCOVERY-UNSUPPORTED-READLISTS"
-method = "GET"
-path = "/api/v1/readlists?search=ReadList"
-headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
 
 [[cases.setup]]
 name = "login"

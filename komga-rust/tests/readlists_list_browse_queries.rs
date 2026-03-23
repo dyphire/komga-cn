@@ -32,6 +32,18 @@ struct ExcludedBrowseShapeCase<'a> {
     uri: &'a str,
 }
 
+struct SearchQueryParityCase<'a> {
+    name: &'a str,
+    basic_auth: &'a str,
+    uri: &'a str,
+    expected_ids: &'a [&'a str],
+    expected_filtered: &'a [(&'a str, bool)],
+    expected_total_elements: u64,
+    expected_page_number: u64,
+    expected_page_size: u64,
+    expected_number_of_elements: u64,
+}
+
 #[tokio::test]
 async fn phase9_query_parity_owned_browse_variants_match_java_contract() {
     let app = komga_rust::app::build_router();
@@ -142,12 +154,125 @@ async fn phase9_query_parity_owned_browse_variants_match_java_contract() {
 }
 
 #[tokio::test]
+async fn phase10_search_query_shapes_are_native_owned_and_filter_results() {
+    let app = komga_rust::app::build_router();
+    let cases = [
+        SearchQueryParityCase {
+            name: "non-blank search is native-owned and filters readlists",
+            basic_auth: USER_BASIC_AUTH,
+            uri: "/api/v1/readlists?search=alpha",
+            expected_ids: &["readlist-1", "readlist-2"],
+            expected_filtered: &[
+                ("readlist-1", false),
+                ("readlist-2", false),
+            ],
+            expected_total_elements: 2,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 2,
+        },
+        SearchQueryParityCase {
+            name: "paged search keeps browse paging semantics while remaining filtered",
+            basic_auth: USER_BASIC_AUTH,
+            uri: "/api/v1/readlists?search=alpha&page=1&size=1",
+            expected_ids: &["readlist-2"],
+            expected_filtered: &[("readlist-2", false)],
+            expected_total_elements: 2,
+            expected_page_number: 1,
+            expected_page_size: 1,
+            expected_number_of_elements: 1,
+        },
+        SearchQueryParityCase {
+            name: "repeated library search is native-owned and filtered",
+            basic_auth: USER_BASIC_AUTH,
+            uri: "/api/v1/readlists?search=alpha&library_id=1&library_id=2",
+            expected_ids: &["readlist-1", "readlist-2"],
+            expected_filtered: &[
+                ("readlist-1", false),
+                ("readlist-2", false),
+            ],
+            expected_total_elements: 2,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 2,
+        },
+        SearchQueryParityCase {
+            name: "repeated library paged search remains native-owned and filtered",
+            basic_auth: USER_BASIC_AUTH,
+            uri: "/api/v1/readlists?search=alpha&library_id=1&library_id=2&page=1&size=1",
+            expected_ids: &["readlist-2"],
+            expected_filtered: &[("readlist-2", false)],
+            expected_total_elements: 2,
+            expected_page_number: 1,
+            expected_page_size: 1,
+            expected_number_of_elements: 1,
+        },
+        SearchQueryParityCase {
+            name: "size zero search preserves browse size-zero semantics while filtered",
+            basic_auth: USER_BASIC_AUTH,
+            uri: "/api/v1/readlists?search=alpha&size=0",
+            expected_ids: &["readlist-1", "readlist-2"],
+            expected_filtered: &[
+                ("readlist-1", false),
+                ("readlist-2", false),
+            ],
+            expected_total_elements: 2,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 2,
+        },
+        SearchQueryParityCase {
+            name: "repeated library size zero search stays native-owned and filtered",
+            basic_auth: USER_BASIC_AUTH,
+            uri: "/api/v1/readlists?search=alpha&library_id=1&library_id=2&size=0",
+            expected_ids: &["readlist-1", "readlist-2"],
+            expected_filtered: &[
+                ("readlist-1", false),
+                ("readlist-2", false),
+            ],
+            expected_total_elements: 2,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 2,
+        },
+        SearchQueryParityCase {
+            name: "no-match search returns empty native-owned result page",
+            basic_auth: USER_BASIC_AUTH,
+            uri: "/api/v1/readlists?search=zzzz-no-match",
+            expected_ids: &[],
+            expected_filtered: &[],
+            expected_total_elements: 0,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 0,
+        },
+        SearchQueryParityCase {
+            name: "permission-filtered search keeps ACL behavior while remaining native-owned",
+            basic_auth: RESTRICTED_BASIC_AUTH,
+            uri: "/api/v1/readlists?search=alpha",
+            expected_ids: &["readlist-1", "readlist-2"],
+            expected_filtered: &[("readlist-1", false), ("readlist-2", true)],
+            expected_total_elements: 2,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 2,
+        },
+    ];
+
+    assert_search_query_parity_cases(&app, &cases).await;
+}
+
+#[tokio::test]
 async fn phase9_excluded_browse_variants_stay_explicitly_non_native() {
     let app = komga_rust::app::build_router();
     let cases = [
         ExcludedBrowseShapeCase {
-            name: "search query stays exclusion-only",
-            uri: "/api/v1/readlists?search=ReadList",
+            name: "blank search stays exclusion-only",
+            uri: "/api/v1/readlists?search=",
+        },
+        ExcludedBrowseShapeCase {
+            name: "whitespace-only search stays exclusion-only",
+            uri: "/api/v1/readlists?search=%20%20",
         },
         ExcludedBrowseShapeCase {
             name: "unpaged true stays exclusion-only",
@@ -158,8 +283,24 @@ async fn phase9_excluded_browse_variants_stay_explicitly_non_native() {
             uri: "/api/v1/readlists?sort=name,desc",
         },
         ExcludedBrowseShapeCase {
-            name: "library filter plus search stays exclusion-only",
-            uri: "/api/v1/readlists?library_id=1&search=ReadList",
+            name: "search plus sort stays exclusion-only",
+            uri: "/api/v1/readlists?search=alpha&sort=name,asc",
+        },
+        ExcludedBrowseShapeCase {
+            name: "search plus unpaged stays exclusion-only",
+            uri: "/api/v1/readlists?search=alpha&unpaged=true",
+        },
+        ExcludedBrowseShapeCase {
+            name: "duplicate page stays exclusion-only",
+            uri: "/api/v1/readlists?search=alpha&page=0&page=1",
+        },
+        ExcludedBrowseShapeCase {
+            name: "duplicate size stays exclusion-only",
+            uri: "/api/v1/readlists?search=alpha&size=20&size=1",
+        },
+        ExcludedBrowseShapeCase {
+            name: "unsupported extra query key stays exclusion-only",
+            uri: "/api/v1/readlists?search=alpha&foo=bar",
         },
         ExcludedBrowseShapeCase {
             name: "library filter plus unpaged stays exclusion-only",
@@ -296,6 +437,133 @@ async fn assert_query_parity_cases_match_java_contract<S>(
     assert!(
         failures.is_empty(),
         "Phase 9 readlists-list browse parity gaps:\n- {}",
+        failures.join("\n- ")
+    );
+}
+
+async fn assert_search_query_parity_cases<S>(
+    app: &S,
+    cases: &[SearchQueryParityCase<'_>],
+) where
+    S: tower::Service<Request<Body>, Response = axum::response::Response> + Clone,
+    S::Error: std::fmt::Debug,
+    S::Future: Send,
+{
+    let mut failures = Vec::new();
+
+    for case in cases {
+        let token = session_token_for_basic_auth(app, case.basic_auth).await;
+        let response = get_response(app, &token, case.uri).await;
+        let header = ownership_header(&response).map(str::to_string);
+        let status = response.status();
+
+        if status != StatusCode::OK {
+            failures.push(format!(
+                "{}: expected HTTP 200 but got {} for {}",
+                case.name, status, case.uri
+            ));
+            continue;
+        }
+
+        let json = response_json(response).await;
+        let ids = page_content_ids(&json);
+        let mut problems = Vec::new();
+
+        if header.as_deref() != Some(NATIVE_OWNERSHIP_MARKER) {
+            problems.push(format!(
+                "expected ownership marker {:?}, got {:?}",
+                NATIVE_OWNERSHIP_MARKER, header
+            ));
+        }
+        if json.get("_compat").is_some() {
+            problems.push(format!(
+                "expected no _compat diagnostics, got {}",
+                json["_compat"]
+            ));
+        }
+        if ids != case.expected_ids {
+            problems.push(format!(
+                "expected ids {:?}, got {:?}",
+                case.expected_ids, ids
+            ));
+        }
+
+        if json["pageable"]["paged"] != Value::Bool(true) {
+            problems.push(format!(
+                "expected pageable.paged=true, got {}",
+                json["pageable"]["paged"]
+            ));
+        }
+        if json["pageable"]["unpaged"] != Value::Bool(false) {
+            problems.push(format!(
+                "expected pageable.unpaged=false, got {}",
+                json["pageable"]["unpaged"]
+            ));
+        }
+        if json["pageable"]["pageNumber"] != Value::from(case.expected_page_number) {
+            problems.push(format!(
+                "expected pageable.pageNumber={}, got {}",
+                case.expected_page_number, json["pageable"]["pageNumber"]
+            ));
+        }
+        if json["pageable"]["pageSize"] != Value::from(case.expected_page_size) {
+            problems.push(format!(
+                "expected pageable.pageSize={}, got {}",
+                case.expected_page_size, json["pageable"]["pageSize"]
+            ));
+        }
+        if json["number"] != Value::from(case.expected_page_number) {
+            problems.push(format!(
+                "expected number={}, got {}",
+                case.expected_page_number, json["number"]
+            ));
+        }
+        if json["size"] != Value::from(case.expected_page_size) {
+            problems.push(format!(
+                "expected size={}, got {}",
+                case.expected_page_size, json["size"]
+            ));
+        }
+        if json["numberOfElements"] != Value::from(case.expected_number_of_elements) {
+            problems.push(format!(
+                "expected numberOfElements={}, got {}",
+                case.expected_number_of_elements, json["numberOfElements"]
+            ));
+        }
+        if json["totalElements"] != Value::from(case.expected_total_elements) {
+            problems.push(format!(
+                "expected totalElements={}, got {}",
+                case.expected_total_elements, json["totalElements"]
+            ));
+        }
+
+        for (id, expected_filtered) in case.expected_filtered {
+            match page_item_by_id(&json, id) {
+                Some(item) if item["filtered"] == Value::Bool(*expected_filtered) => {}
+                Some(item) => problems.push(format!(
+                    "expected filtered={} for {}, got {}",
+                    expected_filtered, id, item["filtered"]
+                )),
+                None => problems.push(format!(
+                    "expected item {} to be present in page content",
+                    id
+                )),
+            }
+        }
+
+        if !problems.is_empty() {
+            failures.push(format!(
+                "{} [{}]: {}",
+                case.name,
+                case.uri,
+                problems.join("; ")
+            ));
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "Phase 10 readlists-list search parity gaps:\n- {}",
         failures.join("\n- ")
     );
 }

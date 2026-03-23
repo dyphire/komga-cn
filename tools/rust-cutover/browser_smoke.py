@@ -570,6 +570,40 @@ def emit_route_summary(route_result: dict[str, object]) -> None:
         )
         return
 
+    if route_name == 'search-readlists-native':
+        signals = route_result.get('signals', {}) if isinstance(route_result.get('signals'), dict) else {}
+        print(
+            'page-load: '
+            f'rootFound={signals.get("rootFound")} '
+            f'readlistsResultBlockFound={signals.get("readlistsResultBlockFound")} '
+            f'searchQueryFound={signals.get("searchQueryFound")} '
+            f'emptySummaryFound={signals.get("emptySummaryFound")}'
+        )
+        print(
+            'search-governance: '
+            f'searchQueryFromRouteFound={signals.get("searchQueryFromRouteFound")} '
+            f'readlistsSearchRequestFound={signals.get("readlistsSearchRequestFound")}'
+        )
+
+        governance_requests = route_result.get('governanceOwnedRequests')
+        if isinstance(governance_requests, list):
+            for entry in governance_requests:
+                if not isinstance(entry, dict):
+                    continue
+                matched_response = entry.get('matchedResponse') if isinstance(entry.get('matchedResponse'), dict) else {}
+                status = matched_response.get('status')
+                payload_summary = summarize_page_payload(matched_response.get('json'))
+                contract_only = entry.get('contractOnly') is True
+                observation = entry.get('ownershipObservation') or 'unknown-observation'
+                print(
+                    f'- {entry.get("purpose")}: label={entry.get("label")} '
+                    f'pass={entry.get("pass")} observation={observation} '
+                    f'contractOnly={contract_only} status={status} request={request_path_for_summary(entry)} {payload_summary}'
+                )
+
+        print('non-claims: sort and unpaged=true remain outside this search-readlists-native evidence')
+        return
+
     if route_name != 'browse-readlist':
         return
 

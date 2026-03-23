@@ -692,6 +692,124 @@ def seed_phase9_readlists_list_browse_closure_evidence(
         write_json(root / 'task-7-browser-smoke/summary.json', [browse_readlists_row])
 
 
+def seed_phase10_readlists_search_contract_evidence(
+    root: Path,
+    *,
+    include_contract: bool = True,
+    include_exclusions: bool = True,
+    complete_contract_matrix: bool = True,
+) -> None:
+    if include_contract:
+        contract_lines = [
+            'Task: T1 Phase 10 search contract matrix freeze',
+            'Scenario: readlists search ownership stays exact and fail-closed',
+            'phase10_readlists_search_matrix_is_frozen',
+            '',
+            'New ownership (Phase 10 only; layered on top of Phase 9 browse ownership):',
+            '  - GET /api/v1/readlists?search=alpha',
+            '  - GET /api/v1/readlists?search=alpha&page={page}&size={size}',
+            '  - GET /api/v1/readlists?search=alpha&library_id={libraryId} (single or repeated library_id)',
+            '  - GET /api/v1/readlists?search=alpha&library_id={libraryId...}&page={page}&size={size}',
+            '  - GET /api/v1/readlists?search=alpha&size=0 (matches JVM exactly)',
+            '  - GET /api/v1/readlists?search=alpha&library_id={libraryId...}&size=0 (matches JVM exactly)',
+            '',
+            'Deterministic search token: alpha',
+            'Deterministic no-result token: zzzz-no-match',
+            '',
+            'Pre-owned dependencies retained unchanged:',
+            '  - Phase 2 catalog discovery read slice',
+            '  - Phase 3 detail read slice',
+            '  - Phase 4 readlist-context read',
+            '  - Phase 5 oneshot closure',
+            '  - Phase 6 oneshot readlist-context closure',
+            '  - Phase 7 series oneshot query closure',
+            '  - Phase 8 readlist books family closure',
+            '  - Phase 9 readlists list browse closure',
+            '',
+            'Boundary rule:',
+            '  - No browse-only Phase 9 route is re-defined here; Phase 10 adds only non-blank search-bearing request shapes.',
+            '  - No route/query shape can exist in more than one bucket.',
+            'Result: PASS',
+        ]
+        if not complete_contract_matrix:
+            contract_lines = [
+                line
+                for line in contract_lines
+                if line not in {
+                    '  - GET /api/v1/readlists?search=alpha&library_id={libraryId...}&page={page}&size={size}',
+                    '  - GET /api/v1/readlists?search=alpha&library_id={libraryId...}&size=0 (matches JVM exactly)',
+                    'Deterministic no-result token: zzzz-no-match',
+                    '  - Phase 9 readlists list browse closure',
+                    'Boundary rule:',
+                }
+            ]
+        write_text(
+            root / 'task-1-search-contract-matrix/phase10-readlists-search-contract.txt',
+            '\n'.join(contract_lines),
+        )
+
+    if include_exclusions:
+        write_text(
+            root / 'task-1-search-contract-matrix/phase10-readlists-search-exclusions.txt',
+            '\n'.join([
+                'Task: T1 Phase 10 search exclusion ledger freeze',
+                'Scenario: blank search and adjacent widened query shapes remain explicit non-native',
+                'phase10_search_adjacent_routes_remain_explicitly_non_native',
+                '',
+                'Explicit exclusions (must stay non-native):',
+                '  - GET /api/v1/readlists?search=',
+                '  - GET /api/v1/readlists?search=%20%20',
+                '  - GET /api/v1/readlists?search=alpha&sort=name,asc',
+                '  - GET /api/v1/readlists?search=alpha&unpaged=true',
+                '  - GET /api/v1/readlists?search=alpha&page=0&page=1',
+                '  - GET /api/v1/readlists?search=alpha&size=20&size=1',
+                '  - GET /api/v1/readlists?search=alpha&foo=bar',
+                '  - browse-only Phase 9 shapes remain governed by Phase 9 and are not re-declared as Phase 10 ownership',
+                '  - no blank/whitespace search ownership',
+                '  - no search+sort ownership',
+                '  - no search+unpaged ownership',
+                '  - no duplicate page/size ownership',
+                '  - no unsupported extra query ownership',
+                'Result: PASS',
+                'shadow-java-writer',
+            ]),
+        )
+
+
+def seed_phase10_readlists_search_closure_evidence(
+    root: Path,
+    *,
+    include_runtime: bool = True,
+    include_compat: bool = True,
+    compat_failure: bool = False,
+    preserve_phase9_markers: bool = True,
+) -> None:
+    if include_runtime:
+        write_text(
+            root / 'task-4-native-search/readlists-list-browse-queries.txt',
+            'cargo test: 3 passed (1 suite, 0.16s)',
+        )
+        write_text(
+            root / 'task-5-runtime-boundaries/readlists-list-browse-shadow.txt',
+            'cargo test: 4 passed (1 suite, 0.13s)',
+        )
+
+    if include_compat:
+        compat_lines = (
+            [
+                'cargo test: 29 passed, 4 ignored (1 suite, 0.58s)',
+            ]
+            if not compat_failure
+            else [
+                'test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out',
+            ]
+        )
+        write_text(
+            root / 'task-6-compat-gate/http-json-diff.txt',
+            '\n'.join(compat_lines),
+        )
+
+
 def build_admin_queue_payload(*, status: str, can_claim_admin_queue_parity: bool) -> dict[str, object]:
     return {
         'task': 'T13 admin task endpoint parity remains executable',

@@ -520,9 +520,9 @@ pub(in crate::app::compat_runtime) async fn readlists(
         (!values.is_empty()).then_some(values)
     };
     let search = query_value(query_string, "search")
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
+        .map(decode_query_component)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
     let sort = query_values(query_string, "sort")
         .into_iter()
         .map(str::trim)
@@ -553,6 +553,7 @@ pub(in crate::app::compat_runtime) async fn readlists(
         page: query.page,
         size: query.size,
         library_ids: query.library_ids.clone(),
+        search: query.search.clone(),
     };
 
     match adapter.list_readlists(&domain_context, native_query).await {
@@ -1008,17 +1009,17 @@ fn seed_series_detail_data(adapter: &mut SqliteDiscoveryAdapter) {
     );
     adapter.insert_read_list(
         ReadListRow::new("readlist-1", "ReadList 1")
-            .with_summary("Visible readlist")
+            .with_summary("alpha visible readlist")
             .with_book_ids(["book-1"]),
     );
     adapter.insert_read_list(
         ReadListRow::new("readlist-2", "ReadList 2")
-            .with_summary("Mixed visibility readlist")
+            .with_summary("alpha mixed visibility readlist")
             .with_book_ids(["book-1", "book-2"]),
     );
     adapter.insert_read_list(
         ReadListRow::new("readlist-3", "ReadList 3")
-            .with_summary("Restricted-only readlist")
+            .with_summary("restricted-only readlist")
             .with_book_ids(["book-2"]),
     );
 
@@ -1087,12 +1088,46 @@ fn parse_optional_query_bool(value: &str) -> Option<bool> {
     }
 }
 
+fn decode_query_component(value: &str) -> String {
+    let mut decoded = Vec::with_capacity(value.len());
+    let bytes = value.as_bytes();
+    let mut index = 0usize;
+
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' => {
+                decoded.push(b' ');
+                index += 1;
+            }
+            b'%' if index + 2 < bytes.len() => {
+                let first = (bytes[index + 1] as char).to_digit(16);
+                let second = (bytes[index + 2] as char).to_digit(16);
+
+                if let (Some(first), Some(second)) = (first, second) {
+                    decoded.push((first * 16 + second) as u8);
+                    index += 3;
+                } else {
+                    decoded.push(bytes[index]);
+                    index += 1;
+                }
+            }
+            byte => {
+                decoded.push(byte);
+                index += 1;
+            }
+        }
+    }
+
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
 fn classify_readlists_browse_request(
     query_string: &str,
     query: &ReadListsQuery,
 ) -> Result<(), DiscoveryError> {
     let mut page_count = 0usize;
     let mut size_count = 0usize;
+    let mut search_count = 0usize;
 
     for pair in query_string.split('&').filter(|segment| !segment.is_empty()) {
         let key = pair.split('=').next().unwrap_or_default();
@@ -1115,9 +1150,12 @@ fn classify_readlists_browse_request(
             }
             "library_id" => {}
             "search" => {
-                return Err(DiscoveryError::NonNativeRequestShape(
-                    NonNativeRequestShape::UnsupportedBookFilter("search".to_string()),
-                ));
+                search_count += 1;
+                if search_count > 1 || query.search.is_none() {
+                    return Err(DiscoveryError::NonNativeRequestShape(
+                        NonNativeRequestShape::UnsupportedBookFilter("search".to_string()),
+                    ));
+                }
             }
             "unpaged" => {
                 return Err(DiscoveryError::NonNativeRequestShape(
@@ -1478,4 +1516,14 @@ fn readlist_payload(readlist: &ReadListReadModel) -> Value {
         "lastModifiedDate": readlist.last_modified_date,
         "filtered": readlist.filtered,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_query_component;
+
+    #[test]
+    fn decode_query_component_decodes_percent_encoded_utf8_sequences() {
+        assert_eq!(decode_query_component("caf%C3%A9+au+lait"), "café au lait");
+    }
 }

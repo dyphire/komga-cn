@@ -26,6 +26,7 @@ class GateEvaluators:
     def is_neutral_success_line(line: str) -> bool:
         neutral_patterns = [
             re.compile(r"\btest result:\s+ok\b", re.IGNORECASE),
+            re.compile(r"\bcargo test:\s+\d+\s+passed\b", re.IGNORECASE),
             re.compile(r"\b0\s+(?:fail|failed|error|errors|blocker|blockers|missing)\b", re.IGNORECASE),
         ]
         return any(pattern.search(line) for pattern in neutral_patterns)

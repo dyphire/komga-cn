@@ -393,8 +393,31 @@ async fn phase8_readlist_books_family_negative_inventory_is_explicit_and_self_co
                     );
                 }
             }
-            "P8-READLIST-BOOKS-EXCLUDED-READLISTS-LIST-FAMILY"
-            | "P8-READLIST-BOOKS-EXCLUDED-TACHIYOMI" => {
+            "P8-READLIST-BOOKS-EXCLUDED-READLISTS-LIST-FAMILY" => {
+                assert_eq!(
+                    response.status, 200,
+                    "excluded list-family inventory case should stay HTTP 200 explicit non-native: {case_id}"
+                );
+
+                let body = match response.body {
+                    NormalizedBody::Json(body) => body,
+                    other => panic!(
+                        "excluded list-family inventory case must stay JSON for explicit shadow evidence: {case_id} => {other:?}"
+                    ),
+                };
+
+                assert_eq!(
+                    body["_compat"]["discoveryOwnership"],
+                    serde_json::Value::String("non-native".to_string()),
+                    "excluded list-family inventory case must stay explicit shadow evidence: {case_id}",
+                );
+                assert_eq!(
+                    body["_compat"]["shape"],
+                    serde_json::Value::String("UnsupportedBookSort(name,asc)".to_string()),
+                    "excluded list-family inventory case must keep exact rejected ownership shape: {case_id}",
+                );
+            }
+            "P8-READLIST-BOOKS-EXCLUDED-TACHIYOMI" => {
                 assert_eq!(
                     response.status, 404,
                     "excluded inventory case should stay HTTP 404: {case_id}"
@@ -495,6 +518,13 @@ async fn readlists_list_browse_negative_inventory_is_explicit_and_self_consisten
                     serde_json::Value::String("unsupported-request-shape".to_string()),
                     "negative browse inventory case must keep unsupported-request-shape diagnostics: {case_id}",
                 );
+                if case_id == "P9-READLISTS-LIST-BROWSE-NEGATIVE-SEARCH" {
+                    assert_eq!(
+                        body["_compat"]["shape"],
+                        serde_json::Value::String("UnsupportedBookFilter(search)".to_string()),
+                        "negative browse search inventory case must keep exact rejected ownership shape: {case_id}",
+                    );
+                }
             }
             "P9-READLISTS-LIST-BROWSE-NEGATIVE-TACHIYOMI" => {
                 assert_eq!(
@@ -505,6 +535,133 @@ async fn readlists_list_browse_negative_inventory_is_explicit_and_self_consisten
             _ => panic!("unexpected phase9 negative compat case id: {case_id}"),
         }
     }
+}
+
+#[tokio::test]
+async fn readlists_search_owned_cases_self_diff_clean() {
+    let config = HarnessConfig::load_default().expect("default compat cases should load");
+
+    let responses = run_cases_against_self(&config, phase10_readlists_search_owned_case_ids()).await;
+
+    assert_eq!(
+        responses.len(),
+        phase10_readlists_search_owned_case_ids().len(),
+        "phase10 owned search compat self-diff must cover the full owned inventory",
+    );
+
+    for (case_id, response) in responses {
+        assert_eq!(
+            response.status, 200,
+            "owned readlists search compat case should stay HTTP 200: {case_id}",
+        );
+
+        match response.body {
+            NormalizedBody::Json(body) => {
+                assert!(
+                    body.get("_compat").is_none(),
+                    "owned readlists search compat case must not emit _compat diagnostics: {case_id}",
+                );
+
+                let content_ids = page_content_ids(&body);
+
+                match case_id.as_str() {
+                    "P10-READLISTS-SEARCH-DEFAULT-OWNED"
+                    | "P10-READLISTS-SEARCH-REPEATED-LIBRARY-ID-OWNED"
+                    | "P10-READLISTS-SEARCH-SIZE-ZERO-OWNED"
+                    | "P10-READLISTS-SEARCH-REPEATED-LIBRARY-ID-SIZE-ZERO-OWNED" => {
+                        assert_eq!(content_ids, vec!["readlist-1", "readlist-2"]);
+                        assert_eq!(body["size"], serde_json::Value::from(20));
+                        assert_eq!(body["number"], serde_json::Value::from(0));
+                        assert_eq!(body["totalElements"], serde_json::Value::from(2));
+                    }
+                    "P10-READLISTS-SEARCH-PAGE-SIZE-OWNED"
+                    | "P10-READLISTS-SEARCH-REPEATED-LIBRARY-ID-PAGE-SIZE-OWNED" => {
+                        assert_eq!(content_ids, vec!["readlist-2"]);
+                        assert_eq!(body["size"], serde_json::Value::from(1));
+                        assert_eq!(body["number"], serde_json::Value::from(1));
+                        assert_eq!(body["totalElements"], serde_json::Value::from(2));
+                    }
+                    "P10-READLISTS-SEARCH-NO-RESULTS-OWNED" => {
+                        assert!(content_ids.is_empty());
+                        assert_eq!(body["size"], serde_json::Value::from(20));
+                        assert_eq!(body["number"], serde_json::Value::from(0));
+                        assert_eq!(body["totalElements"], serde_json::Value::from(0));
+                    }
+                    other => panic!("unexpected phase10 owned compat case id: {other}"),
+                }
+            }
+            other => panic!(
+                "owned readlists search compat case must stay JSON: {case_id} => {other:?}"
+            ),
+        }
+    }
+}
+
+#[tokio::test]
+async fn readlists_search_negative_inventory_is_explicit_and_self_consistent() {
+    let config = HarnessConfig::load_default().expect("default compat cases should load");
+    let responses = run_cases_against_self(&config, phase10_readlists_search_negative_case_ids()).await;
+
+    assert_eq!(
+        responses.len(),
+        phase10_readlists_search_negative_case_ids().len(),
+        "phase10 negative search compat self-diff must cover the full explicit non-owned inventory",
+    );
+
+    for (case_id, response) in responses {
+        assert_eq!(
+            response.status, 200,
+            "negative search inventory case should stay HTTP 200 explicit non-native: {case_id}",
+        );
+
+        let body = match response.body {
+            NormalizedBody::Json(body) => body,
+            other => panic!(
+                "negative search inventory case must stay JSON for explicit shadow evidence: {case_id} => {other:?}"
+            ),
+        };
+
+        assert_eq!(
+            body["_compat"]["discoveryOwnership"],
+            serde_json::Value::String("non-native".to_string()),
+            "negative search inventory case must stay explicit shadow evidence: {case_id}",
+        );
+        assert_eq!(
+            body["_compat"]["reason"],
+            serde_json::Value::String("unsupported-request-shape".to_string()),
+            "negative search inventory case must keep unsupported-request-shape diagnostics: {case_id}",
+        );
+
+        let expected_shape = match case_id.as_str() {
+            "P10-READLISTS-SEARCH-NEGATIVE-BLANK"
+            | "P10-READLISTS-SEARCH-NEGATIVE-WHITESPACE" => "UnsupportedBookFilter(search)",
+            "P10-READLISTS-SEARCH-NEGATIVE-SORT" => "UnsupportedBookSort(name,asc)",
+            "P10-READLISTS-SEARCH-NEGATIVE-UNPAGED-TRUE" => "UnsupportedBookFilter(unpaged)",
+            "P10-READLISTS-SEARCH-NEGATIVE-DUPLICATE-PAGE" => "UnsupportedBookFilter(page)",
+            "P10-READLISTS-SEARCH-NEGATIVE-DUPLICATE-SIZE" => "UnsupportedBookFilter(size)",
+            "P10-READLISTS-SEARCH-NEGATIVE-UNSUPPORTED-EXTRA" => "UnsupportedBookFilter(foo)",
+            other => panic!("unexpected phase10 negative compat case id: {other}"),
+        };
+
+        assert_eq!(
+            body["_compat"]["shape"],
+            serde_json::Value::String(expected_shape.to_string()),
+            "negative search inventory case must keep exact rejected shape diagnostics: {case_id}",
+        );
+    }
+}
+
+fn page_content_ids(body: &serde_json::Value) -> Vec<&str> {
+    body["content"]
+        .as_array()
+        .expect("paged body should include content array")
+        .iter()
+        .map(|entry| {
+            entry["id"]
+                .as_str()
+                .expect("page content entry should include string id")
+        })
+        .collect()
 }
 
 #[test]

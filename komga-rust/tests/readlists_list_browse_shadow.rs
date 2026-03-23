@@ -28,6 +28,7 @@ struct OwnedBrowseRouteCase<'a> {
 struct ExplicitNonNativeCase<'a> {
     name: &'a str,
     uri: &'a str,
+    expected_shape: &'a str,
 }
 
 #[tokio::test]
@@ -94,6 +95,33 @@ async fn phase9_owned_browse_list_routes_are_native_owned() {
 }
 
 #[tokio::test]
+async fn phase10_search_only_browse_routes_are_native_owned() {
+    let app = komga_rust::app::build_router();
+    let cases = [
+        OwnedBrowseRouteCase {
+            name: "search-only browse list is native-owned",
+            basic_auth: USER_BASIC_AUTH,
+            uri: "/api/v1/readlists?search=alpha",
+            expected_ids: &["readlist-1", "readlist-2"],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 2,
+        },
+        OwnedBrowseRouteCase {
+            name: "search plus library filter stays native-owned",
+            basic_auth: USER_BASIC_AUTH,
+            uri: "/api/v1/readlists?search=alpha&library_id=1",
+            expected_ids: &["readlist-1", "readlist-2"],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 2,
+        },
+    ];
+
+    assert_native_owned_cases(&app, &cases).await;
+}
+
+#[tokio::test]
 async fn phase9_dependency_routes_remain_unchanged() {
     let app = komga_rust::app::build_router();
     let token = session_token_for_basic_auth(&app, USER_BASIC_AUTH).await;
@@ -139,32 +167,64 @@ async fn phase9_excluded_browse_list_variants_stay_explicitly_non_native() {
     let app = komga_rust::app::build_router();
     let cases = [
         ExplicitNonNativeCase {
-            name: "search stays non-native",
-            uri: "/api/v1/readlists?search=ReadList",
+            name: "blank search stays non-native",
+            uri: "/api/v1/readlists?search=",
+            expected_shape: "UnsupportedBookFilter(search)",
+        },
+        ExplicitNonNativeCase {
+            name: "whitespace-only search stays non-native",
+            uri: "/api/v1/readlists?search=%20%20",
+            expected_shape: "UnsupportedBookFilter(search)",
         },
         ExplicitNonNativeCase {
             name: "explicit unpaged true stays non-native",
             uri: "/api/v1/readlists?unpaged=true",
+            expected_shape: "UnsupportedBookFilter(unpaged)",
         },
         ExplicitNonNativeCase {
             name: "explicit unpaged false still widens the request and stays non-native",
             uri: "/api/v1/readlists?unpaged=false",
+            expected_shape: "UnsupportedBookFilter(unpaged)",
         },
         ExplicitNonNativeCase {
             name: "explicit sort stays non-native",
             uri: "/api/v1/readlists?sort=name,desc",
+            expected_shape: "UnsupportedBookSort(name,desc)",
         },
         ExplicitNonNativeCase {
-            name: "library plus search stays non-native",
-            uri: "/api/v1/readlists?library_id=1&search=ReadList",
+            name: "search plus sort stays non-native",
+            uri: "/api/v1/readlists?search=alpha&sort=name,asc",
+            expected_shape: "UnsupportedBookSort(name,asc)",
+        },
+        ExplicitNonNativeCase {
+            name: "search plus unpaged stays non-native",
+            uri: "/api/v1/readlists?search=alpha&unpaged=true",
+            expected_shape: "UnsupportedBookFilter(unpaged)",
         },
         ExplicitNonNativeCase {
             name: "library plus unpaged stays non-native",
             uri: "/api/v1/readlists?library_id=1&unpaged=true",
+            expected_shape: "UnsupportedBookFilter(unpaged)",
         },
         ExplicitNonNativeCase {
             name: "library plus sort stays non-native",
             uri: "/api/v1/readlists?library_id=1&page=0&size=20&sort=name,desc",
+            expected_shape: "UnsupportedBookSort(name,desc)",
+        },
+        ExplicitNonNativeCase {
+            name: "duplicate page stays non-native",
+            uri: "/api/v1/readlists?search=alpha&page=0&page=1",
+            expected_shape: "UnsupportedBookFilter(page)",
+        },
+        ExplicitNonNativeCase {
+            name: "duplicate size stays non-native",
+            uri: "/api/v1/readlists?search=alpha&size=20&size=1",
+            expected_shape: "UnsupportedBookFilter(size)",
+        },
+        ExplicitNonNativeCase {
+            name: "unsupported extra query key stays non-native",
+            uri: "/api/v1/readlists?search=alpha&foo=bar",
+            expected_shape: "UnsupportedBookFilter(foo)",
         },
     ];
 
@@ -299,6 +359,12 @@ where
             problems.push(format!(
                 "expected _compat.reason=unsupported-request-shape, got {}",
                 json["_compat"]["reason"]
+            ));
+        }
+        if json["_compat"]["shape"] != Value::String(case.expected_shape.to_string()) {
+            problems.push(format!(
+                "expected _compat.shape={}, got {}",
+                case.expected_shape, json["_compat"]["shape"]
             ));
         }
 

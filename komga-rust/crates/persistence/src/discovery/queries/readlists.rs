@@ -207,6 +207,7 @@ pub(in crate::discovery) async fn list_readlists_sqlx(
         pool.clone(),
         context,
         candidate_library_ids.as_ref(),
+        query.search.as_deref(),
     )
     .await?;
     let total_elements = candidate_rows.len();
@@ -464,6 +465,7 @@ async fn list_readlist_candidate_rows_sqlx(
     pool: SqlitePool,
     context: &DiscoveryQueryContext,
     allowed_library_ids: Option<&Vec<String>>,
+    search: Option<&str>,
 ) -> Result<Vec<SqlxReadListCandidateRow>, DiscoveryError> {
     let mut builder = QueryBuilder::<Sqlite>::new(
         "SELECT DISTINCT rl.id AS id, rl.name AS name, rl.summary AS summary, rl.ordered AS ordered, rl.created_date AS created_date, rl.last_modified_date AS last_modified_date \
@@ -483,6 +485,15 @@ async fn list_readlist_candidate_rows_sqlx(
         context.restrictions.as_ref(),
         "s",
     );
+
+    if let Some(search) = search {
+        append_clause_sqlx("(LOWER(rl.name) LIKE ", &mut builder, &mut state);
+        builder.push_bind(format!("%{}%", search.to_ascii_lowercase()));
+        builder.push(" OR LOWER(rl.summary) LIKE ");
+        builder.push_bind(format!("%{}%", search.to_ascii_lowercase()));
+        builder.push(")");
+    }
+
     builder.push(" ORDER BY rl.name COLLATE NOCASE ASC");
 
     builder

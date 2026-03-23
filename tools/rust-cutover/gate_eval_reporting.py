@@ -15,6 +15,7 @@ def build_governance(
     phase6_oneshot_readlist_context_closure_shadow_pass: bool,
     phase8_readlist_books_family_closure_shadow_pass: bool,
     phase9_readlists_list_browse_closure_shadow_pass: bool,
+    phase10_readlists_search_closure_shadow_pass: bool,
 ) -> dict[str, Any]:
     is_phase2_discovery = run_label == data.PHASE2_DISCOVERY_LABEL
     is_phase3_detail_read = run_label == data.PHASE3_DETAIL_READ_LABEL
@@ -24,6 +25,7 @@ def build_governance(
     is_phase7_series_oneshot_query_closure = run_label == data.PHASE7_SERIES_ONESHOT_QUERY_CLOSURE_LABEL
     is_phase8_readlist_books_family_closure = run_label == data.PHASE8_READLIST_BOOKS_FAMILY_CLOSURE_LABEL
     is_phase9_readlists_list_browse_closure = run_label == data.PHASE9_READLISTS_LIST_BROWSE_CLOSURE_LABEL
+    is_phase10_readlists_search_closure = run_label == data.PHASE10_READLISTS_SEARCH_CLOSURE_LABEL
 
     if is_phase2_discovery:
         return {
@@ -253,6 +255,34 @@ def build_governance(
             },
         }
 
+    if is_phase10_readlists_search_closure:
+        return {
+            "shadow_mode": {
+                "allowed": shadow_safety_pass,
+                "rule": "Shadow mode must keep Java as stateful writer unless explicitly isolated",
+            },
+            "canary_mode": {
+                "allowed": search_task_guardrails,
+                "rule": "Search/task ownership guardrails remain required, but this phase10 label is not whole-cutover approval.",
+            },
+            "phase10_readlists_search_closure_shadow": {
+                "allowed": phase10_readlists_search_closure_shadow_pass,
+                "scope": "Readlists non-blank search slice is shadow-ready only for the exact search-bearing GET /api/v1/readlists matrix layered on top of preserved Phase 9 browse/list ownership.",
+            },
+            "phase10_readlists_search_non_claims": {
+                "allowed": False,
+                "scope": "Refused: browse-only Phase 9 promotion, blank/whitespace search, search+sort, search+unpaged=true, duplicate page/size, unsupported extra keys, dialogs/import/edit/delete admin actions, Tachiyomi, and whole cutover claims remain out of slice.",
+            },
+            "cutover": {
+                "allowed": False,
+                "scope": "phase10-readlists-search-closure is a slice-only runbook; whole cutover/direct-serving remains refused until broader runtime/media/write/release conditions are proven.",
+            },
+            "rollback": {
+                "ready": phase10_readlists_search_closure_shadow_pass,
+                "trigger": "Any readlists search regression, browse-only promotion, or out-of-slice expansion forces rollback/no-cutover.",
+            },
+        }
+
     return {
         "shadow_mode": {
             "allowed": shadow_safety_pass,
@@ -289,7 +319,9 @@ def build_summary(
     phase5_checks: list[dict[str, Any]],
     phase6_checks: list[dict[str, Any]],
     phase8_checks: list[dict[str, Any]],
+    phase10_checks: list[dict[str, Any]],
     phase9_readlists_list_browse_closure_shadow_pass: bool,
+    phase10_readlists_search_closure_shadow_pass: bool,
     discovery_shadow_pass: bool,
     phase3_detail_shadow_pass: bool,
     phase4_readlist_context_shadow_pass: bool,
@@ -305,6 +337,7 @@ def build_summary(
     is_phase7_series_oneshot_query_closure = run_label == data.PHASE7_SERIES_ONESHOT_QUERY_CLOSURE_LABEL
     is_phase8_readlist_books_family_closure = run_label == data.PHASE8_READLIST_BOOKS_FAMILY_CLOSURE_LABEL
     is_phase9_readlists_list_browse_closure = run_label == data.PHASE9_READLISTS_LIST_BROWSE_CLOSURE_LABEL
+    is_phase10_readlists_search_closure = run_label == data.PHASE10_READLISTS_SEARCH_CLOSURE_LABEL
 
     phase7_check_ids = [
         check["id"]
@@ -320,6 +353,11 @@ def build_summary(
         check["id"]
         for check in results
         if check.get("category") == "phase9-readlists-list-browse-closure"
+    ]
+    phase10_check_ids = [
+        check["id"]
+        for check in results
+        if check.get("category") == "phase10-readlists-search-closure"
     ]
 
     summary: dict[str, Any] = {
@@ -444,6 +482,25 @@ def build_summary(
         }
         if non_blocking:
             summary["non_blocking"] = non_blocking
+    elif is_phase10_readlists_search_closure:
+        summary["evaluation_scope"] = "phase10-readlists-search-closure-shadow"
+        summary["readlists_search_closure_slice"] = {
+            "shadow_ready": phase10_readlists_search_closure_shadow_pass,
+            "newly_owned_surface": data.phase10_readlists_search_owned_scope[0],
+            "owned_routes": data.phase10_readlists_search_owned_scope,
+            "supported_scope": data.phase10_readlists_search_owned_scope,
+            "required_pre_owned_dependencies": data.phase10_readlists_search_pre_owned_dependencies,
+            "excluded_branches": data.phase10_readlists_search_out_of_slice,
+            "out_of_slice": data.phase10_readlists_search_out_of_slice,
+            "non_claims": [
+                "This does not claim whole cutover readiness.",
+                "This does not claim browse-only Phase 9 promotion or any full GET /api/v1/readlists closure.",
+                "This does not claim blank-search, search+sort, search+unpaged=true, duplicate page/size, unsupported extra keys, Tachiyomi, or broader media/write/reader/SSE ownership.",
+            ],
+            "check_ids": phase10_check_ids if phase10_check_ids else [check["id"] for check in phase10_checks],
+        }
+        if non_blocking:
+            summary["non_blocking"] = non_blocking
     elif is_phase3_detail_read:
         summary["evaluation_scope"] = "phase3-detail-read-shadow"
         summary["detail_read_slice"] = {
@@ -497,6 +554,7 @@ def build_report_text(
     phase6_oneshot_readlist_context_closure_shadow_pass: bool,
     phase8_readlist_books_family_closure_shadow_pass: bool,
     phase9_readlists_list_browse_closure_shadow_pass: bool,
+    phase10_readlists_search_closure_shadow_pass: bool,
 ) -> str:
     is_phase2_discovery = run_label == data.PHASE2_DISCOVERY_LABEL
     is_phase3_detail_read = run_label == data.PHASE3_DETAIL_READ_LABEL
@@ -506,6 +564,7 @@ def build_report_text(
     is_phase7_series_oneshot_query_closure = run_label == data.PHASE7_SERIES_ONESHOT_QUERY_CLOSURE_LABEL
     is_phase8_readlist_books_family_closure = run_label == data.PHASE8_READLIST_BOOKS_FAMILY_CLOSURE_LABEL
     is_phase9_readlists_list_browse_closure = run_label == data.PHASE9_READLISTS_LIST_BROWSE_CLOSURE_LABEL
+    is_phase10_readlists_search_closure = run_label == data.PHASE10_READLISTS_SEARCH_CLOSURE_LABEL
 
     lines = []
     lines.append(f"# Rust Cutover Readiness Gate ({run_label})")
@@ -537,6 +596,9 @@ def build_report_text(
     elif is_phase9_readlists_list_browse_closure:
         lines.append("- Evaluation scope: `phase9-readlists-list-browse-closure-shadow`")
         lines.append("- Non-claim: this label records exact readlists browse/list readiness only, not search/unpaged/dialogs/admin/Tachiyomi/media/write or whole cutover/direct-serving readiness")
+    elif is_phase10_readlists_search_closure:
+        lines.append("- Evaluation scope: `phase10-readlists-search-closure-shadow`")
+        lines.append("- Non-claim: this label records exact non-blank readlists search readiness only, not browse-only Phase 9 promotion, blank-search/sort/unpaged ownership, admin/Tachiyomi/media/write, or whole cutover/direct-serving readiness")
     lines.append("")
 
     if is_phase2_discovery:
@@ -705,6 +767,30 @@ def build_report_text(
         )
         lines.append(
             "- Browser capture note: `captureMode=source-contract-fallback` is accepted only when BrowseReadLists evidence stays limited to the exact five `governanceOwnedRequests` browse/list entries and explicit non-claims for search/unpaged/dialogs/admin-actions/Tachiyomi"
+        )
+        lines.append("")
+    elif is_phase10_readlists_search_closure:
+        lines.append("## Phase10 Readlists-Search-Closure Runbook")
+        lines.append("")
+        lines.append(f"- Shadow-ready target: **{'PASS' if phase10_readlists_search_closure_shadow_pass else 'FAIL'}**")
+        lines.append(f"- Owned surface (newly owned search shapes): {', '.join(f'`{item}`' for item in data.phase10_readlists_search_owned_scope)}")
+        lines.append(
+            "- Exact search closure: **ALLOW (slice-only)** — newly owned surface is only the non-blank `GET /api/v1/readlists` search matrix, including paged/library-filtered/size=0 and no-results behavior via compat evidence"
+        )
+        lines.append(
+            f"- Required pre-owned dependencies (preserved, not reopened): {', '.join(f'`{item}`' for item in data.phase10_readlists_search_pre_owned_dependencies)}"
+        )
+        lines.append(
+            "- Out-of-slice governance: **REFUSE** — blank/whitespace search, `search+sort`, `search+unpaged=true`, duplicate page/size, unsupported extra keys, browse-only Phase 9 promotion, dialogs/admin actions, Tachiyomi, and whole cutover claims remain explicit non-native"
+        )
+        lines.append(
+            f"- Excluded branches still out of scope: {', '.join(f'`{item}`' for item in data.phase10_readlists_search_out_of_slice)}"
+        )
+        lines.append(
+            "- Whole cutover/direct-serving: **REFUSE** — this label is not a full cutover approval"
+        )
+        lines.append(
+            "- Compat note: gate consumes the real redirected `http_json_diff` cargo summary output (`cargo test: ... passed ...`) as pass/fail evidence, while the exact owned/excluded Phase10 and preserved Phase9 matrices remain frozen in the compat inventory and gate runbook text"
         )
         lines.append("")
 

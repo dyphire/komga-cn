@@ -20,6 +20,7 @@ pub struct NativeReadListsQuery {
     pub page: usize,
     pub size: usize,
     pub library_ids: Option<Vec<String>>,
+    pub search: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -109,10 +110,6 @@ pub fn classify_readlist_books_query(
 }
 
 pub fn classify_readlists_browse_query(query: &ReadListsQuery) -> Result<(), DiscoveryError> {
-    if query.search.is_some() {
-        return Err(unsupported_book_filter("search"));
-    }
-
     if query.unpaged {
         return Err(unsupported_book_filter("unpaged"));
     }
