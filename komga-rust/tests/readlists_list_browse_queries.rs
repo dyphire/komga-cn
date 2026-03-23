@@ -10,7 +10,6 @@ use compat_http::{page_content_ids, response_json, session_token_for_basic_auth}
 
 const SEARCH_OWNERSHIP_HEADER: &str = "x-komga-compat-search-ownership";
 const NATIVE_OWNERSHIP_MARKER: &str = "native-rust-owned";
-const NON_NATIVE_OWNERSHIP_MARKER: &str = "shadow-java-writer";
 const USER_BASIC_AUTH: &str = "dXNlckBleGFtcGxlLm9yZzp1c2Vy";
 const LIMITED_BASIC_AUTH: &str = "bGltaXRlZEBleGFtcGxlLm9yZzpsaW1pdGVk";
 const RESTRICTED_BASIC_AUTH: &str = "cmVzdHJpY3RlZEBleGFtcGxlLm9yZzpyZXN0cmljdGVk";
@@ -25,11 +24,6 @@ struct BrowseQueryParityCase<'a> {
     expected_page_number: u64,
     expected_page_size: u64,
     expected_number_of_elements: u64,
-}
-
-struct ExcludedBrowseShapeCase<'a> {
-    name: &'a str,
-    uri: &'a str,
 }
 
 struct SearchQueryParityCase<'a> {
@@ -354,72 +348,213 @@ async fn phase11_blank_effective_search_falls_back_to_native_browse_semantics() 
 }
 
 #[tokio::test]
-async fn phase9_excluded_browse_variants_stay_explicitly_non_native() {
+async fn phase12_remaining_browse_query_shapes_are_native_owned_with_current_contract() {
     let app = komga_rust::app::build_router();
     let cases = [
-        ExcludedBrowseShapeCase {
-            name: "unpaged true stays exclusion-only",
+        BrowseQueryParityCase {
+            name: "unpaged true remains accepted and keeps current paged metadata contract",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?unpaged=true",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_filtered: &[
+                ("readlist-1", false),
+                ("readlist-2", false),
+                ("readlist-3", false),
+            ],
+            expected_total_elements: 3,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 3,
         },
-        ExcludedBrowseShapeCase {
-            name: "explicit sort stays exclusion-only",
+        BrowseQueryParityCase {
+            name: "explicit sort is accepted and reorders browse results",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?sort=name,desc",
+            expected_ids: &["readlist-3", "readlist-2", "readlist-1"],
+            expected_filtered: &[
+                ("readlist-3", false),
+                ("readlist-2", false),
+                ("readlist-1", false),
+            ],
+            expected_total_elements: 3,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 3,
         },
-        ExcludedBrowseShapeCase {
-            name: "search plus sort stays exclusion-only",
+        BrowseQueryParityCase {
+            name: "search plus sort is accepted and remains filtered",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?search=alpha&sort=name,asc",
+            expected_ids: &["readlist-1", "readlist-2"],
+            expected_filtered: &[("readlist-1", false), ("readlist-2", false)],
+            expected_total_elements: 2,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 2,
         },
-        ExcludedBrowseShapeCase {
-            name: "search plus unpaged stays exclusion-only",
+        BrowseQueryParityCase {
+            name: "search plus unpaged true is accepted and remains filtered",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?search=alpha&unpaged=true",
+            expected_ids: &["readlist-1", "readlist-2"],
+            expected_filtered: &[("readlist-1", false), ("readlist-2", false)],
+            expected_total_elements: 2,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 2,
         },
-        ExcludedBrowseShapeCase {
-            name: "duplicate page stays exclusion-only",
+        BrowseQueryParityCase {
+            name: "duplicate page is accepted and keeps first page value",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?search=alpha&page=0&page=1",
+            expected_ids: &["readlist-1", "readlist-2"],
+            expected_filtered: &[("readlist-1", false), ("readlist-2", false)],
+            expected_total_elements: 2,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 2,
         },
-        ExcludedBrowseShapeCase {
-            name: "duplicate size stays exclusion-only",
+        BrowseQueryParityCase {
+            name: "duplicate size is accepted and keeps first size value",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?search=alpha&size=20&size=1",
+            expected_ids: &["readlist-1", "readlist-2"],
+            expected_filtered: &[("readlist-1", false), ("readlist-2", false)],
+            expected_total_elements: 2,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 2,
         },
-        ExcludedBrowseShapeCase {
-            name: "unsupported extra query key stays exclusion-only",
+        BrowseQueryParityCase {
+            name: "unsupported extra query key is ignored instead of exclusion",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?search=alpha&foo=bar",
+            expected_ids: &["readlist-1", "readlist-2"],
+            expected_filtered: &[("readlist-1", false), ("readlist-2", false)],
+            expected_total_elements: 2,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 2,
         },
-        ExcludedBrowseShapeCase {
-            name: "blank search plus sort stays exclusion-only",
+        BrowseQueryParityCase {
+            name: "blank search plus sort falls back to browse and stays accepted",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?search=&sort=name,asc",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_filtered: &[
+                ("readlist-1", false),
+                ("readlist-2", false),
+                ("readlist-3", false),
+            ],
+            expected_total_elements: 3,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 3,
         },
-        ExcludedBrowseShapeCase {
-            name: "blank search plus unpaged stays exclusion-only",
+        BrowseQueryParityCase {
+            name: "blank search plus unpaged true falls back to browse and stays accepted",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?search=&unpaged=true",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_filtered: &[
+                ("readlist-1", false),
+                ("readlist-2", false),
+                ("readlist-3", false),
+            ],
+            expected_total_elements: 3,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 3,
         },
-        ExcludedBrowseShapeCase {
-            name: "blank search plus duplicate page stays exclusion-only",
+        BrowseQueryParityCase {
+            name: "blank search plus duplicate page stays accepted with first page value",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?search=&page=0&page=1",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_filtered: &[
+                ("readlist-1", false),
+                ("readlist-2", false),
+                ("readlist-3", false),
+            ],
+            expected_total_elements: 3,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 3,
         },
-        ExcludedBrowseShapeCase {
-            name: "blank search plus duplicate size stays exclusion-only",
+        BrowseQueryParityCase {
+            name: "blank search plus duplicate size stays accepted with first size value",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?search=&size=20&size=1",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_filtered: &[
+                ("readlist-1", false),
+                ("readlist-2", false),
+                ("readlist-3", false),
+            ],
+            expected_total_elements: 3,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 3,
         },
-        ExcludedBrowseShapeCase {
-            name: "blank search plus unsupported extra key stays exclusion-only",
+        BrowseQueryParityCase {
+            name: "blank search plus extra key stays accepted and ignored",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?search=&foo=bar",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_filtered: &[
+                ("readlist-1", false),
+                ("readlist-2", false),
+                ("readlist-3", false),
+            ],
+            expected_total_elements: 3,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 3,
         },
-        ExcludedBrowseShapeCase {
-            name: "duplicate blank-effective search stays exclusion-only",
+        BrowseQueryParityCase {
+            name: "duplicate search stays accepted under current multi-value contract",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?search=&search=%20%20",
+            expected_ids: &[],
+            expected_filtered: &[],
+            expected_total_elements: 0,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 0,
         },
-        ExcludedBrowseShapeCase {
-            name: "library filter plus unpaged stays exclusion-only",
+        BrowseQueryParityCase {
+            name: "library filter plus unpaged stays accepted and filtered by ACL intersection",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?library_id=1&unpaged=true",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_filtered: &[
+                ("readlist-1", false),
+                ("readlist-2", false),
+                ("readlist-3", false),
+            ],
+            expected_total_elements: 3,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 3,
         },
-        ExcludedBrowseShapeCase {
-            name: "library filter plus explicit sort stays exclusion-only",
+        BrowseQueryParityCase {
+            name: "library filter plus explicit sort stays accepted with requested ordering",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?library_id=1&page=0&size=20&sort=name,desc",
+            expected_ids: &["readlist-3", "readlist-2", "readlist-1"],
+            expected_filtered: &[
+                ("readlist-3", false),
+                ("readlist-2", false),
+                ("readlist-1", false),
+            ],
+            expected_total_elements: 3,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 3,
         },
     ];
 
-    assert_excluded_shapes_stay_non_native(&app, &cases).await;
+    assert_query_parity_cases_match_java_contract(&app, &cases).await;
 }
 
 async fn assert_query_parity_cases_match_java_contract<S>(
@@ -671,67 +806,6 @@ async fn assert_search_query_parity_cases<S>(
     assert!(
         failures.is_empty(),
         "Phase 10 readlists-list search parity gaps:\n- {}",
-        failures.join("\n- ")
-    );
-}
-
-async fn assert_excluded_shapes_stay_non_native<S>(app: &S, cases: &[ExcludedBrowseShapeCase<'_>])
-where
-    S: tower::Service<Request<Body>, Response = axum::response::Response> + Clone,
-    S::Error: std::fmt::Debug,
-    S::Future: Send,
-{
-    let mut failures = Vec::new();
-
-    for case in cases {
-        let token = session_token_for_basic_auth(app, USER_BASIC_AUTH).await;
-        let response = get_response(app, &token, case.uri).await;
-        let header = ownership_header(&response).map(str::to_string);
-        let status = response.status();
-
-        if status != StatusCode::OK {
-            failures.push(format!(
-                "{}: expected HTTP 200 explicit non-native response but got {} for {}",
-                case.name, status, case.uri
-            ));
-            continue;
-        }
-
-        let json = response_json(response).await;
-        let mut problems = Vec::new();
-
-        if header.as_deref() != Some(NON_NATIVE_OWNERSHIP_MARKER) {
-            problems.push(format!(
-                "expected ownership marker {:?}, got {:?}",
-                NON_NATIVE_OWNERSHIP_MARKER, header
-            ));
-        }
-        if json["_compat"]["discoveryOwnership"] != Value::String("non-native".to_string()) {
-            problems.push(format!(
-                "expected _compat.discoveryOwnership=non-native, got {}",
-                json["_compat"]["discoveryOwnership"]
-            ));
-        }
-        if json["_compat"]["reason"] != Value::String("unsupported-request-shape".to_string()) {
-            problems.push(format!(
-                "expected _compat.reason=unsupported-request-shape, got {}",
-                json["_compat"]["reason"]
-            ));
-        }
-
-        if !problems.is_empty() {
-            failures.push(format!(
-                "{} [{}]: {}",
-                case.name,
-                case.uri,
-                problems.join("; ")
-            ));
-        }
-    }
-
-    assert!(
-        failures.is_empty(),
-        "Phase 9 readlists-list browse exclusion gaps:\n- {}",
         failures.join("\n- ")
     );
 }

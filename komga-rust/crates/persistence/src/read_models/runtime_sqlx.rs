@@ -10,9 +10,12 @@ use komga_domain::discovery::{
 };
 use sqlx::SqlitePool;
 
+#[path = "runtime_sqlx/store_rows.rs"]
+mod store_rows;
+
 use super::{BookRow, LibraryRow, SeriesRow};
-use crate::discovery::queries;
-use crate::discovery::queries::{book_detail, readlists};
+use crate::read_models::queries;
+use crate::read_models::queries::{book_detail, readlists};
 use crate::sqlite::{SqliteTempPool, setup};
 
 #[derive(Clone)]
@@ -44,170 +47,21 @@ impl SqlxRuntimeDiscoveryStore {
     }
 
     pub async fn insert_library(&self, row: LibraryRow) -> Result<(), DiscoveryError> {
-        sqlx::query("INSERT INTO libraries (id, name, root) VALUES (?1, ?2, ?3)")
-            .bind(row.id)
-            .bind(row.name)
-            .bind(row.root)
-            .execute(self.temp_pool.pool())
+        store_rows::insert_library_row(self.temp_pool.pool(), row)
             .await
-            .map_err(map_sqlx_error)?;
-        Ok(())
+            .map_err(map_sqlx_error)
     }
 
     pub async fn insert_series(&self, row: SeriesRow) -> Result<(), DiscoveryError> {
-        let SeriesRow {
-            id,
-            library_id,
-            title,
-            labels,
-            genres,
-            tags,
-            language,
-            publisher,
-            age_rating,
-            release_date,
-            status,
-            complete,
-            read_status,
-            authors,
-            deleted,
-            oneshot,
-            created,
-            last_modified,
-            file_last_modified,
-            url,
-        } = row;
-
-        sqlx::query(
-            "INSERT INTO series (id, library_id, title, age_rating, language, publisher, release_date, status, complete, read_status, deleted, oneshot, created, last_modified, file_last_modified, url) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
-        )
-        .bind(&id)
-        .bind(&library_id)
-        .bind(&title)
-        .bind(age_rating)
-        .bind(&language)
-        .bind(&publisher)
-        .bind(release_date)
-        .bind(&status)
-        .bind(complete)
-        .bind(&read_status)
-        .bind(deleted)
-        .bind(oneshot)
-        .bind(&created)
-        .bind(&last_modified)
-        .bind(&file_last_modified)
-        .bind(&url)
-        .execute(self.temp_pool.pool())
-        .await
-        .map_err(map_sqlx_error)?;
-
-        for label in labels {
-            sqlx::query("INSERT INTO series_labels (series_id, label) VALUES (?1, ?2)")
-                .bind(&id)
-                .bind(label)
-                .execute(self.temp_pool.pool())
-                .await
-                .map_err(map_sqlx_error)?;
-        }
-
-        for genre in genres {
-            sqlx::query("INSERT INTO series_genres (series_id, genre) VALUES (?1, ?2)")
-                .bind(&id)
-                .bind(genre)
-                .execute(self.temp_pool.pool())
-                .await
-                .map_err(map_sqlx_error)?;
-        }
-
-        for tag in tags {
-            sqlx::query("INSERT INTO series_tags (series_id, tag) VALUES (?1, ?2)")
-                .bind(&id)
-                .bind(tag)
-                .execute(self.temp_pool.pool())
-                .await
-                .map_err(map_sqlx_error)?;
-        }
-
-        for author in authors {
-            sqlx::query("INSERT INTO series_authors (series_id, author) VALUES (?1, ?2)")
-                .bind(&id)
-                .bind(author)
-                .execute(self.temp_pool.pool())
-                .await
-                .map_err(map_sqlx_error)?;
-        }
-
-        Ok(())
+        store_rows::insert_series_row(self.temp_pool.pool(), row)
+            .await
+            .map_err(map_sqlx_error)
     }
 
     pub async fn insert_book(&self, row: BookRow) -> Result<(), DiscoveryError> {
-        let BookRow {
-            id,
-            series_id,
-            library_id,
-            title,
-            url,
-            created,
-            last_modified,
-            file_last_modified,
-            size_bytes,
-            media_status,
-            media_profile,
-            media_type,
-            media_pages_count,
-            metadata_release_date,
-            number_sort,
-            deleted,
-            oneshot,
-            tags,
-            read_status,
-            authors,
-        } = row;
-
-        sqlx::query(
-            "INSERT INTO books (id, series_id, library_id, title, url, created, last_modified, file_last_modified, size_bytes, media_status, media_profile, media_type, media_pages_count, metadata_release_date, number_sort, read_status, deleted, oneshot) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
-        )
-        .bind(&id)
-        .bind(&series_id)
-        .bind(&library_id)
-        .bind(&title)
-        .bind(&url)
-        .bind(&created)
-        .bind(&last_modified)
-        .bind(&file_last_modified)
-        .bind(size_bytes as i64)
-        .bind(&media_status)
-        .bind(&media_profile)
-        .bind(&media_type)
-        .bind(media_pages_count as i64)
-        .bind(metadata_release_date)
-        .bind(number_sort)
-        .bind(&read_status)
-        .bind(deleted)
-        .bind(oneshot)
-        .execute(self.temp_pool.pool())
-        .await
-        .map_err(map_sqlx_error)?;
-
-        for tag in tags {
-            sqlx::query("INSERT INTO book_tags (book_id, tag) VALUES (?1, ?2)")
-                .bind(&id)
-                .bind(tag)
-                .execute(self.temp_pool.pool())
-                .await
-                .map_err(map_sqlx_error)?;
-        }
-
-        for author in authors {
-            sqlx::query("INSERT INTO book_authors (book_id, author) VALUES (?1, ?2)")
-                .bind(&id)
-                .bind(author)
-                .execute(self.temp_pool.pool())
-                .await
-                .map_err(map_sqlx_error)?;
-        }
-
-        Ok(())
+        store_rows::insert_book_row(self.temp_pool.pool(), row)
+            .await
+            .map_err(map_sqlx_error)
     }
 
     pub async fn cleanup(self) {

@@ -10,7 +10,6 @@ use compat_http::{page_content_ids, response_json, session_token_for_basic_auth}
 
 const SEARCH_OWNERSHIP_HEADER: &str = "x-komga-compat-search-ownership";
 const NATIVE_OWNERSHIP_MARKER: &str = "native-rust-owned";
-const NON_NATIVE_OWNERSHIP_MARKER: &str = "shadow-java-writer";
 const USER_BASIC_AUTH: &str = "dXNlckBleGFtcGxlLm9yZzp1c2Vy";
 const LIMITED_BASIC_AUTH: &str = "bGltaXRlZEBleGFtcGxlLm9yZzpsaW1pdGVk";
 const RESTRICTED_BASIC_AUTH: &str = "cmVzdHJpY3RlZEBleGFtcGxlLm9yZzpyZXN0cmljdGVk";
@@ -23,12 +22,6 @@ struct OwnedBrowseRouteCase<'a> {
     expected_page_number: u64,
     expected_page_size: u64,
     expected_total_elements: u64,
-}
-
-struct ExplicitNonNativeCase<'a> {
-    name: &'a str,
-    uri: &'a str,
-    expected_shape: &'a str,
 }
 
 #[tokio::test]
@@ -235,97 +228,165 @@ async fn phase9_dependency_routes_remain_unchanged() {
 }
 
 #[tokio::test]
-async fn phase9_excluded_browse_list_variants_stay_explicitly_non_native() {
+async fn phase12_remaining_browse_shapes_are_native_owned_routes() {
     let app = komga_rust::app::build_router();
     let cases = [
-        ExplicitNonNativeCase {
-            name: "explicit unpaged true stays non-native",
+        OwnedBrowseRouteCase {
+            name: "explicit unpaged true is now native-owned",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?unpaged=true",
-            expected_shape: "UnsupportedBookFilter(unpaged)",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 3,
         },
-        ExplicitNonNativeCase {
-            name: "explicit unpaged false still widens the request and stays non-native",
+        OwnedBrowseRouteCase {
+            name: "explicit unpaged false remains native-owned",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?unpaged=false",
-            expected_shape: "UnsupportedBookFilter(unpaged)",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 3,
         },
-        ExplicitNonNativeCase {
-            name: "explicit sort stays non-native",
+        OwnedBrowseRouteCase {
+            name: "explicit sort is now native-owned",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?sort=name,desc",
-            expected_shape: "UnsupportedBookSort(name,desc)",
+            expected_ids: &["readlist-3", "readlist-2", "readlist-1"],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 3,
         },
-        ExplicitNonNativeCase {
-            name: "search plus sort stays non-native",
+        OwnedBrowseRouteCase {
+            name: "search plus sort is native-owned",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?search=alpha&sort=name,asc",
-            expected_shape: "UnsupportedBookSort(name,asc)",
+            expected_ids: &["readlist-1", "readlist-2"],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 2,
         },
-        ExplicitNonNativeCase {
-            name: "search plus unpaged stays non-native",
+        OwnedBrowseRouteCase {
+            name: "search plus unpaged stays native-owned",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?search=alpha&unpaged=true",
-            expected_shape: "UnsupportedBookFilter(unpaged)",
+            expected_ids: &["readlist-1", "readlist-2"],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 2,
         },
-        ExplicitNonNativeCase {
-            name: "library plus unpaged stays non-native",
+        OwnedBrowseRouteCase {
+            name: "library plus unpaged is native-owned",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?library_id=1&unpaged=true",
-            expected_shape: "UnsupportedBookFilter(unpaged)",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 3,
         },
-        ExplicitNonNativeCase {
-            name: "library plus sort stays non-native",
+        OwnedBrowseRouteCase {
+            name: "library plus sort is native-owned",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?library_id=1&page=0&size=20&sort=name,desc",
-            expected_shape: "UnsupportedBookSort(name,desc)",
+            expected_ids: &["readlist-3", "readlist-2", "readlist-1"],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 3,
         },
-        ExplicitNonNativeCase {
-            name: "duplicate page stays non-native",
+        OwnedBrowseRouteCase {
+            name: "duplicate page is native-owned using first value",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?search=alpha&page=0&page=1",
-            expected_shape: "UnsupportedBookFilter(page)",
+            expected_ids: &["readlist-1", "readlist-2"],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 2,
         },
-        ExplicitNonNativeCase {
-            name: "duplicate size stays non-native",
+        OwnedBrowseRouteCase {
+            name: "duplicate size is native-owned using first value",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?search=alpha&size=20&size=1",
-            expected_shape: "UnsupportedBookFilter(size)",
+            expected_ids: &["readlist-1", "readlist-2"],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 2,
         },
-        ExplicitNonNativeCase {
-            name: "unsupported extra query key stays non-native",
+        OwnedBrowseRouteCase {
+            name: "unsupported extra query key is ignored while native-owned",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?search=alpha&foo=bar",
-            expected_shape: "UnsupportedBookFilter(foo)",
+            expected_ids: &["readlist-1", "readlist-2"],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 2,
         },
-        ExplicitNonNativeCase {
-            name: "blank search plus sort stays non-native by sort precedence",
+        OwnedBrowseRouteCase {
+            name: "blank search plus sort falls back to native browse",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?search=&sort=name,asc",
-            expected_shape: "UnsupportedBookSort(name,asc)",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 3,
         },
-        ExplicitNonNativeCase {
-            name: "blank search plus unpaged=true stays non-native by unpaged precedence",
+        OwnedBrowseRouteCase {
+            name: "blank search plus unpaged=true stays native-owned",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?search=&unpaged=true",
-            expected_shape: "UnsupportedBookFilter(unpaged)",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 3,
         },
-        ExplicitNonNativeCase {
-            name: "blank search plus unpaged=false still stays non-native by unpaged precedence",
+        OwnedBrowseRouteCase {
+            name: "blank search plus unpaged=false stays native-owned",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?search=&unpaged=false",
-            expected_shape: "UnsupportedBookFilter(unpaged)",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 3,
         },
-        ExplicitNonNativeCase {
-            name: "blank search plus duplicate page stays non-native by page precedence",
+        OwnedBrowseRouteCase {
+            name: "blank search plus duplicate page stays native-owned",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?search=&page=0&page=1",
-            expected_shape: "UnsupportedBookFilter(page)",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 3,
         },
-        ExplicitNonNativeCase {
-            name: "blank search plus duplicate size stays non-native by size precedence",
+        OwnedBrowseRouteCase {
+            name: "blank search plus duplicate size stays native-owned",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?search=&size=20&size=1",
-            expected_shape: "UnsupportedBookFilter(size)",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 3,
         },
-        ExplicitNonNativeCase {
-            name: "blank search plus unsupported extra key stays non-native by extra-key precedence",
+        OwnedBrowseRouteCase {
+            name: "blank search plus extra key stays native-owned",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?search=&foo=bar",
-            expected_shape: "UnsupportedBookFilter(foo)",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 3,
         },
-        ExplicitNonNativeCase {
-            name: "duplicate blank-effective search stays non-native",
+        OwnedBrowseRouteCase {
+            name: "duplicate search stays native-owned under current contract",
+            basic_auth: USER_BASIC_AUTH,
             uri: "/api/v1/readlists?search=&search=%20%20",
-            expected_shape: "UnsupportedBookFilter(search)",
+            expected_ids: &[],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 0,
         },
     ];
 
-    assert_explicit_non_native_cases(&app, &cases).await;
+    assert_native_owned_cases(&app, &cases).await;
 
     let token = session_token_for_basic_auth(&app, USER_BASIC_AUTH).await;
     let tachiyomi = get_response(
@@ -334,7 +395,7 @@ async fn phase9_excluded_browse_list_variants_stay_explicitly_non_native() {
         "/api/v1/readlists/readlist-2/read-progress/tachiyomi",
     )
     .await;
-    assert_eq!(tachiyomi.status(), StatusCode::NOT_FOUND);
+    assert_eq!(tachiyomi.status(), StatusCode::OK);
     assert_eq!(ownership_header(&tachiyomi), None);
 }
 
@@ -411,73 +472,6 @@ where
     assert!(
         failures.is_empty(),
         "Phase 9 readlists browse-list owned routing gaps:\n- {}",
-        failures.join("\n- ")
-    );
-}
-
-async fn assert_explicit_non_native_cases<S>(app: &S, cases: &[ExplicitNonNativeCase<'_>])
-where
-    S: tower::Service<Request<Body>, Response = axum::response::Response> + Clone,
-    S::Error: std::fmt::Debug,
-    S::Future: Send,
-{
-    let mut failures = Vec::new();
-
-    for case in cases {
-        let token = session_token_for_basic_auth(app, USER_BASIC_AUTH).await;
-        let response = get_response(app, &token, case.uri).await;
-        let header = ownership_header(&response).map(str::to_string);
-        let status = response.status();
-
-        if status != StatusCode::OK {
-            failures.push(format!(
-                "{}: expected HTTP 200 explicit non-native response but got {} for {}",
-                case.name, status, case.uri
-            ));
-            continue;
-        }
-
-        let json = response_json(response).await;
-        let mut problems = Vec::new();
-
-        if header.as_deref() != Some(NON_NATIVE_OWNERSHIP_MARKER) {
-            problems.push(format!(
-                "expected ownership marker {:?}, got {:?}",
-                NON_NATIVE_OWNERSHIP_MARKER, header
-            ));
-        }
-        if json["_compat"]["discoveryOwnership"] != Value::String("non-native".to_string()) {
-            problems.push(format!(
-                "expected _compat.discoveryOwnership=non-native, got {}",
-                json["_compat"]["discoveryOwnership"]
-            ));
-        }
-        if json["_compat"]["reason"] != Value::String("unsupported-request-shape".to_string()) {
-            problems.push(format!(
-                "expected _compat.reason=unsupported-request-shape, got {}",
-                json["_compat"]["reason"]
-            ));
-        }
-        if json["_compat"]["shape"] != Value::String(case.expected_shape.to_string()) {
-            problems.push(format!(
-                "expected _compat.shape={}, got {}",
-                case.expected_shape, json["_compat"]["shape"]
-            ));
-        }
-
-        if !problems.is_empty() {
-            failures.push(format!(
-                "{} [{}]: {}",
-                case.name,
-                case.uri,
-                problems.join("; ")
-            ));
-        }
-    }
-
-    assert!(
-        failures.is_empty(),
-        "Phase 9 readlists browse-list exclusion routing gaps:\n- {}",
         failures.join("\n- ")
     );
 }

@@ -8,7 +8,7 @@ use komga_rust::domain::discovery::{
     AgeRestrictionKind, DirectBrowseBooksListFamily, DiscoveryError, DiscoveryQueryContext,
     QueryRestrictions,
 };
-use komga_rust::persistence::discovery::{
+use komga_rust::persistence::read_models::{
     BookRow, CollectionRow, LibraryRow, ReadListRow, ReadProgressRow, SeriesRow,
     SqliteDiscoveryAdapter,
 };

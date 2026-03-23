@@ -1,6 +1,6 @@
 use sqlx::SqlitePool;
 
-use crate::discovery::{
+use crate::read_models::{
     BookRow, CollectionRow, LibraryRow, ReadListRow, ReadProgressRow, SeriesRow,
 };
 

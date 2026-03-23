@@ -102,13 +102,13 @@ headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownershi
 id = "P8-READLIST-BOOKS-EXCLUDED-READLISTS-LIST-FAMILY"
 method = "GET"
 path = "/api/v1/readlists?search=alpha&sort=name,asc"
-headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
 
 [[cases]]
 id = "P8-READLIST-BOOKS-EXCLUDED-TACHIYOMI"
 method = "GET"
 path = "/api/v1/readlists/readlist-2/read-progress/tachiyomi"
-headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
 
 [[cases]]
 id = "P9-READLISTS-LIST-BROWSE-DEFAULT-OWNED"
@@ -150,19 +150,73 @@ headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownershi
 id = "P9-READLISTS-LIST-BROWSE-NEGATIVE-UNPAGED-TRUE"
 method = "GET"
 path = "/api/v1/readlists?unpaged=true"
-headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
 
 [[cases]]
 id = "P9-READLISTS-LIST-BROWSE-NEGATIVE-SORT"
 method = "GET"
 path = "/api/v1/readlists?sort=name,desc"
-headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
 
 [[cases]]
 id = "P9-READLISTS-LIST-BROWSE-NEGATIVE-TACHIYOMI"
 method = "GET"
 path = "/api/v1/readlists/readlist-2/read-progress/tachiyomi"
-headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P12-READLISTS-TACHIYOMI-PUT-OWNED"
+method = "PUT"
+path = "/api/v1/readlists/readlist-2/read-progress/tachiyomi"
+body = "{\"lastBookRead\":1}"
+headers = { "Content-Type" = "application/json", "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P12-READLISTS-THUMBNAIL-GET-OWNED"
+method = "GET"
+path = "/api/v1/readlists/readlist-1/thumbnail"
+comparison = "binary_metadata"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P12-READLISTS-THUMBNAILS-LIST-OWNED"
+method = "GET"
+path = "/api/v1/readlists/readlist-1/thumbnails"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P12-READLISTS-FILE-DOWNLOAD-OWNED"
+method = "GET"
+path = "/api/v1/readlists/readlist-1/file"
+comparison = "binary_metadata"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P12-READLISTS-CREATE-OWNED"
+method = "POST"
+path = "/api/v1/readlists"
+body = "{\"name\":\"readlist\",\"summary\":\"summary\",\"bookIds\":[\"book-1\"]}"
+headers = { "Content-Type" = "application/json", "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P12-READLISTS-PATCH-OWNED"
+method = "PATCH"
+path = "/api/v1/readlists/readlist-2"
+body = "{\"name\":\"updated\"}"
+headers = { "Content-Type" = "application/json", "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P12-READLISTS-DELETE-OWNED"
+method = "DELETE"
+path = "/api/v1/readlists/readlist-2"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P12-READLISTS-COMICRACK-MATCH-OWNED"
+method = "POST"
+path = "/api/v1/readlists/match/comicrack"
+body = "--komga--"
+headers = { "Content-Type" = "multipart/form-data; boundary=komga", "X-Auth-Token" = "${SESSION_TOKEN}" }
 
 [[cases]]
 id = "P10-READLISTS-SEARCH-DEFAULT-OWNED"
@@ -222,31 +276,31 @@ headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownershi
 id = "P10-READLISTS-SEARCH-NEGATIVE-SORT"
 method = "GET"
 path = "/api/v1/readlists?search=alpha&sort=name,asc"
-headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
 
 [[cases]]
 id = "P10-READLISTS-SEARCH-NEGATIVE-UNPAGED-TRUE"
 method = "GET"
 path = "/api/v1/readlists?search=alpha&unpaged=true"
-headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
 
 [[cases]]
 id = "P10-READLISTS-SEARCH-NEGATIVE-DUPLICATE-PAGE"
 method = "GET"
 path = "/api/v1/readlists?search=alpha&page=0&page=1"
-headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
 
 [[cases]]
 id = "P10-READLISTS-SEARCH-NEGATIVE-DUPLICATE-SIZE"
 method = "GET"
 path = "/api/v1/readlists?search=alpha&size=20&size=1"
-headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
 
 [[cases]]
 id = "P10-READLISTS-SEARCH-NEGATIVE-UNSUPPORTED-EXTRA"
 method = "GET"
 path = "/api/v1/readlists?search=alpha&foo=bar"
-headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
 
 [[cases]]
 id = "P11-READLISTS-BLANK-SEARCH-DEFAULT-OWNED"
@@ -294,37 +348,37 @@ headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
 id = "P11-READLISTS-BLANK-SEARCH-NEGATIVE-SORT"
 method = "GET"
 path = "/api/v1/readlists?search=&sort=name,asc"
-headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
 
 [[cases]]
 id = "P11-READLISTS-BLANK-SEARCH-NEGATIVE-UNPAGED-TRUE"
 method = "GET"
 path = "/api/v1/readlists?search=&unpaged=true"
-headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
 
 [[cases]]
 id = "P11-READLISTS-BLANK-SEARCH-NEGATIVE-DUPLICATE-PAGE"
 method = "GET"
 path = "/api/v1/readlists?search=&page=0&page=1"
-headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
 
 [[cases]]
 id = "P11-READLISTS-BLANK-SEARCH-NEGATIVE-DUPLICATE-SIZE"
 method = "GET"
 path = "/api/v1/readlists?search=&size=20&size=1"
-headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
 
 [[cases]]
 id = "P11-READLISTS-BLANK-SEARCH-NEGATIVE-UNSUPPORTED-EXTRA"
 method = "GET"
 path = "/api/v1/readlists?search=&foo=bar"
-headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
 
 [[cases]]
 id = "P11-READLISTS-BLANK-SEARCH-NEGATIVE-DUPLICATE-SEARCH"
 method = "GET"
 path = "/api/v1/readlists?search=&search=%20%20"
-headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
 
 [[cases]]
 id = "P2-DISCOVERY-LIBRARIES-OWNED"

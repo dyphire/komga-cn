@@ -70,7 +70,7 @@ phase5_oneshot_pre_owned_dependencies = [
 ]
 phase5_oneshot_out_of_slice = [
     "GET /api/v1/series/{seriesId}?oneshot=true",
-    "READLIST-context fallback and readlist detail/list/next/previous branches",
+    "READLIST-context readlists runtime branches (detail/list/books/siblings are Rust-owned, but out of this phase5 closure claim)",
     "generic books/list widening beyond oneshot-bootstrap SeriesId-only",
     "media delivery (/thumbnail, /file, /pages*, /manifest, /resource/*, /positions)",
     "reader handoff and download branches",
@@ -259,7 +259,6 @@ phase3_skipped_base_checks: dict[str, str] = {
     "read_progress": "Skipped for phase3-detail-read: this runbook does not claim read-progress write/progression ownership.",
     "server_management_browser_smoke": "Skipped for phase3-detail-read: server-management/browser-ops acceptance is outside this direct-browse detail slice.",
     "packaging_tray": "Skipped for phase3-detail-read: packaging/tray startup contract is outside this slice gate.",
-    "external_release_credentials": "Skipped for phase3-detail-read: release credentials are not part of direct-browse detail-read readiness.",
 }
 
 phase4_skipped_base_checks: dict[str, str] = {
@@ -270,7 +269,6 @@ phase4_skipped_base_checks: dict[str, str] = {
     "read_progress": "Skipped for phase4-readlist-context-read: this runbook does not claim read-progress write/progression ownership.",
     "server_management_browser_smoke": "Skipped for phase4-readlist-context-read: server-management/browser-ops acceptance is outside this readlist-context slice.",
     "packaging_tray": "Skipped for phase4-readlist-context-read: packaging/tray startup contract is outside this slice gate.",
-    "external_release_credentials": "Skipped for phase4-readlist-context-read: release credentials are not part of readlist-context-read readiness.",
 }
 
 phase5_skipped_base_checks: dict[str, str] = {
@@ -281,7 +279,6 @@ phase5_skipped_base_checks: dict[str, str] = {
     "read_progress": "Skipped for phase5-oneshot-closure: this runbook does not claim read-progress write/progression ownership.",
     "server_management_browser_smoke": "Skipped for phase5-oneshot-closure: server-management/browser-ops acceptance is outside this oneshot-closure slice.",
     "packaging_tray": "Skipped for phase5-oneshot-closure: packaging/tray startup contract is outside this slice gate.",
-    "external_release_credentials": "Skipped for phase5-oneshot-closure: release credentials are not part of oneshot-closure readiness.",
 }
 
 phase6_skipped_base_checks: dict[str, str] = {
@@ -292,7 +289,6 @@ phase6_skipped_base_checks: dict[str, str] = {
     "read_progress": "Skipped for phase6-oneshot-readlist-context-closure: this runbook does not claim read-progress write/progression ownership.",
     "server_management_browser_smoke": "Skipped for phase6-oneshot-readlist-context-closure: server-management/browser-ops acceptance is outside this oneshot READLIST-context direct-read slice.",
     "packaging_tray": "Skipped for phase6-oneshot-readlist-context-closure: packaging/tray startup contract is outside this slice gate.",
-    "external_release_credentials": "Skipped for phase6-oneshot-readlist-context-closure: release credentials are not part of oneshot READLIST-context direct-read readiness.",
 }
 phase7_skipped_base_checks: dict[str, str] = {
     "auth_api_key": "Skipped for phase7-series-oneshot-query-closure: API key parity is outside this exact series-detail query runbook.",
@@ -302,7 +298,6 @@ phase7_skipped_base_checks: dict[str, str] = {
     "read_progress": "Skipped for phase7-series-oneshot-query-closure: this runbook does not claim read-progress write/progression ownership.",
     "server_management_browser_smoke": "Skipped for phase7-series-oneshot-query-closure: server-management/browser-ops acceptance is outside this exact series-detail query slice.",
     "packaging_tray": "Skipped for phase7-series-oneshot-query-closure: packaging/tray startup contract is outside this slice gate.",
-    "external_release_credentials": "Skipped for phase7-series-oneshot-query-closure: release credentials are not part of exact series-detail query readiness.",
 }
 phase8_skipped_base_checks: dict[str, str] = {
     "auth_api_key": "Skipped for phase8-readlist-books-family-closure: API key parity is outside this readlist-books family runbook.",
@@ -312,7 +307,6 @@ phase8_skipped_base_checks: dict[str, str] = {
     "read_progress": "Skipped for phase8-readlist-books-family-closure: this runbook does not claim read-progress/progression ownership.",
     "server_management_browser_smoke": "Skipped for phase8-readlist-books-family-closure: server-management/browser-ops acceptance is outside this direct readlist-books family slice.",
     "packaging_tray": "Skipped for phase8-readlist-books-family-closure: packaging/tray startup contract is outside this slice gate.",
-    "external_release_credentials": "Skipped for phase8-readlist-books-family-closure: release credentials are not part of direct readlist-books family readiness.",
 }
 phase9_skipped_base_checks: dict[str, str] = {
     "auth_api_key": "Skipped for phase9-readlists-list-browse-closure: API key parity is outside this readlists browse/list runbook.",
@@ -322,7 +316,6 @@ phase9_skipped_base_checks: dict[str, str] = {
     "read_progress": "Skipped for phase9-readlists-list-browse-closure: this runbook does not claim Tachiyomi/read-progress ownership.",
     "server_management_browser_smoke": "Skipped for phase9-readlists-list-browse-closure: server-management/browser-ops acceptance is outside this browse/list slice.",
     "packaging_tray": "Skipped for phase9-readlists-list-browse-closure: packaging/tray startup contract is outside this slice gate.",
-    "external_release_credentials": "Skipped for phase9-readlists-list-browse-closure: release credentials are not part of browse/list closure readiness.",
 }
 phase10_skipped_base_checks: dict[str, str] = {
     "auth_api_key": "Skipped for phase10-readlists-search-closure: API key parity is outside this readlists search slice gate.",
@@ -332,7 +325,6 @@ phase10_skipped_base_checks: dict[str, str] = {
     "read_progress": "Skipped for phase10-readlists-search-closure: this runbook does not claim Tachiyomi/read-progress ownership.",
     "server_management_browser_smoke": "Skipped for phase10-readlists-search-closure: server-management/browser-ops acceptance is outside this readlists search slice.",
     "packaging_tray": "Skipped for phase10-readlists-search-closure: packaging/tray startup contract is outside this slice gate.",
-    "external_release_credentials": "Skipped for phase10-readlists-search-closure: release credentials are not part of readlists search closure readiness.",
 }
 phase11_skipped_base_checks: dict[str, str] = {
     "auth_api_key": "Skipped for phase11-readlists-blank-search-closure: API key parity is outside this blank-effective readlists search slice gate.",
@@ -342,7 +334,6 @@ phase11_skipped_base_checks: dict[str, str] = {
     "read_progress": "Skipped for phase11-readlists-blank-search-closure: this runbook does not claim Tachiyomi/read-progress ownership.",
     "server_management_browser_smoke": "Skipped for phase11-readlists-blank-search-closure: server-management/browser-ops acceptance is outside this blank-effective readlists search slice.",
     "packaging_tray": "Skipped for phase11-readlists-blank-search-closure: packaging/tray startup contract is outside this slice gate.",
-    "external_release_credentials": "Skipped for phase11-readlists-blank-search-closure: release credentials are not part of blank-effective readlists search closure readiness.",
 }
 
 
@@ -467,24 +458,6 @@ def build_checks(
                 evidence_root / "task-3-shadow-governance" / "config-precedence.txt",
             ],
             "mode": "text",
-        },
-        {
-            "id": "external_release_credentials",
-            "category": "distribution",
-            "refusal_condition": "External release credentials unavailable for packaging/release",
-            "evidence": [],
-            "mode": "credential",
-            "profile_overrides": {
-                PHASE2_DISCOVERY_LABEL: {
-                    "status": "skipped",
-                    "blocking": False,
-                    "details": [
-                        "Skipped for the phase2-catalog-discovery shadow runbook: packaging/release credentials are not part of this slice gate.",
-                        "This label does not claim direct-serving, release, or whole-cutover readiness.",
-                        "External release credentials still have to be proven before any broader cutover/release claim.",
-                    ],
-                },
-            },
         },
     ]
 
@@ -881,7 +854,7 @@ def build_checks(
                         "shadow-java-writer",
                     ],
                 },
-                "success_note": "Phase5 exclusions stay explicit and fail-closed: ?oneshot=true, READLIST-context fallback, media/reader/progress/removal/admin/SSE branches remain refused.",
+                "success_note": "Phase5 exclusions stay explicit and fail-closed: ?oneshot=true, READLIST-context runtime branches remain out of this slice claim, and media/reader/progress/removal/admin/SSE branches remain refused.",
             },
         ]
 
@@ -953,10 +926,10 @@ def build_checks(
                     phase6_browser_gate_check: [
                         'ok=True',
                         'browse-oneshot proves exact owned labels: oneshot-series-detail, oneshot-series-collections, oneshot-bootstrap-books-list, oneshot-book-readlists, readlist-detail, readlist-books-unpaged, readlist-book-next, readlist-book-previous',
-                        'browse-oneshot keeps READLIST-context fallback inventory empty after readlist detail promotion',
+                        'browse-oneshot keeps READLIST-context runtime fallback inventory empty after readlist detail promotion',
                     ],
                 },
-                "success_note": "Phase6 browser evidence proves exact eight-label owned inventory while keeping READLIST-context fallback empty after readlist-detail promotion.",
+                "success_note": "Phase6 browser evidence proves exact eight-label owned inventory while keeping READLIST-context runtime fallback inventory empty after readlist-detail promotion.",
             },
             {
                 "id": "phase6_oneshot_readlist_context_closure_regression",

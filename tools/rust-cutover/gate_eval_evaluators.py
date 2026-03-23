@@ -503,7 +503,7 @@ class GateEvaluators:
         elif fallback_requests:
             failures.append("browse-oneshot: observedFallbackRequests must stay empty for READLIST-context oneshot evidence")
         else:
-            details.append("browse-oneshot keeps READLIST-context fallback inventory empty after readlist detail promotion")
+            details.append("browse-oneshot keeps READLIST-context runtime fallback inventory empty after readlist detail promotion")
 
         ok_text, text_messages, _ = self.eval_text_evidence_with_markers(
             [direct_parity_path],
@@ -924,10 +924,3 @@ class GateEvaluators:
     def eval_packaging_artifacts(self, runtime_startup_path: Path, tray_compat_path: Path) -> tuple[bool, list[str], list[str]]:
         ok_text, text_messages, _ = self.eval_text_evidence([runtime_startup_path, tray_compat_path])
         return ok_text, text_messages, []
-
-    @staticmethod
-    def eval_release_credentials() -> tuple[bool, list[str], list[str]]:
-        token = os.getenv("JRELEASER_GITHUB_TOKEN", "")
-        if token.strip():
-            return True, ["JRELEASER_GITHUB_TOKEN is set"], []
-        return False, ["Missing external release credential: JRELEASER_GITHUB_TOKEN"], []

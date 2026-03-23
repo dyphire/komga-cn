@@ -360,7 +360,7 @@ def seed_phase6_oneshot_readlist_context_closure_evidence(
                 'ok=True',
                 'DETAIL: browse-oneshot captureMode=source-contract-fallback (accepted in this environment)',
                 'DETAIL: browse-oneshot proves exact owned labels: oneshot-series-detail, oneshot-series-collections, oneshot-bootstrap-books-list, oneshot-book-readlists, readlist-detail, readlist-books-unpaged, readlist-book-next, readlist-book-previous',
-                'DETAIL: browse-oneshot keeps READLIST-context fallback inventory empty after readlist detail promotion',
+                'DETAIL: browse-oneshot keeps READLIST-context runtime fallback inventory empty after readlist detail promotion',
             ]),
         )
 

@@ -17,6 +17,8 @@ mod helpers;
 mod libraries;
 #[path = "minimal_http_surface/opds.rs"]
 mod opds;
+#[path = "minimal_http_surface/readlists.rs"]
+mod readlists;
 #[path = "minimal_http_surface/series.rs"]
 mod series;
 

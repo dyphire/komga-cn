@@ -207,7 +207,7 @@ async fn phase8_dependency_only_readlist_routes_keep_preowned_markers_and_behavi
 }
 
 #[tokio::test]
-async fn phase8_list_family_and_tachiyomi_routes_remain_excluded() {
+async fn phase8_tachiyomi_route_is_now_native_owned() {
     let app = komga_rust::app::build_router();
     let token = session_token_for_basic_auth(&app, USER_BASIC_AUTH).await;
 
@@ -217,8 +217,10 @@ async fn phase8_list_family_and_tachiyomi_routes_remain_excluded() {
         "/api/v1/readlists/readlist-2/read-progress/tachiyomi",
     )
     .await;
-    assert_eq!(tachiyomi.status(), StatusCode::NOT_FOUND);
+    assert_eq!(tachiyomi.status(), StatusCode::OK);
     assert_eq!(ownership_header(&tachiyomi), None);
+    let tachiyomi_json = response_json(tachiyomi).await;
+    assert_eq!(tachiyomi_json["booksCount"], Value::from(2));
 }
 
 async fn assert_native_owned_cases_match_java_contract<S>(app: &S, cases: &[OwnedReadListBooksCase<'_>])

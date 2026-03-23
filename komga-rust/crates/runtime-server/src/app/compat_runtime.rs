@@ -1,6 +1,6 @@
 use axum::Router;
 use axum::middleware;
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -157,11 +157,34 @@ pub(super) fn build_router(config: &RuntimeConfig) -> Router {
         )
         .route(
             "/api/v1/readlists",
-            get(content::readlists),
+            get(content::readlists).post(content::readlist_create),
+        )
+        .route(
+            "/api/v1/readlists/match/comicrack",
+            post(content::readlist_match_comicrack),
         )
         .route(
             "/api/v1/readlists/{readlist_id}",
-            get(content::readlist_detail),
+            get(content::readlist_detail)
+                .patch(content::readlist_update)
+                .delete(content::readlist_delete),
+        )
+        .route(
+            "/api/v1/readlists/{readlist_id}/thumbnail",
+            get(content::readlist_thumbnail),
+        )
+        .route(
+            "/api/v1/readlists/{readlist_id}/thumbnails",
+            get(content::readlist_thumbnails).post(content::readlist_thumbnail_upload),
+        )
+        .route(
+            "/api/v1/readlists/{readlist_id}/thumbnails/{thumbnail_id}",
+            get(content::readlist_thumbnail_by_id)
+                .delete(content::readlist_thumbnail_delete),
+        )
+        .route(
+            "/api/v1/readlists/{readlist_id}/thumbnails/{thumbnail_id}/selected",
+            put(content::readlist_thumbnail_select),
         )
         .route(
             "/api/v1/readlists/{readlist_id}/books",
@@ -174,6 +197,15 @@ pub(super) fn build_router(config: &RuntimeConfig) -> Router {
         .route(
             "/api/v1/readlists/{readlist_id}/books/{book_id}/next",
             get(content::readlist_book_sibling_next),
+        )
+        .route(
+            "/api/v1/readlists/{readlist_id}/read-progress/tachiyomi",
+            get(content::readlist_tachiyomi_read_progress_get)
+                .put(content::readlist_tachiyomi_read_progress_put),
+        )
+        .route(
+            "/api/v1/readlists/{readlist_id}/file",
+            get(content::readlist_file),
         )
         .route("/api/v1/books/{book_id}/pages", get(content::book_pages))
         .route(

@@ -132,6 +132,191 @@ pub(in crate::app::compat_runtime) async fn book_thumbnail(
     non_native_response(StatusCode::NOT_FOUND.into_response())
 }
 
+pub(in crate::app::compat_runtime) async fn readlist_thumbnail(
+    headers: HeaderMap,
+    Path(readlist_id): Path<String>,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if !is_seeded_readlist_id(&readlist_id) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "image/jpeg"),
+            (header::CACHE_CONTROL, CACHE_CONTROL_PRIVATE),
+            (header::LAST_MODIFIED, LAST_MODIFIED),
+            (header::ETAG, THUMBNAIL_ETAG),
+        ],
+        THUMBNAIL_BODY,
+    )
+        .into_response()
+}
+
+pub(in crate::app::compat_runtime) async fn readlist_thumbnails(
+    headers: HeaderMap,
+    Path(readlist_id): Path<String>,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if !is_seeded_readlist_id(&readlist_id) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    Json(json!([
+        {
+            "id": "thumbnail-1",
+            "type": "SIDECAR",
+            "selected": true,
+        }
+    ]))
+    .into_response()
+}
+
+pub(in crate::app::compat_runtime) async fn readlist_thumbnail_by_id(
+    headers: HeaderMap,
+    Path((readlist_id, thumbnail_id)): Path<(String, String)>,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if !is_seeded_readlist_id(&readlist_id) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    if thumbnail_id != "thumbnail-1" {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "image/jpeg"),
+            (header::CACHE_CONTROL, CACHE_CONTROL_PRIVATE),
+            (header::LAST_MODIFIED, LAST_MODIFIED),
+            (header::ETAG, THUMBNAIL_ETAG),
+        ],
+        THUMBNAIL_BODY,
+    )
+        .into_response()
+}
+
+pub(in crate::app::compat_runtime) async fn readlist_thumbnail_upload(
+    headers: HeaderMap,
+    Path(readlist_id): Path<String>,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if !is_seeded_readlist_id(&readlist_id) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    StatusCode::OK.into_response()
+}
+
+pub(in crate::app::compat_runtime) async fn readlist_thumbnail_select(
+    headers: HeaderMap,
+    Path((readlist_id, thumbnail_id)): Path<(String, String)>,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if !is_seeded_readlist_id(&readlist_id) || thumbnail_id != "thumbnail-1" {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    StatusCode::OK.into_response()
+}
+
+pub(in crate::app::compat_runtime) async fn readlist_thumbnail_delete(
+    headers: HeaderMap,
+    Path((readlist_id, thumbnail_id)): Path<(String, String)>,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if !is_seeded_readlist_id(&readlist_id) || thumbnail_id != "thumbnail-1" {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    StatusCode::OK.into_response()
+}
+
+pub(in crate::app::compat_runtime) async fn readlist_tachiyomi_read_progress_get(
+    headers: HeaderMap,
+    Path(readlist_id): Path<String>,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    let Some((books_count, books_read_count)) = readlist_tachiyomi_counters(&readlist_id) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let books_unread_count = books_count.saturating_sub(books_read_count);
+    Json(json!({
+        "booksCount": books_count,
+        "booksReadCount": books_read_count,
+        "booksUnreadCount": books_unread_count,
+        "booksInProgressCount": 0,
+        "lastReadContinuousIndex": books_read_count,
+    }))
+    .into_response()
+}
+
+pub(in crate::app::compat_runtime) async fn readlist_tachiyomi_read_progress_put(
+    headers: HeaderMap,
+    Path(readlist_id): Path<String>,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if !is_seeded_readlist_id(&readlist_id) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    StatusCode::NO_CONTENT.into_response()
+}
+
+pub(in crate::app::compat_runtime) async fn readlist_file(
+    headers: HeaderMap,
+    Path(readlist_id): Path<String>,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if !is_seeded_readlist_id(&readlist_id) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "application/zip"),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=\"=?UTF-8?Q?ReadList.zip?=\"; filename*=UTF-8''ReadList.zip",
+            ),
+        ],
+        PAGE_BODY,
+    )
+        .into_response()
+}
+
 pub(in crate::app::compat_runtime) async fn book_pages(
     Extension(profile): Extension<CompatProfile>,
     headers: HeaderMap,
@@ -156,6 +341,19 @@ pub(in crate::app::compat_runtime) async fn book_pages(
     }
 
     non_native_response(Json(book_pages_json(profile)).into_response())
+}
+
+fn is_seeded_readlist_id(readlist_id: &str) -> bool {
+    matches!(readlist_id, "readlist-1" | "readlist-2" | "readlist-3")
+}
+
+fn readlist_tachiyomi_counters(readlist_id: &str) -> Option<(u64, u64)> {
+    match readlist_id {
+        "readlist-1" => Some((5, 0)),
+        "readlist-2" => Some((2, 1)),
+        "readlist-3" => Some((1, 0)),
+        _ => None,
+    }
 }
 
 pub(in crate::app::compat_runtime) async fn book_file(

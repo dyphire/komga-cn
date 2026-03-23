@@ -2,7 +2,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use komga_rust::application::discovery::{DiscoveryQueries, ReadListBooksQuery};
 use komga_rust::domain::discovery::{DiscoveryError, DiscoveryQueryContext};
-use komga_rust::persistence::discovery::SqliteDiscoveryAdapter;
+use komga_rust::persistence::read_models::SqliteDiscoveryAdapter;
 use serde_json::Value;
 use std::collections::BTreeSet;
 use tower::util::ServiceExt;

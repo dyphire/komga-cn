@@ -14,6 +14,8 @@ pub(super) fn phase8_readlist_books_family_owned_case_ids() -> &'static [&'stati
         "P8-READLIST-BOOKS-COMBINED-FILTERS-OWNED",
         "P8-READLIST-BOOKS-COMBINED-REPEATED-FILTERS-OWNED",
         "P8-READLIST-BOOKS-UNPAGED-FALSE-OWNED",
+        "P8-READLIST-BOOKS-EXCLUDED-READLISTS-LIST-FAMILY",
+        "P8-READLIST-BOOKS-EXCLUDED-TACHIYOMI",
     ]
 }
 
@@ -21,8 +23,6 @@ pub(super) fn phase8_readlist_books_family_negative_case_ids() -> &'static [&'st
     &[
         "P8-READLIST-BOOKS-DEPENDENCY-UNPAGED-PREOWNED",
         "P8-READLIST-BOOKS-DEPENDENCY-UNPAGED-WIDENED-SHADOW",
-        "P8-READLIST-BOOKS-EXCLUDED-READLISTS-LIST-FAMILY",
-        "P8-READLIST-BOOKS-EXCLUDED-TACHIYOMI",
     ]
 }
 
@@ -40,10 +40,10 @@ pub(super) fn phase8_readlist_books_family_all_case_ids() -> &'static [&'static 
         "P8-READLIST-BOOKS-COMBINED-FILTERS-OWNED",
         "P8-READLIST-BOOKS-COMBINED-REPEATED-FILTERS-OWNED",
         "P8-READLIST-BOOKS-UNPAGED-FALSE-OWNED",
-        "P8-READLIST-BOOKS-DEPENDENCY-UNPAGED-PREOWNED",
-        "P8-READLIST-BOOKS-DEPENDENCY-UNPAGED-WIDENED-SHADOW",
         "P8-READLIST-BOOKS-EXCLUDED-READLISTS-LIST-FAMILY",
         "P8-READLIST-BOOKS-EXCLUDED-TACHIYOMI",
+        "P8-READLIST-BOOKS-DEPENDENCY-UNPAGED-PREOWNED",
+        "P8-READLIST-BOOKS-DEPENDENCY-UNPAGED-WIDENED-SHADOW",
     ]
 }
 
@@ -54,15 +54,14 @@ pub(super) fn phase9_readlists_list_browse_owned_case_ids() -> &'static [&'stati
         "P9-READLISTS-LIST-BROWSE-REPEATED-LIBRARY-ID-OWNED",
         "P9-READLISTS-LIST-BROWSE-REPEATED-LIBRARY-ID-PAGE-SIZE-OWNED",
         "P9-READLISTS-LIST-BROWSE-SIZE-ZERO-OWNED",
-    ]
-}
-
-pub(super) fn phase9_readlists_list_browse_negative_case_ids() -> &'static [&'static str] {
-    &[
         "P9-READLISTS-LIST-BROWSE-NEGATIVE-UNPAGED-TRUE",
         "P9-READLISTS-LIST-BROWSE-NEGATIVE-SORT",
         "P9-READLISTS-LIST-BROWSE-NEGATIVE-TACHIYOMI",
     ]
+}
+
+pub(super) fn phase9_readlists_list_browse_negative_case_ids() -> &'static [&'static str] {
+    &[]
 }
 
 pub(super) fn phase9_readlists_list_browse_all_case_ids() -> &'static [&'static str] {
@@ -78,6 +77,19 @@ pub(super) fn phase9_readlists_list_browse_all_case_ids() -> &'static [&'static 
     ]
 }
 
+pub(super) fn phase12_readlists_control_plane_owned_case_ids() -> &'static [&'static str] {
+    &[
+        "P12-READLISTS-TACHIYOMI-PUT-OWNED",
+        "P12-READLISTS-THUMBNAIL-GET-OWNED",
+        "P12-READLISTS-THUMBNAILS-LIST-OWNED",
+        "P12-READLISTS-FILE-DOWNLOAD-OWNED",
+        "P12-READLISTS-CREATE-OWNED",
+        "P12-READLISTS-PATCH-OWNED",
+        "P12-READLISTS-DELETE-OWNED",
+        "P12-READLISTS-COMICRACK-MATCH-OWNED",
+    ]
+}
+
 pub(super) fn phase10_readlists_search_owned_case_ids() -> &'static [&'static str] {
     &[
         "P10-READLISTS-SEARCH-DEFAULT-OWNED",
@@ -87,17 +99,16 @@ pub(super) fn phase10_readlists_search_owned_case_ids() -> &'static [&'static st
         "P10-READLISTS-SEARCH-SIZE-ZERO-OWNED",
         "P10-READLISTS-SEARCH-REPEATED-LIBRARY-ID-SIZE-ZERO-OWNED",
         "P10-READLISTS-SEARCH-NO-RESULTS-OWNED",
-    ]
-}
-
-pub(super) fn phase10_readlists_search_negative_case_ids() -> &'static [&'static str] {
-    &[
         "P10-READLISTS-SEARCH-NEGATIVE-SORT",
         "P10-READLISTS-SEARCH-NEGATIVE-UNPAGED-TRUE",
         "P10-READLISTS-SEARCH-NEGATIVE-DUPLICATE-PAGE",
         "P10-READLISTS-SEARCH-NEGATIVE-DUPLICATE-SIZE",
         "P10-READLISTS-SEARCH-NEGATIVE-UNSUPPORTED-EXTRA",
     ]
+}
+
+pub(super) fn phase10_readlists_search_negative_case_ids() -> &'static [&'static str] {
+    &[]
 }
 
 pub(super) fn phase10_readlists_search_all_case_ids() -> &'static [&'static str] {
@@ -126,11 +137,6 @@ pub(super) fn phase11_readlists_blank_search_owned_case_ids() -> &'static [&'sta
         "P11-READLISTS-BLANK-SEARCH-REPEATED-LIBRARY-ID-PAGE-SIZE-OWNED",
         "P11-READLISTS-BLANK-SEARCH-SIZE-ZERO-OWNED",
         "P11-READLISTS-BLANK-SEARCH-REPEATED-LIBRARY-ID-SIZE-ZERO-OWNED",
-    ]
-}
-
-pub(super) fn phase11_readlists_blank_search_negative_case_ids() -> &'static [&'static str] {
-    &[
         "P11-READLISTS-BLANK-SEARCH-NEGATIVE-SORT",
         "P11-READLISTS-BLANK-SEARCH-NEGATIVE-UNPAGED-TRUE",
         "P11-READLISTS-BLANK-SEARCH-NEGATIVE-DUPLICATE-PAGE",
@@ -138,6 +144,10 @@ pub(super) fn phase11_readlists_blank_search_negative_case_ids() -> &'static [&'
         "P11-READLISTS-BLANK-SEARCH-NEGATIVE-UNSUPPORTED-EXTRA",
         "P11-READLISTS-BLANK-SEARCH-NEGATIVE-DUPLICATE-SEARCH",
     ]
+}
+
+pub(super) fn phase11_readlists_blank_search_negative_case_ids() -> &'static [&'static str] {
+    &[]
 }
 
 pub(super) fn phase11_readlists_blank_search_all_case_ids() -> &'static [&'static str] {
@@ -182,6 +192,21 @@ pub(super) fn execute_case(
 ) -> anyhow::Result<NormalizedResponse> {
     let mut request = match case.method.as_str() {
         "GET" => client.get(format!(
+            "{}{}",
+            base_url.trim_end_matches('/'),
+            case.path.as_str()
+        )),
+        "POST" => client.post(format!(
+            "{}{}",
+            base_url.trim_end_matches('/'),
+            case.path.as_str()
+        )),
+        "PUT" => client.put(format!(
+            "{}{}",
+            base_url.trim_end_matches('/'),
+            case.path.as_str()
+        )),
+        "DELETE" => client.delete(format!(
             "{}{}",
             base_url.trim_end_matches('/'),
             case.path.as_str()
@@ -247,6 +272,21 @@ pub(super) async fn execute_case_async(
 ) -> anyhow::Result<NormalizedResponse> {
     let mut request = match case.method.as_str() {
         "GET" => client.get(format!(
+            "{}{}",
+            base_url.trim_end_matches('/'),
+            case.path.as_str()
+        )),
+        "POST" => client.post(format!(
+            "{}{}",
+            base_url.trim_end_matches('/'),
+            case.path.as_str()
+        )),
+        "PUT" => client.put(format!(
+            "{}{}",
+            base_url.trim_end_matches('/'),
+            case.path.as_str()
+        )),
+        "DELETE" => client.delete(format!(
             "{}{}",
             base_url.trim_end_matches('/'),
             case.path.as_str()

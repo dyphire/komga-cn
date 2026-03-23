@@ -171,7 +171,7 @@ impl From<SqlxBookResourceRow> for BookResourceReadModel {
     }
 }
 
-pub(in crate::discovery) async fn list_libraries_sqlx(
+pub(in crate::read_models) async fn list_libraries_sqlx(
     pool: SqlitePool,
     context: &DiscoveryQueryContext,
 ) -> Result<Vec<LibraryReadModel>, DiscoveryError> {
@@ -318,7 +318,7 @@ pub(super) async fn get_series_detail_sqlx(
     Ok(row.map(SeriesDetailReadModel::from))
 }
 
-pub(in crate::discovery) async fn list_series_collections_sqlx(
+pub(in crate::read_models) async fn list_series_collections_sqlx(
     pool: SqlitePool,
     context: &DiscoveryQueryContext,
     query: &SeriesCollectionsQuery,
@@ -408,7 +408,7 @@ pub(in crate::discovery) async fn list_series_collections_sqlx(
     Ok(collections)
 }
 
-pub(in crate::discovery) async fn resolve_series_resource_sqlx(
+pub(in crate::read_models) async fn resolve_series_resource_sqlx(
     pool: SqlitePool,
     series_id: &str,
 ) -> Result<Option<SeriesResourceReadModel>, DiscoveryError> {
@@ -427,7 +427,7 @@ pub(in crate::discovery) async fn resolve_series_resource_sqlx(
     Ok(row.map(SeriesResourceReadModel::from))
 }
 
-pub(in crate::discovery) async fn resolve_book_resource_sqlx(
+pub(in crate::read_models) async fn resolve_book_resource_sqlx(
     pool: SqlitePool,
     book_id: &str,
 ) -> Result<Option<BookResourceReadModel>, DiscoveryError> {

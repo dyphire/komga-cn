@@ -300,17 +300,6 @@ async fn phase8_readlist_books_family_negative_inventory_is_explicit_and_self_co
         .iter()
         .find(|it| it.id == "P8-READLIST-BOOKS-DEPENDENCY-UNPAGED-WIDENED-SHADOW")
         .expect("widened dependency case should exist");
-    let readlists = config
-        .cases
-        .iter()
-        .find(|it| it.id == "P8-READLIST-BOOKS-EXCLUDED-READLISTS-LIST-FAMILY")
-        .expect("readlists exclusion case should exist");
-    let tachiyomi = config
-        .cases
-        .iter()
-        .find(|it| it.id == "P8-READLIST-BOOKS-EXCLUDED-TACHIYOMI")
-        .expect("tachiyomi exclusion case should exist");
-
     assert_eq!(
         dependency
             .headers
@@ -327,23 +316,6 @@ async fn phase8_readlist_books_family_negative_inventory_is_explicit_and_self_co
         Some(&"shadow-java-writer".to_string()),
         "widened unpaged dependency case must stay explicit shadow inventory",
     );
-    assert_eq!(
-        readlists
-            .headers
-            .as_ref()
-            .and_then(|headers| headers.get("X-Komga-Compat-Search-Ownership")),
-        Some(&"shadow-java-writer".to_string()),
-        "list-family exclusion must stay explicit shadow inventory",
-    );
-    assert_eq!(
-        tachiyomi
-            .headers
-            .as_ref()
-            .and_then(|headers| headers.get("X-Komga-Compat-Search-Ownership")),
-        Some(&"shadow-java-writer".to_string()),
-        "tachiyomi exclusion must stay explicit shadow inventory",
-    );
-
     let responses = run_cases_against_self(&config, phase8_readlist_books_family_negative_case_ids()).await;
 
     assert_eq!(
@@ -393,36 +365,6 @@ async fn phase8_readlist_books_family_negative_inventory_is_explicit_and_self_co
                     );
                 }
             }
-            "P8-READLIST-BOOKS-EXCLUDED-READLISTS-LIST-FAMILY" => {
-                assert_eq!(
-                    response.status, 200,
-                    "excluded list-family inventory case should stay HTTP 200 explicit non-native: {case_id}"
-                );
-
-                let body = match response.body {
-                    NormalizedBody::Json(body) => body,
-                    other => panic!(
-                        "excluded list-family inventory case must stay JSON for explicit shadow evidence: {case_id} => {other:?}"
-                    ),
-                };
-
-                assert_eq!(
-                    body["_compat"]["discoveryOwnership"],
-                    serde_json::Value::String("non-native".to_string()),
-                    "excluded list-family inventory case must stay explicit shadow evidence: {case_id}",
-                );
-                assert_eq!(
-                    body["_compat"]["shape"],
-                    serde_json::Value::String("UnsupportedBookSort(name,asc)".to_string()),
-                    "excluded list-family inventory case must keep exact rejected ownership shape: {case_id}",
-                );
-            }
-            "P8-READLIST-BOOKS-EXCLUDED-TACHIYOMI" => {
-                assert_eq!(
-                    response.status, 404,
-                    "excluded inventory case should stay HTTP 404: {case_id}"
-                );
-            }
             _ => panic!("unexpected phase8 negative compat case id: {case_id}"),
         }
     }
@@ -465,9 +407,15 @@ async fn readlists_list_browse_owned_cases_self_diff_clean() {
                         assert_eq!(body["number"], serde_json::Value::from(1));
                     }
                     "P9-READLISTS-LIST-BROWSE-REPEATED-LIBRARY-ID-OWNED"
-                    | "P9-READLISTS-LIST-BROWSE-SIZE-ZERO-OWNED" => {
+                    | "P9-READLISTS-LIST-BROWSE-SIZE-ZERO-OWNED"
+                    | "P9-READLISTS-LIST-BROWSE-NEGATIVE-UNPAGED-TRUE"
+                    | "P9-READLISTS-LIST-BROWSE-NEGATIVE-SORT" => {
                         assert_eq!(body["size"], serde_json::Value::from(20));
                         assert_eq!(body["number"], serde_json::Value::from(0));
+                    }
+                    "P9-READLISTS-LIST-BROWSE-NEGATIVE-TACHIYOMI" => {
+                        assert_eq!(body["booksCount"], serde_json::Value::from(2));
+                        assert_eq!(body["booksReadCount"], serde_json::Value::from(1));
                     }
                     other => panic!("unexpected phase9 owned compat case id: {other}"),
                 }
@@ -491,42 +439,10 @@ async fn readlists_list_browse_negative_inventory_is_explicit_and_self_consisten
         "phase9 negative compat self-diff must cover the full explicit non-owned inventory",
     );
 
-    for (case_id, response) in responses {
-        match case_id.as_str() {
-            "P9-READLISTS-LIST-BROWSE-NEGATIVE-UNPAGED-TRUE"
-            | "P9-READLISTS-LIST-BROWSE-NEGATIVE-SORT" => {
-                assert_eq!(
-                    response.status, 200,
-                    "negative inventory case should stay HTTP 200 explicit non-native: {case_id}",
-                );
-
-                let body = match response.body {
-                    NormalizedBody::Json(body) => body,
-                    other => panic!(
-                        "negative browse inventory case must stay JSON for explicit shadow evidence: {case_id} => {other:?}"
-                    ),
-                };
-
-                assert_eq!(
-                    body["_compat"]["discoveryOwnership"],
-                    serde_json::Value::String("non-native".to_string()),
-                    "negative browse inventory case must stay explicit shadow evidence: {case_id}",
-                );
-                assert_eq!(
-                    body["_compat"]["reason"],
-                    serde_json::Value::String("unsupported-request-shape".to_string()),
-                    "negative browse inventory case must keep unsupported-request-shape diagnostics: {case_id}",
-                );
-            }
-            "P9-READLISTS-LIST-BROWSE-NEGATIVE-TACHIYOMI" => {
-                assert_eq!(
-                    response.status, 404,
-                    "tachiyomi exclusion inventory case should stay HTTP 404: {case_id}",
-                );
-            }
-            _ => panic!("unexpected phase9 negative compat case id: {case_id}"),
-        }
-    }
+    assert!(
+        responses.is_empty(),
+        "phase9 negative browse inventory should be empty after tachiyomi closure",
+    );
 }
 
 #[tokio::test]
@@ -560,7 +476,12 @@ async fn readlists_search_owned_cases_self_diff_clean() {
                     "P10-READLISTS-SEARCH-DEFAULT-OWNED"
                     | "P10-READLISTS-SEARCH-REPEATED-LIBRARY-ID-OWNED"
                     | "P10-READLISTS-SEARCH-SIZE-ZERO-OWNED"
-                    | "P10-READLISTS-SEARCH-REPEATED-LIBRARY-ID-SIZE-ZERO-OWNED" => {
+                    | "P10-READLISTS-SEARCH-REPEATED-LIBRARY-ID-SIZE-ZERO-OWNED"
+                    | "P10-READLISTS-SEARCH-NEGATIVE-SORT"
+                    | "P10-READLISTS-SEARCH-NEGATIVE-UNPAGED-TRUE"
+                    | "P10-READLISTS-SEARCH-NEGATIVE-DUPLICATE-PAGE"
+                    | "P10-READLISTS-SEARCH-NEGATIVE-DUPLICATE-SIZE"
+                    | "P10-READLISTS-SEARCH-NEGATIVE-UNSUPPORTED-EXTRA" => {
                         assert_eq!(content_ids, vec!["readlist-1", "readlist-2"]);
                         assert_eq!(body["size"], serde_json::Value::from(20));
                         assert_eq!(body["number"], serde_json::Value::from(0));
@@ -599,46 +520,10 @@ async fn readlists_search_negative_inventory_is_explicit_and_self_consistent() {
         phase10_readlists_search_negative_case_ids().len(),
         "phase10 negative search compat self-diff must cover the full explicit non-owned inventory",
     );
-
-    for (case_id, response) in responses {
-        assert_eq!(
-            response.status, 200,
-            "negative search inventory case should stay HTTP 200 explicit non-native: {case_id}",
-        );
-
-        let body = match response.body {
-            NormalizedBody::Json(body) => body,
-            other => panic!(
-                "negative search inventory case must stay JSON for explicit shadow evidence: {case_id} => {other:?}"
-            ),
-        };
-
-        assert_eq!(
-            body["_compat"]["discoveryOwnership"],
-            serde_json::Value::String("non-native".to_string()),
-            "negative search inventory case must stay explicit shadow evidence: {case_id}",
-        );
-        assert_eq!(
-            body["_compat"]["reason"],
-            serde_json::Value::String("unsupported-request-shape".to_string()),
-            "negative search inventory case must keep unsupported-request-shape diagnostics: {case_id}",
-        );
-
-        let expected_shape = match case_id.as_str() {
-            "P10-READLISTS-SEARCH-NEGATIVE-SORT" => "UnsupportedBookSort(name,asc)",
-            "P10-READLISTS-SEARCH-NEGATIVE-UNPAGED-TRUE" => "UnsupportedBookFilter(unpaged)",
-            "P10-READLISTS-SEARCH-NEGATIVE-DUPLICATE-PAGE" => "UnsupportedBookFilter(page)",
-            "P10-READLISTS-SEARCH-NEGATIVE-DUPLICATE-SIZE" => "UnsupportedBookFilter(size)",
-            "P10-READLISTS-SEARCH-NEGATIVE-UNSUPPORTED-EXTRA" => "UnsupportedBookFilter(foo)",
-            other => panic!("unexpected phase10 negative compat case id: {other}"),
-        };
-
-        assert_eq!(
-            body["_compat"]["shape"],
-            serde_json::Value::String(expected_shape.to_string()),
-            "negative search inventory case must keep exact rejected shape diagnostics: {case_id}",
-        );
-    }
+    assert!(
+        responses.is_empty(),
+        "phase10 negative search inventory should be empty after matrix closure",
+    );
 }
 
 #[tokio::test]
@@ -767,45 +652,38 @@ async fn readlists_blank_search_negative_inventory_is_explicit_and_self_consiste
         "phase11 negative blank-search compat self-diff must cover the full explicit non-owned inventory",
     );
 
+    assert!(
+        responses.is_empty(),
+        "phase11 negative blank-search inventory should be empty after matrix closure",
+    );
+}
+
+#[tokio::test]
+async fn phase12_readlists_control_plane_cases_self_diff_clean() {
+    let config = HarnessConfig::load_default().expect("default compat cases should load");
+
+    let responses = run_cases_against_self(&config, phase12_readlists_control_plane_owned_case_ids()).await;
+
+    assert_eq!(
+        responses.len(),
+        phase12_readlists_control_plane_owned_case_ids().len(),
+        "phase12 control-plane compat self-diff must cover full owned inventory",
+    );
+
     for (case_id, response) in responses {
-        assert_eq!(
-            response.status, 200,
-            "negative blank-search inventory case should stay HTTP 200 explicit non-native: {case_id}",
-        );
-
-        let body = match response.body {
-            NormalizedBody::Json(body) => body,
-            other => panic!(
-                "negative blank-search inventory case must stay JSON for explicit shadow evidence: {case_id} => {other:?}"
-            ),
-        };
-
-        assert_eq!(
-            body["_compat"]["discoveryOwnership"],
-            serde_json::Value::String("non-native".to_string()),
-            "negative blank-search inventory case must stay explicit shadow evidence: {case_id}",
-        );
-        assert_eq!(
-            body["_compat"]["reason"],
-            serde_json::Value::String("unsupported-request-shape".to_string()),
-            "negative blank-search inventory case must keep unsupported-request-shape diagnostics: {case_id}",
-        );
-
-        let expected_shape = match case_id.as_str() {
-            "P11-READLISTS-BLANK-SEARCH-NEGATIVE-SORT" => "UnsupportedBookSort(name,asc)",
-            "P11-READLISTS-BLANK-SEARCH-NEGATIVE-UNPAGED-TRUE" => "UnsupportedBookFilter(unpaged)",
-            "P11-READLISTS-BLANK-SEARCH-NEGATIVE-DUPLICATE-PAGE" => "UnsupportedBookFilter(page)",
-            "P11-READLISTS-BLANK-SEARCH-NEGATIVE-DUPLICATE-SIZE" => "UnsupportedBookFilter(size)",
-            "P11-READLISTS-BLANK-SEARCH-NEGATIVE-UNSUPPORTED-EXTRA" => "UnsupportedBookFilter(foo)",
-            "P11-READLISTS-BLANK-SEARCH-NEGATIVE-DUPLICATE-SEARCH" => "UnsupportedBookFilter(search)",
-            other => panic!("unexpected phase11 negative blank-search compat case id: {other}"),
-        };
-
-        assert_eq!(
-            body["_compat"]["shape"],
-            serde_json::Value::String(expected_shape.to_string()),
-            "negative blank-search inventory case must keep exact rejected shape diagnostics: {case_id}",
-        );
+        match case_id.as_str() {
+            "P12-READLISTS-PATCH-OWNED"
+            | "P12-READLISTS-DELETE-OWNED"
+            | "P12-READLISTS-TACHIYOMI-PUT-OWNED" => {
+                assert_eq!(response.status, 204, "phase12 write case should stay HTTP 204: {case_id}");
+            }
+            "P12-READLISTS-THUMBNAIL-GET-OWNED" | "P12-READLISTS-FILE-DOWNLOAD-OWNED" => {
+                assert_eq!(response.status, 200, "phase12 binary case should stay HTTP 200: {case_id}");
+            }
+            _ => {
+                assert_eq!(response.status, 200, "phase12 json case should stay HTTP 200: {case_id}");
+            }
+        }
     }
 }
 

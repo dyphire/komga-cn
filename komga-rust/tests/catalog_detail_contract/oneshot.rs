@@ -81,7 +81,6 @@ pub(super) fn phase7_adjacent_oneshot_query_variants_remain_explicitly_non_nativ
     let config = HarnessConfig::load_default().expect("default compat cases should load");
     for id in [
         "P3-DETAIL-EXCLUDED-ONESHOT-ROUTE-CLOSURE",
-        "P2-DISCOVERY-UNSUPPORTED-READLISTS",
         "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-BOOKS",
         "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-PREVIOUS",
         "P3-DETAIL-EXCLUDED-READLIST-CONTEXT-NEXT",

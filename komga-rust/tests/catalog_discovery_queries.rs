@@ -5,7 +5,7 @@ use komga_rust::domain::discovery::{
     AgeRestrictionKind, DirectBrowseBooksListFamily, DiscoveryError, DiscoveryQueryContext,
     QueryRestrictions,
 };
-use komga_rust::persistence::discovery::{BookRow, LibraryRow, SeriesRow, SqliteDiscoveryAdapter};
+use komga_rust::persistence::read_models::{BookRow, LibraryRow, SeriesRow, SqliteDiscoveryAdapter};
 
 #[path = "catalog_discovery_queries/authorization.rs"]
 mod authorization;

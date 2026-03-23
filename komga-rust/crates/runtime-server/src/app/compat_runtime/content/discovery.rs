@@ -10,7 +10,7 @@ use komga_domain::discovery::{
     DirectBrowseBooksListFamily, DiscoveryError, NonNativeRequestShape, PageEnvelope,
     SeriesReadModel,
 };
-use komga_persistence::discovery::{
+use komga_persistence::read_models::{
     BookRow, SeriesRow, SqlxRuntimeDiscoveryAdapter, SqlxRuntimeDiscoveryStore,
 };
 use serde_json::{Value, json};

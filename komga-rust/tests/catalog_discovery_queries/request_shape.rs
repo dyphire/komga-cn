@@ -4,7 +4,7 @@ use super::{
 };
 
 const DISCOVERY_QUERY_SOURCE: &str =
-    include_str!("../../crates/persistence/src/discovery/queries.rs");
+    include_str!("../../crates/persistence/src/read_models/queries.rs");
 
 #[tokio::test]
 async fn unsupported_sorts_are_classified_non_native() {

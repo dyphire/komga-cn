@@ -1,6 +1,6 @@
 use komga_rust::application::discovery::{DiscoveryQueries, LibraryListQuery};
 use komga_rust::domain::discovery::DiscoveryQueryContext;
-use komga_rust::persistence::discovery::{BookRow, LibraryRow, SeriesRow, SqliteDiscoveryAdapter};
+use komga_rust::persistence::read_models::{BookRow, LibraryRow, SeriesRow, SqliteDiscoveryAdapter};
 use komga_rust::persistence::sqlite::{fixtures, setup};
 
 #[tokio::test]

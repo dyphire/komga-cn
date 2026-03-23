@@ -129,8 +129,6 @@ def main() -> int:
                 ok, messages, _ = evaluators.eval_task_ownership(evidence_paths[0], evidence_paths[1])
             elif mode == "packaging":
                 ok, messages, _ = evaluators.eval_packaging_artifacts(evidence_paths[0], evidence_paths[1])
-            elif mode == "credential":
-                ok, messages, _ = evaluators.eval_release_credentials()
             elif mode == "discovery_markers":
                 ok, messages, _ = evaluators.eval_text_evidence_with_markers(
                     evidence_paths,

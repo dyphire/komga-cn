@@ -5,7 +5,7 @@ use komga_domain::discovery::{
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 
 use super::{map_sqlx_error, parse_labels};
-use crate::discovery::filters::{
+use crate::read_models::filters::{
     SqlxWhereState, append_clause_sqlx, append_in_clause_sqlx, apply_restrictions_sqlx,
     effective_library_ids,
 };
@@ -105,7 +105,7 @@ impl From<SqlxBookDetailRow> for BookDetailReadModel {
     }
 }
 
-pub(in crate::discovery) async fn get_book_detail_sqlx(
+pub(in crate::read_models) async fn get_book_detail_sqlx(
     pool: SqlitePool,
     context: &DiscoveryQueryContext,
     query: &BookDetailQuery,
@@ -113,7 +113,7 @@ pub(in crate::discovery) async fn get_book_detail_sqlx(
     fetch_book_detail_sqlx(pool, context, &query.book_id).await
 }
 
-pub(in crate::discovery) async fn get_book_sibling_previous_sqlx(
+pub(in crate::read_models) async fn get_book_sibling_previous_sqlx(
     pool: SqlitePool,
     context: &DiscoveryQueryContext,
     query: &BookSiblingQuery,
@@ -121,7 +121,7 @@ pub(in crate::discovery) async fn get_book_sibling_previous_sqlx(
     get_book_sibling_sqlx(pool, context, &query.book_id, false).await
 }
 
-pub(in crate::discovery) async fn get_book_sibling_next_sqlx(
+pub(in crate::read_models) async fn get_book_sibling_next_sqlx(
     pool: SqlitePool,
     context: &DiscoveryQueryContext,
     query: &BookSiblingQuery,
@@ -186,7 +186,7 @@ async fn get_book_sibling_sqlx(
     fetch_book_detail_sqlx(pool, context, &sibling_id).await
 }
 
-pub(in crate::discovery) async fn fetch_book_detail_sqlx(
+pub(in crate::read_models) async fn fetch_book_detail_sqlx(
     pool: SqlitePool,
     context: &DiscoveryQueryContext,
     book_id: &str,

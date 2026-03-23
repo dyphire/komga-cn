@@ -1,12 +1,12 @@
-#[path = "discovery/adapter.rs"]
+#[path = "read_models/adapter.rs"]
 mod adapter;
-#[path = "discovery/filters.rs"]
+#[path = "read_models/filters.rs"]
 mod filters;
-#[path = "discovery/queries.rs"]
+#[path = "read_models/queries.rs"]
 mod queries;
-#[path = "discovery/rows.rs"]
+#[path = "read_models/rows.rs"]
 mod rows;
-#[path = "discovery/runtime_sqlx.rs"]
+#[path = "read_models/runtime_sqlx.rs"]
 mod runtime_sqlx;
 
 pub use adapter::SqliteDiscoveryAdapter;

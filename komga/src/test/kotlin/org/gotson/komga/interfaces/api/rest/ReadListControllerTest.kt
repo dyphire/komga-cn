@@ -31,6 +31,7 @@ import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.multipart
 import org.springframework.test.web.servlet.patch
 import org.springframework.test.web.servlet.post
+import org.springframework.test.web.servlet.put
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -308,6 +309,125 @@ class ReadListControllerTest(
             jsonPath("$.number") { value(2) }
             jsonPath("$.totalElements") { value(3) }
             jsonPath("$.content.length()") { value(0) }
+          }
+      }
+
+      @Test
+      @WithMockCustomUser
+      fun `given read lists when getting browse list with explicit sort then controller honors requested sort order`() {
+        makeReadLists()
+
+        mockMvc
+          .get("/api/v1/readlists") {
+            param("sort", "name,desc")
+          }.andExpect {
+            status { isOk() }
+            jsonPath("$.size") { value(20) }
+            jsonPath("$.number") { value(0) }
+            jsonPath("$.totalElements") { value(3) }
+            jsonPath("$.content[0].name") { value("Lib2") }
+            jsonPath("$.content[1].name") { value("Lib1+2") }
+            jsonPath("$.content[2].name") { value("Lib1") }
+          }
+      }
+
+      @Test
+      @WithMockCustomUser
+      fun `given read lists when getting browse list unpaged then controller returns all results with unpaged metadata`() {
+        makeReadLists()
+
+        mockMvc
+          .get("/api/v1/readlists") {
+            param("unpaged", "true")
+          }.andExpect {
+            status { isOk() }
+            jsonPath("$.size") { value(20) }
+            jsonPath("$.number") { value(0) }
+            jsonPath("$.totalElements") { value(3) }
+            jsonPath("$.content.length()") { value(3) }
+            jsonPath("$.pageable.paged") { value(true) }
+            jsonPath("$.pageable.unpaged") { value(false) }
+            jsonPath("$.content[0].name") { value("Lib1") }
+            jsonPath("$.content[1].name") { value("Lib1+2") }
+            jsonPath("$.content[2].name") { value("Lib2") }
+          }
+      }
+
+      @Test
+      @WithMockCustomUser
+      fun `given read lists when page is duplicated then controller keeps first page value`() {
+        makeReadLists()
+
+        mockMvc
+          .get("/api/v1/readlists") {
+            param("page", "1", "0")
+            param("size", "1")
+          }.andExpect {
+            status { isOk() }
+            jsonPath("$.size") { value(1) }
+            jsonPath("$.number") { value(1) }
+            jsonPath("$.totalElements") { value(3) }
+            jsonPath("$.content.length()") { value(1) }
+            jsonPath("$.content[0].name") { value("Lib1+2") }
+          }
+      }
+
+      @Test
+      @WithMockCustomUser
+      fun `given read lists when size is duplicated then controller keeps first size value`() {
+        makeReadLists()
+
+        mockMvc
+          .get("/api/v1/readlists") {
+            param("page", "0")
+            param("size", "1", "2")
+          }.andExpect {
+            status { isOk() }
+            jsonPath("$.size") { value(1) }
+            jsonPath("$.number") { value(0) }
+            jsonPath("$.totalElements") { value(3) }
+            jsonPath("$.content.length()") { value(1) }
+            jsonPath("$.content[0].name") { value("Lib1") }
+          }
+      }
+
+      @Test
+      @WithMockCustomUser
+      fun `given read lists when search is duplicated then controller applies current multi-value search contract`() {
+        makeReadLists()
+
+        mockMvc
+          .get("/api/v1/readlists") {
+            param("search", "Lib1", "Lib2")
+          }.andExpect {
+            status { isOk() }
+            jsonPath("$.size") { value(20) }
+            jsonPath("$.number") { value(0) }
+            jsonPath("$.totalElements") { value(3) }
+            jsonPath("$.content.length()") { value(3) }
+            jsonPath("$.content[?(@.name == 'Lib1')].filtered") { value(false) }
+            jsonPath("$.content[?(@.name == 'Lib2')].filtered") { value(false) }
+            jsonPath("$.content[?(@.name == 'Lib1+2')].filtered") { value(false) }
+          }
+      }
+
+      @Test
+      @WithMockCustomUser
+      fun `given read lists when unsupported extra query keys are present then controller ignores them`() {
+        makeReadLists()
+
+        mockMvc
+          .get("/api/v1/readlists") {
+            param("foo", "bar")
+            param("page", "1")
+            param("size", "1")
+          }.andExpect {
+            status { isOk() }
+            jsonPath("$.size") { value(1) }
+            jsonPath("$.number") { value(1) }
+            jsonPath("$.totalElements") { value(3) }
+            jsonPath("$.content.length()") { value(1) }
+            jsonPath("$.content[0].name") { value("Lib1+2") }
           }
       }
     }
@@ -1258,6 +1378,86 @@ class ReadListControllerTest(
       mockMvc
         .get("/api/v1/readlists/${rlLib1.id}")
         .andExpect {
+          status { isNotFound() }
+        }
+    }
+  }
+
+  @Nested
+  inner class Thumbnails {
+    @Test
+    @WithMockCustomUser
+    fun `given existing read list when getting generated thumbnail then return jpeg`() {
+      makeReadLists()
+
+      mockMvc
+        .get("/api/v1/readlists/${rlLib1.id}/thumbnail")
+        .andExpect {
+          status { isOk() }
+          content {
+            contentType(MediaType.IMAGE_JPEG)
+          }
+        }
+    }
+
+    @Test
+    @WithMockCustomUser
+    fun `given existing read list when listing thumbnails then return json collection`() {
+      makeReadLists()
+
+      mockMvc
+        .get("/api/v1/readlists/${rlLib1.id}/thumbnails")
+        .andExpect {
+          status { isOk() }
+          content {
+            contentType(MediaType.APPLICATION_JSON)
+          }
+          jsonPath("$") { isArray() }
+        }
+    }
+
+    @Test
+    @WithMockCustomUser
+    fun `given unknown thumbnail id when getting thumbnail by id then return not found`() {
+      makeReadLists()
+
+      mockMvc
+        .get("/api/v1/readlists/${rlLib1.id}/thumbnails/does-not-exist")
+        .andExpect {
+          status { isNotFound() }
+        }
+    }
+  }
+
+  @Nested
+  inner class TachiyomiReadProgress {
+    @Test
+    @WithMockCustomUser
+    fun `given existing read list when getting Tachiyomi read progress then return counters`() {
+      makeReadLists()
+
+      mockMvc
+        .get("/api/v1/readlists/${rlLib1.id}/read-progress/tachiyomi")
+        .andExpect {
+          status { isOk() }
+          jsonPath("$.booksCount") { value(5) }
+          jsonPath("$.booksReadCount") { value(0) }
+          jsonPath("$.booksUnreadCount") { value(5) }
+          jsonPath("$.booksInProgressCount") { value(0) }
+          jsonPath("$.lastReadContinuousIndex") { value(0) }
+        }
+    }
+
+    @Test
+    @WithMockCustomUser
+    fun `given unknown read list when updating Tachiyomi read progress then return not found`() {
+      makeReadLists()
+
+      mockMvc
+        .put("/api/v1/readlists/does-not-exist/read-progress/tachiyomi") {
+          contentType = MediaType.APPLICATION_JSON
+          content = """{"lastBookRead":2}"""
+        }.andExpect {
           status { isNotFound() }
         }
     }

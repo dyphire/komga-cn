@@ -35,7 +35,6 @@ seed_phase11_readlists_blank_search_closure_evidence = fixtures.seed_phase11_rea
 
 def run_gate(evidence_root: Path, output_dir: Path, *, label: str) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
-    env['JRELEASER_GITHUB_TOKEN'] = 'test-token'
     return subprocess.run(
         [
             'bash',
@@ -143,6 +142,40 @@ class GateRegressionTests(unittest.TestCase):
             summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
             self.assertEqual(summary['overall'], 'pass')
             self.assertTrue((output_dir / 'report.md').exists())
+
+    def test_phase11_5_endgame_report_generation_retains_task8_addendum_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            evidence_root = temp_path / 'evidence'
+            output_dir = temp_path / 'output'
+            seed_common_evidence(
+                evidence_root,
+                neutral_transcripts=True,
+                admin_queue_payload=build_admin_queue_payload(
+                    status='action-exercised-parity-ok',
+                    can_claim_admin_queue_parity=True,
+                ),
+            )
+
+            result = run_gate(evidence_root, output_dir, label='phase11.5-endgame')
+
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=f'gate unexpectedly failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}',
+            )
+
+            report = (output_dir / 'report.md').read_text(encoding='utf-8').lower()
+            report_labeled = (output_dir / 'report-phase11.5-endgame.md').read_text(encoding='utf-8').lower()
+
+            for required in ['blocker count: 0', 'refusal conditions', 'rollback readiness', 'go/no-go: go']:
+                self.assertIn(required, report)
+                self.assertIn(required, report_labeled)
+
+            self.assertEqual(
+                (output_dir / 'report.md').read_text(encoding='utf-8'),
+                (output_dir / 'report-phase11.5-endgame.md').read_text(encoding='utf-8'),
+            )
 
     def test_phase3_detail_read_label_passes_with_slice_evidence_only(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -410,7 +443,7 @@ class GateRegressionTests(unittest.TestCase):
                 summary['oneshot_closure_slice']['excluded_branches'],
                 [
                     'GET /api/v1/series/{seriesId}?oneshot=true',
-                    'READLIST-context fallback and readlist detail/list/next/previous branches',
+                    'READLIST-context readlists runtime branches (detail/list/books/siblings are Rust-owned, but out of this phase5 closure claim)',
                     'generic books/list widening beyond oneshot-bootstrap SeriesId-only',
                     'media delivery (/thumbnail, /file, /pages*, /manifest, /resource/*, /positions)',
                     'reader handoff and download branches',
@@ -430,7 +463,7 @@ class GateRegressionTests(unittest.TestCase):
             self.assertIn('Owned surface (newly owned exactly 1 family)', report)
             self.assertIn('`POST /api/v1/books/list`', report)
             self.assertIn('`GET /api/v1/series/{seriesId}?oneshot=true`', report)
-            self.assertIn('READLIST-context fallback', report)
+            self.assertIn('READLIST-context runtime branches', report)
             self.assertIn('reader handoff and download branches', report)
             self.assertIn('whole cutover/direct-serving', report)
 

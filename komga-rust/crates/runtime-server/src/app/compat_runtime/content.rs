@@ -23,7 +23,8 @@ mod helpers;
 mod media;
 
 pub(super) use detail::{
-    book_detail, book_readlists, book_sibling_next, book_sibling_previous, readlist_detail,
+    book_detail, book_readlists, book_sibling_next, book_sibling_previous, readlist_create,
+    readlist_delete, readlist_detail, readlist_match_comicrack, readlist_update,
     readlist_book_sibling_next, readlist_book_sibling_previous, readlist_books, readlists,
     series_collections, series_detail,
 };
@@ -34,6 +35,9 @@ pub(super) use helpers::{
 pub(super) use media::{
     book_file, book_page, book_page_thumbnail, book_pages, book_progression, book_progression_get,
     book_read_progress, book_read_progress_delete, book_read_progress_get, book_thumbnail,
+    readlist_file, readlist_tachiyomi_read_progress_get, readlist_tachiyomi_read_progress_put,
+    readlist_thumbnail, readlist_thumbnail_by_id, readlist_thumbnail_delete,
+    readlist_thumbnail_select, readlist_thumbnail_upload, readlist_thumbnails,
 };
 
 pub(super) async fn libraries(

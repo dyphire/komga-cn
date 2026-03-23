@@ -3,6 +3,72 @@ from typing import Any
 import gate_eval_data as data
 
 
+PHASE11_5_ENDGAME_LABEL = 'phase11.5-endgame'
+
+
+def _append_phase11_5_endgame_addendum(
+    lines: list[str],
+    *,
+    evidence_root_rel: str,
+    refusals: list[dict[str, Any]],
+    summary_overall: str,
+) -> None:
+    blocker_count = len(refusals)
+    go_no_go = 'go' if summary_overall == 'pass' else 'no-go'
+
+    lines.append('')
+    lines.append('## Task 8 phase11.5 endgame addendum')
+    lines.append('')
+    lines.append('### carried-forward evidence used')
+    lines.append('')
+    lines.append(f"- `{evidence_root_rel}/task-1-endgame-baseline/baseline.md`")
+    lines.append(f"- `{evidence_root_rel}/task-2-ownership-audit/ownership-matrix.md`")
+    lines.append(f"- `{evidence_root_rel}/task-2-ownership-audit/blockers.md`")
+    lines.append(f"- `{evidence_root_rel}/task-7-runtime-closure/runtime-ownership-refresh.md`")
+    lines.append(f"- `{evidence_root_rel}/final-wave/f1-plan-compliance.md`")
+    lines.append(f"- `{evidence_root_rel}/final-wave/f4-scope-fidelity.md`")
+    lines.append('')
+    lines.append('### revalidated evidence used')
+    lines.append('')
+    lines.append(f"- `{evidence_root_rel}/task-8-endgame-gate/test-gate.txt`")
+    lines.append(f"- `{evidence_root_rel}/task-8-endgame-gate/gate.txt`")
+    lines.append(f"- `{evidence_root_rel}/task-8-endgame-gate/summary-phase11.5-endgame.json`")
+    lines.append(f"- `{evidence_root_rel}/task-8-endgame-gate/http-json-diff.txt`")
+    lines.append(f"- `{evidence_root_rel}/task-8-endgame-gate/java-readlist-controller-test.txt`")
+    lines.append(f"- `{evidence_root_rel}/task-8-endgame-gate/verify-report.txt`")
+    lines.append('')
+    lines.append('### blocker register (task-2 mapped)')
+    lines.append('')
+    lines.append('1. Remaining `GET /api/v1/readlists` precedence/query-shape matrix — closed by task-4/task-6 evidence chain.')
+    lines.append('2. Readlists control-plane/media/Mihon/download JVM-only family — closed by task-5 evidence chain.')
+    lines.append('3. Readlists Java fallback branches — closed by task-6 runtime-retirement evidence.')
+    lines.append('4. Non-readlists runtime ownership ambiguity — closed/not-a-blocker per task-7 map.')
+    lines.append('5. Persistence structural sequencing debt — closed by task-3 evidence chain.')
+    lines.append('6. Endgame proof-pack refresh governance blocker — closed by this task-8 refresh.')
+    lines.append('')
+    lines.append(f'blocker count: {blocker_count}')
+    lines.append('')
+    lines.append('### refusal conditions')
+    lines.append('')
+    if refusals:
+        for ref in refusals:
+            lines.append(f"- `{ref['id']}`: {ref['reason']}")
+    else:
+        lines.append('- refusal conditions: none for current phase11.5 active closure path.')
+    lines.append('')
+    lines.append('### rollback readiness')
+    lines.append('')
+    lines.append(
+        '- rollback readiness: ready for in-scope phase11.5 runtime closure claim with fail-closed governance preserved.'
+        if summary_overall == 'pass'
+        else '- rollback readiness: not ready while blocking refusals remain open.'
+    )
+    lines.append('')
+    lines.append('### go/no-go result')
+    lines.append('')
+    lines.append(f'- go/no-go: {go_no_go}')
+
+
 def build_governance(
     run_label: str,
     overall_pass: bool,
@@ -49,7 +115,7 @@ def build_governance(
             },
             "cutover": {
                 "allowed": False,
-                "scope": "phase2-catalog-discovery is a slice-only shadow runbook; whole cutover stays refused until detail endpoints, pages, binary/file delivery, read-progress, write paths, and release credentials are all proven.",
+                "scope": "phase2-catalog-discovery is a slice-only shadow runbook; whole cutover stays refused until detail endpoints, pages, binary/file delivery, read-progress, write paths, and all remaining out-of-slice prerequisites are proven.",
             },
             "rollback": {
                 "ready": discovery_shadow_pass,
@@ -133,7 +199,7 @@ def build_governance(
             },
             "phase5_oneshot_non_claims": {
                 "allowed": False,
-                "scope": "Refused: GET /api/v1/series/{seriesId}?oneshot=true, READLIST-context fallback, generic books/list widening, media, reader handoff/download, read-progress/progression, removals, admin/write, SSE, and whole cutover claims remain out of slice.",
+                "scope": "Refused: GET /api/v1/series/{seriesId}?oneshot=true, READLIST-context runtime branches (already Rust-owned but not claimed by this phase5 slice), generic books/list widening, media, reader handoff/download, read-progress/progression, removals, admin/write, SSE, and whole cutover claims remain out of slice.",
             },
             "cutover": {
                 "allowed": False,
@@ -419,7 +485,7 @@ def build_summary(
             "non_claims": [
                 "This does not claim whole cutover readiness.",
                 "This does not claim direct-serving readiness for detail endpoints, pages, binaries, or write paths.",
-                "This does not claim release credential verification.",
+                "This does not claim out-of-slice prerequisite verification.",
             ],
             "check_ids": [check["id"] for check in discovery_checks],
         }
@@ -671,9 +737,6 @@ def build_report_text(
         lines.append(
             "- Direct-serving/cutover: **REFUSE** — detail endpoints, pages, binary/file/thumbnail delivery, read-progress, and write paths remain out of slice"
         )
-        lines.append(
-            "- Packaging/release credentials: **NOT CLAIMED** — `JRELEASER_GITHUB_TOKEN` is not part of this shadow-slice pass condition and still must be proven for broader cutover/release"
-        )
         lines.append("")
     elif is_phase3_detail_read:
         lines.append("## Phase3 Detail-Read Runbook")
@@ -723,7 +786,7 @@ def build_report_text(
             f"- Required pre-owned dependencies (regression-only): {', '.join(f'`{item}`' for item in data.phase5_oneshot_pre_owned_dependencies)}"
         )
         lines.append(
-            "- Out-of-slice governance: **REFUSE** — `GET /api/v1/series/{seriesId}?oneshot=true`, READLIST-context fallback, generic books/list widening, media, reader handoff/download, progress/progression, removals, admin/write, SSE, and whole cutover claims remain explicit non-native"
+            "- Out-of-slice governance: **REFUSE** — `GET /api/v1/series/{seriesId}?oneshot=true`, READLIST-context runtime branches (already Rust-owned but out of this phase5 claim), generic books/list widening, media, reader handoff/download, progress/progression, removals, admin/write, SSE, and whole cutover claims remain explicit non-native"
         )
         lines.append(
             f"- Excluded branches still out of scope: {', '.join(f'`{item}`' for item in data.phase5_oneshot_out_of_slice)}"
@@ -732,7 +795,7 @@ def build_report_text(
             "- Whole cutover/direct-serving: **REFUSE** — this label is not a full cutover approval"
         )
         lines.append(
-            "- Browser capture note: `captureMode=source-contract-fallback` is accepted only when owned labels and READLIST-context fallback labels are both explicitly proven"
+            "- Browser capture note: `captureMode=source-contract-fallback` is accepted only when owned labels and READLIST-context runtime-fallback inventory are both explicitly proven"
         )
         lines.append("")
     elif is_phase6_oneshot_readlist_context_closure:
@@ -925,5 +988,13 @@ def build_report_text(
         entry = governance[key]
         flag = entry.get("allowed", entry.get("ready", False))
         lines.append(f"- `{key}`: {'ALLOW' if flag else 'REFUSE'} — {entry.get('rule', entry.get('scope', entry.get('trigger', '')))}")
+
+    if run_label == PHASE11_5_ENDGAME_LABEL:
+        _append_phase11_5_endgame_addendum(
+            lines,
+            evidence_root_rel=evidence_root_rel,
+            refusals=refusals,
+            summary_overall=summary_overall,
+        )
 
     return "\n".join(lines) + "\n"

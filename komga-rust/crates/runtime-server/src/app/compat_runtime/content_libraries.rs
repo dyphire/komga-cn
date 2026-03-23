@@ -7,7 +7,7 @@ use komga_domain::discovery::{
     DiscoveryQueryContext as DomainDiscoveryQueryContext, LibraryReadModel,
     QueryRestrictions as DomainQueryRestrictions,
 };
-use komga_persistence::discovery::{LibraryRow, SqliteDiscoveryAdapter};
+use komga_persistence::read_models::{LibraryRow, SqliteDiscoveryAdapter};
 use reqwest::header::{AUTHORIZATION, COOKIE};
 use serde_json::{Value, json};
 

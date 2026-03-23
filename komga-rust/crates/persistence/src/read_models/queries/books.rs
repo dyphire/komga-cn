@@ -3,7 +3,7 @@ use komga_domain::discovery::{BookReadModel, DiscoveryError, DiscoveryQueryConte
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 
 use super::{map_sqlx_error, parse_labels};
-use crate::discovery::filters::{
+use crate::read_models::filters::{
     SqlxWhereState, append_clause_sqlx, append_string_set_filter_sqlx, effective_library_ids,
     query_filters_sqlx,
 };
@@ -62,7 +62,7 @@ impl From<SqlxBookListRow> for BookReadModel {
     }
 }
 
-pub(in crate::discovery) async fn list_books_sqlx(
+pub(in crate::read_models) async fn list_books_sqlx(
     pool: SqlitePool,
     context: &DiscoveryQueryContext,
     query: &NativeBooksListQuery,
@@ -89,7 +89,7 @@ pub(in crate::discovery) async fn list_books_sqlx(
     .await
 }
 
-pub(in crate::discovery) async fn list_books_latest_sqlx(
+pub(in crate::read_models) async fn list_books_latest_sqlx(
     pool: SqlitePool,
     context: &DiscoveryQueryContext,
     query: &NativeBooksLatestQuery,

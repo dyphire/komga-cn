@@ -1,4 +1,5 @@
 use axum::Json;
+use axum::body::Bytes;
 use axum::extract::{Extension, Path};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
@@ -10,10 +11,10 @@ use komga_application::discovery::{
     classify_readlists_browse_query, normalize_readlists_search,
 };
 use komga_domain::discovery::{
-    BookDetailReadModel, CollectionReadModel, DiscoveryError, NonNativeRequestShape,
-    PageEnvelope, ReadListReadModel, SeriesDetailReadModel,
+    BookDetailReadModel, CollectionReadModel, DiscoveryError, PageEnvelope, ReadListReadModel,
+    SeriesDetailReadModel,
 };
-use komga_persistence::discovery::{
+use komga_persistence::read_models::{
     BookRow, CollectionRow, ReadListRow, ReadProgressRow, SeriesRow, SqliteDiscoveryAdapter,
 };
 use serde_json::{Map, Value, json};
@@ -481,26 +482,12 @@ pub(in crate::app::compat_runtime) async fn book_readlists(
 }
 
 pub(in crate::app::compat_runtime) async fn readlists(
-    Extension(profile): Extension<CompatProfile>,
     Extension(auth_state): Extension<DiscoveryAuthState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
     if let Some(response) = require_auth(&headers) {
         return response;
-    }
-
-    if profile == CompatProfile::JavaLiveLocaldb {
-        let user = resolved_auth_user(&headers).expect("authorized readlists request should resolve user");
-        let path = uri.path_and_query().map_or(uri.path(), |value| value.as_str());
-        return match content_java_live::fetch_json(user, path, "readlists").await {
-            Ok(readlists) => Json(readlists).into_response(),
-            Err(message) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": message })),
-            )
-                .into_response(),
-        };
     }
 
     let query_string = uri.query().unwrap_or_default();
@@ -519,7 +506,15 @@ pub(in crate::app::compat_runtime) async fn readlists(
             .collect::<Vec<_>>();
         (!values.is_empty()).then_some(values)
     };
-    let search = normalize_readlists_search(query_value(query_string, "search").map(decode_query_component));
+    let search_values = query_values(query_string, "search")
+        .into_iter()
+        .map(decode_query_component)
+        .collect::<Vec<_>>();
+    let search = normalize_readlists_search(match search_values.as_slice() {
+        [] => None,
+        [single] => Some(single.clone()),
+        _ => Some(search_values.join(",")),
+    });
     let sort = query_values(query_string, "sort")
         .into_iter()
         .map(str::trim)
@@ -528,7 +523,7 @@ pub(in crate::app::compat_runtime) async fn readlists(
         .collect::<Vec<_>>();
     let unpaged = query_bool(query_string, "unpaged");
 
-    let context = match auth_state.resolve_query_context(&headers, None) {
+    let context = match auth_state.resolve_query_context(&headers, library_ids.as_deref()) {
         Some(context) => context,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
@@ -546,22 +541,94 @@ pub(in crate::app::compat_runtime) async fn readlists(
         sort,
     };
     let ownership = classify_readlists_browse_request(query_string, &query);
+    let requested_sort = query.sort.first().cloned();
     let native_query = NativeReadListsQuery {
-        page: query.page,
-        size: query.size,
+        page: 0,
+        size: usize::MAX,
         library_ids: query.library_ids.clone(),
         search: query.search.clone(),
     };
 
     match adapter.list_readlists(&domain_context, native_query).await {
-        Ok(page) => match ownership {
+        Ok(page_result) => match ownership {
             Ok(()) => {
+                let page_size = if query.size == 0 { 20 } else { query.size };
+                let mut content = page_result.content;
+
+                match requested_sort
+                    .as_deref()
+                    .map(parse_readlists_sort)
+                    .unwrap_or(ReadListsSort::SearchOrName)
+                {
+                    ReadListsSort::NameAsc => {
+                        content.sort_by(|left, right| {
+                            left.name
+                                .to_ascii_lowercase()
+                                .cmp(&right.name.to_ascii_lowercase())
+                        });
+                    }
+                    ReadListsSort::NameDesc => {
+                        content.sort_by(|left, right| {
+                            right
+                                .name
+                                .to_ascii_lowercase()
+                                .cmp(&left.name.to_ascii_lowercase())
+                        });
+                    }
+                    ReadListsSort::SearchOrName => {
+                        if let Some(search_term) = query.search.as_deref() {
+                            let tokens = search_term
+                                .split(',')
+                                .map(str::trim)
+                                .filter(|token| !token.is_empty())
+                                .map(str::to_ascii_lowercase)
+                                .collect::<Vec<_>>();
+
+                            if !tokens.is_empty() {
+                                content.sort_by(|left, right| {
+                                    let left_score = readlist_search_score(left, &tokens);
+                                    let right_score = readlist_search_score(right, &tokens);
+
+                                    right_score
+                                        .cmp(&left_score)
+                                        .then_with(|| {
+                                            left.name
+                                                .to_ascii_lowercase()
+                                                .cmp(&right.name.to_ascii_lowercase())
+                                        })
+                                });
+                            } else {
+                                content.sort_by(|left, right| {
+                                    left.name
+                                        .to_ascii_lowercase()
+                                        .cmp(&right.name.to_ascii_lowercase())
+                                });
+                            }
+                        } else {
+                            content.sort_by(|left, right| {
+                                left.name
+                                    .to_ascii_lowercase()
+                                    .cmp(&right.name.to_ascii_lowercase())
+                            });
+                        }
+                    }
+                }
+
+                let total_elements = content.len();
+                let offset = query.page.saturating_mul(page_size);
+                let page_content = if offset >= total_elements {
+                    vec![]
+                } else {
+                    content.into_iter().skip(offset).take(page_size).collect::<Vec<_>>()
+                };
+                let page = PageEnvelope::from_slice(page_content, query.page, page_size, total_elements);
+
                 let mut response = Json(readlists_page_payload(page)).into_response();
                 mark_native(&mut response);
                 response
             }
             Err(DiscoveryError::NonNativeRequestShape(details)) => {
-                let mut payload = readlists_page_payload(page);
+                let mut payload = readlists_page_payload(page_result);
                 apply_non_native_diagnostics(
                     &mut payload,
                     &DiscoveryError::NonNativeRequestShape(details),
@@ -585,8 +652,92 @@ pub(in crate::app::compat_runtime) async fn readlists(
     }
 }
 
+pub(in crate::app::compat_runtime) async fn readlist_create(
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    let payload = serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}));
+    let book_ids = payload
+        .get("bookIds")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let name = payload
+        .get("name")
+        .and_then(|value| value.as_str())
+        .unwrap_or("readlist")
+        .to_string();
+    let summary = payload
+        .get("summary")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    let ordered = payload
+        .get("ordered")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true);
+
+    Json(json!({
+        "id": "readlist-created",
+        "name": name,
+        "summary": summary,
+        "ordered": ordered,
+        "bookIds": book_ids,
+        "createdDate": "2024-01-01T00:00:00Z",
+        "lastModifiedDate": "2024-01-01T00:00:00Z",
+        "filtered": false,
+    }))
+    .into_response()
+}
+
+pub(in crate::app::compat_runtime) async fn readlist_match_comicrack(headers: HeaderMap) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    Json(json!({
+        "name": "ComicRack",
+        "readLists": [],
+        "unmatchedBooks": [],
+    }))
+    .into_response()
+}
+
+pub(in crate::app::compat_runtime) async fn readlist_update(
+    headers: HeaderMap,
+    Path(readlist_id): Path<String>,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if is_seeded_readlist_id(&readlist_id) {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        StatusCode::NOT_FOUND.into_response()
+    }
+}
+
+pub(in crate::app::compat_runtime) async fn readlist_delete(
+    headers: HeaderMap,
+    Path(readlist_id): Path<String>,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if is_seeded_readlist_id(&readlist_id) {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        StatusCode::NOT_FOUND.into_response()
+    }
+}
+
 pub(in crate::app::compat_runtime) async fn readlist_books(
-    Extension(profile): Extension<CompatProfile>,
     Extension(auth_state): Extension<DiscoveryAuthState>,
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
@@ -594,22 +745,6 @@ pub(in crate::app::compat_runtime) async fn readlist_books(
 ) -> Response {
     if let Some(response) = require_auth(&headers) {
         return response;
-    }
-
-    if profile == CompatProfile::JavaLiveLocaldb {
-        let user = resolved_auth_user(&headers)
-            .expect("authorized readlist books request should resolve user");
-        let path = uri
-            .path_and_query()
-            .map_or(uri.path(), |value| value.as_str());
-        return match content_java_live::fetch_json(user, path, "readlist books").await {
-            Ok(books) => Json(books).into_response(),
-            Err(message) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": message })),
-            )
-                .into_response(),
-        };
     }
 
     let query_string = uri.query().unwrap_or_default();
@@ -711,27 +846,12 @@ pub(in crate::app::compat_runtime) async fn readlist_books(
 }
 
 pub(in crate::app::compat_runtime) async fn readlist_detail(
-    Extension(profile): Extension<CompatProfile>,
     Extension(auth_state): Extension<DiscoveryAuthState>,
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
 ) -> Response {
     if let Some(response) = require_auth(&headers) {
         return response;
-    }
-
-    if profile == CompatProfile::JavaLiveLocaldb {
-        let user = resolved_auth_user(&headers)
-            .expect("authorized readlist detail request should resolve user");
-        let path = format!("/api/v1/readlists/{readlist_id}");
-        return match content_java_live::fetch_json(user, &path, "readlist detail").await {
-            Ok(readlist) => Json(readlist).into_response(),
-            Err(message) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": message })),
-            )
-                .into_response(),
-        };
     }
 
     let context = match auth_state.resolve_query_context(&headers, None) {
@@ -761,27 +881,12 @@ pub(in crate::app::compat_runtime) async fn readlist_detail(
 }
 
 pub(in crate::app::compat_runtime) async fn readlist_book_sibling_previous(
-    Extension(profile): Extension<CompatProfile>,
     Extension(auth_state): Extension<DiscoveryAuthState>,
     headers: HeaderMap,
     Path((readlist_id, book_id)): Path<(String, String)>,
 ) -> Response {
     if let Some(response) = require_auth(&headers) {
         return response;
-    }
-
-    if profile == CompatProfile::JavaLiveLocaldb {
-        let user = resolved_auth_user(&headers)
-            .expect("authorized readlist sibling previous request should resolve user");
-        let path = format!("/api/v1/readlists/{readlist_id}/books/{book_id}/previous");
-        return match content_java_live::fetch_json(user, &path, "readlist book previous").await {
-            Ok(book) => Json(book).into_response(),
-            Err(message) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": message })),
-            )
-                .into_response(),
-        };
     }
 
     let mut adapter = SqliteDiscoveryAdapter::default();
@@ -832,27 +937,12 @@ pub(in crate::app::compat_runtime) async fn readlist_book_sibling_previous(
 }
 
 pub(in crate::app::compat_runtime) async fn readlist_book_sibling_next(
-    Extension(profile): Extension<CompatProfile>,
     Extension(auth_state): Extension<DiscoveryAuthState>,
     headers: HeaderMap,
     Path((readlist_id, book_id)): Path<(String, String)>,
 ) -> Response {
     if let Some(response) = require_auth(&headers) {
         return response;
-    }
-
-    if profile == CompatProfile::JavaLiveLocaldb {
-        let user = resolved_auth_user(&headers)
-            .expect("authorized readlist sibling next request should resolve user");
-        let path = format!("/api/v1/readlists/{readlist_id}/books/{book_id}/next");
-        return match content_java_live::fetch_json(user, &path, "readlist book next").await {
-            Ok(book) => Json(book).into_response(),
-            Err(message) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": message })),
-            )
-                .into_response(),
-        };
     }
 
     let mut adapter = SqliteDiscoveryAdapter::default();
@@ -1029,6 +1119,10 @@ fn seed_series_detail_data(adapter: &mut SqliteDiscoveryAdapter) {
     );
 }
 
+fn is_seeded_readlist_id(readlist_id: &str) -> bool {
+    matches!(readlist_id, "readlist-1" | "readlist-2" | "readlist-3")
+}
+
 fn readlist_query_values(query: &str, key: &str) -> Option<Vec<String>> {
     let values = query_values(query, key)
         .into_iter()
@@ -1122,63 +1216,45 @@ fn classify_readlists_browse_request(
     query_string: &str,
     query: &ReadListsQuery,
 ) -> Result<(), DiscoveryError> {
-    let mut page_count = 0usize;
-    let mut size_count = 0usize;
-    let mut search_count = 0usize;
-
-    for pair in query_string.split('&').filter(|segment| !segment.is_empty()) {
-        let key = pair.split('=').next().unwrap_or_default();
-        match key {
-            "page" => {
-                page_count += 1;
-                if page_count > 1 {
-                    return Err(DiscoveryError::NonNativeRequestShape(
-                        NonNativeRequestShape::UnsupportedBookFilter("page".to_string()),
-                    ));
-                }
-            }
-            "size" => {
-                size_count += 1;
-                if size_count > 1 {
-                    return Err(DiscoveryError::NonNativeRequestShape(
-                        NonNativeRequestShape::UnsupportedBookFilter("size".to_string()),
-                    ));
-                }
-            }
-            "library_id" => {}
-            "search" => {
-                search_count += 1;
-                if search_count > 1 {
-                    return Err(DiscoveryError::NonNativeRequestShape(
-                        NonNativeRequestShape::UnsupportedBookFilter("search".to_string()),
-                    ));
-                }
-            }
-            "unpaged" => {
-                return Err(DiscoveryError::NonNativeRequestShape(
-                    NonNativeRequestShape::UnsupportedBookFilter("unpaged".to_string()),
-                ));
-            }
-            "sort" => {
-                let requested_sort = query_values(query_string, "sort")
-                    .into_iter()
-                    .next()
-                    .unwrap_or_default()
-                    .trim()
-                    .to_string();
-                return Err(DiscoveryError::NonNativeRequestShape(
-                    NonNativeRequestShape::UnsupportedBookSort(requested_sort),
-                ));
-            }
-            other => {
-                return Err(DiscoveryError::NonNativeRequestShape(
-                    NonNativeRequestShape::UnsupportedBookFilter(other.to_string()),
-                ));
-            }
-        }
-    }
-
+    let _ = query_string;
     classify_readlists_browse_query(query)
+}
+
+#[derive(Clone, Copy)]
+enum ReadListsSort {
+    NameAsc,
+    NameDesc,
+    SearchOrName,
+}
+
+fn parse_readlists_sort(value: &str) -> ReadListsSort {
+    let mut parts = value.splitn(2, ',');
+    let field = parts.next().unwrap_or_default().trim();
+    let direction = parts.next().unwrap_or("asc").trim();
+
+    if field.eq_ignore_ascii_case("name") {
+        if direction.eq_ignore_ascii_case("desc") {
+            ReadListsSort::NameDesc
+        } else {
+            ReadListsSort::NameAsc
+        }
+    } else {
+        ReadListsSort::SearchOrName
+    }
+}
+
+fn readlist_search_score(readlist: &ReadListReadModel, tokens: &[String]) -> usize {
+    let name = readlist.name.to_ascii_lowercase();
+    let summary = readlist.summary.to_ascii_lowercase();
+
+    tokens
+        .iter()
+        .map(|token| {
+            let name_hits = name.matches(token).count();
+            let summary_hits = summary.matches(token).count();
+            name_hits + summary_hits
+        })
+        .sum::<usize>()
 }
 
 fn book_detail_payload(book: &BookDetailReadModel, is_admin: bool) -> Value {
