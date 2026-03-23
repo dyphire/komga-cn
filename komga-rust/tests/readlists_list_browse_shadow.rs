@@ -122,6 +122,78 @@ async fn phase10_search_only_browse_routes_are_native_owned() {
 }
 
 #[tokio::test]
+async fn phase11_blank_effective_search_routes_fall_back_to_native_browse() {
+    let app = komga_rust::app::build_router();
+    let cases = [
+        OwnedBrowseRouteCase {
+            name: "protocol-only blank-effective search falls back to native browse",
+            basic_auth: USER_BASIC_AUTH,
+            uri: "/api/v1/readlists?search=",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 3,
+        },
+        OwnedBrowseRouteCase {
+            name: "whitespace-only search falls back to native browse",
+            basic_auth: USER_BASIC_AUTH,
+            uri: "/api/v1/readlists?search=%20%20",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 3,
+        },
+        OwnedBrowseRouteCase {
+            name: "blank-effective search with paging stays native-owned",
+            basic_auth: USER_BASIC_AUTH,
+            uri: "/api/v1/readlists?search=%20%20&page=1&size=1",
+            expected_ids: &["readlist-2"],
+            expected_page_number: 1,
+            expected_page_size: 1,
+            expected_total_elements: 3,
+        },
+        OwnedBrowseRouteCase {
+            name: "blank-effective search with repeated library filters stays native-owned",
+            basic_auth: USER_BASIC_AUTH,
+            uri: "/api/v1/readlists?search=%20%20&library_id=1&library_id=2",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 3,
+        },
+        OwnedBrowseRouteCase {
+            name: "blank-effective search with size zero parity stays native-owned",
+            basic_auth: USER_BASIC_AUTH,
+            uri: "/api/v1/readlists?search=%20%20&size=0",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 3,
+        },
+        OwnedBrowseRouteCase {
+            name: "blank-effective search keeps ACL-filtered visibility native-owned",
+            basic_auth: RESTRICTED_BASIC_AUTH,
+            uri: "/api/v1/readlists?search=%20%20",
+            expected_ids: &["readlist-1", "readlist-2"],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 2,
+        },
+        OwnedBrowseRouteCase {
+            name: "blank-effective search keeps unauthorized library intersection fail-closed",
+            basic_auth: LIMITED_BASIC_AUTH,
+            uri: "/api/v1/readlists?search=%20%20&library_id=2",
+            expected_ids: &[],
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_total_elements: 0,
+        },
+    ];
+
+    assert_native_owned_cases(&app, &cases).await;
+}
+
+#[tokio::test]
 async fn phase9_dependency_routes_remain_unchanged() {
     let app = komga_rust::app::build_router();
     let token = session_token_for_basic_auth(&app, USER_BASIC_AUTH).await;
@@ -166,16 +238,6 @@ async fn phase9_dependency_routes_remain_unchanged() {
 async fn phase9_excluded_browse_list_variants_stay_explicitly_non_native() {
     let app = komga_rust::app::build_router();
     let cases = [
-        ExplicitNonNativeCase {
-            name: "blank search stays non-native",
-            uri: "/api/v1/readlists?search=",
-            expected_shape: "UnsupportedBookFilter(search)",
-        },
-        ExplicitNonNativeCase {
-            name: "whitespace-only search stays non-native",
-            uri: "/api/v1/readlists?search=%20%20",
-            expected_shape: "UnsupportedBookFilter(search)",
-        },
         ExplicitNonNativeCase {
             name: "explicit unpaged true stays non-native",
             uri: "/api/v1/readlists?unpaged=true",
@@ -225,6 +287,41 @@ async fn phase9_excluded_browse_list_variants_stay_explicitly_non_native() {
             name: "unsupported extra query key stays non-native",
             uri: "/api/v1/readlists?search=alpha&foo=bar",
             expected_shape: "UnsupportedBookFilter(foo)",
+        },
+        ExplicitNonNativeCase {
+            name: "blank search plus sort stays non-native by sort precedence",
+            uri: "/api/v1/readlists?search=&sort=name,asc",
+            expected_shape: "UnsupportedBookSort(name,asc)",
+        },
+        ExplicitNonNativeCase {
+            name: "blank search plus unpaged=true stays non-native by unpaged precedence",
+            uri: "/api/v1/readlists?search=&unpaged=true",
+            expected_shape: "UnsupportedBookFilter(unpaged)",
+        },
+        ExplicitNonNativeCase {
+            name: "blank search plus unpaged=false still stays non-native by unpaged precedence",
+            uri: "/api/v1/readlists?search=&unpaged=false",
+            expected_shape: "UnsupportedBookFilter(unpaged)",
+        },
+        ExplicitNonNativeCase {
+            name: "blank search plus duplicate page stays non-native by page precedence",
+            uri: "/api/v1/readlists?search=&page=0&page=1",
+            expected_shape: "UnsupportedBookFilter(page)",
+        },
+        ExplicitNonNativeCase {
+            name: "blank search plus duplicate size stays non-native by size precedence",
+            uri: "/api/v1/readlists?search=&size=20&size=1",
+            expected_shape: "UnsupportedBookFilter(size)",
+        },
+        ExplicitNonNativeCase {
+            name: "blank search plus unsupported extra key stays non-native by extra-key precedence",
+            uri: "/api/v1/readlists?search=&foo=bar",
+            expected_shape: "UnsupportedBookFilter(foo)",
+        },
+        ExplicitNonNativeCase {
+            name: "duplicate blank-effective search stays non-native",
+            uri: "/api/v1/readlists?search=&search=%20%20",
+            expected_shape: "UnsupportedBookFilter(search)",
         },
     ];
 

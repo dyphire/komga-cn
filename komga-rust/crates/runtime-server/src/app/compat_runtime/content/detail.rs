@@ -7,7 +7,7 @@ use komga_application::discovery::{
     DiscoveryQueryRepository, NativeReadListBooksQuery, NativeReadListsQuery,
     ReadListBooksOwnership, ReadListBooksQuery, ReadListDetailQuery, ReadListsQuery,
     SeriesCollectionsQuery, SeriesDetailQuery, classify_readlist_books_query,
-    classify_readlists_browse_query,
+    classify_readlists_browse_query, normalize_readlists_search,
 };
 use komga_domain::discovery::{
     BookDetailReadModel, CollectionReadModel, DiscoveryError, NonNativeRequestShape,
@@ -519,10 +519,7 @@ pub(in crate::app::compat_runtime) async fn readlists(
             .collect::<Vec<_>>();
         (!values.is_empty()).then_some(values)
     };
-    let search = query_value(query_string, "search")
-        .map(decode_query_component)
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
+    let search = normalize_readlists_search(query_value(query_string, "search").map(decode_query_component));
     let sort = query_values(query_string, "sort")
         .into_iter()
         .map(str::trim)
@@ -1151,7 +1148,7 @@ fn classify_readlists_browse_request(
             "library_id" => {}
             "search" => {
                 search_count += 1;
-                if search_count > 1 || query.search.is_none() {
+                if search_count > 1 {
                     return Err(DiscoveryError::NonNativeRequestShape(
                         NonNativeRequestShape::UnsupportedBookFilter("search".to_string()),
                     ));

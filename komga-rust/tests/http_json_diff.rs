@@ -22,6 +22,9 @@ mod helpers;
 
 use helpers::{
     execute_case, execute_case_async, live_http_json_case_ids,
+    phase11_readlists_blank_search_all_case_ids,
+    phase11_readlists_blank_search_negative_case_ids,
+    phase11_readlists_blank_search_owned_case_ids,
     phase10_readlists_search_all_case_ids, phase10_readlists_search_negative_case_ids,
     phase10_readlists_search_owned_case_ids,
     phase8_readlist_books_family_all_case_ids, phase8_readlist_books_family_negative_case_ids,
@@ -56,4 +59,9 @@ fn readlists_list_browse_case_inventory_loads() {
 #[test]
 fn phase10_readlists_search_case_inventory_loads() {
     config::phase10_readlists_search_case_inventory_loads();
+}
+
+#[test]
+fn phase11_readlists_blank_search_case_inventory_loads() {
+    config::phase11_readlists_blank_search_case_inventory_loads();
 }

@@ -12,6 +12,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import test_gate_fixtures as fixtures
+from gate_eval_data import PHASE11_READLISTS_BLANK_SEARCH_CLOSURE_LABEL
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -28,6 +29,8 @@ seed_phase8_readlist_books_family_closure_evidence = fixtures.seed_phase8_readli
 seed_phase9_readlists_list_browse_closure_evidence = fixtures.seed_phase9_readlists_list_browse_closure_evidence
 seed_phase10_readlists_search_contract_evidence = fixtures.seed_phase10_readlists_search_contract_evidence
 seed_phase10_readlists_search_closure_evidence = fixtures.seed_phase10_readlists_search_closure_evidence
+seed_phase11_readlists_blank_search_contract_evidence = fixtures.seed_phase11_readlists_blank_search_contract_evidence
+seed_phase11_readlists_blank_search_closure_evidence = fixtures.seed_phase11_readlists_blank_search_closure_evidence
 
 
 def run_gate(evidence_root: Path, output_dir: Path, *, label: str) -> subprocess.CompletedProcess[str]:
@@ -54,6 +57,13 @@ def run_gate(evidence_root: Path, output_dir: Path, *, label: str) -> subprocess
 
 
 class GateRegressionTests(unittest.TestCase):
+    def test_phase11_readlists_blank_search_closure_label_name_is_printable(self) -> None:
+        print(PHASE11_READLISTS_BLANK_SEARCH_CLOSURE_LABEL)
+        self.assertEqual(
+            PHASE11_READLISTS_BLANK_SEARCH_CLOSURE_LABEL,
+            'phase11-readlists-blank-search-closure',
+        )
+
     def test_rejects_admin_queue_structured_parity_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -1502,6 +1512,218 @@ class GateRegressionTests(unittest.TestCase):
             self.assertEqual(failing_check['status'], 'fail')
             self.assertTrue(any('explicit failure markers' in detail for detail in failing_check['details']))
 
+    def test_phase11_readlists_blank_search_contract_matrix_freezes_only_blank_effective_search_shapes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            evidence_root = temp_path / 'evidence'
+
+            seed_phase11_readlists_blank_search_contract_evidence(evidence_root)
+
+            contract_text = (
+                evidence_root / 'task-1-blank-contract' / 'phase11-readlists-blank-search-contract.txt'
+            ).read_text(encoding='utf-8')
+
+            self.assertIn('phase11_readlists_blank_search_matrix_is_frozen', contract_text)
+            self.assertIn('GET /api/v1/readlists?search=', contract_text)
+            self.assertIn('GET /api/v1/readlists?search=%20%20', contract_text)
+            self.assertIn('GET /api/v1/readlists?search={blank-effective}&page={page}&size={size}', contract_text)
+            self.assertIn(
+                'GET /api/v1/readlists?search={blank-effective}&library_id={libraryId...}&page={page}&size={size}',
+                contract_text,
+            )
+            self.assertIn(
+                'GET /api/v1/readlists?search={blank-effective}&size=0 (browse fallback; matches JVM exactly)',
+                contract_text,
+            )
+            self.assertIn('Protocol-only coverage token: ?search=', contract_text)
+            self.assertIn('UI-reachable whitespace example: ?search=%20%20', contract_text)
+            self.assertNotIn('GET /api/v1/readlists?search=alpha', contract_text)
+
+    def test_phase11_readlists_blank_search_exclusions_keep_precedence_and_duplicates_non_native(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            evidence_root = temp_path / 'evidence'
+
+            seed_phase11_readlists_blank_search_contract_evidence(evidence_root)
+
+            exclusions_text = (
+                evidence_root / 'task-1-blank-contract' / 'phase11-readlists-blank-search-exclusions.txt'
+            ).read_text(encoding='utf-8')
+
+            self.assertIn('phase11_blank_search_precedence_routes_remain_explicitly_non_native', exclusions_text)
+            self.assertIn('GET /api/v1/readlists?search=&sort=name,asc', exclusions_text)
+            self.assertIn('GET /api/v1/readlists?search=&unpaged=true', exclusions_text)
+            self.assertIn('GET /api/v1/readlists?search=&page=0&page=1', exclusions_text)
+            self.assertIn('GET /api/v1/readlists?search=&size=20&size=1', exclusions_text)
+            self.assertIn('GET /api/v1/readlists?search=&foo=bar', exclusions_text)
+            self.assertIn('GET /api/v1/readlists?search=&search=%20%20', exclusions_text)
+            self.assertIn('shadow-java-writer', exclusions_text)
+
+    def test_phase11_readlists_blank_search_closure_label_passes_with_runtime_and_compat_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            evidence_root = temp_path / 'evidence'
+            output_dir = temp_path / 'output'
+            seed_common_evidence(
+                evidence_root,
+                neutral_transcripts=True,
+                admin_queue_payload=build_admin_queue_payload(
+                    status='action-exercised-parity-ok',
+                    can_claim_admin_queue_parity=True,
+                ),
+            )
+            seed_phase11_readlists_blank_search_closure_evidence(evidence_root)
+
+            result = run_gate(evidence_root, output_dir, label='phase11-readlists-blank-search-closure')
+
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=f'gate unexpectedly failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}',
+            )
+
+            summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
+            self.assertEqual(summary['overall'], 'pass')
+            self.assertEqual(summary.get('evaluation_scope'), 'phase11-readlists-blank-search-closure-shadow')
+            self.assertFalse(summary['governance']['cutover']['allowed'])
+            self.assertFalse(summary['governance']['phase11_readlists_blank_search_non_claims']['allowed'])
+            self.assertIn(
+                'GET /api/v1/readlists?search=',
+                summary['readlists_blank_search_closure_slice']['owned_routes'],
+            )
+            self.assertIn(
+                'GET /api/v1/readlists?search=%20%20',
+                summary['readlists_blank_search_closure_slice']['owned_routes'],
+            )
+            self.assertIn(
+                'Phase 10 readlists non-blank search closure',
+                summary['readlists_blank_search_closure_slice']['required_pre_owned_dependencies'],
+            )
+            self.assertIn(
+                'GET /api/v1/readlists?search=&sort=...',
+                summary['readlists_blank_search_closure_slice']['excluded_branches'],
+            )
+            self.assertIn(
+                'GET /api/v1/readlists?search=&search=...',
+                summary['readlists_blank_search_closure_slice']['excluded_branches'],
+            )
+
+            compat_check = next(
+                item for item in summary['checks'] if item['id'] == 'phase11_readlists_blank_search_compat'
+            )
+            self.assertEqual(compat_check['status'], 'pass')
+            self.assertFalse(any('missing required discovery markers' in detail for detail in compat_check['details']))
+            self.assertTrue(any('no explicit failure markers' in detail for detail in compat_check['details']))
+
+            report = (output_dir / 'report.md').read_text(encoding='utf-8')
+            self.assertIn('Phase11 Readlists-Blank-Search-Closure Runbook', report)
+            self.assertIn('`GET /api/v1/readlists?search=`', report)
+            self.assertIn('`GET /api/v1/readlists?search=&sort=...`', report)
+            self.assertIn('Phase 10 readlists non-blank search closure', report)
+            self.assertIn('gate accepts the real redirected `http_json_diff` cargo transcript', report)
+
+    def test_phase11_readlists_blank_search_closure_label_fails_closed_when_runtime_artifact_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            evidence_root = temp_path / 'evidence'
+            output_dir = temp_path / 'output'
+            seed_common_evidence(
+                evidence_root,
+                neutral_transcripts=True,
+                admin_queue_payload=build_admin_queue_payload(
+                    status='action-exercised-parity-ok',
+                    can_claim_admin_queue_parity=True,
+                ),
+            )
+            seed_phase11_readlists_blank_search_closure_evidence(
+                evidence_root,
+                include_runtime=False,
+            )
+
+            result = run_gate(evidence_root, output_dir, label='phase11-readlists-blank-search-closure')
+
+            self.assertEqual(
+                result.returncode,
+                1,
+                msg=f'gate unexpectedly passed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}',
+            )
+
+            summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
+            self.assertEqual(summary['overall'], 'fail')
+            failing_check = next(
+                item for item in summary['checks'] if item['id'] == 'phase11_readlists_blank_search_runtime'
+            )
+            self.assertEqual(failing_check['status'], 'fail')
+            self.assertTrue(any('Missing evidence file' in detail for detail in failing_check['details']))
+
+    def test_phase11_readlists_blank_search_closure_label_fails_closed_when_compat_artifact_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            evidence_root = temp_path / 'evidence'
+            output_dir = temp_path / 'output'
+            seed_common_evidence(
+                evidence_root,
+                neutral_transcripts=True,
+                admin_queue_payload=build_admin_queue_payload(
+                    status='action-exercised-parity-ok',
+                    can_claim_admin_queue_parity=True,
+                ),
+            )
+            seed_phase11_readlists_blank_search_closure_evidence(
+                evidence_root,
+                include_compat=False,
+            )
+
+            result = run_gate(evidence_root, output_dir, label='phase11-readlists-blank-search-closure')
+
+            self.assertEqual(
+                result.returncode,
+                1,
+                msg=f'gate unexpectedly passed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}',
+            )
+
+            summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
+            self.assertEqual(summary['overall'], 'fail')
+            failing_check = next(
+                item for item in summary['checks'] if item['id'] == 'phase11_readlists_blank_search_compat'
+            )
+            self.assertEqual(failing_check['status'], 'fail')
+            self.assertTrue(any('Missing evidence file' in detail for detail in failing_check['details']))
+
+    def test_phase11_readlists_blank_search_closure_label_fails_closed_when_compat_output_reports_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            evidence_root = temp_path / 'evidence'
+            output_dir = temp_path / 'output'
+            seed_common_evidence(
+                evidence_root,
+                neutral_transcripts=True,
+                admin_queue_payload=build_admin_queue_payload(
+                    status='action-exercised-parity-ok',
+                    can_claim_admin_queue_parity=True,
+                ),
+            )
+            seed_phase11_readlists_blank_search_closure_evidence(
+                evidence_root,
+                compat_failure=True,
+            )
+
+            result = run_gate(evidence_root, output_dir, label='phase11-readlists-blank-search-closure')
+
+            self.assertEqual(
+                result.returncode,
+                1,
+                msg=f'gate unexpectedly passed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}',
+            )
+
+            summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
+            self.assertEqual(summary['overall'], 'fail')
+            failing_check = next(
+                item for item in summary['checks'] if item['id'] == 'phase11_readlists_blank_search_compat'
+            )
+            self.assertEqual(failing_check['status'], 'fail')
+            self.assertTrue(any('explicit failure markers' in detail for detail in failing_check['details']))
+
 
 if __name__ == '__main__':
-    unittest.main(testRunner=unittest.TextTestRunner(stream=sys.stdout))
+    unittest.main(testRunner=unittest.TextTestRunner(stream=sys.stdout, verbosity=2))

@@ -1133,11 +1133,6 @@ pub(super) fn readlists_list_browse_case_inventory_loads() {
         .iter()
         .find(|it| it.id == "P9-READLISTS-LIST-BROWSE-SIZE-ZERO-OWNED")
         .expect("phase9 size=0 browse case should exist");
-    let search = config
-        .cases
-        .iter()
-        .find(|it| it.id == "P9-READLISTS-LIST-BROWSE-NEGATIVE-SEARCH")
-        .expect("phase9 search browse exclusion case should exist");
     let unpaged_true = config
         .cases
         .iter()
@@ -1165,7 +1160,6 @@ pub(super) fn readlists_list_browse_case_inventory_loads() {
         "/api/v1/readlists?library_id=1&library_id=2&page=1&size=1"
     );
     assert_eq!(size_zero.path, "/api/v1/readlists?size=0");
-    assert_eq!(search.path, "/api/v1/readlists?search=");
     assert_eq!(unpaged_true.path, "/api/v1/readlists?unpaged=true");
     assert_eq!(sort.path, "/api/v1/readlists?sort=name,desc");
     assert_eq!(
@@ -1294,16 +1288,6 @@ pub(super) fn phase10_readlists_search_case_inventory_loads() {
         .iter()
         .find(|it| it.id == "P10-READLISTS-SEARCH-NO-RESULTS-OWNED")
         .expect("phase10 no-results search case should exist");
-    let blank = config
-        .cases
-        .iter()
-        .find(|it| it.id == "P10-READLISTS-SEARCH-NEGATIVE-BLANK")
-        .expect("phase10 blank search exclusion case should exist");
-    let whitespace = config
-        .cases
-        .iter()
-        .find(|it| it.id == "P10-READLISTS-SEARCH-NEGATIVE-WHITESPACE")
-        .expect("phase10 whitespace search exclusion case should exist");
     let sort = config
         .cases
         .iter()
@@ -1349,8 +1333,6 @@ pub(super) fn phase10_readlists_search_case_inventory_loads() {
         "/api/v1/readlists?search=alpha&library_id=1&library_id=2&size=0"
     );
     assert_eq!(no_results.path, "/api/v1/readlists?search=zzzz-no-match");
-    assert_eq!(blank.path, "/api/v1/readlists?search=");
-    assert_eq!(whitespace.path, "/api/v1/readlists?search=%20%20");
     assert_eq!(sort.path, "/api/v1/readlists?search=alpha&sort=name,asc");
     assert_eq!(
         unpaged_true.path,
@@ -1365,6 +1347,193 @@ pub(super) fn phase10_readlists_search_case_inventory_loads() {
         "/api/v1/readlists?search=alpha&size=20&size=1"
     );
     assert_eq!(extra.path, "/api/v1/readlists?search=alpha&foo=bar");
+}
+
+#[test]
+pub(super) fn phase11_readlists_blank_search_case_inventory_loads() {
+    let config = HarnessConfig::load_default().expect("default compat cases should load");
+    let owned_case_ids: BTreeSet<&str> = phase11_readlists_blank_search_owned_case_ids()
+        .iter()
+        .copied()
+        .collect();
+    let negative_case_ids: BTreeSet<&str> = phase11_readlists_blank_search_negative_case_ids()
+        .iter()
+        .copied()
+        .collect();
+    let all_case_ids: BTreeSet<&str> = phase11_readlists_blank_search_all_case_ids()
+        .iter()
+        .copied()
+        .collect();
+
+    assert!(
+        owned_case_ids.is_disjoint(&negative_case_ids),
+        "phase11 owned and negative compat inventory buckets must stay disjoint",
+    );
+    assert_eq!(
+        owned_case_ids
+            .union(&negative_case_ids)
+            .copied()
+            .collect::<BTreeSet<_>>(),
+        all_case_ids,
+        "phase11 owned + negative compat inventory buckets must explain the full case inventory",
+    );
+
+    for id in phase11_readlists_blank_search_all_case_ids() {
+        let case = config
+            .cases
+            .iter()
+            .find(|it| it.id == *id)
+            .unwrap_or_else(|| panic!("missing phase11 readlists blank-search compat case: {id}"));
+
+        assert_eq!(
+            config.cases.iter().filter(|it| it.id == *id).count(),
+            1,
+            "phase11 readlists blank-search case id must be unique: {id}",
+        );
+        assert_eq!(
+            case.method, "GET",
+            "phase11 readlists blank-search cases stay GET-only: {id}",
+        );
+        assert_eq!(
+            case.body, None,
+            "phase11 readlists blank-search cases must stay body-less: {id}",
+        );
+        assert!(
+            case.setup.is_none(),
+            "phase11 readlists blank-search compat cases must stay self-contained without setup blocks: {id}",
+        );
+        assert_eq!(
+            PathBuf::from(&config.output_dir).join(format!("{id}.json")),
+            PathBuf::from("target/compat-diff").join(format!("{id}.json")),
+            "phase11 readlists blank-search diff evidence path contract changed for {id}",
+        );
+        assert_eq!(
+            case.headers
+                .as_ref()
+                .and_then(|headers| headers.get("X-Auth-Token")),
+            Some(&"${SESSION_TOKEN}".to_string()),
+            "phase11 readlists blank-search compat cases must use explicit session-token wiring: {id}",
+        );
+
+        let ownership_header = case
+            .headers
+            .as_ref()
+            .and_then(|headers| headers.get("X-Komga-Compat-Search-Ownership"));
+
+        if owned_case_ids.contains(id) {
+            assert_eq!(
+                ownership_header, None,
+                "phase11 owned blank-search case must not carry a shadow marker: {id}",
+            );
+        } else {
+            assert_eq!(
+                ownership_header,
+                Some(&"shadow-java-writer".to_string()),
+                "phase11 negative blank-search case must carry a shadow marker: {id}",
+            );
+        }
+    }
+
+    let default_blank = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P11-READLISTS-BLANK-SEARCH-DEFAULT-OWNED")
+        .expect("phase11 default blank-effective search case should exist");
+    let whitespace = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P11-READLISTS-BLANK-SEARCH-WHITESPACE-OWNED")
+        .expect("phase11 whitespace blank-effective search case should exist");
+    let page_size = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P11-READLISTS-BLANK-SEARCH-PAGE-SIZE-OWNED")
+        .expect("phase11 page/size blank-effective search case should exist");
+    let repeated_library = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P11-READLISTS-BLANK-SEARCH-REPEATED-LIBRARY-ID-OWNED")
+        .expect("phase11 repeated library blank-effective search case should exist");
+    let repeated_library_page_size = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P11-READLISTS-BLANK-SEARCH-REPEATED-LIBRARY-ID-PAGE-SIZE-OWNED")
+        .expect("phase11 repeated library + page/size blank-effective search case should exist");
+    let size_zero = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P11-READLISTS-BLANK-SEARCH-SIZE-ZERO-OWNED")
+        .expect("phase11 size=0 blank-effective search case should exist");
+    let repeated_library_size_zero = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P11-READLISTS-BLANK-SEARCH-REPEATED-LIBRARY-ID-SIZE-ZERO-OWNED")
+        .expect("phase11 repeated library size=0 blank-effective search case should exist");
+    let sort = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P11-READLISTS-BLANK-SEARCH-NEGATIVE-SORT")
+        .expect("phase11 sort exclusion case should exist");
+    let unpaged_true = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P11-READLISTS-BLANK-SEARCH-NEGATIVE-UNPAGED-TRUE")
+        .expect("phase11 unpaged=true exclusion case should exist");
+    let duplicate_page = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P11-READLISTS-BLANK-SEARCH-NEGATIVE-DUPLICATE-PAGE")
+        .expect("phase11 duplicate page exclusion case should exist");
+    let duplicate_size = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P11-READLISTS-BLANK-SEARCH-NEGATIVE-DUPLICATE-SIZE")
+        .expect("phase11 duplicate size exclusion case should exist");
+    let extra = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P11-READLISTS-BLANK-SEARCH-NEGATIVE-UNSUPPORTED-EXTRA")
+        .expect("phase11 unsupported extra exclusion case should exist");
+    let duplicate_search = config
+        .cases
+        .iter()
+        .find(|it| it.id == "P11-READLISTS-BLANK-SEARCH-NEGATIVE-DUPLICATE-SEARCH")
+        .expect("phase11 duplicate search exclusion case should exist");
+
+    assert_eq!(default_blank.path, "/api/v1/readlists?search=");
+    assert_eq!(whitespace.path, "/api/v1/readlists?search=%20%20");
+    assert_eq!(
+        page_size.path,
+        "/api/v1/readlists?search=%20%20&page=1&size=1"
+    );
+    assert_eq!(
+        repeated_library.path,
+        "/api/v1/readlists?search=%20%20&library_id=1&library_id=2"
+    );
+    assert_eq!(
+        repeated_library_page_size.path,
+        "/api/v1/readlists?search=%20%20&library_id=1&library_id=2&page=1&size=1"
+    );
+    assert_eq!(size_zero.path, "/api/v1/readlists?search=%20%20&size=0");
+    assert_eq!(
+        repeated_library_size_zero.path,
+        "/api/v1/readlists?search=%20%20&library_id=1&library_id=2&size=0"
+    );
+    assert_eq!(sort.path, "/api/v1/readlists?search=&sort=name,asc");
+    assert_eq!(unpaged_true.path, "/api/v1/readlists?search=&unpaged=true");
+    assert_eq!(
+        duplicate_page.path,
+        "/api/v1/readlists?search=&page=0&page=1"
+    );
+    assert_eq!(
+        duplicate_size.path,
+        "/api/v1/readlists?search=&size=20&size=1"
+    );
+    assert_eq!(extra.path, "/api/v1/readlists?search=&foo=bar");
+    assert_eq!(
+        duplicate_search.path,
+        "/api/v1/readlists?search=&search=%20%20"
+    );
 }
 
 #[test]

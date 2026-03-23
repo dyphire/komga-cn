@@ -44,6 +44,8 @@ class GateEvaluators:
             re.compile(r"\bpanic(?:!|:)\b", re.IGNORECASE),
             re.compile(r"^FAIL:\s", re.IGNORECASE),
             re.compile(r"^FAILED\s", re.IGNORECASE),
+            re.compile(r"^FAILED \(failures=", re.IGNORECASE),
+            re.compile(r"^FAILED \(errors=", re.IGNORECASE),
             re.compile(r"contains failure/blocker markers", re.IGNORECASE),
         ]
         return any(pattern.search(line) for pattern in failure_patterns)

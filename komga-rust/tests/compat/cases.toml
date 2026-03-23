@@ -249,6 +249,84 @@ path = "/api/v1/readlists?search=alpha&foo=bar"
 headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
 
 [[cases]]
+id = "P11-READLISTS-BLANK-SEARCH-DEFAULT-OWNED"
+method = "GET"
+path = "/api/v1/readlists?search="
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P11-READLISTS-BLANK-SEARCH-WHITESPACE-OWNED"
+method = "GET"
+path = "/api/v1/readlists?search=%20%20"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P11-READLISTS-BLANK-SEARCH-PAGE-SIZE-OWNED"
+method = "GET"
+path = "/api/v1/readlists?search=%20%20&page=1&size=1"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P11-READLISTS-BLANK-SEARCH-REPEATED-LIBRARY-ID-OWNED"
+method = "GET"
+path = "/api/v1/readlists?search=%20%20&library_id=1&library_id=2"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P11-READLISTS-BLANK-SEARCH-REPEATED-LIBRARY-ID-PAGE-SIZE-OWNED"
+method = "GET"
+path = "/api/v1/readlists?search=%20%20&library_id=1&library_id=2&page=1&size=1"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P11-READLISTS-BLANK-SEARCH-SIZE-ZERO-OWNED"
+method = "GET"
+path = "/api/v1/readlists?search=%20%20&size=0"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P11-READLISTS-BLANK-SEARCH-REPEATED-LIBRARY-ID-SIZE-ZERO-OWNED"
+method = "GET"
+path = "/api/v1/readlists?search=%20%20&library_id=1&library_id=2&size=0"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}" }
+
+[[cases]]
+id = "P11-READLISTS-BLANK-SEARCH-NEGATIVE-SORT"
+method = "GET"
+path = "/api/v1/readlists?search=&sort=name,asc"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases]]
+id = "P11-READLISTS-BLANK-SEARCH-NEGATIVE-UNPAGED-TRUE"
+method = "GET"
+path = "/api/v1/readlists?search=&unpaged=true"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases]]
+id = "P11-READLISTS-BLANK-SEARCH-NEGATIVE-DUPLICATE-PAGE"
+method = "GET"
+path = "/api/v1/readlists?search=&page=0&page=1"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases]]
+id = "P11-READLISTS-BLANK-SEARCH-NEGATIVE-DUPLICATE-SIZE"
+method = "GET"
+path = "/api/v1/readlists?search=&size=20&size=1"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases]]
+id = "P11-READLISTS-BLANK-SEARCH-NEGATIVE-UNSUPPORTED-EXTRA"
+method = "GET"
+path = "/api/v1/readlists?search=&foo=bar"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases]]
+id = "P11-READLISTS-BLANK-SEARCH-NEGATIVE-DUPLICATE-SEARCH"
+method = "GET"
+path = "/api/v1/readlists?search=&search=%20%20"
+headers = { "X-Auth-Token" = "${SESSION_TOKEN}", "X-Komga-Compat-Search-Ownership" = "shadow-java-writer" }
+
+[[cases]]
 id = "P2-DISCOVERY-LIBRARIES-OWNED"
 method = "GET"
 path = "/api/v1/libraries"

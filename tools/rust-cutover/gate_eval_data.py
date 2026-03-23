@@ -10,6 +10,7 @@ PHASE7_SERIES_ONESHOT_QUERY_CLOSURE_LABEL = "phase7-series-oneshot-query-closure
 PHASE8_READLIST_BOOKS_FAMILY_CLOSURE_LABEL = "phase8-readlist-books-family-closure"
 PHASE9_READLISTS_LIST_BROWSE_CLOSURE_LABEL = "phase9-readlists-list-browse-closure"
 PHASE10_READLISTS_SEARCH_CLOSURE_LABEL = "phase10-readlists-search-closure"
+PHASE11_READLISTS_BLANK_SEARCH_CLOSURE_LABEL = "phase11-readlists-blank-search-closure"
 
 discovery_supported_scope = [
     "GET /api/v1/libraries",
@@ -217,6 +218,38 @@ phase10_readlists_search_out_of_slice = [
     "readlist dialogs/import/edit/delete admin actions",
     "write/media/reader/SSE/whole-cutover claims",
 ]
+phase11_readlists_blank_search_owned_scope = [
+    "GET /api/v1/readlists?search=",
+    "GET /api/v1/readlists?search=%20%20",
+    "GET /api/v1/readlists?search={blank-effective}&page={page}&size={size}",
+    "GET /api/v1/readlists?search={blank-effective}&library_id={libraryId} (single or repeated library_id)",
+    "GET /api/v1/readlists?search={blank-effective}&library_id={libraryId...}&page={page}&size={size}",
+    "GET /api/v1/readlists?search={blank-effective}&size=0 (browse fallback; matches JVM exactly)",
+    "GET /api/v1/readlists?search={blank-effective}&library_id={libraryId...}&size=0 (browse fallback; matches JVM exactly)",
+]
+phase11_readlists_blank_search_pre_owned_dependencies = [
+    "Phase 2 catalog discovery read slice",
+    "Phase 3 detail read slice",
+    "Phase 4 readlist-context read",
+    "Phase 5 oneshot closure",
+    "Phase 6 oneshot readlist-context closure",
+    "Phase 7 series oneshot query closure",
+    "Phase 8 readlist books family closure",
+    "Phase 9 readlists list browse closure",
+    "Phase 10 readlists non-blank search closure",
+]
+phase11_readlists_blank_search_out_of_slice = [
+    "GET /api/v1/readlists?search=&sort=...",
+    "GET /api/v1/readlists?search=&unpaged=true",
+    "GET /api/v1/readlists?search=&page=...&page=...",
+    "GET /api/v1/readlists?search=&size=...&size=...",
+    "GET /api/v1/readlists?search=&foo=bar",
+    "GET /api/v1/readlists?search=&search=...",
+    "browse-only Phase 9 GET /api/v1/readlists shapes remain governed by Phase 9 rather than promoted into Phase 11",
+    "non-blank Phase 10 GET /api/v1/readlists?search=... shapes remain governed by Phase 10 rather than re-declared in Phase 11",
+    "readlist dialogs/import/edit/delete admin actions",
+    "write/media/reader/SSE/whole-cutover claims",
+]
 
 phase3_skipped_base_checks: dict[str, str] = {
     "auth_api_key": "Skipped for phase3-detail-read: API key parity is outside this direct-browse detail-read runbook.",
@@ -301,12 +334,23 @@ phase10_skipped_base_checks: dict[str, str] = {
     "packaging_tray": "Skipped for phase10-readlists-search-closure: packaging/tray startup contract is outside this slice gate.",
     "external_release_credentials": "Skipped for phase10-readlists-search-closure: release credentials are not part of readlists search closure readiness.",
 }
+phase11_skipped_base_checks: dict[str, str] = {
+    "auth_api_key": "Skipped for phase11-readlists-blank-search-closure: API key parity is outside this blank-effective readlists search slice gate.",
+    "libraries_visibility": "Skipped for phase11-readlists-blank-search-closure: discovery libraries parity is not part of this blank-effective readlists search slice gate.",
+    "opds": "Skipped for phase11-readlists-blank-search-closure: OPDS parity is outside this blank-effective readlists search slice gate.",
+    "cache_file_headers": "Skipped for phase11-readlists-blank-search-closure: binary metadata/header parity is outside this blank-effective readlists search slice gate.",
+    "read_progress": "Skipped for phase11-readlists-blank-search-closure: this runbook does not claim Tachiyomi/read-progress ownership.",
+    "server_management_browser_smoke": "Skipped for phase11-readlists-blank-search-closure: server-management/browser-ops acceptance is outside this blank-effective readlists search slice.",
+    "packaging_tray": "Skipped for phase11-readlists-blank-search-closure: packaging/tray startup contract is outside this slice gate.",
+    "external_release_credentials": "Skipped for phase11-readlists-blank-search-closure: release credentials are not part of blank-effective readlists search closure readiness.",
+}
 
 
 def build_checks(
     run_label: str,
     evidence_root: Path,
 ) -> tuple[
+    list[dict[str, object]],
     list[dict[str, object]],
     list[dict[str, object]],
     list[dict[str, object]],
@@ -326,6 +370,7 @@ def build_checks(
     is_phase8_readlist_books_family_closure = run_label == PHASE8_READLIST_BOOKS_FAMILY_CLOSURE_LABEL
     is_phase9_readlists_list_browse_closure = run_label == PHASE9_READLISTS_LIST_BROWSE_CLOSURE_LABEL
     is_phase10_readlists_search_closure = run_label == PHASE10_READLISTS_SEARCH_CLOSURE_LABEL
+    is_phase11_readlists_blank_search_closure = run_label == PHASE11_READLISTS_BLANK_SEARCH_CLOSURE_LABEL
 
     base_checks = [
         {
@@ -1248,5 +1293,28 @@ def build_checks(
             },
         ]
 
-    checks = base_checks + discovery_checks + phase3_checks + phase4_checks + phase5_checks + phase6_checks + phase7_checks + phase8_checks + phase9_checks + phase10_checks
-    return checks, discovery_checks, phase3_checks, phase4_checks, phase5_checks, phase6_checks, phase8_checks, phase9_checks, phase10_checks
+    phase11_checks: list[dict[str, object]] = []
+    if is_phase11_readlists_blank_search_closure:
+        phase11_runtime_queries = evidence_root / "task-3-blank-parity" / "readlists-list-browse-queries.txt"
+        phase11_runtime_shadow = evidence_root / "task-3-blank-parity" / "readlists-list-browse-shadow.txt"
+        phase11_compat = evidence_root / "task-4-blank-compat-gate" / "http-json-diff.txt"
+
+        phase11_checks = [
+            {
+                "id": "phase11_readlists_blank_search_runtime",
+                "category": "phase11-readlists-blank-search-closure",
+                "refusal_condition": "Phase11 runtime/query ownership evidence for readlists blank-effective search is not proven",
+                "evidence": [phase11_runtime_queries, phase11_runtime_shadow],
+                "mode": "text",
+            },
+            {
+                "id": "phase11_readlists_blank_search_compat",
+                "category": "phase11-readlists-blank-search-closure",
+                "refusal_condition": "Phase11 compat inventory/diff evidence for phase11-readlists-blank-search-closure ownership and fail-closed exclusions is not proven",
+                "evidence": [phase11_compat],
+                "mode": "text",
+            },
+        ]
+
+    checks = base_checks + discovery_checks + phase3_checks + phase4_checks + phase5_checks + phase6_checks + phase7_checks + phase8_checks + phase9_checks + phase10_checks + phase11_checks
+    return checks, discovery_checks, phase3_checks, phase4_checks, phase5_checks, phase6_checks, phase8_checks, phase9_checks, phase10_checks, phase11_checks

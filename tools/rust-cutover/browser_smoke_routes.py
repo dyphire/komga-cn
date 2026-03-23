@@ -539,6 +539,78 @@ ROUTES: dict[str, dict[str, object]] = {
             'emptySummaryFound': True,
         },
     },
+    'search-readlists-blank-native': {
+        'route': 'search-readlists-blank-native',
+        'path': '/search?q=%20%20',
+        'selector': '[data-testid="search-results-root"]',
+        'panelSelector': '[data-testid="search-results-readlists"]',
+        'panelKey': 'readlistsResultBlockFound',
+        'panelExpected': True,
+        'siblingNavigationSelector': '[data-testid="browse-book-sibling-navigation"]',
+        'siblingNavigationExpected': False,
+        'extraSelectors': [
+            {
+                'signalKey': 'searchQueryFound',
+                'selector': '[data-testid="search-results-query"]',
+                'expected': True,
+            },
+        ],
+        'sourceFile': 'komga-webui/src/views/SearchView.vue',
+        'sourceFiles': [
+            'komga-webui/src/views/SearchView.vue',
+            'komga-webui/src/services/komga-readlists.service.ts',
+        ],
+        'sourceMetadataFragments': [
+            'data-testid="search-results-query"',
+            'data-testid="search-results-readlists"',
+            'data-testid="search-results-empty-summary"',
+            "this.$komgaReadLists.getReadLists(undefined, pageable, search)",
+            "if (search) params.search = search",
+        ],
+        'metadataMinimumMatches': 4,
+        'ownedRequests': [],
+        'contractSignals': [
+            {
+                'signalKey': 'searchQueryFromRouteFound',
+                'allOf': [
+                    "data-testid=\"search-results-query\"",
+                    "{name: $route.query.q}",
+                ],
+            },
+            {
+                'signalKey': 'readlistsSearchRequestFound',
+                'allOf': [
+                    "data-testid=\"search-results-readlists\"",
+                    "this.loaderReadLists = new PageLoader<ReadListDto>({size: this.pageSize}, (pageable: PageRequest) => this.$komgaReadLists.getReadLists(undefined, pageable, search))",
+                    "if (search) params.search = search",
+                ],
+            },
+            {
+                'signalKey': 'emptySummaryFound',
+                'allOf': [
+                    "data-testid=\"search-results-empty-summary\"",
+                    "search.no_results",
+                    "search.search_for_something_else",
+                ],
+            },
+        ],
+        'governanceEvidenceRequests': [
+            {
+                'label': 'readlists-search-blank-whitespace',
+                'purpose': 'whitespace-search-ui-reachable',
+                'ownershipClass': 'phase11-owned-target',
+                'method': 'GET',
+                'urlEndsWith': '/api/v1/readlists?search=%20%20',
+                'requestPath': '/api/v1/readlists?search=%20%20',
+                'responseStatuses': [200, 400],
+            },
+        ],
+        'contractSignalExpectations': {
+            'searchQueryFromRouteFound': True,
+            'readlistsSearchRequestFound': True,
+            'emptySummaryFound': True,
+        },
+    },
     'browse-series': {
         'route': 'browse-series',
         'path': '/series/series-1',

@@ -263,17 +263,100 @@ async fn phase10_search_query_shapes_are_native_owned_and_filter_results() {
 }
 
 #[tokio::test]
+async fn phase11_blank_effective_search_falls_back_to_native_browse_semantics() {
+    let app = komga_rust::app::build_router();
+    let cases = [
+        BrowseQueryParityCase {
+            name: "protocol-only blank-effective search falls back to browse",
+            basic_auth: USER_BASIC_AUTH,
+            uri: "/api/v1/readlists?search=",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_filtered: &[
+                ("readlist-1", false),
+                ("readlist-2", false),
+                ("readlist-3", false),
+            ],
+            expected_total_elements: 3,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 3,
+        },
+        BrowseQueryParityCase {
+            name: "decoded whitespace-only search falls back to browse",
+            basic_auth: USER_BASIC_AUTH,
+            uri: "/api/v1/readlists?search=%20%20",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_filtered: &[
+                ("readlist-1", false),
+                ("readlist-2", false),
+                ("readlist-3", false),
+            ],
+            expected_total_elements: 3,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 3,
+        },
+        BrowseQueryParityCase {
+            name: "blank-effective search with paging keeps browse pagination",
+            basic_auth: USER_BASIC_AUTH,
+            uri: "/api/v1/readlists?search=%20%20&page=1&size=1",
+            expected_ids: &["readlist-2"],
+            expected_filtered: &[("readlist-2", false)],
+            expected_total_elements: 3,
+            expected_page_number: 1,
+            expected_page_size: 1,
+            expected_number_of_elements: 1,
+        },
+        BrowseQueryParityCase {
+            name: "blank-effective search with repeated library_id keeps browse bucket",
+            basic_auth: USER_BASIC_AUTH,
+            uri: "/api/v1/readlists?search=%20%20&library_id=1&library_id=2",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_filtered: &[
+                ("readlist-1", false),
+                ("readlist-2", false),
+                ("readlist-3", false),
+            ],
+            expected_total_elements: 3,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 3,
+        },
+        BrowseQueryParityCase {
+            name: "blank-effective search with size zero preserves browse size-zero semantics",
+            basic_auth: USER_BASIC_AUTH,
+            uri: "/api/v1/readlists?search=%20%20&size=0",
+            expected_ids: &["readlist-1", "readlist-2", "readlist-3"],
+            expected_filtered: &[
+                ("readlist-1", false),
+                ("readlist-2", false),
+                ("readlist-3", false),
+            ],
+            expected_total_elements: 3,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 3,
+        },
+        BrowseQueryParityCase {
+            name: "blank-effective search preserves ACL filtered visibility semantics",
+            basic_auth: RESTRICTED_BASIC_AUTH,
+            uri: "/api/v1/readlists?search=%20%20",
+            expected_ids: &["readlist-1", "readlist-2"],
+            expected_filtered: &[("readlist-1", false), ("readlist-2", true)],
+            expected_total_elements: 2,
+            expected_page_number: 0,
+            expected_page_size: 20,
+            expected_number_of_elements: 2,
+        },
+    ];
+
+    assert_query_parity_cases_match_java_contract(&app, &cases).await;
+}
+
+#[tokio::test]
 async fn phase9_excluded_browse_variants_stay_explicitly_non_native() {
     let app = komga_rust::app::build_router();
     let cases = [
-        ExcludedBrowseShapeCase {
-            name: "blank search stays exclusion-only",
-            uri: "/api/v1/readlists?search=",
-        },
-        ExcludedBrowseShapeCase {
-            name: "whitespace-only search stays exclusion-only",
-            uri: "/api/v1/readlists?search=%20%20",
-        },
         ExcludedBrowseShapeCase {
             name: "unpaged true stays exclusion-only",
             uri: "/api/v1/readlists?unpaged=true",
@@ -301,6 +384,30 @@ async fn phase9_excluded_browse_variants_stay_explicitly_non_native() {
         ExcludedBrowseShapeCase {
             name: "unsupported extra query key stays exclusion-only",
             uri: "/api/v1/readlists?search=alpha&foo=bar",
+        },
+        ExcludedBrowseShapeCase {
+            name: "blank search plus sort stays exclusion-only",
+            uri: "/api/v1/readlists?search=&sort=name,asc",
+        },
+        ExcludedBrowseShapeCase {
+            name: "blank search plus unpaged stays exclusion-only",
+            uri: "/api/v1/readlists?search=&unpaged=true",
+        },
+        ExcludedBrowseShapeCase {
+            name: "blank search plus duplicate page stays exclusion-only",
+            uri: "/api/v1/readlists?search=&page=0&page=1",
+        },
+        ExcludedBrowseShapeCase {
+            name: "blank search plus duplicate size stays exclusion-only",
+            uri: "/api/v1/readlists?search=&size=20&size=1",
+        },
+        ExcludedBrowseShapeCase {
+            name: "blank search plus unsupported extra key stays exclusion-only",
+            uri: "/api/v1/readlists?search=&foo=bar",
+        },
+        ExcludedBrowseShapeCase {
+            name: "duplicate blank-effective search stays exclusion-only",
+            uri: "/api/v1/readlists?search=&search=%20%20",
         },
         ExcludedBrowseShapeCase {
             name: "library filter plus unpaged stays exclusion-only",

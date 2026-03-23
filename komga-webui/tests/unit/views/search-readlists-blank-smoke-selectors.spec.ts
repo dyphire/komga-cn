@@ -1,17 +1,17 @@
 import fs from 'fs'
 import path from 'path'
 
-type SearchReadlistsSmokeSelectorInventoryEntry = {
-  route: 'search-readlists-native'
+type SearchReadlistsBlankSmokeSelectorInventoryEntry = {
+  route: 'search-readlists-blank-native'
   path: '/search'
   selector: string
   stableSelectors: string[]
   sourceFile: 'SearchView.vue'
 }
 
-const searchReadlistsSmokeSelectorInventory: SearchReadlistsSmokeSelectorInventoryEntry[] = [
+const searchReadlistsBlankSmokeSelectorInventory: SearchReadlistsBlankSmokeSelectorInventoryEntry[] = [
   {
-    route: 'search-readlists-native',
+    route: 'search-readlists-blank-native',
     path: '/search',
     selector: '[data-testid="search-results-root"]',
     stableSelectors: [
@@ -28,14 +28,7 @@ const viewsRoot = path.resolve(__dirname, '../../../src/views')
 const repoRoot = path.resolve(__dirname, '../../../..')
 const browserSmokeRoutesPath = path.resolve(repoRoot, 'tools/rust-cutover/browser_smoke_routes.py')
 const bannedSelectorTerms = /(?:^|[-])(action|actions|admin|write|edit|download|delete|remove|dialog|sort|unpaged)(?:[-]|$)/
-const expectedGovernanceLabels = [
-  'readlists-search-default',
-  'readlists-search-paged',
-  'readlists-search-repeated-library-id',
-  'readlists-search-repeated-library-id-paged',
-  'readlists-search-size-zero-count',
-  'readlists-search-repeated-library-id-size-zero-count',
-]
+const expectedGovernanceLabels = ['readlists-search-blank-whitespace']
 
 const selectorToAttribute = (selector: string): string => {
   const match = selector.match(/^\[data-testid="([^"]+)"\]$/)
@@ -45,7 +38,7 @@ const selectorToAttribute = (selector: string): string => {
   return `data-testid="${match?.[1]}"`
 }
 
-const readViewSource = (sourceFile: SearchReadlistsSmokeSelectorInventoryEntry['sourceFile']): string =>
+const readViewSource = (sourceFile: SearchReadlistsBlankSmokeSelectorInventoryEntry['sourceFile']): string =>
   fs.readFileSync(path.resolve(viewsRoot, sourceFile), 'utf8')
 
 const readBrowserSmokeRoutesSource = (): string => fs.readFileSync(browserSmokeRoutesPath, 'utf8')
@@ -75,16 +68,16 @@ const routeLabelsFor = (section: string, blockName: 'governanceEvidenceRequests'
   return Array.from(section.slice(blockStart, blockEnd).matchAll(/'label': '([^']+)'/g), match => match[1])
 }
 
-describe('search readlists smoke selectors', () => {
-  test('given search readlists smoke inventory when enumerated then it should expose only stable selector anchors', () => {
-    expect(searchReadlistsSmokeSelectorInventory.map(entry => ({
+describe('search readlists blank smoke selectors', () => {
+  test('given blank search readlists smoke inventory when enumerated then it should expose only stable selector anchors', () => {
+    expect(searchReadlistsBlankSmokeSelectorInventory.map(entry => ({
       route: entry.route,
       path: entry.path,
       selector: entry.selector,
       stableSelectors: entry.stableSelectors,
     }))).toStrictEqual([
       {
-        route: 'search-readlists-native',
+        route: 'search-readlists-blank-native',
         path: '/search',
         selector: '[data-testid="search-results-root"]',
         stableSelectors: [
@@ -96,7 +89,7 @@ describe('search readlists smoke selectors', () => {
       },
     ])
 
-    searchReadlistsSmokeSelectorInventory.forEach(entry => {
+    searchReadlistsBlankSmokeSelectorInventory.forEach(entry => {
       expect(entry.stableSelectors[0]).toEqual(entry.selector)
       expect(new Set(entry.stableSelectors).size).toEqual(entry.stableSelectors.length)
       entry.stableSelectors.forEach(selector => {
@@ -106,8 +99,8 @@ describe('search readlists smoke selectors', () => {
     })
   })
 
-  test('given search readlists smoke inventory when matched against source then each selector should exist in the owning view', () => {
-    searchReadlistsSmokeSelectorInventory.forEach(entry => {
+  test('given blank search readlists smoke inventory when matched against source then each selector should exist in the owning view', () => {
+    searchReadlistsBlankSmokeSelectorInventory.forEach(entry => {
       const source = readViewSource(entry.sourceFile)
 
       entry.stableSelectors.forEach(selector => {
@@ -119,10 +112,10 @@ describe('search readlists smoke selectors', () => {
     })
   })
 
-  test('given search readlists smoke route when inspected then it should exercise only owned non blank search shapes', () => {
-    const section = routeSection(readBrowserSmokeRoutesSource(), 'search-readlists-native')
+  test('given blank search readlists smoke route when inspected then it should exercise only the whitespace search shape', () => {
+    const section = routeSection(readBrowserSmokeRoutesSource(), 'search-readlists-blank-native')
 
-    expect(section).toContain('\'path\': \'/search?q=alpha\'')
+    expect(section).toContain('\'path\': \'/search?q=%20%20\'')
     expect(section).toContain('\'selector\': \'[data-testid="search-results-root"]\'')
     expect(section).toContain('\'panelSelector\': \'[data-testid="search-results-readlists"]\'')
     expect(section).toContain('\'signalKey\': \'searchQueryFound\'')
@@ -130,15 +123,10 @@ describe('search readlists smoke selectors', () => {
     expect(section).toContain('\'signalKey\': \'emptySummaryFound\'')
     expect(section).toContain('data-testid=\\"search-results-empty-summary\\"')
     expect(routeLabelsFor(section, 'governanceEvidenceRequests')).toStrictEqual(expectedGovernanceLabels)
-    expect(section).toContain('\'requestPath\': \'/api/v1/readlists?search=alpha\'')
-    expect(section).toContain('\'requestPath\': \'/api/v1/readlists?search=alpha&page=1&size=1\'')
-    expect(section).toContain('\'requestPath\': \'/api/v1/readlists?search=alpha&library_id=1&library_id=2\'')
-    expect(section).toContain('\'requestPath\': \'/api/v1/readlists?search=alpha&library_id=1&library_id=2&page=1&size=1\'')
-    expect(section).toContain('\'requestPath\': \'/api/v1/readlists?search=alpha&size=0\'')
-    expect(section).toContain('\'requestPath\': \'/api/v1/readlists?search=alpha&library_id=1&library_id=2&size=0\'')
+    expect(section).toContain('\'requestPath\': \'/api/v1/readlists?search=%20%20\'')
+    expect(section).toContain('\'urlEndsWith\': \'/api/v1/readlists?search=%20%20\'')
+    expect(section).not.toContain('search=alpha')
     expect(section).not.toContain('sort=')
     expect(section).not.toContain('unpaged=true')
-    expect(section).not.toContain('\'path\': \'/search?q=\'')
-    expect(section).not.toContain('%20')
   })
 })

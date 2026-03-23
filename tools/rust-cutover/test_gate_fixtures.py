@@ -810,6 +810,125 @@ def seed_phase10_readlists_search_closure_evidence(
         )
 
 
+def seed_phase11_readlists_blank_search_contract_evidence(
+    root: Path,
+    *,
+    include_contract: bool = True,
+    include_exclusions: bool = True,
+    complete_contract_matrix: bool = True,
+) -> None:
+    if include_contract:
+        contract_lines = [
+            'Task: T1 Phase 11 blank-effective search contract matrix freeze',
+            'Scenario: readlists blank-effective search ownership stays exact and fail-closed',
+            'phase11_readlists_blank_search_matrix_is_frozen',
+            '',
+            'New ownership (Phase 11 only; layered on top of preserved Phase 9 browse and Phase 10 non-blank search ownership):',
+            '  - GET /api/v1/readlists?search=',
+            '  - GET /api/v1/readlists?search=%20%20',
+            '  - GET /api/v1/readlists?search={blank-effective}&page={page}&size={size}',
+            '  - GET /api/v1/readlists?search={blank-effective}&library_id={libraryId} (single or repeated library_id)',
+            '  - GET /api/v1/readlists?search={blank-effective}&library_id={libraryId...}&page={page}&size={size}',
+            '  - GET /api/v1/readlists?search={blank-effective}&size=0 (browse fallback; matches JVM exactly)',
+            '  - GET /api/v1/readlists?search={blank-effective}&library_id={libraryId...}&size=0 (browse fallback; matches JVM exactly)',
+            '',
+            'Blank-effective definition is fixed to decoded values where JVM String.isNullOrBlank() is true.',
+            'Protocol-only coverage token: ?search=',
+            'UI-reachable whitespace example: ?search=%20%20',
+            '',
+            'Pre-owned dependencies retained unchanged:',
+            '  - Phase 2 catalog discovery read slice',
+            '  - Phase 3 detail read slice',
+            '  - Phase 4 readlist-context read',
+            '  - Phase 5 oneshot closure',
+            '  - Phase 6 oneshot readlist-context closure',
+            '  - Phase 7 series oneshot query closure',
+            '  - Phase 8 readlist books family closure',
+            '  - Phase 9 readlists list browse closure',
+            '  - Phase 10 readlists non-blank search closure',
+            '',
+            'Boundary rule:',
+            '  - Phase 11 owns decoded blank-effective search only as browse fallback; it does not reopen non-blank search semantics.',
+            '  - No route/query shape can exist in more than one bucket.',
+            'Result: PASS',
+        ]
+        if not complete_contract_matrix:
+            contract_lines = [
+                line
+                for line in contract_lines
+                if line not in {
+                    '  - GET /api/v1/readlists?search={blank-effective}&library_id={libraryId...}&page={page}&size={size}',
+                    '  - GET /api/v1/readlists?search={blank-effective}&library_id={libraryId...}&size=0 (browse fallback; matches JVM exactly)',
+                    'UI-reachable whitespace example: ?search=%20%20',
+                    '  - Phase 10 readlists non-blank search closure',
+                    'Boundary rule:',
+                }
+            ]
+        write_text(
+            root / 'task-1-blank-contract/phase11-readlists-blank-search-contract.txt',
+            '\n'.join(contract_lines),
+        )
+
+    if include_exclusions:
+        write_text(
+            root / 'task-1-blank-contract/phase11-readlists-blank-search-exclusions.txt',
+            '\n'.join([
+                'Task: T1 Phase 11 blank-effective search exclusion ledger freeze',
+                'Scenario: precedence rules and widened blank-search query shapes remain explicit non-native',
+                'phase11_blank_search_precedence_routes_remain_explicitly_non_native',
+                '',
+                'Explicit exclusions (must stay non-native):',
+                '  - GET /api/v1/readlists?search=&sort=name,asc',
+                '  - GET /api/v1/readlists?search=&unpaged=true',
+                '  - GET /api/v1/readlists?search=&page=0&page=1',
+                '  - GET /api/v1/readlists?search=&size=20&size=1',
+                '  - GET /api/v1/readlists?search=&foo=bar',
+                '  - GET /api/v1/readlists?search=&search=%20%20',
+                '  - browse-only Phase 9 shapes remain governed by Phase 9 and are not re-declared as Phase 11 ownership',
+                '  - non-blank Phase 10 search shapes remain governed by Phase 10 and are not re-declared as Phase 11 ownership',
+                '  - no blank-effective search + sort ownership',
+                '  - no blank-effective search + unpaged ownership',
+                '  - no duplicate page/size ownership',
+                '  - no unsupported extra query ownership',
+                '  - no duplicate search ownership',
+                'Result: PASS',
+                'shadow-java-writer',
+            ]),
+        )
+
+
+def seed_phase11_readlists_blank_search_closure_evidence(
+    root: Path,
+    *,
+    include_runtime: bool = True,
+    include_compat: bool = True,
+    compat_failure: bool = False,
+) -> None:
+    if include_runtime:
+        write_text(
+            root / 'task-3-blank-parity/readlists-list-browse-queries.txt',
+            'cargo test: 4 passed (1 suite, 0.18s)',
+        )
+        write_text(
+            root / 'task-3-blank-parity/readlists-list-browse-shadow.txt',
+            'cargo test: 5 passed (1 suite, 0.15s)',
+        )
+
+    if include_compat:
+        compat_lines = (
+            [
+                'cargo test: 33 passed, 4 ignored (1 suite, 0.61s)',
+            ]
+            if not compat_failure
+            else [
+                'test result: FAILED. 9 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out',
+            ]
+        )
+        write_text(
+            root / 'task-4-blank-compat-gate/http-json-diff.txt',
+            '\n'.join(compat_lines),
+        )
+
 def build_admin_queue_payload(*, status: str, can_claim_admin_queue_parity: bool) -> dict[str, object]:
     return {
         'task': 'T13 admin task endpoint parity remains executable',

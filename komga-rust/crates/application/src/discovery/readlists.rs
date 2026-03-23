@@ -121,6 +121,32 @@ pub fn classify_readlists_browse_query(query: &ReadListsQuery) -> Result<(), Dis
     Ok(())
 }
 
+pub fn normalize_readlists_search(search: Option<String>) -> Option<String> {
+    search.and_then(|value| (!value.trim().is_empty()).then_some(value))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_readlists_search;
+
+    #[test]
+    fn normalize_readlists_search_returns_none_for_blank_effective_values() {
+        assert_eq!(normalize_readlists_search(None), None);
+        assert_eq!(normalize_readlists_search(Some(String::new())), None);
+        assert_eq!(normalize_readlists_search(Some("   \t\n".to_string())), None);
+    }
+
+    #[test]
+    fn normalize_readlists_search_preserves_non_blank_value_without_trimming() {
+        let decoded = " alpha ".to_string();
+
+        assert_eq!(
+            normalize_readlists_search(Some(decoded.clone())),
+            Some(decoded),
+        );
+    }
+}
+
 pub(in crate::discovery) fn native_readlist_books_query(
     query: ReadListBooksQuery,
 ) -> NativeReadListBooksQuery {
