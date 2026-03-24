@@ -4,7 +4,7 @@ members = [
   "crates/domain",
   "crates/application",
   "crates/persistence",
-  "crates/runtime-server",
+  "crates/server",
   "crates/compat-testkit",
   "crates/benchmark-wpd3",
 ]
@@ -14,16 +14,23 @@ edition = "2024"
 
 [workspace.dependencies]
 axum = "0.8.6"
+axum-extra = { version = "0.10.3", features = ["cookie"] }
 base64 = "0.22.1"
+bcrypt = "0.19.0"
+config = "0.15.19"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-tokio = { version = "1.43.0", features = ["macros", "rt-multi-thread", "net"] }
+sha2 = "0.10.9"
+tokio = { version = "1.43.0", features = ["macros", "rt-multi-thread", "net", "signal"] }
 sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio-rustls"] }
 tracing-subscriber = { version = "0.3.19", features = ["fmt", "env-filter"] }
 anyhow = "1.0.102"
 reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "json", "rustls"] }
 toml = "1.0.7"
 tower = { version = "0.5.2", features = ["util"] }
+tower-sessions = "0.14.0"
+oauth2 = "5.0.0"
+tantivy = "0.25.0"
 
 [package]
 name = "komga-rust"
@@ -36,7 +43,9 @@ base64.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tracing-subscriber.workspace = true
-komga-runtime-server = { path = "crates/runtime-server" }
+sqlx.workspace = true
+notify = "8.2.0"
+komga-server = { path = "crates/server" }
 komga-benchmark-wpd3 = { path = "crates/benchmark-wpd3" }
 komga-domain = { path = "crates/domain" }
 komga-application = { path = "crates/application" }
@@ -49,4 +58,6 @@ reqwest.workspace = true
 toml.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sqlx.workspace = true
+tempfile = "3.23.0"
 komga-compat-testkit = { path = "crates/compat-testkit" }

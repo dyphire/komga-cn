@@ -1,8 +1,8 @@
 <template>
-  <div data-testid="search-results-root">
+  <div>
     <toolbar-sticky v-if="showToolbar">
       <v-toolbar-title>
-        <span data-testid="search-results-query">{{ $t('search.search_results_for', {name: $route.query.q}) }}</span>
+        <span>{{ $t('search.search_results_for', {name: $route.query.q}) }}</span>
       </v-toolbar-title>
     </toolbar-sticky>
 
@@ -47,16 +47,15 @@
     />
 
     <v-container fluid>
-      <div v-if="emptyResults" data-testid="search-results-empty-summary">
-        <empty-state
-          :title="$t('search.no_results')"
-          :sub-title="$t('search.search_for_something_else')"
-          icon="mdi-magnify"
-          icon-color="secondary"
-          class="my-4"
-        >
-        </empty-state>
-      </div>
+      <empty-state
+        v-if="emptyResults"
+        :title="$t('search.no_results')"
+        :sub-title="$t('search.search_for_something_else')"
+        icon="mdi-magnify"
+        icon-color="secondary"
+        class="my-4"
+      >
+      </empty-state>
 
       <template v-else>
         <horizontal-scroller
@@ -122,7 +121,6 @@
 
         <horizontal-scroller
           v-if="loaderReadLists && loaderReadLists.items.length !== 0"
-          data-testid="search-results-readlists"
           class="mb-4"
           :tick="loaderReadLists.tick"
           @scroll-changed="(percent) => scrollChanged(loaderReadLists, percent)"

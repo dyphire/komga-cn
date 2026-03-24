@@ -144,7 +144,9 @@ impl SqliteDiscoveryAdapter {
             .connect("sqlite::memory:")
             .await
             .map_err(map_sqlx_error)?;
-        setup::bootstrap_pool(&pool).await.map_err(map_sqlx_error)?;
+        setup::bootstrap_read_model_pool(&pool)
+            .await
+            .map_err(map_sqlx_error)?;
 
         let mut pool_guard = self
             .pool

@@ -1,9 +1,9 @@
 use crate::cases::SetupStep;
-use anyhow::Context;
+use anyhow::{bail, Context};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Debug, Deserialize)]
 pub struct SseHarnessConfig {
@@ -35,9 +35,7 @@ pub enum SseAudience {
 
 impl SseHarnessConfig {
     pub fn load_default() -> anyhow::Result<Self> {
-        Self::load_from(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/compat/sse-cases.toml"),
-        )
+        bail!("default SSE compat cases were removed; use SseHarnessConfig::load_from(path)")
     }
 
     pub fn load_from(path: impl Into<PathBuf>) -> anyhow::Result<Self> {

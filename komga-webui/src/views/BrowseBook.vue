@@ -1,5 +1,5 @@
 <template>
-  <div v-if="!$_.isEmpty(book)" data-testid="browse-book-root">
+  <div v-if="!$_.isEmpty(book)">
     <toolbar-sticky>
       <v-tooltip bottom :disabled="!isAdmin">
         <template v-slot:activator="{ on }">
@@ -36,58 +36,56 @@
       >{{ $t('browse_book.navigation_within_readlist', {name: contextName}) }}
       </v-alert>
 
-      <div class="d-flex align-center" data-testid="browse-book-sibling-navigation">
-        <!--   Navigate to previous book   -->
-        <v-btn
-          icon
-          :disabled="$_.isEmpty(siblingPrevious)"
-          :to="{ name: siblingPrevious.oneshot ? 'browse-oneshot' : 'browse-book', params: { seriesId: siblingPrevious.seriesId, bookId: previousId }, query: { context: context.origin, contextId: context.id}  }"
-        >
-          <rtl-icon icon="mdi-chevron-left" rtl="mdi-chevron-right"/>
-        </v-btn>
+      <!--   Navigate to previous book   -->
+      <v-btn
+        icon
+        :disabled="$_.isEmpty(siblingPrevious)"
+        :to="{ name: siblingPrevious.oneshot ? 'browse-oneshot' : 'browse-book', params: { seriesId: siblingPrevious.seriesId, bookId: previousId }, query: { context: context.origin, contextId: context.id}  }"
+      >
+        <rtl-icon icon="mdi-chevron-left" rtl="mdi-chevron-right"/>
+      </v-btn>
 
-        <!--   List of all books in context (series/readlist) for navigation   -->
-        <v-menu bottom
-                offset-y
-                :max-height="$vuetify.breakpoint.height * .7"
-                :max-width="250"
-        >
-          <template v-slot:activator="{ on }">
-            <v-btn icon v-on="on">
-              <v-icon>mdi-menu</v-icon>
-            </v-btn>
-          </template>
+      <!--   List of all books in context (series/readlist) for navigation   -->
+      <v-menu bottom
+              offset-y
+              :max-height="$vuetify.breakpoint.height * .7"
+              :max-width="250"
+      >
+        <template v-slot:activator="{ on }">
+          <v-btn icon v-on="on">
+            <v-icon>mdi-menu</v-icon>
+          </v-btn>
+        </template>
 
-          <v-list
-            flat
-          >
-            <v-list-item-group color="primary">
-              <v-list-item
-                v-for="(book, i) in siblings"
-                :key="i"
-                :to="{ name: book.oneshot ? 'browse-oneshot' : 'browse-book', params: { seriesId: book.seriesId, bookId: book.id }, query: { context: context.origin, contextId: context.id}  }"
-              >
-                <v-list-item-title class="text-wrap text-body-2">
-                  <template v-if="contextReadList && !book.oneshot">{{ book.seriesTitle }} {{ book.metadata.number }}:
-                    {{ book.metadata.title }}
-                  </template>
-                  <template v-else-if="contextReadList && book.oneshot">{{ book.metadata.title }}</template>
-                  <template v-else>{{ book.metadata.number }} - {{ book.metadata.title }}</template>
-                </v-list-item-title>
-              </v-list-item>
-            </v-list-item-group>
-          </v-list>
-        </v-menu>
-
-        <!--   Navigate to next book   -->
-        <v-btn
-          icon
-          :disabled="$_.isEmpty(siblingNext)"
-          :to="{ name: siblingNext.oneshot ? 'browse-oneshot' : 'browse-book', params: { seriesId: siblingNext.seriesId, bookId: nextId }, query: { context: context.origin, contextId: context.id}  }"
+        <v-list
+          flat
         >
-          <rtl-icon icon="mdi-chevron-right" rtl="mdi-chevron-left"/>
-        </v-btn>
-      </div>
+          <v-list-item-group color="primary">
+            <v-list-item
+              v-for="(book, i) in siblings"
+              :key="i"
+              :to="{ name: book.oneshot ? 'browse-oneshot' : 'browse-book', params: { seriesId: book.seriesId, bookId: book.id }, query: { context: context.origin, contextId: context.id}  }"
+            >
+              <v-list-item-title class="text-wrap text-body-2">
+                <template v-if="contextReadList && !book.oneshot">{{ book.seriesTitle }} {{ book.metadata.number }}:
+                  {{ book.metadata.title }}
+                </template>
+                <template v-else-if="contextReadList && book.oneshot">{{ book.metadata.title }}</template>
+                <template v-else>{{ book.metadata.number }} - {{ book.metadata.title }}</template>
+              </v-list-item-title>
+            </v-list-item>
+          </v-list-item-group>
+        </v-list>
+      </v-menu>
+
+      <!--   Navigate to next book   -->
+      <v-btn
+        icon
+        :disabled="$_.isEmpty(siblingNext)"
+        :to="{ name: siblingNext.oneshot ? 'browse-oneshot' : 'browse-book', params: { seriesId: siblingNext.seriesId, bookId: nextId }, query: { context: context.origin, contextId: context.id}  }"
+      >
+        <rtl-icon icon="mdi-chevron-right" rtl="mdi-chevron-left"/>
+      </v-btn>
     </toolbar-sticky>
 
     <v-container fluid class="pa-6">
@@ -345,7 +343,7 @@
       </v-row>
 
       <v-row>
-        <v-col data-testid="browse-book-readlists-panel">
+        <v-col>
           <read-lists-expansion-panels :read-lists="readLists">
             <template v-slot:prepend="props">
               <v-tooltip bottom>

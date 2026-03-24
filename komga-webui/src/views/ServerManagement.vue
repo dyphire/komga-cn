@@ -1,5 +1,5 @@
 <template>
-  <v-container fluid class="pa-6" data-testid="server-management-root">
+  <v-container fluid class="pa-6">
     <v-row>
       <v-col><span class="text-h5">{{ $t('server.server_management.section_title') }}</span></v-col>
     </v-row>

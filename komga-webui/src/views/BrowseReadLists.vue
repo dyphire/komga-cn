@@ -1,5 +1,5 @@
 <template>
-  <div :style="$vuetify.breakpoint.xs ? 'margin-bottom: 56px' : undefined" data-testid="browse-readlists-root">
+  <div :style="$vuetify.breakpoint.xs ? 'margin-bottom: 56px' : undefined">
     <toolbar-sticky v-if="selectedReadLists.length === 0">
       <!--   Action menu   -->
       <library-actions-menu v-if="isAdmin && library"
@@ -7,7 +7,7 @@
 
       <v-toolbar-title>
         <span>{{ toolbarTitle }}</span>
-        <v-chip label class="mx-4" v-if="totalElements" data-testid="browse-readlists-total-count">
+        <v-chip label class="mx-4" v-if="totalElements">
           <span style="font-size: 1.1rem">{{ totalElements }}</span>
         </v-chip>
       </v-toolbar-title>
@@ -38,24 +38,20 @@
         v-model="page"
         :total-visible="paginationVisible"
         :length="totalPages"
-        data-testid="browse-readlists-pagination-top"
       />
 
-      <div data-testid="browse-readlists-item-browser">
-        <item-browser
-          :items="readLists"
-          :selectable="isAdmin"
-          :selected.sync="selectedReadLists"
-          :edit-function="isAdmin ? editSingle : undefined"
-        />
-      </div>
+      <item-browser
+        :items="readLists"
+        :selectable="isAdmin"
+        :selected.sync="selectedReadLists"
+        :edit-function="isAdmin ? editSingle : undefined"
+      />
 
       <v-pagination
         v-if="totalPages > 1"
         v-model="page"
         :total-visible="paginationVisible"
         :length="totalPages"
-        data-testid="browse-readlists-pagination-bottom"
       />
     </v-container>
 

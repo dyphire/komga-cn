@@ -1,4 +1,5 @@
 pub mod cases;
+pub mod contract_matrix;
 pub mod diff_writer;
 pub mod normalize;
 pub mod runtime;

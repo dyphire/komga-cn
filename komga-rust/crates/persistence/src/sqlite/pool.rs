@@ -5,6 +5,7 @@ use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
 use crate::context::SqlitePersistenceContext;
+use crate::sqlite::setup;
 
 pub const DEFAULT_MAX_CONNECTIONS: u32 = 4;
 
@@ -36,7 +37,15 @@ pub async fn connect_persistence_context(
     path: impl AsRef<Path>,
     max_connections: u32,
 ) -> Result<SqlitePersistenceContext, sqlx::Error> {
+    if max_connections != 1 {
+        return Err(sqlx::Error::Protocol(
+            "persistence write path requires single-writer sqlite pool (max_connections=1)"
+                .to_string(),
+        ));
+    }
+
     let pool = connect_pool(path, max_connections).await?;
+    setup::bootstrap_pool(&pool).await?;
     Ok(SqlitePersistenceContext::new(pool))
 }
 

@@ -1,5 +1,5 @@
 <template>
-  <div v-if="!$_.isEmpty(series)" data-testid="browse-series-root">
+  <div v-if="!$_.isEmpty(series)">
     <toolbar-sticky v-if="selectedBooks.length === 0">
       <!--   Go back to parent library   -->
       <v-tooltip bottom :disabled="!isAdmin">
@@ -444,7 +444,7 @@
       </v-row>
 
       <v-row>
-        <v-col data-testid="browse-series-collections-panel">
+        <v-col>
           <collections-expansion-panels :collections="collections">
             <template v-slot:prepend="props">
               <v-tooltip bottom>

@@ -36,7 +36,7 @@ pub struct SqlxRuntimeDiscoveryStore {
 impl SqlxRuntimeDiscoveryStore {
     pub async fn new(case_id: &str) -> Result<Self, DiscoveryError> {
         let temp_pool = SqliteTempPool::new(case_id).await.map_err(map_sqlx_error)?;
-        setup::bootstrap_pool(temp_pool.pool())
+        setup::bootstrap_read_model_pool(temp_pool.pool())
             .await
             .map_err(map_sqlx_error)?;
         Ok(Self { temp_pool })
