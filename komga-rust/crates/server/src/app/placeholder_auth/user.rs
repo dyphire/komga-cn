@@ -52,6 +52,12 @@ pub(in crate::app) struct PersistedAuthenticationActivity {
 }
 
 #[derive(Clone)]
+pub(in crate::app) struct PersistedApiKeyMetadata {
+    pub(in crate::app) id: String,
+    pub(in crate::app) comment: String,
+}
+
+#[derive(Clone)]
 pub(in crate::app) struct PlaceholderUser {
     id: String,
     email: String,
@@ -238,6 +244,31 @@ pub(in crate::app) async fn persisted_api_key_user(
     };
 
     Some(AuthOutcome::Valid(user.clone()))
+}
+
+pub(in crate::app) async fn persisted_api_key_metadata(
+    headers: &HeaderMap,
+    database_file: &Path,
+) -> Option<PersistedApiKeyMetadata> {
+    if !database_file.exists() {
+        return None;
+    }
+
+    let api_key = api_key_header_value(headers)?;
+    let api_key_hash = sha512_hex(&api_key);
+    let pool = connect_pool(database_file, 1).await.ok()?;
+    let row = sqlx::query("SELECT ID, COMMENT FROM USER_API_KEY WHERE API_KEY = ? LIMIT 1")
+        .bind(api_key_hash)
+        .fetch_optional(&pool)
+        .await;
+
+    pool.close().await;
+
+    let row = row.ok()??;
+    Some(PersistedApiKeyMetadata {
+        id: row.get::<String, _>("ID"),
+        comment: row.get::<String, _>("COMMENT"),
+    })
 }
 
 pub(in crate::app) fn user_is_admin(user: &PlaceholderUser) -> bool {

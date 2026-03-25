@@ -2,6 +2,8 @@
 mod books;
 #[path = "readlists/browse.rs"]
 mod browse;
+#[path = "readlists/collections.rs"]
+mod collections;
 #[path = "readlists/detail.rs"]
 mod detail;
 #[path = "readlists/sibling.rs"]
@@ -9,9 +11,11 @@ mod sibling;
 
 use komga_application::discovery::{
     BookReadlistsQuery, NativeReadListBooksQuery, NativeReadListsQuery, ReadListDetailQuery,
+    SeriesCollectionsQuery,
 };
 use komga_domain::discovery::{
-    BookDetailReadModel, BookReadModel, DiscoveryError, DiscoveryQueryContext, ReadListReadModel,
+    BookDetailReadModel, BookReadModel, CollectionReadModel, DiscoveryError, DiscoveryQueryContext,
+    ReadListReadModel,
 };
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 
@@ -113,6 +117,14 @@ pub(in crate::read_models) async fn get_readlist_book_sibling_sqlx(
     next: bool,
 ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
     sibling::get_readlist_book_sibling_sqlx(pool, context, readlist_id, book_id, next).await
+}
+
+pub(in crate::read_models) async fn list_series_collections_sqlx(
+    pool: SqlitePool,
+    context: &DiscoveryQueryContext,
+    query: &SeriesCollectionsQuery,
+) -> Result<Vec<CollectionReadModel>, DiscoveryError> {
+    collections::list_series_collections_sqlx(pool, context, query).await
 }
 
 async fn visible_readlist_book_ids_sqlx(

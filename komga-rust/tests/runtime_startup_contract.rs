@@ -265,3 +265,170 @@ fn startup_webui_layout_fails_closed_when_legacy_public_layout_missing() {
         "startup error should deterministically explain missing WebUI layout: {error}",
     );
 }
+
+#[test]
+fn runtime_config_prefers_cli_config_dir_over_env_and_file_defaults() {
+    let cli_config_dir = unique_temp_dir("komga-runtime-cli-config-dir");
+    fs::create_dir_all(&cli_config_dir).expect("cli config directory should be created");
+
+    fs::write(
+        cli_config_dir.join("application.yml"),
+        r#"
+komga:
+  database:
+    file: ${komga.config-dir}/from-cli/database.sqlite
+"#,
+    )
+    .expect("application.yml should be written");
+
+    let mut env = BTreeMap::new();
+    env.insert(
+        "KOMGA_CONFIG_DIR".to_string(),
+        unique_temp_dir("komga-runtime-env-config-dir")
+            .to_string_lossy()
+            .to_string(),
+    );
+
+    let cli = komga_rust::config::RuntimeCli {
+        config_dir: Some(cli_config_dir.clone()),
+        ..Default::default()
+    };
+
+    let config = komga_rust::config::RuntimeConfig::resolve_with_env(&cli, &env)
+        .expect("runtime config should resolve");
+
+    assert_eq!(config.config_dir.as_deref(), Some(cli_config_dir.as_path()));
+    assert_eq!(
+        config.database_file,
+        cli_config_dir.join("from-cli").join("database.sqlite"),
+    );
+}
+
+#[test]
+fn startup_config_dir_env_overrides_application_property_config_dir() {
+    let bootstrap_config_dir = unique_temp_dir("komga-runtime-bootstrap-config-dir");
+    let file_declared_config_dir = unique_temp_dir("komga-runtime-file-config-dir");
+    fs::create_dir_all(&bootstrap_config_dir)
+        .expect("bootstrap config directory should be created");
+    fs::create_dir_all(&file_declared_config_dir)
+        .expect("file-declared config directory should be created");
+
+    fs::write(
+        bootstrap_config_dir.join("application.yml"),
+        format!(
+            "komga:\n  config-dir: {}\nlogging:\n  file:\n    name: ${{komga.config-dir}}/logs/komga.log\n",
+            file_declared_config_dir.to_string_lossy(),
+        ),
+    )
+    .expect("application.yml should be written");
+
+    let mut env = BTreeMap::new();
+    env.insert(
+        "KOMGA_CONFIG_DIR".to_string(),
+        bootstrap_config_dir.to_string_lossy().to_string(),
+    );
+
+    let config = komga_rust::config::RuntimeConfig::resolve_with_env(
+        &komga_rust::config::RuntimeCli::default(),
+        &env,
+    )
+    .expect("runtime config should resolve");
+
+    assert_eq!(
+        config.config_dir.as_deref(),
+        Some(bootstrap_config_dir.as_path())
+    );
+    assert_eq!(
+        config.log_file,
+        bootstrap_config_dir.join("logs").join("komga.log"),
+    );
+}
+
+#[test]
+fn startup_config_expands_escaped_kotlin_placeholders_for_paths() {
+    let config_dir = unique_temp_dir("komga-runtime-escaped-path-placeholder");
+    fs::create_dir_all(&config_dir).expect("test config directory should be created");
+
+    fs::write(
+        config_dir.join("application.yml"),
+        r#"
+logging:
+  file:
+    name: \${komga.config-dir}/logs/komga.log
+"#,
+    )
+    .expect("application.yml should be written");
+
+    let mut env = BTreeMap::new();
+    env.insert(
+        "KOMGA_CONFIG_DIR".to_string(),
+        config_dir.to_string_lossy().to_string(),
+    );
+
+    let config = komga_rust::config::RuntimeConfig::resolve_with_env(
+        &komga_rust::config::RuntimeCli::default(),
+        &env,
+    )
+    .expect("runtime config should resolve");
+
+    assert_eq!(config.log_file, config_dir.join("logs").join("komga.log"));
+}
+
+#[test]
+fn invalid_context_path_from_config_file_fails_startup() {
+    let config_dir = unique_temp_dir("komga-runtime-invalid-context-from-file");
+    fs::create_dir_all(&config_dir).expect("test config directory should be created");
+
+    fs::write(
+        config_dir.join("application.yml"),
+        "server:\n  servlet:\n    context-path: /trailing/\n",
+    )
+    .expect("application.yml should be written");
+
+    let mut env = BTreeMap::new();
+    env.insert(
+        "KOMGA_CONFIG_DIR".to_string(),
+        config_dir.to_string_lossy().to_string(),
+    );
+
+    let error = komga_rust::config::RuntimeConfig::resolve_with_env(
+        &komga_rust::config::RuntimeCli::default(),
+        &env,
+    )
+    .expect_err("invalid context path from config file must fail startup");
+
+    assert_eq!(
+        error.to_string(),
+        "invalid SERVER_SERVLET_CONTEXT_PATH: must be empty or start with '/' and not end with '/'",
+    );
+}
+
+#[test]
+fn shadow_mode_rejects_legacy_writer_targets_during_startup_resolution() {
+    let config_dir = unique_temp_dir("komga-runtime-shadow-writer-ownership");
+    fs::create_dir_all(&config_dir).expect("test config directory should be created");
+
+    let mut env = BTreeMap::new();
+    env.insert("KOMGA_RUST_MODE".to_string(), "shadow".to_string());
+    env.insert(
+        "KOMGA_CONFIG_DIR".to_string(),
+        config_dir.to_string_lossy().to_string(),
+    );
+
+    let error = komga_rust::config::RuntimeConfig::resolve_with_env(
+        &komga_rust::config::RuntimeCli::default(),
+        &env,
+    )
+    .expect_err("shadow mode must reject legacy writer targets by default");
+
+    assert!(
+        error
+            .to_string()
+            .contains("unsafe mixed-writer storage ownership detected"),
+        "startup should fail with mixed-writer ownership error: {error}",
+    );
+    assert!(
+        error.to_string().contains("database.sqlite"),
+        "mixed-writer error should attribute blocked target details: {error}",
+    );
+}

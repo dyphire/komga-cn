@@ -3,20 +3,44 @@ use std::path::PathBuf;
 
 use sqlx::Row;
 
+use crate::context::SqlitePersistenceContext;
 use crate::sqlite::connect_persistence_context;
 
 #[derive(Clone)]
 pub struct ServerSettingsStore {
-    database_file: PathBuf,
+    backend: StoreBackend,
+}
+
+#[derive(Clone)]
+enum StoreBackend {
+    DatabaseFile(PathBuf),
+    Context(SqlitePersistenceContext),
 }
 
 impl ServerSettingsStore {
     pub fn new(database_file: PathBuf) -> Self {
-        Self { database_file }
+        Self {
+            backend: StoreBackend::DatabaseFile(database_file),
+        }
+    }
+
+    pub fn from_context(context: SqlitePersistenceContext) -> Self {
+        Self {
+            backend: StoreBackend::Context(context),
+        }
+    }
+
+    async fn context(&self) -> Result<SqlitePersistenceContext, sqlx::Error> {
+        match &self.backend {
+            StoreBackend::DatabaseFile(database_file) => {
+                connect_persistence_context(database_file, 1).await
+            }
+            StoreBackend::Context(context) => Ok(context.clone()),
+        }
     }
 
     pub async fn load_map(&self) -> Result<BTreeMap<String, Option<String>>, sqlx::Error> {
-        let context = connect_persistence_context(&self.database_file, 1).await?;
+        let context = self.context().await?;
         let rows = sqlx::query("SELECT KEY, VALUE FROM SERVER_SETTINGS")
             .fetch_all(context.pool())
             .await?
@@ -28,7 +52,6 @@ impl ServerSettingsStore {
                 )
             })
             .collect::<BTreeMap<_, _>>();
-        context.pool().close().await;
         Ok(rows)
     }
 
@@ -40,7 +63,7 @@ impl ServerSettingsStore {
             return Ok(());
         }
 
-        let context = connect_persistence_context(&self.database_file, 1).await?;
+        let context = self.context().await?;
         for (key, value) in changes {
             match value {
                 Some(value) => {
@@ -61,7 +84,6 @@ impl ServerSettingsStore {
                 }
             }
         }
-        context.pool().close().await;
         Ok(())
     }
 }

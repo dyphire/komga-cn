@@ -1,5 +1,7 @@
 use komga_compat_testkit::contract_matrix::assert_required_target_declared;
+use komga_persistence::server_settings::ServerSettingsStore;
 use komga_rust::persistence::sqlite::connect_pool;
+use komga_rust::persistence::sqlite::connect_persistence_context;
 
 #[path = "support/persistence_contract_fixture.rs"]
 mod persistence_contract_fixture;
@@ -39,5 +41,40 @@ async fn server_settings_rows_persist_in_flyway_seeded_main_db() {
     assert_eq!(value, "4");
 
     pool.close().await;
+    persistence_contract_fixture::cleanup(paths);
+}
+
+#[tokio::test]
+async fn server_settings_store_round_trips_through_context_backed_path() {
+    let paths = persistence_contract_fixture::new_legacy_db_paths("settings-persistence-context")
+        .expect("settings persistence db paths should be created");
+    persistence_contract_fixture::seed_main_db_from_flyway(&paths.main_db)
+        .await
+        .expect("main db flyway fixture should be created");
+    persistence_contract_fixture::seed_tasks_db_from_flyway(&paths.tasks_db)
+        .await
+        .expect("tasks db flyway fixture should be created");
+
+    let context = connect_persistence_context(&paths.main_db, 1)
+        .await
+        .expect("main sqlite persistence context should open");
+    let store = ServerSettingsStore::from_context(context.clone());
+
+    store
+        .apply_changes(&[
+            ("TASK_POOL_SIZE".to_string(), Some("4".to_string())),
+            ("KOBO_PORT".to_string(), None),
+        ])
+        .await
+        .expect("settings changes should persist via context-backed path");
+
+    let persisted = store
+        .load_map()
+        .await
+        .expect("settings map should load via context-backed path");
+    assert_eq!(persisted.get("TASK_POOL_SIZE"), Some(&Some("4".to_string())));
+    assert_eq!(persisted.get("KOBO_PORT"), None);
+
+    context.pool().close().await;
     persistence_contract_fixture::cleanup(paths);
 }

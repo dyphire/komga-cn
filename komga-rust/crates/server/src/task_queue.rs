@@ -186,6 +186,8 @@ impl TaskQueueScheduler {
     pub fn enqueue(&mut self, task: TaskQueueRecord) {
         if let Some(store) = &self.persisted_store {
             store.persist_task(&task);
+            self.reload_admin_from_store();
+            return;
         }
         self.admin.enqueue(task);
     }
@@ -195,9 +197,12 @@ impl TaskQueueScheduler {
             return None;
         }
 
+        self.reload_admin_from_store();
+
         let task = self.admin.take_available(&self.consumer_owner)?;
         if let Some(store) = &self.persisted_store {
             store.claim_task(&task.id, &self.consumer_owner);
+            self.reload_admin_from_store();
         }
 
         Some(task)
@@ -212,6 +217,8 @@ impl TaskQueueScheduler {
             return self.take_next().into_iter().collect();
         }
 
+        self.reload_admin_from_store();
+
         let mut selected = Vec::new();
         while selected.len() < self.task_pool_size {
             let Some(task) = self.admin.take_available(&self.consumer_owner) else {
@@ -222,16 +229,18 @@ impl TaskQueueScheduler {
             }
             selected.push(task);
         }
+        self.reload_admin_from_store();
         selected
     }
 
     pub fn complete(&mut self, task_id: &str) -> bool {
-        let removed = self.admin.complete(task_id);
         if let Some(store) = &self.persisted_store {
-            return store.delete_task(task_id);
+            let removed = store.delete_task(task_id);
+            self.reload_admin_from_store();
+            return removed;
         }
 
-        removed
+        self.admin.complete(task_id)
     }
 
     pub fn admin(&self) -> &TaskQueueAdmin {
@@ -251,18 +260,23 @@ impl TaskQueueScheduler {
     }
 
     pub fn disown_all(&mut self) -> usize {
-        let disowned = self.admin.disown_all();
-        if let Some(store) = &self.persisted_store {
-            store.disown_all();
+        if self.persisted_store.is_some() {
+            self.reload_admin_from_store();
+            let disowned = self.admin.disown_all();
+            if let Some(store) = &self.persisted_store {
+                store.disown_all();
+            }
+            self.reload_admin_from_store();
+            return disowned;
         }
 
-        disowned
+        self.admin.disown_all()
     }
 
     pub fn clear_unowned(&mut self) -> usize {
         if let Some(store) = &self.persisted_store {
             let deleted = store.clear_unowned();
-            self.admin = store.load_admin();
+            self.reload_admin_from_store();
             return deleted;
         }
 
@@ -288,7 +302,8 @@ impl TaskQueueScheduler {
                 return Ok(processed);
             }
 
-            for task in batch {
+            let mut batch_iter = batch.into_iter();
+            while let Some(task) = batch_iter.next() {
                 match self.execute_claimed_task(runtime, &task) {
                     Ok(()) => {
                         let _ = self.complete(&task.id);
@@ -296,6 +311,9 @@ impl TaskQueueScheduler {
                     }
                     Err(error) => {
                         self.disown_task(&task.id);
+                        for remaining in batch_iter {
+                            self.disown_task(&remaining.id);
+                        }
                         return Err(error);
                     }
                 }
@@ -312,9 +330,18 @@ impl TaskQueueScheduler {
     }
 
     fn disown_task(&mut self, task_id: &str) {
-        let _ = self.admin.disown(task_id);
         if let Some(store) = &self.persisted_store {
             store.disown_task(task_id);
+            self.reload_admin_from_store();
+            return;
+        }
+
+        let _ = self.admin.disown(task_id);
+    }
+
+    fn reload_admin_from_store(&mut self) {
+        if let Some(store) = &self.persisted_store {
+            self.admin = store.load_admin();
         }
     }
 
@@ -627,58 +654,115 @@ fn persist_scanned_library(
     run_database_query(database_file, move |pool| {
         Box::pin(async move {
             for series in &scanned.series_rows {
-                sqlx::query(
-                    "INSERT OR IGNORE INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot) VALUES (?, ?, ?, ?, ?, 0)",
+                let series_updated = sqlx::query(
+                    "UPDATE SERIES SET FILE_LAST_MODIFIED = ?, NAME = ?, URL = ?, LIBRARY_ID = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP WHERE ID = ?",
                 )
-                .bind(&series.series_id)
                 .bind(series.series_last_modified_unix_seconds)
                 .bind(&series.series_name)
                 .bind(&series.series_url)
                 .bind(&library_id)
+                .bind(&series.series_id)
                 .execute(&pool)
                 .await
-                .map_err(|error| TaskExecutionError::runtime(format!("failed to persist SERIES rows: {error}")))?;
+                .map_err(|error| TaskExecutionError::runtime(format!("failed to update SERIES rows: {error}")))?
+                .rows_affected();
+
+                if series_updated == 0 {
+                    sqlx::query(
+                        "INSERT OR IGNORE INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot) VALUES (?, ?, ?, ?, ?, 0)",
+                    )
+                    .bind(&series.series_id)
+                    .bind(series.series_last_modified_unix_seconds)
+                    .bind(&series.series_name)
+                    .bind(&series.series_url)
+                    .bind(&library_id)
+                    .execute(&pool)
+                    .await
+                    .map_err(|error| TaskExecutionError::runtime(format!("failed to insert SERIES rows: {error}")))?;
+                }
 
                 for book in &series.books {
-                    sqlx::query(
-                        "INSERT OR IGNORE INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, LIBRARY_ID, oneshot) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
+                    let book_updated = sqlx::query(
+                        "UPDATE BOOK SET FILE_LAST_MODIFIED = ?, NAME = ?, URL = ?, SERIES_ID = ?, FILE_SIZE = ?, LIBRARY_ID = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP WHERE ID = ?",
                     )
-                    .bind(&book.book_id)
                     .bind(book.file_last_modified_unix_seconds)
                     .bind(&book.file_name)
                     .bind(&book.book_url)
                     .bind(&series.series_id)
                     .bind(book.file_size)
                     .bind(&library_id)
+                    .bind(&book.book_id)
                     .execute(&pool)
                     .await
-                    .map_err(|error| TaskExecutionError::runtime(format!("failed to persist BOOK rows: {error}")))?;
+                    .map_err(|error| TaskExecutionError::runtime(format!("failed to update BOOK rows: {error}")))?
+                    .rows_affected();
 
-                    sqlx::query(
-                        "INSERT INTO MEDIA_FILE (FILE_NAME, BOOK_ID, FILE_SIZE) SELECT ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM MEDIA_FILE WHERE FILE_NAME = ? AND BOOK_ID = ?)",
+                    if book_updated == 0 {
+                        sqlx::query(
+                            "INSERT OR IGNORE INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, LIBRARY_ID, oneshot) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
+                        )
+                        .bind(&book.book_id)
+                        .bind(book.file_last_modified_unix_seconds)
+                        .bind(&book.file_name)
+                        .bind(&book.book_url)
+                        .bind(&series.series_id)
+                        .bind(book.file_size)
+                        .bind(&library_id)
+                        .execute(&pool)
+                        .await
+                        .map_err(|error| TaskExecutionError::runtime(format!("failed to insert BOOK rows: {error}")))?;
+                    }
+
+                    let media_updated = sqlx::query(
+                        "UPDATE MEDIA_FILE SET FILE_SIZE = ? WHERE FILE_NAME = ? AND BOOK_ID = ?",
                     )
-                    .bind(&book.file_name)
-                    .bind(&book.book_id)
                     .bind(book.file_size)
                     .bind(&book.file_name)
                     .bind(&book.book_id)
                     .execute(&pool)
                     .await
-                    .map_err(|error| TaskExecutionError::runtime(format!("failed to persist MEDIA_FILE rows: {error}")))?;
+                    .map_err(|error| TaskExecutionError::runtime(format!("failed to update MEDIA_FILE rows: {error}")))?
+                    .rows_affected();
+
+                    if media_updated == 0 {
+                        sqlx::query(
+                            "INSERT INTO MEDIA_FILE (FILE_NAME, BOOK_ID, FILE_SIZE) VALUES (?, ?, ?)",
+                        )
+                        .bind(&book.file_name)
+                        .bind(&book.book_id)
+                        .bind(book.file_size)
+                        .execute(&pool)
+                        .await
+                        .map_err(|error| TaskExecutionError::runtime(format!("failed to insert MEDIA_FILE rows: {error}")))?;
+                    }
                 }
             }
 
             for sidecar in &scanned.sidecars {
-                sqlx::query(
-                    "INSERT OR IGNORE INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID) VALUES (?, ?, ?, ?)",
+                let sidecar_updated = sqlx::query(
+                    "UPDATE SIDECAR SET PARENT_URL = ?, LAST_MODIFIED_TIME = ? WHERE URL = ? AND LIBRARY_ID = ?",
                 )
-                .bind(&sidecar.url)
                 .bind(&sidecar.parent_url)
                 .bind(sidecar.last_modified_unix_seconds)
+                .bind(&sidecar.url)
                 .bind(&library_id)
                 .execute(&pool)
                 .await
-                .map_err(|error| TaskExecutionError::runtime(format!("failed to persist SIDECAR rows: {error}")))?;
+                .map_err(|error| TaskExecutionError::runtime(format!("failed to update SIDECAR rows: {error}")))?
+                .rows_affected();
+
+                if sidecar_updated == 0 {
+                    sqlx::query(
+                        "INSERT OR IGNORE INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID) VALUES (?, ?, ?, ?)",
+                    )
+                    .bind(&sidecar.url)
+                    .bind(&sidecar.parent_url)
+                    .bind(sidecar.last_modified_unix_seconds)
+                    .bind(&library_id)
+                    .execute(&pool)
+                    .await
+                    .map_err(|error| TaskExecutionError::runtime(format!("failed to insert SIDECAR rows: {error}")))?;
+                }
             }
 
             Ok::<(), TaskExecutionError>(())

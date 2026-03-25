@@ -33,10 +33,37 @@ pub async fn connect_pool(
     path: impl AsRef<Path>,
     max_connections: u32,
 ) -> Result<SqlitePool, sqlx::Error> {
-    SqlitePoolOptions::new()
+    connect_bootstrapped_pool(path, max_connections, BootstrapTarget::None).await
+}
+
+pub async fn connect_tasks_pool(
+    path: impl AsRef<Path>,
+    max_connections: u32,
+) -> Result<SqlitePool, sqlx::Error> {
+    connect_bootstrapped_pool(path, max_connections, BootstrapTarget::Tasks).await
+}
+
+async fn connect_bootstrapped_pool(
+    path: impl AsRef<Path>,
+    max_connections: u32,
+    bootstrap_target: BootstrapTarget,
+) -> Result<SqlitePool, sqlx::Error> {
+    let pool = SqlitePoolOptions::new()
         .max_connections(max_connections)
         .connect_with(file_backed_connect_options(path))
-        .await
+        .await?;
+
+    match bootstrap_target {
+        BootstrapTarget::None => Ok(pool),
+        BootstrapTarget::Main => {
+            setup::bootstrap_pool(&pool).await?;
+            Ok(pool)
+        }
+        BootstrapTarget::Tasks => {
+            setup::bootstrap_tasks_pool(&pool).await?;
+            Ok(pool)
+        }
+    }
 }
 
 pub async fn connect_persistence_context(
@@ -50,9 +77,15 @@ pub async fn connect_persistence_context(
         ));
     }
 
-    let pool = connect_pool(path, max_connections).await?;
-    setup::bootstrap_pool(&pool).await?;
+    let pool = connect_bootstrapped_pool(path, max_connections, BootstrapTarget::Main).await?;
     Ok(SqlitePersistenceContext::new(pool))
+}
+
+#[derive(Copy, Clone)]
+enum BootstrapTarget {
+    None,
+    Main,
+    Tasks,
 }
 
 pub struct SqliteTempPool {

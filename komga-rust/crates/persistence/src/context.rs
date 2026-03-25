@@ -32,11 +32,14 @@ pub struct SqliteUnitOfWork {
 
 impl SqliteUnitOfWork {
     pub fn connection(&mut self) -> SqlitePersistenceConnection<'_> {
-        let tx = self
-            .transaction
-            .as_mut()
-            .expect("unit-of-work connection requested after completion");
+        let tx = self.transaction_mut();
         SqlitePersistenceConnection::Transaction(tx)
+    }
+
+    fn transaction_mut(&mut self) -> &mut Transaction<'static, Sqlite> {
+        self.transaction
+            .as_mut()
+            .expect("unit-of-work connection requested after completion")
     }
 
     pub async fn commit(mut self) -> Result<(), sqlx::Error> {

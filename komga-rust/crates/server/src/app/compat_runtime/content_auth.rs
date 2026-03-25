@@ -13,7 +13,8 @@ use crate::app::placeholder_auth::{
     auth_token_user, basic_user, bootstrap_api_key_user, bootstrap_user,
     bootstrap_user_with_remember_me_cookies, bootstrap_user_with_remember_me_token,
     configured_users, empty_auth_token_supplied, expired_remember_me_cookie,
-    expired_session_cookie, persisted_api_key_user, persisted_basic_user, persisted_create_api_key,
+    expired_session_cookie, persisted_api_key_metadata, persisted_api_key_user,
+    persisted_basic_user, persisted_create_api_key,
     persisted_delete_api_key_by_id, persisted_latest_authentication_activity_by_user_and_api_key,
     persisted_list_api_keys, persisted_list_authentication_activity,
     persisted_record_successful_authentication_activity, persisted_update_password_by_user_id,
@@ -34,6 +35,25 @@ pub(super) async fn users_me(
         .unwrap_or_else(|| api_key_user(&headers))
     {
         AuthOutcome::Valid(user) => {
+            let api_key_metadata = persisted_api_key_metadata(&headers, auth_db.database_file.as_path())
+                .await;
+            let (api_key_id, api_key_comment) = api_key_metadata
+                .as_ref()
+                .map(|metadata| {
+                    (
+                        Some(metadata.id.as_str()),
+                        Some(metadata.comment.as_str()),
+                    )
+                })
+                .unwrap_or((None, None));
+            let _ = persisted_record_successful_authentication_activity(
+                auth_db.database_file.as_path(),
+                &user,
+                "API_KEY",
+                api_key_id,
+                api_key_comment,
+            )
+            .await;
             let token = session_token_for_user(&user);
             register_discovery_principal(
                 &auth_state,

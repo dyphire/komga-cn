@@ -155,22 +155,21 @@ dependencies = [
 
 [[package]]
 name = "axum-extra"
-version = "0.10.3"
+version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9963ff19f40c6102c76756ef0a46004c0d58957d87259fc9208ff8441c12ab96"
+checksum = "fef252edff26ddba56bbcdf2ee3307b8129acb86f5749b68990c168a6fcc9c76"
 dependencies = [
  "axum",
  "axum-core",
  "bytes",
  "cookie",
+ "futures-core",
  "futures-util",
  "http",
  "http-body",
  "http-body-util",
  "mime",
  "pin-project-lite",
- "rustversion",
- "serde_core",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -1577,7 +1576,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "224399e74b87b5f3557511d98dff8b14089b3dadafcab6bb93eab67d3aace965"
 dependencies = [
  "scopeguard",
- "serde",
 ]
 
 [[package]]
@@ -2608,9 +2606,9 @@ dependencies = [
 
 [[package]]
 name = "serde_spanned"
-version = "1.0.4"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8bbf91e5a4d6315eee45e704372590b30e260ee83af6639d64557f51b067776"
+checksum = "876ac351060d4f882bb1032b6369eb0aef79ad9df1ea8bc404874d8cc3d0cd98"
 dependencies = [
  "serde_core",
 ]
@@ -3310,9 +3308,9 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "1.0.7+spec-1.1.0"
+version = "1.1.0+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd28d57d8a6f6e458bc0b8784f8fdcc4b99a437936056fa122cb234f18656a96"
+checksum = "f8195ca05e4eb728f4ba94f3e3291661320af739c4e43779cbdfae82ab239fcc"
 dependencies = [
  "indexmap",
  "serde_core",
@@ -3325,27 +3323,27 @@ dependencies = [
 
 [[package]]
 name = "toml_datetime"
-version = "1.0.1+spec-1.1.0"
+version = "1.1.0+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b320e741db58cac564e26c607d3cc1fdc4a88fd36c879568c07856ed83ff3e9"
+checksum = "97251a7c317e03ad83774a8752a7e81fb6067740609f75ea2b585b569a59198f"
 dependencies = [
  "serde_core",
 ]
 
 [[package]]
 name = "toml_parser"
-version = "1.0.10+spec-1.1.0"
+version = "1.1.0+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7df25b4befd31c4816df190124375d5a20c6b6921e2cad937316de3fccd63420"
+checksum = "2334f11ee363607eb04df9b8fc8a13ca1715a72ba8662a26ac285c98aabb4011"
 dependencies = [
  "winnow",
 ]
 
 [[package]]
 name = "toml_writer"
-version = "1.0.7+spec-1.1.0"
+version = "1.1.0+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f17aaa1c6e3dc22b1da4b6bba97d066e354c7945cac2f7852d4e4e7ca7a6b56d"
+checksum = "d282ade6016312faf3e41e57ebbba0c073e4056dab1232ab1cb624199648f8ed"
 
 [[package]]
 name = "tower"
@@ -3411,9 +3409,9 @@ checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
 
 [[package]]
 name = "tower-sessions"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43a05911f23e8fae446005fe9b7b97e66d95b6db589dc1c4d59f6a2d4d4927d3"
+checksum = "518dca34b74a17cadfcee06e616a09d2bd0c3984eff1769e1e76d58df978fc78"
 dependencies = [
  "async-trait",
  "http",
@@ -3429,9 +3427,9 @@ dependencies = [
 
 [[package]]
 name = "tower-sessions-core"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce8cce604865576b7751b7a6bc3058f754569a60d689328bb74c52b1d87e355b"
+checksum = "568531ec3dfcf3ffe493de1958ae5662a0284ac5d767476ecdb6a34ff8c6b06c"
 dependencies = [
  "async-trait",
  "axum-core",
@@ -3439,7 +3437,7 @@ dependencies = [
  "futures",
  "http",
  "parking_lot",
- "rand 0.8.5",
+ "rand 0.9.2",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -3450,9 +3448,9 @@ dependencies = [
 
 [[package]]
 name = "tower-sessions-memory-store"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb05909f2e1420135a831dd5df9f5596d69196d0a64c3499ca474c4bd3d33242"
+checksum = "713fabf882b6560a831e2bbed6204048b35bdd60e50bbb722902c74f8df33460"
 dependencies = [
  "async-trait",
  "time",

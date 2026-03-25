@@ -15,7 +15,7 @@ mod store_rows;
 
 use super::{BookRow, LibraryRow, SeriesRow};
 use crate::read_models::queries;
-use crate::read_models::queries::{book_detail, readlists};
+use crate::read_models::queries::{books_media, readlists};
 use crate::sqlite::{SqliteTempPool, setup};
 
 #[derive(Clone)]
@@ -82,7 +82,7 @@ impl DiscoveryQueryRepository for SqlxRuntimeDiscoveryAdapter {
         context: &DiscoveryQueryContext,
         query: NativeSeriesListQuery,
     ) -> Result<PageEnvelope<SeriesReadModel>, DiscoveryError> {
-        queries::list_series_sqlx(self.pool.clone(), context, &query).await
+        queries::series::list_series_sqlx(self.pool.clone(), context, &query).await
     }
 
     async fn list_books(
@@ -90,7 +90,7 @@ impl DiscoveryQueryRepository for SqlxRuntimeDiscoveryAdapter {
         context: &DiscoveryQueryContext,
         query: NativeBooksListQuery,
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
-        queries::books::list_books_sqlx(self.pool.clone(), context, &query).await
+        books_media::list_books_sqlx(self.pool.clone(), context, &query).await
     }
 
     async fn list_books_latest(
@@ -98,7 +98,7 @@ impl DiscoveryQueryRepository for SqlxRuntimeDiscoveryAdapter {
         context: &DiscoveryQueryContext,
         query: NativeBooksLatestQuery,
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
-        queries::books::list_books_latest_sqlx(self.pool.clone(), context, &query).await
+        books_media::list_books_latest_sqlx(self.pool.clone(), context, &query).await
     }
 
     async fn list_readlist_books(
@@ -121,7 +121,7 @@ impl DiscoveryQueryRepository for SqlxRuntimeDiscoveryAdapter {
         &self,
         series_id: &str,
     ) -> Result<Option<SeriesResourceReadModel>, DiscoveryError> {
-        queries::resolve_series_resource_sqlx(self.pool.clone(), series_id).await
+        queries::series::resolve_series_resource_sqlx(self.pool.clone(), series_id).await
     }
 
     async fn get_series_detail(
@@ -129,14 +129,14 @@ impl DiscoveryQueryRepository for SqlxRuntimeDiscoveryAdapter {
         context: &DiscoveryQueryContext,
         query: SeriesDetailQuery,
     ) -> Result<Option<SeriesDetailReadModel>, DiscoveryError> {
-        queries::get_series_detail_sqlx(self.pool.clone(), context, &query).await
+        queries::series::get_series_detail_sqlx(self.pool.clone(), context, &query).await
     }
 
     async fn resolve_book_resource(
         &self,
         book_id: &str,
     ) -> Result<Option<BookResourceReadModel>, DiscoveryError> {
-        queries::resolve_book_resource_sqlx(self.pool.clone(), book_id).await
+        books_media::resolve_book_resource_sqlx(self.pool.clone(), book_id).await
     }
 
     async fn get_book_detail(
@@ -144,7 +144,7 @@ impl DiscoveryQueryRepository for SqlxRuntimeDiscoveryAdapter {
         context: &DiscoveryQueryContext,
         query: BookDetailQuery,
     ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
-        book_detail::get_book_detail_sqlx(self.pool.clone(), context, &query).await
+        books_media::get_book_detail_sqlx(self.pool.clone(), context, &query).await
     }
 
     async fn get_book_sibling_previous(
@@ -152,7 +152,7 @@ impl DiscoveryQueryRepository for SqlxRuntimeDiscoveryAdapter {
         context: &DiscoveryQueryContext,
         query: BookSiblingQuery,
     ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
-        book_detail::get_book_sibling_previous_sqlx(self.pool.clone(), context, &query).await
+        books_media::get_book_sibling_previous_sqlx(self.pool.clone(), context, &query).await
     }
 
     async fn get_book_sibling_next(
@@ -160,7 +160,7 @@ impl DiscoveryQueryRepository for SqlxRuntimeDiscoveryAdapter {
         context: &DiscoveryQueryContext,
         query: BookSiblingQuery,
     ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
-        book_detail::get_book_sibling_next_sqlx(self.pool.clone(), context, &query).await
+        books_media::get_book_sibling_next_sqlx(self.pool.clone(), context, &query).await
     }
 
     async fn list_book_readlists(
@@ -176,7 +176,7 @@ impl DiscoveryQueryRepository for SqlxRuntimeDiscoveryAdapter {
         context: &DiscoveryQueryContext,
         query: SeriesCollectionsQuery,
     ) -> Result<Vec<CollectionReadModel>, DiscoveryError> {
-        queries::list_series_collections_sqlx(self.pool.clone(), context, &query).await
+        readlists::list_series_collections_sqlx(self.pool.clone(), context, &query).await
     }
 }
 

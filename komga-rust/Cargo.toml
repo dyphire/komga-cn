@@ -14,7 +14,7 @@ edition = "2024"
 
 [workspace.dependencies]
 axum = "0.8.6"
-axum-extra = { version = "0.10.3", features = ["cookie"] }
+axum-extra = { version = "0.12.5", features = ["cookie"] }
 base64 = "0.22.1"
 bcrypt = "0.19.0"
 config = "0.15.19"
@@ -26,9 +26,9 @@ sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio-rustls"] }
 tracing-subscriber = { version = "0.3.19", features = ["fmt", "env-filter"] }
 anyhow = "1.0.102"
 reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "json", "rustls"] }
-toml = "1.0.7"
+toml = "1.1.0"
 tower = { version = "0.5.2", features = ["util"] }
-tower-sessions = "0.14.0"
+tower-sessions = "0.15.0"
 oauth2 = "5.0.0"
 tantivy = "0.25.0"
 

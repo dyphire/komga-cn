@@ -7,7 +7,7 @@ use tantivy::collector::TopDocs;
 use tantivy::doc;
 use tantivy::query::{BooleanQuery, Occur, QueryParser, TermQuery};
 use tantivy::schema::{
-    Field, IndexRecordOption, STORED, STRING, Schema, TEXT, TantivyDocument, Value,
+    Field, IndexRecordOption, Schema, TantivyDocument, Value, STORED, STRING, TEXT,
 };
 use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, Term};
 
@@ -132,19 +132,14 @@ impl SearchFields {
 }
 
 pub fn startup_recover(index_dir: &Path) -> Result<(), SearchError> {
-    fs::create_dir_all(index_dir)?;
-    if looks_like_legacy_lucene_directory(index_dir)? {
-        return Err(SearchError::UnsafeLegacyIndexOwnership(
-            index_dir.to_path_buf(),
-        ));
-    }
+    prepare_index_directory(index_dir)?;
     let _ = open_or_rebuild_index(index_dir, build_schema())?;
     Ok(())
 }
 
 impl SearchIndexLifecycle {
     pub fn bootstrap(index_dir: &Path) -> Result<Self, SearchError> {
-        fs::create_dir_all(index_dir)?;
+        prepare_index_directory(index_dir)?;
 
         let schema = build_schema();
         let index = open_or_rebuild_index(index_dir, schema.clone())?;
@@ -278,6 +273,16 @@ fn open_or_rebuild_index(index_dir: &Path, schema: Schema) -> Result<Index, Sear
     Ok(Index::create_in_dir(index_dir, schema)?)
 }
 
+fn prepare_index_directory(index_dir: &Path) -> Result<(), SearchError> {
+    fs::create_dir_all(index_dir)?;
+    if looks_like_legacy_lucene_directory(index_dir)? {
+        return Err(SearchError::UnsafeLegacyIndexOwnership(
+            index_dir.to_path_buf(),
+        ));
+    }
+    Ok(())
+}
+
 fn looks_like_legacy_lucene_directory(index_dir: &Path) -> Result<bool, SearchError> {
     let entries = fs::read_dir(index_dir)?;
     for entry in entries {
@@ -292,4 +297,97 @@ fn looks_like_legacy_lucene_directory(index_dir: &Path) -> Result<bool, SearchEr
         }
     }
     Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::{startup_recover, SearchError, SearchIndexLifecycle};
+
+    #[test]
+    fn bootstrap_rejects_legacy_lucene_artifacts() {
+        let index_dir = temp_index_dir("bootstrap-rejects-legacy-lucene");
+        std::fs::write(index_dir.join("segments_1"), b"legacy").expect("write legacy marker");
+
+        let result = SearchIndexLifecycle::bootstrap(index_dir.as_path());
+
+        assert!(
+            matches!(
+                result,
+                Err(SearchError::UnsafeLegacyIndexOwnership(path)) if path == index_dir
+            ),
+            "bootstrap must fail-closed when Java Lucene ownership artifacts are present",
+        );
+
+        let _ = std::fs::remove_dir_all(index_dir);
+    }
+
+    #[test]
+    fn startup_recover_rejects_legacy_lucene_artifacts() {
+        let index_dir = temp_index_dir("startup-recover-rejects-legacy-lucene");
+        std::fs::write(index_dir.join("segments.gen"), b"legacy").expect("write legacy marker");
+
+        let result = startup_recover(index_dir.as_path());
+
+        assert!(
+            matches!(
+                result,
+                Err(SearchError::UnsafeLegacyIndexOwnership(path)) if path == index_dir
+            ),
+            "startup recovery must fail-closed when Java Lucene ownership artifacts are present",
+        );
+
+        let _ = std::fs::remove_dir_all(index_dir);
+    }
+
+    #[test]
+    fn bootstrap_refuses_corrupted_existing_meta_without_explicit_rebuild() {
+        let index_dir = temp_index_dir("bootstrap-refuses-corrupted-meta");
+        std::fs::write(index_dir.join("meta.json"), b"not-valid-json")
+            .expect("write corrupted meta");
+
+        let result = SearchIndexLifecycle::bootstrap(index_dir.as_path());
+
+        assert!(
+            matches!(
+                result,
+                Err(SearchError::CorruptedIndexRequiresExplicitRebuild(path, _)) if path == index_dir
+            ),
+            "bootstrap must refuse destructive overwrite when existing index metadata is corrupted",
+        );
+
+        let _ = std::fs::remove_dir_all(index_dir);
+    }
+
+    #[test]
+    fn bootstrap_opens_existing_native_index_without_rebuild() {
+        let index_dir = temp_index_dir("bootstrap-opens-existing-native-index");
+
+        let first = SearchIndexLifecycle::bootstrap(index_dir.as_path());
+        assert!(first.is_ok(), "first bootstrap should create native index");
+        drop(first);
+
+        let second = SearchIndexLifecycle::bootstrap(index_dir.as_path());
+        assert!(
+            second.is_ok(),
+            "second bootstrap should open existing native index without rebuild",
+        );
+
+        let _ = std::fs::remove_dir_all(index_dir);
+    }
+
+    fn temp_index_dir(case: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after unix epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "komga-rust-search-{case}-{}-{nanos}",
+            std::process::id(),
+        ));
+        std::fs::create_dir_all(&dir).expect("temp index dir should be created");
+        dir
+    }
 }

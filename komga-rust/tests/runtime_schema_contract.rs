@@ -1,6 +1,8 @@
 use komga_compat_testkit::contract_matrix::assert_required_target_declared;
 use komga_rust::persistence::SqlitePersistenceContext;
-use komga_rust::persistence::sqlite::{connect_pool, setup};
+use komga_rust::persistence::sqlite::{
+    connect_persistence_context, connect_pool, connect_tasks_pool, setup,
+};
 use sqlx::Row;
 
 #[path = "support/persistence_contract_fixture.rs"]
@@ -165,6 +167,45 @@ async fn reject_outdated_schema() {
     );
 
     pool.close().await;
+    persistence_contract_fixture::cleanup(paths);
+}
+
+#[tokio::test]
+async fn sqlite_connect_layer_bootstraps_main_and_tasks_databases() {
+    let paths = persistence_contract_fixture::new_legacy_db_paths("runtime-schema-connect-layer")
+        .expect("connect-layer db paths should be created");
+
+    let main_context = connect_persistence_context(&paths.main_db, 1)
+        .await
+        .expect("main context connect should bootstrap main sqlite schema");
+    let tasks_pool = connect_tasks_pool(&paths.tasks_db, 1)
+        .await
+        .expect("tasks connect should bootstrap tasks sqlite schema");
+
+    let main_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND LOWER(name) = 'server_settings'",
+    )
+    .fetch_one(main_context.pool())
+    .await
+    .expect("main schema probe should succeed");
+    assert_eq!(
+        main_count, 1,
+        "main connect-layer bootstrap must provision Kotlin-compatible SERVER_SETTINGS table",
+    );
+
+    let tasks_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND LOWER(name) = 'task'",
+    )
+    .fetch_one(&tasks_pool)
+    .await
+    .expect("tasks schema probe should succeed");
+    assert_eq!(
+        tasks_count, 1,
+        "tasks connect-layer bootstrap must provision Kotlin-compatible TASK table",
+    );
+
+    main_context.pool().close().await;
+    tasks_pool.close().await;
     persistence_contract_fixture::cleanup(paths);
 }
 

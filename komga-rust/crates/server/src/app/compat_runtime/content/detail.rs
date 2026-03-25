@@ -964,6 +964,12 @@ struct PersistedBookResource {
     sharing_labels: Vec<String>,
 }
 
+#[derive(Clone, Copy)]
+enum PersistedBookSiblingDirection {
+    Previous,
+    Next,
+}
+
 async fn resolve_snapshot_book_id_for_persisted(
     database_file: &FsPath,
     requested_book_id: &str,
@@ -1092,14 +1098,127 @@ async fn load_persisted_book_detail(
     Ok(model)
 }
 
+async fn load_persisted_book_sibling_detail(
+    database_file: &FsPath,
+    book_id: &str,
+    direction: PersistedBookSiblingDirection,
+) -> Result<Option<BookDetailReadModel>, String> {
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("open book sibling db: {error}"))?;
+
+    let current = sqlx::query("SELECT SERIES_ID, NUMBER FROM BOOK WHERE ID = ?")
+        .bind(book_id)
+        .fetch_optional(&pool)
+        .await
+        .map_err(|error| format!("query persisted current book for sibling lookup: {error}"))?;
+
+    let Some(current) = current else {
+        pool.close().await;
+        return Ok(None);
+    };
+
+    let series_id = current.get::<String, _>("SERIES_ID");
+    let number = current.get::<i32, _>("NUMBER");
+
+    let sibling_row = match direction {
+        PersistedBookSiblingDirection::Previous => {
+            sqlx::query(
+                "SELECT ID
+                 FROM BOOK
+                 WHERE SERIES_ID = ?
+                   AND DELETED_DATE IS NULL
+                   AND (NUMBER < ? OR (NUMBER = ? AND ID < ?))
+                 ORDER BY NUMBER DESC, ID DESC
+                 LIMIT 1",
+            )
+            .bind(&series_id)
+            .bind(number)
+            .bind(number)
+            .bind(book_id)
+            .fetch_optional(&pool)
+            .await
+        }
+        PersistedBookSiblingDirection::Next => {
+            sqlx::query(
+                "SELECT ID
+                 FROM BOOK
+                 WHERE SERIES_ID = ?
+                   AND DELETED_DATE IS NULL
+                   AND (NUMBER > ? OR (NUMBER = ? AND ID > ?))
+                 ORDER BY NUMBER ASC, ID ASC
+                 LIMIT 1",
+            )
+            .bind(&series_id)
+            .bind(number)
+            .bind(number)
+            .bind(book_id)
+            .fetch_optional(&pool)
+            .await
+        }
+    }
+    .map_err(|error| format!("query persisted sibling book id: {error}"))?;
+
+    pool.close().await;
+
+    let Some(sibling_row) = sibling_row else {
+        return Ok(None);
+    };
+    let sibling_id = sibling_row.get::<String, _>("ID");
+
+    load_persisted_book_detail(database_file, &sibling_id).await
+}
+
 pub(in crate::app::compat_runtime) async fn book_sibling_previous(
     Extension(_profile): Extension<CompatProfile>,
+    Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(auth_state): Extension<DiscoveryAuthState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
     if let Some(response) = require_auth(&headers) {
         return response;
+    }
+
+    if auth_db.database_file.exists() {
+        let book_id =
+            resolve_snapshot_book_id_for_persisted(auth_db.database_file.as_path(), &book_id).await;
+
+        let Some(resource) =
+            (match load_persisted_book_resource(auth_db.database_file.as_path(), &book_id).await {
+                Ok(resource) => resource,
+                Err(error) => return internal_error_response(error),
+            })
+        else {
+            return StatusCode::NOT_FOUND.into_response();
+        };
+
+        let detail_context = DetailResourceContext {
+            library_id: Some(resource.library_id),
+            content: Some(DetailContentContext {
+                age_rating: resource.age_rating,
+                sharing_labels: resource.sharing_labels,
+            }),
+        };
+
+        let detail_query_context =
+            match auth_state.resolve_detail_query_context(&headers, &detail_context) {
+                Ok(context) => context,
+                Err(denial) => return detail_access_denial_response(denial),
+            };
+        let is_admin = detail_query_context.is_admin;
+
+        return match load_persisted_book_sibling_detail(
+            auth_db.database_file.as_path(),
+            &book_id,
+            PersistedBookSiblingDirection::Previous,
+        )
+        .await
+        {
+            Ok(Some(book)) => Json(book_detail_payload(&book, is_admin)).into_response(),
+            Ok(None) => StatusCode::NOT_FOUND.into_response(),
+            Err(error) => internal_error_response(error),
+        };
     }
 
     let mut adapter = SqliteDiscoveryAdapter::default();
@@ -1152,12 +1271,54 @@ pub(in crate::app::compat_runtime) async fn book_sibling_previous(
 
 pub(in crate::app::compat_runtime) async fn book_sibling_next(
     Extension(_profile): Extension<CompatProfile>,
+    Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(auth_state): Extension<DiscoveryAuthState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
     if let Some(response) = require_auth(&headers) {
         return response;
+    }
+
+    if auth_db.database_file.exists() {
+        let book_id =
+            resolve_snapshot_book_id_for_persisted(auth_db.database_file.as_path(), &book_id).await;
+
+        let Some(resource) =
+            (match load_persisted_book_resource(auth_db.database_file.as_path(), &book_id).await {
+                Ok(resource) => resource,
+                Err(error) => return internal_error_response(error),
+            })
+        else {
+            return StatusCode::NOT_FOUND.into_response();
+        };
+
+        let detail_context = DetailResourceContext {
+            library_id: Some(resource.library_id),
+            content: Some(DetailContentContext {
+                age_rating: resource.age_rating,
+                sharing_labels: resource.sharing_labels,
+            }),
+        };
+
+        let detail_query_context =
+            match auth_state.resolve_detail_query_context(&headers, &detail_context) {
+                Ok(context) => context,
+                Err(denial) => return detail_access_denial_response(denial),
+            };
+        let is_admin = detail_query_context.is_admin;
+
+        return match load_persisted_book_sibling_detail(
+            auth_db.database_file.as_path(),
+            &book_id,
+            PersistedBookSiblingDirection::Next,
+        )
+        .await
+        {
+            Ok(Some(book)) => Json(book_detail_payload(&book, is_admin)).into_response(),
+            Ok(None) => StatusCode::NOT_FOUND.into_response(),
+            Err(error) => internal_error_response(error),
+        };
     }
 
     let mut adapter = SqliteDiscoveryAdapter::default();

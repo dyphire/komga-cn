@@ -23,12 +23,12 @@ pub(super) use token::{
 };
 pub(super) use user::{
     AuthOutcome, PersistedAuthenticationActivity, PlaceholderUser, api_key_user, basic_user,
-    configured_users, persisted_api_key_user, persisted_basic_user, persisted_create_api_key,
-    persisted_delete_api_key_by_id, persisted_latest_authentication_activity_by_user_and_api_key,
-    persisted_list_api_keys, persisted_list_authentication_activity,
-    persisted_record_successful_authentication_activity, persisted_update_password_by_user_id,
-    persisted_users, placeholder_user_json, user_id, user_is_admin, user_shared_all_libraries,
-    user_shared_library_ids,
+    configured_users, persisted_api_key_metadata, persisted_api_key_user, persisted_basic_user,
+    persisted_create_api_key, persisted_delete_api_key_by_id,
+    persisted_latest_authentication_activity_by_user_and_api_key, persisted_list_api_keys,
+    persisted_list_authentication_activity, persisted_record_successful_authentication_activity,
+    persisted_update_password_by_user_id, persisted_users, placeholder_user_json, user_id,
+    user_is_admin, user_shared_all_libraries, user_shared_library_ids,
 };
 
 pub(super) fn require_auth(headers: &HeaderMap) -> Option<Response> {

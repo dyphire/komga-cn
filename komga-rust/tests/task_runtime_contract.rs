@@ -164,6 +164,93 @@ async fn rejects_memory_queue_by_requiring_restart_visible_tasks_from_sqlite() {
     persistence_contract_fixture::cleanup(paths);
 }
 
+#[tokio::test]
+async fn process_available_disowns_unprocessed_claimed_tasks_after_mid_batch_failure() {
+    let paths = new_task_runtime_fixture("task-runtime-mid-batch-failure").await;
+    let config = runtime_config_for_paths(&paths);
+    let mut scheduler = TaskQueueScheduler::for_runtime(config.clone(), "rust-main");
+    scheduler.set_task_pool_size(3);
+
+    scheduler.enqueue(TaskQueueRecord::new(
+        "EMPTY_TRASH:ok-1",
+        100,
+        Some("group-ok-1".to_string()),
+    ));
+    scheduler.enqueue(TaskQueueRecord::new(
+        "UNKNOWN_TASK:boom",
+        90,
+        Some("group-fail".to_string()),
+    ));
+    scheduler.enqueue(TaskQueueRecord::new(
+        "EMPTY_TRASH:ok-2",
+        80,
+        Some("group-ok-2".to_string()),
+    ));
+
+    let error = scheduler
+        .process_available(&config)
+        .expect_err("mid-batch unsupported task must fail processing");
+    assert!(
+        error
+            .to_string()
+            .contains("unsupported runtime task type: UNKNOWN_TASK"),
+        "failure should expose unsupported task kind"
+    );
+
+    let rows = load_task_rows(&paths.tasks_db).await;
+    assert_eq!(
+        rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
+        vec!["UNKNOWN_TASK:boom", "EMPTY_TRASH:ok-2"],
+        "only pre-failure completed tasks should be deleted from persisted TASK rows",
+    );
+
+    let by_id = rows
+        .iter()
+        .map(|row| (row.id.as_str(), row.owner.as_deref()))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(
+        by_id.get("UNKNOWN_TASK:boom").copied().flatten(),
+        None,
+        "failed task must be disowned so restart recovery can requeue it",
+    );
+    assert_eq!(
+        by_id.get("EMPTY_TRASH:ok-2").copied().flatten(),
+        None,
+        "unprocessed tasks claimed earlier in the same batch must be disowned after failure",
+    );
+
+    persistence_contract_fixture::cleanup(paths);
+}
+
+#[tokio::test]
+async fn consumes_tasks_persisted_after_scheduler_bootstrap_for_persistence_handoff() {
+    let paths = new_task_runtime_fixture("task-runtime-persistence-handoff").await;
+    let config = runtime_config_for_paths(&paths);
+    let mut scheduler = TaskQueueScheduler::for_runtime(config, "rust-main");
+
+    insert_task_row(
+        &paths.tasks_db,
+        "EMPTY_TRASH:handoff-1",
+        120,
+        Some("handoff-group"),
+        "EMPTY_TRASH",
+        None,
+    )
+    .await;
+
+    let running = scheduler
+        .take_next()
+        .expect("scheduler must consume tasks handed off into tasks.sqlite after bootstrap");
+    assert_eq!(running.id, "EMPTY_TRASH:handoff-1");
+
+    let rows = load_task_rows(&paths.tasks_db).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "EMPTY_TRASH:handoff-1");
+    assert_eq!(rows[0].owner.as_deref(), Some("rust-main"));
+
+    persistence_contract_fixture::cleanup(paths);
+}
+
 #[derive(Debug, Eq, PartialEq)]
 struct PersistedTaskRow {
     id: String,
@@ -234,4 +321,45 @@ async fn load_task_rows(path: &Path) -> Vec<PersistedTaskRow> {
 
     pool.close().await;
     result
+}
+
+async fn insert_task_row(
+    path: &Path,
+    id: &str,
+    priority: i64,
+    group_id: Option<&str>,
+    simple_type: &str,
+    owner: Option<&str>,
+) {
+    let pool = connect_pool(path, 1)
+        .await
+        .expect("sqlite pool should open for task insertion");
+
+    sqlx::query(
+        "INSERT INTO TASK (ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER)
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(id)
+    .bind(priority)
+    .bind(group_id)
+    .bind(format!(
+        "org.gotson.komga.task.{}.CompatTask",
+        simple_type.to_ascii_lowercase()
+    ))
+    .bind(simple_type)
+    .bind(format!(
+        "{{\"id\":\"{}\",\"simpleType\":\"{}\",\"priority\":{},\"groupId\":{}}}",
+        id,
+        simple_type,
+        priority,
+        group_id
+            .map(|value| format!("\"{value}\""))
+            .unwrap_or_else(|| "null".to_string())
+    ))
+    .bind(owner)
+    .execute(&pool)
+    .await
+    .expect("task row should be insertable for handoff contract");
+
+    pool.close().await;
 }

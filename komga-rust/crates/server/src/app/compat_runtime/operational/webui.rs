@@ -73,43 +73,12 @@ fn resolve_asset_file(root: &Path, webui_path: &str) -> Option<PathBuf> {
     if candidate.is_file() {
         Some(candidate)
     } else {
-        resolve_nested_route_asset_file(root, normalized)
+        None
     }
-}
-
-fn resolve_nested_route_asset_file(root: &Path, webui_path: &str) -> Option<PathBuf> {
-    let segments = webui_path
-        .split('/')
-        .filter(|segment| !segment.is_empty())
-        .collect::<Vec<_>>();
-
-    if segments.len() < 2 {
-        return None;
-    }
-
-    for index in 1..segments.len() {
-        if !is_root_asset_candidate(segments[index], segments.len() - index) {
-            continue;
-        }
-
-        let candidate = root.join(segments[index..].join("/"));
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-
-    None
 }
 
 fn is_index_fallback_candidate(path: &str) -> bool {
     Path::new(path).extension().is_none()
-}
-
-fn is_root_asset_candidate(first_segment: &str, remaining_segments: usize) -> bool {
-    match first_segment {
-        "js" | "css" | "fonts" | "img" => remaining_segments > 1,
-        _ => remaining_segments == 1 && Path::new(first_segment).extension().is_some(),
-    }
 }
 
 fn is_runtime_owned_prefix(path: &str) -> bool {
@@ -132,7 +101,6 @@ fn is_runtime_owned_prefix(path: &str) -> bool {
         || normalized.starts_with("actuator/")
         || normalized == "oauth2"
         || normalized.starts_with("oauth2/")
-        || normalized == "login"
         || normalized.starts_with("login/oauth2/")
 }
 
@@ -156,5 +124,45 @@ fn content_type_for(path: &Path) -> &'static str {
         Some("woff2") => "font/woff2",
         Some("ttf") => "font/ttf",
         _ => "application/octet-stream",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_runtime_owned_prefix, resolve_asset_file};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_temp_dir(prefix: &str) -> PathBuf {
+        let millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after unix epoch")
+            .as_millis();
+        std::env::temp_dir().join(format!("{prefix}-{millis}"))
+    }
+
+    #[test]
+    fn resolve_asset_file_rejects_hidden_nested_prefix_stripping_for_static_assets() {
+        let root = unique_temp_dir("komga-webui-asset-resolution");
+        let js_dir = root.join("js");
+        fs::create_dir_all(&js_dir).expect("js directory should be created");
+        fs::write(js_dir.join("app.js"), "console.log('ok')")
+            .expect("asset file should be created");
+
+        let resolved = resolve_asset_file(root.as_path(), "library/1/js/app.js");
+        assert_eq!(resolved, None);
+    }
+
+    #[test]
+    fn runtime_owned_prefix_filter_keeps_login_spa_route_while_reserving_oauth_callback_path() {
+        assert!(
+            !is_runtime_owned_prefix("login"),
+            "runtime WebUI must keep /login as SPA route; only /login/oauth2/* callback paths are runtime-owned",
+        );
+        assert!(
+            is_runtime_owned_prefix("login/oauth2/code/provider-a"),
+            "runtime must continue reserving /login/oauth2/code/{{id}} callback endpoint ownership",
+        );
     }
 }

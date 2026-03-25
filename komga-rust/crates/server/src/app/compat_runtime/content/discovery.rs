@@ -1115,24 +1115,31 @@ async fn load_persisted_authors(
     database_file: &FsPath,
     library_id: Option<&str>,
 ) -> Result<Vec<PersistedAuthorEntry>, String> {
-    let Some(library_id) = library_id else {
-        return Ok(vec![]);
-    };
-
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(|error| format!("open authors db: {error}"))?;
 
-    let rows = sqlx::query(
-        "SELECT a.NAME, a.ROLE
-         FROM BOOK_METADATA_AUTHOR a
-         JOIN BOOK b ON b.ID = a.BOOK_ID
-         WHERE b.LIBRARY_ID = ?
-         ORDER BY lower(a.NAME), lower(a.ROLE), a.NAME, a.ROLE, b.ID",
-    )
-    .bind(library_id)
-    .fetch_all(&pool)
-    .await
+    let rows = if let Some(library_id) = library_id {
+        sqlx::query(
+            "SELECT a.NAME, a.ROLE
+             FROM BOOK_METADATA_AUTHOR a
+             JOIN BOOK b ON b.ID = a.BOOK_ID
+             WHERE b.LIBRARY_ID = ?
+             ORDER BY lower(a.NAME), lower(a.ROLE), a.NAME, a.ROLE, b.ID",
+        )
+        .bind(library_id)
+        .fetch_all(&pool)
+        .await
+    } else {
+        sqlx::query(
+            "SELECT a.NAME, a.ROLE
+             FROM BOOK_METADATA_AUTHOR a
+             JOIN BOOK b ON b.ID = a.BOOK_ID
+             ORDER BY lower(a.NAME), lower(a.ROLE), a.NAME, a.ROLE, b.ID",
+        )
+        .fetch_all(&pool)
+        .await
+    }
     .map_err(|error| format!("query persisted authors: {error}"))?;
 
     let mut authors = Vec::with_capacity(rows.len());
@@ -1397,6 +1404,10 @@ async fn load_persisted_genres(
          JOIN SERIES s ON s.ID = g.SERIES_ID
          WHERE s.LIBRARY_ID = ?
          ORDER BY lower(g.GENRE), g.GENRE, s.ID",
+        "SELECT g.GENRE AS VALUE
+         FROM SERIES_METADATA_GENRE g
+         JOIN SERIES s ON s.ID = g.SERIES_ID
+         ORDER BY lower(g.GENRE), g.GENRE, s.ID",
     )
     .await
 }
@@ -1405,32 +1416,45 @@ async fn load_persisted_tags(
     database_file: &FsPath,
     library_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
-    let Some(library_id) = library_id else {
-        return Ok(vec![]);
-    };
-
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(|error| format!("open tags db: {error}"))?;
 
-    let rows = sqlx::query(
-        "SELECT TAG FROM (
-             SELECT st.TAG AS TAG
-             FROM SERIES_METADATA_TAG st
-             JOIN SERIES s ON s.ID = st.SERIES_ID
-             WHERE s.LIBRARY_ID = ?
-             UNION
-             SELECT bt.TAG AS TAG
-             FROM BOOK_METADATA_TAG bt
-             JOIN BOOK b ON b.ID = bt.BOOK_ID
-             WHERE b.LIBRARY_ID = ?
-         )
-         ORDER BY lower(TAG), TAG",
-    )
-    .bind(library_id)
-    .bind(library_id)
-    .fetch_all(&pool)
-    .await
+    let rows = if let Some(library_id) = library_id {
+        sqlx::query(
+            "SELECT TAG FROM (
+                 SELECT st.TAG AS TAG
+                 FROM SERIES_METADATA_TAG st
+                 JOIN SERIES s ON s.ID = st.SERIES_ID
+                 WHERE s.LIBRARY_ID = ?
+                 UNION
+                 SELECT bt.TAG AS TAG
+                 FROM BOOK_METADATA_TAG bt
+                 JOIN BOOK b ON b.ID = bt.BOOK_ID
+                 WHERE b.LIBRARY_ID = ?
+             )
+             ORDER BY lower(TAG), TAG",
+        )
+        .bind(library_id)
+        .bind(library_id)
+        .fetch_all(&pool)
+        .await
+    } else {
+        sqlx::query(
+            "SELECT TAG FROM (
+                 SELECT st.TAG AS TAG
+                 FROM SERIES_METADATA_TAG st
+                 JOIN SERIES s ON s.ID = st.SERIES_ID
+                 UNION
+                 SELECT bt.TAG AS TAG
+                 FROM BOOK_METADATA_TAG bt
+                 JOIN BOOK b ON b.ID = bt.BOOK_ID
+             )
+             ORDER BY lower(TAG), TAG",
+        )
+        .fetch_all(&pool)
+        .await
+    }
     .map_err(|error| format!("query persisted tags: {error}"))?;
 
     let tags = rows
@@ -1455,6 +1479,10 @@ async fn load_persisted_languages(
          JOIN SERIES s ON s.ID = sm.SERIES_ID
          WHERE s.LIBRARY_ID = ?
          ORDER BY lower(sm.LANGUAGE), sm.LANGUAGE",
+        "SELECT DISTINCT sm.LANGUAGE AS VALUE
+         FROM SERIES_METADATA sm
+         JOIN SERIES s ON s.ID = sm.SERIES_ID
+         ORDER BY lower(sm.LANGUAGE), sm.LANGUAGE",
     )
     .await
 }
@@ -1472,6 +1500,10 @@ async fn load_persisted_publishers(
          JOIN SERIES s ON s.ID = sm.SERIES_ID
          WHERE s.LIBRARY_ID = ?
          ORDER BY lower(sm.PUBLISHER), sm.PUBLISHER",
+        "SELECT DISTINCT sm.PUBLISHER AS VALUE
+         FROM SERIES_METADATA sm
+         JOIN SERIES s ON s.ID = sm.SERIES_ID
+         ORDER BY lower(sm.PUBLISHER), sm.PUBLISHER",
     )
     .await
 }
@@ -1480,24 +1512,32 @@ async fn load_persisted_age_ratings(
     database_file: &FsPath,
     library_id: Option<&str>,
 ) -> Result<Vec<u16>, String> {
-    let Some(library_id) = library_id else {
-        return Ok(vec![]);
-    };
-
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(|error| format!("open age-ratings db: {error}"))?;
 
-    let rows = sqlx::query(
-        "SELECT DISTINCT sm.AGE_RATING AS VALUE
-         FROM SERIES_METADATA sm
-         JOIN SERIES s ON s.ID = sm.SERIES_ID
-         WHERE s.LIBRARY_ID = ? AND sm.AGE_RATING IS NOT NULL
-         ORDER BY sm.AGE_RATING",
-    )
-    .bind(library_id)
-    .fetch_all(&pool)
-    .await
+    let rows = if let Some(library_id) = library_id {
+        sqlx::query(
+            "SELECT DISTINCT sm.AGE_RATING AS VALUE
+             FROM SERIES_METADATA sm
+             JOIN SERIES s ON s.ID = sm.SERIES_ID
+             WHERE s.LIBRARY_ID = ? AND sm.AGE_RATING IS NOT NULL
+             ORDER BY sm.AGE_RATING",
+        )
+        .bind(library_id)
+        .fetch_all(&pool)
+        .await
+    } else {
+        sqlx::query(
+            "SELECT DISTINCT sm.AGE_RATING AS VALUE
+             FROM SERIES_METADATA sm
+             JOIN SERIES s ON s.ID = sm.SERIES_ID
+             WHERE sm.AGE_RATING IS NOT NULL
+             ORDER BY sm.AGE_RATING",
+        )
+        .fetch_all(&pool)
+        .await
+    }
     .map_err(|error| format!("query persisted age-ratings: {error}"))?;
 
     let values = rows
@@ -1523,6 +1563,10 @@ async fn load_persisted_sharing_labels(
          JOIN SERIES s ON s.ID = sms.SERIES_ID
          WHERE s.LIBRARY_ID = ?
          ORDER BY lower(sms.LABEL), sms.LABEL",
+        "SELECT DISTINCT sms.LABEL AS VALUE
+         FROM SERIES_METADATA_SHARING sms
+         JOIN SERIES s ON s.ID = sms.SERIES_ID
+         ORDER BY lower(sms.LABEL), sms.LABEL",
     )
     .await
 }
@@ -1540,6 +1584,11 @@ async fn load_persisted_series_release_dates(
          JOIN BOOK b ON b.ID = bm.BOOK_ID
          WHERE b.LIBRARY_ID = ? AND bm.RELEASE_DATE IS NOT NULL AND bm.RELEASE_DATE <> ''
          ORDER BY bm.RELEASE_DATE",
+        "SELECT DISTINCT bm.RELEASE_DATE AS VALUE
+         FROM BOOK_METADATA bm
+         JOIN BOOK b ON b.ID = bm.BOOK_ID
+         WHERE bm.RELEASE_DATE IS NOT NULL AND bm.RELEASE_DATE <> ''
+         ORDER BY bm.RELEASE_DATE",
     )
     .await
 }
@@ -1549,20 +1598,18 @@ async fn load_persisted_library_strings(
     library_id: Option<&str>,
     label: &str,
     sql: &str,
+    sql_all: &str,
 ) -> Result<Vec<String>, String> {
-    let Some(library_id) = library_id else {
-        return Ok(vec![]);
-    };
-
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(|error| format!("open {label} db: {error}"))?;
 
-    let rows = sqlx::query(sql)
-        .bind(library_id)
-        .fetch_all(&pool)
-        .await
-        .map_err(|error| format!("query persisted {label}: {error}"))?;
+    let rows = if let Some(library_id) = library_id {
+        sqlx::query(sql).bind(library_id).fetch_all(&pool).await
+    } else {
+        sqlx::query(sql_all).fetch_all(&pool).await
+    }
+    .map_err(|error| format!("query persisted {label}: {error}"))?;
 
     let values = rows
         .into_iter()

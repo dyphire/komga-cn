@@ -2,6 +2,8 @@
 mod adapter;
 #[path = "read_models/filters.rs"]
 mod filters;
+#[path = "read_models/libraries.rs"]
+pub mod libraries;
 #[path = "read_models/queries.rs"]
 mod queries;
 #[path = "read_models/rows.rs"]

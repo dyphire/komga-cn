@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::Path as FsPath;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -6,6 +5,10 @@ use axum::Json;
 use axum::extract::Path;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
+use komga_domain::discovery::DiscoveryError;
+use komga_persistence::read_models::libraries::{
+    PersistedLibraryReadModel, get_persisted_library, list_persisted_libraries,
+};
 use komga_persistence::sqlite::connect_pool;
 use serde_json::{Value, json};
 use sqlx::{Row, Sqlite, Transaction};
@@ -16,6 +19,7 @@ use crate::app::placeholder_auth::{require_admin, require_auth};
 use crate::task_queue::TaskQueueRecord;
 
 use super::super::OperationalState;
+use super::helpers::to_domain_query_context;
 use super::mark_native;
 
 pub(super) async fn response(
@@ -741,6 +745,15 @@ fn internal_error_response(error: impl std::fmt::Display) -> Response {
         .into_response()
 }
 
+fn discovery_error_message(error: &DiscoveryError) -> String {
+    match error {
+        DiscoveryError::NonNativeRequestShape(details) => format!("{details:?}"),
+        DiscoveryError::InvalidRequest(message) | DiscoveryError::Persistence(message) => {
+            message.clone()
+        }
+    }
+}
+
 async fn native_owned_libraries_response(
     context: DiscoveryQueryContext,
     database_file: &FsPath,
@@ -753,7 +766,7 @@ async fn native_owned_libraries_response(
         }
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": error.to_string() })),
+            Json(json!({ "error": discovery_error_message(&error) })),
         )
             .into_response(),
     }
@@ -764,18 +777,18 @@ async fn native_owned_library_detail_response(
     database_file: &FsPath,
     library_id: &str,
 ) -> Response {
-    match native_owned_libraries(context.clone(), database_file).await {
-        Ok(libraries) => {
-            let Some(library) = libraries.into_iter().find(|it| it.id == library_id) else {
-                return StatusCode::NOT_FOUND.into_response();
-            };
+    let domain_context = to_domain_query_context(context.clone());
+    match get_persisted_library(database_file, &domain_context, library_id).await {
+        Ok(Some(library)) => {
+            let library = PersistedLibrary::from(library);
             let mut response = Json(library_payload(library, context.is_admin)).into_response();
             mark_native(&mut response);
             response
         }
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": error.to_string() })),
+            Json(json!({ "error": discovery_error_message(&error) })),
         )
             .into_response(),
     }
@@ -852,107 +865,50 @@ impl PersistedLibrary {
     }
 }
 
+impl From<PersistedLibraryReadModel> for PersistedLibrary {
+    fn from(value: PersistedLibraryReadModel) -> Self {
+        Self {
+            id: value.id,
+            name: value.name,
+            root: value.root,
+            import_comicinfo_book: value.import_comicinfo_book,
+            import_comicinfo_series: value.import_comicinfo_series,
+            import_comicinfo_collection: value.import_comicinfo_collection,
+            import_comicinfo_readlist: value.import_comicinfo_readlist,
+            import_comicinfo_series_append_volume: value.import_comicinfo_series_append_volume,
+            import_epub_book: value.import_epub_book,
+            import_epub_series: value.import_epub_series,
+            import_mylar_series: value.import_mylar_series,
+            import_local_artwork: value.import_local_artwork,
+            import_barcode_isbn: value.import_barcode_isbn,
+            scan_force_modified_time: value.scan_force_modified_time,
+            scan_interval: value.scan_interval,
+            scan_on_startup: value.scan_on_startup,
+            scan_cbx: value.scan_cbx,
+            scan_pdf: value.scan_pdf,
+            scan_epub: value.scan_epub,
+            scan_directory_exclusions: value.scan_directory_exclusions,
+            repair_extensions: value.repair_extensions,
+            convert_to_cbz: value.convert_to_cbz,
+            empty_trash_after_scan: value.empty_trash_after_scan,
+            series_cover: value.series_cover,
+            hash_files: value.hash_files,
+            hash_pages: value.hash_pages,
+            hash_koreader: value.hash_koreader,
+            analyze_dimensions: value.analyze_dimensions,
+            oneshots_directory: value.oneshots_directory,
+            unavailable: value.unavailable,
+        }
+    }
+}
+
 async fn native_owned_libraries(
     context: DiscoveryQueryContext,
     database_file: &FsPath,
-) -> Result<Vec<PersistedLibrary>, sqlx::Error> {
-    if context
-        .authorized_library_ids
-        .as_ref()
-        .is_some_and(Vec::is_empty)
-    {
-        return Ok(vec![]);
-    }
-
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
-    let pool = connect_pool(database_file, 1).await?;
-    let rows = sqlx::query(
-        "SELECT \
-            ID, \
-            NAME, \
-            ROOT, \
-            IMPORT_COMICINFO_BOOK, \
-            IMPORT_COMICINFO_SERIES, \
-            IMPORT_COMICINFO_COLLECTION, \
-            IMPORT_COMICINFO_READLIST, \
-            IMPORT_COMICINFO_SERIES_APPEND_VOLUME, \
-            IMPORT_EPUB_BOOK, \
-            IMPORT_EPUB_SERIES, \
-            IMPORT_MYLAR_SERIES, \
-            IMPORT_LOCAL_ARTWORK, \
-            IMPORT_BARCODE_ISBN, \
-            SCAN_FORCE_MODIFIED_TIME, \
-            SCAN_INTERVAL, \
-            SCAN_STARTUP, \
-            SCAN_CBX, \
-            SCAN_PDF, \
-            SCAN_EPUB, \
-            REPAIR_EXTENSIONS, \
-            CONVERT_TO_CBZ, \
-            EMPTY_TRASH_AFTER_SCAN, \
-            SERIES_COVER, \
-            HASH_FILES, \
-            HASH_PAGES, \
-            HASH_KOREADER, \
-            ANALYZE_DIMENSIONS, \
-            ONESHOTS_DIRECTORY, \
-            UNAVAILABLE_DATE \
-         FROM LIBRARY \
-         ORDER BY NAME COLLATE NOCASE ASC, ID ASC",
-    )
-    .fetch_all(&pool)
-    .await?;
-
-    let mut libraries = filter_authorized_libraries(
-        rows.into_iter().map(map_persisted_library_row).collect(),
-        &context,
-    );
-
-    if !libraries.is_empty() {
-        let exclusions = sqlx::query(
-            "SELECT LIBRARY_ID, EXCLUSION \
-             FROM LIBRARY_EXCLUSIONS \
-             ORDER BY LIBRARY_ID ASC, EXCLUSION COLLATE NOCASE ASC",
-        )
-        .fetch_all(&pool)
-        .await?;
-
-        let library_indexes = libraries
-            .iter()
-            .enumerate()
-            .map(|(index, library)| (library.id.clone(), index))
-            .collect::<HashMap<_, _>>();
-
-        for row in exclusions {
-            let library_id = row.get::<String, _>("LIBRARY_ID");
-            let Some(index) = library_indexes.get(&library_id).copied() else {
-                continue;
-            };
-            libraries[index]
-                .scan_directory_exclusions
-                .push(row.get::<String, _>("EXCLUSION"));
-        }
-    }
-
-    pool.close().await;
-    Ok(libraries)
-}
-
-fn filter_authorized_libraries(
-    libraries: Vec<PersistedLibrary>,
-    context: &DiscoveryQueryContext,
-) -> Vec<PersistedLibrary> {
-    let Some(allowed_ids) = context.authorized_library_ids.as_ref() else {
-        return libraries;
-    };
-
-    libraries
-        .into_iter()
-        .filter(|library| allowed_ids.iter().any(|id| id == library.id.as_str()))
-        .collect()
+) -> Result<Vec<PersistedLibrary>, DiscoveryError> {
+    let domain_context = to_domain_query_context(context);
+    let libraries = list_persisted_libraries(database_file, &domain_context).await?;
+    Ok(libraries.into_iter().map(PersistedLibrary::from).collect())
 }
 
 fn map_persisted_library_row(row: sqlx::sqlite::SqliteRow) -> PersistedLibrary {

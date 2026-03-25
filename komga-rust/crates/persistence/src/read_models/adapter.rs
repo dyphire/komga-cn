@@ -14,7 +14,7 @@ use komga_domain::discovery::{
 use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
 
 use super::queries;
-use super::queries::{book_detail, books, readlists};
+use super::queries::{books_media, readlists};
 use super::rows::{BookRow, CollectionRow, LibraryRow, ReadListRow, ReadProgressRow, SeriesRow};
 use crate::sqlite::setup;
 
@@ -459,7 +459,7 @@ impl DiscoveryQueryRepository for SqliteDiscoveryAdapter {
         query: NativeSeriesListQuery,
     ) -> Result<PageEnvelope<SeriesReadModel>, DiscoveryError> {
         let pool = self.ready_pool().await?;
-        queries::list_series_sqlx(pool, context, &query).await
+        queries::series::list_series_sqlx(pool, context, &query).await
     }
 
     async fn list_books(
@@ -468,7 +468,7 @@ impl DiscoveryQueryRepository for SqliteDiscoveryAdapter {
         query: NativeBooksListQuery,
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
         let pool = self.ready_pool().await?;
-        books::list_books_sqlx(pool, context, &query).await
+        books_media::list_books_sqlx(pool, context, &query).await
     }
 
     async fn list_books_latest(
@@ -477,7 +477,7 @@ impl DiscoveryQueryRepository for SqliteDiscoveryAdapter {
         query: NativeBooksLatestQuery,
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
         let pool = self.ready_pool().await?;
-        books::list_books_latest_sqlx(pool, context, &query).await
+        books_media::list_books_latest_sqlx(pool, context, &query).await
     }
 
     async fn list_readlist_books(
@@ -503,7 +503,7 @@ impl DiscoveryQueryRepository for SqliteDiscoveryAdapter {
         series_id: &str,
     ) -> Result<Option<SeriesResourceReadModel>, DiscoveryError> {
         let pool = self.ready_pool().await?;
-        queries::resolve_series_resource_sqlx(pool, series_id).await
+        queries::series::resolve_series_resource_sqlx(pool, series_id).await
     }
 
     async fn get_series_detail(
@@ -512,7 +512,7 @@ impl DiscoveryQueryRepository for SqliteDiscoveryAdapter {
         query: SeriesDetailQuery,
     ) -> Result<Option<SeriesDetailReadModel>, DiscoveryError> {
         let pool = self.ready_pool().await?;
-        queries::get_series_detail_sqlx(pool, context, &query).await
+        queries::series::get_series_detail_sqlx(pool, context, &query).await
     }
 
     async fn resolve_book_resource(
@@ -520,7 +520,7 @@ impl DiscoveryQueryRepository for SqliteDiscoveryAdapter {
         book_id: &str,
     ) -> Result<Option<BookResourceReadModel>, DiscoveryError> {
         let pool = self.ready_pool().await?;
-        queries::resolve_book_resource_sqlx(pool, book_id).await
+        books_media::resolve_book_resource_sqlx(pool, book_id).await
     }
 
     async fn get_book_detail(
@@ -529,7 +529,7 @@ impl DiscoveryQueryRepository for SqliteDiscoveryAdapter {
         query: BookDetailQuery,
     ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
         let pool = self.ready_pool().await?;
-        book_detail::get_book_detail_sqlx(pool, context, &query).await
+        books_media::get_book_detail_sqlx(pool, context, &query).await
     }
 
     async fn get_book_sibling_previous(
@@ -538,7 +538,7 @@ impl DiscoveryQueryRepository for SqliteDiscoveryAdapter {
         query: BookSiblingQuery,
     ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
         let pool = self.ready_pool().await?;
-        book_detail::get_book_sibling_previous_sqlx(pool, context, &query).await
+        books_media::get_book_sibling_previous_sqlx(pool, context, &query).await
     }
 
     async fn get_book_sibling_next(
@@ -547,7 +547,7 @@ impl DiscoveryQueryRepository for SqliteDiscoveryAdapter {
         query: BookSiblingQuery,
     ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
         let pool = self.ready_pool().await?;
-        book_detail::get_book_sibling_next_sqlx(pool, context, &query).await
+        books_media::get_book_sibling_next_sqlx(pool, context, &query).await
     }
 
     async fn list_book_readlists(
@@ -574,7 +574,7 @@ impl DiscoveryQueryRepository for SqliteDiscoveryAdapter {
         query: SeriesCollectionsQuery,
     ) -> Result<Vec<CollectionReadModel>, DiscoveryError> {
         let pool = self.ready_pool().await?;
-        queries::list_series_collections_sqlx(pool, context, &query).await
+        readlists::list_series_collections_sqlx(pool, context, &query).await
     }
 }
 

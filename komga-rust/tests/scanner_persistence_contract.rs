@@ -7,7 +7,7 @@ use komga_rust::config::{RuntimeCli, RuntimeConfig};
 use komga_rust::persistence::sqlite::connect_pool;
 use komga_rust::scanner::{ScannerOptions, scan_root_folder};
 use komga_rust::search::{SearchEntityType, SearchIndexLifecycle};
-use komga_rust::task_queue::TaskQueueScheduler;
+use komga_rust::task_queue::{TaskQueueRecord, TaskQueueScheduler};
 use sqlx::Row;
 
 #[path = "support/persistence_contract_fixture.rs"]
@@ -201,6 +201,46 @@ async fn scanner_persisted_rows_remain_visible_after_runtime_rebuild() {
     fixture.cleanup();
 }
 
+#[tokio::test]
+async fn scanner_rescan_updates_existing_persisted_book_file_size_rows() {
+    let fixture = ScannerPersistenceFixture::new("scanner-persistence-rescan-updates")
+        .await
+        .expect("scanner rescan fixture should be created");
+
+    let _initial_runtime = komga_rust::app::build_router_with_config(&fixture.config);
+
+    let book_path = fixture.library_root.join("Series-A").join("Book-001.cbz");
+    let book_url = book_path.to_string_lossy().to_string();
+
+    let initial_size = load_book_file_size(&fixture.paths.main_db, &book_url).await;
+    assert!(
+        initial_size > 0,
+        "fixture sanity: scanner startup should persist initial BOOK file size before rescan",
+    );
+
+    let updated_payload = b"book-001-updated-payload-content";
+    fs::write(&book_path, updated_payload)
+        .expect("book payload rewrite should succeed for rescan update contract");
+
+    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    scheduler.enqueue(
+        TaskQueueRecord::new("SCAN_LIBRARY:library-1", 900, Some("library-1".to_string()))
+            .with_simple_type("SCAN_LIBRARY"),
+    );
+    scheduler
+        .process_available(&fixture.config)
+        .expect("scanner rescan task should process successfully");
+
+    let updated_size = load_book_file_size(&fixture.paths.main_db, &book_url).await;
+    assert_eq!(
+        updated_size,
+        updated_payload.len() as i64,
+        "scanner persistence contract requires rescan to update existing BOOK file size rows instead of leaving stale values",
+    );
+
+    fixture.cleanup();
+}
+
 #[derive(Debug, Eq, PartialEq)]
 struct PersistenceSnapshot {
     library_rows: i64,
@@ -366,4 +406,18 @@ async fn load_media_ready_count(main_db: &Path) -> i64 {
         .get::<i64, _>("COUNT");
     pool.close().await;
     count
+}
+
+async fn load_book_file_size(main_db: &Path, book_url: &str) -> i64 {
+    let pool = connect_pool(main_db, 1)
+        .await
+        .expect("sqlite pool should open for book file size inspection");
+    let file_size = sqlx::query("SELECT FILE_SIZE FROM BOOK WHERE URL = ? LIMIT 1")
+        .bind(book_url)
+        .fetch_one(&pool)
+        .await
+        .expect("book row should be queryable by URL for rescan contract")
+        .get::<i64, _>("FILE_SIZE");
+    pool.close().await;
+    file_size
 }

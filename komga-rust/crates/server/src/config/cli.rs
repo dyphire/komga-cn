@@ -72,6 +72,15 @@ pub struct RuntimeConfig {
     pub shadow_policy: ShadowPolicy,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct DerivedRuntimePaths {
+    log_file: PathBuf,
+    database_file: PathBuf,
+    tasks_db_file: PathBuf,
+    lucene_data_directory: PathBuf,
+    fonts_data_directory: PathBuf,
+}
+
 impl RuntimeConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
         let cli = RuntimeCli::default();
@@ -109,7 +118,10 @@ impl RuntimeConfig {
         let bootstrap_config_dir = cli
             .config_dir
             .clone()
-            .or_else(|| env.get(CONFIG_DIR_ENV).map(PathBuf::from))
+            .or_else(|| {
+                preferred_string(None, env.get(CONFIG_DIR_ENV).map(String::as_str))
+                    .map(PathBuf::from)
+            })
             .or_else(|| platform_profile.default_config_dir(env))
             .or_else(|| default_home_config_dir(env))
             .unwrap_or_else(|| PathBuf::from(DEFAULT_CONFIG_DIR));
@@ -120,7 +132,11 @@ impl RuntimeConfig {
             .config_dir
             .as_ref()
             .map(path_to_string)
-            .or_else(|| env.get(CONFIG_DIR_ENV).cloned())
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                preferred_string(None, env.get(CONFIG_DIR_ENV).map(String::as_str))
+                    .map(str::to_string)
+            })
             .or_else(|| read_string(&layered, &["komga.config-dir"]))
             .or_else(|| {
                 platform_profile
@@ -136,80 +152,16 @@ impl RuntimeConfig {
             env,
         ));
 
-        let bind_address = match preferred_string(
-            cli.address.as_deref(),
-            env.get(ADDR_ENV).map(String::as_str),
-        ) {
-            Some(raw) => raw.parse().map_err(ConfigError::InvalidAddress)?,
-            None => SocketAddr::from(([127, 0, 0, 1], resolve_server_port(env, &layered)?)),
-        };
+        let (bind_address, server_context_path) =
+            resolve_bind_address_and_context_path(cli, env, &layered)?;
 
-        let server_context_path =
-            preferred_string(None, env.get(SERVER_CONTEXT_PATH_ENV).map(String::as_str))
-                .map(str::to_string)
-                .or_else(|| {
-                    read_string(
-                        &layered,
-                        &["server.servlet.context-path", "server.servlet.context.path"],
-                    )
-                })
-                .unwrap_or_default();
-        if !is_valid_startup_context_path(&server_context_path) {
-            return Err(ConfigError::InvalidContextPath(server_context_path));
-        }
-
-        let log_file = cli
-            .log_file
-            .as_ref()
-            .map(path_to_string)
-            .or_else(|| env.get(LOG_FILE_ENV).cloned())
-            .or_else(|| read_string(&layered, &["logging.file.name"]))
-            .or_else(|| {
-                platform_profile
-                    .default_log_file(env)
-                    .as_ref()
-                    .map(path_to_string)
-            })
-            .map(|value| PathBuf::from(expand_path_placeholders(&value, &resolved_config_dir, env)))
-            .unwrap_or_else(|| default_log_file_for_config_dir(&resolved_config_dir));
-
-        let database_file = env
-            .get(DATABASE_FILE_ENV)
-            .cloned()
-            .or_else(|| read_string(&layered, &["komga.database.file"]))
-            .map(|value| PathBuf::from(expand_path_placeholders(&value, &resolved_config_dir, env)))
-            .unwrap_or_else(|| resolved_config_dir.join("database.sqlite"));
-
-        let tasks_db_file = env
-            .get(TASKS_DB_FILE_ENV)
-            .cloned()
-            .or_else(|| read_string(&layered, &["komga.tasks-db.file", "komga.tasks.db.file"]))
-            .map(|value| PathBuf::from(expand_path_placeholders(&value, &resolved_config_dir, env)))
-            .unwrap_or_else(|| resolved_config_dir.join("tasks.sqlite"));
-
-        let lucene_data_directory = env
-            .get(LUCENE_DATA_DIRECTORY_ENV)
-            .cloned()
-            .or_else(|| {
-                read_string(
-                    &layered,
-                    &["komga.lucene.data-directory", "komga.lucene.data.directory"],
-                )
-            })
-            .map(|value| PathBuf::from(expand_path_placeholders(&value, &resolved_config_dir, env)))
-            .unwrap_or_else(|| resolved_config_dir.join("lucene"));
-
-        let fonts_data_directory = env
-            .get(FONTS_DATA_DIRECTORY_ENV)
-            .cloned()
-            .or_else(|| {
-                read_string(
-                    &layered,
-                    &["komga.fonts.data-directory", "komga.fonts.data.directory"],
-                )
-            })
-            .map(|value| PathBuf::from(expand_path_placeholders(&value, &resolved_config_dir, env)))
-            .unwrap_or_else(|| resolved_config_dir.join("fonts"));
+        let derived_paths = resolve_derived_runtime_paths(
+            cli,
+            env,
+            &layered,
+            &resolved_config_dir,
+            platform_profile,
+        );
 
         let kepubify_path = cli
             .kepubify_path
@@ -230,22 +182,9 @@ impl RuntimeConfig {
             .map(|value| PathBuf::from(expand_path_placeholders(&value, &resolved_config_dir, env)))
             .or_else(|| platform_profile.default_kepubify_path());
 
-        let isolation_root = cli
-            .shadow_isolation_root
-            .clone()
-            .or_else(|| env.get(SHADOW_ISOLATION_ROOT_ENV).map(PathBuf::from));
+        let oauth2_clients = resolve_oauth2_clients_for_startup_slice(&layered, env);
 
-        let oauth2_clients = resolve_oauth2_clients(&layered, env);
-
-        let allow_shadow_writes = if cli.allow_shadow_writes {
-            true
-        } else {
-            env.get(ALLOW_SHADOW_WRITES_ENV)
-                .map(String::as_str)
-                .map(parse_bool)
-                .transpose()?
-                .unwrap_or(false)
-        };
+        let shadow_policy = resolve_shadow_policy_for_startup_slice(cli, env)?;
 
         let config = Self {
             bind_address,
@@ -254,17 +193,14 @@ impl RuntimeConfig {
             platform_profile,
             config_dir: Some(resolved_config_dir),
             server_context_path: Some(server_context_path),
-            log_file,
-            database_file,
-            tasks_db_file,
-            lucene_data_directory,
-            fonts_data_directory,
+            log_file: derived_paths.log_file,
+            database_file: derived_paths.database_file,
+            tasks_db_file: derived_paths.tasks_db_file,
+            lucene_data_directory: derived_paths.lucene_data_directory,
+            fonts_data_directory: derived_paths.fonts_data_directory,
             kepubify_path,
             oauth2_clients,
-            shadow_policy: ShadowPolicy {
-                isolation_root,
-                allow_shadow_writes,
-            },
+            shadow_policy,
         };
 
         config.validate_single_writer_storage_ownership(env)?;
@@ -424,33 +360,10 @@ impl RuntimeConfig {
 
 impl RuntimeConfig {
     fn webui_layout_candidates(&self) -> Vec<PathBuf> {
-        let mut candidates = Vec::new();
-
-        if let Some(config_dir) = self.config_dir.as_ref() {
-            candidates.push(config_dir.join(LEGACY_WEBUI_DIRECTORY_NAME));
-        }
-
-        if let Ok(exe_path) = std::env::current_exe()
-            && let Some(exe_dir) = exe_path.parent()
-        {
-            candidates.push(exe_dir.join(LEGACY_WEBUI_DIRECTORY_NAME));
-            candidates.push(exe_dir.join("resources").join(LEGACY_WEBUI_DIRECTORY_NAME));
-        }
-
-        if let Ok(current_dir) = std::env::current_dir() {
-            candidates.push(current_dir.join(LEGACY_WEBUI_DIRECTORY_NAME));
-            candidates.push(
-                current_dir
-                    .join("komga")
-                    .join("src")
-                    .join("main")
-                    .join("resources")
-                    .join(LEGACY_WEBUI_DIRECTORY_NAME),
-            );
-            candidates.push(current_dir.join("komga-webui").join("dist"));
-        }
-
-        dedup_paths(candidates)
+        self.config_dir
+            .as_ref()
+            .map(|config_dir| vec![config_dir.join(LEGACY_WEBUI_DIRECTORY_NAME)])
+            .unwrap_or_default()
     }
 }
 
@@ -510,6 +423,36 @@ fn resolve_server_port(
     Ok(25600)
 }
 
+fn resolve_bind_address_and_context_path(
+    cli: &RuntimeCli,
+    env: &BTreeMap<String, String>,
+    layered: &LayeredConfig,
+) -> Result<(SocketAddr, String), ConfigError> {
+    let bind_address = match preferred_string(
+        cli.address.as_deref(),
+        env.get(ADDR_ENV).map(String::as_str),
+    ) {
+        Some(raw) => raw.parse().map_err(ConfigError::InvalidAddress)?,
+        None => SocketAddr::from(([127, 0, 0, 1], resolve_server_port(env, layered)?)),
+    };
+
+    let server_context_path =
+        preferred_string(None, env.get(SERVER_CONTEXT_PATH_ENV).map(String::as_str))
+            .map(str::to_string)
+            .or_else(|| {
+                read_string(
+                    layered,
+                    &["server.servlet.context-path", "server.servlet.context.path"],
+                )
+            })
+            .unwrap_or_default();
+    if !is_valid_startup_context_path(&server_context_path) {
+        return Err(ConfigError::InvalidContextPath(server_context_path));
+    }
+
+    Ok((bind_address, server_context_path))
+}
+
 fn parse_port(raw: &str) -> Result<u16, ConfigError> {
     raw.trim()
         .parse::<u16>()
@@ -538,6 +481,75 @@ fn expand_path_placeholders(
         expanded = expanded.replace("${user.home}", home);
     }
     expanded
+}
+
+fn resolve_derived_runtime_paths(
+    cli: &RuntimeCli,
+    env: &BTreeMap<String, String>,
+    layered: &LayeredConfig,
+    resolved_config_dir: &Path,
+    platform_profile: PlatformProfile,
+) -> DerivedRuntimePaths {
+    let log_file = cli
+        .log_file
+        .as_ref()
+        .map(path_to_string)
+        .or_else(|| env.get(LOG_FILE_ENV).cloned())
+        .or_else(|| read_string(layered, &["logging.file.name"]))
+        .or_else(|| {
+            platform_profile
+                .default_log_file(env)
+                .as_ref()
+                .map(path_to_string)
+        })
+        .map(|value| PathBuf::from(expand_path_placeholders(&value, resolved_config_dir, env)))
+        .unwrap_or_else(|| default_log_file_for_config_dir(resolved_config_dir));
+
+    let database_file = env
+        .get(DATABASE_FILE_ENV)
+        .cloned()
+        .or_else(|| read_string(layered, &["komga.database.file"]))
+        .map(|value| PathBuf::from(expand_path_placeholders(&value, resolved_config_dir, env)))
+        .unwrap_or_else(|| resolved_config_dir.join("database.sqlite"));
+
+    let tasks_db_file = env
+        .get(TASKS_DB_FILE_ENV)
+        .cloned()
+        .or_else(|| read_string(layered, &["komga.tasks-db.file", "komga.tasks.db.file"]))
+        .map(|value| PathBuf::from(expand_path_placeholders(&value, resolved_config_dir, env)))
+        .unwrap_or_else(|| resolved_config_dir.join("tasks.sqlite"));
+
+    let lucene_data_directory = env
+        .get(LUCENE_DATA_DIRECTORY_ENV)
+        .cloned()
+        .or_else(|| {
+            read_string(
+                layered,
+                &["komga.lucene.data-directory", "komga.lucene.data.directory"],
+            )
+        })
+        .map(|value| PathBuf::from(expand_path_placeholders(&value, resolved_config_dir, env)))
+        .unwrap_or_else(|| resolved_config_dir.join("lucene"));
+
+    let fonts_data_directory = env
+        .get(FONTS_DATA_DIRECTORY_ENV)
+        .cloned()
+        .or_else(|| {
+            read_string(
+                layered,
+                &["komga.fonts.data-directory", "komga.fonts.data.directory"],
+            )
+        })
+        .map(|value| PathBuf::from(expand_path_placeholders(&value, resolved_config_dir, env)))
+        .unwrap_or_else(|| resolved_config_dir.join("fonts"));
+
+    DerivedRuntimePaths {
+        log_file,
+        database_file,
+        tasks_db_file,
+        lucene_data_directory,
+        fonts_data_directory,
+    }
 }
 
 fn ensure_runtime_directories(
@@ -619,17 +631,7 @@ fn parse_bool(value: &str) -> Result<bool, ConfigError> {
     }
 }
 
-fn dedup_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
-    let mut ordered = Vec::new();
-    for path in paths {
-        if !ordered.iter().any(|existing| existing == &path) {
-            ordered.push(path);
-        }
-    }
-    ordered
-}
-
-fn resolve_oauth2_clients(
+fn resolve_oauth2_clients_for_startup_slice(
     layered: &LayeredConfig,
     env: &BTreeMap<String, String>,
 ) -> Vec<OAuth2ClientConfig> {
@@ -643,6 +645,31 @@ fn resolve_oauth2_clients(
     }
 
     clients_by_registration_id.into_values().collect()
+}
+
+fn resolve_shadow_policy_for_startup_slice(
+    cli: &RuntimeCli,
+    env: &BTreeMap<String, String>,
+) -> Result<ShadowPolicy, ConfigError> {
+    let isolation_root = cli
+        .shadow_isolation_root
+        .clone()
+        .or_else(|| env.get(SHADOW_ISOLATION_ROOT_ENV).map(PathBuf::from));
+
+    let allow_shadow_writes = if cli.allow_shadow_writes {
+        true
+    } else {
+        env.get(ALLOW_SHADOW_WRITES_ENV)
+            .map(String::as_str)
+            .map(parse_bool)
+            .transpose()?
+            .unwrap_or(false)
+    };
+
+    Ok(ShadowPolicy {
+        isolation_root,
+        allow_shadow_writes,
+    })
 }
 
 fn resolve_oauth2_clients_from_layered(layered: &LayeredConfig) -> Vec<OAuth2ClientConfig> {
@@ -807,4 +834,399 @@ fn read_object_string(
 
 fn default_log_file_for_config_dir(config_dir: &Path) -> PathBuf {
     config_dir.join("logs").join(DEFAULT_LOG_FILE_NAME)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_temp_dir(prefix: &str) -> PathBuf {
+        let millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after unix epoch")
+            .as_millis();
+        std::env::temp_dir().join(format!("{prefix}-{millis}"))
+    }
+
+    #[test]
+    fn preferred_string_uses_cli_then_env_and_skips_blank_values() {
+        assert_eq!(preferred_string(Some("cli"), Some("env")), Some("cli"));
+        assert_eq!(preferred_string(Some("   "), Some("env")), Some("env"));
+        assert_eq!(preferred_string(None, Some("env")), Some("env"));
+        assert_eq!(preferred_string(None, Some("   ")), None);
+    }
+
+    #[test]
+    fn expand_path_placeholders_expands_config_dir_and_user_home_and_escaped_tokens() {
+        let resolved_config_dir = PathBuf::from("/runtime/.komga");
+        let mut env = BTreeMap::new();
+        env.insert("HOME".to_string(), "/home/runtime".to_string());
+
+        let expanded = expand_path_placeholders(
+            r#"${komga.config-dir}/data:\${komga.config-dir}:${user.home}"#,
+            &resolved_config_dir,
+            &env,
+        );
+
+        assert_eq!(
+            expanded,
+            "/runtime/.komga/data:/runtime/.komga:/home/runtime"
+        );
+    }
+
+    #[test]
+    fn startup_context_path_validation_accepts_and_rejects_expected_shapes() {
+        assert!(is_valid_startup_context_path(""));
+        assert!(is_valid_startup_context_path("/komga"));
+        assert!(is_valid_startup_context_path("/a-b_c/123"));
+
+        assert!(!is_valid_startup_context_path("noslash"));
+        assert!(!is_valid_startup_context_path("/trailing/"));
+        assert!(!is_valid_startup_context_path("/with.dot"));
+        assert!(!is_valid_startup_context_path("/with space"));
+    }
+
+    #[test]
+    fn resolve_with_env_ignores_blank_env_config_dir_and_keeps_placeholder_expansion() {
+        let home_dir = unique_temp_dir("komga-cli-blank-env-config-dir-home");
+        let config_dir = home_dir.join(".komga");
+        fs::create_dir_all(&config_dir).expect("test config directory should be created");
+
+        fs::write(
+            config_dir.join("application.yml"),
+            r#"
+komga:
+  config-dir: ${user.home}/.komga
+  database:
+    file: ${komga.config-dir}/database.sqlite
+logging:
+  file:
+    name: ${komga.config-dir}/logs/komga.log
+"#,
+        )
+        .expect("application.yml should be written");
+
+        let mut env = BTreeMap::new();
+        env.insert("HOME".to_string(), home_dir.to_string_lossy().to_string());
+        env.insert("KOMGA_CONFIG_DIR".to_string(), "   ".to_string());
+
+        let config = RuntimeConfig::resolve_with_env(&RuntimeCli::default(), &env)
+            .expect("runtime config should resolve");
+
+        assert_eq!(config.config_dir.as_deref(), Some(config_dir.as_path()));
+        assert_eq!(config.database_file, config_dir.join("database.sqlite"));
+        assert_eq!(config.log_file, config_dir.join("logs").join("komga.log"));
+    }
+
+    #[test]
+    fn startup_network_slice_preserves_bind_port_and_context_path_precedence() {
+        let config_dir = unique_temp_dir("komga-cli-network-slice");
+        fs::create_dir_all(&config_dir).expect("test config directory should be created");
+        fs::write(
+            config_dir.join("application.yml"),
+            "server:\n  port: 28080\n  servlet:\n    context-path: /from-file\n",
+        )
+        .expect("application.yml should be written");
+
+        let mut env = BTreeMap::new();
+        env.insert("SERVER_PORT".to_string(), "28111".to_string());
+        env.insert(
+            "KOMGA_CONFIG_DIR".to_string(),
+            config_dir.to_string_lossy().to_string(),
+        );
+        let layered = build_layered_config(&config_dir, &env)
+            .expect("layered startup config should be created for tests");
+
+        let from_port_fallback = resolve_bind_address_and_context_path(
+            &RuntimeCli::default(),
+            &env,
+            &layered,
+        )
+        .expect("fallback resolution should work");
+        assert_eq!(from_port_fallback.0, SocketAddr::from(([127, 0, 0, 1], 28111)));
+        assert_eq!(from_port_fallback.1, "/from-file");
+
+        let from_cli_bind = resolve_bind_address_and_context_path(
+            &RuntimeCli {
+                address: Some("0.0.0.0:38000".to_string()),
+                ..RuntimeCli::default()
+            },
+            &env,
+            &layered,
+        )
+        .expect("cli bind-address should override port fallback");
+        assert_eq!(from_cli_bind.0, SocketAddr::from(([0, 0, 0, 0], 38000)));
+    }
+
+    #[test]
+    fn derived_runtime_paths_slice_keeps_env_precedence_file_expansion_and_split_defaults() {
+        let config_dir = unique_temp_dir("komga-cli-derived-paths-slice");
+        fs::create_dir_all(&config_dir).expect("test config directory should be created");
+        fs::write(
+            config_dir.join("application.yml"),
+            r#"
+logging:
+  file:
+    name: ${komga.config-dir}/file/logs/komga.log
+komga:
+  tasks-db:
+    file: ${komga.config-dir}/file/tasks.sqlite
+  lucene:
+    data-directory: ${komga.config-dir}/file/lucene
+  fonts:
+    data-directory: ${komga.config-dir}/file/fonts
+"#,
+        )
+        .expect("application.yml should be written");
+
+        let mut env = BTreeMap::new();
+        env.insert(
+            "KOMGA_DATABASE_FILE".to_string(),
+            "${komga.config-dir}/env/database.sqlite".to_string(),
+        );
+
+        let layered = build_layered_config(&config_dir, &env)
+            .expect("layered startup config should be created for tests");
+        let derived = resolve_derived_runtime_paths(
+            &RuntimeCli::default(),
+            &env,
+            &layered,
+            &config_dir,
+            PlatformProfile::Default,
+        );
+
+        assert_eq!(derived.log_file, config_dir.join("file").join("logs").join("komga.log"));
+        assert_eq!(
+            derived.database_file,
+            config_dir.join("env").join("database.sqlite"),
+        );
+        assert_eq!(
+            derived.tasks_db_file,
+            config_dir.join("file").join("tasks.sqlite"),
+        );
+        assert_eq!(
+            derived.lucene_data_directory,
+            config_dir.join("file").join("lucene"),
+        );
+        assert_eq!(
+            derived.fonts_data_directory,
+            config_dir.join("file").join("fonts"),
+        );
+
+        let defaults_dir = unique_temp_dir("komga-cli-derived-paths-defaults");
+        fs::create_dir_all(&defaults_dir).expect("test config directory should be created");
+
+        let defaults = resolve_derived_runtime_paths(
+            &RuntimeCli::default(),
+            &BTreeMap::new(),
+            &build_layered_config(&defaults_dir, &BTreeMap::new())
+                .expect("layered startup config should be created for tests"),
+            &defaults_dir,
+            PlatformProfile::Default,
+        );
+        assert_eq!(
+            defaults.database_file,
+            defaults_dir.join("database.sqlite"),
+        );
+        assert_eq!(defaults.tasks_db_file, defaults_dir.join("tasks.sqlite"),);
+        assert_eq!(defaults.lucene_data_directory, defaults_dir.join("lucene"),);
+        assert_eq!(defaults.fonts_data_directory, defaults_dir.join("fonts"),);
+        assert_eq!(
+            defaults.log_file,
+            defaults_dir.join("logs").join("komga.log"),
+        );
+    }
+
+    #[test]
+    fn webui_layout_candidates_are_config_dir_rooted_legacy_public_only() {
+        let config_dir = unique_temp_dir("komga-cli-webui-candidates");
+        fs::create_dir_all(&config_dir).expect("test config directory should be created");
+
+        let mut config = RuntimeConfig::for_compat_profile(CompatProfile::SnapshotAligned);
+        config.config_dir = Some(config_dir.clone());
+
+        let candidates = config.webui_layout_candidates();
+        assert_eq!(candidates, vec![config_dir.join("public")]);
+    }
+
+    #[test]
+    fn oauth2_loading_slice_merges_layered_and_env_with_env_override_and_incomplete_omission() {
+        let config_dir = unique_temp_dir("komga-cli-oauth2-slice");
+        fs::create_dir_all(&config_dir).expect("test config directory should be created");
+        fs::write(
+            config_dir.join("application.yml"),
+            r#"
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          oidc:
+            client-id: file-oidc-id
+            client-secret: file-oidc-secret
+            client-name: File OIDC
+          github:
+            client-id: file-github-id
+            client-secret: file-github-secret
+            client-name: File GitHub
+        provider:
+          oidc:
+            authorization-uri: https://file.example.org/oidc/authorize
+            token-uri: https://file.example.org/oidc/token
+          github:
+            authorization-uri: https://github.com/login/oauth/authorize
+            token-uri: https://github.com/login/oauth/access_token
+"#,
+        )
+        .expect("application.yml should be written");
+
+        let mut env = BTreeMap::new();
+        env.insert(
+            "KOMGA_CONFIG_DIR".to_string(),
+            config_dir.to_string_lossy().to_string(),
+        );
+        env.insert(
+            "SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_OIDC_CLIENT_ID".to_string(),
+            "env-oidc-id".to_string(),
+        );
+        env.insert(
+            "SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_OIDC_CLIENT_SECRET".to_string(),
+            "env-oidc-secret".to_string(),
+        );
+        env.insert(
+            "SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_OIDC_CLIENT_NAME".to_string(),
+            "Env OIDC".to_string(),
+        );
+        env.insert(
+            "SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_OIDC_PROVIDER".to_string(),
+            "oidc_env".to_string(),
+        );
+        env.insert(
+            "SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_OIDC_ENV_AUTHORIZATION_URI".to_string(),
+            "https://env.example.org/oidc/authorize".to_string(),
+        );
+        env.insert(
+            "SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_OIDC_ENV_TOKEN_URI".to_string(),
+            "https://env.example.org/oidc/token".to_string(),
+        );
+        env.insert(
+            "SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITLAB_CLIENT_ID".to_string(),
+            "env-gitlab-id".to_string(),
+        );
+        env.insert(
+            "SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITLAB_CLIENT_SECRET".to_string(),
+            "env-gitlab-secret".to_string(),
+        );
+        env.insert(
+            "SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_GITLAB_AUTHORIZATION_URI".to_string(),
+            "https://gitlab.com/oauth/authorize".to_string(),
+        );
+        env.insert(
+            "SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_GITLAB_TOKEN_URI".to_string(),
+            "https://gitlab.com/oauth/token".to_string(),
+        );
+        env.insert(
+            "SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_BROKEN_CLIENT_ID".to_string(),
+            "broken-id".to_string(),
+        );
+        env.insert(
+            "SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_BROKEN_CLIENT_SECRET".to_string(),
+            "broken-secret".to_string(),
+        );
+        env.insert(
+            "SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_BROKEN_AUTHORIZATION_URI".to_string(),
+            "https://broken.example.org/authorize".to_string(),
+        );
+
+        let layered = build_layered_config(&config_dir, &env)
+            .expect("layered startup config should be created for tests");
+        let clients = resolve_oauth2_clients_for_startup_slice(&layered, &env);
+
+        let by_id = clients
+            .into_iter()
+            .map(|client| (client.registration_id.clone(), client))
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(by_id.len(), 3);
+
+        assert_eq!(
+            by_id.get("oidc"),
+            Some(&OAuth2ClientConfig {
+                registration_id: "oidc".to_string(),
+                client_name: "Env OIDC".to_string(),
+                client_id: "env-oidc-id".to_string(),
+                client_secret: "env-oidc-secret".to_string(),
+                authorization_uri: "https://env.example.org/oidc/authorize".to_string(),
+                token_uri: "https://env.example.org/oidc/token".to_string(),
+            }),
+        );
+        assert_eq!(
+            by_id.get("github"),
+            Some(&OAuth2ClientConfig {
+                registration_id: "github".to_string(),
+                client_name: "File GitHub".to_string(),
+                client_id: "file-github-id".to_string(),
+                client_secret: "file-github-secret".to_string(),
+                authorization_uri: "https://github.com/login/oauth/authorize".to_string(),
+                token_uri: "https://github.com/login/oauth/access_token".to_string(),
+            }),
+        );
+        assert_eq!(
+            by_id.get("gitlab"),
+            Some(&OAuth2ClientConfig {
+                registration_id: "gitlab".to_string(),
+                client_name: "gitlab".to_string(),
+                client_id: "env-gitlab-id".to_string(),
+                client_secret: "env-gitlab-secret".to_string(),
+                authorization_uri: "https://gitlab.com/oauth/authorize".to_string(),
+                token_uri: "https://gitlab.com/oauth/token".to_string(),
+            }),
+        );
+        assert!(
+            by_id.get("broken").is_none(),
+            "oauth registration with missing provider token uri must be omitted",
+        );
+    }
+
+    #[test]
+    fn shadow_policy_slice_prefers_cli_values_and_parses_env_opt_in() {
+        let mut env = BTreeMap::new();
+        env.insert(ALLOW_SHADOW_WRITES_ENV.to_string(), "false".to_string());
+        env.insert(
+            SHADOW_ISOLATION_ROOT_ENV.to_string(),
+            "/env/komga-shadow".to_string(),
+        );
+
+        let cli_preferred = resolve_shadow_policy_for_startup_slice(
+            &RuntimeCli {
+                allow_shadow_writes: true,
+                shadow_isolation_root: Some(PathBuf::from("/cli/komga-shadow")),
+                ..RuntimeCli::default()
+            },
+            &env,
+        )
+        .expect("shadow policy should resolve from cli and env");
+
+        assert_eq!(
+            cli_preferred,
+            ShadowPolicy {
+                isolation_root: Some(PathBuf::from("/cli/komga-shadow")),
+                allow_shadow_writes: true,
+            },
+        );
+
+        env.insert(ALLOW_SHADOW_WRITES_ENV.to_string(), "true".to_string());
+        let env_fallback = resolve_shadow_policy_for_startup_slice(&RuntimeCli::default(), &env)
+            .expect("shadow policy should parse env opt-in fallback");
+
+        assert_eq!(
+            env_fallback,
+            ShadowPolicy {
+                isolation_root: Some(PathBuf::from("/env/komga-shadow")),
+                allow_shadow_writes: true,
+            },
+        );
+    }
 }

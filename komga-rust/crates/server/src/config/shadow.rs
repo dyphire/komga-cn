@@ -72,3 +72,110 @@ impl RuntimeConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::CompatProfile;
+
+    fn runtime_config_for(
+        mode: RuntimeMode,
+        allow_shadow_writes: bool,
+        isolation_root: Option<&str>,
+    ) -> RuntimeConfig {
+        let mut config = RuntimeConfig::for_compat_profile(CompatProfile::SnapshotAligned);
+        config.mode = mode;
+        config.shadow_policy = ShadowPolicy {
+            isolation_root: isolation_root.map(PathBuf::from),
+            allow_shadow_writes,
+        };
+        config
+    }
+
+    #[test]
+    fn snapshot_and_localdb_modes_allow_all_writers() {
+        for mode in [RuntimeMode::Snapshot, RuntimeMode::Localdb] {
+            let config = runtime_config_for(mode, false, None);
+            for writer in [
+                WriterKind::MainDatabase,
+                WriterKind::TasksDatabase,
+                WriterKind::SearchIndex,
+                WriterKind::FilesystemScanOutput,
+                WriterKind::SidecarOutput,
+            ] {
+                assert_eq!(config.writer_decision(writer), WriterDecision::Allowed);
+            }
+        }
+    }
+
+    #[test]
+    fn canary_mode_blocks_all_writers_with_cutover_reason() {
+        let config = runtime_config_for(RuntimeMode::Canary, false, None);
+        for writer in [
+            WriterKind::MainDatabase,
+            WriterKind::TasksDatabase,
+            WriterKind::SearchIndex,
+            WriterKind::FilesystemScanOutput,
+            WriterKind::SidecarOutput,
+        ] {
+            assert_eq!(
+                config.writer_decision(writer),
+                WriterDecision::Blocked {
+                    reason: "canary mode requires explicit cutover wiring",
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn shadow_mode_without_opt_in_blocks_all_writers() {
+        let config = runtime_config_for(RuntimeMode::Shadow, false, None);
+        for writer in [
+            WriterKind::MainDatabase,
+            WriterKind::TasksDatabase,
+            WriterKind::SearchIndex,
+            WriterKind::FilesystemScanOutput,
+            WriterKind::SidecarOutput,
+        ] {
+            let expected_reason = if writer == WriterKind::SearchIndex {
+                "search index ownership remains with java writer in shadow mode"
+            } else {
+                "shadow mode requires explicit isolation or opt-in"
+            };
+            assert_eq!(
+                config.writer_decision(writer),
+                WriterDecision::Blocked {
+                    reason: expected_reason,
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn shadow_mode_with_opt_in_isolates_non_search_writers_and_still_blocks_search() {
+        let config = runtime_config_for(RuntimeMode::Shadow, true, Some("/tmp/komga-shadow"));
+
+        assert_eq!(
+            config.writer_decision(WriterKind::MainDatabase),
+            WriterDecision::Isolated,
+        );
+        assert_eq!(
+            config.writer_decision(WriterKind::TasksDatabase),
+            WriterDecision::Isolated,
+        );
+        assert_eq!(
+            config.writer_decision(WriterKind::FilesystemScanOutput),
+            WriterDecision::Isolated,
+        );
+        assert_eq!(
+            config.writer_decision(WriterKind::SidecarOutput),
+            WriterDecision::Isolated,
+        );
+        assert_eq!(
+            config.writer_decision(WriterKind::SearchIndex),
+            WriterDecision::Blocked {
+                reason: "search index ownership remains with java writer in shadow mode",
+            },
+        );
+    }
+}
