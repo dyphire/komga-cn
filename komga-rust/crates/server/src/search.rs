@@ -7,7 +7,7 @@ use tantivy::collector::TopDocs;
 use tantivy::doc;
 use tantivy::query::{BooleanQuery, Occur, QueryParser, TermQuery};
 use tantivy::schema::{
-    Field, IndexRecordOption, Schema, TantivyDocument, Value, STORED, STRING, TEXT,
+    Field, IndexRecordOption, STORED, STRING, Schema, TEXT, TantivyDocument, Value,
 };
 use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, Term};
 
@@ -55,6 +55,8 @@ pub enum SearchError {
     Query(String),
     MissingStoredField(&'static str),
     WriterPoisoned,
+    UnsafeLegacyIndexOwnership(PathBuf),
+    CorruptedIndexRequiresExplicitRebuild(PathBuf, String),
 }
 
 impl Display for SearchError {
@@ -67,6 +69,16 @@ impl Display for SearchError {
                 write!(f, "search stored field missing: {field}")
             }
             SearchError::WriterPoisoned => write!(f, "search index writer lock poisoned"),
+            SearchError::UnsafeLegacyIndexOwnership(path) => write!(
+                f,
+                "legacy search directory '{}' is Java-owned; refusing non-destructive startup to avoid mixed-writer index wipe",
+                path.display(),
+            ),
+            SearchError::CorruptedIndexRequiresExplicitRebuild(path, source) => write!(
+                f,
+                "search index startup refused to overwrite existing state at '{}'; explicit rebuild is required ({source})",
+                path.display(),
+            ),
         }
     }
 }
@@ -121,6 +133,11 @@ impl SearchFields {
 
 pub fn startup_recover(index_dir: &Path) -> Result<(), SearchError> {
     fs::create_dir_all(index_dir)?;
+    if looks_like_legacy_lucene_directory(index_dir)? {
+        return Err(SearchError::UnsafeLegacyIndexOwnership(
+            index_dir.to_path_buf(),
+        ));
+    }
     let _ = open_or_rebuild_index(index_dir, build_schema())?;
     Ok(())
 }
@@ -250,17 +267,12 @@ fn document_key(entity_type: SearchEntityType, id: &str) -> String {
 fn open_or_rebuild_index(index_dir: &Path, schema: Schema) -> Result<Index, SearchError> {
     let has_meta = index_dir.join("meta.json").exists();
     if has_meta {
-        return match Index::open_in_dir(index_dir) {
-            Ok(index) => Ok(index),
-            Err(_) => {
-                clear_directory(index_dir)?;
-                Ok(Index::create_in_dir(index_dir, schema)?)
-            }
-        };
-    }
-
-    if looks_like_legacy_lucene_directory(index_dir)? {
-        clear_directory(index_dir)?;
+        return Index::open_in_dir(index_dir).map_err(|error| {
+            SearchError::CorruptedIndexRequiresExplicitRebuild(
+                index_dir.to_path_buf(),
+                error.to_string(),
+            )
+        });
     }
 
     Ok(Index::create_in_dir(index_dir, schema)?)
@@ -280,33 +292,4 @@ fn looks_like_legacy_lucene_directory(index_dir: &Path) -> Result<bool, SearchEr
         }
     }
     Ok(false)
-}
-
-fn clear_directory(index_dir: &Path) -> Result<(), SearchError> {
-    for entry in fs::read_dir(index_dir)? {
-        let entry = entry?;
-        let path: PathBuf = entry.path();
-        if path.is_dir() {
-            remove_dir_all_ignore_not_found(&path)?;
-        } else {
-            remove_file_ignore_not_found(&path)?;
-        }
-    }
-    Ok(())
-}
-
-fn remove_dir_all_ignore_not_found(path: &Path) -> Result<(), SearchError> {
-    match fs::remove_dir_all(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(SearchError::Io(error)),
-    }
-}
-
-fn remove_file_ignore_not_found(path: &Path) -> Result<(), SearchError> {
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(SearchError::Io(error)),
-    }
 }

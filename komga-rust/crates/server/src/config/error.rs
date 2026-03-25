@@ -15,6 +15,12 @@ pub enum ConfigError {
         source: std::io::Error,
     },
     InvalidTempDirectory(PathBuf),
+    MissingWebUiAssetsLayout {
+        candidates: Vec<PathBuf>,
+    },
+    MixedWriterStorageOwnership {
+        details: String,
+    },
 }
 
 impl std::fmt::Display for ConfigError {
@@ -36,14 +42,33 @@ impl std::fmt::Display for ConfigError {
                 f,
                 "invalid SERVER_SERVLET_CONTEXT_PATH: must be empty or start with '/' and not end with '/'",
             ),
-            Self::InvalidConfigSource(value) => write!(f, "invalid runtime startup config source: {value}"),
+            Self::InvalidConfigSource(value) => {
+                write!(f, "invalid runtime startup config source: {value}")
+            }
             Self::DirectoryCreate { path, source } => {
-                write!(f, "failed to create runtime directory '{}': {source}", path.display())
+                write!(
+                    f,
+                    "failed to create runtime directory '{}': {source}",
+                    path.display()
+                )
             }
             Self::InvalidTempDirectory(path) => write!(
                 f,
                 "invalid temp directory '{}': directory does not exist or is not a directory",
                 path.display(),
+            ),
+            Self::MissingWebUiAssetsLayout { candidates } => write!(
+                f,
+                "missing WebUI runtime assets layout: expected 'public/index.html' in one of [{}]",
+                candidates
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
+            Self::MixedWriterStorageOwnership { details } => write!(
+                f,
+                "unsafe mixed-writer storage ownership detected: {details}. keep a single writer for database.sqlite, tasks.sqlite, and legacy search directory",
             ),
         }
     }

@@ -12,18 +12,14 @@ use sqlx::{Row, Sqlite, Transaction};
 
 use crate::app::CompatProfile;
 use crate::app::discovery_auth::{DiscoveryAuthState, DiscoveryQueryContext};
-use crate::app::placeholder_auth::{
-    PlaceholderUser, require_admin, require_auth, resolved_auth_user, user_is_admin,
-    user_shared_all_libraries, user_shared_library_ids,
-};
-use crate::app::snapshots::snapshot_json;
+use crate::app::placeholder_auth::{require_admin, require_auth};
 use crate::task_queue::TaskQueueRecord;
 
 use super::super::OperationalState;
-use super::{DiscoveryOwnershipRoute, DiscoveryShape, discovery_ownership_route, mark_native};
+use super::mark_native;
 
 pub(super) async fn response(
-    profile: CompatProfile,
+    _profile: CompatProfile,
     headers: HeaderMap,
     auth_state: DiscoveryAuthState,
     database_file: &FsPath,
@@ -32,33 +28,16 @@ pub(super) async fn response(
         return response;
     }
 
-    let ownership_route = discovery_ownership_route(profile, &headers, DiscoveryShape::Libraries);
-    let prefer_native = if ownership_route == DiscoveryOwnershipRoute::NativeOwned {
-        true
-    } else {
-        match persisted_libraries_exist(database_file).await {
-            Ok(has_rows) => has_rows,
-            Err(error) => return internal_error_response(error),
-        }
+    let context = match auth_state.resolve_query_context(&headers, None) {
+        Some(context) => context,
+        None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    if prefer_native {
-        let context = match auth_state.resolve_query_context(&headers, None) {
-            Some(context) => context,
-            None => return StatusCode::UNAUTHORIZED.into_response(),
-        };
-
-        return native_owned_libraries_response(context, database_file).await;
-    }
-
-    let user =
-        resolved_auth_user(&headers).expect("authorized libraries request should resolve user");
-
-    Json(snapshot_libraries_for_user(profile, user)).into_response()
+    native_owned_libraries_response(context, database_file).await
 }
 
 pub(super) async fn library_detail(
-    profile: CompatProfile,
+    _profile: CompatProfile,
     headers: HeaderMap,
     auth_state: DiscoveryAuthState,
     database_file: &FsPath,
@@ -68,44 +47,12 @@ pub(super) async fn library_detail(
         return response;
     }
 
-    let ownership_route = discovery_ownership_route(profile, &headers, DiscoveryShape::Libraries);
-    let prefer_native = if ownership_route == DiscoveryOwnershipRoute::NativeOwned {
-        true
-    } else {
-        match persisted_libraries_exist(database_file).await {
-            Ok(has_rows) => has_rows,
-            Err(error) => return internal_error_response(error),
-        }
+    let context = match auth_state.resolve_query_context(&headers, Some(&[library_id.clone()])) {
+        Some(context) => context,
+        None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    if prefer_native {
-        let context = match auth_state.resolve_query_context(&headers, Some(&[library_id.clone()]))
-        {
-            Some(context) => context,
-            None => return StatusCode::UNAUTHORIZED.into_response(),
-        };
-
-        return native_owned_library_detail_response(context, database_file, &library_id).await;
-    }
-
-    let user = resolved_auth_user(&headers)
-        .expect("authorized library-detail request should resolve user");
-
-    let libraries = snapshot_libraries_for_user(profile, user);
-
-    let Some(library) = libraries
-        .as_array()
-        .and_then(|entries| {
-            entries
-                .iter()
-                .find(|entry| entry.get("id").and_then(Value::as_str) == Some(library_id.as_str()))
-        })
-        .cloned()
-    else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    Json(library).into_response()
+    native_owned_library_detail_response(context, database_file, &library_id).await
 }
 
 pub(super) async fn library_update(
@@ -313,6 +260,14 @@ fn enqueue_task_records(state: &OperationalState, task_records: Vec<TaskQueueRec
         .expect("task queue state lock should not be poisoned");
     for task in task_records {
         task_queue.enqueue(task);
+    }
+
+    if let Err(error) = task_queue.process_available(&state.runtime) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": error.to_string() })),
+        )
+            .into_response();
     }
 
     let mut response = StatusCode::ACCEPTED.into_response();
@@ -910,10 +865,7 @@ async fn native_owned_libraries(
     }
 
     if !database_file.exists() {
-        return Ok(filter_authorized_libraries(
-            vec![PersistedLibrary::fallback_default()],
-            &context,
-        ));
+        return Ok(vec![]);
     }
 
     let pool = connect_pool(database_file, 1).await?;
@@ -987,20 +939,6 @@ async fn native_owned_libraries(
 
     pool.close().await;
     Ok(libraries)
-}
-
-async fn persisted_libraries_exist(database_file: &FsPath) -> Result<bool, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(false);
-    }
-
-    let pool = connect_pool(database_file, 1).await?;
-    let row = sqlx::query("SELECT COUNT(*) AS COUNT FROM LIBRARY")
-        .fetch_one(&pool)
-        .await?;
-    pool.close().await;
-
-    Ok(row.get::<i64, _>("COUNT") > 0)
 }
 
 fn filter_authorized_libraries(
@@ -1100,28 +1038,4 @@ fn library_payload(library: PersistedLibrary, is_admin: bool) -> Value {
         "oneshotsDirectory": library.oneshots_directory,
         "unavailable": library.unavailable,
     })
-}
-
-fn snapshot_libraries_for_user(profile: CompatProfile, user: PlaceholderUser) -> Value {
-    let snapshot = if user_is_admin(&user) {
-        "libraries-list-admin.json"
-    } else {
-        "libraries-list-user.json"
-    };
-
-    let mut libraries = snapshot_json(snapshot, profile);
-
-    if !user_shared_all_libraries(&user) {
-        let allowed_ids = user_shared_library_ids(&user);
-        if let Some(entries) = libraries.as_array_mut() {
-            entries.retain(|library| {
-                library
-                    .get("id")
-                    .and_then(|value| value.as_str())
-                    .is_some_and(|id| allowed_ids.iter().any(|allowed_id| allowed_id == id))
-            });
-        }
-    }
-
-    libraries
 }

@@ -10,5 +10,5 @@ mod rows;
 mod runtime_sqlx;
 
 pub use adapter::SqliteDiscoveryAdapter;
-pub use runtime_sqlx::{SqlxRuntimeDiscoveryAdapter, SqlxRuntimeDiscoveryStore};
 pub use rows::{BookRow, CollectionRow, LibraryRow, ReadListRow, ReadProgressRow, SeriesRow};
+pub use runtime_sqlx::{SqlxRuntimeDiscoveryAdapter, SqlxRuntimeDiscoveryStore};

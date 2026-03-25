@@ -70,30 +70,31 @@ where
         query: SeriesListQuery,
     ) -> Result<PageEnvelope<SeriesReadModel>, DiscoveryError> {
         let sort = classify_series_sorts(&query.sort)?;
-        self.repository.list_series(
-            context,
-            NativeSeriesListQuery {
-                page: query.page,
-                size: query.size,
-                library_ids: query.library_ids,
-                deleted: query.deleted,
-                oneshot: query.oneshot,
-                read_statuses: query.read_statuses,
-                genres: query.genres,
-                tags: query.tags,
-                languages: query.languages,
-                publishers: query.publishers,
-                age_ratings: query.age_ratings,
-                release_dates: query.release_dates,
-                sharing_labels: query.sharing_labels,
-                series_statuses: query.series_statuses,
-                complete: query.complete,
-                authors: query.authors,
-                sort,
-                search: query.search,
-            },
-        )
-        .await
+        self.repository
+            .list_series(
+                context,
+                NativeSeriesListQuery {
+                    page: query.page,
+                    size: query.size,
+                    library_ids: query.library_ids,
+                    deleted: query.deleted,
+                    oneshot: query.oneshot,
+                    read_statuses: query.read_statuses,
+                    genres: query.genres,
+                    tags: query.tags,
+                    languages: query.languages,
+                    publishers: query.publishers,
+                    age_ratings: query.age_ratings,
+                    release_dates: query.release_dates,
+                    sharing_labels: query.sharing_labels,
+                    series_statuses: query.series_statuses,
+                    complete: query.complete,
+                    authors: query.authors,
+                    sort,
+                    search: query.search,
+                },
+            )
+            .await
     }
 
     pub async fn resolve_series_resource(
@@ -116,6 +117,8 @@ where
         context: &DiscoveryQueryContext,
         query: SeriesCollectionsQuery,
     ) -> Result<Vec<CollectionReadModel>, DiscoveryError> {
-        self.repository.list_series_collections(context, query).await
+        self.repository
+            .list_series_collections(context, query)
+            .await
     }
 }

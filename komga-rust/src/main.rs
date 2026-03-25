@@ -18,14 +18,16 @@ async fn validate_startup_schema_gate(config: &komga_rust::config::RuntimeConfig
     let main_pool = komga_rust::persistence::sqlite::connect_pool(&config.database_file, 1)
         .await
         .expect("failed to open main sqlite database");
-    let main_schema_result = komga_rust::persistence::sqlite::setup::bootstrap_pool(&main_pool).await;
+    let main_schema_result =
+        komga_rust::persistence::sqlite::setup::bootstrap_pool(&main_pool).await;
     main_pool.close().await;
     main_schema_result.expect("main sqlite schema gate failed");
 
     let tasks_pool = komga_rust::persistence::sqlite::connect_pool(&config.tasks_db_file, 1)
         .await
         .expect("failed to open tasks sqlite database");
-    let tasks_schema_result = komga_rust::persistence::sqlite::setup::bootstrap_tasks_pool(&tasks_pool).await;
+    let tasks_schema_result =
+        komga_rust::persistence::sqlite::setup::bootstrap_tasks_pool(&tasks_pool).await;
     tasks_pool.close().await;
     tasks_schema_result.expect("tasks sqlite schema gate failed");
 }

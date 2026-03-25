@@ -1,8 +1,9 @@
-use axum::http::{header, HeaderMap};
-use base64::{engine::general_purpose::STANDARD, Engine as _};
+use axum::http::{HeaderMap, header};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password, verify as verify_bcrypt_password};
 use komga_persistence::sqlite::connect_pool;
-use serde_json::{json, Value};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha512};
 use sqlx::Row;
 use std::fmt::Write as _;
@@ -61,6 +62,24 @@ pub(in crate::app) struct PlaceholderUser {
     labels_allow: Vec<String>,
     labels_exclude: Vec<String>,
     age_restriction: Option<UserAgeRestriction>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(in crate::app) struct PlaceholderUserSessionSnapshot {
+    pub(in crate::app) id: String,
+    pub(in crate::app) email: String,
+    pub(in crate::app) roles: Vec<String>,
+    pub(in crate::app) shared_all_libraries: bool,
+    pub(in crate::app) shared_library_ids: Vec<String>,
+    pub(in crate::app) labels_allow: Vec<String>,
+    pub(in crate::app) labels_exclude: Vec<String>,
+    pub(in crate::app) age_restriction: Option<PlaceholderUserAgeRestrictionSnapshot>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(in crate::app) struct PlaceholderUserAgeRestrictionSnapshot {
+    pub(in crate::app) age: i64,
+    pub(in crate::app) restriction: String,
 }
 
 #[derive(Clone)]
@@ -199,12 +218,10 @@ pub(in crate::app) async fn persisted_api_key_user(
         Err(_) => return None,
     };
 
-    let row = sqlx::query(
-        "SELECT USER_ID FROM USER_API_KEY WHERE API_KEY = ? LIMIT 1",
-    )
-    .bind(api_key_hash)
-    .fetch_optional(&pool)
-    .await;
+    let row = sqlx::query("SELECT USER_ID FROM USER_API_KEY WHERE API_KEY = ? LIMIT 1")
+        .bind(api_key_hash)
+        .fetch_optional(&pool)
+        .await;
 
     pool.close().await;
 
@@ -253,6 +270,55 @@ pub(in crate::app) fn placeholder_user_json(user: &PlaceholderUser) -> Value {
     })
 }
 
+pub(in crate::app) fn user_session_snapshot(
+    user: &PlaceholderUser,
+) -> PlaceholderUserSessionSnapshot {
+    PlaceholderUserSessionSnapshot {
+        id: user.id.clone(),
+        email: user.email.clone(),
+        roles: user.roles.clone(),
+        shared_all_libraries: user.shared_all_libraries,
+        shared_library_ids: user.shared_library_ids.clone(),
+        labels_allow: user.labels_allow.clone(),
+        labels_exclude: user.labels_exclude.clone(),
+        age_restriction: user.age_restriction.as_ref().map(|age_restriction| {
+            PlaceholderUserAgeRestrictionSnapshot {
+                age: age_restriction.age,
+                restriction: age_restriction.restriction.to_string(),
+            }
+        }),
+    }
+}
+
+pub(in crate::app) fn user_from_session_snapshot(
+    snapshot: &PlaceholderUserSessionSnapshot,
+) -> PlaceholderUser {
+    PlaceholderUser {
+        id: snapshot.id.clone(),
+        email: snapshot.email.clone(),
+        password: String::new(),
+        roles: snapshot.roles.clone(),
+        shared_all_libraries: snapshot.shared_all_libraries,
+        shared_library_ids: snapshot.shared_library_ids.clone(),
+        labels_allow: snapshot.labels_allow.clone(),
+        labels_exclude: snapshot.labels_exclude.clone(),
+        age_restriction: snapshot
+            .age_restriction
+            .as_ref()
+            .and_then(|age_restriction| {
+                let restriction = match age_restriction.restriction.as_str() {
+                    "ALLOW_ONLY" => "ALLOW_ONLY",
+                    "EXCLUDE" => "EXCLUDE",
+                    _ => return None,
+                };
+                Some(UserAgeRestriction {
+                    age: age_restriction.age,
+                    restriction,
+                })
+            }),
+    }
+}
+
 pub(in crate::app) async fn persisted_users(database_file: &Path) -> Option<Vec<PlaceholderUser>> {
     open_persisted_users(database_file).await
 }
@@ -292,13 +358,14 @@ pub(in crate::app) async fn persisted_create_api_key(
     let generated_id = generated_api_key_id(user_id);
     let pool = connect_pool(database_file, 1).await.ok()?;
 
-    let insert = sqlx::query("INSERT INTO USER_API_KEY (ID, USER_ID, API_KEY, COMMENT) VALUES (?, ?, ?, ?)")
-        .bind(&generated_id)
-        .bind(user_id)
-        .bind(generated_key_hash)
-        .bind(comment)
-        .execute(&pool)
-        .await;
+    let insert =
+        sqlx::query("INSERT INTO USER_API_KEY (ID, USER_ID, API_KEY, COMMENT) VALUES (?, ?, ?, ?)")
+            .bind(&generated_id)
+            .bind(user_id)
+            .bind(generated_key_hash)
+            .bind(comment)
+            .execute(&pool)
+            .await;
 
     pool.close().await;
     insert.ok()?;
@@ -311,7 +378,10 @@ pub(in crate::app) async fn persisted_create_api_key(
     })
 }
 
-pub(in crate::app) async fn persisted_list_api_keys(database_file: &Path, user_id: &str) -> Option<Vec<PersistedApiKey>> {
+pub(in crate::app) async fn persisted_list_api_keys(
+    database_file: &Path,
+    user_id: &str,
+) -> Option<Vec<PersistedApiKey>> {
     if !database_file.exists() {
         return None;
     }
@@ -594,7 +664,9 @@ fn basic_credentials(headers: &HeaderMap) -> Option<(String, String)> {
 }
 
 fn api_key_header_value(headers: &HeaderMap) -> Option<String> {
-    let value = headers.get("x-api-key").and_then(|value| value.to_str().ok())?;
+    let value = headers
+        .get("x-api-key")
+        .and_then(|value| value.to_str().ok())?;
     let value = value.trim();
     if value.is_empty() {
         None
@@ -719,11 +791,17 @@ fn generated_api_key_seed(user_id: &str) -> String {
 }
 
 fn generated_api_key_secret(user_id: &str) -> String {
-    sha512_hex(&format!("komga-api-key:{}", generated_api_key_seed(user_id)))
+    sha512_hex(&format!(
+        "komga-api-key:{}",
+        generated_api_key_seed(user_id)
+    ))
 }
 
 fn generated_api_key_id(user_id: &str) -> String {
-    let digest = sha512_hex(&format!("komga-api-key-id:{}", generated_api_key_seed(user_id)));
+    let digest = sha512_hex(&format!(
+        "komga-api-key-id:{}",
+        generated_api_key_seed(user_id)
+    ));
     format!("rust-api-key-{}", &digest[..24])
 }
 

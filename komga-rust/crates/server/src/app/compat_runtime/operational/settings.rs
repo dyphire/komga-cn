@@ -2,13 +2,15 @@ use axum::Json;
 use axum::body::Bytes;
 use axum::extract::Extension;
 use axum::extract::Path as AxumPath;
-use axum::http::{HeaderMap, header};
 use axum::http::StatusCode;
 use axum::http::Uri;
+use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
 use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
 use komga_persistence::sqlite::connect_pool;
+use reqwest::Client as AsyncHttpClient;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use sqlx::Row;
 use std::collections::HashMap;
 use std::fs;
@@ -18,8 +20,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::app::placeholder_auth::{require_admin, require_auth, resolved_auth_user, user_id};
+use crate::task_queue::TaskQueueRecord;
 
-use super::super::{OperationalSettings, OperationalState};
+use super::super::{OperationalSettings, OperationalState, TransientBookRecord, now_epoch_seconds};
 use super::helpers::{
     effective_kepubify_path, effective_server_context_path, effective_server_port,
     invalid_settings_payload, is_valid_context_path, multi_source_number, multi_source_string,
@@ -44,11 +47,20 @@ pub(in crate::app::compat_runtime) async fn get_server_settings(
         }
     };
 
-    state
-        .task_queue
-        .lock()
-        .expect("task queue state lock should not be poisoned")
-        .set_task_pool_size(settings.task_pool_size as usize);
+    {
+        let mut task_queue = state
+            .task_queue
+            .lock()
+            .expect("task queue state lock should not be poisoned");
+        task_queue.set_task_pool_size(settings.task_pool_size as usize);
+        if let Err(error) = task_queue.process_available(&state.runtime) {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "message": format!("failed to process queued tasks: {error}") })),
+            )
+                .into_response();
+        }
+    }
 
     Json(settings_json(&state.runtime, &settings)).into_response()
 }
@@ -88,10 +100,13 @@ pub(in crate::app::compat_runtime) async fn post_claim(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    let created_user = match persisted_create_initial_admin_user(database_file, &email, &hashed_password).await {
-        Ok(created_user) => created_user,
-        Err(PersistedClaimError::Storage) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    };
+    let created_user =
+        match persisted_create_initial_admin_user(database_file, &email, &hashed_password).await {
+            Ok(created_user) => created_user,
+            Err(PersistedClaimError::Storage) => {
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        };
 
     Json(json!({
         "id": created_user.id,
@@ -101,12 +116,35 @@ pub(in crate::app::compat_runtime) async fn post_claim(
     .into_response()
 }
 
-pub(in crate::app::compat_runtime) async fn get_announcements(headers: HeaderMap) -> Response {
-    if let Some(response) = require_auth(&headers) {
+pub(in crate::app::compat_runtime) async fn get_announcements(
+    Extension(state): Extension<OperationalState>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = require_admin(&headers) {
         return response;
     }
 
-    Json(json!([])).into_response()
+    let Some(current_user) = resolved_auth_user(&headers) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+
+    let feed = match load_cached_announcements_feed(&state).await {
+        Ok(Some(feed)) => feed,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+
+    let read_ids = match persisted_announcement_read_ids(
+        state.runtime.database_file.as_path(),
+        user_id(&current_user),
+    )
+    .await
+    {
+        Ok(ids) => ids,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
+    Json(apply_announcement_read_projection(feed, &read_ids)).into_response()
 }
 
 pub(in crate::app::compat_runtime) async fn put_announcements(
@@ -151,22 +189,21 @@ pub(in crate::app::compat_runtime) async fn put_announcements(
     StatusCode::NO_CONTENT.into_response()
 }
 
-pub(in crate::app::compat_runtime) async fn get_releases(headers: HeaderMap) -> Response {
+pub(in crate::app::compat_runtime) async fn get_releases(
+    Extension(state): Extension<OperationalState>,
+    headers: HeaderMap,
+) -> Response {
     if let Some(response) = require_admin(&headers) {
         return response;
     }
 
-    Json(json!([
-        {
-            "version": "v1.0.0",
-            "releaseDate": "2026-01-01T00:00:00Z",
-            "url": "https://github.com/gotson/komga/releases/tag/v1.0.0",
-            "latest": true,
-            "preRelease": false,
-            "description": "Deterministic compatibility release payload",
-        }
-    ]))
-    .into_response()
+    let releases = match load_cached_releases(&state).await {
+        Ok(Some(releases)) => releases,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+
+    Json(releases).into_response()
 }
 
 pub(in crate::app::compat_runtime) async fn post_filesystem(
@@ -238,10 +275,11 @@ pub(in crate::app::compat_runtime) async fn get_history(
         .filter(|value| *value > 0)
         .unwrap_or(20);
 
-    let page_data = match persisted_history_page(state.runtime.database_file.as_path(), page, size).await {
-        Ok(page_data) => page_data,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    };
+    let page_data =
+        match persisted_history_page(state.runtime.database_file.as_path(), page, size).await {
+            Ok(page_data) => page_data,
+            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        };
 
     Json(page_data).into_response()
 }
@@ -264,10 +302,11 @@ pub(in crate::app::compat_runtime) async fn get_page_hashes(
         .filter(|value| *value > 0)
         .unwrap_or(20);
 
-    let page_data = match persisted_page_hashes_page(state.runtime.database_file.as_path(), page, size).await {
-        Ok(page_data) => page_data,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    };
+    let page_data =
+        match persisted_page_hashes_page(state.runtime.database_file.as_path(), page, size).await {
+            Ok(page_data) => page_data,
+            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        };
 
     Json(page_data).into_response()
 }
@@ -281,17 +320,18 @@ pub(in crate::app::compat_runtime) async fn get_page_hash_thumbnail(
         return response;
     }
 
-    let thumbnail = match persisted_page_hash_thumbnail(state.runtime.database_file.as_path(), &page_hash).await {
+    let thumbnail = match persisted_page_hash_thumbnail(
+        state.runtime.database_file.as_path(),
+        &page_hash,
+    )
+    .await
+    {
         Ok(Some(thumbnail)) => thumbnail,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    (
-        [(header::CONTENT_TYPE, "image/jpeg")],
-        thumbnail,
-    )
-        .into_response()
+    ([(header::CONTENT_TYPE, "image/jpeg")], thumbnail).into_response()
 }
 
 pub(in crate::app::compat_runtime) async fn post_transient_books(
@@ -299,7 +339,7 @@ pub(in crate::app::compat_runtime) async fn post_transient_books(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_admin(&headers) {
         return response;
     }
 
@@ -318,7 +358,221 @@ pub(in crate::app::compat_runtime) async fn post_transient_books(
     let resolved_path = normalize_requested_path(requested_path, state.runtime.config_dir.as_ref());
     let scanned_books = list_transient_book_entries(&resolved_path);
 
-    Json(Value::Array(scanned_books)).into_response()
+    let mut store = state
+        .transient_books
+        .lock()
+        .expect("transient books state lock should not be poisoned");
+
+    let mut payload = Vec::new();
+    for scanned in scanned_books {
+        let Some(path) = scanned.get("path").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(name) = scanned.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+
+        let file_metadata = match fs::metadata(path) {
+            Ok(metadata) => metadata,
+            Err(_) => continue,
+        };
+        let id = transient_book_id(path);
+        let existing = store.records.get(&id).cloned();
+        let status = existing
+            .as_ref()
+            .map(|record| record.status.clone())
+            .unwrap_or_else(|| "UNPROCESSED".to_string());
+        let media_type = existing
+            .as_ref()
+            .map(|record| record.media_type.clone())
+            .unwrap_or_default();
+
+        let record = TransientBookRecord {
+            id: id.clone(),
+            name: name.to_string(),
+            path: path.to_string(),
+            file_last_modified_epoch_seconds: to_unix_seconds(file_metadata.modified().ok()),
+            size_bytes: file_metadata.len(),
+            status,
+            media_type,
+        };
+        store.records.insert(id, record.clone());
+        payload.push(transient_book_payload(&record));
+    }
+
+    store.persist();
+    payload.sort_by(|left, right| {
+        left["path"]
+            .as_str()
+            .unwrap_or_default()
+            .cmp(right["path"].as_str().unwrap_or_default())
+    });
+    Json(Value::Array(payload)).into_response()
+}
+
+pub(in crate::app::compat_runtime) async fn post_transient_book_analyze(
+    Extension(state): Extension<OperationalState>,
+    headers: HeaderMap,
+    AxumPath(transient_book_id): AxumPath<String>,
+) -> Response {
+    if let Some(response) = require_admin(&headers) {
+        return response;
+    }
+
+    let record = {
+        let store = state
+            .transient_books
+            .lock()
+            .expect("transient books state lock should not be poisoned");
+        store.records.get(&transient_book_id).cloned()
+    };
+    let Some(record) = record else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    if !Path::new(record.path.as_str()).exists() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    if let Err(_) =
+        persisted_ensure_transient_book(state.runtime.database_file.as_path(), &record).await
+    {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+
+    {
+        let mut task_queue = state
+            .task_queue
+            .lock()
+            .expect("task queue state lock should not be poisoned");
+        task_queue.enqueue(TaskQueueRecord::new(
+            format!("ANALYZE_BOOK:{}", record.id),
+            100,
+            Some(record.id.clone()),
+        ));
+        if task_queue.process_available(&state.runtime).is_err() {
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    }
+
+    let media =
+        match persisted_media_for_book(state.runtime.database_file.as_path(), &record.id).await {
+            Ok(Some(media)) => media,
+            Ok(None) => ("UNPROCESSED".to_string(), String::new()),
+            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        };
+
+    let mut store = state
+        .transient_books
+        .lock()
+        .expect("transient books state lock should not be poisoned");
+    let Some(entry) = store.records.get_mut(&transient_book_id) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    entry.status = media.0;
+    entry.media_type = media.1;
+    let payload = transient_book_payload(entry);
+    store.persist();
+
+    Json(payload).into_response()
+}
+
+pub(in crate::app::compat_runtime) async fn get_transient_book_status(
+    Extension(state): Extension<OperationalState>,
+    headers: HeaderMap,
+    AxumPath(transient_book_id): AxumPath<String>,
+) -> Response {
+    if let Some(response) = require_admin(&headers) {
+        return response;
+    }
+
+    let maybe_record = {
+        let store = state
+            .transient_books
+            .lock()
+            .expect("transient books state lock should not be poisoned");
+        store.records.get(&transient_book_id).cloned()
+    };
+    let Some(mut record) = maybe_record else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    if let Ok(Some((status, media_type))) =
+        persisted_media_for_book(state.runtime.database_file.as_path(), &record.id).await
+    {
+        record.status = status;
+        record.media_type = media_type;
+
+        let mut store = state
+            .transient_books
+            .lock()
+            .expect("transient books state lock should not be poisoned");
+        store.records.insert(transient_book_id, record.clone());
+        store.persist();
+    }
+
+    Json(transient_book_payload(&record)).into_response()
+}
+
+pub(in crate::app::compat_runtime) async fn get_transient_book_media(
+    Extension(state): Extension<OperationalState>,
+    headers: HeaderMap,
+    AxumPath(transient_book_id): AxumPath<String>,
+) -> Response {
+    if let Some(response) = require_admin(&headers) {
+        return response;
+    }
+
+    let store = state
+        .transient_books
+        .lock()
+        .expect("transient books state lock should not be poisoned");
+    let Some(record) = store.records.get(&transient_book_id) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if !record.status.eq_ignore_ascii_case("READY") {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let bytes = match fs::read(record.path.as_str()) {
+        Ok(bytes) => bytes,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let content_type = transient_content_type(record.path.as_str(), record.media_type.as_str());
+
+    ([(header::CONTENT_TYPE, content_type)], bytes).into_response()
+}
+
+pub(in crate::app::compat_runtime) async fn get_transient_book_page(
+    Extension(state): Extension<OperationalState>,
+    headers: HeaderMap,
+    AxumPath((transient_book_id, page_number)): AxumPath<(String, u32)>,
+) -> Response {
+    if let Some(response) = require_admin(&headers) {
+        return response;
+    }
+    if page_number != 1 {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+
+    let store = state
+        .transient_books
+        .lock()
+        .expect("transient books state lock should not be poisoned");
+    let Some(record) = store.records.get(&transient_book_id) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if !record.status.eq_ignore_ascii_case("READY") {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let bytes = match fs::read(record.path.as_str()) {
+        Ok(bytes) => bytes,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let content_type = transient_content_type(record.path.as_str(), record.media_type.as_str());
+
+    ([(header::CONTENT_TYPE, content_type)], bytes).into_response()
 }
 
 pub(in crate::app::compat_runtime) async fn delete_syncpoints_me(
@@ -356,18 +610,42 @@ pub(in crate::app::compat_runtime) async fn delete_syncpoints_me(
 
 pub(in crate::app::compat_runtime) async fn get_client_settings_global(
     Extension(state): Extension<OperationalState>,
+    headers: HeaderMap,
 ) -> Response {
-    Json(state.client_settings.global.clone()).into_response()
+    let include_unauthorized_only = resolved_auth_user(&headers).is_none();
+    let settings = match persisted_client_settings_global(
+        state.runtime.database_file.as_path(),
+        include_unauthorized_only,
+    )
+    .await
+    {
+        Ok(settings) => settings,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    Json(settings).into_response()
 }
 
 pub(in crate::app::compat_runtime) async fn get_client_settings_user(
+    Extension(state): Extension<OperationalState>,
     headers: HeaderMap,
 ) -> Response {
     if let Some(response) = require_auth(&headers) {
         return response;
     }
+    let Some(current_user) = resolved_auth_user(&headers) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
 
-    Json(json!({})).into_response()
+    let settings = match persisted_client_settings_user(
+        state.runtime.database_file.as_path(),
+        user_id(&current_user),
+    )
+    .await
+    {
+        Ok(settings) => settings,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    Json(settings).into_response()
 }
 
 pub(in crate::app::compat_runtime) async fn get_oauth2_providers(
@@ -520,11 +798,18 @@ pub(in crate::app::compat_runtime) async fn update_server_settings(
                 return invalid_settings_payload("taskPoolSize must be greater than 0");
             }
             settings.task_pool_size = value;
-            state
+            let mut task_queue = state
                 .task_queue
                 .lock()
-                .expect("task queue state lock should not be poisoned")
-                .set_task_pool_size(value as usize);
+                .expect("task queue state lock should not be poisoned");
+            task_queue.set_task_pool_size(value as usize);
+            if let Err(error) = task_queue.process_available(&state.runtime) {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "message": format!("failed to process queued tasks: {error}") })),
+                )
+                    .into_response();
+            }
             persistence_changes.push(("TASK_POOL_SIZE".to_string(), Some(value.to_string())));
         }
     }
@@ -712,6 +997,191 @@ fn query_value<'a>(query: &'a str, key: &str) -> Option<&'a str> {
     })
 }
 
+async fn load_cached_announcements_feed(
+    state: &OperationalState,
+) -> Result<Option<Value>, reqwest::Error> {
+    const CACHE_TTL_SECONDS: u64 = 60 * 60;
+    let now = now_epoch_seconds();
+    {
+        let cache = state
+            .announcements_cache
+            .lock()
+            .expect("announcements cache lock should not be poisoned");
+        if let Some(cached) = cache.as_ref() {
+            if now.saturating_sub(cached.fetched_at_epoch_seconds) < CACHE_TTL_SECONDS {
+                return Ok(Some(cached.payload.clone()));
+            }
+        }
+    }
+
+    let url = std::env::var("KOMGA_RUST_ANNOUNCEMENTS_URL")
+        .unwrap_or_else(|_| "https://komga.org/blog/feed.json".to_string());
+    let payload = AsyncHttpClient::new()
+        .get(url)
+        .send()
+        .await?
+        .json::<Value>()
+        .await?;
+
+    {
+        let mut cache = state
+            .announcements_cache
+            .lock()
+            .expect("announcements cache lock should not be poisoned");
+        *cache = Some(super::super::RemoteCacheEntry {
+            fetched_at_epoch_seconds: now,
+            payload: payload.clone(),
+        });
+    }
+
+    Ok(Some(payload))
+}
+
+async fn load_cached_releases(state: &OperationalState) -> Result<Option<Value>, reqwest::Error> {
+    const CACHE_TTL_SECONDS: u64 = 60 * 60;
+    let now = now_epoch_seconds();
+    {
+        let cache = state
+            .releases_cache
+            .lock()
+            .expect("releases cache lock should not be poisoned");
+        if let Some(cached) = cache.as_ref() {
+            if now.saturating_sub(cached.fetched_at_epoch_seconds) < CACHE_TTL_SECONDS {
+                return Ok(Some(cached.payload.clone()));
+            }
+        }
+    }
+
+    let url = std::env::var("KOMGA_RUST_RELEASES_URL").unwrap_or_else(|_| {
+        "https://api.github.com/repos/gotson/komga/releases?per_page=20".to_string()
+    });
+    let upstream = AsyncHttpClient::new()
+        .get(url)
+        .header("User-Agent", "komga-rust-compat")
+        .send()
+        .await?
+        .json::<Value>()
+        .await?;
+
+    let payload = map_github_releases(upstream);
+    {
+        let mut cache = state
+            .releases_cache
+            .lock()
+            .expect("releases cache lock should not be poisoned");
+        *cache = Some(super::super::RemoteCacheEntry {
+            fetched_at_epoch_seconds: now,
+            payload: payload.clone(),
+        });
+    }
+
+    Ok(Some(payload))
+}
+
+fn map_github_releases(upstream: Value) -> Value {
+    let Some(items) = upstream.as_array() else {
+        return Value::Array(Vec::new());
+    };
+
+    Value::Array(
+        items
+            .iter()
+            .enumerate()
+            .map(|(index, release)| {
+                json!({
+                    "version": release.get("tag_name").cloned().unwrap_or(Value::Null),
+                    "releaseDate": release.get("published_at").cloned().unwrap_or(Value::Null),
+                    "url": release.get("html_url").cloned().unwrap_or(Value::Null),
+                    "latest": index == 0,
+                    "preRelease": release.get("prerelease").cloned().unwrap_or(Value::Bool(false)),
+                    "description": release.get("body").cloned().unwrap_or(Value::Null),
+                })
+            })
+            .collect(),
+    )
+}
+
+fn apply_announcement_read_projection(feed: Value, read_ids: &[String]) -> Value {
+    let mut projected = feed;
+    let read_set = read_ids
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+
+    if let Some(items) = projected
+        .as_object_mut()
+        .and_then(|object| object.get_mut("items"))
+        .and_then(Value::as_array_mut)
+    {
+        for item in items {
+            let read = item
+                .get("id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| read_set.contains(id));
+            if let Some(object) = item.as_object_mut() {
+                object.insert("_komga".to_string(), json!({ "read": read }));
+            }
+        }
+    }
+
+    projected
+}
+
+fn transient_book_id(path: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(path.as_bytes());
+    let digest = hasher.finalize();
+    format!("transient-{:x}", digest)[..26].to_string()
+}
+
+fn transient_book_payload(record: &TransientBookRecord) -> Value {
+    json!({
+        "id": record.id,
+        "name": record.name,
+        "path": record.path,
+        "fileLastModified": record.file_last_modified_epoch_seconds,
+        "sizeBytes": record.size_bytes,
+        "status": record.status,
+        "mediaType": record.media_type,
+        "pages": [{ "number": 1 }],
+        "files": [PathBuf::from(record.path.as_str()).file_name().and_then(|value| value.to_str()).unwrap_or_default()],
+        "comment": "",
+        "number": Value::Null,
+        "seriesId": Value::Null,
+    })
+}
+
+fn transient_content_type(path: &str, media_type: &str) -> &'static str {
+    if !media_type.is_empty() {
+        return match media_type {
+            "application/pdf" => "application/pdf",
+            "application/epub+zip" => "application/epub+zip",
+            "application/zip" => "application/zip",
+            "application/vnd.comicbook-rar" => "application/vnd.comicbook-rar",
+            _ => "application/octet-stream",
+        };
+    }
+
+    match PathBuf::from(path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("pdf") => "application/pdf",
+        Some("epub") => "application/epub+zip",
+        Some("cbz") | Some("zip") => "application/zip",
+        Some("cbr") | Some("rar") => "application/vnd.comicbook-rar",
+        _ => "application/octet-stream",
+    }
+}
+
+fn to_unix_seconds(time: Option<SystemTime>) -> i64 {
+    time.and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+        .map(|value| value.as_secs() as i64)
+        .unwrap_or_default()
+}
+
 async fn persisted_user_count_from_db_path(database_file: &Path) -> Result<i64, sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
     let count = sqlx::query("SELECT COUNT(*) AS COUNT FROM USER")
@@ -732,7 +1202,10 @@ async fn persisted_create_initial_admin_user(
         .map_err(|_| PersistedClaimError::Storage)?;
     let created_user_id = generate_claimed_user_id();
 
-    let mut tx = pool.begin().await.map_err(|_| PersistedClaimError::Storage)?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|_| PersistedClaimError::Storage)?;
     sqlx::query(
         "INSERT INTO USER (ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES, AGE_RESTRICTION, AGE_RESTRICTION_ALLOW_ONLY) VALUES (?, ?, ?, ?, ?, ?)",
     )
@@ -753,7 +1226,9 @@ async fn persisted_create_initial_admin_user(
         .await
         .map_err(|_| PersistedClaimError::Storage)?;
 
-    tx.commit().await.map_err(|_| PersistedClaimError::Storage)?;
+    tx.commit()
+        .await
+        .map_err(|_| PersistedClaimError::Storage)?;
     pool.close().await;
 
     Ok(CreatedUser {
@@ -800,6 +1275,176 @@ async fn persisted_save_announcements_read(
     Ok(())
 }
 
+async fn persisted_announcement_read_ids(
+    database_file: &Path,
+    user_id: &str,
+) -> Result<Vec<String>, sqlx::Error> {
+    let pool = connect_pool(database_file, 1).await?;
+    let rows = sqlx::query(
+        "SELECT ANNOUNCEMENT_ID FROM ANNOUNCEMENTS_READ WHERE USER_ID = ? ORDER BY ANNOUNCEMENT_ID ASC",
+    )
+    .bind(user_id)
+    .fetch_all(&pool)
+    .await?;
+    pool.close().await;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| row.get::<String, _>("ANNOUNCEMENT_ID"))
+        .collect())
+}
+
+async fn persisted_client_settings_global(
+    database_file: &Path,
+    allow_unauthorized_only: bool,
+) -> Result<Value, sqlx::Error> {
+    let pool = connect_pool(database_file, 1).await?;
+    let rows = if allow_unauthorized_only {
+        sqlx::query(
+            "SELECT KEY, VALUE, ALLOW_UNAUTHORIZED FROM CLIENT_SETTINGS_GLOBAL WHERE ALLOW_UNAUTHORIZED = 1 ORDER BY KEY ASC",
+        )
+        .fetch_all(&pool)
+        .await?
+    } else {
+        sqlx::query(
+            "SELECT KEY, VALUE, ALLOW_UNAUTHORIZED FROM CLIENT_SETTINGS_GLOBAL ORDER BY KEY ASC",
+        )
+        .fetch_all(&pool)
+        .await?
+    };
+    pool.close().await;
+
+    let mut map = serde_json::Map::new();
+    for row in rows {
+        let key = row.get::<String, _>("KEY");
+        let value = row.get::<String, _>("VALUE");
+        let allow_unauthorized = row.get::<bool, _>("ALLOW_UNAUTHORIZED");
+        map.insert(
+            key,
+            json!({
+                "value": value,
+                "allowUnauthorized": allow_unauthorized,
+            }),
+        );
+    }
+    if !map.contains_key("webui.oauth2.hide_login") {
+        map.insert(
+            "webui.oauth2.hide_login".to_string(),
+            json!({
+                "value": "false",
+                "allowUnauthorized": true,
+            }),
+        );
+    }
+    Ok(Value::Object(map))
+}
+
+async fn persisted_client_settings_user(
+    database_file: &Path,
+    user_id: &str,
+) -> Result<Value, sqlx::Error> {
+    let pool = connect_pool(database_file, 1).await?;
+    let rows = sqlx::query(
+        "SELECT KEY, VALUE FROM CLIENT_SETTINGS_USER WHERE USER_ID = ? ORDER BY KEY ASC",
+    )
+    .bind(user_id)
+    .fetch_all(&pool)
+    .await?;
+    pool.close().await;
+
+    let mut map = serde_json::Map::new();
+    for row in rows {
+        let key = row.get::<String, _>("KEY");
+        let value = row.get::<String, _>("VALUE");
+        map.insert(key, json!({ "value": value }));
+    }
+    Ok(Value::Object(map))
+}
+
+async fn persisted_ensure_transient_book(
+    database_file: &Path,
+    record: &TransientBookRecord,
+) -> Result<(), sqlx::Error> {
+    let pool = connect_pool(database_file, 1).await?;
+    let mut tx = pool.begin().await?;
+
+    sqlx::query(
+        "INSERT OR IGNORE INTO LIBRARY (ID, NAME, ROOT, SCAN_STARTUP, EMPTY_TRASH_AFTER_SCAN, ONESHOTS_DIRECTORY) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind("__transient_runtime_library__")
+    .bind("Transient Runtime")
+    .bind("/")
+    .bind(false)
+    .bind(false)
+    .bind(None::<String>)
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        "INSERT OR IGNORE INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot) VALUES (?, ?, ?, ?, ?, 0)",
+    )
+    .bind("__transient_runtime_series__")
+    .bind(record.file_last_modified_epoch_seconds)
+    .bind("Transient Runtime")
+    .bind("__transient_runtime_series__")
+    .bind("__transient_runtime_library__")
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        "INSERT OR IGNORE INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, LIBRARY_ID, oneshot) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
+    )
+    .bind(record.id.as_str())
+    .bind(record.file_last_modified_epoch_seconds)
+    .bind(record.name.as_str())
+    .bind(record.path.as_str())
+    .bind("__transient_runtime_series__")
+    .bind(record.size_bytes as i64)
+    .bind("__transient_runtime_library__")
+    .execute(&mut *tx)
+    .await?;
+
+    let file_name = PathBuf::from(record.path.as_str())
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_string();
+    sqlx::query(
+        "INSERT INTO MEDIA_FILE (FILE_NAME, BOOK_ID, FILE_SIZE) SELECT ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM MEDIA_FILE WHERE FILE_NAME = ? AND BOOK_ID = ?)",
+    )
+    .bind(file_name.as_str())
+    .bind(record.id.as_str())
+    .bind(record.size_bytes as i64)
+    .bind(file_name.as_str())
+    .bind(record.id.as_str())
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    pool.close().await;
+    Ok(())
+}
+
+async fn persisted_media_for_book(
+    database_file: &Path,
+    book_id: &str,
+) -> Result<Option<(String, String)>, sqlx::Error> {
+    let pool = connect_pool(database_file, 1).await?;
+    let row = sqlx::query("SELECT STATUS, MEDIA_TYPE FROM MEDIA WHERE BOOK_ID = ?")
+        .bind(book_id)
+        .fetch_optional(&pool)
+        .await?;
+    pool.close().await;
+
+    Ok(row.map(|row| {
+        (
+            row.get::<String, _>("STATUS"),
+            row.get::<Option<String>, _>("MEDIA_TYPE")
+                .unwrap_or_default(),
+        )
+    }))
+}
+
 async fn persisted_history_page(
     database_file: &Path,
     page: u64,
@@ -834,7 +1479,9 @@ async fn persisted_history_page(
 
     let mut properties_by_id: HashMap<String, serde_json::Map<String, Value>> = HashMap::new();
     if !events.is_empty() {
-        let placeholders = std::iter::repeat_n("?", events.len()).collect::<Vec<_>>().join(", ");
+        let placeholders = std::iter::repeat_n("?", events.len())
+            .collect::<Vec<_>>()
+            .join(", ");
         let sql = format!(
             "SELECT ID, \"KEY\" AS EVENT_KEY, VALUE FROM HISTORICAL_EVENT_PROPERTIES WHERE ID IN ({placeholders})",
         );
@@ -1117,6 +1764,9 @@ fn is_recognized_transient_book_file(path: &Path) -> bool {
                 || extension.eq_ignore_ascii_case("cb7")
                 || extension.eq_ignore_ascii_case("cbt")
                 || extension.eq_ignore_ascii_case("zip")
+                || extension.eq_ignore_ascii_case("rar")
+                || extension.eq_ignore_ascii_case("pdf")
+                || extension.eq_ignore_ascii_case("epub")
     )
 }
 

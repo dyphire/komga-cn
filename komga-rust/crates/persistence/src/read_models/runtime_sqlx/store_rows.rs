@@ -2,7 +2,10 @@ use sqlx::SqlitePool;
 
 use super::super::{BookRow, LibraryRow, SeriesRow};
 
-pub(super) async fn insert_library_row(pool: &SqlitePool, row: LibraryRow) -> Result<(), sqlx::Error> {
+pub(super) async fn insert_library_row(
+    pool: &SqlitePool,
+    row: LibraryRow,
+) -> Result<(), sqlx::Error> {
     sqlx::query("INSERT INTO libraries (id, name, root) VALUES (?1, ?2, ?3)")
         .bind(row.id)
         .bind(row.name)
@@ -12,7 +15,10 @@ pub(super) async fn insert_library_row(pool: &SqlitePool, row: LibraryRow) -> Re
     Ok(())
 }
 
-pub(super) async fn insert_series_row(pool: &SqlitePool, row: SeriesRow) -> Result<(), sqlx::Error> {
+pub(super) async fn insert_series_row(
+    pool: &SqlitePool,
+    row: SeriesRow,
+) -> Result<(), sqlx::Error> {
     let SeriesRow {
         id,
         library_id,

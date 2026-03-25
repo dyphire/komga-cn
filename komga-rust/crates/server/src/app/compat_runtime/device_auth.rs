@@ -88,6 +88,34 @@ pub(in crate::app::compat_runtime) async fn oauth2_authorization(
         .into_response()
 }
 
+pub(in crate::app::compat_runtime) async fn oauth2_login_code(
+    Extension(state): Extension<OperationalState>,
+    Path(registration_id): Path<String>,
+) -> Response {
+    let known_provider = state
+        .oauth2_clients
+        .iter()
+        .any(|client| client.registration_id == registration_id);
+
+    let error = if known_provider {
+        "oauth2_not_implemented"
+    } else {
+        "oauth2_provider_not_found"
+    };
+
+    let redirect = format!("/login?server_redirect=Y&error={error}");
+    (
+        StatusCode::FOUND,
+        [(
+            header::LOCATION,
+            HeaderValue::from_str(&redirect).unwrap_or_else(|_| {
+                HeaderValue::from_static("/login?server_redirect=Y&error=oauth2_invalid_redirect")
+            }),
+        )],
+    )
+        .into_response()
+}
+
 pub(in crate::app::compat_runtime) async fn kobo_ping(
     Path(auth_token): Path<String>,
     headers: HeaderMap,
@@ -204,7 +232,9 @@ pub(in crate::app::compat_runtime) async fn kobo_library_sync(
     .into_response()
 }
 
-async fn load_kobo_sync_deltas(database_file: &FsPath) -> Result<(Vec<Value>, Vec<Value>), sqlx::Error> {
+async fn load_kobo_sync_deltas(
+    database_file: &FsPath,
+) -> Result<(Vec<Value>, Vec<Value>), sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
     let rows = sqlx::query(
         "SELECT b.ID AS BOOK_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE FROM BOOK b LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID WHERE b.DELETED_DATE IS NULL ORDER BY b.ID ASC",

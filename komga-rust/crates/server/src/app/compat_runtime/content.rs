@@ -24,28 +24,27 @@ mod helpers;
 mod media;
 
 pub(super) use detail::{
-    book_detail, book_readlists, book_sibling_next, book_sibling_previous, collection_delete,
-    collection_create, collection_detail, collection_series, collection_update, collections,
-    readlist_book_sibling_next,
-    readlist_book_sibling_previous, readlist_books, readlist_create, readlist_delete,
-    readlist_detail, readlist_match_comicrack, readlist_update, readlists,
+    book_detail, book_readlists, book_sibling_next, book_sibling_previous, collection_create,
+    collection_delete, collection_detail, collection_series, collection_update, collections,
+    readlist_book_sibling_next, readlist_book_sibling_previous, readlist_books, readlist_create,
+    readlist_delete, readlist_detail, readlist_match_comicrack, readlist_update, readlists,
 };
 pub(super) use discovery::{
     book_tags, books, books_duplicates, books_latest, books_list, books_ondeck, series_list,
 };
-pub(super) use helpers::{
-    DiscoveryOwnershipRoute, DiscoveryShape, discovery_ownership_route, mark_native,
-};
+pub(super) use helpers::mark_native;
 pub(super) use media::{
-    book_analyze, book_file, book_file_delete, book_manifest, book_metadata_batch_update, book_metadata_refresh,
+    book_analyze, book_file, book_file_delete, book_manifest, book_manifest_divina,
+    book_manifest_epub, book_manifest_pdf, book_metadata_batch_update, book_metadata_refresh,
     book_metadata_update, book_page, book_page_thumbnail, book_pages, book_progression,
     book_progression_get, book_read_progress, book_read_progress_delete, book_read_progress_get,
-    books_thumbnails_regenerate,
     book_thumbnail, book_thumbnail_delete, book_thumbnail_select, book_thumbnail_upload,
-    book_thumbnails, books_import, readlist_file, readlist_tachiyomi_read_progress_get,
-    readlist_tachiyomi_read_progress_put, readlist_thumbnail, readlist_thumbnail_by_id,
-    readlist_thumbnail_delete, readlist_thumbnail_select, readlist_thumbnail_upload,
-    readlist_thumbnails, series_thumbnail,
+    book_thumbnails, books_import, books_thumbnails_regenerate, collection_thumbnail,
+    collection_thumbnail_by_id, collection_thumbnail_delete, collection_thumbnail_select,
+    collection_thumbnail_upload, collection_thumbnails, readlist_file,
+    readlist_tachiyomi_read_progress_get, readlist_tachiyomi_read_progress_put, readlist_thumbnail,
+    readlist_thumbnail_by_id, readlist_thumbnail_delete, readlist_thumbnail_select,
+    readlist_thumbnail_upload, readlist_thumbnails, series_thumbnail,
 };
 
 pub(super) async fn libraries(
@@ -70,7 +69,14 @@ pub(super) async fn series(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    discovery::series(profile, headers, uri, auth_state, auth_db.database_file.as_path()).await
+    discovery::series(
+        profile,
+        headers,
+        uri,
+        auth_state,
+        auth_db.database_file.as_path(),
+    )
+    .await
 }
 
 pub(super) async fn authors(
@@ -79,6 +85,29 @@ pub(super) async fn authors(
     uri: Uri,
 ) -> Response {
     discovery::authors(headers, uri, auth_db.database_file.as_path()).await
+}
+
+pub(super) async fn authors_names(
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    discovery::authors_names(headers, uri, auth_db.database_file.as_path()).await
+}
+
+pub(super) async fn authors_roles(
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+) -> Response {
+    discovery::authors_roles(headers, auth_db.database_file.as_path()).await
+}
+
+pub(super) async fn authors_v2(
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    discovery::authors_v2(headers, uri, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn genres(
@@ -95,6 +124,14 @@ pub(super) async fn tags(
     uri: Uri,
 ) -> Response {
     discovery::tags(headers, uri, auth_db.database_file.as_path()).await
+}
+
+pub(super) async fn series_tags(
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    discovery::series_tags(headers, uri, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn languages(
@@ -170,8 +207,13 @@ pub(super) async fn series_alphabetical_groups(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    discovery::series_alphabetical_groups(headers, body, auth_state, auth_db.database_file.as_path())
-        .await
+    discovery::series_alphabetical_groups(
+        headers,
+        body,
+        auth_state,
+        auth_db.database_file.as_path(),
+    )
+    .await
 }
 
 pub(super) async fn series_detail(
@@ -181,7 +223,14 @@ pub(super) async fn series_detail(
     path: axum::extract::Path<String>,
     uri: Uri,
 ) -> Response {
-    detail::series_detail(headers, path, uri, auth_state, auth_db.database_file.as_path()).await
+    detail::series_detail(
+        headers,
+        path,
+        uri,
+        auth_state,
+        auth_db.database_file.as_path(),
+    )
+    .await
 }
 
 pub(super) async fn series_collections(
@@ -195,11 +244,19 @@ pub(super) async fn series_collections(
 
 pub(super) async fn series_metadata_update(
     Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(state): Extension<super::OperationalState>,
     headers: HeaderMap,
     path: axum::extract::Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    detail::series_metadata_update(headers, auth_db.database_file.as_path(), path, body).await
+    detail::series_metadata_update(
+        headers,
+        auth_db.database_file.as_path(),
+        state.runtime.lucene_data_directory.as_path(),
+        path,
+        body,
+    )
+    .await
 }
 
 pub(super) async fn library_detail(
@@ -385,6 +442,22 @@ pub(super) async fn opds_manifest(
     content_opds::opds_manifest(profile, headers, auth_db.database_file.as_path(), &book_id).await
 }
 
+pub(super) async fn opds_manifest_profile(
+    Extension(profile): Extension<CompatProfile>,
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    Path((book_id, manifest_profile)): Path<(String, String)>,
+) -> Response {
+    content_opds::opds_manifest_with_profile(
+        profile,
+        headers,
+        auth_db.database_file.as_path(),
+        &book_id,
+        &manifest_profile,
+    )
+    .await
+}
+
 pub(super) async fn opds_auth(headers: HeaderMap) -> Response {
     content_opds::opds_auth(headers).await
 }
@@ -395,7 +468,71 @@ pub(super) async fn opds_catalog(headers: HeaderMap) -> Response {
 
 pub(super) async fn opds_v1_series(
     Extension(profile): Extension<CompatProfile>,
+    Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
 ) -> Response {
-    content_opds::opds_v1_series(profile, headers).await
+    content_opds::opds_v1_series(profile, headers, auth_db.database_file.as_path()).await
+}
+
+pub(super) async fn opds_v2_libraries(
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+) -> Response {
+    content_opds::opds_v2_libraries(headers, auth_db.database_file.as_path()).await
+}
+
+pub(super) async fn opds_v2_library(
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    Path(library_id): Path<String>,
+) -> Response {
+    content_opds::opds_v2_library(headers, auth_db.database_file.as_path(), &library_id).await
+}
+
+pub(super) async fn opds_v2_library_readlists(
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    Path(library_id): Path<String>,
+) -> Response {
+    content_opds::opds_v2_library_readlists(headers, auth_db.database_file.as_path(), &library_id)
+        .await
+}
+
+pub(super) async fn opds_v2_series(
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    Path(series_id): Path<String>,
+) -> Response {
+    content_opds::opds_v2_series(headers, auth_db.database_file.as_path(), &series_id).await
+}
+
+pub(super) async fn opds_v2_readlist(
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    Path(readlist_id): Path<String>,
+) -> Response {
+    content_opds::opds_v2_readlist(headers, auth_db.database_file.as_path(), &readlist_id).await
+}
+
+pub(super) async fn opds_v2_search(
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    let query = uri
+        .query()
+        .and_then(|raw| {
+            raw.split('&').find_map(|pair| {
+                let (key, value) = pair.split_once('=')?;
+                (key == "query").then_some(value)
+            })
+        })
+        .map(|value| value.replace('+', " "))
+        .unwrap_or_default();
+    content_opds::opds_v2_search(
+        headers,
+        auth_db.database_file.as_path(),
+        Some(query.as_str()),
+    )
+    .await
 }

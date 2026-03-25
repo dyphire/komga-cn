@@ -135,11 +135,12 @@ async fn get_book_sibling_sqlx(
     book_id: &str,
     next: bool,
 ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
-    let anchor = sqlx::query_as::<_, (String, i64)>("SELECT series_id, number_sort FROM books WHERE id = ?")
-        .bind(book_id)
-        .fetch_optional(&pool)
-        .await
-        .map_err(map_sqlx_error)?;
+    let anchor =
+        sqlx::query_as::<_, (String, i64)>("SELECT series_id, number_sort FROM books WHERE id = ?")
+            .bind(book_id)
+            .fetch_optional(&pool)
+            .await
+            .map_err(map_sqlx_error)?;
 
     let Some((series_id, number_sort)) = anchor else {
         return Ok(None);
@@ -150,7 +151,8 @@ async fn get_book_sibling_sqlx(
         return Ok(None);
     }
 
-    let mut builder = QueryBuilder::<Sqlite>::new("SELECT b.id FROM books b JOIN series s ON s.id = b.series_id");
+    let mut builder =
+        QueryBuilder::<Sqlite>::new("SELECT b.id FROM books b JOIN series s ON s.id = b.series_id");
     let mut state = SqlxWhereState::default();
     append_clause_sqlx("b.series_id = ", &mut builder, &mut state);
     builder.push_bind(series_id);

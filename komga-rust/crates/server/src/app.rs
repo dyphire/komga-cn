@@ -46,8 +46,12 @@ pub async fn serve_with_config(
     listener: TcpListener,
     config: RuntimeConfig,
 ) -> std::io::Result<()> {
-    search::startup_recover(config.lucene_data_directory.as_path())
-        .map_err(|error| std::io::Error::other(format!("search startup recovery failed: {error}")))?;
+    config.resolve_webui_assets_layout().map_err(|error| {
+        std::io::Error::other(format!("webui startup layout check failed: {error}"))
+    })?;
+    search::startup_recover(config.lucene_data_directory.as_path()).map_err(|error| {
+        std::io::Error::other(format!("search startup recovery failed: {error}"))
+    })?;
     axum::serve(listener, build_router_with_config(&config))
         .with_graceful_shutdown(shutdown_signal())
         .await

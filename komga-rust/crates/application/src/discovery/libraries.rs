@@ -28,6 +28,8 @@ where
         query: LibraryDetailQuery,
     ) -> Result<Option<LibraryReadModel>, DiscoveryError> {
         let libraries = self.repository.list_libraries(context).await?;
-        Ok(libraries.into_iter().find(|library| library.id == query.library_id))
+        Ok(libraries
+            .into_iter()
+            .find(|library| library.id == query.library_id))
     }
 }

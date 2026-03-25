@@ -1,11 +1,10 @@
-use axum::http::{header, HeaderName, HeaderValue, StatusCode};
-use axum::response::{IntoResponse, Response};
 use axum::Json;
+use axum::http::{HeaderName, HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use axum_extra::extract::cookie::{Cookie, SameSite};
 use serde_json::json;
 
-use super::token::remember_me_token_for_session;
-use super::user::{placeholder_user_json, PlaceholderUser};
+use super::user::{PlaceholderUser, placeholder_user_json};
 
 pub(in crate::app) fn bootstrap_user(user: PlaceholderUser, token: String) -> Response {
     let session_cookie = Cookie::build(("KOMGA-SESSION", token.clone()))
@@ -37,6 +36,7 @@ pub(in crate::app) fn bootstrap_user(user: PlaceholderUser, token: String) -> Re
 pub(in crate::app) fn bootstrap_user_with_remember_me_cookies(
     user: PlaceholderUser,
     session_token: String,
+    remember_me_token: String,
 ) -> Response {
     let session_cookie = Cookie::build(("KOMGA-SESSION", session_token.clone()))
         .path("/")
@@ -46,7 +46,7 @@ pub(in crate::app) fn bootstrap_user_with_remember_me_cookies(
         .to_string();
     let remember_me_cookie = format!(
         "komga-remember-me={}; Path=/; HttpOnly; Max-Age=2592000; Expires=Sun, 18 Apr 2038 23:59:59 GMT",
-        remember_me_token_for_session(&session_token)
+        remember_me_token
     );
 
     let mut response = (StatusCode::OK, Json(placeholder_user_json(&user))).into_response();
@@ -68,10 +68,11 @@ pub(in crate::app) fn bootstrap_user_with_remember_me_cookies(
 pub(in crate::app) fn bootstrap_user_with_remember_me_token(
     user: PlaceholderUser,
     token: String,
+    remember_me_token: String,
 ) -> Response {
     let remember_me_cookie = format!(
         "komga-remember-me={}; Path=/; HttpOnly; Max-Age=2592000; Expires=Sun, 18 Apr 2038 23:59:59 GMT",
-        remember_me_token_for_session(&token)
+        remember_me_token
     );
 
     let mut response = (StatusCode::OK, Json(placeholder_user_json(&user))).into_response();
@@ -122,4 +123,8 @@ pub(in crate::app) fn unauthorized_json_response(path: &str) -> Response {
 
 pub(in crate::app) fn expired_session_cookie() -> HeaderValue {
     HeaderValue::from_static("KOMGA-SESSION=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
+}
+
+pub(in crate::app) fn expired_remember_me_cookie() -> HeaderValue {
+    HeaderValue::from_static("komga-remember-me=; Path=/; Max-Age=0; HttpOnly")
 }

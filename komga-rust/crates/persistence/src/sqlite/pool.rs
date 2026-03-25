@@ -9,7 +9,10 @@ use crate::sqlite::setup;
 
 pub const DEFAULT_MAX_CONNECTIONS: u32 = 4;
 
-pub fn reject_or_quarantine_pool_topology(database_url: &str, max_connections: u32) -> Result<(), String> {
+pub fn reject_or_quarantine_pool_topology(
+    database_url: &str,
+    max_connections: u32,
+) -> Result<(), String> {
     if database_url == "sqlite::memory:" && max_connections > 1 {
         return Err(
             "pooled sqlite::memory: is quarantined; use deterministic file-backed sqlite topology instead"
@@ -26,7 +29,10 @@ pub fn file_backed_connect_options(path: impl AsRef<Path>) -> SqliteConnectOptio
         .create_if_missing(true)
 }
 
-pub async fn connect_pool(path: impl AsRef<Path>, max_connections: u32) -> Result<SqlitePool, sqlx::Error> {
+pub async fn connect_pool(
+    path: impl AsRef<Path>,
+    max_connections: u32,
+) -> Result<SqlitePool, sqlx::Error> {
     SqlitePoolOptions::new()
         .max_connections(max_connections)
         .connect_with(file_backed_connect_options(path))
@@ -79,8 +85,7 @@ impl SqliteTempPool {
         if self.db_path.exists()
             && let Err(error) = std::fs::remove_file(&self.db_path)
             && error.kind() != std::io::ErrorKind::NotFound
-        {
-        }
+        {}
     }
 }
 

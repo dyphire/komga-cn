@@ -140,7 +140,11 @@ async fn search_series_list_native_owned_filters_persisted_series_by_full_text_s
     let content = payload["content"]
         .as_array()
         .expect("series/list response must expose content array");
-    assert_eq!(content.len(), 1, "series fullTextSearch must filter persisted titles");
+    assert_eq!(
+        content.len(),
+        1,
+        "series fullTextSearch must filter persisted titles"
+    );
     assert_eq!(
         content[0]["id"],
         Value::String("series-search-a".to_string()),
@@ -151,8 +155,287 @@ async fn search_series_list_native_owned_filters_persisted_series_by_full_text_s
 }
 
 #[tokio::test]
+async fn browse_series_list_keeps_series_visible_when_metadata_row_is_missing() {
+    let fixture = SearchWebUiContractFixture::new("search-webui-browse-series-metadata-gap").await;
+
+    seed_browse_fixture_without_series_metadata(
+        &fixture.paths.main_db,
+        &fixture.library_root,
+        "library-browse",
+        "series-browse",
+        "book-browse",
+    )
+    .await;
+
+    let token = admin_session_token(&fixture.app).await;
+
+    let books_response = request(
+        &fixture.app,
+        "POST",
+        "/api/v1/books/list?page=0&size=20&sort=metadata.title,asc",
+        Some(&token),
+        &[(header::CONTENT_TYPE.as_str(), "application/json")],
+        Some(json!({
+            "condition": {
+                "allOf": [
+                    {
+                        "libraryId": {
+                            "operator": "is",
+                            "value": "library-browse"
+                        }
+                    }
+                ]
+            }
+        })),
+    )
+    .await;
+    assert_eq!(books_response.status(), StatusCode::OK);
+    let books_payload = response_json(books_response).await;
+    assert_eq!(books_payload["totalElements"], Value::Number(1u64.into()));
+
+    let series_response = request(
+        &fixture.app,
+        "POST",
+        "/api/v1/series/list?page=0&size=20&sort=metadata.titleSort,asc",
+        Some(&token),
+        &[(header::CONTENT_TYPE.as_str(), "application/json")],
+        Some(json!({
+            "condition": {
+                "allOf": [
+                    {
+                        "libraryId": {
+                            "operator": "is",
+                            "value": "library-browse"
+                        }
+                    }
+                ]
+            }
+        })),
+    )
+    .await;
+
+    assert_eq!(series_response.status(), StatusCode::OK);
+    let series_payload = response_json(series_response).await;
+    assert_eq!(
+        series_payload["totalElements"],
+        Value::Number(1u64.into()),
+        "browse series list must still render series cards when scanner persisted SERIES row before SERIES_METADATA exists",
+    );
+    assert_eq!(
+        series_payload["content"][0]["id"],
+        Value::String("series-browse".to_string()),
+    );
+    assert_eq!(
+        series_payload["content"][0]["metadata"]["title"],
+        Value::String("Needle Browse Series".to_string()),
+    );
+
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn browse_library_subpages_honor_webui_series_and_books_default_contracts() {
+    let fixture = SearchWebUiContractFixture::new("search-webui-browse-library-subpages").await;
+
+    seed_browse_fixture_without_series_metadata(
+        &fixture.paths.main_db,
+        &fixture.library_root,
+        "library-browse",
+        "series-browse",
+        "book-browse",
+    )
+    .await;
+
+    let token = admin_session_token(&fixture.app).await;
+    let library_filter = json!({
+        "condition": {
+            "allOf": [
+                {
+                    "libraryId": {
+                        "operator": "is",
+                        "value": "library-browse"
+                    }
+                }
+            ]
+        }
+    });
+
+    let series_response = request(
+        &fixture.app,
+        "POST",
+        "/api/v1/series/list?page=0&size=20&sort=metadata.titleSort%2Casc",
+        Some(&token),
+        &[(header::CONTENT_TYPE.as_str(), "application/json")],
+        Some(library_filter.clone()),
+    )
+    .await;
+    assert_eq!(series_response.status(), StatusCode::OK);
+    let series_payload = response_json(series_response).await;
+    assert_eq!(series_payload["totalElements"], Value::Number(1u64.into()));
+    assert_eq!(
+        series_payload["content"][0]["id"],
+        Value::String("series-browse".to_string())
+    );
+
+    let alphabetical_groups_response = request(
+        &fixture.app,
+        "POST",
+        "/api/v1/series/list/alphabetical-groups",
+        Some(&token),
+        &[(header::CONTENT_TYPE.as_str(), "application/json")],
+        Some(library_filter.clone()),
+    )
+    .await;
+    assert_eq!(alphabetical_groups_response.status(), StatusCode::OK);
+    let alphabetical_groups_payload = response_json(alphabetical_groups_response).await;
+    assert!(
+        alphabetical_groups_payload
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|entry| {
+                entry.get("group") == Some(&Value::String("N".to_string()))
+                    && entry.get("count") == Some(&Value::Number(1u64.into()))
+            }),
+        "browse series alphabetical groups should include one persisted 'N' bucket for Needle Browse Series",
+    );
+
+    let books_response = request(
+        &fixture.app,
+        "POST",
+        "/api/v1/books/list?page=0&size=20&sort=series%2Cmetadata.numberSort%2Casc",
+        Some(&token),
+        &[(header::CONTENT_TYPE.as_str(), "application/json")],
+        Some(library_filter),
+    )
+    .await;
+    assert_eq!(books_response.status(), StatusCode::OK);
+    let books_payload = response_json(books_response).await;
+    assert_eq!(books_payload["totalElements"], Value::Number(1u64.into()));
+    assert_eq!(
+        books_payload["content"][0]["id"],
+        Value::String("book-browse".to_string())
+    );
+
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn scanner_seeded_browse_ids_are_route_safe_for_detail_and_media_endpoints() {
+    let fixture = SearchWebUiContractFixture::new_with_scanner_seed(
+        "search-webui-scanner-route-safe-ids",
+        "library-scanner",
+    )
+    .await;
+
+    backfill_scanner_detail_metadata(&fixture.paths.main_db).await;
+
+    let token = admin_session_token(&fixture.app).await;
+    let library_filter = json!({
+        "condition": {
+            "allOf": [
+                {
+                    "libraryId": {
+                        "operator": "is",
+                        "value": "library-scanner"
+                    }
+                }
+            ]
+        }
+    });
+
+    let series_response = request(
+        &fixture.app,
+        "POST",
+        "/api/v1/series/list?page=0&size=20&sort=metadata.titleSort%2Casc",
+        Some(&token),
+        &[(header::CONTENT_TYPE.as_str(), "application/json")],
+        Some(library_filter.clone()),
+    )
+    .await;
+    assert_eq!(series_response.status(), StatusCode::OK);
+    let series_payload = response_json(series_response).await;
+    let series_id = series_payload["content"][0]["id"]
+        .as_str()
+        .expect("series/list scanner-seeded payload must include series id")
+        .to_string();
+    assert!(
+        !series_id.contains('/'),
+        "scanner-seeded series/list ids must be route-safe and never contain filesystem separators",
+    );
+
+    let series_detail_response = request(
+        &fixture.app,
+        "GET",
+        &format!("/api/v1/series/{series_id}"),
+        Some(&token),
+        &[],
+        None,
+    )
+    .await;
+    assert_eq!(
+        series_detail_response.status(),
+        StatusCode::OK,
+        "route-safe scanner series id from browse payload must resolve on detail endpoint",
+    );
+
+    let books_response = request(
+        &fixture.app,
+        "POST",
+        "/api/v1/books/list?page=0&size=20&sort=series%2Cmetadata.numberSort%2Casc",
+        Some(&token),
+        &[(header::CONTENT_TYPE.as_str(), "application/json")],
+        Some(library_filter),
+    )
+    .await;
+    assert_eq!(books_response.status(), StatusCode::OK);
+    let books_payload = response_json(books_response).await;
+    let book_id = books_payload["content"][0]["id"]
+        .as_str()
+        .expect("books/list scanner-seeded payload must include book id")
+        .to_string();
+    assert!(
+        !book_id.contains('/'),
+        "scanner-seeded books/list ids must be route-safe and never contain filesystem separators",
+    );
+
+    let book_detail_response = request(
+        &fixture.app,
+        "GET",
+        &format!("/api/v1/books/{book_id}"),
+        Some(&token),
+        &[],
+        None,
+    )
+    .await;
+    assert_eq!(
+        book_detail_response.status(),
+        StatusCode::OK,
+        "route-safe scanner book id from browse payload must resolve on detail endpoint",
+    );
+
+    let book_file_response = request(
+        &fixture.app,
+        "GET",
+        &format!("/api/v1/books/{book_id}/file"),
+        Some(&token),
+        &[],
+        None,
+    )
+    .await;
+    assert_eq!(
+        book_file_response.status(),
+        StatusCode::OK,
+        "route-safe scanner book id from browse payload must resolve on media endpoint",
+    );
+
+    fixture.cleanup();
+}
+
+#[tokio::test]
 async fn series_list_shadow_mode_maps_snapshot_library_filter_to_persisted_library_ids() {
-    let fixture = SearchWebUiContractFixture::new("search-webui-series-shadow-library-filter").await;
+    let fixture =
+        SearchWebUiContractFixture::new("search-webui-series-shadow-library-filter").await;
 
     seed_search_fixture(
         &fixture.paths.main_db,
@@ -211,11 +494,13 @@ async fn series_list_shadow_mode_maps_snapshot_library_filter_to_persisted_libra
         .cloned()
         .collect::<Vec<_>>();
     assert!(
-        ids.iter().any(|id| id == &Value::String("series-search-a".to_string())),
+        ids.iter()
+            .any(|id| id == &Value::String("series-search-a".to_string())),
         "series/list shadow-mode should return persisted ids, not only snapshot placeholders",
     );
     assert!(
-        ids.iter().all(|id| id != &Value::String("series-1".to_string())),
+        ids.iter()
+            .all(|id| id != &Value::String("series-1".to_string())),
         "series/list shadow-mode must not regress to snapshot series-1 placeholder ids",
     );
 
@@ -283,11 +568,13 @@ async fn books_list_shadow_mode_maps_snapshot_library_filter_to_persisted_librar
         .cloned()
         .collect::<Vec<_>>();
     assert!(
-        ids.iter().any(|id| id == &Value::String("book-search-hit".to_string())),
+        ids.iter()
+            .any(|id| id == &Value::String("book-search-hit".to_string())),
         "books/list shadow-mode should return persisted ids, not only snapshot placeholders",
     );
     assert!(
-        ids.iter().all(|id| id != &Value::String("book-1".to_string())),
+        ids.iter()
+            .all(|id| id != &Value::String("book-1".to_string())),
         "books/list shadow-mode must not regress to snapshot book-1 placeholder ids",
     );
 
@@ -315,9 +602,13 @@ async fn rejects_missing_webui_dependencies() {
     );
     assert_eq!(global_settings.status(), StatusCode::OK);
     let global_payload = response_json(global_settings).await;
-    assert!(
-        global_payload.get("webui.oauth2.hide_login").is_some(),
-        "unchanged WebUI bootstrap depends on webui.oauth2.hide_login client setting",
+    assert_eq!(
+        global_payload.get("webui.oauth2.hide_login"),
+        Some(&json!({
+            "value": "false",
+            "allowUnauthorized": true,
+        })),
+        "unchanged WebUI bootstrap depends on webui.oauth2.hide_login defaulting to a public false setting",
     );
 
     let user_settings_unauth = request(
@@ -424,9 +715,124 @@ impl SearchWebUiContractFixture {
         }
     }
 
+    async fn new_with_scanner_seed(case_id: &str, library_id: &str) -> Self {
+        compat_auth_env::ensure_compat_auth_env();
+
+        let paths = persistence_contract_fixture::new_legacy_db_paths(case_id)
+            .expect("search/webui scanner fixture db paths should be created");
+        persistence_contract_fixture::seed_main_db_from_flyway(&paths.main_db)
+            .await
+            .expect("main db flyway fixture should be created");
+        persistence_contract_fixture::seed_tasks_db_from_flyway(&paths.tasks_db)
+            .await
+            .expect("tasks db flyway fixture should be created");
+
+        fs::create_dir_all(paths.config_dir.join("lucene"))
+            .expect("lucene directory should be created for search/webui scanner fixture");
+        fs::create_dir_all(paths.config_dir.join("fonts"))
+            .expect("fonts directory should be created for search/webui scanner fixture");
+        let library_root = paths.config_dir.join("search-webui-scanner-library-root");
+        fs::create_dir_all(&library_root)
+            .expect("library root directory should be created for scanner fixture");
+
+        seed_scanner_library_fixture(&paths.main_db, &library_root, library_id).await;
+
+        let mut config = RuntimeConfig::for_compat_profile(CompatProfile::SnapshotAligned);
+        config.config_dir = Some(paths.config_dir.clone());
+        config.log_file = paths.config_dir.join("komga.log");
+        config.database_file = paths.main_db.clone();
+        config.tasks_db_file = paths.tasks_db.clone();
+        config.lucene_data_directory = paths.config_dir.join("lucene");
+        config.fonts_data_directory = paths.config_dir.join("fonts");
+
+        let app = komga_rust::app::build_router_with_config(&config);
+
+        Self {
+            paths,
+            app,
+            library_root,
+        }
+    }
+
     fn cleanup(self) {
         persistence_contract_fixture::cleanup(self.paths);
     }
+}
+
+async fn seed_scanner_library_fixture(main_db: &Path, library_root: &Path, library_id: &str) {
+    fs::write(library_root.join("RouteSafe-001.cbz"), b"route-safe-book-bytes")
+        .expect("scanner fixture media file should be written");
+
+    let pool = connect_pool(main_db, 1)
+        .await
+        .expect("sqlite pool should open for scanner fixture seeding");
+
+    sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
+        .bind(library_id)
+        .bind("Search WebUI Scanner Contract Library")
+        .bind(library_root.to_string_lossy().to_string())
+        .execute(&pool)
+        .await
+        .expect("scanner fixture library row should insert");
+
+    pool.close().await;
+}
+
+async fn backfill_scanner_detail_metadata(main_db: &Path) {
+    let pool = connect_pool(main_db, 1)
+        .await
+        .expect("sqlite pool should open for scanner metadata backfill");
+
+    let series_rows = sqlx::query("SELECT ID, NAME FROM SERIES")
+        .fetch_all(&pool)
+        .await
+        .expect("series rows should be queryable for scanner metadata backfill");
+    for row in series_rows {
+        let series_id = row.get::<String, _>("ID");
+        let series_name = row.get::<String, _>("NAME");
+        sqlx::query(
+            "INSERT OR IGNORE INTO SERIES_METADATA (CREATED_DATE, LAST_MODIFIED_DATE, STATUS, TITLE, TITLE_SORT, SUMMARY, LANGUAGE, PUBLISHER, SERIES_ID) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind("2024-03-01T00:00:00")
+        .bind("2024-03-03T00:00:00")
+        .bind("ONGOING")
+        .bind(&series_name)
+        .bind(&series_name)
+        .bind("scanner metadata backfill")
+        .bind("en")
+        .bind("Komga Rust")
+        .bind(series_id)
+        .execute(&pool)
+        .await
+        .expect("series metadata backfill row should insert");
+    }
+
+    let book_rows = sqlx::query(
+        "SELECT ID, NAME, COALESCE(NUMBER, 1) AS NUMBER_VALUE FROM BOOK",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("book rows should be queryable for scanner metadata backfill");
+    for row in book_rows {
+        let book_id = row.get::<String, _>("ID");
+        let book_name = row.get::<String, _>("NAME");
+        let number_value = row.get::<i64, _>("NUMBER_VALUE").max(1);
+        sqlx::query(
+            "INSERT OR IGNORE INTO BOOK_METADATA (CREATED_DATE, LAST_MODIFIED_DATE, NUMBER, NUMBER_SORT, TITLE, SUMMARY, BOOK_ID) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind("2024-03-01T00:00:00")
+        .bind("2024-03-03T00:00:00")
+        .bind(number_value.to_string())
+        .bind(number_value as f64)
+        .bind(&book_name)
+        .bind("scanner metadata backfill")
+        .bind(book_id)
+        .execute(&pool)
+        .await
+        .expect("book metadata backfill row should insert");
+    }
+
+    pool.close().await;
 }
 
 async fn request(
@@ -477,10 +883,7 @@ async fn admin_session_token(app: &axum::Router) -> String {
                 .uri("/api/v2/users/me")
                 .header(
                     header::AUTHORIZATION,
-                    format!(
-                        "Basic {}",
-                        compat_auth_env::COMPAT_ADMIN_BASIC_AUTH_BASE64,
-                    ),
+                    format!("Basic {}", compat_auth_env::COMPAT_ADMIN_BASIC_AUTH_BASE64,),
                 )
                 .header("X-Auth-Token", "")
                 .body(Body::empty())
@@ -640,6 +1043,94 @@ async fn seed_series_and_book(
         .execute(pool)
         .await
         .expect("search/webui fixture media row should insert");
+}
+
+async fn seed_browse_fixture_without_series_metadata(
+    main_db: &Path,
+    library_root: &Path,
+    library_id: &str,
+    series_id: &str,
+    book_id: &str,
+) {
+    fs::write(library_root.join("browse-hit.cbz"), b"browse-hit")
+        .expect("browse fixture media file should be written");
+
+    let pool = connect_pool(main_db, 1)
+        .await
+        .expect("sqlite pool should open for browse fixture seeding");
+
+    sqlx::query(
+        "INSERT INTO LIBRARY (ID, NAME, ROOT, SCAN_STARTUP, EMPTY_TRASH_AFTER_SCAN, ONESHOTS_DIRECTORY) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(library_id)
+    .bind("Browse Contract Library")
+    .bind(library_root.to_string_lossy().to_string())
+    .bind(false)
+    .bind(false)
+    .bind(None::<String>)
+    .execute(&pool)
+    .await
+    .expect("browse fixture library row should insert");
+
+    sqlx::query(
+        "INSERT INTO SERIES (ID, CREATED_DATE, LAST_MODIFIED_DATE, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, ONESHOT, DELETED_DATE) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(series_id)
+    .bind("2024-03-01T00:00:00")
+    .bind("2024-03-03T00:00:00")
+    .bind("2024-03-03T00:00:00")
+    .bind("Needle Browse Series")
+    .bind(format!("/library/{library_id}/series/{series_id}"))
+    .bind(library_id)
+    .bind(false)
+    .bind(None::<String>)
+    .execute(&pool)
+    .await
+    .expect("browse fixture series row should insert");
+
+    sqlx::query(
+        "INSERT INTO BOOK (ID, CREATED_DATE, LAST_MODIFIED_DATE, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID, ONESHOT, DELETED_DATE) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(book_id)
+    .bind("2024-03-01T00:00:00")
+    .bind("2024-03-03T00:00:00")
+    .bind("2024-03-03T00:00:00")
+    .bind("browse-hit.cbz")
+    .bind(format!("/library/{library_id}/books/browse-hit.cbz"))
+    .bind(series_id)
+    .bind(40_i64)
+    .bind(1_i32)
+    .bind(library_id)
+    .bind(false)
+    .bind(None::<String>)
+    .execute(&pool)
+    .await
+    .expect("browse fixture book row should insert");
+
+    sqlx::query(
+        "INSERT INTO BOOK_METADATA (CREATED_DATE, LAST_MODIFIED_DATE, NUMBER, NUMBER_SORT, TITLE, SUMMARY, BOOK_ID) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("2024-03-01T00:00:00")
+    .bind("2024-03-03T00:00:00")
+    .bind("1")
+    .bind(1.0_f64)
+    .bind("Needle Browse Book")
+    .bind("browse contract book summary")
+    .bind(book_id)
+    .execute(&pool)
+    .await
+    .expect("browse fixture book metadata row should insert");
+
+    sqlx::query("INSERT INTO MEDIA (STATUS, MEDIA_TYPE, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("READY")
+        .bind("application/vnd.comicbook+zip")
+        .bind(book_id)
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("browse fixture media row should insert");
+
+    pool.close().await;
 }
 
 async fn persisted_book_count(main_db: &Path) -> i64 {

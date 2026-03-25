@@ -27,7 +27,12 @@ fn readlists_collections_contract_target_is_registered() {
 async fn readlists_listing_reflects_persisted_rows() {
     let fixture = ReadlistsCollectionsContractFixture::new("readlists-list").await;
 
-    seed_library(&fixture.paths.main_db, "library-readlists", &fixture.library_root).await;
+    seed_library(
+        &fixture.paths.main_db,
+        "library-readlists",
+        &fixture.library_root,
+    )
+    .await;
     seed_series_with_book(
         &fixture.paths.main_db,
         &fixture.library_root,
@@ -83,8 +88,14 @@ async fn readlists_listing_reflects_persisted_rows() {
     )
     .await;
 
-    assert_eq!(readlist_row_count(&fixture.paths.main_db, "readlist-alpha").await, 1);
-    assert_eq!(readlist_row_count(&fixture.paths.main_db, "readlist-zulu").await, 1);
+    assert_eq!(
+        readlist_row_count(&fixture.paths.main_db, "readlist-alpha").await,
+        1
+    );
+    assert_eq!(
+        readlist_row_count(&fixture.paths.main_db, "readlist-zulu").await,
+        1
+    );
 
     let token = admin_session_token(&fixture.app).await;
     let list = request_json(
@@ -96,7 +107,10 @@ async fn readlists_listing_reflects_persisted_rows() {
     )
     .await;
     assert_eq!(list["totalElements"], Value::from(2));
-    assert_eq!(readlist_names(&list), vec!["Alpha Queue".to_string(), "Zulu Queue".to_string()]);
+    assert_eq!(
+        readlist_names(&list),
+        vec!["Alpha Queue".to_string(), "Zulu Queue".to_string()]
+    );
 
     fixture.cleanup();
 }
@@ -105,7 +119,12 @@ async fn readlists_listing_reflects_persisted_rows() {
 async fn readlist_detail_reads_persisted_row_instead_of_seeded_snapshot_record() {
     let fixture = ReadlistsCollectionsContractFixture::new("readlists-detail").await;
 
-    seed_library(&fixture.paths.main_db, "library-readlists", &fixture.library_root).await;
+    seed_library(
+        &fixture.paths.main_db,
+        "library-readlists",
+        &fixture.library_root,
+    )
+    .await;
     seed_series_with_book(
         &fixture.paths.main_db,
         &fixture.library_root,
@@ -168,7 +187,10 @@ async fn readlist_detail_reads_persisted_row_instead_of_seeded_snapshot_record()
     assert_eq!(detail["name"], "Alpha Queue");
     assert_eq!(detail["summary"], "persisted alpha summary");
     assert_eq!(detail["ordered"], Value::Bool(true));
-    assert_eq!(detail["bookIds"], json!(["book-readlists-a", "book-readlists-b"]));
+    assert_eq!(
+        detail["bookIds"],
+        json!(["book-readlists-a", "book-readlists-b"])
+    );
 
     fixture.cleanup();
 }
@@ -177,7 +199,12 @@ async fn readlist_detail_reads_persisted_row_instead_of_seeded_snapshot_record()
 async fn readlist_create_round_trips_through_follow_up_reads_instead_of_request_echo() {
     let fixture = ReadlistsCollectionsContractFixture::new("readlists-create").await;
 
-    seed_library(&fixture.paths.main_db, "library-readlists", &fixture.library_root).await;
+    seed_library(
+        &fixture.paths.main_db,
+        "library-readlists",
+        &fixture.library_root,
+    )
+    .await;
     seed_series_with_book(
         &fixture.paths.main_db,
         &fixture.library_root,
@@ -274,7 +301,12 @@ async fn readlist_create_round_trips_through_follow_up_reads_instead_of_request_
 async fn readlist_update_changes_follow_up_read_instead_of_accepting_only_seeded_ids() {
     let fixture = ReadlistsCollectionsContractFixture::new("readlists-update").await;
 
-    seed_library(&fixture.paths.main_db, "library-readlists", &fixture.library_root).await;
+    seed_library(
+        &fixture.paths.main_db,
+        "library-readlists",
+        &fixture.library_root,
+    )
+    .await;
     seed_series_with_book(
         &fixture.paths.main_db,
         &fixture.library_root,
@@ -358,7 +390,12 @@ async fn readlist_update_changes_follow_up_read_instead_of_accepting_only_seeded
 async fn readlist_delete_removes_persisted_row_and_follow_up_read_stops_resolving() {
     let fixture = ReadlistsCollectionsContractFixture::new("readlists-delete").await;
 
-    seed_library(&fixture.paths.main_db, "library-readlists", &fixture.library_root).await;
+    seed_library(
+        &fixture.paths.main_db,
+        "library-readlists",
+        &fixture.library_root,
+    )
+    .await;
     seed_series_with_book(
         &fixture.paths.main_db,
         &fixture.library_root,
@@ -387,7 +424,10 @@ async fn readlist_delete_removes_persisted_row_and_follow_up_read_stops_resolvin
     )
     .await;
 
-    assert_eq!(readlist_row_count(&fixture.paths.main_db, "readlist-delete-target").await, 1);
+    assert_eq!(
+        readlist_row_count(&fixture.paths.main_db, "readlist-delete-target").await,
+        1
+    );
 
     let token = admin_session_token(&fixture.app).await;
     let delete_response = request(
@@ -403,7 +443,10 @@ async fn readlist_delete_removes_persisted_row_and_follow_up_read_stops_resolvin
         StatusCode::NO_CONTENT,
         "DELETE /api/v1/readlists/{{id}} must remove persisted readlists rather than only acknowledging seeded ids",
     );
-    assert_eq!(readlist_row_count(&fixture.paths.main_db, "readlist-delete-target").await, 0);
+    assert_eq!(
+        readlist_row_count(&fixture.paths.main_db, "readlist-delete-target").await,
+        0
+    );
 
     let detail_after_delete = request(
         &fixture.app,
@@ -422,7 +465,12 @@ async fn readlist_delete_removes_persisted_row_and_follow_up_read_stops_resolvin
 async fn readlist_thumbnail_routes_use_persisted_state_when_present() {
     let fixture = ReadlistsCollectionsContractFixture::new("readlists-thumbnail").await;
 
-    seed_library(&fixture.paths.main_db, "library-readlists", &fixture.library_root).await;
+    seed_library(
+        &fixture.paths.main_db,
+        "library-readlists",
+        &fixture.library_root,
+    )
+    .await;
     seed_series_with_book(
         &fixture.paths.main_db,
         &fixture.library_root,
@@ -480,7 +528,10 @@ async fn readlist_thumbnail_routes_use_persisted_state_when_present() {
             .expect("thumbnail response should include content type"),
         "image/jpeg",
     );
-    assert_eq!(response_bytes(thumbnail_response).await.as_ref(), READLIST_THUMBNAIL_BYTES);
+    assert_eq!(
+        response_bytes(thumbnail_response).await.as_ref(),
+        READLIST_THUMBNAIL_BYTES
+    );
 
     let thumbnails_list = request_json(
         &fixture.app,
@@ -502,7 +553,10 @@ async fn readlist_thumbnail_routes_use_persisted_state_when_present() {
     )
     .await;
     assert_eq!(thumbnail_by_id.status(), StatusCode::OK);
-    assert_eq!(response_bytes(thumbnail_by_id).await.as_ref(), READLIST_THUMBNAIL_BYTES);
+    assert_eq!(
+        response_bytes(thumbnail_by_id).await.as_ref(),
+        READLIST_THUMBNAIL_BYTES
+    );
 
     fixture.cleanup();
 }
@@ -511,7 +565,12 @@ async fn readlist_thumbnail_routes_use_persisted_state_when_present() {
 async fn readlist_export_route_uses_persisted_state_when_present() {
     let fixture = ReadlistsCollectionsContractFixture::new("readlists-export").await;
 
-    seed_library(&fixture.paths.main_db, "library-readlists", &fixture.library_root).await;
+    seed_library(
+        &fixture.paths.main_db,
+        "library-readlists",
+        &fixture.library_root,
+    )
+    .await;
     seed_series_with_book(
         &fixture.paths.main_db,
         &fixture.library_root,
@@ -584,7 +643,12 @@ async fn readlist_export_route_uses_persisted_state_when_present() {
 async fn collections_listing_reflects_persisted_rows() {
     let fixture = ReadlistsCollectionsContractFixture::new("collections-list").await;
 
-    seed_library(&fixture.paths.main_db, "library-collections", &fixture.library_root).await;
+    seed_library(
+        &fixture.paths.main_db,
+        "library-collections",
+        &fixture.library_root,
+    )
+    .await;
     seed_series_with_book(
         &fixture.paths.main_db,
         &fixture.library_root,
@@ -638,8 +702,14 @@ async fn collections_listing_reflects_persisted_rows() {
     )
     .await;
 
-    assert_eq!(collection_row_count(&fixture.paths.main_db, "collection-alpha").await, 1);
-    assert_eq!(collection_row_count(&fixture.paths.main_db, "collection-zulu").await, 1);
+    assert_eq!(
+        collection_row_count(&fixture.paths.main_db, "collection-alpha").await,
+        1
+    );
+    assert_eq!(
+        collection_row_count(&fixture.paths.main_db, "collection-zulu").await,
+        1
+    );
 
     let token = admin_session_token(&fixture.app).await;
     let list_response = request(
@@ -658,7 +728,13 @@ async fn collections_listing_reflects_persisted_rows() {
     let list = response_json(list_response).await;
 
     assert_eq!(list["totalElements"], Value::from(2));
-    assert_eq!(collection_names(&list), vec!["Alpha Collection".to_string(), "Zulu Collection".to_string()]);
+    assert_eq!(
+        collection_names(&list),
+        vec![
+            "Alpha Collection".to_string(),
+            "Zulu Collection".to_string()
+        ]
+    );
 
     fixture.cleanup();
 }
@@ -667,7 +743,12 @@ async fn collections_listing_reflects_persisted_rows() {
 async fn collection_detail_reads_persisted_row_instead_of_missing_route() {
     let fixture = ReadlistsCollectionsContractFixture::new("collections-detail").await;
 
-    seed_library(&fixture.paths.main_db, "library-collections", &fixture.library_root).await;
+    seed_library(
+        &fixture.paths.main_db,
+        "library-collections",
+        &fixture.library_root,
+    )
+    .await;
     seed_series_with_book(
         &fixture.paths.main_db,
         &fixture.library_root,
@@ -728,7 +809,10 @@ async fn collection_detail_reads_persisted_row_instead_of_missing_route() {
     assert_eq!(detail["id"], "collection-alpha");
     assert_eq!(detail["name"], "Alpha Collection");
     assert_eq!(detail["ordered"], Value::Bool(true));
-    assert_eq!(detail["seriesIds"], json!(["series-collections-a", "series-collections-b"]));
+    assert_eq!(
+        detail["seriesIds"],
+        json!(["series-collections-a", "series-collections-b"])
+    );
 
     fixture.cleanup();
 }
@@ -737,7 +821,12 @@ async fn collection_detail_reads_persisted_row_instead_of_missing_route() {
 async fn collection_create_round_trips_through_follow_up_reads_instead_of_request_echo() {
     let fixture = ReadlistsCollectionsContractFixture::new("collections-create").await;
 
-    seed_library(&fixture.paths.main_db, "library-collections", &fixture.library_root).await;
+    seed_library(
+        &fixture.paths.main_db,
+        "library-collections",
+        &fixture.library_root,
+    )
+    .await;
     seed_series_with_book(
         &fixture.paths.main_db,
         &fixture.library_root,
@@ -830,7 +919,12 @@ async fn collection_create_round_trips_through_follow_up_reads_instead_of_reques
 async fn collection_update_changes_follow_up_read_instead_of_accepting_only_seeded_ids() {
     let fixture = ReadlistsCollectionsContractFixture::new("collections-update").await;
 
-    seed_library(&fixture.paths.main_db, "library-collections", &fixture.library_root).await;
+    seed_library(
+        &fixture.paths.main_db,
+        "library-collections",
+        &fixture.library_root,
+    )
+    .await;
     seed_series_with_book(
         &fixture.paths.main_db,
         &fixture.library_root,
@@ -901,7 +995,10 @@ async fn collection_update_changes_follow_up_read_instead_of_accepting_only_seed
     .await;
     assert_eq!(detail["name"], "After Collection Update");
     assert_eq!(detail["ordered"], Value::Bool(false));
-    assert_eq!(detail["seriesIds"], json!(["series-update-b", "series-update-a"]));
+    assert_eq!(
+        detail["seriesIds"],
+        json!(["series-update-b", "series-update-a"])
+    );
 
     fixture.cleanup();
 }
@@ -910,7 +1007,12 @@ async fn collection_update_changes_follow_up_read_instead_of_accepting_only_seed
 async fn collection_delete_removes_persisted_row_and_follow_up_read_stops_resolving() {
     let fixture = ReadlistsCollectionsContractFixture::new("collections-delete").await;
 
-    seed_library(&fixture.paths.main_db, "library-collections", &fixture.library_root).await;
+    seed_library(
+        &fixture.paths.main_db,
+        "library-collections",
+        &fixture.library_root,
+    )
+    .await;
     seed_series_with_book(
         &fixture.paths.main_db,
         &fixture.library_root,
@@ -938,7 +1040,10 @@ async fn collection_delete_removes_persisted_row_and_follow_up_read_stops_resolv
     )
     .await;
 
-    assert_eq!(collection_row_count(&fixture.paths.main_db, "collection-delete-target").await, 1);
+    assert_eq!(
+        collection_row_count(&fixture.paths.main_db, "collection-delete-target").await,
+        1
+    );
 
     let token = admin_session_token(&fixture.app).await;
     let delete_response = request(
@@ -954,7 +1059,10 @@ async fn collection_delete_removes_persisted_row_and_follow_up_read_stops_resolv
         StatusCode::NO_CONTENT,
         "DELETE /api/v1/collections/{{id}} must remove persisted collections rather than acknowledge only a fixed seeded id",
     );
-    assert_eq!(collection_row_count(&fixture.paths.main_db, "collection-delete-target").await, 0);
+    assert_eq!(
+        collection_row_count(&fixture.paths.main_db, "collection-delete-target").await,
+        0
+    );
 
     let detail_after_delete = request(
         &fixture.app,
@@ -988,8 +1096,9 @@ impl ReadlistsCollectionsContractFixture {
             .await
             .expect("tasks db flyway fixture should be created");
 
-        fs::create_dir_all(paths.config_dir.join("lucene"))
-            .expect("lucene directory should be created for readlists/collections contract fixture");
+        fs::create_dir_all(paths.config_dir.join("lucene")).expect(
+            "lucene directory should be created for readlists/collections contract fixture",
+        );
         fs::create_dir_all(paths.config_dir.join("fonts"))
             .expect("fonts directory should be created for readlists/collections contract fixture");
 
@@ -1060,10 +1169,7 @@ async fn admin_session_token(app: &axum::Router) -> String {
                 .uri("/api/v2/users/me")
                 .header(
                     header::AUTHORIZATION,
-                    format!(
-                        "Basic {}",
-                        compat_auth_env::COMPAT_ADMIN_BASIC_AUTH_BASE64
-                    ),
+                    format!("Basic {}", compat_auth_env::COMPAT_ADMIN_BASIC_AUTH_BASE64),
                 )
                 .header("X-Auth-Token", "")
                 .body(Body::empty())
@@ -1161,11 +1267,7 @@ async fn seed_library(main_db: &Path, library_id: &str, root: &Path) {
     pool.close().await;
 }
 
-async fn seed_series_with_book(
-    main_db: &Path,
-    library_root: &Path,
-    row: SeedSeriesWithBook<'_>,
-) {
+async fn seed_series_with_book(main_db: &Path, library_root: &Path, row: SeedSeriesWithBook<'_>) {
     fs::write(library_root.join(row.file_name), b"persisted-media-payload")
         .expect("persisted media fixture file should be written");
 
@@ -1238,16 +1340,14 @@ async fn seed_series_with_book(
     .await
     .expect("book metadata fixture row should insert");
 
-    sqlx::query(
-        "INSERT INTO MEDIA (STATUS, MEDIA_TYPE, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)",
-    )
-    .bind("READY")
-    .bind("application/vnd.comicbook+zip")
-    .bind(row.book_id)
-    .bind(1_i64)
-    .execute(&pool)
-    .await
-    .expect("media fixture row should insert");
+    sqlx::query("INSERT INTO MEDIA (STATUS, MEDIA_TYPE, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("READY")
+        .bind("application/vnd.comicbook+zip")
+        .bind(row.book_id)
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("media fixture row should insert");
 
     pool.close().await;
 }
@@ -1272,15 +1372,13 @@ async fn seed_readlist(main_db: &Path, row: SeedReadlistRow<'_>) {
     .expect("readlist fixture row should insert");
 
     for (book_id, number) in row.books {
-        sqlx::query(
-            "INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)",
-        )
-        .bind(row.id)
-        .bind(book_id)
-        .bind(number)
-        .execute(&pool)
-        .await
-        .expect("readlist membership fixture row should insert");
+        sqlx::query("INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)")
+            .bind(row.id)
+            .bind(book_id)
+            .bind(number)
+            .execute(&pool)
+            .await
+            .expect("readlist membership fixture row should insert");
     }
 
     pool.close().await;

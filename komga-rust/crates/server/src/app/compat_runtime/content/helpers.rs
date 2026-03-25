@@ -21,7 +21,6 @@ const NATIVE_OWNERSHIP_MARKER: &str = "native-rust-owned";
 
 #[derive(Clone, Copy)]
 pub(in crate::app::compat_runtime) enum DiscoveryShape {
-    Libraries,
     SeriesList,
     BooksList,
     BooksLatest,
@@ -391,8 +390,8 @@ pub(super) fn set_read_progress(
     state: &ReadProgressState,
     token: String,
     book_id: String,
-    page: u64,
-    completed: bool,
+    _page: u64,
+    _completed: bool,
 ) {
     let mut all_progress = state
         .progress_by_token
@@ -400,17 +399,5 @@ pub(super) fn set_read_progress(
         .expect("read-progress state lock should not be poisoned");
 
     let user_progress = all_progress.entry(token).or_default();
-    user_progress.insert(book_id, ReadProgress { page, completed });
-}
-
-pub(super) fn overlay_book_read_progress(books: &mut Value, read_progress: Option<ReadProgress>) {
-    if let Some(slot) = books.pointer_mut("/content/0/readProgress") {
-        *slot = match read_progress {
-            Some(read_progress) => json!({
-                "page": read_progress.page,
-                "completed": read_progress.completed,
-            }),
-            None => Value::Null,
-        };
-    }
+    user_progress.insert(book_id, ReadProgress);
 }

@@ -1,4 +1,6 @@
-use komga_application::discovery::{NativeSeriesListQuery, SeriesCollectionsQuery, SeriesDetailQuery};
+use komga_application::discovery::{
+    NativeSeriesListQuery, SeriesCollectionsQuery, SeriesDetailQuery,
+};
 use komga_domain::discovery::{
     BookResourceReadModel, CollectionReadModel, DiscoveryError, DiscoveryQueryContext,
     LibraryReadModel, PageEnvelope, SeriesDetailReadModel, SeriesReadModel,
@@ -211,7 +213,8 @@ pub(super) async fn list_series_sqlx(
         ));
     }
 
-    let mut count_builder = QueryBuilder::<Sqlite>::new("SELECT COUNT(DISTINCT s.id) FROM series s");
+    let mut count_builder =
+        QueryBuilder::<Sqlite>::new("SELECT COUNT(DISTINCT s.id) FROM series s");
     let mut count_state = SqlxWhereState::default();
     apply_series_list_filters_sqlx(
         &mut count_builder,
@@ -242,9 +245,8 @@ pub(super) async fn list_series_sqlx(
         query,
         allowed.as_ref(),
     );
-    select_builder.push(
-        " GROUP BY s.id, s.library_id, s.title ORDER BY s.title COLLATE NOCASE ASC LIMIT ",
-    );
+    select_builder
+        .push(" GROUP BY s.id, s.library_id, s.title ORDER BY s.title COLLATE NOCASE ASC LIMIT ");
     select_builder.push_bind(safe_size as i64);
     select_builder.push(" OFFSET ");
     select_builder.push_bind(offset as i64);
@@ -341,7 +343,11 @@ pub(in crate::read_models) async fn list_series_collections_sqlx(
         allowed.as_ref(),
         context,
     );
-    append_clause_sqlx("cs_target.series_id = ", &mut candidate_builder, &mut candidate_state);
+    append_clause_sqlx(
+        "cs_target.series_id = ",
+        &mut candidate_builder,
+        &mut candidate_state,
+    );
     candidate_builder.push_bind(query.series_id.clone());
     candidate_state
         .params
@@ -368,9 +374,15 @@ pub(in crate::read_models) async fn list_series_collections_sqlx(
             allowed.as_ref(),
             context,
         );
-        append_clause_sqlx("cs.collection_id = ", &mut visible_builder, &mut visible_state);
+        append_clause_sqlx(
+            "cs.collection_id = ",
+            &mut visible_builder,
+            &mut visible_state,
+        );
         visible_builder.push_bind(candidate.id.clone());
-        visible_state.params.push(SqlValue::Text(candidate.id.clone()));
+        visible_state
+            .params
+            .push(SqlValue::Text(candidate.id.clone()));
         visible_builder.push(" ORDER BY cs.position ASC");
 
         let visible_rows = visible_builder
@@ -387,12 +399,13 @@ pub(in crate::read_models) async fn list_series_collections_sqlx(
             continue;
         }
 
-        let total_count =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM collection_series WHERE collection_id = ?")
-                .bind(candidate.id.clone())
-                .fetch_one(&pool)
-                .await
-                .map_err(map_sqlx_error)?;
+        let total_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM collection_series WHERE collection_id = ?",
+        )
+        .bind(candidate.id.clone())
+        .fetch_one(&pool)
+        .await
+        .map_err(map_sqlx_error)?;
 
         collections.push(CollectionReadModel {
             id: candidate.id,

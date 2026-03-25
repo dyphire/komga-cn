@@ -1,9 +1,12 @@
 use komga_application::discovery::NativeReadListsQuery;
-use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext, PageEnvelope, ReadListReadModel};
+use komga_domain::discovery::{
+    DiscoveryError, DiscoveryQueryContext, PageEnvelope, ReadListReadModel,
+};
 use sqlx::SqlitePool;
 
 use super::{
-    browse_page_size, list_readlist_candidate_rows_sqlx, map_sqlx_error, visible_readlist_book_ids_sqlx,
+    browse_page_size, list_readlist_candidate_rows_sqlx, map_sqlx_error,
+    visible_readlist_book_ids_sqlx,
 };
 use crate::read_models::filters::effective_library_ids;
 
@@ -14,7 +17,12 @@ pub(super) async fn list_readlists_sqlx(
 ) -> Result<PageEnvelope<ReadListReadModel>, DiscoveryError> {
     let candidate_library_ids = effective_library_ids(context, query.library_ids.as_deref());
     if candidate_library_ids.as_ref().is_some_and(Vec::is_empty) {
-        return Ok(PageEnvelope::from_slice(vec![], query.page, browse_page_size(query.size), 0));
+        return Ok(PageEnvelope::from_slice(
+            vec![],
+            query.page,
+            browse_page_size(query.size),
+            0,
+        ));
     }
 
     let candidate_rows = list_readlist_candidate_rows_sqlx(
@@ -52,12 +60,13 @@ pub(super) async fn list_readlists_sqlx(
             continue;
         }
 
-        let total_count =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM readlist_books WHERE readlist_id = ?")
-                .bind(candidate.id.clone())
-                .fetch_one(&pool)
-                .await
-                .map_err(map_sqlx_error)?;
+        let total_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM readlist_books WHERE readlist_id = ?",
+        )
+        .bind(candidate.id.clone())
+        .fetch_one(&pool)
+        .await
+        .map_err(map_sqlx_error)?;
 
         readlists.push(ReadListReadModel {
             id: candidate.id,

@@ -151,7 +151,10 @@ mod tests {
     fn normalize_readlists_search_returns_none_for_blank_effective_values() {
         assert_eq!(normalize_readlists_search(None), None);
         assert_eq!(normalize_readlists_search(Some(String::new())), None);
-        assert_eq!(normalize_readlists_search(Some("   \t\n".to_string())), None);
+        assert_eq!(
+            normalize_readlists_search(Some("   \t\n".to_string())),
+            None
+        );
     }
 
     #[test]

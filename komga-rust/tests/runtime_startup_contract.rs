@@ -210,3 +210,58 @@ server.port=28123\n",
         resolved_config_dir.join("logs").join("komga.log"),
     );
 }
+
+#[test]
+fn startup_webui_layout_resolves_legacy_public_directory_with_index() {
+    let config_dir = unique_temp_dir("komga-runtime-webui-layout");
+    fs::create_dir_all(&config_dir).expect("test config directory should be created");
+    let public_dir = config_dir.join("public");
+    fs::create_dir_all(&public_dir).expect("public directory should be created");
+    fs::write(public_dir.join("index.html"), "<html>legacy-index</html>")
+        .expect("legacy index.html should be written");
+
+    let mut env = BTreeMap::new();
+    env.insert(
+        "KOMGA_CONFIG_DIR".to_string(),
+        config_dir.to_string_lossy().to_string(),
+    );
+
+    let config = komga_rust::config::RuntimeConfig::resolve_with_env(
+        &komga_rust::config::RuntimeCli::default(),
+        &env,
+    )
+    .expect("runtime config should resolve");
+
+    let webui_root = config
+        .resolve_webui_assets_layout()
+        .expect("startup should resolve legacy public layout when index exists");
+    assert_eq!(webui_root, public_dir);
+}
+
+#[test]
+fn startup_webui_layout_fails_closed_when_legacy_public_layout_missing() {
+    let config_dir = unique_temp_dir("komga-runtime-webui-layout-missing");
+    fs::create_dir_all(&config_dir).expect("test config directory should be created");
+
+    let mut env = BTreeMap::new();
+    env.insert(
+        "KOMGA_CONFIG_DIR".to_string(),
+        config_dir.to_string_lossy().to_string(),
+    );
+
+    let config = komga_rust::config::RuntimeConfig::resolve_with_env(
+        &komga_rust::config::RuntimeCli::default(),
+        &env,
+    )
+    .expect("runtime config should resolve");
+
+    let error = config
+        .resolve_webui_assets_layout()
+        .expect_err("startup must fail closed when no legacy public/index.html layout exists");
+    assert!(
+        error
+            .to_string()
+            .contains("missing WebUI runtime assets layout"),
+        "startup error should deterministically explain missing WebUI layout: {error}",
+    );
+}

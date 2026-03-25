@@ -17,15 +17,16 @@ const DB_ADMIN_USER_ID: &str = "db-admin-1";
 const DB_ADMIN_EMAIL: &str = "db-admin@example.org";
 const DB_ADMIN_PASSWORD: &str = "db-admin-password";
 const DB_ADMIN_UPDATED_PASSWORD: &str = "db-admin-password-updated";
-const DB_ADMIN_PASSWORD_BCRYPT: &str = "$2a$10$x7NyXzncFgR/Nd/VR8eYde9njk/JaWz1X05C1wkk1G89dZnmVpw3e";
+const DB_ADMIN_PASSWORD_BCRYPT: &str =
+    "$2a$10$x7NyXzncFgR/Nd/VR8eYde9njk/JaWz1X05C1wkk1G89dZnmVpw3e";
 const DB_USER_ID: &str = "db-user-1";
 const DB_USER_EMAIL: &str = "db-user@example.org";
 const DB_USER_UPDATED_PASSWORD: &str = "db-user-password-updated";
-const DB_USER_PASSWORD_BCRYPT: &str = "$2a$10$6uBfM3Iovphyo.x1KDYFa.kdgG/Wth9mRYP9wQDTwYF0ShEXc6/4m";
+const DB_USER_PASSWORD_BCRYPT: &str =
+    "$2a$10$6uBfM3Iovphyo.x1KDYFa.kdgG/Wth9mRYP9wQDTwYF0ShEXc6/4m";
 const DB_API_KEY_ID: &str = "db-api-key-1";
 const DB_API_KEY: &str = "db-compat-api-key";
-const DB_API_KEY_SHA512: &str =
-    "b5938e5cff74b2ca05ea0a075501ae9f39f9cc7218691673a00cf9461d15cb85ec4abffd7b147d30543cde42ec894503594eae8140f3f500ffd1f835a649bda1";
+const DB_API_KEY_SHA512: &str = "b5938e5cff74b2ca05ea0a075501ae9f39f9cc7218691673a00cf9461d15cb85ec4abffd7b147d30543cde42ec894503594eae8140f3f500ffd1f835a649bda1";
 const DB_AUTH_ACTIVITY_API_KEY_IP: &str = "203.0.113.10";
 const DB_AUTH_ACTIVITY_API_KEY_USER_AGENT: &str = "Komga contract API key client";
 const DB_AUTH_ACTIVITY_API_KEY_DATE_TIME: &str = "2099-01-02 03:04:05";
@@ -51,6 +52,23 @@ fn extract_cookie_value(set_cookie: &str, cookie_name: &str) -> String {
         .find_map(|part| part.strip_prefix(&format!("{cookie_name}=")))
         .unwrap_or_else(|| panic!("response should include {cookie_name} cookie"))
         .to_string()
+}
+
+fn extract_cookie_value_from_headers(
+    headers: &axum::http::HeaderMap,
+    cookie_name: &str,
+) -> Option<String> {
+    headers
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .find_map(|set_cookie| {
+            set_cookie
+                .split(';')
+                .map(str::trim)
+                .find_map(|part| part.strip_prefix(&format!("{cookie_name}=")))
+                .map(str::to_string)
+        })
 }
 
 async fn response_json(response: axum::response::Response) -> Value {
@@ -149,8 +167,9 @@ async fn runtime_with_db_backed_auth_fixture() -> axum::Router {
     fs::create_dir_all(paths.config_dir.join("lucene")).unwrap();
     fs::create_dir_all(paths.config_dir.join("fonts")).unwrap();
 
-    let mut config =
-        komga_rust::config::RuntimeConfig::for_compat_profile(komga_rust::config::CompatProfile::SnapshotAligned);
+    let mut config = komga_rust::config::RuntimeConfig::for_compat_profile(
+        komga_rust::config::CompatProfile::SnapshotAligned,
+    );
     config.config_dir = Some(paths.config_dir.clone());
     config.log_file = paths.config_dir.join("komga.log");
     config.database_file = paths.main_db.clone();
@@ -162,8 +181,10 @@ async fn runtime_with_db_backed_auth_fixture() -> axum::Router {
 }
 
 async fn runtime_with_db_backed_auth_fixture_without_admin_activity() -> axum::Router {
-    let paths = persistence_contract_fixture::new_legacy_db_paths("auth-session-db-backed-no-admin-activity")
-        .expect("auth session contract db paths should be created");
+    let paths = persistence_contract_fixture::new_legacy_db_paths(
+        "auth-session-db-backed-no-admin-activity",
+    )
+    .expect("auth session contract db paths should be created");
     persistence_contract_fixture::seed_main_db_from_flyway(&paths.main_db)
         .await
         .expect("main db flyway fixture should be created");
@@ -187,14 +208,52 @@ async fn runtime_with_db_backed_auth_fixture_without_admin_activity() -> axum::R
     fs::create_dir_all(paths.config_dir.join("lucene")).unwrap();
     fs::create_dir_all(paths.config_dir.join("fonts")).unwrap();
 
-    let mut config =
-        komga_rust::config::RuntimeConfig::for_compat_profile(komga_rust::config::CompatProfile::SnapshotAligned);
+    let mut config = komga_rust::config::RuntimeConfig::for_compat_profile(
+        komga_rust::config::CompatProfile::SnapshotAligned,
+    );
     config.config_dir = Some(paths.config_dir.clone());
     config.log_file = paths.config_dir.join("komga.log");
     config.database_file = paths.main_db.clone();
     config.tasks_db_file = paths.tasks_db.clone();
     config.lucene_data_directory = paths.config_dir.join("lucene");
     config.fonts_data_directory = paths.config_dir.join("fonts");
+
+    komga_rust::app::build_router_with_config(&config)
+}
+
+async fn runtime_with_db_backed_auth_fixture_and_oauth() -> axum::Router {
+    let paths = persistence_contract_fixture::new_legacy_db_paths("auth-session-db-backed-oauth")
+        .expect("auth session oauth db paths should be created");
+    persistence_contract_fixture::seed_main_db_from_flyway(&paths.main_db)
+        .await
+        .expect("main db flyway fixture should be created");
+    persistence_contract_fixture::seed_tasks_db_from_flyway(&paths.tasks_db)
+        .await
+        .expect("tasks db flyway fixture should be created");
+
+    seed_db_backed_auth_rows(&paths.main_db).await;
+    assert_db_backed_auth_rows(&paths.main_db).await;
+
+    fs::create_dir_all(paths.config_dir.join("lucene")).unwrap();
+    fs::create_dir_all(paths.config_dir.join("fonts")).unwrap();
+
+    let mut config = komga_rust::config::RuntimeConfig::for_compat_profile(
+        komga_rust::config::CompatProfile::SnapshotAligned,
+    );
+    config.config_dir = Some(paths.config_dir.clone());
+    config.log_file = paths.config_dir.join("komga.log");
+    config.database_file = paths.main_db.clone();
+    config.tasks_db_file = paths.tasks_db.clone();
+    config.lucene_data_directory = paths.config_dir.join("lucene");
+    config.fonts_data_directory = paths.config_dir.join("fonts");
+    config.oauth2_clients = vec![komga_rust::config::OAuth2ClientConfig {
+        registration_id: "oidc".to_string(),
+        client_name: "Example OIDC".to_string(),
+        client_id: "compat-client".to_string(),
+        client_secret: "compat-secret".to_string(),
+        authorization_uri: "https://id.example.org/oauth2/authorize".to_string(),
+        token_uri: "https://id.example.org/oauth2/token".to_string(),
+    }];
 
     komga_rust::app::build_router_with_config(&config)
 }
@@ -245,7 +304,18 @@ async fn seed_db_backed_auth_rows(main_db: &Path) {
         .await
         .expect("auth fixture API key should insert with Kotlin-compatible token encoding");
 
-    for (user_id, email, ip, user_agent, success, error, date_time, source, api_key_id, api_key_comment) in [
+    for (
+        user_id,
+        email,
+        ip,
+        user_agent,
+        success,
+        error,
+        date_time,
+        source,
+        api_key_id,
+        api_key_comment,
+    ) in [
         (
             Some(DB_ADMIN_USER_ID),
             Some(DB_ADMIN_EMAIL),
@@ -322,13 +392,12 @@ async fn assert_db_backed_auth_rows(main_db: &Path) {
         .expect("auth fixture admin user should exist");
     assert_eq!(admin_email, DB_ADMIN_EMAIL);
 
-    let admin_role_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM USER_ROLE WHERE USER_ID = ? AND ROLE = 'ADMIN'",
-    )
-    .bind(DB_ADMIN_USER_ID)
-    .fetch_one(&pool)
-    .await
-    .expect("auth fixture admin role should be queryable");
+    let admin_role_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM USER_ROLE WHERE USER_ID = ? AND ROLE = 'ADMIN'")
+            .bind(DB_ADMIN_USER_ID)
+            .fetch_one(&pool)
+            .await
+            .expect("auth fixture admin role should be queryable");
     assert_eq!(
         admin_role_count, 1,
         "auth fixture should expose ADMIN via USER_ROLE rather than legacy USER columns",
@@ -373,8 +442,9 @@ async fn assert_db_backed_auth_rows(main_db: &Path) {
 fn auth_session_contract_target_is_registered() {
     assert_required_target_declared("auth/session", "auth_session_contract");
 
-    let cleanup_paths = persistence_contract_fixture::new_legacy_db_paths("auth-session-cleanup-probe")
-        .expect("auth session cleanup probe paths should be created");
+    let cleanup_paths =
+        persistence_contract_fixture::new_legacy_db_paths("auth-session-cleanup-probe")
+            .expect("auth session cleanup probe paths should be created");
     persistence_contract_fixture::cleanup(cleanup_paths);
 }
 
@@ -382,7 +452,8 @@ fn auth_session_contract_target_is_registered() {
 async fn login_cookie_and_x_auth_token_reuse_match_kotlin_session_oracle() {
     let app = runtime_with_db_backed_auth_fixture().await;
 
-    let (token, login_json) = login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")).await;
+    let (token, login_json) =
+        login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")).await;
     assert_eq!(login_json["email"], DB_ADMIN_EMAIL);
 
     let token_reuse = app
@@ -476,7 +547,8 @@ async fn api_key_login_bootstraps_kotlin_session_cookie_for_follow_up_requests()
 async fn logout_clears_kotlin_session_cookie_and_invalidates_token_and_cookie_reuse() {
     let app = runtime_with_db_backed_auth_fixture().await;
 
-    let (token, _) = login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")).await;
+    let (token, _) =
+        login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")).await;
     let session_cookie = exchange_token_for_cookie(&app, &token).await;
 
     let logout = app
@@ -529,6 +601,228 @@ async fn logout_clears_kotlin_session_cookie_and_invalidates_token_and_cookie_re
 }
 
 #[tokio::test]
+async fn login_logout_cookie_lifecycle_matches_contract() {
+    let app = runtime_with_db_backed_auth_fixture().await;
+
+    let (session_token, me_json) =
+        login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")).await;
+    assert_eq!(me_json["email"], DB_ADMIN_EMAIL);
+
+    let session_cookie = exchange_token_for_cookie(&app, &session_token).await;
+
+    let authenticated_with_cookie = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/libraries")
+                .header(header::COOKIE, format!("KOMGA-SESSION={session_cookie}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(authenticated_with_cookie.status(), StatusCode::OK);
+
+    let logout = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/logout")
+                .header("X-Auth-Token", &session_token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(logout.status(), StatusCode::NO_CONTENT);
+    let cleared_cookie = logout
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("logout should return a clearing KOMGA-SESSION cookie")
+        .to_str()
+        .unwrap();
+    assert!(cleared_cookie.contains("KOMGA-SESSION=;"));
+    assert!(cleared_cookie.contains("Max-Age=0"));
+
+    let cookie_after_logout = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/libraries")
+                .header(header::COOKIE, format!("KOMGA-SESSION={session_cookie}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(cookie_after_logout.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn remember_me_survives_expected_restart_flow() {
+    let paths =
+        persistence_contract_fixture::new_legacy_db_paths("auth-session-db-backed-remember-me")
+            .expect("auth session remember-me db paths should be created");
+    persistence_contract_fixture::seed_main_db_from_flyway(&paths.main_db)
+        .await
+        .expect("main db flyway fixture should be created");
+    persistence_contract_fixture::seed_tasks_db_from_flyway(&paths.tasks_db)
+        .await
+        .expect("tasks db flyway fixture should be created");
+
+    seed_db_backed_auth_rows(&paths.main_db).await;
+    assert_db_backed_auth_rows(&paths.main_db).await;
+
+    fs::create_dir_all(paths.config_dir.join("lucene")).unwrap();
+    fs::create_dir_all(paths.config_dir.join("fonts")).unwrap();
+
+    let mut config = komga_rust::config::RuntimeConfig::for_compat_profile(
+        komga_rust::config::CompatProfile::SnapshotAligned,
+    );
+    config.config_dir = Some(paths.config_dir.clone());
+    config.log_file = paths.config_dir.join("komga.log");
+    config.database_file = paths.main_db.clone();
+    config.tasks_db_file = paths.tasks_db.clone();
+    config.lucene_data_directory = paths.config_dir.join("lucene");
+    config.fonts_data_directory = paths.config_dir.join("fonts");
+
+    let app = komga_rust::app::build_router_with_config(&config);
+
+    let remember_login = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v2/users/me?remember-me=true")
+                .header(
+                    header::AUTHORIZATION,
+                    basic_auth(&format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")),
+                )
+                .header("X-Auth-Token", "")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(remember_login.status(), StatusCode::OK);
+    let remember_cookie =
+        extract_cookie_value_from_headers(remember_login.headers(), "komga-remember-me")
+            .expect("remember-me login should issue a remember-me cookie");
+    assert!(remember_cookie.starts_with("komga-remember-me-"));
+
+    let remember_me_store = paths.config_dir.join("remember-me-tokens.json");
+    let remember_me_store_contents = fs::read_to_string(&remember_me_store)
+        .expect("remember-me tokens must be persisted to disk");
+    assert!(
+        remember_me_store_contents.contains(&remember_cookie),
+        "remember-me token persistence must survive process/router restart semantics and be scoped to fixture config dir",
+    );
+
+    let global_store = std::env::temp_dir().join("remember-me-tokens.json");
+    if global_store != remember_me_store
+        && let Ok(global_store_contents) = fs::read_to_string(&global_store)
+    {
+        assert!(
+            !global_store_contents.contains(&remember_cookie),
+            "remember-me token must not leak into a global process-wide store",
+        );
+    }
+
+    let app_after_restart = komga_rust::app::build_router_with_config(&config);
+    let remember_reuse = app_after_restart
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v2/users/me")
+                .header(
+                    header::COOKIE,
+                    format!("komga-remember-me={remember_cookie}"),
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        remember_reuse.status(),
+        StatusCode::OK,
+        "remember-me cookie should authenticate after restart-style router rebuild",
+    );
+    let remember_reuse_json = response_json(remember_reuse).await;
+    assert_eq!(remember_reuse_json["email"], DB_ADMIN_EMAIL);
+}
+
+#[tokio::test]
+async fn oauth_entrypoints_match_current_contract_when_enabled() {
+    let app = runtime_with_db_backed_auth_fixture_and_oauth().await;
+
+    let providers = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/oauth2/providers")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(providers.status(), StatusCode::OK);
+    let providers_json = response_json(providers).await;
+    let providers_array = providers_json
+        .as_array()
+        .expect("oauth2 providers should serialize as an array");
+    assert_eq!(providers_array.len(), 1);
+    assert_eq!(providers_array[0]["registrationId"], "oidc");
+
+    let authorization_redirect = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/oauth2/authorization/oidc")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(authorization_redirect.status(), StatusCode::FOUND);
+    let location = authorization_redirect
+        .headers()
+        .get(header::LOCATION)
+        .expect("oauth2 authorization should provide redirect location")
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(location.contains("https://id.example.org/oauth2/authorize"));
+    assert!(location.contains("client_id=compat-client"));
+    assert!(
+        location.contains("redirect_uri=http%3A%2F%2F127.0.0.1%2Flogin%2Foauth2%2Fcode%2Foidc")
+    );
+
+    let login_code_callback = app
+        .oneshot(
+            Request::builder()
+                .uri("/login/oauth2/code/oidc?code=sample-code&state=sample-state")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        login_code_callback.status(),
+        StatusCode::FOUND,
+        "oauth callback entrypoint should exist and fail closed with a login redirect",
+    );
+    let callback_location = login_code_callback
+        .headers()
+        .get(header::LOCATION)
+        .expect("oauth callback should provide redirect location")
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(callback_location.starts_with("/login?server_redirect=Y&error="));
+}
+
+#[tokio::test]
 async fn db_backed_runtime_rejects_placeholder_credentials_on_protected_routes() {
     compat_auth_env::ensure_compat_auth_env();
     let app = runtime_with_db_backed_auth_fixture().await;
@@ -571,7 +865,8 @@ async fn db_backed_runtime_rejects_placeholder_credentials_on_protected_routes()
 #[tokio::test]
 async fn user_v2_management_entrypoints_remain_available_for_unchanged_clients() {
     let app = runtime_with_db_backed_auth_fixture().await;
-    let (admin_token, _) = login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")).await;
+    let (admin_token, _) =
+        login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")).await;
 
     let list_users = app
         .clone()
@@ -607,7 +902,8 @@ async fn user_v2_management_entrypoints_remain_available_for_unchanged_clients()
 #[tokio::test]
 async fn user_v2_management_allows_current_users_to_change_passwords_via_me_password() {
     let app = runtime_with_db_backed_auth_fixture().await;
-    let (admin_token, _) = login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")).await;
+    let (admin_token, _) =
+        login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")).await;
 
     let update_password = app
         .clone()
@@ -617,7 +913,9 @@ async fn user_v2_management_allows_current_users_to_change_passwords_via_me_pass
                 .uri("/api/v2/users/me/password")
                 .header("X-Auth-Token", &admin_token)
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(format!(r#"{{"password":"{DB_ADMIN_UPDATED_PASSWORD}"}}"#)))
+                .body(Body::from(format!(
+                    r#"{{"password":"{DB_ADMIN_UPDATED_PASSWORD}"}}"#
+                )))
                 .unwrap(),
         )
         .await
@@ -634,15 +932,19 @@ async fn user_v2_management_allows_current_users_to_change_passwords_via_me_pass
         "old basic-auth credentials should stop working after current-user password changes",
     );
 
-    let (_, login_json) =
-        login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_UPDATED_PASSWORD}")).await;
+    let (_, login_json) = login_header_exchange(
+        &app,
+        &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_UPDATED_PASSWORD}"),
+    )
+    .await;
     assert_eq!(login_json["email"], DB_ADMIN_EMAIL);
 }
 
 #[tokio::test]
 async fn user_v2_management_allows_admins_to_change_other_users_passwords_via_user_id_password() {
     let app = runtime_with_db_backed_auth_fixture().await;
-    let (admin_token, _) = login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")).await;
+    let (admin_token, _) =
+        login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")).await;
 
     let update_password = app
         .clone()
@@ -652,7 +954,9 @@ async fn user_v2_management_allows_admins_to_change_other_users_passwords_via_us
                 .uri(format!("/api/v2/users/{DB_USER_ID}/password"))
                 .header("X-Auth-Token", &admin_token)
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(format!(r#"{{"password":"{DB_USER_UPDATED_PASSWORD}"}}"#)))
+                .body(Body::from(format!(
+                    r#"{{"password":"{DB_USER_UPDATED_PASSWORD}"}}"#
+                )))
                 .unwrap(),
         )
         .await
@@ -671,7 +975,8 @@ async fn user_v2_management_allows_admins_to_change_other_users_passwords_via_us
 #[tokio::test]
 async fn user_v2_management_supports_api_key_create_list_delete_round_trips_for_current_users() {
     let app = runtime_with_db_backed_auth_fixture().await;
-    let (admin_token, _) = login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")).await;
+    let (admin_token, _) =
+        login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")).await;
 
     let create_api_key = app
         .clone()
@@ -798,7 +1103,8 @@ async fn user_v2_management_supports_api_key_create_list_delete_round_trips_for_
 #[tokio::test]
 async fn user_v2_management_lists_current_user_authentication_activity_for_unchanged_clients() {
     let app = runtime_with_db_backed_auth_fixture().await;
-    let (admin_token, _) = login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")).await;
+    let (admin_token, _) =
+        login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")).await;
 
     let activity = app
         .clone()
@@ -827,13 +1133,18 @@ async fn user_v2_management_lists_current_user_authentication_activity_for_uncha
     assert_eq!(activity_rows[0]["apiKeyId"], DB_API_KEY_ID);
     assert_eq!(activity_rows[0]["apiKeyComment"], DB_API_KEY);
     assert_eq!(activity_rows[0]["ip"], DB_AUTH_ACTIVITY_API_KEY_IP);
-    assert_eq!(activity_rows[0]["userAgent"], DB_AUTH_ACTIVITY_API_KEY_USER_AGENT);
+    assert_eq!(
+        activity_rows[0]["userAgent"],
+        DB_AUTH_ACTIVITY_API_KEY_USER_AGENT
+    );
     assert_eq!(activity_rows[0]["success"], true);
     assert_eq!(activity_rows[0]["error"], Value::Null);
     assert_eq!(activity_rows[0]["source"], "API_KEY");
     assert_eq!(activity_rows[0]["dateTime"], "2099-01-02T03:04:05Z");
     assert!(
-        activity_rows.iter().all(|row| row["email"] != DB_USER_EMAIL),
+        activity_rows
+            .iter()
+            .all(|row| row["email"] != DB_USER_EMAIL),
         "current-user authentication activity should not leak other users' rows",
     );
 }
@@ -841,7 +1152,8 @@ async fn user_v2_management_lists_current_user_authentication_activity_for_uncha
 #[tokio::test]
 async fn user_v2_management_lists_admin_authentication_activity_for_unchanged_clients() {
     let app = runtime_with_db_backed_auth_fixture().await;
-    let (admin_token, _) = login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")).await;
+    let (admin_token, _) =
+        login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")).await;
 
     let activity = app
         .clone()
@@ -867,11 +1179,15 @@ async fn user_v2_management_lists_admin_authentication_activity_for_unchanged_cl
     assert_eq!(activity_json["pageable"]["unpaged"], true);
     assert_eq!(activity_rows[0]["dateTime"], "2099-01-02T03:04:05Z");
     assert!(
-        activity_rows.iter().any(|row| row["email"] == DB_ADMIN_EMAIL),
+        activity_rows
+            .iter()
+            .any(|row| row["email"] == DB_ADMIN_EMAIL),
         "admin authentication activity should include admin rows",
     );
     assert!(
-        activity_rows.iter().any(|row| row["email"] == DB_USER_EMAIL),
+        activity_rows
+            .iter()
+            .any(|row| row["email"] == DB_USER_EMAIL),
         "admin authentication activity should include secondary-user rows",
     );
 }
@@ -879,7 +1195,8 @@ async fn user_v2_management_lists_admin_authentication_activity_for_unchanged_cl
 #[tokio::test]
 async fn user_v2_management_returns_latest_authentication_activity_by_user_and_api_key() {
     let app = runtime_with_db_backed_auth_fixture().await;
-    let (admin_token, _) = login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")).await;
+    let (admin_token, _) =
+        login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")).await;
 
     let latest_activity = app
         .oneshot(
@@ -905,7 +1222,10 @@ async fn user_v2_management_returns_latest_authentication_activity_by_user_and_a
     assert_eq!(latest_activity_json["apiKeyId"], DB_API_KEY_ID);
     assert_eq!(latest_activity_json["apiKeyComment"], DB_API_KEY);
     assert_eq!(latest_activity_json["ip"], DB_AUTH_ACTIVITY_API_KEY_IP);
-    assert_eq!(latest_activity_json["userAgent"], DB_AUTH_ACTIVITY_API_KEY_USER_AGENT);
+    assert_eq!(
+        latest_activity_json["userAgent"],
+        DB_AUTH_ACTIVITY_API_KEY_USER_AGENT
+    );
     assert_eq!(latest_activity_json["success"], true);
     assert_eq!(latest_activity_json["error"], Value::Null);
     assert_eq!(latest_activity_json["source"], "API_KEY");
@@ -915,7 +1235,8 @@ async fn user_v2_management_returns_latest_authentication_activity_by_user_and_a
 #[tokio::test]
 async fn user_v2_management_returns_latest_authentication_activity_without_api_key_filter() {
     let app = runtime_with_db_backed_auth_fixture().await;
-    let (admin_token, _) = login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")).await;
+    let (admin_token, _) =
+        login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")).await;
 
     let latest_activity = app
         .oneshot(
@@ -939,7 +1260,10 @@ async fn user_v2_management_returns_latest_authentication_activity_without_api_k
     assert_eq!(latest_activity_json["userId"], DB_ADMIN_USER_ID);
     assert_eq!(latest_activity_json["email"], DB_ADMIN_EMAIL);
     assert_eq!(latest_activity_json["ip"], DB_AUTH_ACTIVITY_API_KEY_IP);
-    assert_eq!(latest_activity_json["userAgent"], DB_AUTH_ACTIVITY_API_KEY_USER_AGENT);
+    assert_eq!(
+        latest_activity_json["userAgent"],
+        DB_AUTH_ACTIVITY_API_KEY_USER_AGENT
+    );
     assert_eq!(latest_activity_json["success"], true);
     assert_eq!(latest_activity_json["error"], Value::Null);
     assert_eq!(latest_activity_json["source"], "API_KEY");
@@ -947,9 +1271,11 @@ async fn user_v2_management_returns_latest_authentication_activity_without_api_k
 }
 
 #[tokio::test]
-async fn user_v2_management_records_login_activity_for_latest_without_api_key_filter_when_seed_has_none() {
+async fn user_v2_management_records_login_activity_for_latest_without_api_key_filter_when_seed_has_none()
+ {
     let app = runtime_with_db_backed_auth_fixture_without_admin_activity().await;
-    let (admin_token, _) = login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")).await;
+    let (admin_token, _) =
+        login_header_exchange(&app, &format!("{DB_ADMIN_EMAIL}:{DB_ADMIN_PASSWORD}")).await;
 
     let latest_activity = app
         .oneshot(

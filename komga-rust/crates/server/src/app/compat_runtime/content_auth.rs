@@ -12,13 +12,15 @@ use crate::app::placeholder_auth::{
     AuthOutcome, PersistedAuthenticationActivity, PlaceholderUser, SESSION_REGISTRY, api_key_user,
     auth_token_user, basic_user, bootstrap_api_key_user, bootstrap_user,
     bootstrap_user_with_remember_me_cookies, bootstrap_user_with_remember_me_token,
-    configured_users, empty_auth_token_supplied, expired_session_cookie, persisted_api_key_user,
-    persisted_basic_user, persisted_create_api_key, persisted_delete_api_key_by_id,
-    persisted_latest_authentication_activity_by_user_and_api_key, persisted_list_api_keys,
-    persisted_list_authentication_activity, persisted_record_successful_authentication_activity,
-    persisted_update_password_by_user_id, persisted_users, placeholder_user_json,
-    remember_me_requested, require_admin, require_auth, resolved_token, session_token_for_user,
-    session_token_from_headers, unauthorized_json_response, user_id, user_is_admin,
+    configured_users, empty_auth_token_supplied, expired_remember_me_cookie,
+    expired_session_cookie, persisted_api_key_user, persisted_basic_user, persisted_create_api_key,
+    persisted_delete_api_key_by_id, persisted_latest_authentication_activity_by_user_and_api_key,
+    persisted_list_api_keys, persisted_list_authentication_activity,
+    persisted_record_successful_authentication_activity, persisted_update_password_by_user_id,
+    persisted_users, placeholder_user_json, remember_me_requested,
+    remember_me_token_for_user_with_namespace, remember_me_token_from_headers, require_admin,
+    require_auth, resolved_token, session_token_for_user, session_token_from_headers,
+    unauthorized_json_response, user_id, user_is_admin,
 };
 
 pub(super) async fn users_me(
@@ -45,10 +47,14 @@ pub(super) async fn users_me(
     }
 
     if let Some(user) = auth_token_user(&headers) {
-        let token = resolved_token(&headers);
+        let token =
+            session_token_from_headers(&headers).unwrap_or_else(|| session_token_for_user(&user));
         let payload = crate::app::placeholder_auth::placeholder_user_json(&user);
         register_discovery_principal(&auth_state, &payload, &token);
-        return Json(payload).into_response();
+        if session_token_from_headers(&headers).is_some() {
+            return Json(payload).into_response();
+        }
+        return bootstrap_user(user, token);
     }
 
     match persisted_basic_user(&headers, auth_db.database_file.as_path())
@@ -64,6 +70,12 @@ pub(super) async fn users_me(
                 None,
             )
             .await;
+            let Some(remember_me_token) = remember_me_token_for_user_with_namespace(
+                &user,
+                auth_db.remember_me_namespace.as_str(),
+            ) else {
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            };
             if empty_auth_token_supplied(&headers) {
                 let token = session_token_for_user(&user);
                 register_discovery_principal(
@@ -71,7 +83,7 @@ pub(super) async fn users_me(
                     &crate::app::placeholder_auth::placeholder_user_json(&user),
                     &token,
                 );
-                bootstrap_user_with_remember_me_token(user, token)
+                bootstrap_user_with_remember_me_token(user, token, remember_me_token)
             } else {
                 let token = session_token_for_user(&user);
                 register_discovery_principal(
@@ -79,7 +91,7 @@ pub(super) async fn users_me(
                     &crate::app::placeholder_auth::placeholder_user_json(&user),
                     &token,
                 );
-                bootstrap_user_with_remember_me_cookies(user, token)
+                bootstrap_user_with_remember_me_cookies(user, token, remember_me_token)
             }
         }
         AuthOutcome::Valid(user) => {
@@ -148,12 +160,15 @@ pub(super) async fn logout(headers: HeaderMap) -> Response {
     if let Some(token) = session_token_from_headers(&headers) {
         SESSION_REGISTRY.invalidate_session_token(&token);
     }
+    if let Some(remember_me_token) = remember_me_token_from_headers(&headers) {
+        SESSION_REGISTRY.invalidate_remember_me_token(&remember_me_token);
+    }
 
-    (
-        StatusCode::NO_CONTENT,
-        [(header::SET_COOKIE, expired_session_cookie())],
-    )
-        .into_response()
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    let headers = response.headers_mut();
+    headers.append(header::SET_COOKIE, expired_session_cookie());
+    headers.append(header::SET_COOKIE, expired_remember_me_cookie());
+    response
 }
 
 pub(super) async fn users_me_password(
@@ -359,9 +374,12 @@ pub(super) async fn users_by_id_authentication_activity_latest(
         )
         .await
     } else {
-        persisted_list_authentication_activity(auth_db.database_file.as_path(), Some(&target_user_id))
-            .await
-            .and_then(|rows| rows.into_iter().next())
+        persisted_list_authentication_activity(
+            auth_db.database_file.as_path(),
+            Some(&target_user_id),
+        )
+        .await
+        .and_then(|rows| rows.into_iter().next())
     };
 
     let Some(activity) = activity else {

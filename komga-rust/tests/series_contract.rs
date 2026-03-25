@@ -26,7 +26,13 @@ async fn series_listing_reflects_persisted_rows_and_collection_filters() {
     let fixture = SeriesContractFixture::new("series-list-persisted").await;
     let library_root = create_library_root(&fixture.paths.config_dir, "series-list-library");
 
-    seed_library(&fixture.paths.main_db, "library-main", "Series Library", &library_root).await;
+    seed_library(
+        &fixture.paths.main_db,
+        "library-main",
+        "Series Library",
+        &library_root,
+    )
+    .await;
     seed_series(
         &fixture.paths.main_db,
         SeedSeriesRow {
@@ -86,7 +92,10 @@ async fn series_listing_reflects_persisted_rows_and_collection_filters() {
     .await;
 
     assert_eq!(series_row_count(&fixture.paths.main_db).await, 2);
-    assert_eq!(collection_series_count(&fixture.paths.main_db, "collection-curated").await, 1);
+    assert_eq!(
+        collection_series_count(&fixture.paths.main_db, "collection-curated").await,
+        1
+    );
 
     let token = admin_session_token(&fixture.app).await;
     let listed = request_json(
@@ -107,10 +116,19 @@ async fn series_listing_reflects_persisted_rows_and_collection_filters() {
     .await;
 
     assert_eq!(listed["totalElements"], Value::from(2));
-    assert_eq!(series_titles(&listed), vec!["Alpha Archive".to_string(), "Beta Brigade".to_string()]);
+    assert_eq!(
+        series_titles(&listed),
+        vec!["Alpha Archive".to_string(), "Beta Brigade".to_string()]
+    );
     assert_eq!(collection_filtered["totalElements"], Value::from(1));
-    assert_eq!(series_ids(&collection_filtered), vec!["series-beta".to_string()]);
-    assert_eq!(collection_filtered["content"][0]["metadata"]["sharingLabels"], json!(["vip"]));
+    assert_eq!(
+        series_ids(&collection_filtered),
+        vec!["series-beta".to_string()]
+    );
+    assert_eq!(
+        collection_filtered["content"][0]["metadata"]["sharingLabels"],
+        json!(["vip"])
+    );
 
     fixture.cleanup();
 }
@@ -120,7 +138,13 @@ async fn series_detail_and_collections_reflect_persisted_rows() {
     let fixture = SeriesContractFixture::new("series-detail-persisted").await;
     let library_root = create_library_root(&fixture.paths.config_dir, "series-detail-library");
 
-    seed_library(&fixture.paths.main_db, "library-main", "Series Library", &library_root).await;
+    seed_library(
+        &fixture.paths.main_db,
+        "library-main",
+        "Series Library",
+        &library_root,
+    )
+    .await;
     seed_series(
         &fixture.paths.main_db,
         SeedSeriesRow {
@@ -154,7 +178,10 @@ async fn series_detail_and_collections_reflect_persisted_rows() {
     )
     .await;
 
-    assert_eq!(persisted_series_title(&fixture.paths.main_db, "series-detail").await, "Persisted Detail Title");
+    assert_eq!(
+        persisted_series_title(&fixture.paths.main_db, "series-detail").await,
+        "Persisted Detail Title"
+    );
 
     let token = admin_session_token(&fixture.app).await;
     let detail = request_json(
@@ -193,7 +220,13 @@ async fn alphabetical_groups_reflect_persisted_series_title_buckets() {
     let fixture = SeriesContractFixture::new("series-alpha-groups").await;
     let library_root = create_library_root(&fixture.paths.config_dir, "series-alpha-library");
 
-    seed_library(&fixture.paths.main_db, "library-main", "Series Library", &library_root).await;
+    seed_library(
+        &fixture.paths.main_db,
+        "library-main",
+        "Series Library",
+        &library_root,
+    )
+    .await;
     for (id, title) in [
         ("series-alpha", "Alpha Archive"),
         ("series-beta-1", "Beta Brigade"),
@@ -242,7 +275,10 @@ async fn alphabetical_groups_reflect_persisted_series_title_buckets() {
     )
     .await;
 
-    assert_eq!(group_counts(&groups), vec![("A".to_string(), 1), ("B".to_string(), 2)]);
+    assert_eq!(
+        group_counts(&groups),
+        vec![("A".to_string(), 1), ("B".to_string(), 2)]
+    );
 
     fixture.cleanup();
 }
@@ -252,7 +288,13 @@ async fn latest_series_surface_orders_persisted_recent_activity() {
     let fixture = SeriesContractFixture::new("series-latest-persisted").await;
     let library_root = create_library_root(&fixture.paths.config_dir, "series-latest-library");
 
-    seed_library(&fixture.paths.main_db, "library-main", "Series Library", &library_root).await;
+    seed_library(
+        &fixture.paths.main_db,
+        "library-main",
+        "Series Library",
+        &library_root,
+    )
+    .await;
     seed_series(
         &fixture.paths.main_db,
         SeedSeriesRow {
@@ -315,7 +357,10 @@ async fn latest_series_surface_orders_persisted_recent_activity() {
     .await;
 
     assert_eq!(latest["totalElements"], Value::from(2));
-    assert_eq!(series_ids(&latest), vec!["series-fresh".to_string(), "series-older".to_string()]);
+    assert_eq!(
+        series_ids(&latest),
+        vec!["series-fresh".to_string(), "series-older".to_string()]
+    );
 
     fixture.cleanup();
 }
@@ -325,7 +370,13 @@ async fn ordinary_books_latest_browse_prefers_persisted_rows_without_owned_marke
     let fixture = SeriesContractFixture::new("books-latest-ordinary-persisted").await;
     let library_root = create_library_root(&fixture.paths.config_dir, "books-latest-library");
 
-    seed_library(&fixture.paths.main_db, "library-main", "Series Library", &library_root).await;
+    seed_library(
+        &fixture.paths.main_db,
+        "library-main",
+        "Series Library",
+        &library_root,
+    )
+    .await;
     seed_series(
         &fixture.paths.main_db,
         SeedSeriesRow {
@@ -415,7 +466,13 @@ async fn metadata_update_round_trips_through_follow_up_detail_reads() {
     let fixture = SeriesContractFixture::new("series-metadata-update").await;
     let library_root = create_library_root(&fixture.paths.config_dir, "series-update-library");
 
-    seed_library(&fixture.paths.main_db, "library-main", "Series Library", &library_root).await;
+    seed_library(
+        &fixture.paths.main_db,
+        "library-main",
+        "Series Library",
+        &library_root,
+    )
+    .await;
     seed_series(
         &fixture.paths.main_db,
         SeedSeriesRow {
@@ -441,7 +498,10 @@ async fn metadata_update_round_trips_through_follow_up_detail_reads() {
         },
     )
     .await;
-    assert_eq!(persisted_series_title(&fixture.paths.main_db, "series-update").await, "Before Update");
+    assert_eq!(
+        persisted_series_title(&fixture.paths.main_db, "series-update").await,
+        "Before Update"
+    );
 
     let token = admin_session_token(&fixture.app).await;
     let patch_response = request(
@@ -523,14 +583,8 @@ async fn rejects_snapshot_series_payloads_after_persisted_follow_up_reads() {
     );
 
     let token = admin_session_token(&fixture.app).await;
-    let detail_after_mutation = request_json(
-        &fixture.app,
-        "GET",
-        "/api/v1/series/series-1",
-        &token,
-        None,
-    )
-    .await;
+    let detail_after_mutation =
+        request_json(&fixture.app, "GET", "/api/v1/series/series-1", &token, None).await;
     let list_after_mutation = request_json(
         &fixture.app,
         "GET",
@@ -540,12 +594,27 @@ async fn rejects_snapshot_series_payloads_after_persisted_follow_up_reads() {
     )
     .await;
 
-    assert_eq!(detail_after_mutation["metadata"]["title"], "Mutated Persisted Series");
-    assert_eq!(detail_after_mutation["metadata"]["summary"], "mutated summary");
-    assert_eq!(detail_after_mutation["metadata"]["sharingLabels"], json!(["persisted-only"]));
+    assert_eq!(
+        detail_after_mutation["metadata"]["title"],
+        "Mutated Persisted Series"
+    );
+    assert_eq!(
+        detail_after_mutation["metadata"]["summary"],
+        "mutated summary"
+    );
+    assert_eq!(
+        detail_after_mutation["metadata"]["sharingLabels"],
+        json!(["persisted-only"])
+    );
     assert_eq!(list_after_mutation["totalElements"], Value::from(1));
-    assert_eq!(series_ids(&list_after_mutation), vec!["series-1".to_string()]);
-    assert_eq!(list_after_mutation["content"][0]["metadata"]["title"], "Mutated Persisted Series");
+    assert_eq!(
+        series_ids(&list_after_mutation),
+        vec!["series-1".to_string()]
+    );
+    assert_eq!(
+        list_after_mutation["content"][0]["metadata"]["title"],
+        "Mutated Persisted Series"
+    );
 
     fixture.cleanup();
 }
@@ -630,10 +699,7 @@ async fn admin_session_token(app: &axum::Router) -> String {
                 .uri("/api/v2/users/me")
                 .header(
                     header::AUTHORIZATION,
-                    format!(
-                        "Basic {}",
-                        compat_auth_env::COMPAT_ADMIN_BASIC_AUTH_BASE64
-                    ),
+                    format!("Basic {}", compat_auth_env::COMPAT_ADMIN_BASIC_AUTH_BASE64),
                 )
                 .header("X-Auth-Token", "")
                 .body(Body::empty())
@@ -813,12 +879,7 @@ async fn seed_series(main_db: &Path, series: SeedSeriesRow<'_>) {
     pool.close().await;
 }
 
-async fn seed_collection(
-    main_db: &Path,
-    collection_id: &str,
-    name: &str,
-    members: &[(&str, i32)],
-) {
+async fn seed_collection(main_db: &Path, collection_id: &str, name: &str, members: &[(&str, i32)]) {
     let pool = connect_pool(main_db, 1)
         .await
         .expect("sqlite pool should open for series collection fixture seeding");
@@ -894,14 +955,13 @@ async fn collection_series_count(main_db: &Path, collection_id: &str) -> i64 {
     let pool = connect_pool(main_db, 1)
         .await
         .expect("sqlite pool should open for collection membership inspection");
-    let count = sqlx::query(
-        "SELECT COUNT(*) AS COUNT FROM COLLECTION_SERIES WHERE COLLECTION_ID = ?",
-    )
-    .bind(collection_id)
-    .fetch_one(&pool)
-    .await
-    .expect("collection membership count should be queryable")
-    .get::<i64, _>("COUNT");
+    let count =
+        sqlx::query("SELECT COUNT(*) AS COUNT FROM COLLECTION_SERIES WHERE COLLECTION_ID = ?")
+            .bind(collection_id)
+            .fetch_one(&pool)
+            .await
+            .expect("collection membership count should be queryable")
+            .get::<i64, _>("COUNT");
     pool.close().await;
     count
 }

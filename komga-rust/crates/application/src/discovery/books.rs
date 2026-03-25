@@ -108,16 +108,17 @@ where
         context: &DiscoveryQueryContext,
         query: BooksLatestQuery,
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
-        self.repository.list_books_latest(
-            context,
-            NativeBooksLatestQuery {
-                page: query.page,
-                size: query.size,
-                unpaged: query.unpaged,
-                library_ids: query.library_ids,
-            },
-        )
-        .await
+        self.repository
+            .list_books_latest(
+                context,
+                NativeBooksLatestQuery {
+                    page: query.page,
+                    size: query.size,
+                    unpaged: query.unpaged,
+                    library_ids: query.library_ids,
+                },
+            )
+            .await
     }
 
     pub async fn resolve_book_resource(
@@ -140,7 +141,9 @@ where
         context: &DiscoveryQueryContext,
         query: BookSiblingQuery,
     ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
-        self.repository.get_book_sibling_previous(context, query).await
+        self.repository
+            .get_book_sibling_previous(context, query)
+            .await
     }
 
     pub async fn get_book_sibling_next(

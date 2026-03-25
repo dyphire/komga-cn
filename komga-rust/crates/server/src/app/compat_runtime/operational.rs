@@ -8,6 +8,8 @@ mod helpers;
 mod settings;
 #[path = "operational/sse.rs"]
 mod sse;
+#[path = "operational/webui.rs"]
+mod webui;
 
 pub(super) use actuator::{
     actuator_beans, actuator_health, actuator_info, actuator_logfile, actuator_metric_detail,
@@ -19,7 +21,9 @@ pub(super) use settings::{
     delete_syncpoints_me, delete_tasks, get_announcements, get_claim_status,
     get_client_settings_global, get_client_settings_user, get_fonts_families, get_history,
     get_oauth2_providers, get_page_hash_thumbnail, get_page_hashes, get_releases,
-    get_server_settings, post_claim, post_filesystem, post_transient_books, put_announcements,
-    update_server_settings,
+    get_server_settings, get_transient_book_media, get_transient_book_page,
+    get_transient_book_status, post_claim, post_filesystem, post_transient_book_analyze,
+    post_transient_books, put_announcements, update_server_settings,
 };
 pub(super) use sse::sse_events;
+pub(super) use webui::{webui_asset, webui_entrypoint};

@@ -6,6 +6,7 @@ use komga_compat_testkit::contract_matrix::assert_required_target_declared;
 use komga_rust::config::{RuntimeCli, RuntimeConfig};
 use komga_rust::persistence::sqlite::connect_pool;
 use komga_rust::scanner::{ScannerOptions, scan_root_folder};
+use komga_rust::search::{SearchEntityType, SearchIndexLifecycle};
 use komga_rust::task_queue::TaskQueueScheduler;
 use sqlx::Row;
 
@@ -18,15 +19,24 @@ fn scanner_persistence_contract_target_is_registered() {
 }
 
 #[tokio::test]
-async fn scanner_scan_output_is_persisted_into_kotlin_compatible_library_series_book_and_sidecar_tables() {
+async fn scanner_scan_output_is_persisted_into_kotlin_compatible_library_series_book_and_sidecar_tables()
+ {
     let fixture = ScannerPersistenceFixture::new("scanner-persistence-write-shape")
         .await
         .expect("scanner persistence fixture should be created");
 
     let scan_result = scan_root_folder(&fixture.library_root, &ScannerOptions::default())
         .expect("filesystem scan fixture should produce deterministic scanner output");
-    assert_eq!(scan_result.series.len(), 1, "fixture sanity: one series expected");
-    assert_eq!(scan_result.series[0].books.len(), 1, "fixture sanity: one book expected");
+    assert_eq!(
+        scan_result.series.len(),
+        1,
+        "fixture sanity: one series expected"
+    );
+    assert_eq!(
+        scan_result.series[0].books.len(),
+        1,
+        "fixture sanity: one book expected"
+    );
     assert_eq!(
         scan_result.sidecars.len(),
         2,
@@ -69,8 +79,16 @@ async fn scanner_scan_persistence_emits_scan_and_analyze_tasks_into_persisted_ru
 
     let scan_result = scan_root_folder(&fixture.library_root, &ScannerOptions::default())
         .expect("filesystem scan fixture should produce deterministic scanner output");
-    assert_eq!(scan_result.series.len(), 1, "fixture sanity: one series expected");
-    assert_eq!(scan_result.series[0].books.len(), 1, "fixture sanity: one book expected");
+    assert_eq!(
+        scan_result.series.len(),
+        1,
+        "fixture sanity: one series expected"
+    );
+    assert_eq!(
+        scan_result.series[0].books.len(),
+        1,
+        "fixture sanity: one book expected"
+    );
 
     let _app = komga_rust::app::build_router_with_config(&fixture.config);
 
@@ -81,26 +99,31 @@ async fn scanner_scan_persistence_emits_scan_and_analyze_tasks_into_persisted_ru
     );
 
     let task_snapshot = load_task_snapshot(&fixture.paths.tasks_db).await;
-    assert!(
-        task_snapshot.scan_library_rows >= 1,
-        "scanner-triggered runtime contract requires SCAN_LIBRARY tasks to persist in TASK rows",
+    assert_eq!(
+        task_snapshot.task_rows, 0,
+        "scanner-triggered runtime contract now requires queue worker to execute and complete queued scan/analyze tasks end to end",
     );
+
+    let media_ready_rows = load_media_ready_count(&fixture.paths.main_db).await;
     assert!(
-        task_snapshot.analyze_book_rows >= 1,
-        "scanner-triggered runtime contract requires ANALYZE_BOOK tasks to persist in TASK rows",
+        media_ready_rows >= 1,
+        "scanner-triggered runtime flow must execute analyze tasks and persist MEDIA status transitions",
     );
 
     let scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
-    let runtime_counts = scheduler.count_by_simple_type();
-    assert_eq!(
-        runtime_counts.get("SCAN_LIBRARY").copied(),
-        Some(task_snapshot.scan_library_rows as usize),
-        "runtime task flow must read persisted SCAN_LIBRARY rows from tasks.sqlite",
+    assert!(
+        scheduler.count_by_simple_type().is_empty(),
+        "runtime queue should be drained after worker execution instead of leaving persisted pending rows",
     );
-    assert_eq!(
-        runtime_counts.get("ANALYZE_BOOK").copied(),
-        Some(task_snapshot.analyze_book_rows as usize),
-        "runtime task flow must read persisted ANALYZE_BOOK rows from tasks.sqlite",
+
+    let search = SearchIndexLifecycle::bootstrap(fixture.config.lucene_data_directory.as_path())
+        .expect("search index should bootstrap for scanner runtime assertions");
+    let hits = search
+        .search_ids("Book-001", SearchEntityType::Book, 10)
+        .expect("search lookup should succeed after scanner/analyze worker execution");
+    assert!(
+        !hits.is_empty(),
+        "scan/analyze runtime flow should update search index documents",
     );
 
     fixture.cleanup();
@@ -114,13 +137,23 @@ async fn scanner_persisted_rows_remain_visible_after_runtime_rebuild() {
 
     let scan_result = scan_root_folder(&fixture.library_root, &ScannerOptions::default())
         .expect("filesystem scan fixture should produce deterministic scanner output");
-    assert_eq!(scan_result.series.len(), 1, "fixture sanity: one series expected");
-    assert_eq!(scan_result.series[0].books.len(), 1, "fixture sanity: one book expected");
+    assert_eq!(
+        scan_result.series.len(),
+        1,
+        "fixture sanity: one series expected"
+    );
+    assert_eq!(
+        scan_result.series[0].books.len(),
+        1,
+        "fixture sanity: one book expected"
+    );
 
     let _initial_runtime = komga_rust::app::build_router_with_config(&fixture.config);
     let before_restart = load_persistence_snapshot(&fixture.paths.main_db, "library-1").await;
     let task_before_restart = load_task_snapshot(&fixture.paths.tasks_db).await;
-    let runtime_before_restart = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    let media_ready_before_restart = load_media_ready_count(&fixture.paths.main_db).await;
+    let runtime_before_restart =
+        TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
 
     assert!(
         before_restart.series_rows >= 1
@@ -128,31 +161,25 @@ async fn scanner_persisted_rows_remain_visible_after_runtime_rebuild() {
             && before_restart.sidecar_rows >= 2,
         "restart contract requires scanner-derived rows to exist before runtime rebuild; memory-only scanner state is invalid",
     );
+    assert_eq!(
+        task_before_restart.task_rows, 0,
+        "restart contract now requires queue worker to have drained persisted scanner/analyze tasks before runtime rebuild",
+    );
     assert!(
-        task_before_restart.scan_library_rows >= 1 && task_before_restart.analyze_book_rows >= 1,
-        "restart contract requires persisted scanner/analyze tasks before runtime rebuild; runtime-only queue state is invalid",
+        media_ready_before_restart >= 1,
+        "restart contract requires analyze side effects before runtime rebuild",
     );
-    assert_eq!(
-        runtime_before_restart
-            .count_by_simple_type()
-            .get("SCAN_LIBRARY")
-            .copied(),
-        Some(task_before_restart.scan_library_rows as usize),
-        "runtime pre-restart task flow should expose persisted SCAN_LIBRARY rows",
-    );
-    assert_eq!(
-        runtime_before_restart
-            .count_by_simple_type()
-            .get("ANALYZE_BOOK")
-            .copied(),
-        Some(task_before_restart.analyze_book_rows as usize),
-        "runtime pre-restart task flow should expose persisted ANALYZE_BOOK rows",
+    assert!(
+        runtime_before_restart.count_by_simple_type().is_empty(),
+        "runtime pre-restart queue should be empty after worker completion",
     );
 
     let _restarted_runtime = komga_rust::app::build_router_with_config(&fixture.config);
     let after_restart = load_persistence_snapshot(&fixture.paths.main_db, "library-1").await;
     let task_after_restart = load_task_snapshot(&fixture.paths.tasks_db).await;
-    let runtime_after_restart = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    let media_ready_after_restart = load_media_ready_count(&fixture.paths.main_db).await;
+    let runtime_after_restart =
+        TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
 
     assert_eq!(
         after_restart, before_restart,
@@ -160,23 +187,15 @@ async fn scanner_persisted_rows_remain_visible_after_runtime_rebuild() {
     );
     assert_eq!(
         task_after_restart, task_before_restart,
-        "scanner-triggered TASK rows must survive runtime rebuild; losing task rows indicates queue state stayed in memory",
+        "scanner-triggered queue state should remain drained after runtime rebuild",
     );
     assert_eq!(
-        runtime_after_restart
-            .count_by_simple_type()
-            .get("SCAN_LIBRARY")
-            .copied(),
-        Some(task_after_restart.scan_library_rows as usize),
-        "runtime post-restart task flow should keep persisted SCAN_LIBRARY visibility",
+        media_ready_after_restart, media_ready_before_restart,
+        "analyze side effects must remain persisted across runtime rebuild",
     );
-    assert_eq!(
-        runtime_after_restart
-            .count_by_simple_type()
-            .get("ANALYZE_BOOK")
-            .copied(),
-        Some(task_after_restart.analyze_book_rows as usize),
-        "runtime post-restart task flow should keep persisted ANALYZE_BOOK visibility",
+    assert!(
+        runtime_after_restart.count_by_simple_type().is_empty(),
+        "runtime post-restart queue should stay empty after persisted completion",
     );
 
     fixture.cleanup();
@@ -194,8 +213,6 @@ struct PersistenceSnapshot {
 #[derive(Debug, Eq, PartialEq)]
 struct TaskSnapshot {
     task_rows: i64,
-    scan_library_rows: i64,
-    analyze_book_rows: i64,
 }
 
 struct ScannerPersistenceFixture {
@@ -333,27 +350,20 @@ async fn load_task_snapshot(tasks_db: &Path) -> TaskSnapshot {
         .expect("task row count should be queryable")
         .get::<i64, _>("COUNT");
 
-    let scan_library_rows = sqlx::query(
-        "SELECT COUNT(*) AS COUNT FROM TASK WHERE SIMPLE_TYPE = 'SCAN_LIBRARY'",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("scan task row count should be queryable")
-    .get::<i64, _>("COUNT");
-
-    let analyze_book_rows = sqlx::query(
-        "SELECT COUNT(*) AS COUNT FROM TASK WHERE SIMPLE_TYPE = 'ANALYZE_BOOK'",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("analyze task row count should be queryable")
-    .get::<i64, _>("COUNT");
-
     pool.close().await;
 
-    TaskSnapshot {
-        task_rows,
-        scan_library_rows,
-        analyze_book_rows,
-    }
+    TaskSnapshot { task_rows }
+}
+
+async fn load_media_ready_count(main_db: &Path) -> i64 {
+    let pool = connect_pool(main_db, 1)
+        .await
+        .expect("sqlite pool should open for media status inspection");
+    let count = sqlx::query("SELECT COUNT(*) AS COUNT FROM MEDIA WHERE STATUS = 'READY'")
+        .fetch_one(&pool)
+        .await
+        .expect("media READY count should be queryable")
+        .get::<i64, _>("COUNT");
+    pool.close().await;
+    count
 }

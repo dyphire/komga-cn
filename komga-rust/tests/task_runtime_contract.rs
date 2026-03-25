@@ -28,7 +28,11 @@ async fn persists_queued_running_and_completed_task_state_in_tasks_sqlite() {
     ));
 
     let queued_rows = load_task_rows(&paths.tasks_db).await;
-    assert_eq!(queued_rows.len(), 1, "enqueue must persist queued task rows in tasks.sqlite");
+    assert_eq!(
+        queued_rows.len(),
+        1,
+        "enqueue must persist queued task rows in tasks.sqlite"
+    );
     assert_eq!(queued_rows[0].id, "SCAN_LIBRARY:library-1");
     assert_eq!(queued_rows[0].priority, 100);
     assert_eq!(queued_rows[0].group_id.as_deref(), Some("library-1"));
@@ -104,12 +108,18 @@ async fn restart_rehydrates_persisted_task_queue_state_from_tasks_sqlite() {
         "restart must reload queued unowned tasks from tasks.sqlite",
     );
     assert_eq!(
-        restarted.count_by_simple_type().get("SCAN_LIBRARY").copied(),
+        restarted
+            .count_by_simple_type()
+            .get("SCAN_LIBRARY")
+            .copied(),
         Some(1),
         "restart should preserve queued task simple-type counts from persisted store",
     );
     assert_eq!(
-        restarted.count_by_simple_type().get("ANALYZE_BOOK").copied(),
+        restarted
+            .count_by_simple_type()
+            .get("ANALYZE_BOOK")
+            .copied(),
         Some(1),
         "restart should preserve running task simple-type counts from persisted store",
     );
@@ -143,7 +153,10 @@ async fn rejects_memory_queue_by_requiring_restart_visible_tasks_from_sqlite() {
 
     let restarted = TaskQueueScheduler::for_runtime(config, "rust-main");
     assert_eq!(
-        restarted.count_by_simple_type().get("SCAN_LIBRARY").copied(),
+        restarted
+            .count_by_simple_type()
+            .get("SCAN_LIBRARY")
+            .copied(),
         Some(1),
         "rejects_memory_queue: tasks lost after restart indicate runtime kept task state only in memory instead of tasks.sqlite",
     );
@@ -162,9 +175,7 @@ struct PersistedTaskRow {
     owner: Option<String>,
 }
 
-async fn new_task_runtime_fixture(
-    case_id: &str,
-) -> persistence_contract_fixture::LegacyDbPaths {
+async fn new_task_runtime_fixture(case_id: &str) -> persistence_contract_fixture::LegacyDbPaths {
     let paths = persistence_contract_fixture::new_legacy_db_paths(case_id)
         .expect("task runtime db paths should be created");
     persistence_contract_fixture::seed_main_db_from_flyway(&paths.main_db)

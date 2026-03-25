@@ -90,12 +90,6 @@ jobs:
           cache: 'npm'
           cache-dependency-path: komga-webui/package-lock.json
 
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: komga-rust -> target
-
       - name: Setup Java 21
         uses: actions/setup-java@v5
         with:
@@ -125,14 +119,8 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v5
 
-      - name: Build Rust release binary
-        run: cargo build --manifest-path komga-rust/Cargo.toml --release
-
-      - name: Verify Rust startup contract
-        run: python3 tools/rust-cutover/verify_ci_package.py --startup-binary komga-rust/target/release/komga-rust
-
-      - name: Build package inputs
-        run: ./gradlew :komga:prepareThymeLeaf packageRustDockerContext :komga-tray:jar
+      - name: Build
+        run: ./gradlew :komga:prepareThymeLeaf :komga:bootJar :komga-tray:jar
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
 

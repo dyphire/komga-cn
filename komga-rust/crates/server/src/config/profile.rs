@@ -6,7 +6,7 @@ use super::error::ConfigError;
 pub(super) const DEFAULT_CONFIG_DIR: &str = ".komga";
 pub(super) const DEFAULT_LOG_FILE_NAME: &str = "komga.log";
 const HOME_ENV: &str = "HOME";
-const LOCALAPPDATA_ENV: &str = "LOCALAPPDATA";
+const USERPROFILE_ENV: &str = "USERPROFILE";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeMode {
@@ -47,6 +47,15 @@ impl RuntimeMode {
             Self::Snapshot | Self::Shadow | Self::Canary => CompatProfile::SnapshotAligned,
         }
     }
+
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::Snapshot => "snapshot",
+            Self::Localdb => "localdb",
+            Self::Shadow => "shadow",
+            Self::Canary => "canary",
+        }
+    }
 }
 
 impl CompatProfile {
@@ -72,19 +81,11 @@ impl PlatformProfile {
 
     pub(super) fn default_config_dir(self, env: &BTreeMap<String, String>) -> Option<PathBuf> {
         match self {
-            Self::Default | Self::Docker => env
+            Self::Default | Self::Docker | Self::Mac | Self::Windows => env
                 .get(HOME_ENV)
+                .or_else(|| env.get(USERPROFILE_ENV))
                 .map(|home| PathBuf::from(home).join(DEFAULT_CONFIG_DIR))
                 .or_else(|| Some(PathBuf::from(DEFAULT_CONFIG_DIR))),
-            Self::Mac => env.get(HOME_ENV).map(|home| {
-                PathBuf::from(home)
-                    .join("Library")
-                    .join("Application Support")
-                    .join("Komga")
-            }),
-            Self::Windows => env
-                .get(LOCALAPPDATA_ENV)
-                .map(|root| PathBuf::from(root).join("Komga")),
         }
     }
 

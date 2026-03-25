@@ -16,9 +16,7 @@ use komga_domain::discovery::{
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 
 use super::map_sqlx_error;
-use crate::read_models::filters::{
-    SqlxWhereState, append_clause_sqlx, query_filters_sqlx,
-};
+use crate::read_models::filters::{SqlxWhereState, append_clause_sqlx, query_filters_sqlx};
 
 #[derive(sqlx::FromRow)]
 struct SqlxReadlistBookRow {

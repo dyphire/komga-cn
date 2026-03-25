@@ -3,12 +3,17 @@ use axum::http::{Request, header};
 use axum::middleware;
 use axum::routing::{delete, get, patch, post, put};
 use komga_persistence::server_settings::ServerSettingsStore;
-use serde_json::{Value, json};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::app::discovery_auth::DiscoveryAuthState;
+use crate::app::placeholder_auth::SESSION_REGISTRY;
 use crate::config::RuntimeConfig;
 use crate::task_queue::TaskQueueScheduler;
 
@@ -17,9 +22,6 @@ mod device_auth;
 mod operational;
 
 const LAST_MODIFIED: &str = "Mon, 01 Jan 2024 22:04:05 GMT";
-const PAGE_BODY: &[u8] = b"\x89PNG\r\n\x1a\nplaceholder";
-const THUMBNAIL_BODY: &[u8] = b"\xff\xd8\xff\xdb\x00C\x00placeholder-jpeg\xff\xd9";
-const PDF_BODY: &[u8] = b"%PDF-1.7\n%komga-rust-placeholder\n";
 const THUMBNAIL_ETAG: &str = "\"048bbf960d13687d84948688ab74aaa59\"";
 const CACHE_CONTROL_PRIVATE: &str = "max-age=0, must-revalidate, private";
 const SEARCH_OWNERSHIP_HEADER: &str = "x-komga-compat-search-ownership";
@@ -37,16 +39,20 @@ const DEV_CORS_ALLOW_HEADERS: &str = "authorization,x-auth-token,content-type,x-
 #[derive(Clone)]
 struct OperationalState {
     runtime: RuntimeConfig,
+    webui_assets_root: Option<PathBuf>,
     settings_store: Arc<ServerSettingsStore>,
     task_queue: Arc<Mutex<TaskQueueScheduler>>,
     sse: Arc<Mutex<SseOperationalState>>,
-    client_settings: Arc<ClientSettingsState>,
+    announcements_cache: Arc<Mutex<Option<RemoteCacheEntry>>>,
+    releases_cache: Arc<Mutex<Option<RemoteCacheEntry>>>,
+    transient_books: Arc<Mutex<TransientBooksStore>>,
     oauth2_clients: Arc<Vec<crate::config::OAuth2ClientConfig>>,
 }
 
 #[derive(Clone)]
 pub(super) struct AuthDatabaseState {
     pub(super) database_file: PathBuf,
+    pub(super) remember_me_namespace: String,
 }
 
 #[derive(Clone, Default)]
@@ -87,24 +93,62 @@ impl OperationalSettings {
     }
 }
 
-#[derive(Clone, Default)]
-struct ClientSettingsState {
-    global: Value,
+#[derive(Clone)]
+struct RemoteCacheEntry {
+    fetched_at_epoch_seconds: u64,
+    payload: Value,
 }
 
-impl ClientSettingsState {
-    fn bootstrap() -> Self {
-        Self {
-            global: json!({
-                "webui.oauth2.hide_login": {
-                    "value": "false",
-                    "allowUnauthorized": true,
-                },
-                "webui.oauth2.auto_login": {
-                    "value": "false",
-                    "allowUnauthorized": true,
-                },
-            }),
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct TransientBooksStore {
+    records: HashMap<String, TransientBookRecord>,
+    state_file: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct TransientBookRecord {
+    id: String,
+    name: String,
+    path: String,
+    file_last_modified_epoch_seconds: i64,
+    size_bytes: u64,
+    status: String,
+    media_type: String,
+}
+
+impl TransientBooksStore {
+    fn load(state_file: Option<PathBuf>) -> Self {
+        let mut store = Self {
+            records: HashMap::new(),
+            state_file,
+        };
+        store.reload_from_disk();
+        store
+    }
+
+    fn reload_from_disk(&mut self) {
+        let Some(state_file) = self.state_file.as_ref() else {
+            return;
+        };
+        let Ok(content) = fs::read_to_string(state_file) else {
+            return;
+        };
+        let Ok(records) = serde_json::from_str::<HashMap<String, TransientBookRecord>>(&content)
+        else {
+            return;
+        };
+        self.records = records;
+    }
+
+    fn persist(&self) {
+        let Some(state_file) = self.state_file.as_ref() else {
+            return;
+        };
+        if let Some(parent) = state_file.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if let Ok(content) = serde_json::to_string_pretty(&self.records) {
+            let _ = fs::write(state_file, content);
         }
     }
 }
@@ -116,10 +160,7 @@ struct ReadProgressState {
 }
 
 #[derive(Clone)]
-struct ReadProgress {
-    page: u64,
-    completed: bool,
-}
+struct ReadProgress;
 
 #[derive(Clone)]
 struct KoreaderProgress {
@@ -131,6 +172,14 @@ struct KoreaderProgress {
 }
 
 pub(super) fn build_router(config: &RuntimeConfig) -> Router {
+    let remember_me_store_root = config
+        .config_dir
+        .as_deref()
+        .or_else(|| config.database_file.parent())
+        .unwrap_or_else(|| Path::new("."));
+    let remember_me_namespace =
+        SESSION_REGISTRY.configure_remember_me_store(remember_me_store_root);
+
     let state = ReadProgressState {
         progress_by_token: Arc::new(Mutex::new(HashMap::new())),
         koreader_progress_by_hash: Arc::new(Mutex::new(HashMap::new())),
@@ -139,18 +188,24 @@ pub(super) fn build_router(config: &RuntimeConfig) -> Router {
     let discovery_auth = DiscoveryAuthState::default();
     let auth_db = AuthDatabaseState {
         database_file: config.database_file.clone(),
+        remember_me_namespace,
     };
+    let mut task_queue = TaskQueueScheduler::for_runtime(config.clone(), "rust-compat-runtime");
+    let _ = task_queue.recover_and_process(config);
+
     let operational = OperationalState {
         runtime: config.clone(),
+        webui_assets_root: config.discover_webui_assets_layout(),
         settings_store: Arc::new(ServerSettingsStore::new(config.database_file.clone())),
-        task_queue: Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
-            config.clone(),
-            "rust-compat-runtime",
-        ))),
+        task_queue: Arc::new(Mutex::new(task_queue)),
         sse: Arc::new(Mutex::new(SseOperationalState {
             accepting_connections: true,
         })),
-        client_settings: Arc::new(ClientSettingsState::bootstrap()),
+        announcements_cache: Arc::new(Mutex::new(None)),
+        releases_cache: Arc::new(Mutex::new(None)),
+        transient_books: Arc::new(Mutex::new(TransientBooksStore::load(Some(
+            transient_books_state_file(config),
+        )))),
         oauth2_clients: Arc::new(config.oauth2_clients.clone()),
     };
 
@@ -183,6 +238,22 @@ pub(super) fn build_router(config: &RuntimeConfig) -> Router {
             post(operational::post_transient_books),
         )
         .route(
+            "/api/v1/transient-books/{transient_book_id}/analyze",
+            post(operational::post_transient_book_analyze),
+        )
+        .route(
+            "/api/v1/transient-books/{transient_book_id}/status",
+            get(operational::get_transient_book_status),
+        )
+        .route(
+            "/api/v1/transient-books/{transient_book_id}/media",
+            get(operational::get_transient_book_media),
+        )
+        .route(
+            "/api/v1/transient-books/{transient_book_id}/pages/{page_number}",
+            get(operational::get_transient_book_page),
+        )
+        .route(
             "/api/v1/claim",
             get(operational::get_claim_status).post(operational::post_claim),
         )
@@ -205,6 +276,10 @@ pub(super) fn build_router(config: &RuntimeConfig) -> Router {
         .route(
             "/oauth2/authorization/{registration_id}",
             get(device_auth::oauth2_authorization),
+        )
+        .route(
+            "/login/oauth2/code/{registration_id}",
+            get(device_auth::oauth2_login_code),
         )
         .route("/kobo/{auth_token}/ping", get(device_auth::kobo_ping))
         .route(
@@ -260,8 +335,11 @@ pub(super) fn build_router(config: &RuntimeConfig) -> Router {
             post(content::library_empty_trash),
         )
         .route("/api/v1/authors", get(content::authors))
+        .route("/api/v1/authors/names", get(content::authors_names))
+        .route("/api/v1/authors/roles", get(content::authors_roles))
         .route("/api/v1/genres", get(content::genres))
         .route("/api/v1/tags", get(content::tags))
+        .route("/api/v1/tags/series", get(content::series_tags))
         .route("/api/v1/languages", get(content::languages))
         .route("/api/v1/publishers", get(content::publishers))
         .route("/api/v1/age-ratings", get(content::age_ratings))
@@ -273,10 +351,7 @@ pub(super) fn build_router(config: &RuntimeConfig) -> Router {
             "/api/v1/series/release-dates",
             get(content::series_release_dates),
         )
-        .route(
-            "/api/v1/series/latest",
-            get(content::series_latest),
-        )
+        .route("/api/v1/series/latest", get(content::series_latest))
         .route("/api/v1/tags/book", get(content::book_tags))
         .route("/api/v1/series/{series_id}", get(content::series_detail))
         .route(
@@ -379,6 +454,22 @@ pub(super) fn build_router(config: &RuntimeConfig) -> Router {
                 .patch(content::collection_update)
                 .delete(content::collection_delete),
         )
+        .route(
+            "/api/v1/collections/{collection_id}/thumbnail",
+            get(content::collection_thumbnail),
+        )
+        .route(
+            "/api/v1/collections/{collection_id}/thumbnails",
+            get(content::collection_thumbnails).post(content::collection_thumbnail_upload),
+        )
+        .route(
+            "/api/v1/collections/{collection_id}/thumbnails/{thumbnail_id}",
+            get(content::collection_thumbnail_by_id).delete(content::collection_thumbnail_delete),
+        )
+        .route(
+            "/api/v1/collections/{collection_id}/thumbnails/{thumbnail_id}/selected",
+            put(content::collection_thumbnail_select),
+        )
         .route("/api/v1/books/{book_id}/pages", get(content::book_pages))
         .route(
             "/api/v1/books/{book_id}/pages/{page_number}",
@@ -407,6 +498,18 @@ pub(super) fn build_router(config: &RuntimeConfig) -> Router {
         .route(
             "/api/v1/books/{book_id}/manifest",
             get(content::book_manifest),
+        )
+        .route(
+            "/api/v1/books/{book_id}/manifest/epub",
+            get(content::book_manifest_epub),
+        )
+        .route(
+            "/api/v1/books/{book_id}/manifest/pdf",
+            get(content::book_manifest_pdf),
+        )
+        .route(
+            "/api/v1/books/{book_id}/manifest/divina",
+            get(content::book_manifest_divina),
         )
         .route(
             "/api/v1/books/{book_id}/file",
@@ -473,16 +576,55 @@ pub(super) fn build_router(config: &RuntimeConfig) -> Router {
             "/api/v2/users/{id}/password",
             patch(content::users_by_id_password),
         )
+        .route("/api/v2/authors", get(content::authors_v2))
         .route("/opds/v1.2/series", get(content::opds_v1_series))
         .route("/opds/v2/auth", get(content::opds_auth))
         .route("/opds/v2/catalog", get(content::opds_catalog))
+        .route("/opds/v2/libraries", get(content::opds_v2_libraries))
+        .route(
+            "/opds/v2/libraries/{library_id}",
+            get(content::opds_v2_library),
+        )
+        .route(
+            "/opds/v2/libraries/{library_id}/readlists",
+            get(content::opds_v2_library_readlists),
+        )
+        .route("/opds/v2/series/{series_id}", get(content::opds_v2_series))
+        .route(
+            "/opds/v2/readlists/{readlist_id}",
+            get(content::opds_v2_readlist),
+        )
+        .route("/opds/v2/search", get(content::opds_v2_search))
         .route(
             "/opds/v2/books/{book_id}/manifest",
             get(content::opds_manifest),
         )
+        .route(
+            "/opds/v2/books/{book_id}/manifest/{manifest_profile}",
+            get(content::opds_manifest_profile),
+        )
+        .route("/opds/v2/books/{book_id}/file", get(content::book_file))
+        .route(
+            "/opds/v2/books/{book_id}/thumbnail",
+            get(content::book_thumbnail),
+        )
+        .route(
+            "/opds/v2/books/{book_id}/pages/{page_number}",
+            get(content::book_page),
+        )
+        .route(
+            "/opds/v2/books/{book_id}/pages/{page_number}/raw",
+            get(content::book_page),
+        )
+        .route(
+            "/opds/v2/books/{book_id}/progression",
+            get(content::book_progression_get).patch(content::book_progression),
+        )
         .route("/api/v1/login/set-cookie", get(content::login_set_cookie))
         .route("/api/logout", post(content::logout))
         .route("/sse/v1/events", get(operational::sse_events))
+        .route("/", get(operational::webui_entrypoint))
+        .route("/{*webui_path}", get(operational::webui_asset))
         .layer(middleware::from_fn(operational::dev_cors_middleware))
         .layer(axum::extract::Extension(state))
         .layer(axum::extract::Extension(auth_db))
@@ -531,4 +673,20 @@ async fn strip_placeholder_bootstrap_headers<B>(mut request: Request<B>) -> Requ
     request.headers_mut().remove(header::AUTHORIZATION);
     request.headers_mut().remove("x-api-key");
     request
+}
+
+fn transient_books_state_file(config: &RuntimeConfig) -> PathBuf {
+    let root = config
+        .config_dir
+        .as_deref()
+        .or_else(|| config.database_file.parent())
+        .unwrap_or_else(|| Path::new("."));
+    root.join("transient-books-state.json")
+}
+
+fn now_epoch_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }

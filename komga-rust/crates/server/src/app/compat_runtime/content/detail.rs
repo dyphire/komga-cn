@@ -29,10 +29,11 @@ use super::helpers::{
     mark_non_native, query_bool, query_has_key, query_value, query_values, restricted_book_url,
     to_domain_query_context,
 };
-use crate::app::compat_runtime::AuthDatabaseState;
 use crate::app::CompatProfile;
+use crate::app::compat_runtime::AuthDatabaseState;
 use crate::app::discovery_auth::{DetailContentContext, DetailResourceContext, DiscoveryAuthState};
 use crate::app::placeholder_auth::{require_admin, require_auth};
+use crate::search::{SearchDocument, SearchEntityType, SearchEvent, SearchIndexLifecycle};
 
 pub(in crate::app::compat_runtime) async fn series_detail(
     headers: HeaderMap,
@@ -50,8 +51,7 @@ pub(in crate::app::compat_runtime) async fn series_detail(
     }
 
     let requested_series_id = series_id.clone();
-    let series_id =
-        resolve_snapshot_series_id_for_persisted(database_file, &series_id).await;
+    let series_id = resolve_snapshot_series_id_for_persisted(database_file, &series_id).await;
 
     let Some(resource) = (match load_persisted_series_resource(database_file, &series_id).await {
         Ok(resource) => resource,
@@ -68,11 +68,11 @@ pub(in crate::app::compat_runtime) async fn series_detail(
         }),
     };
 
-    let detail_query_context = match auth_state.resolve_detail_query_context(&headers, &detail_context)
-    {
-        Ok(context) => context,
-        Err(denial) => return detail_access_denial_response(denial),
-    };
+    let detail_query_context =
+        match auth_state.resolve_detail_query_context(&headers, &detail_context) {
+            Ok(context) => context,
+            Err(denial) => return detail_access_denial_response(denial),
+        };
     let is_admin = detail_query_context.is_admin;
     let query_string = uri.query().unwrap_or_default();
     let exact_oneshot_true_shape = query_has_key(query_string, "oneshot")
@@ -126,8 +126,7 @@ pub(in crate::app::compat_runtime) async fn series_collections(
         return seeded_series_collections_response(headers, series_id, auth_state).await;
     }
 
-    let series_id =
-        resolve_snapshot_series_id_for_persisted(database_file, &series_id).await;
+    let series_id = resolve_snapshot_series_id_for_persisted(database_file, &series_id).await;
 
     let Some(resource) = (match load_persisted_series_resource(database_file, &series_id).await {
         Ok(resource) => resource,
@@ -156,6 +155,7 @@ pub(in crate::app::compat_runtime) async fn series_collections(
 pub(in crate::app::compat_runtime) async fn series_metadata_update(
     headers: HeaderMap,
     database_file: &FsPath,
+    lucene_data_directory: &FsPath,
     Path(series_id): Path<String>,
     body: Value,
 ) -> Response {
@@ -197,8 +197,18 @@ pub(in crate::app::compat_runtime) async fn series_metadata_update(
         .and_then(Value::as_str)
         .unwrap_or(existing.summary.as_str());
 
-    match persist_series_metadata_update(database_file, &series_id, title, title_sort, summary).await {
-        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+    match persist_series_metadata_update(database_file, &series_id, title, title_sort, summary)
+        .await
+    {
+        Ok(true) => {
+            if let Err(error) =
+                refresh_series_search_document(database_file, lucene_data_directory, &series_id)
+                    .await
+            {
+                return internal_error_response(error);
+            }
+            StatusCode::NO_CONTENT.into_response()
+        }
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -248,11 +258,11 @@ async fn seeded_series_detail_response(
         }),
     };
 
-    let detail_query_context = match auth_state.resolve_detail_query_context(&headers, &detail_context)
-    {
-        Ok(context) => context,
-        Err(denial) => return detail_access_denial_response(denial),
-    };
+    let detail_query_context =
+        match auth_state.resolve_detail_query_context(&headers, &detail_context) {
+            Ok(context) => context,
+            Err(denial) => return detail_access_denial_response(denial),
+        };
     let is_admin = detail_query_context.is_admin;
     let query_string = uri.query().unwrap_or_default();
     let exact_oneshot_true_shape = query_has_key(query_string, "oneshot")
@@ -325,16 +335,19 @@ async fn seeded_series_collections_response(
         }),
     };
 
-    let detail_query_context = match auth_state.resolve_detail_query_context(&headers, &detail_context)
-    {
-        Ok(context) => context,
-        Err(denial) => return detail_access_denial_response(denial),
-    };
+    let detail_query_context =
+        match auth_state.resolve_detail_query_context(&headers, &detail_context) {
+            Ok(context) => context,
+            Err(denial) => return detail_access_denial_response(denial),
+        };
 
     let domain_context = to_domain_query_context(detail_query_context);
     let query = SeriesCollectionsQuery { series_id };
 
-    match queries.list_series_collections(&domain_context, query).await {
+    match queries
+        .list_series_collections(&domain_context, query)
+        .await
+    {
         Ok(collections) => Json(series_collections_payload(&collections)).into_response(),
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -364,7 +377,9 @@ async fn load_persisted_series_resource(
 
     let resource = row.map(|row| PersistedSeriesResource {
         library_id: row.get::<String, _>("LIBRARY_ID"),
-        age_rating: row.get::<Option<i64>, _>("AGE_RATING").map(|value| value as u16),
+        age_rating: row
+            .get::<Option<i64>, _>("AGE_RATING")
+            .map(|value| value as u16),
         sharing_labels: parse_csv_values(&row.get::<String, _>("SHARING_LABELS")),
     });
 
@@ -429,7 +444,7 @@ async fn load_persisted_series_detail(
         .map_err(|error| format!("open series detail db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT s.ID AS ID, s.LIBRARY_ID AS LIBRARY_ID, s.URL AS URL, s.CREATED_DATE AS CREATED_DATE, s.LAST_MODIFIED_DATE AS LAST_MODIFIED_DATE, s.FILE_LAST_MODIFIED AS FILE_LAST_MODIFIED, s.ONESHOT AS ONESHOT, s.DELETED_DATE AS DELETED_DATE, sm.STATUS AS STATUS, sm.TITLE AS TITLE, sm.SUMMARY AS SUMMARY, sm.READING_DIRECTION AS READING_DIRECTION, sm.PUBLISHER AS PUBLISHER, sm.AGE_RATING AS AGE_RATING, sm.LANGUAGE AS LANGUAGE, sm.CREATED_DATE AS METADATA_CREATED, sm.LAST_MODIFIED_DATE AS METADATA_LAST_MODIFIED, COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS FROM SERIES s JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID WHERE s.ID = ? GROUP BY s.ID, s.LIBRARY_ID, s.URL, s.CREATED_DATE, s.LAST_MODIFIED_DATE, s.FILE_LAST_MODIFIED, s.ONESHOT, s.DELETED_DATE, sm.STATUS, sm.TITLE, sm.SUMMARY, sm.READING_DIRECTION, sm.PUBLISHER, sm.AGE_RATING, sm.LANGUAGE, METADATA_CREATED, METADATA_LAST_MODIFIED",
+        "SELECT s.ID AS ID, s.LIBRARY_ID AS LIBRARY_ID, s.URL AS URL, s.CREATED_DATE AS CREATED_DATE, s.LAST_MODIFIED_DATE AS LAST_MODIFIED_DATE, CAST(s.FILE_LAST_MODIFIED AS TEXT) AS FILE_LAST_MODIFIED, s.ONESHOT AS ONESHOT, s.DELETED_DATE AS DELETED_DATE, sm.STATUS AS STATUS, sm.TITLE AS TITLE, sm.SUMMARY AS SUMMARY, sm.READING_DIRECTION AS READING_DIRECTION, sm.PUBLISHER AS PUBLISHER, sm.AGE_RATING AS AGE_RATING, sm.LANGUAGE AS LANGUAGE, sm.CREATED_DATE AS METADATA_CREATED, sm.LAST_MODIFIED_DATE AS METADATA_LAST_MODIFIED, COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS FROM SERIES s JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID WHERE s.ID = ? GROUP BY s.ID, s.LIBRARY_ID, s.URL, s.CREATED_DATE, s.LAST_MODIFIED_DATE, s.FILE_LAST_MODIFIED, s.ONESHOT, s.DELETED_DATE, sm.STATUS, sm.TITLE, sm.SUMMARY, sm.READING_DIRECTION, sm.PUBLISHER, sm.AGE_RATING, sm.LANGUAGE, METADATA_CREATED, METADATA_LAST_MODIFIED",
     )
     .bind(series_id)
     .fetch_optional(&pool)
@@ -461,9 +476,13 @@ async fn load_persisted_series_detail(
         books_in_progress_count: 0,
         status: row.get::<String, _>("STATUS"),
         summary: row.get::<String, _>("SUMMARY"),
-        reading_direction: row.get::<Option<String>, _>("READING_DIRECTION").unwrap_or_default(),
+        reading_direction: row
+            .get::<Option<String>, _>("READING_DIRECTION")
+            .unwrap_or_default(),
         publisher: row.get::<String, _>("PUBLISHER"),
-        age_rating: row.get::<Option<i64>, _>("AGE_RATING").map(|value| value as u16),
+        age_rating: row
+            .get::<Option<i64>, _>("AGE_RATING")
+            .map(|value| value as u16),
         language: row.get::<String, _>("LANGUAGE"),
         genres: vec![],
         tags: vec![],
@@ -540,13 +559,12 @@ async fn load_existing_series_metadata(
         .await
         .map_err(|error| format!("open series metadata db: {error}"))?;
 
-    let row = sqlx::query(
-        "SELECT TITLE, TITLE_SORT, SUMMARY FROM SERIES_METADATA WHERE SERIES_ID = ?",
-    )
-    .bind(series_id)
-    .fetch_optional(&pool)
-    .await
-    .map_err(|error| format!("query existing series metadata: {error}"))?;
+    let row =
+        sqlx::query("SELECT TITLE, TITLE_SORT, SUMMARY FROM SERIES_METADATA WHERE SERIES_ID = ?")
+            .bind(series_id)
+            .fetch_optional(&pool)
+            .await
+            .map_err(|error| format!("query existing series metadata: {error}"))?;
 
     let metadata = row.map(|row| ExistingSeriesMetadata {
         title: row.get::<String, _>("TITLE"),
@@ -582,6 +600,45 @@ async fn persist_series_metadata_update(
 
     pool.close().await;
     Ok(result.rows_affected() > 0)
+}
+
+async fn refresh_series_search_document(
+    database_file: &FsPath,
+    lucene_data_directory: &FsPath,
+    series_id: &str,
+) -> Result<(), String> {
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("open series search refresh db: {error}"))?;
+
+    let row = sqlx::query(
+        "SELECT s.ID AS ID, COALESCE(sm.TITLE, s.NAME) AS TITLE FROM SERIES s LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID WHERE s.ID = ? AND s.DELETED_DATE IS NULL LIMIT 1",
+    )
+    .bind(series_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|error| format!("query series search refresh payload: {error}"))?;
+
+    pool.close().await;
+
+    let index = SearchIndexLifecycle::bootstrap(lucene_data_directory)
+        .map_err(|error| format!("bootstrap search index for series metadata update: {error}"))?;
+
+    match row {
+        Some(row) => index
+            .apply_event(SearchEvent::Upsert(SearchDocument {
+                entity_type: SearchEntityType::Series,
+                id: row.get::<String, _>("ID"),
+                title: row.get::<String, _>("TITLE"),
+            }))
+            .map_err(|error| format!("upsert series search document: {error}")),
+        None => index
+            .apply_event(SearchEvent::Delete {
+                entity_type: SearchEntityType::Series,
+                id: series_id.to_string(),
+            })
+            .map_err(|error| format!("delete stale series search document: {error}")),
+    }
 }
 
 fn parse_csv_values(raw: &str) -> Vec<String> {
@@ -625,7 +682,9 @@ pub(in crate::app::compat_runtime) async fn collection_series(
     let unpaged = query_bool(query_string, "unpaged");
 
     if auth_db.database_file.exists() {
-        match load_persisted_collection_series(auth_db.database_file.as_path(), &collection_id).await {
+        match load_persisted_collection_series(auth_db.database_file.as_path(), &collection_id)
+            .await
+        {
             Ok(Some(series)) => {
                 let page_payload = collection_series_page_payload(series, page, size, unpaged);
                 return Json(page_payload).into_response();
@@ -639,7 +698,8 @@ pub(in crate::app::compat_runtime) async fn collection_series(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    let mut response = Json(collection_series_page_payload(series, page, size, unpaged)).into_response();
+    let mut response =
+        Json(collection_series_page_payload(series, page, size, unpaged)).into_response();
     mark_native(&mut response);
     response
 }
@@ -663,10 +723,11 @@ pub(in crate::app::compat_runtime) async fn collections(
         .unwrap_or(20);
 
     let mut content = if auth_db.database_file.exists() {
-        let persisted_rows_exist = match persisted_collections_exist(auth_db.database_file.as_path()).await {
-            Ok(exists) => exists,
-            Err(error) => return internal_error_response(error),
-        };
+        let persisted_rows_exist =
+            match persisted_collections_exist(auth_db.database_file.as_path()).await {
+                Ok(exists) => exists,
+                Err(error) => return internal_error_response(error),
+            };
 
         if persisted_rows_exist {
             match load_persisted_collections(auth_db.database_file.as_path()).await {
@@ -717,7 +778,8 @@ pub(in crate::app::compat_runtime) async fn collection_create(
     let payload = serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}));
     let input = collection_write_input(&payload);
 
-    let created_id = match persist_collection_create(auth_db.database_file.as_path(), &input).await {
+    let created_id = match persist_collection_create(auth_db.database_file.as_path(), &input).await
+    {
         Ok(id) => id,
         Err(error) => return internal_error_response(error),
     };
@@ -739,7 +801,9 @@ pub(in crate::app::compat_runtime) async fn collection_detail(
     }
 
     if auth_db.database_file.exists() {
-        match load_persisted_collection_detail(auth_db.database_file.as_path(), &collection_id).await {
+        match load_persisted_collection_detail(auth_db.database_file.as_path(), &collection_id)
+            .await
+        {
             Ok(Some(collection)) => return Json(collection_payload(&collection)).into_response(),
             Ok(None) => {}
             Err(error) => return internal_error_response(error),
@@ -767,7 +831,9 @@ pub(in crate::app::compat_runtime) async fn collection_update(
 
     match persist_collection_update(auth_db.database_file.as_path(), &collection_id, &input).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
-        Ok(false) if is_seeded_collection_id(&collection_id) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) if is_seeded_collection_id(&collection_id) => {
+            StatusCode::NO_CONTENT.into_response()
+        }
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -784,7 +850,9 @@ pub(in crate::app::compat_runtime) async fn collection_delete(
 
     match delete_persisted_collection(auth_db.database_file.as_path(), &collection_id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
-        Ok(false) if is_seeded_collection_id(&collection_id) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) if is_seeded_collection_id(&collection_id) => {
+            StatusCode::NO_CONTENT.into_response()
+        }
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -806,12 +874,12 @@ pub(in crate::app::compat_runtime) async fn book_detail(
         let book_id =
             resolve_snapshot_book_id_for_persisted(auth_db.database_file.as_path(), &book_id).await;
 
-        let Some(resource) = (match load_persisted_book_resource(auth_db.database_file.as_path(), &book_id)
-            .await
-        {
-            Ok(resource) => resource,
-            Err(error) => return internal_error_response(error),
-        }) else {
+        let Some(resource) =
+            (match load_persisted_book_resource(auth_db.database_file.as_path(), &book_id).await {
+                Ok(resource) => resource,
+                Err(error) => return internal_error_response(error),
+            })
+        else {
             return StatusCode::NOT_FOUND.into_response();
         };
 
@@ -962,7 +1030,9 @@ async fn load_persisted_book_resource(
 
     let resource = row.map(|row| PersistedBookResource {
         library_id: row.get::<String, _>("LIBRARY_ID"),
-        age_rating: row.get::<Option<i64>, _>("AGE_RATING").map(|value| value as u16),
+        age_rating: row
+            .get::<Option<i64>, _>("AGE_RATING")
+            .map(|value| value as u16),
         sharing_labels: parse_csv_values(&row.get::<String, _>("SHARING_LABELS")),
     });
 
@@ -979,7 +1049,7 @@ async fn load_persisted_book_detail(
         .map_err(|error| format!("open book detail db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT b.ID AS ID, b.SERIES_ID AS SERIES_ID, COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE, b.LIBRARY_ID AS LIBRARY_ID, b.NAME AS NAME, b.URL AS URL, b.NUMBER AS NUMBER, b.CREATED_DATE AS CREATED_DATE, b.LAST_MODIFIED_DATE AS LAST_MODIFIED_DATE, b.FILE_LAST_MODIFIED AS FILE_LAST_MODIFIED, b.FILE_SIZE AS FILE_SIZE, b.FILE_HASH AS FILE_HASH, b.ONESHOT AS ONESHOT, b.DELETED_DATE AS DELETED_DATE, bm.TITLE AS METADATA_TITLE, bm.SUMMARY AS METADATA_SUMMARY, bm.NUMBER AS METADATA_NUMBER, bm.NUMBER_SORT AS METADATA_NUMBER_SORT, bm.RELEASE_DATE AS METADATA_RELEASE_DATE, bm.ISBN AS METADATA_ISBN, bm.CREATED_DATE AS METADATA_CREATED, bm.LAST_MODIFIED_DATE AS METADATA_LAST_MODIFIED, COALESCE(m.STATUS, 'UNKNOWN') AS MEDIA_STATUS, COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE, COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT, COALESCE(m.COMMENT, '') AS MEDIA_COMMENT FROM BOOK b JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID JOIN SERIES s ON s.ID = b.SERIES_ID LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID WHERE b.ID = ?",
+        "SELECT b.ID AS ID, b.SERIES_ID AS SERIES_ID, COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE, b.LIBRARY_ID AS LIBRARY_ID, b.NAME AS NAME, b.URL AS URL, b.NUMBER AS NUMBER, b.CREATED_DATE AS CREATED_DATE, b.LAST_MODIFIED_DATE AS LAST_MODIFIED_DATE, CAST(b.FILE_LAST_MODIFIED AS TEXT) AS FILE_LAST_MODIFIED, b.FILE_SIZE AS FILE_SIZE, b.FILE_HASH AS FILE_HASH, b.ONESHOT AS ONESHOT, b.DELETED_DATE AS DELETED_DATE, bm.TITLE AS METADATA_TITLE, bm.SUMMARY AS METADATA_SUMMARY, bm.NUMBER AS METADATA_NUMBER, bm.NUMBER_SORT AS METADATA_NUMBER_SORT, bm.RELEASE_DATE AS METADATA_RELEASE_DATE, bm.ISBN AS METADATA_ISBN, bm.CREATED_DATE AS METADATA_CREATED, bm.LAST_MODIFIED_DATE AS METADATA_LAST_MODIFIED, COALESCE(m.STATUS, 'UNKNOWN') AS MEDIA_STATUS, COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE, COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT, COALESCE(m.COMMENT, '') AS MEDIA_COMMENT FROM BOOK b JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID JOIN SERIES s ON s.ID = b.SERIES_ID LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID WHERE b.ID = ?",
     )
     .bind(book_id)
     .fetch_optional(&pool)
@@ -1244,10 +1314,11 @@ pub(in crate::app::compat_runtime) async fn readlists(
     };
 
     if auth_db.database_file.exists() {
-        let persisted_rows_exist = match persisted_readlists_exist(auth_db.database_file.as_path()).await {
-            Ok(exists) => exists,
-            Err(error) => return internal_error_response(error),
-        };
+        let persisted_rows_exist =
+            match persisted_readlists_exist(auth_db.database_file.as_path()).await {
+                Ok(exists) => exists,
+                Err(error) => return internal_error_response(error),
+            };
 
         if persisted_rows_exist {
             let mut content = match load_persisted_readlists(
@@ -1691,7 +1762,9 @@ pub(in crate::app::compat_runtime) async fn readlist_detail(
     };
 
     if auth_db.database_file.exists() {
-        match load_persisted_readlist_detail(auth_db.database_file.as_path(), &readlist_id, None).await {
+        match load_persisted_readlist_detail(auth_db.database_file.as_path(), &readlist_id, None)
+            .await
+        {
             Ok(Some(readlist)) => return Json(readlist_payload(&readlist)).into_response(),
             Ok(None) => {}
             Err(error) => return internal_error_response(error),
@@ -2042,7 +2115,9 @@ async fn persisted_collections_exist(database_file: &FsPath) -> Result<bool, Str
     Ok(row.is_some())
 }
 
-async fn load_persisted_collections(database_file: &FsPath) -> Result<Vec<CollectionReadModel>, String> {
+async fn load_persisted_collections(
+    database_file: &FsPath,
+) -> Result<Vec<CollectionReadModel>, String> {
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(|error| format!("open persisted collections db: {error}"))?;
@@ -2225,7 +2300,9 @@ fn collection_series_page_payload(
     let page_content = if offset >= total_elements {
         vec![]
     } else {
-        series.drain(offset..(offset + page_size).min(total_elements)).collect()
+        series
+            .drain(offset..(offset + page_size).min(total_elements))
+            .collect()
     };
     let total_pages = if total_elements == 0 {
         0
@@ -2268,8 +2345,10 @@ fn collection_series_page_payload(
 
 fn uses_snapshot_id_bridge(requested_id: &str, resolved_id: &str) -> bool {
     requested_id != resolved_id
-        && ((requested_id.starts_with("series-") && requested_id[7..].chars().all(|ch| ch.is_ascii_digit()))
-            || (requested_id.starts_with("book-") && requested_id[5..].chars().all(|ch| ch.is_ascii_digit())))
+        && ((requested_id.starts_with("series-")
+            && requested_id[7..].chars().all(|ch| ch.is_ascii_digit()))
+            || (requested_id.starts_with("book-")
+                && requested_id[5..].chars().all(|ch| ch.is_ascii_digit())))
 }
 
 fn coerce_legacy_library_id_for_snapshot_bridge(payload: &mut Value) {
@@ -2312,7 +2391,8 @@ async fn load_persisted_readlists(
     let mut readlists = Vec::with_capacity(rows.len());
     for row in rows {
         let id = row.get::<String, _>("ID");
-        let (book_ids, filtered) = load_persisted_readlist_book_ids(&pool, &id, library_ids).await?;
+        let (book_ids, filtered) =
+            load_persisted_readlist_book_ids(&pool, &id, library_ids).await?;
         if library_ids.is_some() && book_ids.is_empty() {
             continue;
         }
@@ -2359,7 +2439,8 @@ async fn load_persisted_readlist_detail(
         return Ok(None);
     };
 
-    let (book_ids, filtered) = load_persisted_readlist_book_ids(&pool, readlist_id, library_ids).await?;
+    let (book_ids, filtered) =
+        load_persisted_readlist_book_ids(&pool, readlist_id, library_ids).await?;
 
     let readlist = ReadListReadModel {
         id: row.get::<String, _>("ID"),
@@ -2547,7 +2628,10 @@ async fn persist_collection_update(
     Ok(true)
 }
 
-async fn delete_persisted_collection(database_file: &FsPath, collection_id: &str) -> Result<bool, String> {
+async fn delete_persisted_collection(
+    database_file: &FsPath,
+    collection_id: &str,
+) -> Result<bool, String> {
     if !database_file.exists() {
         return Ok(false);
     }
@@ -2600,12 +2684,14 @@ async fn replace_collection_series(
         .await?;
 
     for (index, series_id) in series_ids.iter().enumerate() {
-        sqlx::query("INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)")
-            .bind(collection_id)
-            .bind(series_id)
-            .bind(index as i64)
-            .execute(&mut **tx)
-            .await?;
+        sqlx::query(
+            "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
+        )
+        .bind(collection_id)
+        .bind(series_id)
+        .bind(index as i64)
+        .execute(&mut **tx)
+        .await?;
     }
 
     Ok(())
@@ -2707,7 +2793,10 @@ async fn persist_readlist_update(
     Ok(true)
 }
 
-async fn delete_persisted_readlist(database_file: &FsPath, readlist_id: &str) -> Result<bool, String> {
+async fn delete_persisted_readlist(
+    database_file: &FsPath,
+    readlist_id: &str,
+) -> Result<bool, String> {
     if !database_file.exists() {
         return Ok(false);
     }

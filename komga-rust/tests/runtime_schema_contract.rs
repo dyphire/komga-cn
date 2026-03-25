@@ -168,7 +168,9 @@ async fn reject_outdated_schema() {
     persistence_contract_fixture::cleanup(paths);
 }
 
-async fn schema_inventory(path: &std::path::Path) -> anyhow::Result<Vec<(String, String, String, String)>> {
+async fn schema_inventory(
+    path: &std::path::Path,
+) -> anyhow::Result<Vec<(String, String, String, String)>> {
     let pool = connect_pool(path, 1).await?;
     let rows = sqlx::query(
         "SELECT type, name, tbl_name, COALESCE(sql, '') AS sql

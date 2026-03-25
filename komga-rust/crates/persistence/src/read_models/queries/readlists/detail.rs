@@ -29,23 +29,20 @@ pub(super) async fn list_book_readlists_sqlx(
 
     let mut readlists = vec![];
     for candidate in candidates {
-        let visible_book_ids = visible_readlist_book_ids_sqlx(
-            pool.clone(),
-            context,
-            &candidate.id,
-            allowed.as_ref(),
-        )
-        .await?;
+        let visible_book_ids =
+            visible_readlist_book_ids_sqlx(pool.clone(), context, &candidate.id, allowed.as_ref())
+                .await?;
         if visible_book_ids.is_empty() {
             continue;
         }
 
-        let total_count =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM readlist_books WHERE readlist_id = ?")
-                .bind(candidate.id.clone())
-                .fetch_one(&pool)
-                .await
-                .map_err(map_sqlx_error)?;
+        let total_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM readlist_books WHERE readlist_id = ?",
+        )
+        .bind(candidate.id.clone())
+        .fetch_one(&pool)
+        .await
+        .map_err(map_sqlx_error)?;
 
         readlists.push(ReadListReadModel {
             id: candidate.id,
@@ -83,13 +80,9 @@ pub(super) async fn get_readlist_detail_sqlx(
         return Ok(None);
     };
 
-    let visible_book_ids = visible_readlist_book_ids_sqlx(
-        pool.clone(),
-        context,
-        &candidate.id,
-        allowed.as_ref(),
-    )
-    .await?;
+    let visible_book_ids =
+        visible_readlist_book_ids_sqlx(pool.clone(), context, &candidate.id, allowed.as_ref())
+            .await?;
 
     let total_count =
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM readlist_books WHERE readlist_id = ?")

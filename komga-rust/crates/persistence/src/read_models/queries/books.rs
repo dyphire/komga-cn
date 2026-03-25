@@ -316,7 +316,13 @@ pub(super) fn apply_books_filters_sqlx<'args>(
         separated.push_unseparated("))");
     }
 
-    append_string_set_filter_sqlx("b.metadata_release_date", release_dates, builder, state, false);
+    append_string_set_filter_sqlx(
+        "b.metadata_release_date",
+        release_dates,
+        builder,
+        state,
+        false,
+    );
 }
 
 fn append_bool_sqlx_filter<'args>(

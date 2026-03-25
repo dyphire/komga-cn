@@ -1,4 +1,5 @@
 use std::io;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::time::UNIX_EPOCH;
 
@@ -35,6 +36,9 @@ pub async fn serve(listener: TcpListener) -> io::Result<()> {
 }
 
 pub async fn serve_with_config(listener: TcpListener, config: RuntimeConfig) -> io::Result<()> {
+    config
+        .resolve_webui_assets_layout()
+        .map_err(|error| io::Error::other(format!("webui startup layout check failed: {error}")))?;
     search::startup_recover(config.lucene_data_directory.as_path())
         .map_err(|error| io::Error::other(format!("search startup recovery failed: {error}")))?;
     axum::serve(listener, build_router_with_config(&config))
@@ -74,10 +78,11 @@ fn persist_scanner_rows(config: &RuntimeConfig) {
             for library in libraries {
                 let library_id = library.get::<String, _>("ID");
                 let root = library.get::<String, _>("ROOT");
-                let scan_result = match scan_root_folder(PathBuf::from(&root).as_path(), &Default::default()) {
-                    Ok(result) => result,
-                    Err(_) => continue,
-                };
+                let scan_result =
+                    match scan_root_folder(PathBuf::from(&root).as_path(), &Default::default()) {
+                        Ok(result) => result,
+                        Err(_) => continue,
+                    };
 
                 persist_library_scan(&pool, &library_id, &scan_result)
                     .await
@@ -86,7 +91,9 @@ fn persist_scanner_rows(config: &RuntimeConfig) {
                 if let Some(tasks_pool) = &tasks_pool {
                     persist_scanner_tasks(tasks_pool, &library_id, &scan_result)
                         .await
-                        .expect("scanner task rows should persist into Kotlin-compatible TASK table");
+                        .expect(
+                            "scanner task rows should persist into Kotlin-compatible TASK table",
+                        );
                 }
             }
 
@@ -107,7 +114,7 @@ async fn persist_library_scan(
 ) -> Result<(), sqlx::Error> {
     for scanned_series in &scan_result.series {
         let series = &scanned_series.series;
-        let series_id = series.path.to_string_lossy().to_string();
+        let series_id = route_safe_scanner_id("series", &series.path);
         let series_url = series.path.to_string_lossy().to_string();
 
         sqlx::query(
@@ -123,15 +130,21 @@ async fn persist_library_scan(
         .await?;
 
         for book in &scanned_series.books {
-            let book_id = book.path.to_string_lossy().to_string();
+            let book_id = route_safe_scanner_id("book", &book.path);
             let book_url = book.path.to_string_lossy().to_string();
+            let book_file_name = book
+                .path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default()
+                .to_string();
 
             sqlx::query(
                 "INSERT OR IGNORE INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, LIBRARY_ID, oneshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&book_id)
             .bind(to_unix_seconds(book.file_last_modified))
-            .bind(&book.name)
+            .bind(&book_file_name)
             .bind(book_url)
             .bind(&series_id)
             .bind(book.file_size as i64)
@@ -143,20 +156,10 @@ async fn persist_library_scan(
             sqlx::query(
                 "INSERT INTO MEDIA_FILE (FILE_NAME, BOOK_ID, FILE_SIZE) SELECT ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM MEDIA_FILE WHERE FILE_NAME = ? AND BOOK_ID = ?)",
             )
-            .bind(
-                book.path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or_default(),
-            )
+            .bind(&book_file_name)
             .bind(&book_id)
             .bind(book.file_size as i64)
-            .bind(
-                book.path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or_default(),
-            )
+            .bind(&book_file_name)
             .bind(&book_id)
             .execute(pool)
             .await?;
@@ -194,7 +197,7 @@ async fn persist_scanner_tasks(
 
     for scanned_series in &scan_result.series {
         for book in &scanned_series.books {
-            let book_id = book.path.to_string_lossy().to_string();
+            let book_id = route_safe_scanner_id("book", &book.path);
             persist_task_row(
                 tasks_pool,
                 &format!("ANALYZE_BOOK:{book_id}"),
@@ -207,6 +210,12 @@ async fn persist_scanner_tasks(
     }
 
     Ok(())
+}
+
+fn route_safe_scanner_id(prefix: &str, path: &std::path::Path) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.to_string_lossy().hash(&mut hasher);
+    format!("{prefix}-{:016x}", hasher.finish())
 }
 
 async fn persist_task_row(

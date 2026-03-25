@@ -75,7 +75,9 @@ async fn opds_v2_auth_returns_opds_authentication_document() {
         links.iter().any(|link| {
             link["rel"] == Value::String("logo".to_string())
                 && link["href"]
-                    == Value::String("http://opds-contract.local/android-chrome-512x512.png".to_string())
+                    == Value::String(
+                        "http://opds-contract.local/android-chrome-512x512.png".to_string(),
+                    )
         }),
         "OPDS auth contract requires host-resolved logo link",
     );
@@ -242,7 +244,9 @@ async fn opds_v2_manifest_requires_auth_and_rejects_snapshot_only_payload_for_pe
     );
     assert_eq!(
         payload["links"][0]["href"],
-        Value::String("http://opds-contract.local/opds/v2/books/book-opds-persisted-1/manifest".to_string()),
+        Value::String(
+            "http://opds-contract.local/opds/v2/books/book-opds-persisted-1/manifest".to_string()
+        ),
         "OPDS manifest contract requires self link href to target requested persisted book id",
     );
     assert_eq!(
@@ -257,7 +261,9 @@ async fn opds_v2_manifest_requires_auth_and_rejects_snapshot_only_payload_for_pe
     );
     assert_eq!(
         payload["links"][1]["href"],
-        Value::String("http://opds-contract.local/opds/v2/books/book-opds-persisted-1/file".to_string()),
+        Value::String(
+            "http://opds-contract.local/opds/v2/books/book-opds-persisted-1/file".to_string()
+        ),
         "OPDS manifest contract requires acquisition link to target requested persisted book id, not snapshot book-1",
     );
     assert_eq!(
@@ -267,7 +273,10 @@ async fn opds_v2_manifest_requires_auth_and_rejects_snapshot_only_payload_for_pe
     );
     assert_eq!(
         payload["links"][2]["href"],
-        Value::String("http://opds-contract.local/opds/v2/books/book-opds-persisted-1/progression".to_string()),
+        Value::String(
+            "http://opds-contract.local/opds/v2/books/book-opds-persisted-1/progression"
+                .to_string()
+        ),
         "OPDS manifest contract requires progression link to target requested persisted book id",
     );
     assert_eq!(
@@ -280,7 +289,9 @@ async fn opds_v2_manifest_requires_auth_and_rejects_snapshot_only_payload_for_pe
     );
     assert_eq!(
         payload["resources"][0]["href"],
-        Value::String("http://opds-contract.local/opds/v2/books/book-opds-persisted-1/thumbnail".to_string()),
+        Value::String(
+            "http://opds-contract.local/opds/v2/books/book-opds-persisted-1/thumbnail".to_string()
+        ),
         "OPDS manifest contract requires resources thumbnail href to target requested persisted book id",
     );
     assert_ne!(
@@ -393,10 +404,7 @@ async fn admin_session_token(app: &axum::Router) -> String {
                 .uri("/api/v2/users/me")
                 .header(
                     header::AUTHORIZATION,
-                    format!(
-                        "Basic {}",
-                        compat_auth_env::COMPAT_ADMIN_BASIC_AUTH_BASE64,
-                    ),
+                    format!("Basic {}", compat_auth_env::COMPAT_ADMIN_BASIC_AUTH_BASE64,),
                 )
                 .header("X-Auth-Token", "")
                 .body(Body::empty())

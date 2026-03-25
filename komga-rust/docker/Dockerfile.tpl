@@ -5,6 +5,8 @@ COPY assembly/${ARCHIVE} /tmp/komga-rust-docker-context.tar.gz
 RUN mkdir source && tar -xzf /tmp/komga-rust-docker-context.tar.gz -C source
 WORKDIR /builder/source/komga-rust
 RUN cargo build --release --bin komga-rust
+RUN test -f /builder/source/komga/src/main/resources/public/index.html
+RUN cp -a /builder/source/komga/src/main/resources/public /builder/webui-public
 
 # amd64 builder
 FROM ubuntu:24.10 AS build-amd64
@@ -45,6 +47,7 @@ FROM build-${TARGETARCH} AS runner
 VOLUME /config
 WORKDIR /app
 COPY --from=builder /builder/source/komga-rust/target/release/komga-rust ./komga-rust
+COPY --from=builder /builder/webui-public ./public
 ENV KOMGA_CONFIGDIR="/config"
 ENV KOMGA_CONFIG_DIR="/config"
 ENV KOMGA_RUST_MODE="localdb"

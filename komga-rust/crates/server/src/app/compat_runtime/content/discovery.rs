@@ -6,31 +6,23 @@ use axum::body::Bytes;
 use axum::extract::Extension;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use komga_application::discovery::{
-    BooksLatestQuery, BooksListQuery, DiscoveryQueries, SeriesDetailQuery, SeriesListQuery,
-};
 use komga_domain::discovery::{
     BookReadModel, DirectBrowseBooksListFamily, DiscoveryError, NonNativeRequestShape,
     PageEnvelope, SeriesReadModel,
 };
-use komga_persistence::read_models::{
-    BookRow, SeriesRow, SqlxRuntimeDiscoveryAdapter, SqlxRuntimeDiscoveryStore,
-};
 use komga_persistence::sqlite::connect_pool;
 use serde_json::{Value, json};
-use sqlx::Row;
+use sqlx::{QueryBuilder, Row, Sqlite};
 
 use crate::app::CompatProfile;
 use crate::app::discovery_auth::{DiscoveryAuthState, DiscoveryQueryContext};
-use crate::app::placeholder_auth::{require_auth, resolved_auth_user, resolved_token, user_id};
-use crate::app::snapshots::{books_latest_json, snapshot_json};
+use crate::app::placeholder_auth::{require_auth, resolved_auth_user, user_id};
 
 use super::super::{AuthDatabaseState, ReadProgressState};
 use super::helpers::{
-    DiscoveryOwnershipRoute, DiscoveryShape, apply_non_native_diagnostics, books_page_payload,
-    discovery_ownership_route, extract_full_text_search, mark_native, mark_non_native,
-    matches_search_pattern, overlay_book_read_progress, parse_search_regex, query_bool,
-    query_has_key, query_value, query_values, to_domain_query_context, wants_shadow_marker,
+    DiscoveryOwnershipRoute, DiscoveryShape, books_page_payload, discovery_ownership_route,
+    extract_full_text_search, mark_native, mark_non_native, matches_search_pattern,
+    parse_search_regex, query_bool, query_has_key, query_value, query_values, wants_shadow_marker,
 };
 
 pub(in crate::app::compat_runtime) async fn series(
@@ -45,17 +37,18 @@ pub(in crate::app::compat_runtime) async fn series(
     }
 
     if !database_file.exists() {
-        return Json(series_json_for_request(profile, &uri, None)).into_response();
+        return removed_runtime_fallback_response(
+            "GET /api/v1/series",
+            "persisted/domain-backed data unavailable",
+        );
     }
 
     let query = uri.query().unwrap_or_default();
     let requested_library_ids = requested_query_values(query, "library_id");
-    let library_ids = remap_legacy_library_ids_for_persisted(
-        database_file,
-        requested_library_ids.as_ref(),
-    )
-    .await
-    .or(requested_library_ids);
+    let library_ids =
+        remap_legacy_library_ids_for_persisted(database_file, requested_library_ids.as_ref())
+            .await
+            .or(requested_library_ids);
     let collection_ids = requested_query_values(query, "collection_id");
     let search = query_value(query, "search").map(decode_query_component);
     let page = query_value(query, "page")
@@ -240,14 +233,13 @@ pub(in crate::app::compat_runtime) async fn series_list(
         return native_response;
     }
 
-    let mut response =
-        Json(series_json_for_request(profile, &uri, full_text_search)).into_response();
+    let _ = profile;
+    let _ = full_text_search;
 
-    if wants_shadow_marker(&headers, payload.as_ref()) {
-        mark_non_native(&mut response);
-    }
-
-    response
+    removed_runtime_fallback_response(
+        "POST /api/v1/series/list",
+        "persisted/domain-backed data unavailable",
+    )
 }
 
 pub(in crate::app::compat_runtime) async fn books(
@@ -287,7 +279,7 @@ pub(in crate::app::compat_runtime) async fn books(
         let unpaged = query_bool(query, "unpaged");
         let sort_values = query_values(query, "sort")
             .into_iter()
-            .map(str::to_string)
+            .map(decode_query_component)
             .collect::<Vec<_>>();
         let search = query_value(query, "search").map(decode_query_component);
 
@@ -306,25 +298,22 @@ pub(in crate::app::compat_runtime) async fn books(
             )
             .await
             {
-                Ok(page) => return Json(books_page_payload(page, context.is_admin, !unpaged)).into_response(),
+                Ok(page) => {
+                    return Json(books_page_payload(page, context.is_admin, !unpaged))
+                        .into_response();
+                }
                 Err(error) => return internal_error_response(error),
             }
         }
     }
 
-    let token = resolved_token(&headers);
-    let mut books = snapshot_json("books-list.json", profile);
-    let read_progress = state
-        .progress_by_token
-        .lock()
-        .expect("read-progress state lock should not be poisoned")
-        .get(&token)
-        .and_then(|books| books.get("book-1"))
-        .cloned();
+    let _ = profile;
+    let _ = state;
 
-    overlay_book_read_progress(&mut books, read_progress);
-
-    Json(books).into_response()
+    removed_runtime_fallback_response(
+        "GET /api/v1/books",
+        "persisted/domain-backed data unavailable",
+    )
 }
 
 pub(in crate::app::compat_runtime) async fn books_list(
@@ -366,14 +355,13 @@ pub(in crate::app::compat_runtime) async fn books_list(
         return native_response;
     }
 
-    let mut response =
-        Json(books_json_for_request(profile, &uri, full_text_search)).into_response();
+    let _ = profile;
+    let _ = full_text_search;
 
-    if wants_shadow_marker(&headers, payload.as_ref()) {
-        mark_non_native(&mut response);
-    }
-
-    response
+    removed_runtime_fallback_response(
+        "POST /api/v1/books/list",
+        "persisted/domain-backed data unavailable",
+    )
 }
 
 pub(in crate::app::compat_runtime) async fn books_latest(
@@ -429,14 +417,21 @@ pub(in crate::app::compat_runtime) async fn books_latest(
         )
         .await
         {
-            Ok(page) => return Json(books_page_payload(page, context.is_admin, !unpaged)).into_response(),
+            Ok(page) => {
+                return Json(books_page_payload(page, context.is_admin, !unpaged)).into_response();
+            }
             Err(error) => return internal_error_response(error),
         }
     }
 
     if (auth_db.database_file.exists() || ownership_route == DiscoveryOwnershipRoute::NativeOwned)
-        && let Some(mut native_response) =
-            native_owned_books_latest_response(&headers, &uri, &auth_state).await
+        && let Some(mut native_response) = native_owned_books_latest_response(
+            &headers,
+            &uri,
+            &auth_state,
+            auth_db.database_file.as_path(),
+        )
+        .await
     {
         if ownership_route != DiscoveryOwnershipRoute::NativeOwned {
             native_response
@@ -446,20 +441,13 @@ pub(in crate::app::compat_runtime) async fn books_latest(
         return native_response;
     }
 
-    let token = resolved_token(&headers);
-    let read_progress = state
-        .progress_by_token
-        .lock()
-        .expect("read-progress state lock should not be poisoned")
-        .get(&token)
-        .and_then(|books| books.get("book-1"))
-        .cloned();
+    let _ = profile;
+    let _ = state;
 
-    let mut books = books_latest_json(profile);
-
-    overlay_book_read_progress(&mut books, read_progress);
-
-    Json(books).into_response()
+    removed_runtime_fallback_response(
+        "GET /api/v1/books/latest",
+        "persisted/domain-backed data unavailable",
+    )
 }
 
 pub(in crate::app::compat_runtime) async fn books_ondeck(
@@ -536,6 +524,121 @@ pub(in crate::app::compat_runtime) async fn authors(
     }
 }
 
+pub(in crate::app::compat_runtime) async fn authors_names(
+    headers: HeaderMap,
+    uri: Uri,
+    database_file: &FsPath,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if !database_file.exists() {
+        return Json(json!([])).into_response();
+    }
+
+    let search = query_value(uri.query().unwrap_or_default(), "search")
+        .map(decode_query_component)
+        .unwrap_or_default();
+
+    match load_persisted_author_names(database_file, &search).await {
+        Ok(values) => Json(json!(values)).into_response(),
+        Err(error) => internal_error_response(error),
+    }
+}
+
+pub(in crate::app::compat_runtime) async fn authors_roles(
+    headers: HeaderMap,
+    database_file: &FsPath,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if !database_file.exists() {
+        return Json(json!([])).into_response();
+    }
+
+    match load_persisted_author_roles(database_file).await {
+        Ok(values) => Json(json!(values)).into_response(),
+        Err(error) => internal_error_response(error),
+    }
+}
+
+pub(in crate::app::compat_runtime) async fn authors_v2(
+    headers: HeaderMap,
+    uri: Uri,
+    database_file: &FsPath,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if !database_file.exists() {
+        return Json(authors_v2_page_payload(vec![], 0, 20, false)).into_response();
+    }
+
+    let query = uri.query().unwrap_or_default();
+    let search = query_value(query, "search")
+        .filter(|value| !value.is_empty())
+        .map(decode_query_component);
+    let role = query_value(query, "role")
+        .filter(|value| !value.is_empty())
+        .map(decode_query_component);
+    let library_ids = query_values(query, "library_id")
+        .into_iter()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(decode_query_component)
+        .collect::<Vec<_>>();
+    let collection_id = query_value(query, "collection_id")
+        .filter(|value| !value.is_empty())
+        .map(decode_query_component);
+    let series_id = query_value(query, "series_id")
+        .filter(|value| !value.is_empty())
+        .map(decode_query_component);
+    let readlist_id = query_value(query, "readlist_id")
+        .filter(|value| !value.is_empty())
+        .map(decode_query_component);
+    let page = query_value(query, "page")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
+    let size = query_value(query, "size")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(20)
+        .max(1);
+    let unpaged = query_bool(query, "unpaged");
+
+    let scope = if !library_ids.is_empty() {
+        PersistedAuthorsScope::Libraries(library_ids)
+    } else if let Some(collection_id) = collection_id {
+        PersistedAuthorsScope::Collection(collection_id)
+    } else if let Some(series_id) = series_id {
+        PersistedAuthorsScope::Series(series_id)
+    } else if let Some(readlist_id) = readlist_id {
+        PersistedAuthorsScope::ReadList(readlist_id)
+    } else {
+        PersistedAuthorsScope::All
+    };
+
+    let mut authors = match load_persisted_authors_by_scope(database_file, &scope).await {
+        Ok(values) => values,
+        Err(error) => return internal_error_response(error),
+    };
+
+    if let Some(role) = role {
+        let role = role.to_ascii_lowercase();
+        authors.retain(|author| author.role.to_ascii_lowercase() == role);
+    }
+
+    if let Some(search) = search {
+        let search = search.to_ascii_lowercase();
+        authors.retain(|author| author.name.to_ascii_lowercase().contains(&search));
+    }
+
+    Json(authors_v2_page_payload(authors, page, size, unpaged)).into_response()
+}
+
 pub(in crate::app::compat_runtime) async fn genres(
     headers: HeaderMap,
     uri: Uri,
@@ -577,6 +680,39 @@ pub(in crate::app::compat_runtime) async fn tags(
         .map(decode_query_component);
 
     match load_persisted_tags(database_file, library_id.as_deref()).await {
+        Ok(values) => Json(json!(values)).into_response(),
+        Err(error) => internal_error_response(error),
+    }
+}
+
+pub(in crate::app::compat_runtime) async fn series_tags(
+    headers: HeaderMap,
+    uri: Uri,
+    database_file: &FsPath,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if !database_file.exists() {
+        return Json(json!([])).into_response();
+    }
+
+    let query = uri.query().unwrap_or_default();
+    let library_id = query_value(query, "library_id")
+        .filter(|value| !value.is_empty())
+        .map(decode_query_component);
+    let collection_id = query_value(query, "collection_id")
+        .filter(|value| !value.is_empty())
+        .map(decode_query_component);
+
+    match load_persisted_series_tags(
+        database_file,
+        library_id.as_deref(),
+        collection_id.as_deref(),
+    )
+    .await
+    {
         Ok(values) => Json(json!(values)).into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -757,6 +893,14 @@ enum PersistedBookTagsScope {
     Library(String),
 }
 
+enum PersistedAuthorsScope {
+    All,
+    Libraries(Vec<String>),
+    Collection(String),
+    Series(String),
+    ReadList(String),
+}
+
 #[derive(Clone, serde::Serialize)]
 struct PersistedAuthorEntry {
     name: String,
@@ -780,7 +924,11 @@ fn books_page_for_entries(entries: Vec<PersistedBookBrowseEntry>, uri: &Uri) -> 
     } else {
         requested_size
     };
-    let offset = if unpaged { 0 } else { page.saturating_mul(page_size) };
+    let offset = if unpaged {
+        0
+    } else {
+        page.saturating_mul(page_size)
+    };
 
     let page_entries = if unpaged {
         entries
@@ -868,12 +1016,14 @@ async fn load_persisted_ondeck_books(
     let mut first_per_series = BTreeMap::<String, PersistedBookBrowseEntry>::new();
     for row in rows {
         let series_id = row.get::<String, _>("SERIES_ID");
-        first_per_series.entry(series_id).or_insert_with(|| PersistedBookBrowseEntry {
-            id: row.get::<String, _>("ID"),
-            library_id: row.get::<String, _>("LIBRARY_ID"),
-            name: row.get::<String, _>("NAME"),
-            title: row.get::<String, _>("TITLE"),
-        });
+        first_per_series
+            .entry(series_id)
+            .or_insert_with(|| PersistedBookBrowseEntry {
+                id: row.get::<String, _>("ID"),
+                library_id: row.get::<String, _>("LIBRARY_ID"),
+                name: row.get::<String, _>("NAME"),
+                title: row.get::<String, _>("TITLE"),
+            });
     }
 
     pool.close().await;
@@ -997,6 +1147,241 @@ async fn load_persisted_authors(
 
     pool.close().await;
     Ok(authors)
+}
+
+async fn load_persisted_author_names(
+    database_file: &FsPath,
+    search: &str,
+) -> Result<Vec<String>, String> {
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("open author names db: {error}"))?;
+
+    let rows = sqlx::query(
+        "SELECT DISTINCT a.NAME
+         FROM BOOK_METADATA_AUTHOR a
+         JOIN BOOK b ON b.ID = a.BOOK_ID
+         ORDER BY lower(a.NAME), a.NAME",
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|error| format!("query persisted author names: {error}"))?;
+
+    let search = search.to_ascii_lowercase();
+    let names = rows
+        .into_iter()
+        .map(|row| row.get::<String, _>("NAME"))
+        .filter(|name| {
+            if search.is_empty() {
+                true
+            } else {
+                name.to_ascii_lowercase().contains(&search)
+            }
+        })
+        .collect();
+
+    pool.close().await;
+    Ok(names)
+}
+
+async fn load_persisted_author_roles(database_file: &FsPath) -> Result<Vec<String>, String> {
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("open author roles db: {error}"))?;
+
+    let rows = sqlx::query(
+        "SELECT DISTINCT ROLE
+         FROM BOOK_METADATA_AUTHOR
+         ORDER BY lower(ROLE), ROLE",
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|error| format!("query persisted author roles: {error}"))?;
+
+    let roles = rows
+        .into_iter()
+        .map(|row| row.get::<String, _>("ROLE"))
+        .collect();
+
+    pool.close().await;
+    Ok(roles)
+}
+
+async fn load_persisted_authors_by_scope(
+    database_file: &FsPath,
+    scope: &PersistedAuthorsScope,
+) -> Result<Vec<PersistedAuthorEntry>, String> {
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("open v2 authors db: {error}"))?;
+
+    let mut query = QueryBuilder::<Sqlite>::new(
+        "SELECT a.NAME, a.ROLE FROM BOOK_METADATA_AUTHOR a JOIN BOOK b ON b.ID = a.BOOK_ID",
+    );
+
+    match scope {
+        PersistedAuthorsScope::All => {}
+        PersistedAuthorsScope::Libraries(library_ids) => {
+            query.push(" WHERE b.LIBRARY_ID IN (");
+            let mut separated = query.separated(",");
+            for library_id in library_ids {
+                separated.push_bind(library_id);
+            }
+            separated.push_unseparated(")");
+        }
+        PersistedAuthorsScope::Collection(collection_id) => {
+            query.push(" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = b.SERIES_ID WHERE cs.COLLECTION_ID = ");
+            query.push_bind(collection_id);
+        }
+        PersistedAuthorsScope::Series(series_id) => {
+            query.push(" WHERE b.SERIES_ID = ");
+            query.push_bind(series_id);
+        }
+        PersistedAuthorsScope::ReadList(readlist_id) => {
+            query.push(" JOIN READLIST_BOOK rb ON rb.BOOK_ID = b.ID WHERE rb.READLIST_ID = ");
+            query.push_bind(readlist_id);
+        }
+    }
+
+    query.push(" ORDER BY lower(a.NAME), lower(a.ROLE), a.NAME, a.ROLE, b.ID");
+
+    let rows = query
+        .build()
+        .fetch_all(&pool)
+        .await
+        .map_err(|error| format!("query persisted v2 authors: {error}"))?;
+
+    let mut authors = Vec::with_capacity(rows.len());
+    let mut seen = BTreeSet::new();
+    for row in rows {
+        let name = row.get::<String, _>("NAME");
+        let role = row.get::<String, _>("ROLE");
+        if seen.insert((name.clone(), role.clone())) {
+            authors.push(PersistedAuthorEntry { name, role });
+        }
+    }
+
+    pool.close().await;
+    Ok(authors)
+}
+
+async fn load_persisted_series_tags(
+    database_file: &FsPath,
+    library_id: Option<&str>,
+    collection_id: Option<&str>,
+) -> Result<Vec<String>, String> {
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("open series tags db: {error}"))?;
+
+    let rows = if let Some(library_id) = library_id {
+        sqlx::query(
+            "SELECT DISTINCT st.TAG
+             FROM SERIES_METADATA_TAG st
+             JOIN SERIES s ON s.ID = st.SERIES_ID
+             WHERE s.LIBRARY_ID = ?
+             ORDER BY lower(st.TAG), st.TAG",
+        )
+        .bind(library_id)
+        .fetch_all(&pool)
+        .await
+    } else if let Some(collection_id) = collection_id {
+        sqlx::query(
+            "SELECT DISTINCT st.TAG
+             FROM SERIES_METADATA_TAG st
+             JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = st.SERIES_ID
+             WHERE cs.COLLECTION_ID = ?
+             ORDER BY lower(st.TAG), st.TAG",
+        )
+        .bind(collection_id)
+        .fetch_all(&pool)
+        .await
+    } else {
+        sqlx::query(
+            "SELECT DISTINCT TAG
+             FROM SERIES_METADATA_TAG
+             ORDER BY lower(TAG), TAG",
+        )
+        .fetch_all(&pool)
+        .await
+    }
+    .map_err(|error| format!("query persisted series tags: {error}"))?;
+
+    let tags = rows
+        .into_iter()
+        .map(|row| row.get::<String, _>("TAG"))
+        .collect();
+
+    pool.close().await;
+    Ok(tags)
+}
+
+fn authors_v2_page_payload(
+    authors: Vec<PersistedAuthorEntry>,
+    page: usize,
+    size: usize,
+    unpaged: bool,
+) -> Value {
+    let total_elements = authors.len();
+    let page_size = if unpaged {
+        total_elements.max(1)
+    } else {
+        size.max(1)
+    };
+    let offset = if unpaged {
+        0
+    } else {
+        page.saturating_mul(page_size)
+    };
+
+    let content = if unpaged {
+        authors
+    } else if offset >= total_elements {
+        vec![]
+    } else {
+        authors.into_iter().skip(offset).take(page_size).collect()
+    };
+
+    let total_pages = if total_elements == 0 {
+        0
+    } else if unpaged {
+        1
+    } else {
+        total_elements.div_ceil(page_size)
+    };
+    let number = if unpaged { 0 } else { page };
+    let number_of_elements = content.len();
+    let first = number == 0;
+    let last = total_pages == 0 || number + 1 >= total_pages;
+
+    json!({
+        "content": content,
+        "number": number,
+        "size": page_size,
+        "first": first,
+        "last": last,
+        "empty": number_of_elements == 0,
+        "numberOfElements": number_of_elements,
+        "totalElements": total_elements,
+        "totalPages": total_pages,
+        "sort": {
+            "empty": true,
+            "sorted": false,
+            "unsorted": true,
+        },
+        "pageable": {
+            "pageNumber": number,
+            "pageSize": page_size,
+            "offset": if unpaged { 0 } else { offset },
+            "sort": {
+                "empty": true,
+                "sorted": false,
+                "unsorted": true,
+            },
+            "paged": !unpaged,
+            "unpaged": unpaged,
+        },
+    })
 }
 
 async fn load_persisted_genres(
@@ -1188,97 +1573,6 @@ async fn load_persisted_library_strings(
     Ok(values)
 }
 
-fn series_json_for_request(
-    profile: CompatProfile,
-    uri: &Uri,
-    full_text_search: Option<String>,
-) -> Value {
-    let mut series = snapshot_json("series-list.json", profile);
-    let query = uri.query().unwrap_or_default();
-
-    let page = query_value(query, "page")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let size = query_value(query, "size")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(20)
-        .max(1);
-    let sort = query_value(query, "sort");
-    let search_term = query_value(query, "search")
-        .map(str::to_owned)
-        .or(full_text_search);
-    let search_regex = query_value(query, "search_regex").and_then(parse_search_regex);
-    let has_author_filters = query_has_key(query, "authors") || query_has_key(query, "author");
-
-    let mut filtered_content = series
-        .pointer("/content")
-        .and_then(|value| value.as_array())
-        .cloned()
-        .unwrap_or_default();
-
-    if has_author_filters {
-        filtered_content.clear();
-    }
-
-    if let Some(term) = search_term {
-        let normalized = term.to_ascii_lowercase();
-        if !normalized.trim().is_empty() && !"series".contains(normalized.trim()) {
-            filtered_content.clear();
-        }
-    }
-
-    if let Some((pattern, field)) = search_regex {
-        let candidate = if field == "title_sort" {
-            "series"
-        } else {
-            "series"
-        };
-        if !matches_search_pattern(candidate, &pattern) {
-            filtered_content.clear();
-        }
-    }
-
-    let total_elements = filtered_content.len();
-    let start = page.saturating_mul(size);
-    let end = start.saturating_add(size).min(total_elements);
-    let page_content = if start >= total_elements {
-        Vec::new()
-    } else {
-        filtered_content[start..end].to_vec()
-    };
-    let number_of_elements = page_content.len();
-    let total_pages = if total_elements == 0 {
-        0
-    } else {
-        total_elements.div_ceil(size)
-    };
-    let first = page == 0;
-    let last = total_pages == 0 || page + 1 >= total_pages;
-    let empty = number_of_elements == 0;
-    let sorted = sort.is_some();
-
-    series["content"] = Value::Array(page_content);
-    series["number"] = Value::Number((page as u64).into());
-    series["size"] = Value::Number((size as u64).into());
-    series["first"] = Value::Bool(first);
-    series["last"] = Value::Bool(last);
-    series["empty"] = Value::Bool(empty);
-    series["numberOfElements"] = Value::Number((number_of_elements as u64).into());
-    series["totalElements"] = Value::Number((total_elements as u64).into());
-    series["totalPages"] = Value::Number((total_pages as u64).into());
-    series["pageable"]["pageNumber"] = Value::Number((page as u64).into());
-    series["pageable"]["pageSize"] = Value::Number((size as u64).into());
-    series["pageable"]["offset"] = Value::Number((start as u64).into());
-    series["sort"]["empty"] = Value::Bool(!sorted);
-    series["sort"]["sorted"] = Value::Bool(sorted);
-    series["sort"]["unsorted"] = Value::Bool(!sorted);
-    series["pageable"]["sort"]["empty"] = Value::Bool(!sorted);
-    series["pageable"]["sort"]["sorted"] = Value::Bool(sorted);
-    series["pageable"]["sort"]["unsorted"] = Value::Bool(!sorted);
-
-    series
-}
-
 #[derive(Clone)]
 struct PersistedSeriesBrowseQuery {
     library_ids: Option<Vec<String>>,
@@ -1452,7 +1746,7 @@ async fn load_persisted_series_summaries(
         .map_err(|error| format!("open series db: {error}"))?;
 
     let rows = sqlx::query(
-        "SELECT s.ID, s.LIBRARY_ID, s.LAST_MODIFIED_DATE, COALESCE(sm.TITLE, s.NAME) AS TITLE, COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) AS TITLE_SORT, COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS LABELS FROM SERIES s JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID GROUP BY s.ID, s.LIBRARY_ID, s.LAST_MODIFIED_DATE, sm.TITLE, sm.TITLE_SORT, s.NAME"
+        "SELECT s.ID, s.LIBRARY_ID, s.LAST_MODIFIED_DATE, COALESCE(sm.TITLE, s.NAME) AS TITLE, COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) AS TITLE_SORT, COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS LABELS FROM SERIES s LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID GROUP BY s.ID, s.LIBRARY_ID, s.LAST_MODIFIED_DATE, sm.TITLE, sm.TITLE_SORT, s.NAME"
     )
     .fetch_all(&pool)
     .await
@@ -1487,9 +1781,9 @@ async fn load_persisted_library_ids(database_file: &FsPath) -> Result<Vec<String
          )
          ORDER BY ID COLLATE NOCASE ASC, ID ASC",
     )
-        .fetch_all(&pool)
-        .await
-        .map_err(|error| format!("query persisted browse-library ids: {error}"))?;
+    .fetch_all(&pool)
+    .await
+    .map_err(|error| format!("query persisted browse-library ids: {error}"))?;
 
     let ids = rows
         .into_iter()
@@ -1648,80 +1942,20 @@ fn internal_error_response(error: String) -> Response {
         .into_response()
 }
 
-fn books_json_for_request(
-    profile: CompatProfile,
-    uri: &Uri,
-    full_text_search: Option<String>,
-) -> Value {
-    let mut books = snapshot_json("books-list.json", profile);
-    let query = uri.query().unwrap_or_default();
+fn removed_runtime_fallback_response(route: &str, detail: impl std::fmt::Display) -> Response {
+    (
+        StatusCode::NOT_IMPLEMENTED,
+        Json(json!({
+            "error": format!(
+                "{route} requires persisted/domain-backed data; snapshot fallback removed ({detail})",
+            ),
+        })),
+    )
+        .into_response()
+}
 
-    let page = query_value(query, "page")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let size = query_value(query, "size")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(20)
-        .max(1);
-    let sort = query_values(query, "sort");
-
-    let mut filtered_content = books
-        .pointer("/content")
-        .and_then(|value| value.as_array())
-        .cloned()
-        .unwrap_or_default();
-
-    if let Some(term) = full_text_search {
-        let normalized = term.to_ascii_lowercase();
-        if !normalized.trim().is_empty() {
-            filtered_content.retain(|candidate| {
-                candidate
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .is_some_and(|name| name.to_ascii_lowercase().contains(normalized.trim()))
-            });
-        }
-    }
-
-    let total_elements = filtered_content.len();
-    let start = page.saturating_mul(size);
-    let end = start.saturating_add(size).min(total_elements);
-    let page_content = if start >= total_elements {
-        Vec::new()
-    } else {
-        filtered_content[start..end].to_vec()
-    };
-    let number_of_elements = page_content.len();
-    let total_pages = if total_elements == 0 {
-        0
-    } else {
-        total_elements.div_ceil(size)
-    };
-    let first = page == 0;
-    let last = total_pages == 0 || page + 1 >= total_pages;
-    let empty = number_of_elements == 0;
-    let sorted = !sort.is_empty();
-
-    books["content"] = Value::Array(page_content);
-    books["number"] = Value::Number((page as u64).into());
-    books["size"] = Value::Number((size as u64).into());
-    books["first"] = Value::Bool(first);
-    books["last"] = Value::Bool(last);
-    books["empty"] = Value::Bool(empty);
-    books["numberOfElements"] = Value::Number((number_of_elements as u64).into());
-    books["totalElements"] = Value::Number((total_elements as u64).into());
-    books["totalPages"] = Value::Number((total_pages as u64).into());
-    books["pageable"]["pageNumber"] = Value::Number((page as u64).into());
-    books["pageable"]["pageSize"] = Value::Number((size as u64).into());
-    books["pageable"]["offset"] = Value::Number((start as u64).into());
-    books["sort"]["empty"] = Value::Bool(!sorted);
-    books["sort"]["sorted"] = Value::Bool(sorted);
-    books["sort"]["unsorted"] = Value::Bool(!sorted);
-    books["pageable"]["sort"]["empty"] = Value::Bool(!sorted);
-    books["pageable"]["sort"]["sorted"] = Value::Bool(sorted);
-    books["pageable"]["sort"]["unsorted"] = Value::Bool(!sorted);
-
-    books
+fn removed_discovery_fallback_response(route: &str, error: &DiscoveryError) -> Response {
+    removed_runtime_fallback_response(route, format!("{error:?}"))
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1889,6 +2123,7 @@ fn parse_persisted_books_sort_mode(sorts: &[String]) -> Option<PersistedBooksSor
 
     match sorts.first().map(|value| value.as_str()) {
         Some("metadata.title,asc") => Some(PersistedBooksSortMode::TitleAsc),
+        Some("series,metadata.numberSort,asc") => Some(PersistedBooksSortMode::TitleAsc),
         Some("createdDate,desc") => Some(PersistedBooksSortMode::CreatedDateDesc),
         Some("lastModifiedDate,desc") => Some(PersistedBooksSortMode::LastModifiedDateDesc),
         Some("metadata.releaseDate,desc") => Some(PersistedBooksSortMode::ReleaseDateDesc),
@@ -1903,9 +2138,9 @@ fn parse_persisted_series_sort_mode(sorts: &[String]) -> Option<PersistedSeriesS
 
     match sorts.first().map(|value| value.as_str()) {
         Some("metadata.titleSort,asc") => Some(PersistedSeriesSortMode::TitleAsc),
-        Some("createdDate,desc") | Some("lastModifiedDate,desc") | Some("booksMetadata.releaseDate,desc") => {
-            Some(PersistedSeriesSortMode::Latest)
-        }
+        Some("createdDate,desc")
+        | Some("lastModifiedDate,desc")
+        | Some("booksMetadata.releaseDate,desc") => Some(PersistedSeriesSortMode::Latest),
         _ => None,
     }
 }
@@ -2068,7 +2303,9 @@ async fn load_persisted_books_page(
     ))
 }
 
-async fn load_persisted_book_summaries(database_file: &FsPath) -> Result<Vec<PersistedBookSummary>, String> {
+async fn load_persisted_book_summaries(
+    database_file: &FsPath,
+) -> Result<Vec<PersistedBookSummary>, String> {
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(|error| format!("open books db: {error}"))?;
@@ -2123,7 +2360,7 @@ async fn native_owned_books_list_response(
     let query_string = uri.query().unwrap_or_default();
     let sorts = query_values(query_string, "sort")
         .into_iter()
-        .map(str::to_string)
+        .map(decode_query_component)
         .collect::<Vec<_>>();
     let page = query_value(query_string, "page")
         .and_then(|value| value.parse::<usize>().ok())
@@ -2136,13 +2373,11 @@ async fn native_owned_books_list_response(
     let oneshot_bootstrap_series_id = exact_oneshot_bootstrap_series_id(payload);
 
     if oneshot_bootstrap_series_id.is_some() && !query_string.trim().is_empty() {
-        return Some(non_native_books_list_response(
-            DiscoveryError::NonNativeRequestShape(NonNativeRequestShape::UnsupportedBookFilter(
+        return Some(removed_discovery_fallback_response(
+            "POST /api/v1/books/list",
+            &DiscoveryError::NonNativeRequestShape(NonNativeRequestShape::UnsupportedBookFilter(
                 "oneshot-bootstrap.query-params".to_string(),
             )),
-            uri,
-            full_text_search,
-            payload,
         ));
     }
 
@@ -2151,11 +2386,9 @@ async fn native_owned_books_list_response(
             Ok(filters) => filters,
             Err(error) => {
                 if strict_native_shape {
-                    return Some(non_native_books_list_response(
-                        error,
-                        uri,
-                        full_text_search,
-                        payload,
+                    return Some(removed_discovery_fallback_response(
+                        "POST /api/v1/books/list",
+                        &error,
                     ));
                 }
                 legacy_webui_books_filters(payload)
@@ -2164,11 +2397,9 @@ async fn native_owned_books_list_response(
 
     if !strict_native_shape {
         coerce_legacy_books_filters_for_persisted(&mut filters);
-        filters.library_ids = remap_legacy_library_ids_for_persisted(
-            database_file,
-            filters.library_ids.as_ref(),
-        )
-        .await;
+        filters.library_ids =
+            remap_legacy_library_ids_for_persisted(database_file, filters.library_ids.as_ref())
+                .await;
     }
 
     let requested_library_ids = strict_native_shape
@@ -2201,7 +2432,8 @@ async fn native_owned_books_list_response(
     {
         match persisted_page {
             Ok(page) => {
-                let mut response = Json(books_page_payload(page, is_admin, !unpaged)).into_response();
+                let mut response =
+                    Json(books_page_payload(page, is_admin, !unpaged)).into_response();
                 mark_native(&mut response);
                 return Some(response);
             }
@@ -2217,133 +2449,37 @@ async fn native_owned_books_list_response(
         }
     }
 
-    let domain_context = to_domain_query_context(context);
-    let fallback_search = full_text_search.clone();
+    let _ = uri;
+    let _ = payload;
+    let _ = full_text_search;
+    let _ = is_admin;
 
-    let result = with_seeded_books_discovery_queries(|queries| async move {
-        if let Some(series_id) = oneshot_bootstrap_series_id.clone() {
-            let visible_series = queries
-                .get_series_detail(
-                    &domain_context,
-                    SeriesDetailQuery {
-                        series_id: series_id.clone(),
-                    },
-                )
-                .await?;
-
-            if visible_series
-                .as_ref()
-                .map(|series| !series.oneshot)
-                .unwrap_or(false)
-            {
-                return Err(DiscoveryError::NonNativeRequestShape(
-                    NonNativeRequestShape::UnsupportedBookFilter(
-                        "oneshot-bootstrap.series-not-oneshot".to_string(),
-                    ),
-                ));
-            }
-
-            let visible_books = queries
-                .list_books(
-                    &domain_context,
-                    BooksListQuery {
-                        page: 0,
-                        size: 20,
-                        unpaged: true,
-                        direct_browse_family: None,
-                        library_ids: None,
-                        series_ids: Some(vec![series_id]),
-                        deleted: None,
-                        oneshot: None,
-                        tags: None,
-                        read_statuses: None,
-                        media_profiles: None,
-                        media_statuses: None,
-                        authors: None,
-                        release_dates: None,
-                        sort: vec![],
-                        search: None,
-                    },
-                )
-                .await?;
-
-            if visible_series.is_none() || visible_books.total_elements != 1 {
-                return Err(DiscoveryError::NonNativeRequestShape(
-                    NonNativeRequestShape::UnsupportedBookFilter(
-                        "oneshot-bootstrap.visible-single-book".to_string(),
-                    ),
-                ));
-            }
-        }
-
-        let query = BooksListQuery {
-            page,
-            size,
-            unpaged,
-            direct_browse_family: filters.direct_browse_family,
-            library_ids: filters.library_ids,
-            series_ids: filters.series_ids,
-            deleted: filters.deleted,
-            oneshot: filters.oneshot,
-            tags: filters.tags,
-            read_statuses: filters.read_statuses,
-            media_profiles: filters.media_profiles,
-            media_statuses: filters.media_statuses,
-            authors: filters.authors,
-            release_dates: filters.release_dates,
-            sort: sorts,
-            search: full_text_search,
-        };
-        let is_direct_browse = query.direct_browse_family.is_some();
-
-        let page = if is_direct_browse {
-            queries
-                .list_books_direct_browse(&domain_context, query)
-                .await?
-        } else {
-            queries.list_books(&domain_context, query).await?
-        };
-
-        Ok(page)
-    })
-    .await;
-
-    match result {
-        Ok(page) => {
-            let mut response = Json(books_page_payload(page, is_admin, true)).into_response();
-            mark_native(&mut response);
-            Some(response)
-        }
-        Err(DiscoveryError::NonNativeRequestShape(details)) => {
-            Some(non_native_books_list_response(
-                DiscoveryError::NonNativeRequestShape(details),
-                uri,
-                fallback_search,
-                payload,
-            ))
-        }
-        Err(error) => Some(
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("native books list failed: {error:?}") })),
-            )
-                .into_response(),
-        ),
-    }
+    Some(removed_runtime_fallback_response(
+        "POST /api/v1/books/list",
+        "persisted/domain-backed data unavailable",
+    ))
 }
 
 async fn native_owned_books_latest_response(
     headers: &HeaderMap,
     uri: &Uri,
     auth_state: &DiscoveryAuthState,
+    database_file: &FsPath,
 ) -> Option<Response> {
     let sorts = query_values(uri.query().unwrap_or_default(), "sort");
     if !sorts.is_empty() {
-        return Some(non_native_books_latest_response(
-            DiscoveryError::NonNativeRequestShape(NonNativeRequestShape::UnsupportedBookSort(
+        return Some(removed_discovery_fallback_response(
+            "GET /api/v1/books/latest",
+            &DiscoveryError::NonNativeRequestShape(NonNativeRequestShape::UnsupportedBookSort(
                 sorts[0].to_string(),
             )),
-            uri,
+        ));
+    }
+
+    if !database_file.exists() {
+        return Some(removed_runtime_fallback_response(
+            "GET /api/v1/books/latest",
+            "persisted/domain-backed data unavailable",
         ));
     }
 
@@ -2361,36 +2497,16 @@ async fn native_owned_books_latest_response(
         None => return Some(StatusCode::UNAUTHORIZED.into_response()),
     };
 
-    let is_admin = context.is_admin;
-    let domain_context = to_domain_query_context(context);
-    let query = BooksLatestQuery {
-        page,
-        size,
-        unpaged,
-        library_ids: None,
-    };
+    let _ = context;
+    let _ = page;
+    let _ = size;
+    let _ = unpaged;
+    let _ = uri;
 
-    match with_seeded_books_discovery_queries(|queries| async move {
-        queries.list_books_latest(&domain_context, query).await
-    })
-    .await
-    {
-        Ok(page) => {
-            let mut response = Json(books_page_payload(page, is_admin, !unpaged)).into_response();
-            mark_native(&mut response);
-            Some(response)
-        }
-        Err(DiscoveryError::NonNativeRequestShape(details)) => Some(
-            non_native_books_latest_response(DiscoveryError::NonNativeRequestShape(details), uri),
-        ),
-        Err(error) => Some(
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("native books latest failed: {error:?}") })),
-            )
-                .into_response(),
-        ),
-    }
+    Some(removed_runtime_fallback_response(
+        "GET /api/v1/books/latest",
+        "persisted/domain-backed data unavailable",
+    ))
 }
 
 async fn native_owned_series_list_response(
@@ -2404,7 +2520,7 @@ async fn native_owned_series_list_response(
 ) -> Option<Response> {
     let sorts = query_values(uri.query().unwrap_or_default(), "sort")
         .into_iter()
-        .map(str::to_string)
+        .map(decode_query_component)
         .collect::<Vec<_>>();
     let page = query_value(uri.query().unwrap_or_default(), "page")
         .and_then(|value| value.parse::<usize>().ok())
@@ -2419,10 +2535,9 @@ async fn native_owned_series_list_response(
             Ok(filters) => filters,
             Err(error) => {
                 if strict_native_shape {
-                    return Some(non_native_series_list_response(
-                        error,
-                        uri,
-                        full_text_search,
+                    return Some(removed_discovery_fallback_response(
+                        "POST /api/v1/series/list",
+                        &error,
                     ));
                 }
                 legacy_webui_series_filters(payload)
@@ -2431,11 +2546,9 @@ async fn native_owned_series_list_response(
 
     if !strict_native_shape {
         coerce_legacy_series_filters_for_persisted(&mut filters);
-        filters.library_ids = remap_legacy_library_ids_for_persisted(
-            database_file,
-            filters.library_ids.as_ref(),
-        )
-        .await;
+        filters.library_ids =
+            remap_legacy_library_ids_for_persisted(database_file, filters.library_ids.as_ref())
+                .await;
     }
 
     let requested_library_ids = strict_native_shape
@@ -2475,125 +2588,13 @@ async fn native_owned_series_list_response(
         }
     }
 
-    let domain_context = to_domain_query_context(context);
-    let query = SeriesListQuery {
-        page,
-        size,
-        library_ids: filters.library_ids,
-        deleted: filters.deleted,
-        oneshot: filters.oneshot,
-        read_statuses: filters.read_statuses,
-        genres: filters.genres,
-        tags: filters.tags,
-        languages: filters.languages,
-        publishers: filters.publishers,
-        age_ratings: filters.age_ratings,
-        release_dates: filters.release_dates,
-        sharing_labels: filters.sharing_labels,
-        series_statuses: filters.series_statuses,
-        complete: filters.complete,
-        authors: filters.authors,
-        sort: sorts,
-        search: full_text_search,
-    };
-    let fallback_search = query.search.clone();
+    let _ = uri;
+    let _ = full_text_search;
 
-    match with_seeded_series_discovery_queries(|queries| async move {
-        queries.list_series(&domain_context, query).await
-    })
-    .await
-    {
-        Ok(page) => {
-            let mut response = Json(series_page_payload(page)).into_response();
-            mark_native(&mut response);
-            Some(response)
-        }
-        Err(DiscoveryError::NonNativeRequestShape(details)) => {
-            Some(non_native_series_list_response(
-                DiscoveryError::NonNativeRequestShape(details),
-                uri,
-                fallback_search,
-            ))
-        }
-        Err(error) => Some(
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("native series list failed: {error:?}") })),
-            )
-                .into_response(),
-        ),
-    }
-}
-
-fn non_native_series_list_response(
-    error: DiscoveryError,
-    uri: &Uri,
-    full_text_search: Option<String>,
-) -> Response {
-    let mut payload =
-        series_json_for_request(CompatProfile::SnapshotAligned, uri, full_text_search);
-    apply_non_native_diagnostics(&mut payload, &error);
-
-    let mut response = Json(payload).into_response();
-    mark_non_native(&mut response);
-    response
-}
-
-fn non_native_books_list_response(
-    error: DiscoveryError,
-    uri: &Uri,
-    full_text_search: Option<String>,
-    _request_payload: Option<&Value>,
-) -> Response {
-    let mut payload = books_json_for_request(CompatProfile::SnapshotAligned, uri, full_text_search);
-    apply_non_native_diagnostics(&mut payload, &error);
-
-    let mut response = Json(payload).into_response();
-    mark_non_native(&mut response);
-    response
-}
-
-fn non_native_books_latest_response(error: DiscoveryError, uri: &Uri) -> Response {
-    let mut payload = books_latest_json_for_request(CompatProfile::SnapshotAligned, uri);
-    apply_non_native_diagnostics(&mut payload, &error);
-
-    let mut response = Json(payload).into_response();
-    mark_non_native(&mut response);
-    response
-}
-
-async fn with_seeded_books_discovery_queries<T, F, Fut>(operation: F) -> Result<T, DiscoveryError>
-where
-    F: FnOnce(DiscoveryQueries<SqlxRuntimeDiscoveryAdapter>) -> Fut,
-    Fut: std::future::Future<Output = Result<T, DiscoveryError>>,
-{
-    let store = SqlxRuntimeDiscoveryStore::new("compat-runtime-books").await?;
-    let seed_result = seed_books_discovery_data(&store).await;
-    if let Err(error) = seed_result {
-        store.cleanup().await;
-        return Err(error);
-    }
-
-    let result = operation(DiscoveryQueries::new(store.adapter())).await;
-    store.cleanup().await;
-    result
-}
-
-async fn with_seeded_series_discovery_queries<T, F, Fut>(operation: F) -> Result<T, DiscoveryError>
-where
-    F: FnOnce(DiscoveryQueries<SqlxRuntimeDiscoveryAdapter>) -> Fut,
-    Fut: std::future::Future<Output = Result<T, DiscoveryError>>,
-{
-    let store = SqlxRuntimeDiscoveryStore::new("compat-runtime-series").await?;
-    let seed_result = seed_series_discovery_data(&store).await;
-    if let Err(error) = seed_result {
-        store.cleanup().await;
-        return Err(error);
-    }
-
-    let result = operation(DiscoveryQueries::new(store.adapter())).await;
-    store.cleanup().await;
-    result
+    Some(removed_runtime_fallback_response(
+        "POST /api/v1/series/list",
+        "persisted/domain-backed data unavailable",
+    ))
 }
 
 fn parse_native_series_filters(
@@ -2800,7 +2801,10 @@ fn map_webui_leaf_to_native(
             && let Some(operator_map) = operator_shape.as_object()
         {
             let mut normalized = serde_json::Map::new();
-            normalized.insert("type".to_string(), Value::String((*native_type).to_string()));
+            normalized.insert(
+                "type".to_string(),
+                Value::String((*native_type).to_string()),
+            );
             for (key, value) in operator_map {
                 normalized.insert(key.clone(), value.clone());
             }
@@ -3616,161 +3620,6 @@ fn merge_boolean_filter(
     }
 }
 
-async fn seed_series_discovery_data(
-    store: &SqlxRuntimeDiscoveryStore,
-) -> Result<(), DiscoveryError> {
-    store
-        .insert_series(
-            SeriesRow::new("series-1", "1", "series")
-                .with_labels(["safe"])
-                .with_genres(["fantasy"])
-                .with_tags(["featured"])
-                .with_language("en")
-                .with_publisher("komga")
-                .with_age_rating(16)
-                .with_release_date("2024-01-01")
-                .with_status("ONGOING")
-                .with_complete(true)
-                .with_read_status("READ")
-                .with_authors(["alice"]),
-        )
-        .await
-}
-
-async fn seed_books_discovery_data(
-    store: &SqlxRuntimeDiscoveryStore,
-) -> Result<(), DiscoveryError> {
-    store
-        .insert_series(SeriesRow::new("series-1", "1", "series").with_labels(["safe"]))
-        .await?;
-    store
-        .insert_series(SeriesRow::new("series-2", "1", "restricted").with_labels(["adult"]))
-        .await?;
-    store
-        .insert_series(
-            SeriesRow::new("series-oneshot", "1", "oneshot")
-                .with_labels(["safe"])
-                .with_oneshot(true),
-        )
-        .await?;
-    store
-        .insert_series(
-            SeriesRow::new("series-oneshot-multi", "1", "oneshot-multi")
-                .with_labels(["safe"])
-                .with_oneshot(true),
-        )
-        .await?;
-    store
-        .insert_series(
-            SeriesRow::new("series-oneshot-restricted", "1", "oneshot-restricted")
-                .with_labels(["adult"])
-                .with_oneshot(true),
-        )
-        .await?;
-
-    store
-        .insert_book(
-            BookRow::new("book-1", "series-1", "1", "book.cbr")
-                .with_url("/library1/book.cbr")
-                .with_last_modified("2024-01-01T03:04:05Z")
-                .with_media("READY", "application/zip", 1)
-                .with_media_profile("PROFILE-1")
-                .with_number_sort(1)
-                .with_read_status("READ")
-                .with_release_date("2024-01-01")
-                .with_tags(["safe"])
-                .with_authors(["alice"]),
-        )
-        .await?;
-    store
-        .insert_book(
-            BookRow::new("book-2", "series-2", "1", "restricted-book.cbz")
-                .with_url("/library1/restricted-book.cbz")
-                .with_last_modified("2024-01-03T03:04:05Z")
-                .with_media("READY", "application/vnd.comicbook+zip", 1)
-                .with_media_profile("PROFILE-2")
-                .with_number_sort(2)
-                .with_read_status("UNREAD")
-                .with_release_date("2023-01-01")
-                .with_tags(["adult"])
-                .with_authors(["bob"]),
-        )
-        .await?;
-    store
-        .insert_book(
-            BookRow::new("book-oneshot", "series-oneshot", "1", "oneshot-book.cbz")
-                .with_url("/library1/oneshot-book.cbz")
-                .with_last_modified("2024-02-01T03:04:05Z")
-                .with_media("READY", "application/vnd.comicbook+zip", 1)
-                .with_media_profile("PROFILE-ONESHOT")
-                .with_number_sort(1)
-                .with_read_status("UNREAD")
-                .with_release_date("2024-02-01")
-                .with_tags(["safe"])
-                .with_authors(["alice"]),
-        )
-        .await?;
-    store
-        .insert_book(
-            BookRow::new(
-                "book-oneshot-multi-1",
-                "series-oneshot-multi",
-                "1",
-                "oneshot-multi-1.cbz",
-            )
-            .with_url("/library1/oneshot-multi-1.cbz")
-            .with_last_modified("2024-02-02T03:04:05Z")
-            .with_media("READY", "application/vnd.comicbook+zip", 1)
-            .with_media_profile("PROFILE-ONESHOT")
-            .with_number_sort(1)
-            .with_read_status("UNREAD")
-            .with_release_date("2024-02-02")
-            .with_tags(["safe"])
-            .with_authors(["alice"]),
-        )
-        .await?;
-    store
-        .insert_book(
-            BookRow::new(
-                "book-oneshot-multi-2",
-                "series-oneshot-multi",
-                "1",
-                "oneshot-multi-2.cbz",
-            )
-            .with_url("/library1/oneshot-multi-2.cbz")
-            .with_last_modified("2024-02-03T03:04:05Z")
-            .with_media("READY", "application/vnd.comicbook+zip", 1)
-            .with_media_profile("PROFILE-ONESHOT")
-            .with_number_sort(2)
-            .with_read_status("UNREAD")
-            .with_release_date("2024-02-03")
-            .with_tags(["safe"])
-            .with_authors(["alice"]),
-        )
-        .await?;
-    store
-        .insert_book(
-            BookRow::new(
-                "book-oneshot-restricted",
-                "series-oneshot-restricted",
-                "1",
-                "oneshot-restricted.cbz",
-            )
-            .with_url("/library1/oneshot-restricted.cbz")
-            .with_last_modified("2024-02-04T03:04:05Z")
-            .with_media("READY", "application/vnd.comicbook+zip", 1)
-            .with_media_profile("PROFILE-ONESHOT")
-            .with_number_sort(1)
-            .with_read_status("UNREAD")
-            .with_release_date("2024-02-04")
-            .with_tags(["adult"])
-            .with_authors(["bob"]),
-        )
-        .await?;
-
-    Ok(())
-}
-
 fn series_page_payload(page: PageEnvelope<SeriesReadModel>) -> Value {
     let content = page.content.iter().map(series_payload).collect::<Vec<_>>();
     let number_of_elements = content.len();
@@ -3806,90 +3655,6 @@ fn series_page_payload(page: PageEnvelope<SeriesReadModel>) -> Value {
         "numberOfElements": number_of_elements,
         "empty": number_of_elements == 0
     })
-}
-
-fn books_latest_json_for_request(profile: CompatProfile, uri: &Uri) -> Value {
-    let mut books = books_latest_json(profile);
-    let query = uri.query().unwrap_or_default();
-
-    let page = query_value(query, "page")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let size = query_value(query, "size")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(20)
-        .max(1);
-    let unpaged = query_bool(query, "unpaged");
-
-    let mut filtered_content = books
-        .pointer("/content")
-        .and_then(|value| value.as_array())
-        .cloned()
-        .unwrap_or_default();
-
-    let total_elements = filtered_content.len();
-    let (page_content, number, response_size, total_pages, first, last, offset, paged) = if unpaged
-    {
-        let response_size = total_elements.max(1);
-        let total_pages = if total_elements == 0 { 0 } else { 1 };
-        let number = 0;
-        let first = true;
-        let last = true;
-        let offset = 0;
-        (
-            filtered_content,
-            number,
-            response_size,
-            total_pages,
-            first,
-            last,
-            offset,
-            false,
-        )
-    } else {
-        let start = page.saturating_mul(size);
-        let end = start.saturating_add(size).min(total_elements);
-        let page_content = if start >= total_elements {
-            Vec::new()
-        } else {
-            filtered_content.drain(start..end).collect()
-        };
-        let total_pages = if total_elements == 0 {
-            0
-        } else {
-            total_elements.div_ceil(size)
-        };
-        let first = page == 0;
-        let last = total_pages == 0 || page + 1 >= total_pages;
-        (
-            page_content,
-            page,
-            size,
-            total_pages,
-            first,
-            last,
-            start,
-            true,
-        )
-    };
-    let number_of_elements = page_content.len();
-
-    books["content"] = Value::Array(page_content);
-    books["number"] = Value::Number((number as u64).into());
-    books["size"] = Value::Number((response_size as u64).into());
-    books["first"] = Value::Bool(first);
-    books["last"] = Value::Bool(last);
-    books["empty"] = Value::Bool(number_of_elements == 0);
-    books["numberOfElements"] = Value::Number((number_of_elements as u64).into());
-    books["totalElements"] = Value::Number((total_elements as u64).into());
-    books["totalPages"] = Value::Number((total_pages as u64).into());
-    books["pageable"]["pageNumber"] = Value::Number((number as u64).into());
-    books["pageable"]["pageSize"] = Value::Number((response_size as u64).into());
-    books["pageable"]["offset"] = Value::Number((offset as u64).into());
-    books["pageable"]["paged"] = Value::Bool(paged);
-    books["pageable"]["unpaged"] = Value::Bool(!paged);
-
-    books
 }
 
 fn series_payload(series: &SeriesReadModel) -> Value {

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use super::error::ConfigError;
 use super::profile::{
-    CompatProfile, PlatformProfile, RuntimeMode, DEFAULT_CONFIG_DIR, DEFAULT_LOG_FILE_NAME,
+    CompatProfile, DEFAULT_CONFIG_DIR, DEFAULT_LOG_FILE_NAME, PlatformProfile, RuntimeMode,
 };
 use super::shadow::ShadowPolicy;
 
@@ -28,6 +28,8 @@ const DATABASE_FILE_ENV: &str = "KOMGA_DATABASE_FILE";
 const TASKS_DB_FILE_ENV: &str = "KOMGA_TASKS_DB_FILE";
 const LUCENE_DATA_DIRECTORY_ENV: &str = "KOMGA_LUCENE_DATA_DIRECTORY";
 const FONTS_DATA_DIRECTORY_ENV: &str = "KOMGA_FONTS_DATA_DIRECTORY";
+const LEGACY_WEBUI_DIRECTORY_NAME: &str = "public";
+const LEGACY_WEBUI_ENTRYPOINT: &str = "index.html";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RuntimeCli {
@@ -245,7 +247,7 @@ impl RuntimeConfig {
                 .unwrap_or(false)
         };
 
-        Ok(Self {
+        let config = Self {
             bind_address,
             mode,
             compat_profile,
@@ -263,7 +265,11 @@ impl RuntimeConfig {
                 isolation_root,
                 allow_shadow_writes,
             },
-        })
+        };
+
+        config.validate_single_writer_storage_ownership(env)?;
+
+        Ok(config)
     }
 
     pub fn for_compat_profile(compat_profile: CompatProfile) -> Self {
@@ -301,6 +307,19 @@ impl RuntimeConfig {
         }
     }
 
+    pub fn discover_webui_assets_layout(&self) -> Option<PathBuf> {
+        self.webui_layout_candidates()
+            .into_iter()
+            .find(|candidate| candidate.join(LEGACY_WEBUI_ENTRYPOINT).is_file())
+    }
+
+    pub fn resolve_webui_assets_layout(&self) -> Result<PathBuf, ConfigError> {
+        self.discover_webui_assets_layout()
+            .ok_or_else(|| ConfigError::MissingWebUiAssetsLayout {
+                candidates: self.webui_layout_candidates(),
+            })
+    }
+
     fn ensure_startup_runtime_layout(&self) -> Result<(), ConfigError> {
         if let Some(config_dir) = self.config_dir.as_ref() {
             ensure_runtime_directories(
@@ -312,7 +331,126 @@ impl RuntimeConfig {
                 &self.fonts_data_directory,
             )?;
         }
+        let _ = self.resolve_webui_assets_layout()?;
         validate_temp_directory()
+    }
+
+    fn validate_single_writer_storage_ownership(
+        &self,
+        env: &BTreeMap<String, String>,
+    ) -> Result<(), ConfigError> {
+        if !matches!(self.mode, RuntimeMode::Shadow | RuntimeMode::Canary) {
+            return Ok(());
+        }
+
+        let Some(config_dir) = self.config_dir.as_ref() else {
+            return Ok(());
+        };
+
+        let legacy_main = config_dir.join("database.sqlite");
+        let legacy_tasks = config_dir.join("tasks.sqlite");
+        let legacy_search = config_dir.join("lucene");
+
+        let mut mixed_targets = Vec::new();
+        if self.database_file == legacy_main {
+            mixed_targets.push("database.sqlite");
+        }
+        if self.tasks_db_file == legacy_tasks {
+            mixed_targets.push("tasks.sqlite");
+        }
+        if self.lucene_data_directory == legacy_search {
+            mixed_targets.push("legacy search directory");
+        }
+
+        if !mixed_targets.is_empty() {
+            return Err(ConfigError::MixedWriterStorageOwnership {
+                details: format!(
+                    "startup mode '{}' would write legacy-owned targets [{}] under {}",
+                    self.mode.as_str(),
+                    mixed_targets.join(", "),
+                    config_dir.display(),
+                ),
+            });
+        }
+
+        if self.shadow_policy.allow_shadow_writes
+            && let Some(isolation_root) = self.shadow_policy.isolation_root.as_ref()
+        {
+            let mut outside_isolation = Vec::new();
+            if !self.database_file.starts_with(isolation_root) {
+                outside_isolation.push(self.database_file.display().to_string());
+            }
+            if !self.tasks_db_file.starts_with(isolation_root) {
+                outside_isolation.push(self.tasks_db_file.display().to_string());
+            }
+            if !self.lucene_data_directory.starts_with(isolation_root) {
+                outside_isolation.push(self.lucene_data_directory.display().to_string());
+            }
+
+            if !outside_isolation.is_empty() {
+                return Err(ConfigError::MixedWriterStorageOwnership {
+                    details: format!(
+                        "shadow isolation root '{}' does not own [{}]",
+                        isolation_root.display(),
+                        outside_isolation.join(", "),
+                    ),
+                });
+            }
+        }
+
+        if self.mode == RuntimeMode::Canary {
+            return Err(ConfigError::MixedWriterStorageOwnership {
+                details: "canary mode storage ownership is not wired yet and is blocked by design"
+                    .to_string(),
+            });
+        }
+
+        if is_legacy_home_config_dir(config_dir, env)
+            && (self.database_file == legacy_main
+                || self.tasks_db_file == legacy_tasks
+                || self.lucene_data_directory == legacy_search)
+        {
+            return Err(ConfigError::MixedWriterStorageOwnership {
+                details: format!(
+                    "legacy config-dir '{}' stays Java-owned during shadow startup",
+                    config_dir.display(),
+                ),
+            });
+        }
+
+        Ok(())
+    }
+}
+
+impl RuntimeConfig {
+    fn webui_layout_candidates(&self) -> Vec<PathBuf> {
+        let mut candidates = Vec::new();
+
+        if let Some(config_dir) = self.config_dir.as_ref() {
+            candidates.push(config_dir.join(LEGACY_WEBUI_DIRECTORY_NAME));
+        }
+
+        if let Ok(exe_path) = std::env::current_exe()
+            && let Some(exe_dir) = exe_path.parent()
+        {
+            candidates.push(exe_dir.join(LEGACY_WEBUI_DIRECTORY_NAME));
+            candidates.push(exe_dir.join("resources").join(LEGACY_WEBUI_DIRECTORY_NAME));
+        }
+
+        if let Ok(current_dir) = std::env::current_dir() {
+            candidates.push(current_dir.join(LEGACY_WEBUI_DIRECTORY_NAME));
+            candidates.push(
+                current_dir
+                    .join("komga")
+                    .join("src")
+                    .join("main")
+                    .join("resources")
+                    .join(LEGACY_WEBUI_DIRECTORY_NAME),
+            );
+            candidates.push(current_dir.join("komga-webui").join("dist"));
+        }
+
+        dedup_paths(candidates)
     }
 }
 
@@ -444,7 +582,14 @@ fn validate_temp_directory() -> Result<(), ConfigError> {
 
 fn default_home_config_dir(env: &BTreeMap<String, String>) -> Option<PathBuf> {
     env.get("HOME")
+        .or_else(|| env.get("USERPROFILE"))
         .map(|home| PathBuf::from(home).join(DEFAULT_CONFIG_DIR))
+}
+
+fn is_legacy_home_config_dir(path: &Path, env: &BTreeMap<String, String>) -> bool {
+    default_home_config_dir(env)
+        .as_ref()
+        .is_some_and(|legacy| path == legacy)
 }
 
 fn is_valid_startup_context_path(value: &str) -> bool {
@@ -472,6 +617,16 @@ fn parse_bool(value: &str) -> Result<bool, ConfigError> {
         "0" | "false" | "no" | "off" => Ok(false),
         other => Err(ConfigError::InvalidBoolean(other.to_string())),
     }
+}
+
+fn dedup_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut ordered = Vec::new();
+    for path in paths {
+        if !ordered.iter().any(|existing| existing == &path) {
+            ordered.push(path);
+        }
+    }
+    ordered
 }
 
 fn resolve_oauth2_clients(

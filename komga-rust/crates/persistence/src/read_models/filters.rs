@@ -13,7 +13,6 @@ pub(super) struct SqlxWhereState {
     pub(super) params: Vec<SqlValue>,
 }
 
-
 pub(super) fn query_filters_sqlx<'args>(
     builder: &mut QueryBuilder<'args, Sqlite>,
     state: &mut SqlxWhereState,
@@ -37,7 +36,12 @@ pub(super) fn query_filters_sqlx<'args>(
     }
 
     if let Some(active_restrictions) = restrictions {
-        apply_restrictions_sqlx(restriction_series_alias, active_restrictions, builder, state);
+        apply_restrictions_sqlx(
+            restriction_series_alias,
+            active_restrictions,
+            builder,
+            state,
+        );
     }
 }
 
@@ -67,7 +71,9 @@ pub(super) fn apply_restrictions_sqlx<'args>(
         (restrictions.age_restriction, restrictions.age)
     {
         push_sqlx_clause_prefix(builder, state);
-        builder.push(format!("({series_alias}.age_rating IS NULL OR {series_alias}.age_rating < "));
+        builder.push(format!(
+            "({series_alias}.age_rating IS NULL OR {series_alias}.age_rating < "
+        ));
         builder.push_bind(max_age as i64);
         builder.push(")");
         state.params.push(SqlValue::Integer(max_age as i64));
@@ -314,12 +320,7 @@ mod tests {
             &mut state,
             false,
         );
-        append_u16_set_filter_sqlx(
-            "s.age_rating",
-            Some(&[10, 16]),
-            &mut builder,
-            &mut state,
-        );
+        append_u16_set_filter_sqlx("s.age_rating", Some(&[10, 16]), &mut builder, &mut state);
 
         let query = builder.build();
         assert!(

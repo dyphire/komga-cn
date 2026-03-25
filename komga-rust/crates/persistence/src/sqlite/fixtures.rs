@@ -249,12 +249,14 @@ pub async fn insert_read_list(pool: &SqlitePool, row: ReadListRow) -> Result<(),
     .await?;
 
     for (index, book_id) in book_ids.iter().enumerate() {
-        sqlx::query("INSERT INTO readlist_books (readlist_id, book_id, position) VALUES (?1, ?2, ?3)")
-            .bind(&id)
-            .bind(book_id)
-            .bind(index as i64)
-            .execute(pool)
-            .await?;
+        sqlx::query(
+            "INSERT INTO readlist_books (readlist_id, book_id, position) VALUES (?1, ?2, ?3)",
+        )
+        .bind(&id)
+        .bind(book_id)
+        .bind(index as i64)
+        .execute(pool)
+        .await?;
     }
 
     Ok(())

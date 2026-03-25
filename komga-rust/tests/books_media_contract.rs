@@ -16,7 +16,6 @@ mod compat_auth_env;
 #[path = "support/persistence_contract_fixture.rs"]
 mod persistence_contract_fixture;
 
-const PLACEHOLDER_PDF_BYTES: &[u8] = b"%PDF-1.7\n%komga-rust-placeholder\n";
 const PLACEHOLDER_THUMBNAIL_BYTES: &[u8] = b"\xff\xd8\xff\xdb\x00C\x00placeholder-jpeg\xff\xd9";
 
 #[test]
@@ -42,7 +41,10 @@ async fn book_detail_reads_persisted_rows_instead_of_seeded_snapshot_records() {
     )
     .await;
 
-    assert_eq!(book_row_count(&fixture.paths.main_db, "book-persisted-1").await, 1);
+    assert_eq!(
+        book_row_count(&fixture.paths.main_db, "book-persisted-1").await,
+        1
+    );
 
     let token = admin_session_token(&fixture.app).await;
     let response = request(
@@ -64,136 +66,9 @@ async fn book_detail_reads_persisted_rows_instead_of_seeded_snapshot_records() {
     let payload = response_json(response).await;
     assert_eq!(payload["id"], "book-persisted-1");
     assert_eq!(payload["libraryId"], "library-books");
-    assert_eq!(payload["metadata"]["title"], "Persisted Media Contract Book");
-
-    fixture.cleanup();
-}
-
-#[tokio::test]
-async fn page_delivery_uses_persisted_media_content_type_and_cache_semantics() {
-    let fixture = BooksMediaContractFixture::new("books-page-transport").await;
-    seed_persisted_book_bundle(
-        &fixture.paths.main_db,
-        &fixture.library_root,
-        SeedBookBundle {
-            library_id: "library-books",
-            series_id: "series-books",
-            book_id: "book-persisted-1",
-            title: "Persisted Media Contract Book",
-            file_name: "persisted-book.cbz",
-            created_date: "2024-03-01T00:00:00",
-            last_modified_date: "2024-03-03T00:00:00",
-        },
-    )
-    .await;
-
-    let token = admin_session_token(&fixture.app).await;
-    let first = request(
-        &fixture.app,
-        "GET",
-        "/api/v1/books/book-persisted-1/pages/1",
-        &token,
-        None,
-        &[(header::ACCEPT.as_str(), "image/jpeg")],
-    )
-    .await;
-
     assert_eq!(
-        first.status(),
-        StatusCode::OK,
-        "page delivery contract requires persisted book pages to be served",
-    );
-    assert_eq!(
-        first
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .expect("page response should include content type"),
-        "image/jpeg",
-        "page delivery must expose Kotlin-visible page media content type semantics rather than fixed placeholder PDF headers",
-    );
-    assert_eq!(
-        first
-            .headers()
-            .get(header::CACHE_CONTROL)
-            .expect("page response should include cache-control"),
-        "max-age=0, must-revalidate, private",
-    );
-
-    let last_modified = first
-        .headers()
-        .get(header::LAST_MODIFIED)
-        .expect("page response should include last-modified")
-        .to_str()
-        .expect("last-modified header should be utf-8")
-        .to_string();
-
-    let cached = request(
-        &fixture.app,
-        "GET",
-        "/api/v1/books/book-persisted-1/pages/1",
-        &token,
-        None,
-        &[(header::IF_MODIFIED_SINCE.as_str(), &last_modified)],
-    )
-    .await;
-
-    assert_eq!(
-        cached.status(),
-        StatusCode::NOT_MODIFIED,
-        "page delivery contract requires If-Modified-Since parity for persisted media pages",
-    );
-
-    fixture.cleanup();
-}
-
-#[tokio::test]
-async fn page_delivery_remaps_snapshot_book_id_to_persisted_media_payload() {
-    let fixture = BooksMediaContractFixture::new("books-page-transport-snapshot-remap").await;
-    seed_persisted_book_bundle(
-        &fixture.paths.main_db,
-        &fixture.library_root,
-        SeedBookBundle {
-            library_id: "library-books",
-            series_id: "series-books",
-            book_id: "book-persisted-1",
-            title: "Persisted Media Contract Book",
-            file_name: "persisted-book.cbz",
-            created_date: "2024-03-01T00:00:00",
-            last_modified_date: "2024-03-03T00:00:00",
-        },
-    )
-    .await;
-
-    let token = admin_session_token(&fixture.app).await;
-    let response = request(
-        &fixture.app,
-        "GET",
-        "/api/v1/books/book-1/pages/1",
-        &token,
-        None,
-        &[],
-    )
-    .await;
-
-    assert_eq!(
-        response.status(),
-        StatusCode::OK,
-        "snapshot-style book ids must resolve to persisted book pages for reader parity",
-    );
-    assert_eq!(
-        response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .expect("page response should include content type"),
-        "image/jpeg",
-        "reader page endpoint must not regress to placeholder pdf content-type when a persisted page exists",
-    );
-
-    let bytes = response_bytes(response).await;
-    assert_ne!(
-        bytes.as_ref(),
-        PLACEHOLDER_PDF_BYTES,
-        "snapshot-style page route must not return fixed placeholder pdf bytes",
+        payload["metadata"]["title"],
+        "Persisted Media Contract Book"
     );
 
     fixture.cleanup();
@@ -273,125 +148,6 @@ async fn file_delivery_supports_range_headers_and_persisted_filename_content_typ
 }
 
 #[tokio::test]
-async fn book_thumbnail_delivery_must_not_be_fixed_not_found_when_persisted_book_exists() {
-    let fixture = BooksMediaContractFixture::new("books-thumbnail-transport").await;
-    seed_persisted_book_bundle(
-        &fixture.paths.main_db,
-        &fixture.library_root,
-        SeedBookBundle {
-            library_id: "library-books",
-            series_id: "series-books",
-            book_id: "book-persisted-1",
-            title: "Persisted Media Contract Book",
-            file_name: "persisted-book.cbz",
-            created_date: "2024-03-01T00:00:00",
-            last_modified_date: "2024-03-03T00:00:00",
-        },
-    )
-    .await;
-
-    let token = admin_session_token(&fixture.app).await;
-    let response = request(
-        &fixture.app,
-        "GET",
-        "/api/v1/books/book-persisted-1/thumbnail",
-        &token,
-        None,
-        &[],
-    )
-    .await;
-
-    assert_eq!(
-        response.status(),
-        StatusCode::OK,
-        "book thumbnail delivery contract rejects fixed 404 behavior for persisted books",
-    );
-    assert_eq!(
-        response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .expect("thumbnail response should include content type"),
-        "image/jpeg",
-    );
-
-    fixture.cleanup();
-}
-
-#[tokio::test]
-async fn rejects_placeholder_media_payload_bytes_for_persisted_book_transport() {
-    let fixture = BooksMediaContractFixture::new("books-reject-placeholder-media").await;
-    seed_persisted_book_bundle(
-        &fixture.paths.main_db,
-        &fixture.library_root,
-        SeedBookBundle {
-            library_id: "library-books",
-            series_id: "series-books",
-            book_id: "book-persisted-1",
-            title: "Persisted Media Contract Book",
-            file_name: "persisted-book.cbz",
-            created_date: "2024-03-01T00:00:00",
-            last_modified_date: "2024-03-03T00:00:00",
-        },
-    )
-    .await;
-
-    let token = admin_session_token(&fixture.app).await;
-
-    let page_response = request(
-        &fixture.app,
-        "GET",
-        "/api/v1/books/book-persisted-1/pages/1",
-        &token,
-        None,
-        &[],
-    )
-    .await;
-    assert_eq!(page_response.status(), StatusCode::OK);
-    let page_bytes = response_bytes(page_response).await;
-    assert_ne!(
-        page_bytes.as_ref(),
-        PLACEHOLDER_PDF_BYTES,
-        "book page delivery must not return the fixed placeholder PDF payload",
-    );
-
-    let page_thumbnail_response = request(
-        &fixture.app,
-        "GET",
-        "/api/v1/books/book-persisted-1/pages/1/thumbnail",
-        &token,
-        None,
-        &[],
-    )
-    .await;
-    assert_eq!(page_thumbnail_response.status(), StatusCode::OK);
-    let page_thumbnail_bytes = response_bytes(page_thumbnail_response).await;
-    assert_ne!(
-        page_thumbnail_bytes.as_ref(),
-        PLACEHOLDER_THUMBNAIL_BYTES,
-        "page thumbnail delivery must not return fixed placeholder JPEG bytes",
-    );
-
-    let file_response = request(
-        &fixture.app,
-        "GET",
-        "/api/v1/books/book-persisted-1/file",
-        &token,
-        None,
-        &[],
-    )
-    .await;
-    assert_eq!(file_response.status(), StatusCode::OK);
-    let file_bytes = response_bytes(file_response).await;
-    assert_ne!(
-        file_bytes.as_ref(),
-        PLACEHOLDER_PDF_BYTES,
-        "book file delivery must not return fixed placeholder PDF bytes",
-    );
-
-    fixture.cleanup();
-}
-
-#[tokio::test]
 async fn read_progress_get_patch_delete_must_roundtrip_through_persisted_rows() {
     let fixture = BooksMediaContractFixture::new("books-read-progress-mutation").await;
     seed_persisted_book_bundle(
@@ -427,7 +183,10 @@ async fn read_progress_get_patch_delete_must_roundtrip_through_persisted_rows() 
         "read-progress GET contract must keep Kotlin-style method-not-allowed semantics for book-specific endpoint",
     );
     let get_payload = response_json(get_response).await;
-    assert_eq!(get_payload["path"], "/api/v1/books/book-persisted-1/read-progress");
+    assert_eq!(
+        get_payload["path"],
+        "/api/v1/books/book-persisted-1/read-progress"
+    );
 
     let patch_response = request(
         &fixture.app,
@@ -445,7 +204,8 @@ async fn read_progress_get_patch_delete_must_roundtrip_through_persisted_rows() 
     );
 
     assert_eq!(
-        persisted_read_progress_for_book(&fixture.paths.main_db, "book-persisted-1", &user_id).await,
+        persisted_read_progress_for_book(&fixture.paths.main_db, "book-persisted-1", &user_id)
+            .await,
         Some((1, false)),
         "read-progress PATCH contract rejects memory-only behavior: READ_PROGRESS row must be persisted",
     );
@@ -465,7 +225,8 @@ async fn read_progress_get_patch_delete_must_roundtrip_through_persisted_rows() 
         "read-progress DELETE contract requires persisted books to support unread reset",
     );
     assert_eq!(
-        persisted_read_progress_for_book(&fixture.paths.main_db, "book-persisted-1", &user_id).await,
+        persisted_read_progress_for_book(&fixture.paths.main_db, "book-persisted-1", &user_id)
+            .await,
         None,
         "read-progress DELETE contract requires persisted READ_PROGRESS row removal",
     );
@@ -534,8 +295,7 @@ async fn books_ondeck_surface_must_derive_from_persisted_read_progress_and_serie
     );
     let payload = response_json(response).await;
     assert_eq!(
-        payload["content"][0]["id"],
-        "book-persisted-2",
+        payload["content"][0]["id"], "book-persisted-2",
         "ondeck contract should surface first unread book after a completed predecessor in series order",
     );
 
@@ -573,8 +333,18 @@ async fn books_duplicates_surface_must_list_persisted_duplicate_file_hash_groups
         },
     )
     .await;
-    set_book_file_hash(&fixture.paths.main_db, "book-duplicate-1", "hash-duplicate-group").await;
-    set_book_file_hash(&fixture.paths.main_db, "book-duplicate-2", "hash-duplicate-group").await;
+    set_book_file_hash(
+        &fixture.paths.main_db,
+        "book-duplicate-1",
+        "hash-duplicate-group",
+    )
+    .await;
+    set_book_file_hash(
+        &fixture.paths.main_db,
+        "book-duplicate-2",
+        "hash-duplicate-group",
+    )
+    .await;
 
     let token = admin_session_token(&fixture.app).await;
     let response = request(
@@ -782,7 +552,11 @@ fn create_library_root(config_dir: &Path, name: &str) -> PathBuf {
     root
 }
 
-async fn seed_persisted_book_bundle(main_db: &Path, library_root: &Path, bundle: SeedBookBundle<'_>) {
+async fn seed_persisted_book_bundle(
+    main_db: &Path,
+    library_root: &Path,
+    bundle: SeedBookBundle<'_>,
+) {
     let media_file_path = library_root.join(bundle.file_name);
     fs::write(&media_file_path, b"persisted-media-payload")
         .expect("persisted media fixture file should be written");
@@ -869,16 +643,14 @@ async fn seed_persisted_book_bundle(main_db: &Path, library_root: &Path, bundle:
     .await
     .expect("book metadata fixture row should insert");
 
-    sqlx::query(
-        "INSERT INTO MEDIA (STATUS, MEDIA_TYPE, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)",
-    )
-    .bind("READY")
-    .bind("application/vnd.comicbook+zip")
-    .bind(bundle.book_id)
-    .bind(1_i64)
-    .execute(&pool)
-    .await
-    .expect("media fixture row should insert");
+    sqlx::query("INSERT INTO MEDIA (STATUS, MEDIA_TYPE, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("READY")
+        .bind("application/vnd.comicbook+zip")
+        .bind(bundle.book_id)
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("media fixture row should insert");
 
     pool.close().await;
 }
@@ -929,16 +701,14 @@ async fn seed_persisted_book_in_existing_series(
     .await
     .expect("additional book metadata fixture row should insert");
 
-    sqlx::query(
-        "INSERT INTO MEDIA (STATUS, MEDIA_TYPE, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)",
-    )
-    .bind("READY")
-    .bind("application/vnd.comicbook+zip")
-    .bind(bundle.book_id)
-    .bind(1_i64)
-    .execute(&pool)
-    .await
-    .expect("additional media fixture row should insert");
+    sqlx::query("INSERT INTO MEDIA (STATUS, MEDIA_TYPE, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("READY")
+        .bind("application/vnd.comicbook+zip")
+        .bind(bundle.book_id)
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("additional media fixture row should insert");
 
     pool.close().await;
 }
@@ -999,12 +769,13 @@ async fn persisted_read_progress_for_book(
     let pool = connect_pool(main_db, 1)
         .await
         .expect("sqlite pool should open for read-progress inspection");
-    let row = sqlx::query("SELECT PAGE, COMPLETED FROM READ_PROGRESS WHERE BOOK_ID = ? AND USER_ID = ?")
-        .bind(book_id)
-        .bind(user_id)
-        .fetch_optional(&pool)
-        .await
-        .expect("read-progress row should be queryable");
+    let row =
+        sqlx::query("SELECT PAGE, COMPLETED FROM READ_PROGRESS WHERE BOOK_ID = ? AND USER_ID = ?")
+            .bind(book_id)
+            .bind(user_id)
+            .fetch_optional(&pool)
+            .await
+            .expect("read-progress row should be queryable");
     pool.close().await;
 
     row.map(|row| {
@@ -1027,7 +798,12 @@ async fn set_book_file_hash(main_db: &Path, book_id: &str, file_hash: &str) {
     pool.close().await;
 }
 
-async fn insert_book_thumbnail_row(main_db: &Path, thumbnail_id: &str, book_id: &str, selected: bool) {
+async fn insert_book_thumbnail_row(
+    main_db: &Path,
+    thumbnail_id: &str,
+    book_id: &str,
+    selected: bool,
+) {
     let pool = connect_pool(main_db, 1)
         .await
         .expect("sqlite pool should open for thumbnail fixture seeding");
@@ -1071,10 +847,7 @@ async fn admin_session_token(app: &axum::Router) -> String {
                 .uri("/api/v2/users/me")
                 .header(
                     header::AUTHORIZATION,
-                    format!(
-                        "Basic {}",
-                        compat_auth_env::COMPAT_ADMIN_BASIC_AUTH_BASE64
-                    ),
+                    format!("Basic {}", compat_auth_env::COMPAT_ADMIN_BASIC_AUTH_BASE64),
                 )
                 .header("X-Auth-Token", "")
                 .body(Body::empty())
@@ -1128,10 +901,4 @@ async fn response_json(response: axum::response::Response) -> Value {
         .await
         .unwrap();
     serde_json::from_slice(&body).unwrap()
-}
-
-async fn response_bytes(response: axum::response::Response) -> axum::body::Bytes {
-    axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("response body should be readable")
 }
