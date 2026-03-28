@@ -2,8 +2,8 @@ use komga_application::discovery::{
     BookDetailQuery, BookSiblingQuery, NativeBooksLatestQuery, NativeBooksListQuery,
 };
 use komga_domain::discovery::{
-    BookDetailReadModel, BookReadModel, BookResourceReadModel, DiscoveryError, DiscoveryQueryContext,
-    PageEnvelope,
+    BookDetailReadModel, BookReadModel, BookResourceReadModel, DiscoveryError,
+    DiscoveryQueryContext, PageEnvelope,
 };
 use sqlx::SqlitePool;
 
@@ -73,10 +73,12 @@ pub(in crate::read_models) async fn resolve_book_resource_sqlx(
     book_id: &str,
 ) -> Result<Option<BookResourceReadModel>, DiscoveryError> {
     let row = sqlx::query_as::<_, SqlxBookResourceRow>(
-        "SELECT b.id, b.library_id, s.age_rating, COALESCE(GROUP_CONCAT(DISTINCT sl.label), '') AS labels \
+        "SELECT b.id, b.library_id, s.age_rating, \
+                COALESCE(GROUP_CONCAT(DISTINCT sl.label), '') AS labels \
          FROM books b \
          JOIN series s ON s.id = b.series_id \
-         LEFT JOIN series_labels sl ON sl.series_id = s.id \
+         LEFT \
+         JOIN series_labels sl ON sl.series_id = s.id \
          WHERE b.id = ? \
          GROUP BY b.id, b.library_id, s.age_rating",
     )

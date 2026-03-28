@@ -135,12 +135,15 @@ async fn get_book_sibling_sqlx(
     book_id: &str,
     next: bool,
 ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
-    let anchor =
-        sqlx::query_as::<_, (String, i64)>("SELECT series_id, number_sort FROM books WHERE id = ?")
-            .bind(book_id)
-            .fetch_optional(&pool)
-            .await
-            .map_err(map_sqlx_error)?;
+    let anchor = sqlx::query_as::<_, (String, i64)>(
+        "SELECT series_id, number_sort \
+                                            FROM books \
+                                            WHERE id = ?",
+    )
+    .bind(book_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(map_sqlx_error)?;
 
     let Some((series_id, number_sort)) = anchor else {
         return Ok(None);
@@ -151,8 +154,11 @@ async fn get_book_sibling_sqlx(
         return Ok(None);
     }
 
-    let mut builder =
-        QueryBuilder::<Sqlite>::new("SELECT b.id FROM books b JOIN series s ON s.id = b.series_id");
+    let mut builder = QueryBuilder::<Sqlite>::new(
+        "SELECT b.id \
+                                     FROM books b \
+                                     JOIN series s ON s.id = b.series_id",
+    );
     let mut state = SqlxWhereState::default();
     append_clause_sqlx("b.series_id = ", &mut builder, &mut state);
     builder.push_bind(series_id);
@@ -199,18 +205,28 @@ pub(in crate::read_models) async fn fetch_book_detail_sqlx(
     }
 
     let mut builder = QueryBuilder::<Sqlite>::new(
-        "SELECT \
-            b.id AS id, b.series_id AS series_id, b.library_id AS library_id, b.title AS title, b.url AS url, b.number_sort AS number_sort, \
-            b.created AS created, b.last_modified AS last_modified, b.file_last_modified AS file_last_modified, b.size_bytes AS size_bytes, \
-            b.media_status AS media_status, b.media_type AS media_type, b.media_pages_count AS media_pages_count, b.metadata_release_date AS metadata_release_date, \
-            b.deleted AS deleted, b.oneshot AS oneshot, s.title AS series_title, \
-            COALESCE(GROUP_CONCAT(DISTINCT ba.author), '') AS metadata_authors, COALESCE(GROUP_CONCAT(DISTINCT bt.tag), '') AS metadata_tags, \
-            rp.page AS rp_page, rp.completed AS rp_completed, rp.read_date AS rp_read_date, rp.created AS rp_created, rp.last_modified AS rp_last_modified, rp.device_id AS rp_device_id, rp.device_name AS rp_device_name \
+        "SELECT b.id AS id, b.series_id AS series_id, b.library_id AS library_id, \
+                b.title AS title, b.url AS url, b.number_sort AS number_sort, \
+                b.created AS created, b.last_modified AS last_modified, \
+                b.file_last_modified AS file_last_modified, b.size_bytes AS size_bytes, \
+                b.media_status AS media_status, b.media_type AS media_type, \
+                b.media_pages_count AS media_pages_count, \
+                b.metadata_release_date AS metadata_release_date, b.deleted AS deleted, \
+                b.oneshot AS oneshot, s.title AS series_title, \
+                COALESCE(GROUP_CONCAT(DISTINCT ba.author), '') AS metadata_authors, \
+                COALESCE(GROUP_CONCAT(DISTINCT bt.tag), '') AS metadata_tags, rp.page AS rp_page, \
+                rp.completed AS rp_completed, rp.read_date AS rp_read_date, \
+                rp.created AS rp_created, rp.last_modified AS rp_last_modified, \
+                rp.device_id AS rp_device_id, rp.device_name AS rp_device_name \
          FROM books b \
          JOIN series s ON s.id = b.series_id \
-         LEFT JOIN book_authors ba ON ba.book_id = b.id \
-         LEFT JOIN book_tags bt ON bt.book_id = b.id \
-         LEFT JOIN read_progress rp ON rp.book_id = b.id AND rp.user_id = ",
+         LEFT \
+         JOIN book_authors ba ON ba.book_id = b.id \
+         LEFT \
+         JOIN book_tags bt ON bt.book_id = b.id \
+         LEFT \
+         JOIN read_progress rp ON rp.book_id = b.id \
+         AND rp.user_id =",
     );
     let user_id = context.user_id.clone().unwrap_or_default();
     builder.push_bind(user_id);
@@ -226,8 +242,10 @@ pub(in crate::read_models) async fn fetch_book_detail_sqlx(
     }
     builder.push(
         " GROUP BY \
-            b.id, b.series_id, b.library_id, b.title, b.url, b.number_sort, b.created, b.last_modified, b.file_last_modified, \
-            b.size_bytes, b.media_status, b.media_type, b.media_pages_count, b.metadata_release_date, b.deleted, b.oneshot, s.title, \
+            b.id, b.series_id, b.library_id, b.title, b.url, b.number_sort, b.created, \
+            b.last_modified, b.file_last_modified, \
+            b.size_bytes, b.media_status, b.media_type, b.media_pages_count, \
+            b.metadata_release_date, b.deleted, b.oneshot, s.title, \
             rp.page, rp.completed, rp.read_date, rp.created, rp.last_modified, rp.device_id, rp.device_name",
     );
 

@@ -1,3 +1,4 @@
-# Reserved crate slot: persistence
+# Persistence crate
 
-This directory is reserved for future persistence-layer extraction.
+`komga-persistence` contains SQLite setup/migrations, read models, and storage adapters
+used by the Rust server runtime.

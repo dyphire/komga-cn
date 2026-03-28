@@ -939,13 +939,13 @@ logging:
         let layered = build_layered_config(&config_dir, &env)
             .expect("layered startup config should be created for tests");
 
-        let from_port_fallback = resolve_bind_address_and_context_path(
-            &RuntimeCli::default(),
-            &env,
-            &layered,
-        )
-        .expect("fallback resolution should work");
-        assert_eq!(from_port_fallback.0, SocketAddr::from(([127, 0, 0, 1], 28111)));
+        let from_port_fallback =
+            resolve_bind_address_and_context_path(&RuntimeCli::default(), &env, &layered)
+                .expect("fallback resolution should work");
+        assert_eq!(
+            from_port_fallback.0,
+            SocketAddr::from(([127, 0, 0, 1], 28111))
+        );
         assert_eq!(from_port_fallback.1, "/from-file");
 
         let from_cli_bind = resolve_bind_address_and_context_path(
@@ -997,7 +997,10 @@ komga:
             PlatformProfile::Default,
         );
 
-        assert_eq!(derived.log_file, config_dir.join("file").join("logs").join("komga.log"));
+        assert_eq!(
+            derived.log_file,
+            config_dir.join("file").join("logs").join("komga.log")
+        );
         assert_eq!(
             derived.database_file,
             config_dir.join("env").join("database.sqlite"),
@@ -1026,10 +1029,7 @@ komga:
             &defaults_dir,
             PlatformProfile::Default,
         );
-        assert_eq!(
-            defaults.database_file,
-            defaults_dir.join("database.sqlite"),
-        );
+        assert_eq!(defaults.database_file, defaults_dir.join("database.sqlite"),);
         assert_eq!(defaults.tasks_db_file, defaults_dir.join("tasks.sqlite"),);
         assert_eq!(defaults.lucene_data_directory, defaults_dir.join("lucene"),);
         assert_eq!(defaults.fonts_data_directory, defaults_dir.join("fonts"),);

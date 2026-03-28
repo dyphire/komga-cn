@@ -1,7 +1,7 @@
 use komga_compat_testkit::contract_matrix::assert_required_target_declared;
 use komga_persistence::server_settings::ServerSettingsStore;
-use komga_rust::persistence::sqlite::connect_pool;
 use komga_rust::persistence::sqlite::connect_persistence_context;
+use komga_rust::persistence::sqlite::connect_pool;
 
 #[path = "support/persistence_contract_fixture.rs"]
 mod persistence_contract_fixture;
@@ -26,18 +26,26 @@ async fn server_settings_rows_persist_in_flyway_seeded_main_db() {
         .await
         .expect("main sqlite pool should open");
 
-    sqlx::query("INSERT OR REPLACE INTO SERVER_SETTINGS (KEY, VALUE) VALUES (?, ?)")
-        .bind("TASK_POOL_SIZE")
-        .bind("4")
-        .execute(&pool)
-        .await
-        .expect("server settings row should upsert");
+    sqlx::query(
+        "INSERT \
+                 OR REPLACE INTO SERVER_SETTINGS (KEY, VALUE) \
+                 VALUES (?, ?)",
+    )
+    .bind("TASK_POOL_SIZE")
+    .bind("4")
+    .execute(&pool)
+    .await
+    .expect("server settings row should upsert");
 
-    let value: String = sqlx::query_scalar("SELECT VALUE FROM SERVER_SETTINGS WHERE KEY = ?")
-        .bind("TASK_POOL_SIZE")
-        .fetch_one(&pool)
-        .await
-        .expect("server settings row should be readable");
+    let value: String = sqlx::query_scalar(
+        "SELECT VALUE \
+                                            FROM SERVER_SETTINGS \
+                                            WHERE KEY = ?",
+    )
+    .bind("TASK_POOL_SIZE")
+    .fetch_one(&pool)
+    .await
+    .expect("server settings row should be readable");
     assert_eq!(value, "4");
 
     pool.close().await;
@@ -72,7 +80,10 @@ async fn server_settings_store_round_trips_through_context_backed_path() {
         .load_map()
         .await
         .expect("settings map should load via context-backed path");
-    assert_eq!(persisted.get("TASK_POOL_SIZE"), Some(&Some("4".to_string())));
+    assert_eq!(
+        persisted.get("TASK_POOL_SIZE"),
+        Some(&Some("4".to_string()))
+    );
     assert_eq!(persisted.get("KOBO_PORT"), None);
 
     context.pool().close().await;

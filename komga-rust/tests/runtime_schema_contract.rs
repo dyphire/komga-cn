@@ -183,7 +183,10 @@ async fn sqlite_connect_layer_bootstraps_main_and_tasks_databases() {
         .expect("tasks connect should bootstrap tasks sqlite schema");
 
     let main_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND LOWER(name) = 'server_settings'",
+        "SELECT COUNT(*) \
+         FROM sqlite_master \
+         WHERE type = 'table' \
+         AND LOWER(name) = 'server_settings'",
     )
     .fetch_one(main_context.pool())
     .await
@@ -194,7 +197,10 @@ async fn sqlite_connect_layer_bootstraps_main_and_tasks_databases() {
     );
 
     let tasks_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND LOWER(name) = 'task'",
+        "SELECT COUNT(*) \
+         FROM sqlite_master \
+         WHERE type = 'table' \
+         AND LOWER(name) = 'task'",
     )
     .fetch_one(&tasks_pool)
     .await
@@ -214,10 +220,10 @@ async fn schema_inventory(
 ) -> anyhow::Result<Vec<(String, String, String, String)>> {
     let pool = connect_pool(path, 1).await?;
     let rows = sqlx::query(
-        "SELECT type, name, tbl_name, COALESCE(sql, '') AS sql
-         FROM sqlite_master
-         WHERE type IN ('table', 'index', 'trigger', 'view')
-           AND name NOT LIKE 'sqlite_%'
+        "SELECT type, name, tbl_name, COALESCE(sql, '') AS sql \
+         FROM sqlite_master \
+         WHERE type IN ('table', 'index', 'trigger', 'view') \
+         AND name NOT LIKE 'sqlite_%' \
          ORDER BY type, name",
     )
     .fetch_all(&pool)
@@ -238,5 +244,10 @@ async fn schema_inventory(
 }
 
 fn normalize_schema_sql(sql: &str) -> String {
-    sql.split_whitespace().collect::<Vec<_>>().join(" ")
+    sql.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace(" ,", ",")
+        .replace(" )", ")")
+        .replace("( ", "(")
 }

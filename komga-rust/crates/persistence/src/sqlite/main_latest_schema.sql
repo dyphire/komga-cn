@@ -14,7 +14,10 @@ CREATE TABLE AUTHENTICATION_ACTIVITY
     USER_AGENT varchar  NULL     DEFAULT NULL,
     SUCCESS    boolean  NOT NULL,
     ERROR      varchar  NULL     DEFAULT NULL,
-    DATE_TIME  datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, SOURCE varchar NULL DEFAULT NULL, API_KEY_ID varchar NULL DEFAULT NULL, API_KEY_COMMENT varchar NULL DEFAULT NULL,
+    DATE_TIME       datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    SOURCE          varchar  NULL     DEFAULT NULL,
+    API_KEY_ID      varchar  NULL     DEFAULT NULL,
+    API_KEY_COMMENT varchar  NULL     DEFAULT NULL,
     FOREIGN KEY (USER_ID) references USER (ID)
 );
 
@@ -29,7 +32,11 @@ CREATE TABLE BOOK
     SERIES_ID          varchar  NOT NULL,
     FILE_SIZE          int8     NOT NULL DEFAULT 0,
     NUMBER             int      NOT NULL DEFAULT 0,
-    LIBRARY_ID         varchar  NOT NULL, FILE_HASH varchar NOT NULL DEFAULT '', DELETED_DATE datetime NULL DEFAULT NULL, oneshot boolean NOT NULL DEFAULT 0, FILE_HASH_KOREADER varchar NOT NULL DEFAULT '',
+    LIBRARY_ID         varchar  NOT NULL,
+    FILE_HASH          varchar  NOT NULL DEFAULT '',
+    DELETED_DATE       datetime NULL     DEFAULT NULL,
+    oneshot            boolean  NOT NULL DEFAULT 0,
+    FILE_HASH_KOREADER varchar  NOT NULL DEFAULT '',
     FOREIGN KEY (LIBRARY_ID) REFERENCES LIBRARY (ID),
     FOREIGN KEY (SERIES_ID) REFERENCES SERIES (ID)
 );
@@ -50,7 +57,10 @@ CREATE TABLE BOOK_METADATA
     TITLE_LOCK         boolean  NOT NULL DEFAULT 0,
     AUTHORS_LOCK       boolean  NOT NULL DEFAULT 0,
     TAGS_LOCK          boolean  NOT NULL DEFAULT 0,
-    BOOK_ID            varchar  NOT NULL PRIMARY KEY, ISBN varchar NOT NULL DEFAULT '', ISBN_LOCK boolean NOT NULL DEFAULT 0, LINKS_LOCK boolean NOT NULL DEFAULT 0,
+    BOOK_ID            varchar  NOT NULL PRIMARY KEY,
+    ISBN               varchar  NOT NULL DEFAULT '',
+    ISBN_LOCK          boolean  NOT NULL DEFAULT 0,
+    LINKS_LOCK         boolean  NOT NULL DEFAULT 0,
     FOREIGN KEY (BOOK_ID) REFERENCES BOOK (ID)
 );
 
@@ -168,8 +178,29 @@ CREATE TABLE LIBRARY
     IMPORT_COMICINFO_SERIES     boolean  NOT NULL DEFAULT 1,
     IMPORT_COMICINFO_COLLECTION boolean  NOT NULL DEFAULT 1,
     IMPORT_EPUB_BOOK            boolean  NOT NULL DEFAULT 1,
-    IMPORT_EPUB_SERIES          boolean  NOT NULL DEFAULT 1
-, SCAN_FORCE_MODIFIED_TIME boolean NOT NULL DEFAULT 0, SCAN_STARTUP boolean NOT NULL DEFAULT 0, IMPORT_LOCAL_ARTWORK boolean NOT NULL DEFAULT 1, IMPORT_COMICINFO_READLIST boolean NOT NULL DEFAULT 1, IMPORT_BARCODE_ISBN boolean NOT NULL DEFAULT 1, CONVERT_TO_CBZ boolean NOT NULL DEFAULT 0, REPAIR_EXTENSIONS boolean NOT NULL DEFAULT 0, EMPTY_TRASH_AFTER_SCAN boolean NOT NULL DEFAULT 0, IMPORT_MYLAR_SERIES boolean NOT NULL DEFAULT 1, SERIES_COVER varchar NOT NULL DEFAULT 'FIRST', UNAVAILABLE_DATE datetime NULL DEFAULT NULL, HASH_FILES boolean NOT NULL DEFAULT 1, HASH_PAGES boolean NOT NULL DEFAULT 0, ANALYZE_DIMENSIONS boolean NOT NULL DEFAULT 1, IMPORT_COMICINFO_SERIES_APPEND_VOLUME boolean NOT NULL DEFAULT 1, ONESHOTS_DIRECTORY varchar NULL DEFAULT NULL, SCAN_CBX boolean NOT NULL DEFAULT 1, SCAN_PDF boolean NOT NULL DEFAULT 1, SCAN_EPUB boolean NOT NULL DEFAULT 1, SCAN_INTERVAL varchar NOT NULL DEFAULT 'EVERY_6H', HASH_KOREADER boolean NOT NULL DEFAULT 0);
+    IMPORT_EPUB_SERIES          boolean  NOT NULL DEFAULT 1,
+    SCAN_FORCE_MODIFIED_TIME    boolean  NOT NULL DEFAULT 0,
+    SCAN_STARTUP                boolean  NOT NULL DEFAULT 0,
+    IMPORT_LOCAL_ARTWORK        boolean  NOT NULL DEFAULT 1,
+    IMPORT_COMICINFO_READLIST   boolean  NOT NULL DEFAULT 1,
+    IMPORT_BARCODE_ISBN         boolean  NOT NULL DEFAULT 1,
+    CONVERT_TO_CBZ              boolean  NOT NULL DEFAULT 0,
+    REPAIR_EXTENSIONS           boolean  NOT NULL DEFAULT 0,
+    EMPTY_TRASH_AFTER_SCAN      boolean  NOT NULL DEFAULT 0,
+    IMPORT_MYLAR_SERIES         boolean  NOT NULL DEFAULT 1,
+    SERIES_COVER                varchar  NOT NULL DEFAULT 'FIRST',
+    UNAVAILABLE_DATE            datetime NULL     DEFAULT NULL,
+    HASH_FILES                  boolean  NOT NULL DEFAULT 1,
+    HASH_PAGES                  boolean  NOT NULL DEFAULT 0,
+    ANALYZE_DIMENSIONS          boolean  NOT NULL DEFAULT 1,
+    IMPORT_COMICINFO_SERIES_APPEND_VOLUME boolean NOT NULL DEFAULT 1,
+    ONESHOTS_DIRECTORY          varchar  NULL     DEFAULT NULL,
+    SCAN_CBX                    boolean  NOT NULL DEFAULT 1,
+    SCAN_PDF                    boolean  NOT NULL DEFAULT 1,
+    SCAN_EPUB                   boolean  NOT NULL DEFAULT 1,
+    SCAN_INTERVAL               varchar  NOT NULL DEFAULT 'EVERY_6H',
+    HASH_KOREADER               boolean  NOT NULL DEFAULT 0
+);
 
 CREATE TABLE LIBRARY_EXCLUSIONS
 (
@@ -187,7 +218,12 @@ CREATE TABLE MEDIA
     LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
     COMMENT            varchar  NULL,
     BOOK_ID            varchar  NOT NULL PRIMARY KEY,
-    PAGE_COUNT         int      NOT NULL DEFAULT 0, EXTENSION_CLASS varchar NULL, _UNUSED varchar NULL, EXTENSION_VALUE_BLOB blob NULL, EPUB_DIVINA_COMPATIBLE boolean NOT NULL DEFAULT 0, EPUB_IS_KEPUB boolean NOT NULL DEFAULT 0,
+    PAGE_COUNT             int      NOT NULL DEFAULT 0,
+    EXTENSION_CLASS        varchar  NULL,
+    _UNUSED                varchar  NULL,
+    EXTENSION_VALUE_BLOB   blob     NULL,
+    EPUB_DIVINA_COMPATIBLE boolean  NOT NULL DEFAULT 0,
+    EPUB_IS_KEPUB          boolean  NOT NULL DEFAULT 0,
     FOREIGN KEY (BOOK_ID) REFERENCES BOOK (ID)
 );
 
@@ -203,7 +239,11 @@ CREATE TABLE MEDIA_PAGE
     FILE_NAME  varchar NOT NULL,
     MEDIA_TYPE varchar NOT NULL,
     NUMBER     int     NOT NULL,
-    BOOK_ID    varchar NOT NULL, width int NULL, height int NULL, FILE_HASH varchar NOT NULL DEFAULT '', FILE_SIZE int8 NULL,
+    BOOK_ID    varchar NOT NULL,
+    width      int     NULL,
+    height     int     NULL,
+    FILE_HASH  varchar NOT NULL DEFAULT '',
+    FILE_SIZE  int8    NULL,
     PRIMARY KEY (BOOK_ID, NUMBER),
     FOREIGN KEY (BOOK_ID) REFERENCES BOOK (ID)
 );
@@ -230,8 +270,10 @@ CREATE TABLE READLIST
     NAME               varchar  NOT NULL,
     BOOK_COUNT         int      NOT NULL,
     CREATED_DATE       datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP
-, SUMMARY varchar not NULL default '', ORDERED boolean NOT NULL DEFAULT 1);
+    LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    SUMMARY            varchar  not NULL default '',
+    ORDERED            boolean  NOT NULL DEFAULT 1
+);
 
 CREATE TABLE READLIST_BOOK
 (
@@ -251,7 +293,10 @@ CREATE TABLE READ_PROGRESS
     LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PAGE               int      NOT NULL,
     COMPLETED          boolean  NOT NULL,
-    READ_DATE          datetime NULL     DEFAULT CURRENT_TIMESTAMP, device_id varchar default '', device_name varchar default '', locator blob null,
+    READ_DATE          datetime NULL     DEFAULT CURRENT_TIMESTAMP,
+    device_id          varchar           default '',
+    device_name        varchar           default '',
+    locator            blob              null,
     PRIMARY KEY (BOOK_ID, USER_ID),
     FOREIGN KEY (BOOK_ID) REFERENCES BOOK (ID),
     FOREIGN KEY (USER_ID) REFERENCES USER (ID)
@@ -276,7 +321,10 @@ CREATE TABLE SERIES
     FILE_LAST_MODIFIED datetime NOT NULL,
     NAME               varchar  NOT NULL,
     URL                varchar  NOT NULL,
-    LIBRARY_ID         varchar  NOT NULL, BOOK_COUNT int NOT NULL DEFAULT 0, DELETED_DATE datetime NULL DEFAULT NULL, oneshot boolean NOT NULL DEFAULT 0,
+    LIBRARY_ID         varchar  NOT NULL,
+    BOOK_COUNT         int      NOT NULL DEFAULT 0,
+    DELETED_DATE       datetime NULL     DEFAULT NULL,
+    oneshot            boolean  NOT NULL DEFAULT 0,
     FOREIGN KEY (LIBRARY_ID) REFERENCES LIBRARY (ID)
 );
 
@@ -290,7 +338,24 @@ CREATE TABLE SERIES_METADATA
     TITLE_LOCK         boolean  NOT NULL DEFAULT 0,
     TITLE_SORT         varchar  NOT NULL,
     TITLE_SORT_LOCK    boolean  NOT NULL DEFAULT 0,
-    SERIES_ID          varchar  NOT NULL PRIMARY KEY, PUBLISHER varchar NOT NULL DEFAULT '', PUBLISHER_LOCK boolean NOT NULL DEFAULT 0, READING_DIRECTION varchar NULL, READING_DIRECTION_LOCK boolean NOT NULL DEFAULT 0, AGE_RATING int NULL, AGE_RATING_LOCK boolean NOT NULL DEFAULT 0, SUMMARY varchar NOT NULL DEFAULT '', SUMMARY_LOCK boolean NOT NULL DEFAULT 0, LANGUAGE varchar NOT NULL DEFAULT '', LANGUAGE_LOCK boolean NOT NULL DEFAULT 0, GENRES_LOCK boolean NOT NULL DEFAULT 0, TAGS_LOCK boolean NOT NULL DEFAULT 0, TOTAL_BOOK_COUNT int NULL, TOTAL_BOOK_COUNT_LOCK boolean NOT NULL DEFAULT 0, SHARING_LABELS_LOCK boolean NOT NULL DEFAULT 0, LINKS_LOCK boolean NOT NULL DEFAULT 0, ALTERNATE_TITLES_LOCK boolean NOT NULL DEFAULT 0,
+    SERIES_ID              varchar  NOT NULL PRIMARY KEY,
+    PUBLISHER              varchar  NOT NULL DEFAULT '',
+    PUBLISHER_LOCK         boolean  NOT NULL DEFAULT 0,
+    READING_DIRECTION      varchar  NULL,
+    READING_DIRECTION_LOCK boolean  NOT NULL DEFAULT 0,
+    AGE_RATING             int      NULL,
+    AGE_RATING_LOCK        boolean  NOT NULL DEFAULT 0,
+    SUMMARY                varchar  NOT NULL DEFAULT '',
+    SUMMARY_LOCK           boolean  NOT NULL DEFAULT 0,
+    LANGUAGE               varchar  NOT NULL DEFAULT '',
+    LANGUAGE_LOCK          boolean  NOT NULL DEFAULT 0,
+    GENRES_LOCK            boolean  NOT NULL DEFAULT 0,
+    TAGS_LOCK              boolean  NOT NULL DEFAULT 0,
+    TOTAL_BOOK_COUNT       int      NULL,
+    TOTAL_BOOK_COUNT_LOCK  boolean  NOT NULL DEFAULT 0,
+    SHARING_LABELS_LOCK    boolean  NOT NULL DEFAULT 0,
+    LINKS_LOCK             boolean  NOT NULL DEFAULT 0,
+    ALTERNATE_TITLES_LOCK  boolean  NOT NULL DEFAULT 0,
     FOREIGN KEY (SERIES_ID) REFERENCES SERIES (ID)
 );
 
@@ -416,7 +481,11 @@ CREATE TABLE THUMBNAIL_BOOK
     TYPE               varchar  NOT NULL,
     CREATED_DATE       datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
     LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    BOOK_ID            varchar  NOT NULL, WIDTH int NOT NULL default 0, HEIGHT int NOT NULL default 0, MEDIA_TYPE varchar NOT NULL default '', FILE_SIZE int8 NOT NULL default 0,
+    BOOK_ID            varchar  NOT NULL,
+    WIDTH              int      NOT NULL default 0,
+    HEIGHT             int      NOT NULL default 0,
+    MEDIA_TYPE         varchar  NOT NULL default '',
+    FILE_SIZE          int8     NOT NULL default 0,
     FOREIGN KEY (BOOK_ID) REFERENCES BOOK (ID)
 );
 
@@ -428,7 +497,11 @@ CREATE TABLE THUMBNAIL_COLLECTION
     TYPE               varchar  NOT NULL,
     COLLECTION_ID      varchar  NOT NULL,
     CREATED_DATE       datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, WIDTH int NOT NULL default 0, HEIGHT int NOT NULL default 0, MEDIA_TYPE varchar NOT NULL default '', FILE_SIZE int8 NOT NULL default 0,
+    LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    WIDTH              int      NOT NULL default 0,
+    HEIGHT             int      NOT NULL default 0,
+    MEDIA_TYPE         varchar  NOT NULL default '',
+    FILE_SIZE          int8     NOT NULL default 0,
     FOREIGN KEY (COLLECTION_ID) REFERENCES COLLECTION (ID)
 );
 
@@ -440,7 +513,11 @@ CREATE TABLE THUMBNAIL_READLIST
     TYPE               varchar  NOT NULL,
     READLIST_ID        varchar  NOT NULL,
     CREATED_DATE       datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, WIDTH int NOT NULL default 0, HEIGHT int NOT NULL default 0, MEDIA_TYPE varchar NOT NULL default '', FILE_SIZE int8 NOT NULL default 0,
+    LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    WIDTH              int      NOT NULL default 0,
+    HEIGHT             int      NOT NULL default 0,
+    MEDIA_TYPE         varchar  NOT NULL default '',
+    FILE_SIZE          int8     NOT NULL default 0,
     FOREIGN KEY (READLIST_ID) REFERENCES READLIST (ID)
 );
 
@@ -453,7 +530,11 @@ CREATE TABLE THUMBNAIL_SERIES
     TYPE                varchar not null,
     CREATED_DATE        datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
     LAST_MODIFIED_DATE  datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    SERIES_ID           varchar  NOT NULL, WIDTH int NOT NULL default 0, HEIGHT int NOT NULL default 0, MEDIA_TYPE varchar NOT NULL default '', FILE_SIZE int8 NOT NULL default 0,
+    SERIES_ID           varchar  NOT NULL,
+    WIDTH               int      NOT NULL default 0,
+    HEIGHT              int      NOT NULL default 0,
+    MEDIA_TYPE          varchar  NOT NULL default '',
+    FILE_SIZE           int8     NOT NULL default 0,
     FOREIGN KEY (SERIES_ID) REFERENCES SERIES (ID)
 );
 

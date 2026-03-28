@@ -256,7 +256,10 @@ mod tests {
             labels_exclude: vec!["NsFw".to_string(), "BLOCKED".to_string()],
         };
 
-        let mut builder = QueryBuilder::<Sqlite>::new("SELECT s.id FROM series s");
+        let mut builder = QueryBuilder::<Sqlite>::new(
+            "SELECT s.id \
+                   FROM series s",
+        );
         let mut state = SqlxWhereState::default();
         query_filters_sqlx(
             &mut builder,
@@ -274,7 +277,11 @@ mod tests {
 
         assert!(
             actual_sql.ends_with(
-                " WHERE s.library_id IN (?,?) AND LOWER(s.title) LIKE ? AND NOT EXISTS (SELECT 1 FROM series_labels ex WHERE ex.series_id = s.id AND LOWER(ex.label) IN (?,?)) AND (s.age_rating IS NULL OR s.age_rating < ?) AND EXISTS (SELECT 1 FROM series_labels al WHERE al.series_id = s.id AND LOWER(al.label) IN (?,?))"
+                "WHERE s.library_id IN (?,?) AND LOWER(s.title) LIKE ? AND NOT EXISTS (SELECT \
+                 1 FROM series_labels ex WHERE ex.series_id = s.id AND LOWER(ex.label) IN \
+                 (?,?)) AND (s.age_rating IS NULL OR s.age_rating < ?) AND EXISTS (SELECT 1 \
+                 FROM series_labels al WHERE al.series_id = s.id AND LOWER(al.label) IN \
+                 (?,?))"
             ),
             "unexpected sql: {actual_sql}",
         );
@@ -296,7 +303,10 @@ mod tests {
 
     #[test]
     fn sqlx_extended_predicates_preserve_exists_lowercase_and_parameter_order() {
-        let mut builder = QueryBuilder::<Sqlite>::new("SELECT s.id FROM series s");
+        let mut builder = QueryBuilder::<Sqlite>::new(
+            "SELECT s.id \
+                   FROM series s",
+        );
         let mut state = SqlxWhereState::default();
         append_clause_sqlx("s.deleted = 0", &mut builder, &mut state);
         append_string_set_filter_sqlx(
@@ -323,11 +333,11 @@ mod tests {
         append_u16_set_filter_sqlx("s.age_rating", Some(&[10, 16]), &mut builder, &mut state);
 
         let query = builder.build();
-        assert!(
-            query.sql().ends_with(
-                " WHERE s.deleted = 0 AND LOWER(s.read_status) IN (?,?) AND EXISTS (SELECT 1 FROM series_genres f WHERE f.series_id = s.id AND LOWER(f.genre) IN (?,?)) AND s.release_date IN (?) AND s.age_rating IN (?,?)"
-            )
-        );
+        assert!(query.sql().ends_with(
+            "WHERE s.deleted = 0 AND LOWER(s.read_status) IN (?,?) AND EXISTS (SELECT 1 \
+                 FROM series_genres f WHERE f.series_id = s.id AND LOWER(f.genre) IN (?,?)) \
+                 AND s.release_date IN (?) AND s.age_rating IN (?,?)"
+        ));
 
         assert_eq!(
             state.params,

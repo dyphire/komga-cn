@@ -1,3 +1,4 @@
-# Reserved crate slot: domain
+# Domain crate
 
-This directory is reserved for future domain extraction.
+`komga-domain` contains domain models and discovery/search-domain abstractions
+used by the Rust runtime.

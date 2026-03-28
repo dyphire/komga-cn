@@ -7,7 +7,7 @@ use tantivy::collector::TopDocs;
 use tantivy::doc;
 use tantivy::query::{BooleanQuery, Occur, QueryParser, TermQuery};
 use tantivy::schema::{
-    Field, IndexRecordOption, Schema, TantivyDocument, Value, STORED, STRING, TEXT,
+    Field, IndexRecordOption, STORED, STRING, Schema, TEXT, TantivyDocument, Value,
 };
 use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, Term};
 
@@ -133,6 +133,15 @@ impl SearchFields {
 
 pub fn startup_recover(index_dir: &Path) -> Result<(), SearchError> {
     prepare_index_directory(index_dir)?;
+    let _ = open_or_rebuild_index(index_dir, build_schema())?;
+    Ok(())
+}
+
+pub fn reset_for_rebuild(index_dir: &Path) -> Result<(), SearchError> {
+    if index_dir.exists() {
+        fs::remove_dir_all(index_dir)?;
+    }
+    fs::create_dir_all(index_dir)?;
     let _ = open_or_rebuild_index(index_dir, build_schema())?;
     Ok(())
 }
@@ -304,7 +313,7 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{startup_recover, SearchError, SearchIndexLifecycle};
+    use super::{SearchError, SearchIndexLifecycle, startup_recover};
 
     #[test]
     fn bootstrap_rejects_legacy_lucene_artifacts() {

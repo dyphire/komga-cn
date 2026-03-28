@@ -1,9 +1,10 @@
+use std::io::Read;
 use std::path::Path as FsPath;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::Json;
 use axum::extract::Path;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use komga_domain::discovery::DiscoveryError;
 use komga_persistence::read_models::libraries::{
@@ -15,7 +16,7 @@ use sqlx::{Row, Sqlite, Transaction};
 
 use crate::app::CompatProfile;
 use crate::app::discovery_auth::{DiscoveryAuthState, DiscoveryQueryContext};
-use crate::app::placeholder_auth::{require_admin, require_auth};
+use crate::app::runtime_auth::{require_admin, require_auth};
 use crate::task_queue::TaskQueueRecord;
 
 use super::super::OperationalState;
@@ -62,6 +63,7 @@ pub(super) async fn library_detail(
 pub(super) async fn library_update(
     headers: HeaderMap,
     database_file: &FsPath,
+    state: OperationalState,
     Path(library_id): Path<String>,
     body: Value,
 ) -> Response {
@@ -74,6 +76,7 @@ pub(super) async fn library_update(
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
     };
+    let previous_library = library.clone();
 
     let body = match body.as_object() {
         Some(body) => body,
@@ -83,17 +86,112 @@ pub(super) async fn library_update(
     if let Err(response) = apply_library_body(&mut library, body) {
         return response;
     }
+    if let Err(message) = validate_library_before_persist(database_file, &library).await {
+        return bad_request_response(message.as_str());
+    }
 
     match persist_library_update(database_file, &library).await {
-        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(true) => {
+            let mut task_records = Vec::new();
+            if library_should_rescan(&previous_library, &library) {
+                task_records.push(scan_library_task_record(&library.id, false));
+            }
+            if library.hash_files && !previous_library.hash_files {
+                match library_book_ids_with_empty_hash(database_file, &library.id, false).await {
+                    Ok(book_ids) => task_records.extend(book_ids.into_iter().map(|book_id| {
+                        TaskQueueRecord::new(format!("HASH_BOOK:{book_id}"), 10, Some(book_id))
+                    })),
+                    Err(error) => return internal_error_response(error),
+                }
+            }
+            if library.hash_koreader && !previous_library.hash_koreader {
+                match library_book_ids_with_empty_hash(database_file, &library.id, true).await {
+                    Ok(book_ids) => task_records.extend(book_ids.into_iter().map(|book_id| {
+                        TaskQueueRecord::new(
+                            format!("HASH_BOOK_KOREADER:{book_id}"),
+                            10,
+                            Some(book_id),
+                        )
+                    })),
+                    Err(error) => return internal_error_response(error),
+                }
+            }
+            if library.hash_pages && !previous_library.hash_pages {
+                task_records.push(TaskQueueRecord::new(
+                    format!("FIND_BOOKS_WITH_MISSING_PAGE_HASH:{}", library.id),
+                    10,
+                    Some(library.id.clone()),
+                ));
+            }
+            if library.repair_extensions && !previous_library.repair_extensions {
+                task_records.push(TaskQueueRecord::new(
+                    format!("REPAIR_EXTENSIONS:{}", library.id),
+                    10,
+                    Some(library.id.clone()),
+                ));
+            }
+            if library.convert_to_cbz && !previous_library.convert_to_cbz {
+                task_records.push(TaskQueueRecord::new(
+                    format!("FIND_BOOKS_TO_CONVERT:{}", library.id),
+                    10,
+                    Some(library.id.clone()),
+                ));
+            }
+
+            if task_records.is_empty() {
+                StatusCode::NO_CONTENT.into_response()
+            } else {
+                enqueue_task_records_with_status(&state, task_records, StatusCode::NO_CONTENT)
+            }
+        }
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }
 }
 
+async fn library_book_ids_with_empty_hash(
+    database_file: &FsPath,
+    library_id: &str,
+    koreader: bool,
+) -> Result<Vec<String>, String> {
+    if !database_file.exists() {
+        return Ok(vec![]);
+    }
+
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("open library hash query db: {error}"))?;
+
+    let sql = if koreader {
+        "SELECT ID \
+         FROM BOOK \
+         WHERE LIBRARY_ID = ? \
+         AND DELETED_DATE IS NULL \
+         AND (FILE_HASH_KOREADER = '' OR FILE_HASH_KOREADER IS NULL)"
+    } else {
+        "SELECT ID \
+         FROM BOOK \
+         WHERE LIBRARY_ID = ? \
+         AND DELETED_DATE IS NULL \
+         AND (FILE_HASH = '' OR FILE_HASH IS NULL)"
+    };
+
+    let rows = sqlx::query(sql)
+        .bind(library_id)
+        .fetch_all(&pool)
+        .await
+        .map_err(|error| format!("query books with empty hash: {error}"))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| row.get::<String, _>("ID"))
+        .collect::<Vec<_>>())
+}
+
 pub(super) async fn library_create(
     headers: HeaderMap,
     database_file: &FsPath,
+    state: OperationalState,
     body: Value,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
@@ -115,9 +213,22 @@ pub(super) async fn library_create(
     if let Err(response) = apply_library_body(&mut library, body) {
         return response;
     }
+    if library.name.trim().is_empty() || library.root.trim().is_empty() {
+        return bad_request_response("library create payload must provide non-empty name and root");
+    }
+    if let Err(message) = validate_library_before_persist(database_file, &library).await {
+        return bad_request_response(message.as_str());
+    }
 
     match persist_library_create(database_file, &library).await {
-        Ok(()) => Json(library_payload(library, true)).into_response(),
+        Ok(()) => {
+            let enqueue_response =
+                enqueue_task_records(&state, vec![scan_library_task_record(&library.id, false)]);
+            if enqueue_response.status().is_server_error() {
+                return enqueue_response;
+            }
+            Json(library_payload(library, true)).into_response()
+        }
         Err(error) => internal_error_response(error),
     }
 }
@@ -140,6 +251,7 @@ pub(super) async fn library_delete(
 
 pub(super) async fn library_scan(
     headers: HeaderMap,
+    uri: Uri,
     database_file: &FsPath,
     state: OperationalState,
     Path(library_id): Path<String>,
@@ -148,11 +260,36 @@ pub(super) async fn library_scan(
         return response;
     }
 
+    let deep_scan = uri.query().map(is_deep_scan_query).unwrap_or(false);
+
     match load_persisted_library(database_file, &library_id).await {
-        Ok(Some(_)) => enqueue_task_records(&state, vec![scan_library_task_record(&library_id)]),
+        Ok(Some(_)) => enqueue_task_records(
+            &state,
+            vec![scan_library_task_record(&library_id, deep_scan)],
+        ),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }
+}
+
+fn is_deep_scan_query(query: &str) -> bool {
+    query
+        .split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .any(|(key, value)| {
+            key.eq_ignore_ascii_case("deep")
+                && matches!(value.to_ascii_lowercase().as_str(), "true" | "1")
+        })
+}
+
+fn library_should_rescan(previous: &PersistedLibrary, next: &PersistedLibrary) -> bool {
+    previous.root != next.root
+        || previous.scan_force_modified_time != next.scan_force_modified_time
+        || previous.scan_cbx != next.scan_cbx
+        || previous.scan_pdf != next.scan_pdf
+        || previous.scan_epub != next.scan_epub
+        || previous.oneshots_directory != next.oneshots_directory
+        || previous.scan_directory_exclusions != next.scan_directory_exclusions
 }
 
 pub(super) async fn library_analyze(
@@ -167,7 +304,7 @@ pub(super) async fn library_analyze(
 
     let task_records = match library_book_ids(database_file, &library_id).await {
         Ok(Some(book_ids)) => {
-            let mut task_records = vec![scan_library_task_record(&library_id)];
+            let mut task_records = Vec::with_capacity(book_ids.len());
             task_records.extend(book_ids.into_iter().map(|book_id| {
                 TaskQueueRecord::new(format!("ANALYZE_BOOK:{book_id}"), 90, Some(book_id))
             }));
@@ -197,8 +334,7 @@ pub(super) async fn library_metadata_refresh(
         Err(error) => return internal_error_response(error),
     };
 
-    let mut task_records = Vec::with_capacity((book_ids.len() * 2) + series_ids.len() + 1);
-    task_records.push(scan_library_task_record(&library_id));
+    let mut task_records = Vec::with_capacity((book_ids.len() * 2) + series_ids.len());
     for book_id in book_ids {
         task_records.push(TaskQueueRecord::new(
             format!("REFRESH_BOOK_METADATA:{book_id}"),
@@ -241,7 +377,7 @@ pub(super) async fn library_empty_trash(
                     70,
                     Some(library_id.clone()),
                 ),
-                scan_library_task_record(&library_id),
+                scan_library_task_record(&library_id, false),
             ],
         ),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
@@ -249,15 +385,27 @@ pub(super) async fn library_empty_trash(
     }
 }
 
-fn scan_library_task_record(library_id: &str) -> TaskQueueRecord {
-    TaskQueueRecord::new(
+fn scan_library_task_record(library_id: &str, deep_scan: bool) -> TaskQueueRecord {
+    let mut task = TaskQueueRecord::new(
         format!("SCAN_LIBRARY:{library_id}"),
         100,
         Some(library_id.to_string()),
-    )
+    );
+    if deep_scan {
+        task = task.with_payload(r#"{"deep":true}"#);
+    }
+    task
 }
 
 fn enqueue_task_records(state: &OperationalState, task_records: Vec<TaskQueueRecord>) -> Response {
+    enqueue_task_records_with_status(state, task_records, StatusCode::ACCEPTED)
+}
+
+fn enqueue_task_records_with_status(
+    state: &OperationalState,
+    task_records: Vec<TaskQueueRecord>,
+    status: StatusCode,
+) -> Response {
     let mut task_queue = state
         .task_queue
         .lock()
@@ -274,7 +422,7 @@ fn enqueue_task_records(state: &OperationalState, task_records: Vec<TaskQueueRec
             .into_response();
     }
 
-    let mut response = StatusCode::ACCEPTED.into_response();
+    let mut response = status.into_response();
     mark_native(&mut response);
     response
 }
@@ -288,11 +436,15 @@ async fn library_book_ids(
     };
 
     let pool = connect_pool(database_file, 1).await?;
-    let rows = sqlx::query("SELECT ID FROM BOOK WHERE LIBRARY_ID = ? ORDER BY ID ASC")
-        .bind(library_id)
-        .fetch_all(&pool)
-        .await?;
-    pool.close().await;
+    let rows = sqlx::query(
+        "SELECT ID \
+                            FROM BOOK \
+                            WHERE LIBRARY_ID = ? \
+                            ORDER BY ID ASC",
+    )
+    .bind(library_id)
+    .fetch_all(&pool)
+    .await?;
 
     Ok(Some(
         rows.into_iter()
@@ -310,15 +462,24 @@ async fn library_series_and_book_ids(
     };
 
     let pool = connect_pool(database_file, 1).await?;
-    let series_rows = sqlx::query("SELECT ID FROM SERIES WHERE LIBRARY_ID = ? ORDER BY ID ASC")
-        .bind(library_id)
-        .fetch_all(&pool)
-        .await?;
-    let book_rows = sqlx::query("SELECT ID FROM BOOK WHERE LIBRARY_ID = ? ORDER BY ID ASC")
-        .bind(library_id)
-        .fetch_all(&pool)
-        .await?;
-    pool.close().await;
+    let series_rows = sqlx::query(
+        "SELECT ID \
+                                   FROM SERIES \
+                                   WHERE LIBRARY_ID = ? \
+                                   ORDER BY ID ASC",
+    )
+    .bind(library_id)
+    .fetch_all(&pool)
+    .await?;
+    let book_rows = sqlx::query(
+        "SELECT ID \
+                                 FROM BOOK \
+                                 WHERE LIBRARY_ID = ? \
+                                 ORDER BY ID ASC",
+    )
+    .bind(library_id)
+    .fetch_all(&pool)
+    .await?;
 
     Ok(Some((
         series_rows
@@ -333,11 +494,24 @@ async fn library_series_and_book_ids(
 }
 
 fn generated_library_id() -> String {
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    format!("library-{timestamp}")
+    format!("library-{}", random_hex_token(12))
+}
+
+fn random_hex_token(byte_len: usize) -> String {
+    let mut bytes = vec![0u8; byte_len];
+    if let Ok(mut file) = std::fs::File::open("/dev/urandom") {
+        let _ = file.read_exact(&mut bytes);
+    } else {
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        for (index, byte) in bytes.iter_mut().enumerate() {
+            *byte = ((seed >> ((index % 8) * 8)) as u8) ^ (index as u8).wrapping_mul(17);
+        }
+    }
+
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn apply_library_body(
@@ -458,7 +632,11 @@ fn apply_optional_string_field(
             "{key} must be a string or null"
         )));
     };
-    *field = Some(value.to_string());
+    *field = if value.chars().all(|ch| ch.is_whitespace()) {
+        None
+    } else {
+        Some(value.to_string())
+    };
     Ok(())
 }
 
@@ -497,7 +675,6 @@ async fn persist_library_create(
     insert_library_row(&mut tx, library).await?;
     replace_library_exclusions(&mut tx, &library.id, &library.scan_directory_exclusions).await?;
     tx.commit().await?;
-    pool.close().await;
     Ok(())
 }
 
@@ -510,12 +687,10 @@ async fn persist_library_update(
     let updated = update_library_row(&mut tx, library).await?;
     if !updated {
         tx.rollback().await?;
-        pool.close().await;
         return Ok(false);
     }
     replace_library_exclusions(&mut tx, &library.id, &library.scan_directory_exclusions).await?;
     tx.commit().await?;
-    pool.close().await;
     Ok(true)
 }
 
@@ -525,23 +700,64 @@ async fn delete_persisted_library(
 ) -> Result<bool, sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
     let mut tx = pool.begin().await?;
-    sqlx::query("DELETE FROM LIBRARY_EXCLUSIONS WHERE LIBRARY_ID = ?")
-        .bind(library_id)
-        .execute(&mut *tx)
-        .await?;
-    let deleted = sqlx::query("DELETE FROM LIBRARY WHERE ID = ?")
-        .bind(library_id)
-        .execute(&mut *tx)
-        .await?
-        .rows_affected()
+    let exists = sqlx::query(
+        "SELECT 1 \
+         FROM LIBRARY \
+         WHERE ID = ? \
+         LIMIT 1",
+    )
+    .bind(library_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .is_some();
+    if !exists {
+        tx.rollback().await?;
+        return Ok(false);
+    }
+
+    for sql in [
+        "DELETE FROM LIBRARY_EXCLUSIONS WHERE LIBRARY_ID = ?",
+        "DELETE FROM SIDECAR WHERE LIBRARY_ID = ?",
+        "DELETE FROM COLLECTION_SERIES WHERE SERIES_ID IN (SELECT ID FROM SERIES WHERE LIBRARY_ID = ?)",
+        "DELETE FROM READ_PROGRESS_SERIES WHERE SERIES_ID IN (SELECT ID FROM SERIES WHERE LIBRARY_ID = ?)",
+        "DELETE FROM THUMBNAIL_SERIES WHERE SERIES_ID IN (SELECT ID FROM SERIES WHERE LIBRARY_ID = ?)",
+        "DELETE FROM SERIES_METADATA_ALTERNATE_TITLE WHERE SERIES_ID IN (SELECT ID FROM SERIES WHERE LIBRARY_ID = ?)",
+        "DELETE FROM SERIES_METADATA_GENRE WHERE SERIES_ID IN (SELECT ID FROM SERIES WHERE LIBRARY_ID = ?)",
+        "DELETE FROM SERIES_METADATA_LINK WHERE SERIES_ID IN (SELECT ID FROM SERIES WHERE LIBRARY_ID = ?)",
+        "DELETE FROM SERIES_METADATA_SHARING WHERE SERIES_ID IN (SELECT ID FROM SERIES WHERE LIBRARY_ID = ?)",
+        "DELETE FROM SERIES_METADATA_TAG WHERE SERIES_ID IN (SELECT ID FROM SERIES WHERE LIBRARY_ID = ?)",
+        "DELETE FROM SERIES_METADATA WHERE SERIES_ID IN (SELECT ID FROM SERIES WHERE LIBRARY_ID = ?)",
+        "DELETE FROM READLIST_BOOK WHERE BOOK_ID IN (SELECT ID FROM BOOK WHERE LIBRARY_ID = ?)",
+        "DELETE FROM READ_PROGRESS WHERE BOOK_ID IN (SELECT ID FROM BOOK WHERE LIBRARY_ID = ?)",
+        "DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID IN (SELECT ID FROM BOOK WHERE LIBRARY_ID = ?)",
+        "DELETE FROM MEDIA_PAGE WHERE BOOK_ID IN (SELECT ID FROM BOOK WHERE LIBRARY_ID = ?)",
+        "DELETE FROM MEDIA_FILE WHERE BOOK_ID IN (SELECT ID FROM BOOK WHERE LIBRARY_ID = ?)",
+        "DELETE FROM MEDIA WHERE BOOK_ID IN (SELECT ID FROM BOOK WHERE LIBRARY_ID = ?)",
+        "DELETE FROM BOOK_METADATA_AUTHOR WHERE BOOK_ID IN (SELECT ID FROM BOOK WHERE LIBRARY_ID = ?)",
+        "DELETE FROM BOOK_METADATA_LINK WHERE BOOK_ID IN (SELECT ID FROM BOOK WHERE LIBRARY_ID = ?)",
+        "DELETE FROM BOOK_METADATA_TAG WHERE BOOK_ID IN (SELECT ID FROM BOOK WHERE LIBRARY_ID = ?)",
+        "DELETE FROM BOOK_METADATA WHERE BOOK_ID IN (SELECT ID FROM BOOK WHERE LIBRARY_ID = ?)",
+        "DELETE FROM BOOK WHERE LIBRARY_ID = ?",
+        "DELETE FROM SERIES WHERE LIBRARY_ID = ?",
+    ] {
+        sqlx::query(sql).bind(library_id).execute(&mut *tx).await?;
+    }
+
+    let deleted = sqlx::query(
+        "DELETE \
+                                FROM LIBRARY \
+                                WHERE ID = ?",
+    )
+    .bind(library_id)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected()
         > 0;
     if !deleted {
         tx.rollback().await?;
-        pool.close().await;
         return Ok(false);
     }
     tx.commit().await?;
-    pool.close().await;
     Ok(true)
 }
 
@@ -555,36 +771,14 @@ async fn load_persisted_library(
 
     let pool = connect_pool(database_file, 1).await?;
     let row = sqlx::query(
-        "SELECT \
-            ID, \
-            NAME, \
-            ROOT, \
-            IMPORT_COMICINFO_BOOK, \
-            IMPORT_COMICINFO_SERIES, \
-            IMPORT_COMICINFO_COLLECTION, \
-            IMPORT_COMICINFO_READLIST, \
-            IMPORT_COMICINFO_SERIES_APPEND_VOLUME, \
-            IMPORT_EPUB_BOOK, \
-            IMPORT_EPUB_SERIES, \
-            IMPORT_MYLAR_SERIES, \
-            IMPORT_LOCAL_ARTWORK, \
-            IMPORT_BARCODE_ISBN, \
-            SCAN_FORCE_MODIFIED_TIME, \
-            SCAN_INTERVAL, \
-            SCAN_STARTUP, \
-            SCAN_CBX, \
-            SCAN_PDF, \
-            SCAN_EPUB, \
-            REPAIR_EXTENSIONS, \
-            CONVERT_TO_CBZ, \
-            EMPTY_TRASH_AFTER_SCAN, \
-            SERIES_COVER, \
-            HASH_FILES, \
-            HASH_PAGES, \
-            HASH_KOREADER, \
-            ANALYZE_DIMENSIONS, \
-            ONESHOTS_DIRECTORY, \
-            UNAVAILABLE_DATE \
+        "SELECT ID, NAME, ROOT, IMPORT_COMICINFO_BOOK, IMPORT_COMICINFO_SERIES, \
+                IMPORT_COMICINFO_COLLECTION, IMPORT_COMICINFO_READLIST, \
+                IMPORT_COMICINFO_SERIES_APPEND_VOLUME, IMPORT_EPUB_BOOK, IMPORT_EPUB_SERIES, \
+                IMPORT_MYLAR_SERIES, IMPORT_LOCAL_ARTWORK, IMPORT_BARCODE_ISBN, \
+                SCAN_FORCE_MODIFIED_TIME, SCAN_INTERVAL, SCAN_STARTUP, SCAN_CBX, SCAN_PDF, \
+                SCAN_EPUB, REPAIR_EXTENSIONS, CONVERT_TO_CBZ, EMPTY_TRASH_AFTER_SCAN, \
+                SERIES_COVER, HASH_FILES, HASH_PAGES, HASH_KOREADER, ANALYZE_DIMENSIONS, \
+                ONESHOTS_DIRECTORY, UNAVAILABLE_DATE \
          FROM LIBRARY \
          WHERE ID = ?",
     )
@@ -593,7 +787,6 @@ async fn load_persisted_library(
     .await?;
 
     let Some(row) = row else {
-        pool.close().await;
         return Ok(None);
     };
 
@@ -612,7 +805,6 @@ async fn load_persisted_library(
         .map(|row| row.get::<String, _>("EXCLUSION"))
         .collect();
 
-    pool.close().await;
     Ok(Some(library))
 }
 
@@ -621,13 +813,15 @@ async fn insert_library_row(
     library: &PersistedLibrary,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "INSERT INTO LIBRARY (\
-            ID, NAME, ROOT, IMPORT_COMICINFO_BOOK, IMPORT_COMICINFO_SERIES, IMPORT_COMICINFO_COLLECTION,\
-            IMPORT_COMICINFO_READLIST, IMPORT_COMICINFO_SERIES_APPEND_VOLUME, IMPORT_EPUB_BOOK, IMPORT_EPUB_SERIES,\
-            IMPORT_MYLAR_SERIES, IMPORT_LOCAL_ARTWORK, IMPORT_BARCODE_ISBN, SCAN_FORCE_MODIFIED_TIME, SCAN_INTERVAL,\
-            SCAN_STARTUP, SCAN_CBX, SCAN_PDF, SCAN_EPUB, REPAIR_EXTENSIONS, CONVERT_TO_CBZ, EMPTY_TRASH_AFTER_SCAN,\
-            SERIES_COVER, HASH_FILES, HASH_PAGES, HASH_KOREADER, ANALYZE_DIMENSIONS, ONESHOTS_DIRECTORY\
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO LIBRARY ( ID, NAME, ROOT, IMPORT_COMICINFO_BOOK, IMPORT_COMICINFO_SERIES, \
+           IMPORT_COMICINFO_COLLECTION, IMPORT_COMICINFO_READLIST, \
+           IMPORT_COMICINFO_SERIES_APPEND_VOLUME, IMPORT_EPUB_BOOK, IMPORT_EPUB_SERIES, \
+           IMPORT_MYLAR_SERIES, IMPORT_LOCAL_ARTWORK, IMPORT_BARCODE_ISBN, \
+           SCAN_FORCE_MODIFIED_TIME, SCAN_INTERVAL, SCAN_STARTUP, SCAN_CBX, SCAN_PDF, SCAN_EPUB, \
+           REPAIR_EXTENSIONS, CONVERT_TO_CBZ, EMPTY_TRASH_AFTER_SCAN, SERIES_COVER, HASH_FILES, \
+           HASH_PAGES, HASH_KOREADER, ANALYZE_DIMENSIONS, ONESHOTS_DIRECTORY ) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \
+                ?)",
     )
     .bind(&library.id)
     .bind(&library.name)
@@ -667,14 +861,16 @@ async fn update_library_row(
     library: &PersistedLibrary,
 ) -> Result<bool, sqlx::Error> {
     let updated = sqlx::query(
-        "UPDATE LIBRARY SET \
-            LAST_MODIFIED_DATE = CURRENT_TIMESTAMP, \
-            NAME = ?, ROOT = ?, IMPORT_COMICINFO_BOOK = ?, IMPORT_COMICINFO_SERIES = ?, IMPORT_COMICINFO_COLLECTION = ?,\
-            IMPORT_COMICINFO_READLIST = ?, IMPORT_COMICINFO_SERIES_APPEND_VOLUME = ?, IMPORT_EPUB_BOOK = ?, IMPORT_EPUB_SERIES = ?,\
-            IMPORT_MYLAR_SERIES = ?, IMPORT_LOCAL_ARTWORK = ?, IMPORT_BARCODE_ISBN = ?, SCAN_FORCE_MODIFIED_TIME = ?,\
-            SCAN_INTERVAL = ?, SCAN_STARTUP = ?, SCAN_CBX = ?, SCAN_PDF = ?, SCAN_EPUB = ?, REPAIR_EXTENSIONS = ?,\
-            CONVERT_TO_CBZ = ?, EMPTY_TRASH_AFTER_SCAN = ?, SERIES_COVER = ?, HASH_FILES = ?, HASH_PAGES = ?,\
-            HASH_KOREADER = ?, ANALYZE_DIMENSIONS = ?, ONESHOTS_DIRECTORY = ? \
+        "UPDATE LIBRARY \
+         SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP, NAME = ?, ROOT = ?, \
+             IMPORT_COMICINFO_BOOK = ?, IMPORT_COMICINFO_SERIES = ?, \
+             IMPORT_COMICINFO_COLLECTION = ?, IMPORT_COMICINFO_READLIST = ?, \
+             IMPORT_COMICINFO_SERIES_APPEND_VOLUME = ?, IMPORT_EPUB_BOOK = ?, \
+             IMPORT_EPUB_SERIES = ?, IMPORT_MYLAR_SERIES = ?, IMPORT_LOCAL_ARTWORK = ?, \
+             IMPORT_BARCODE_ISBN = ?, SCAN_FORCE_MODIFIED_TIME = ?, SCAN_INTERVAL = ?, \
+             SCAN_STARTUP = ?, SCAN_CBX = ?, SCAN_PDF = ?, SCAN_EPUB = ?, REPAIR_EXTENSIONS = ?, \
+             CONVERT_TO_CBZ = ?, EMPTY_TRASH_AFTER_SCAN = ?, SERIES_COVER = ?, HASH_FILES = ?, \
+             HASH_PAGES = ?, HASH_KOREADER = ?, ANALYZE_DIMENSIONS = ?, ONESHOTS_DIRECTORY = ? \
          WHERE ID = ?",
     )
     .bind(&library.name)
@@ -717,17 +913,24 @@ async fn replace_library_exclusions(
     library_id: &str,
     exclusions: &[String],
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM LIBRARY_EXCLUSIONS WHERE LIBRARY_ID = ?")
-        .bind(library_id)
-        .execute(&mut **tx)
-        .await?;
+    sqlx::query(
+        "DELETE \
+                 FROM LIBRARY_EXCLUSIONS \
+                 WHERE LIBRARY_ID = ?",
+    )
+    .bind(library_id)
+    .execute(&mut **tx)
+    .await?;
 
     for exclusion in exclusions {
-        sqlx::query("INSERT INTO LIBRARY_EXCLUSIONS (LIBRARY_ID, EXCLUSION) VALUES (?, ?)")
-            .bind(library_id)
-            .bind(exclusion)
-            .execute(&mut **tx)
-            .await?;
+        sqlx::query(
+            "INSERT INTO LIBRARY_EXCLUSIONS (LIBRARY_ID, EXCLUSION) \
+                     VALUES (?, ?)",
+        )
+        .bind(library_id)
+        .bind(exclusion)
+        .execute(&mut **tx)
+        .await?;
     }
 
     Ok(())
@@ -735,6 +938,64 @@ async fn replace_library_exclusions(
 
 fn bad_request_response(message: &str) -> Response {
     (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response()
+}
+
+async fn validate_library_before_persist(
+    database_file: &FsPath,
+    library: &PersistedLibrary,
+) -> Result<(), String> {
+    let root_path = std::path::Path::new(&library.root);
+    if !root_path.exists() {
+        return Err("library root does not exist".to_string());
+    }
+    if !root_path.is_dir() {
+        return Err("library root must be a directory".to_string());
+    }
+
+    if !database_file.exists() {
+        return Ok(());
+    }
+
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("open library validation db: {error}"))?;
+    let rows = sqlx::query(
+        "SELECT ID, NAME, ROOT \
+         FROM LIBRARY",
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|error| format!("query library validation rows: {error}"))?;
+
+    let normalized_root = normalize_library_root(&library.root);
+    for row in rows {
+        let existing_id = row.get::<String, _>("ID");
+        if existing_id == library.id {
+            continue;
+        }
+
+        let existing_name = row.get::<String, _>("NAME");
+        if existing_name == library.name {
+            return Err("library name must be unique".to_string());
+        }
+
+        let normalized_existing = normalize_library_root(&row.get::<String, _>("ROOT"));
+        if normalized_root == normalized_existing
+            || normalized_root.starts_with(&(normalized_existing.clone() + "/"))
+            || normalized_existing.starts_with(&(normalized_root.clone() + "/"))
+        {
+            return Err("library root cannot overlap another library root".to_string());
+        }
+    }
+
+    Ok(())
+}
+
+fn normalize_library_root(root: &str) -> String {
+    root.trim()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_string()
 }
 
 fn internal_error_response(error: impl std::fmt::Display) -> Response {
@@ -831,9 +1092,9 @@ struct PersistedLibrary {
 impl PersistedLibrary {
     fn fallback_default() -> Self {
         Self {
-            id: "1".to_string(),
-            name: "default".to_string(),
-            root: "/library1".to_string(),
+            id: String::new(),
+            name: String::new(),
+            root: String::new(),
             import_comicinfo_book: true,
             import_comicinfo_series: true,
             import_comicinfo_collection: true,

@@ -14,10 +14,18 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tokio.workspace = true
+tokio-stream.workspace = true
 tower-sessions.workspace = true
 oauth2.workspace = true
 tantivy.workspace = true
 sqlx.workspace = true
+zip.workspace = true
+flate2.workspace = true
+lopdf.workspace = true
+quick-xml.workspace = true
+time.workspace = true
+futures-util.workspace = true
+image.workspace = true
 komga-domain = { path = "../domain" }
 komga-application = { path = "../application" }
 komga-persistence = { path = "../persistence" }

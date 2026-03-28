@@ -41,7 +41,10 @@ pub(in crate::read_models) async fn list_libraries_sqlx(
         return Ok(vec![]);
     }
 
-    let mut builder = QueryBuilder::<Sqlite>::new("SELECT id, name, root FROM libraries");
+    let mut builder = QueryBuilder::<Sqlite>::new(
+        "SELECT id, name, root \
+               FROM libraries",
+    );
     let mut state = SqlxWhereState::default();
     if let Some(allowed_ids) = allowed.as_ref() {
         append_in_clause_sqlx("id", allowed_ids, &mut builder, &mut state);

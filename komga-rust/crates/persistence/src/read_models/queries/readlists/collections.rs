@@ -33,7 +33,8 @@ pub(super) async fn list_series_collections_sqlx(
     }
 
     let mut candidate_builder = QueryBuilder::<Sqlite>::new(
-        "SELECT DISTINCT c.id AS id, c.name AS name, c.ordered AS ordered, c.created_date AS created_date, c.last_modified_date AS last_modified_date \
+        "SELECT DISTINCT c.id AS id, c.name AS name, c.ordered AS ordered, \
+                c.created_date AS created_date, c.last_modified_date AS last_modified_date \
          FROM collections c \
          JOIN collection_series cs_target ON cs_target.collection_id = c.id \
          JOIN series s ON s.id = cs_target.series_id",
@@ -95,12 +96,15 @@ pub(super) async fn list_series_collections_sqlx(
             continue;
         }
 
-        let total_count =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM collection_series WHERE collection_id = ?")
-                .bind(candidate.id.clone())
-                .fetch_one(&pool)
-                .await
-                .map_err(map_sqlx_error)?;
+        let total_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) \
+             FROM collection_series \
+             WHERE collection_id = ?",
+        )
+        .bind(candidate.id.clone())
+        .fetch_one(&pool)
+        .await
+        .map_err(map_sqlx_error)?;
 
         collections.push(CollectionReadModel {
             id: candidate.id,

@@ -1,5 +1,5 @@
-use std::io;
 use std::hash::{Hash, Hasher};
+use std::io;
 use std::path::PathBuf;
 use std::time::UNIX_EPOCH;
 
@@ -8,11 +8,9 @@ use komga_persistence::sqlite::connect_pool;
 use serde_json::json;
 use sqlx::Row;
 use tokio::net::TcpListener;
-use tokio::signal;
 
 use crate::config::RuntimeConfig;
 use crate::scanner::{ScanResult, scan_root_folder};
-use crate::search;
 
 pub use komga_server::app::CompatProfile;
 
@@ -36,17 +34,12 @@ pub async fn serve(listener: TcpListener) -> io::Result<()> {
 }
 
 pub async fn serve_with_config(listener: TcpListener, config: RuntimeConfig) -> io::Result<()> {
-    config
-        .resolve_webui_assets_layout()
-        .map_err(|error| io::Error::other(format!("webui startup layout check failed: {error}")))?;
-    search::startup_recover(config.lucene_data_directory.as_path())
-        .map_err(|error| io::Error::other(format!("search startup recovery failed: {error}")))?;
-    axum::serve(listener, build_router_with_config(&config))
-        .with_graceful_shutdown(shutdown_signal())
-        .await
+    persist_scanner_rows(&config);
+    komga_server::app::serve_with_config(listener, config).await
 }
 
 fn persist_scanner_rows(config: &RuntimeConfig) {
+    let runtime_config = config.clone();
     let database_file = config.database_file.clone();
     let tasks_db_file = config.tasks_db_file.clone();
 
@@ -70,10 +63,13 @@ fn persist_scanner_rows(config: &RuntimeConfig) {
                 None
             };
 
-            let libraries = sqlx::query("SELECT ID, ROOT FROM LIBRARY")
-                .fetch_all(&pool)
-                .await
-                .expect("library rows should be queryable for scanner persistence");
+            let libraries = sqlx::query(
+                "SELECT ID, ROOT \
+                                         FROM LIBRARY",
+            )
+            .fetch_all(&pool)
+            .await
+            .expect("library rows should be queryable for scanner persistence");
 
             for library in libraries {
                 let library_id = library.get::<String, _>("ID");
@@ -101,6 +97,12 @@ fn persist_scanner_rows(config: &RuntimeConfig) {
             if let Some(tasks_pool) = tasks_pool {
                 tasks_pool.close().await;
             }
+
+            let mut scheduler = crate::task_queue::TaskQueueScheduler::for_runtime(
+                runtime_config.clone(),
+                "rust-main",
+            );
+            let _ = scheduler.process_available(&runtime_config);
         })
     })
     .join()
@@ -118,7 +120,9 @@ async fn persist_library_scan(
         let series_url = series.path.to_string_lossy().to_string();
 
         sqlx::query(
-            "INSERT OR IGNORE INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT \
+             OR IGNORE INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot) \
+             VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(&series_id)
         .bind(to_unix_seconds(series.file_last_modified))
@@ -140,7 +144,10 @@ async fn persist_library_scan(
                 .to_string();
 
             sqlx::query(
-                "INSERT OR IGNORE INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, LIBRARY_ID, oneshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT \
+                 OR IGNORE INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, \
+                   LIBRARY_ID, oneshot) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&book_id)
             .bind(to_unix_seconds(book.file_last_modified))
@@ -154,7 +161,11 @@ async fn persist_library_scan(
             .await?;
 
             sqlx::query(
-                "INSERT INTO MEDIA_FILE (FILE_NAME, BOOK_ID, FILE_SIZE) SELECT ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM MEDIA_FILE WHERE FILE_NAME = ? AND BOOK_ID = ?)",
+                "INSERT INTO MEDIA_FILE (FILE_NAME, BOOK_ID, FILE_SIZE) SELECT ?, ?, ? \
+                 WHERE NOT EXISTS (SELECT 1 \
+                 FROM MEDIA_FILE \
+                 WHERE FILE_NAME = ? \
+                 AND BOOK_ID = ?)",
             )
             .bind(&book_file_name)
             .bind(&book_id)
@@ -168,7 +179,9 @@ async fn persist_library_scan(
 
     for sidecar in &scan_result.sidecars {
         sqlx::query(
-            "INSERT OR IGNORE INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID) VALUES (?, ?, ?, ?)",
+            "INSERT \
+             OR IGNORE INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID) \
+             VALUES (?, ?, ?, ?)",
         )
         .bind(sidecar.path.to_string_lossy().to_string())
         .bind(sidecar.target_path.to_string_lossy().to_string())
@@ -186,6 +199,10 @@ async fn persist_scanner_tasks(
     library_id: &str,
     scan_result: &ScanResult,
 ) -> Result<(), sqlx::Error> {
+    if scan_result.series.is_empty() {
+        return Ok(());
+    }
+
     persist_task_row(
         tasks_pool,
         &format!("SCAN_LIBRARY:{library_id}"),
@@ -226,7 +243,9 @@ async fn persist_task_row(
     simple_type: &str,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "INSERT INTO TASK (ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER)\n         VALUES (?, ?, ?, ?, ?, ?, NULL)\n         ON CONFLICT(ID) DO NOTHING",
+        "INSERT INTO TASK (ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER) \
+         VALUES (?, ?, ?, ?, ?, ?, NULL) \
+         ON CONFLICT(ID) DO NOTHING",
     )
     .bind(id)
     .bind(priority)
@@ -261,27 +280,4 @@ fn to_unix_seconds(time: std::time::SystemTime) -> i64 {
     time.duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
-}
-
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        let _ = signal::ctrl_c().await;
-    };
-
-    #[cfg(unix)]
-    let terminate = async {
-        use tokio::signal::unix::{SignalKind, signal};
-
-        if let Ok(mut stream) = signal(SignalKind::terminate()) {
-            let _ = stream.recv().await;
-        }
-    };
-
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        _ = ctrl_c => {},
-        _ = terminate => {},
-    }
 }

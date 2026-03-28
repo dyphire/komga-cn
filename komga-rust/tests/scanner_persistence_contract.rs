@@ -297,12 +297,15 @@ fn create_scannable_library_root(config_dir: &Path) -> anyhow::Result<PathBuf> {
 
 async fn seed_library_row(main_db: &Path, library_id: &str, root: &Path) -> anyhow::Result<()> {
     let pool = connect_pool(main_db, 1).await?;
-    sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
-        .bind(library_id)
-        .bind("Scanner Persistence Contract Library")
-        .bind(root.to_string_lossy().to_string())
-        .execute(&pool)
-        .await?;
+    sqlx::query(
+        "INSERT INTO LIBRARY (ID, NAME, ROOT) \
+                 VALUES (?, ?, ?)",
+    )
+    .bind(library_id)
+    .bind("Scanner Persistence Contract Library")
+    .bind(root.to_string_lossy().to_string())
+    .execute(&pool)
+    .await?;
     pool.close().await;
     Ok(())
 }
@@ -331,29 +334,45 @@ async fn load_persistence_snapshot(main_db: &Path, library_id: &str) -> Persiste
         .await
         .expect("sqlite pool should open for scanner persistence inspection");
 
-    let library_rows = sqlx::query("SELECT COUNT(*) AS COUNT FROM LIBRARY WHERE ID = ?")
-        .bind(library_id)
-        .fetch_one(&pool)
-        .await
-        .expect("library row count should be queryable")
-        .get::<i64, _>("COUNT");
+    let library_rows = sqlx::query(
+        "SELECT COUNT(*) AS COUNT \
+                                    FROM LIBRARY \
+                                    WHERE ID = ?",
+    )
+    .bind(library_id)
+    .fetch_one(&pool)
+    .await
+    .expect("library row count should be queryable")
+    .get::<i64, _>("COUNT");
 
-    let series_rows = sqlx::query("SELECT COUNT(*) AS COUNT FROM SERIES WHERE LIBRARY_ID = ?")
-        .bind(library_id)
-        .fetch_one(&pool)
-        .await
-        .expect("series row count should be queryable")
-        .get::<i64, _>("COUNT");
+    let series_rows = sqlx::query(
+        "SELECT COUNT(*) AS COUNT \
+                                   FROM SERIES \
+                                   WHERE LIBRARY_ID = ?",
+    )
+    .bind(library_id)
+    .fetch_one(&pool)
+    .await
+    .expect("series row count should be queryable")
+    .get::<i64, _>("COUNT");
 
-    let book_rows = sqlx::query("SELECT COUNT(*) AS COUNT FROM BOOK WHERE LIBRARY_ID = ?")
-        .bind(library_id)
-        .fetch_one(&pool)
-        .await
-        .expect("book row count should be queryable")
-        .get::<i64, _>("COUNT");
+    let book_rows = sqlx::query(
+        "SELECT COUNT(*) AS COUNT \
+                                 FROM BOOK \
+                                 WHERE LIBRARY_ID = ?",
+    )
+    .bind(library_id)
+    .fetch_one(&pool)
+    .await
+    .expect("book row count should be queryable")
+    .get::<i64, _>("COUNT");
 
     let media_file_rows = sqlx::query(
-        "SELECT COUNT(*) AS COUNT FROM MEDIA_FILE WHERE BOOK_ID IN (SELECT ID FROM BOOK WHERE LIBRARY_ID = ?)",
+        "SELECT COUNT(*) AS COUNT \
+         FROM MEDIA_FILE \
+         WHERE BOOK_ID IN (SELECT ID \
+         FROM BOOK \
+         WHERE LIBRARY_ID = ?)",
     )
     .bind(library_id)
     .fetch_one(&pool)
@@ -361,12 +380,16 @@ async fn load_persistence_snapshot(main_db: &Path, library_id: &str) -> Persiste
     .expect("media_file row count should be queryable")
     .get::<i64, _>("COUNT");
 
-    let sidecar_rows = sqlx::query("SELECT COUNT(*) AS COUNT FROM SIDECAR WHERE LIBRARY_ID = ?")
-        .bind(library_id)
-        .fetch_one(&pool)
-        .await
-        .expect("sidecar row count should be queryable")
-        .get::<i64, _>("COUNT");
+    let sidecar_rows = sqlx::query(
+        "SELECT COUNT(*) AS COUNT \
+                                    FROM SIDECAR \
+                                    WHERE LIBRARY_ID = ?",
+    )
+    .bind(library_id)
+    .fetch_one(&pool)
+    .await
+    .expect("sidecar row count should be queryable")
+    .get::<i64, _>("COUNT");
 
     pool.close().await;
 
@@ -384,11 +407,14 @@ async fn load_task_snapshot(tasks_db: &Path) -> TaskSnapshot {
         .await
         .expect("sqlite pool should open for scanner task inspection");
 
-    let task_rows = sqlx::query("SELECT COUNT(*) AS COUNT FROM TASK")
-        .fetch_one(&pool)
-        .await
-        .expect("task row count should be queryable")
-        .get::<i64, _>("COUNT");
+    let task_rows = sqlx::query(
+        "SELECT COUNT(*) AS COUNT \
+                                 FROM TASK",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("task row count should be queryable")
+    .get::<i64, _>("COUNT");
 
     pool.close().await;
 
@@ -399,11 +425,15 @@ async fn load_media_ready_count(main_db: &Path) -> i64 {
     let pool = connect_pool(main_db, 1)
         .await
         .expect("sqlite pool should open for media status inspection");
-    let count = sqlx::query("SELECT COUNT(*) AS COUNT FROM MEDIA WHERE STATUS = 'READY'")
-        .fetch_one(&pool)
-        .await
-        .expect("media READY count should be queryable")
-        .get::<i64, _>("COUNT");
+    let count = sqlx::query(
+        "SELECT COUNT(*) AS COUNT \
+                             FROM MEDIA \
+                             WHERE STATUS = 'READY'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("media READY count should be queryable")
+    .get::<i64, _>("COUNT");
     pool.close().await;
     count
 }
@@ -412,12 +442,17 @@ async fn load_book_file_size(main_db: &Path, book_url: &str) -> i64 {
     let pool = connect_pool(main_db, 1)
         .await
         .expect("sqlite pool should open for book file size inspection");
-    let file_size = sqlx::query("SELECT FILE_SIZE FROM BOOK WHERE URL = ? LIMIT 1")
-        .bind(book_url)
-        .fetch_one(&pool)
-        .await
-        .expect("book row should be queryable by URL for rescan contract")
-        .get::<i64, _>("FILE_SIZE");
+    let file_size = sqlx::query(
+        "SELECT FILE_SIZE \
+                                 FROM BOOK \
+                                 WHERE URL = ? \
+                                 LIMIT 1",
+    )
+    .bind(book_url)
+    .fetch_one(&pool)
+    .await
+    .expect("book row should be queryable by URL for rescan contract")
+    .get::<i64, _>("FILE_SIZE");
     pool.close().await;
     file_size
 }

@@ -21,11 +21,15 @@ pub(super) async fn list_readlist_books_sqlx(
         ));
     }
 
-    let ordered = sqlx::query_scalar::<_, bool>("SELECT ordered FROM readlists WHERE id = ?")
-        .bind(&query.readlist_id)
-        .fetch_optional(&pool)
-        .await
-        .map_err(map_sqlx_error)?;
+    let ordered = sqlx::query_scalar::<_, bool>(
+        "SELECT ordered \
+                                                 FROM readlists \
+                                                 WHERE id = ?",
+    )
+    .bind(&query.readlist_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(map_sqlx_error)?;
     let Some(ordered) = ordered else {
         return Ok(PageEnvelope::from_slice(
             vec![],
@@ -36,7 +40,10 @@ pub(super) async fn list_readlist_books_sqlx(
     };
 
     let mut count_builder = QueryBuilder::<Sqlite>::new(
-        "SELECT COUNT(DISTINCT b.id) FROM readlist_books rlb JOIN books b ON b.id = rlb.book_id JOIN series s ON s.id = b.series_id",
+        "SELECT COUNT(DISTINCT b.id) \
+         FROM readlist_books rlb \
+         JOIN books b ON b.id = rlb.book_id \
+         JOIN series s ON s.id = b.series_id",
     );
     let mut count_state = SqlxWhereState::default();
     apply_books_filters_sqlx(
@@ -65,16 +72,19 @@ pub(super) async fn list_readlist_books_sqlx(
         .map_err(map_sqlx_error)? as usize;
 
     let mut select_builder = QueryBuilder::<Sqlite>::new(
-        "SELECT \
-            b.id AS id, b.series_id AS series_id, b.library_id AS library_id, b.title AS title, b.url AS url, \
-            b.created AS created, b.last_modified AS last_modified, b.file_last_modified AS file_last_modified, \
-            b.size_bytes AS size_bytes, b.media_status AS media_status, b.media_type AS media_type, b.media_pages_count AS media_pages_count, \
-            b.metadata_release_date AS metadata_release_date, b.deleted AS deleted, b.oneshot AS oneshot, \
-            s.title AS series_title, COALESCE(GROUP_CONCAT(DISTINCT sl.label), '') AS labels \
+        "SELECT b.id AS id, b.series_id AS series_id, b.library_id AS library_id, \
+                b.title AS title, b.url AS url, b.created AS created, \
+                b.last_modified AS last_modified, b.file_last_modified AS file_last_modified, \
+                b.size_bytes AS size_bytes, b.media_status AS media_status, \
+                b.media_type AS media_type, b.media_pages_count AS media_pages_count, \
+                b.metadata_release_date AS metadata_release_date, b.deleted AS deleted, \
+                b.oneshot AS oneshot, s.title AS series_title, \
+                COALESCE(GROUP_CONCAT(DISTINCT sl.label), '') AS labels \
          FROM readlist_books rlb \
          JOIN books b ON b.id = rlb.book_id \
          JOIN series s ON s.id = b.series_id \
-         LEFT JOIN series_labels sl ON sl.series_id = s.id",
+         LEFT \
+         JOIN series_labels sl ON sl.series_id = s.id",
     );
     let mut select_state = SqlxWhereState::default();
     apply_books_filters_sqlx(
@@ -98,7 +108,8 @@ pub(super) async fn list_readlist_books_sqlx(
     select_builder.push_bind(query.readlist_id.clone());
     select_builder.push(
         " GROUP BY b.id, b.series_id, b.library_id, b.title, b.url, b.created, b.last_modified, b.file_last_modified, \
-            b.size_bytes, b.media_status, b.media_type, b.media_pages_count, b.metadata_release_date, b.deleted, b.oneshot, s.title \
+            b.size_bytes, b.media_status, b.media_type, b.media_pages_count, \
+            b.metadata_release_date, b.deleted, b.oneshot, s.title \
           ORDER BY ",
     );
     select_builder.push(readlist_book_order_sql(ordered));

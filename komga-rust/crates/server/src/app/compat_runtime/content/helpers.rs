@@ -1,17 +1,19 @@
-use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
-use axum::response::{IntoResponse, Response};
 use axum::Json;
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use komga_domain::discovery::{
     AgeRestrictionKind as DomainAgeRestrictionKind, BookReadModel, DiscoveryError,
     DiscoveryQueryContext as DomainDiscoveryQueryContext, NonNativeRequestShape, PageEnvelope,
     QueryRestrictions as DomainQueryRestrictions,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
+use crate::app::CompatProfile;
 use crate::app::discovery_auth::{
     AgeRestrictionKind, DetailAccessDenial, DiscoveryQueryContext, QueryRestrictions,
 };
-use crate::app::CompatProfile;
 
 use super::super::{
     ReadProgress, ReadProgressState, SEARCH_OWNERSHIP_HEADER, SHADOW_JAVA_WRITER_MARKER,
@@ -195,11 +197,6 @@ pub(super) fn mark_non_native(response: &mut Response) {
     );
 }
 
-pub(super) fn non_native_response(mut response: Response) -> Response {
-    mark_non_native(&mut response);
-    response
-}
-
 pub(in crate::app::compat_runtime) fn mark_native(response: &mut Response) {
     response.headers_mut().insert(
         HeaderName::from_static(SEARCH_OWNERSHIP_HEADER),
@@ -371,16 +368,19 @@ pub(super) fn invalid_progression_payload() -> Response {
 }
 
 pub(super) fn method_not_allowed_json_response(path: &str) -> Response {
+    let timestamp = OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "2000-01-01T00:00:00Z".to_string());
     (
         StatusCode::METHOD_NOT_ALLOWED,
         [(header::CONTENT_TYPE, "application/json")],
         Json(json!({
             "error": "Method Not Allowed",
-            "message": "Method 'GET' is not supported.",
+            "message": "Request method is not supported.",
             "path": path,
             "status": 405,
-            "timestamp": "1970-01-01T00:00:00.000+00:00",
-            "trace": "org.springframework.web.HttpRequestMethodNotSupportedException: Request method 'GET' is not supported",
+            "timestamp": timestamp,
+            "trace": "org.springframework.web.HttpRequestMethodNotSupportedException: Request method is not supported",
         })),
     )
         .into_response()

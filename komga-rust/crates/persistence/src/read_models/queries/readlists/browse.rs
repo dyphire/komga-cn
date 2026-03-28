@@ -61,7 +61,9 @@ pub(super) async fn list_readlists_sqlx(
         }
 
         let total_count = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM readlist_books WHERE readlist_id = ?",
+            "SELECT COUNT(*) \
+             FROM readlist_books \
+             WHERE readlist_id = ?",
         )
         .bind(candidate.id.clone())
         .fetch_one(&pool)

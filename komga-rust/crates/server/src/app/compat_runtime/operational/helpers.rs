@@ -86,7 +86,3 @@ pub(super) fn is_valid_context_path(value: &str) -> bool {
         .chars()
         .all(|ch| ch == '/' || ch == '-' || ch == '_' || ch.is_ascii_alphanumeric())
 }
-
-pub(super) fn env_or_default(name: &str, default: &str) -> String {
-    std::env::var(name).unwrap_or_else(|_| default.to_string())
-}

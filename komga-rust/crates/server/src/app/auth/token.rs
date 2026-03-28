@@ -2,9 +2,9 @@ use axum::http::{HeaderMap, Uri};
 use axum_extra::extract::cookie::CookieJar;
 
 use super::session::SESSION_REGISTRY;
-use super::user::PlaceholderUser;
+use super::user::AuthUser;
 
-pub(in crate::app) fn auth_token_user(headers: &HeaderMap) -> Option<PlaceholderUser> {
+pub(in crate::app) fn auth_token_user(headers: &HeaderMap) -> Option<AuthUser> {
     if let Some(session_token) = session_token_from_headers(headers)
         && let Some(user) = SESSION_REGISTRY.resolve_user(&session_token)
     {
@@ -39,12 +39,15 @@ pub(in crate::app) fn remember_me_requested(uri: &Uri) -> bool {
         .is_some_and(|query| query.split('&').any(|pair| pair == "remember-me=true"))
 }
 
-pub(in crate::app) fn session_token_for_user(user: &PlaceholderUser) -> String {
-    SESSION_REGISTRY.issue_session_token(user)
+pub(in crate::app) fn session_token_for_user_with_namespace(
+    user: &AuthUser,
+    namespace: &str,
+) -> String {
+    SESSION_REGISTRY.issue_session_token(user, namespace)
 }
 
 pub(in crate::app) fn remember_me_token_for_user_with_namespace(
-    user: &PlaceholderUser,
+    user: &AuthUser,
     namespace: &str,
 ) -> Option<String> {
     if namespace.trim().is_empty() {

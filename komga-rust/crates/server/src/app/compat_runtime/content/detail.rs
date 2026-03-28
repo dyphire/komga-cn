@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::path::Path as FsPath;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -10,16 +11,13 @@ use komga_application::discovery::{
     BookDetailQuery, BookReadlistsQuery, BookSiblingQuery, DiscoveryQueries,
     DiscoveryQueryRepository, NativeReadListBooksQuery, NativeReadListsQuery,
     ReadListBooksOwnership, ReadListBooksQuery, ReadListDetailQuery, ReadListsQuery,
-    SeriesCollectionsQuery, SeriesDetailQuery, classify_readlist_books_query,
-    classify_readlists_browse_query, normalize_readlists_search,
+    classify_readlist_books_query, classify_readlists_browse_query, normalize_readlists_search,
 };
 use komga_domain::discovery::{
     BookDetailReadModel, CollectionReadModel, DiscoveryError, PageEnvelope, ReadListReadModel,
     SeriesDetailReadModel,
 };
-use komga_persistence::read_models::{
-    BookRow, CollectionRow, ReadListRow, ReadProgressRow, SeriesRow, SqliteDiscoveryAdapter,
-};
+use komga_persistence::read_models::SqliteDiscoveryAdapter;
 use komga_persistence::sqlite::connect_pool;
 use serde_json::{Map, Value, json};
 use sqlx::Row;
@@ -31,8 +29,11 @@ use super::helpers::{
 };
 use crate::app::CompatProfile;
 use crate::app::compat_runtime::AuthDatabaseState;
-use crate::app::discovery_auth::{DetailContentContext, DetailResourceContext, DiscoveryAuthState};
-use crate::app::placeholder_auth::{require_admin, require_auth};
+use crate::app::discovery_auth::{
+    AgeRestrictionKind, DetailContentContext, DetailResourceContext, DiscoveryAuthState,
+    DiscoveryQueryContext, QueryRestrictions,
+};
+use crate::app::runtime_auth::{require_admin, require_auth};
 use crate::search::{SearchDocument, SearchEntityType, SearchEvent, SearchIndexLifecycle};
 
 pub(in crate::app::compat_runtime) async fn series_detail(
@@ -47,7 +48,7 @@ pub(in crate::app::compat_runtime) async fn series_detail(
     }
 
     if !database_file.exists() {
-        return seeded_series_detail_response(headers, series_id, uri, auth_state).await;
+        return StatusCode::NOT_FOUND.into_response();
     }
 
     let requested_series_id = series_id.clone();
@@ -123,7 +124,7 @@ pub(in crate::app::compat_runtime) async fn series_collections(
     }
 
     if !database_file.exists() {
-        return seeded_series_collections_response(headers, series_id, auth_state).await;
+        return StatusCode::NOT_FOUND.into_response();
     }
 
     let series_id = resolve_snapshot_series_id_for_persisted(database_file, &series_id).await;
@@ -227,138 +228,6 @@ struct ExistingSeriesMetadata {
     summary: String,
 }
 
-async fn seeded_series_detail_response(
-    headers: HeaderMap,
-    series_id: String,
-    uri: Uri,
-    auth_state: DiscoveryAuthState,
-) -> Response {
-    let mut adapter = SqliteDiscoveryAdapter::default();
-    seed_series_detail_data(&mut adapter);
-    let queries = DiscoveryQueries::new(adapter);
-
-    let Some(resource) = (match queries.resolve_series_resource(&series_id).await {
-        Ok(resource) => resource,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("series resource lookup failed: {error:?}") })),
-            )
-                .into_response();
-        }
-    }) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    let detail_context = DetailResourceContext {
-        library_id: Some(resource.library_id.clone()),
-        content: Some(DetailContentContext {
-            age_rating: resource.age_rating,
-            sharing_labels: resource.labels,
-        }),
-    };
-
-    let detail_query_context =
-        match auth_state.resolve_detail_query_context(&headers, &detail_context) {
-            Ok(context) => context,
-            Err(denial) => return detail_access_denial_response(denial),
-        };
-    let is_admin = detail_query_context.is_admin;
-    let query_string = uri.query().unwrap_or_default();
-    let exact_oneshot_true_shape = query_has_key(query_string, "oneshot")
-        && query_values(query_string, "oneshot").as_slice() == ["true"]
-        && query_string
-            .split('&')
-            .all(|pair| pair.split('=').next().unwrap_or_default() == "oneshot");
-    let native_owned_shape = query_string.is_empty() || exact_oneshot_true_shape;
-
-    let domain_context = to_domain_query_context(detail_query_context);
-    let query = SeriesDetailQuery { series_id };
-
-    match queries.get_series_detail(&domain_context, query).await {
-        Ok(Some(series)) => {
-            let mut payload = series_detail_payload(&series, is_admin);
-
-            if !native_owned_shape {
-                apply_non_native_diagnostics(
-                    &mut payload,
-                    &DiscoveryError::NonNativeRequestShape(
-                        komga_domain::discovery::NonNativeRequestShape::UnsupportedSeriesFilter(
-                            "oneshot-query-parameter".to_string(),
-                        ),
-                    ),
-                );
-
-                let mut response = Json(payload).into_response();
-                mark_non_native(&mut response);
-                response
-            } else {
-                Json(payload).into_response()
-            }
-        }
-        Ok(None) => StatusCode::NOT_FOUND.into_response(),
-        Err(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("series detail query failed: {error:?}") })),
-        )
-            .into_response(),
-    }
-}
-
-async fn seeded_series_collections_response(
-    headers: HeaderMap,
-    series_id: String,
-    auth_state: DiscoveryAuthState,
-) -> Response {
-    let mut adapter = SqliteDiscoveryAdapter::default();
-    seed_series_detail_data(&mut adapter);
-    let queries = DiscoveryQueries::new(adapter);
-
-    let Some(resource) = (match queries.resolve_series_resource(&series_id).await {
-        Ok(resource) => resource,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("series resource lookup failed: {error:?}") })),
-            )
-                .into_response();
-        }
-    }) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    let detail_context = DetailResourceContext {
-        library_id: Some(resource.library_id.clone()),
-        content: Some(DetailContentContext {
-            age_rating: resource.age_rating,
-            sharing_labels: resource.labels,
-        }),
-    };
-
-    let detail_query_context =
-        match auth_state.resolve_detail_query_context(&headers, &detail_context) {
-            Ok(context) => context,
-            Err(denial) => return detail_access_denial_response(denial),
-        };
-
-    let domain_context = to_domain_query_context(detail_query_context);
-    let query = SeriesCollectionsQuery { series_id };
-
-    match queries
-        .list_series_collections(&domain_context, query)
-        .await
-    {
-        Ok(collections) => Json(series_collections_payload(&collections)).into_response(),
-        Err(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({
-                "error": format!("series collections query failed: {error:?}"),
-            })),
-        )
-            .into_response(),
-    }
-}
-
 async fn load_persisted_series_resource(
     database_file: &FsPath,
     series_id: &str,
@@ -368,7 +237,14 @@ async fn load_persisted_series_resource(
         .map_err(|error| format!("open series detail db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT s.LIBRARY_ID, sm.AGE_RATING, COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS FROM SERIES s JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID WHERE s.ID = ? GROUP BY s.LIBRARY_ID, sm.AGE_RATING",
+        "SELECT s.LIBRARY_ID, sm.AGE_RATING, \
+                COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS \
+         FROM SERIES s \
+         JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+         LEFT \
+         JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
+         WHERE s.ID = ? \
+         GROUP BY s.LIBRARY_ID, sm.AGE_RATING",
     )
     .bind(series_id)
     .fetch_optional(&pool)
@@ -383,7 +259,6 @@ async fn load_persisted_series_resource(
         sharing_labels: parse_csv_values(&row.get::<String, _>("SHARING_LABELS")),
     });
 
-    pool.close().await;
     Ok(resource)
 }
 
@@ -424,14 +299,20 @@ async fn load_series_id_by_sorted_position(
         .map_err(|error| format!("open series-id remap db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT s.ID AS ID FROM SERIES s LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID WHERE s.DELETED_DATE IS NULL ORDER BY COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC, s.ID ASC LIMIT 1 OFFSET ?",
+        "SELECT s.ID AS ID \
+         FROM SERIES s \
+         LEFT \
+         JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+         WHERE s.DELETED_DATE IS NULL \
+         ORDER BY COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC, s.ID ASC \
+         LIMIT 1 \
+         OFFSET ?",
     )
     .bind((index - 1) as i64)
     .fetch_optional(&pool)
     .await
     .map_err(|error| format!("query remapped series id: {error}"))?;
 
-    pool.close().await;
     Ok(row.map(|row| row.get::<String, _>("ID")))
 }
 
@@ -444,7 +325,24 @@ async fn load_persisted_series_detail(
         .map_err(|error| format!("open series detail db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT s.ID AS ID, s.LIBRARY_ID AS LIBRARY_ID, s.URL AS URL, s.CREATED_DATE AS CREATED_DATE, s.LAST_MODIFIED_DATE AS LAST_MODIFIED_DATE, CAST(s.FILE_LAST_MODIFIED AS TEXT) AS FILE_LAST_MODIFIED, s.ONESHOT AS ONESHOT, s.DELETED_DATE AS DELETED_DATE, sm.STATUS AS STATUS, sm.TITLE AS TITLE, sm.SUMMARY AS SUMMARY, sm.READING_DIRECTION AS READING_DIRECTION, sm.PUBLISHER AS PUBLISHER, sm.AGE_RATING AS AGE_RATING, sm.LANGUAGE AS LANGUAGE, sm.CREATED_DATE AS METADATA_CREATED, sm.LAST_MODIFIED_DATE AS METADATA_LAST_MODIFIED, COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS FROM SERIES s JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID WHERE s.ID = ? GROUP BY s.ID, s.LIBRARY_ID, s.URL, s.CREATED_DATE, s.LAST_MODIFIED_DATE, s.FILE_LAST_MODIFIED, s.ONESHOT, s.DELETED_DATE, sm.STATUS, sm.TITLE, sm.SUMMARY, sm.READING_DIRECTION, sm.PUBLISHER, sm.AGE_RATING, sm.LANGUAGE, METADATA_CREATED, METADATA_LAST_MODIFIED",
+        "SELECT s.ID AS ID, s.LIBRARY_ID AS LIBRARY_ID, s.URL AS URL, \
+                s.CREATED_DATE AS CREATED_DATE, s.LAST_MODIFIED_DATE AS LAST_MODIFIED_DATE, \
+                CAST(s.FILE_LAST_MODIFIED AS TEXT) AS FILE_LAST_MODIFIED, s.ONESHOT AS ONESHOT, \
+                s.DELETED_DATE AS DELETED_DATE, sm.STATUS AS STATUS, sm.TITLE AS TITLE, \
+                sm.SUMMARY AS SUMMARY, sm.READING_DIRECTION AS READING_DIRECTION, \
+                sm.PUBLISHER AS PUBLISHER, sm.AGE_RATING AS AGE_RATING, sm.LANGUAGE AS LANGUAGE, \
+                sm.CREATED_DATE AS METADATA_CREATED, \
+                sm.LAST_MODIFIED_DATE AS METADATA_LAST_MODIFIED, \
+                COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS \
+         FROM SERIES s \
+         JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+         LEFT \
+         JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
+         WHERE s.ID = ? \
+         GROUP BY s.ID, s.LIBRARY_ID, s.URL, s.CREATED_DATE, s.LAST_MODIFIED_DATE, \
+                  s.FILE_LAST_MODIFIED, s.ONESHOT, s.DELETED_DATE, sm.STATUS, sm.TITLE, \
+                  sm.SUMMARY, sm.READING_DIRECTION, sm.PUBLISHER, sm.AGE_RATING, sm.LANGUAGE, \
+                  METADATA_CREATED, METADATA_LAST_MODIFIED",
     )
     .bind(series_id)
     .fetch_optional(&pool)
@@ -452,15 +350,18 @@ async fn load_persisted_series_detail(
     .map_err(|error| format!("query persisted series detail: {error}"))?;
 
     let Some(row) = row else {
-        pool.close().await;
         return Ok(None);
     };
 
-    let books_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM BOOK WHERE SERIES_ID = ?")
-        .bind(series_id)
-        .fetch_one(&pool)
-        .await
-        .map_err(|error| format!("query persisted series books count: {error}"))?;
+    let books_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) \
+              FROM BOOK \
+              WHERE SERIES_ID = ?",
+    )
+    .bind(series_id)
+    .fetch_one(&pool)
+    .await
+    .map_err(|error| format!("query persisted series books count: {error}"))?;
 
     let model = SeriesDetailReadModel {
         id: row.get::<String, _>("ID"),
@@ -502,7 +403,6 @@ async fn load_persisted_series_detail(
         oneshot: row.get::<bool, _>("ONESHOT"),
     };
 
-    pool.close().await;
     Ok(Some(model))
 }
 
@@ -515,7 +415,11 @@ async fn load_persisted_series_collections(
         .map_err(|error| format!("open series collection db: {error}"))?;
 
     let rows = sqlx::query(
-        "SELECT c.ID, c.NAME, c.ORDERED, c.CREATED_DATE, c.LAST_MODIFIED_DATE FROM COLLECTION c JOIN COLLECTION_SERIES cs ON cs.COLLECTION_ID = c.ID WHERE cs.SERIES_ID = ? ORDER BY c.NAME COLLATE NOCASE ASC",
+        "SELECT c.ID, c.NAME, c.ORDERED, c.CREATED_DATE, c.LAST_MODIFIED_DATE \
+         FROM COLLECTION c \
+         JOIN COLLECTION_SERIES cs ON cs.COLLECTION_ID = c.ID \
+         WHERE cs.SERIES_ID = ? \
+         ORDER BY c.NAME COLLATE NOCASE ASC",
     )
     .bind(series_id)
     .fetch_all(&pool)
@@ -526,7 +430,10 @@ async fn load_persisted_series_collections(
     for row in rows {
         let collection_id = row.get::<String, _>("ID");
         let series_ids_rows = sqlx::query(
-            "SELECT SERIES_ID FROM COLLECTION_SERIES WHERE COLLECTION_ID = ? ORDER BY NUMBER ASC",
+            "SELECT SERIES_ID \
+             FROM COLLECTION_SERIES \
+             WHERE COLLECTION_ID = ? \
+             ORDER BY NUMBER ASC",
         )
         .bind(collection_id.clone())
         .fetch_all(&pool)
@@ -547,7 +454,6 @@ async fn load_persisted_series_collections(
         });
     }
 
-    pool.close().await;
     Ok(collections)
 }
 
@@ -559,12 +465,15 @@ async fn load_existing_series_metadata(
         .await
         .map_err(|error| format!("open series metadata db: {error}"))?;
 
-    let row =
-        sqlx::query("SELECT TITLE, TITLE_SORT, SUMMARY FROM SERIES_METADATA WHERE SERIES_ID = ?")
-            .bind(series_id)
-            .fetch_optional(&pool)
-            .await
-            .map_err(|error| format!("query existing series metadata: {error}"))?;
+    let row = sqlx::query(
+        "SELECT TITLE, TITLE_SORT, SUMMARY \
+                     FROM SERIES_METADATA \
+                     WHERE SERIES_ID = ?",
+    )
+    .bind(series_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|error| format!("query existing series metadata: {error}"))?;
 
     let metadata = row.map(|row| ExistingSeriesMetadata {
         title: row.get::<String, _>("TITLE"),
@@ -572,7 +481,6 @@ async fn load_existing_series_metadata(
         summary: row.get::<String, _>("SUMMARY"),
     });
 
-    pool.close().await;
     Ok(metadata)
 }
 
@@ -588,7 +496,9 @@ async fn persist_series_metadata_update(
         .map_err(|error| format!("open series metadata update db: {error}"))?;
 
     let result = sqlx::query(
-        "UPDATE SERIES_METADATA SET TITLE = ?, TITLE_SORT = ?, SUMMARY = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP WHERE SERIES_ID = ?",
+        "UPDATE SERIES_METADATA \
+         SET TITLE = ?, TITLE_SORT = ?, SUMMARY = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
+         WHERE SERIES_ID = ?",
     )
     .bind(title)
     .bind(title_sort)
@@ -598,7 +508,6 @@ async fn persist_series_metadata_update(
     .await
     .map_err(|error| format!("persist series metadata update: {error}"))?;
 
-    pool.close().await;
     Ok(result.rows_affected() > 0)
 }
 
@@ -612,14 +521,18 @@ async fn refresh_series_search_document(
         .map_err(|error| format!("open series search refresh db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT s.ID AS ID, COALESCE(sm.TITLE, s.NAME) AS TITLE FROM SERIES s LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID WHERE s.ID = ? AND s.DELETED_DATE IS NULL LIMIT 1",
+        "SELECT s.ID AS ID, COALESCE(sm.TITLE, s.NAME) AS TITLE \
+         FROM SERIES s \
+         LEFT \
+         JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+         WHERE s.ID = ? \
+         AND s.DELETED_DATE IS NULL \
+         LIMIT 1",
     )
     .bind(series_id)
     .fetch_optional(&pool)
     .await
     .map_err(|error| format!("query series search refresh payload: {error}"))?;
-
-    pool.close().await;
 
     let index = SearchIndexLifecycle::bootstrap(lucene_data_directory)
         .map_err(|error| format!("bootstrap search index for series metadata update: {error}"))?;
@@ -663,6 +576,7 @@ fn internal_error_response(error: String) -> Response {
 
 pub(in crate::app::compat_runtime) async fn collection_series(
     Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(auth_state): Extension<DiscoveryAuthState>,
     headers: HeaderMap,
     Path(collection_id): Path<String>,
     uri: Uri,
@@ -681,12 +595,34 @@ pub(in crate::app::compat_runtime) async fn collection_series(
         .unwrap_or(20);
     let unpaged = query_bool(query_string, "unpaged");
 
+    let context = match auth_state.resolve_query_context(&headers, None) {
+        Some(context) => context,
+        None => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+
     if auth_db.database_file.exists() {
         match load_persisted_collection_series(auth_db.database_file.as_path(), &collection_id)
             .await
         {
             Ok(Some(series)) => {
-                let page_payload = collection_series_page_payload(series, page, size, unpaged);
+                let mut visible_series = Vec::with_capacity(series.len());
+                for entry in series {
+                    match series_visible_to_context(
+                        auth_db.database_file.as_path(),
+                        &context,
+                        &entry.id,
+                        Some(&entry.library_id),
+                    )
+                    .await
+                    {
+                        Ok(true) => visible_series.push(entry),
+                        Ok(false) => {}
+                        Err(error) => return internal_error_response(error),
+                    }
+                }
+
+                let page_payload =
+                    collection_series_page_payload(visible_series, page, size, unpaged);
                 return Json(page_payload).into_response();
             }
             Ok(None) => {}
@@ -694,18 +630,12 @@ pub(in crate::app::compat_runtime) async fn collection_series(
         }
     }
 
-    let Some(series) = seeded_collection_series_models(&collection_id) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    let mut response =
-        Json(collection_series_page_payload(series, page, size, unpaged)).into_response();
-    mark_native(&mut response);
-    response
+    StatusCode::NOT_FOUND.into_response()
 }
 
 pub(in crate::app::compat_runtime) async fn collections(
     Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(auth_state): Extension<DiscoveryAuthState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -722,6 +652,11 @@ pub(in crate::app::compat_runtime) async fn collections(
         .filter(|value| *value > 0)
         .unwrap_or(20);
 
+    let context = match auth_state.resolve_query_context(&headers, None) {
+        Some(context) => context,
+        None => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+
     let mut content = if auth_db.database_file.exists() {
         let persisted_rows_exist =
             match persisted_collections_exist(auth_db.database_file.as_path()).await {
@@ -735,11 +670,36 @@ pub(in crate::app::compat_runtime) async fn collections(
                 Err(error) => return internal_error_response(error),
             }
         } else {
-            seeded_collections()
+            vec![]
         }
     } else {
-        seeded_collections()
+        vec![]
     };
+
+    for collection in &mut content {
+        let mut visible_series_ids = Vec::with_capacity(collection.series_ids.len());
+        for series_id in &collection.series_ids {
+            match series_visible_to_context(
+                auth_db.database_file.as_path(),
+                &context,
+                series_id,
+                None,
+            )
+            .await
+            {
+                Ok(true) => visible_series_ids.push(series_id.clone()),
+                Ok(false) => {}
+                Err(error) => return internal_error_response(error),
+            }
+        }
+
+        if visible_series_ids.len() != collection.series_ids.len() {
+            collection.filtered = true;
+        }
+        collection.series_ids = visible_series_ids;
+    }
+
+    content.retain(|collection| !collection.series_ids.is_empty());
 
     content.sort_by(|left, right| {
         left.name
@@ -793,6 +753,7 @@ pub(in crate::app::compat_runtime) async fn collection_create(
 
 pub(in crate::app::compat_runtime) async fn collection_detail(
     Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(auth_state): Extension<DiscoveryAuthState>,
     headers: HeaderMap,
     Path(collection_id): Path<String>,
 ) -> Response {
@@ -800,20 +761,49 @@ pub(in crate::app::compat_runtime) async fn collection_detail(
         return response;
     }
 
+    let context = match auth_state.resolve_query_context(&headers, None) {
+        Some(context) => context,
+        None => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+
     if auth_db.database_file.exists() {
         match load_persisted_collection_detail(auth_db.database_file.as_path(), &collection_id)
             .await
         {
-            Ok(Some(collection)) => return Json(collection_payload(&collection)).into_response(),
+            Ok(Some(mut collection)) => {
+                let mut visible_series_ids = Vec::with_capacity(collection.series_ids.len());
+                for series_id in &collection.series_ids {
+                    match series_visible_to_context(
+                        auth_db.database_file.as_path(),
+                        &context,
+                        series_id,
+                        None,
+                    )
+                    .await
+                    {
+                        Ok(true) => visible_series_ids.push(series_id.clone()),
+                        Ok(false) => {}
+                        Err(error) => return internal_error_response(error),
+                    }
+                }
+
+                if collection.series_ids.len() != visible_series_ids.len() {
+                    collection.filtered = true;
+                }
+                collection.series_ids = visible_series_ids;
+
+                if collection.series_ids.is_empty() {
+                    return StatusCode::NOT_FOUND.into_response();
+                }
+
+                return Json(collection_payload(&collection)).into_response();
+            }
             Ok(None) => {}
             Err(error) => return internal_error_response(error),
         }
     }
 
-    match seeded_collection_detail(&collection_id) {
-        Some(collection) => Json(collection_payload(&collection)).into_response(),
-        None => StatusCode::NOT_FOUND.into_response(),
-    }
+    StatusCode::NOT_FOUND.into_response()
 }
 
 pub(in crate::app::compat_runtime) async fn collection_update(
@@ -831,9 +821,6 @@ pub(in crate::app::compat_runtime) async fn collection_update(
 
     match persist_collection_update(auth_db.database_file.as_path(), &collection_id, &input).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
-        Ok(false) if is_seeded_collection_id(&collection_id) => {
-            StatusCode::NO_CONTENT.into_response()
-        }
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -850,9 +837,6 @@ pub(in crate::app::compat_runtime) async fn collection_delete(
 
     match delete_persisted_collection(auth_db.database_file.as_path(), &collection_id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
-        Ok(false) if is_seeded_collection_id(&collection_id) => {
-            StatusCode::NO_CONTENT.into_response()
-        }
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -911,8 +895,8 @@ pub(in crate::app::compat_runtime) async fn book_detail(
         };
     }
 
-    let mut adapter = SqliteDiscoveryAdapter::default();
-    seed_series_detail_data(&mut adapter);
+    let adapter = SqliteDiscoveryAdapter::default();
+    // seeded runtime disabled
     let queries = DiscoveryQueries::new(adapter);
 
     let Some(resource) = (match queries.resolve_book_resource(&book_id).await {
@@ -1007,14 +991,20 @@ async fn load_book_id_by_sorted_position(
         .map_err(|error| format!("open book-id remap db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT b.ID AS ID FROM BOOK b LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID WHERE b.DELETED_DATE IS NULL ORDER BY COALESCE(bm.TITLE, b.NAME) COLLATE NOCASE ASC, b.ID ASC LIMIT 1 OFFSET ?",
+        "SELECT b.ID AS ID \
+         FROM BOOK b \
+         LEFT \
+         JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
+         WHERE b.DELETED_DATE IS NULL \
+         ORDER BY COALESCE(bm.TITLE, b.NAME) COLLATE NOCASE ASC, b.ID ASC \
+         LIMIT 1 \
+         OFFSET ?",
     )
     .bind((index - 1) as i64)
     .fetch_optional(&pool)
     .await
     .map_err(|error| format!("query remapped book id: {error}"))?;
 
-    pool.close().await;
     Ok(row.map(|row| row.get::<String, _>("ID")))
 }
 
@@ -1027,7 +1017,16 @@ async fn load_persisted_book_resource(
         .map_err(|error| format!("open book resource db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT b.LIBRARY_ID, sm.AGE_RATING, COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS FROM BOOK b JOIN SERIES s ON s.ID = b.SERIES_ID LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID WHERE b.ID = ? GROUP BY b.LIBRARY_ID, sm.AGE_RATING",
+        "SELECT b.LIBRARY_ID, sm.AGE_RATING, \
+                COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS \
+         FROM BOOK b \
+         JOIN SERIES s ON s.ID = b.SERIES_ID \
+         LEFT \
+         JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+         LEFT \
+         JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
+         WHERE b.ID = ? \
+         GROUP BY b.LIBRARY_ID, sm.AGE_RATING",
     )
     .bind(book_id)
     .fetch_optional(&pool)
@@ -1042,7 +1041,6 @@ async fn load_persisted_book_resource(
         sharing_labels: parse_csv_values(&row.get::<String, _>("SHARING_LABELS")),
     });
 
-    pool.close().await;
     Ok(resource)
 }
 
@@ -1055,7 +1053,27 @@ async fn load_persisted_book_detail(
         .map_err(|error| format!("open book detail db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT b.ID AS ID, b.SERIES_ID AS SERIES_ID, COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE, b.LIBRARY_ID AS LIBRARY_ID, b.NAME AS NAME, b.URL AS URL, b.NUMBER AS NUMBER, b.CREATED_DATE AS CREATED_DATE, b.LAST_MODIFIED_DATE AS LAST_MODIFIED_DATE, CAST(b.FILE_LAST_MODIFIED AS TEXT) AS FILE_LAST_MODIFIED, b.FILE_SIZE AS FILE_SIZE, b.FILE_HASH AS FILE_HASH, b.ONESHOT AS ONESHOT, b.DELETED_DATE AS DELETED_DATE, bm.TITLE AS METADATA_TITLE, bm.SUMMARY AS METADATA_SUMMARY, bm.NUMBER AS METADATA_NUMBER, bm.NUMBER_SORT AS METADATA_NUMBER_SORT, bm.RELEASE_DATE AS METADATA_RELEASE_DATE, bm.ISBN AS METADATA_ISBN, bm.CREATED_DATE AS METADATA_CREATED, bm.LAST_MODIFIED_DATE AS METADATA_LAST_MODIFIED, COALESCE(m.STATUS, 'UNKNOWN') AS MEDIA_STATUS, COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE, COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT, COALESCE(m.COMMENT, '') AS MEDIA_COMMENT FROM BOOK b JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID JOIN SERIES s ON s.ID = b.SERIES_ID LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID WHERE b.ID = ?",
+        "SELECT b.ID AS ID, b.SERIES_ID AS SERIES_ID, COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE, \
+                b.LIBRARY_ID AS LIBRARY_ID, b.NAME AS NAME, b.URL AS URL, b.NUMBER AS NUMBER, \
+                b.CREATED_DATE AS CREATED_DATE, b.LAST_MODIFIED_DATE AS LAST_MODIFIED_DATE, \
+                CAST(b.FILE_LAST_MODIFIED AS TEXT) AS FILE_LAST_MODIFIED, \
+                b.FILE_SIZE AS FILE_SIZE, b.FILE_HASH AS FILE_HASH, b.ONESHOT AS ONESHOT, \
+                b.DELETED_DATE AS DELETED_DATE, bm.TITLE AS METADATA_TITLE, \
+                bm.SUMMARY AS METADATA_SUMMARY, bm.NUMBER AS METADATA_NUMBER, \
+                bm.NUMBER_SORT AS METADATA_NUMBER_SORT, bm.RELEASE_DATE AS METADATA_RELEASE_DATE, \
+                bm.ISBN AS METADATA_ISBN, bm.CREATED_DATE AS METADATA_CREATED, \
+                bm.LAST_MODIFIED_DATE AS METADATA_LAST_MODIFIED, \
+                COALESCE(m.STATUS, 'UNKNOWN') AS MEDIA_STATUS, \
+                COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE, \
+                COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT, COALESCE(m.COMMENT, '') AS MEDIA_COMMENT \
+         FROM BOOK b \
+         JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
+         JOIN SERIES s ON s.ID = b.SERIES_ID \
+         LEFT \
+         JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+         LEFT \
+         JOIN MEDIA m ON m.BOOK_ID = b.ID \
+         WHERE b.ID = ?",
     )
     .bind(book_id)
     .fetch_optional(&pool)
@@ -1094,7 +1112,6 @@ async fn load_persisted_book_detail(
         oneshot: row.get::<bool, _>("ONESHOT"),
     });
 
-    pool.close().await;
     Ok(model)
 }
 
@@ -1107,14 +1124,17 @@ async fn load_persisted_book_sibling_detail(
         .await
         .map_err(|error| format!("open book sibling db: {error}"))?;
 
-    let current = sqlx::query("SELECT SERIES_ID, NUMBER FROM BOOK WHERE ID = ?")
-        .bind(book_id)
-        .fetch_optional(&pool)
-        .await
-        .map_err(|error| format!("query persisted current book for sibling lookup: {error}"))?;
+    let current = sqlx::query(
+        "SELECT SERIES_ID, NUMBER \
+                               FROM BOOK \
+                               WHERE ID = ?",
+    )
+    .bind(book_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|error| format!("query persisted current book for sibling lookup: {error}"))?;
 
     let Some(current) = current else {
-        pool.close().await;
         return Ok(None);
     };
 
@@ -1124,12 +1144,14 @@ async fn load_persisted_book_sibling_detail(
     let sibling_row = match direction {
         PersistedBookSiblingDirection::Previous => {
             sqlx::query(
-                "SELECT ID
-                 FROM BOOK
-                 WHERE SERIES_ID = ?
-                   AND DELETED_DATE IS NULL
-                   AND (NUMBER < ? OR (NUMBER = ? AND ID < ?))
-                 ORDER BY NUMBER DESC, ID DESC
+                "SELECT ID \
+                 FROM BOOK \
+                 WHERE SERIES_ID = ? \
+                 AND DELETED_DATE IS NULL \
+                 AND (NUMBER < ? \
+                 OR (NUMBER = ? \
+                 AND ID < ?)) \
+                 ORDER BY NUMBER DESC, ID DESC \
                  LIMIT 1",
             )
             .bind(&series_id)
@@ -1141,12 +1163,14 @@ async fn load_persisted_book_sibling_detail(
         }
         PersistedBookSiblingDirection::Next => {
             sqlx::query(
-                "SELECT ID
-                 FROM BOOK
-                 WHERE SERIES_ID = ?
-                   AND DELETED_DATE IS NULL
-                   AND (NUMBER > ? OR (NUMBER = ? AND ID > ?))
-                 ORDER BY NUMBER ASC, ID ASC
+                "SELECT ID \
+                 FROM BOOK \
+                 WHERE SERIES_ID = ? \
+                 AND DELETED_DATE IS NULL \
+                 AND (NUMBER > ? \
+                 OR (NUMBER = ? \
+                 AND ID > ?)) \
+                 ORDER BY NUMBER ASC, ID ASC \
                  LIMIT 1",
             )
             .bind(&series_id)
@@ -1158,8 +1182,6 @@ async fn load_persisted_book_sibling_detail(
         }
     }
     .map_err(|error| format!("query persisted sibling book id: {error}"))?;
-
-    pool.close().await;
 
     let Some(sibling_row) = sibling_row else {
         return Ok(None);
@@ -1221,8 +1243,8 @@ pub(in crate::app::compat_runtime) async fn book_sibling_previous(
         };
     }
 
-    let mut adapter = SqliteDiscoveryAdapter::default();
-    seed_series_detail_data(&mut adapter);
+    let adapter = SqliteDiscoveryAdapter::default();
+    // seeded runtime disabled
     let queries = DiscoveryQueries::new(adapter);
 
     let Some(resource) = (match queries.resolve_book_resource(&book_id).await {
@@ -1321,8 +1343,8 @@ pub(in crate::app::compat_runtime) async fn book_sibling_next(
         };
     }
 
-    let mut adapter = SqliteDiscoveryAdapter::default();
-    seed_series_detail_data(&mut adapter);
+    let adapter = SqliteDiscoveryAdapter::default();
+    // seeded runtime disabled
     let queries = DiscoveryQueries::new(adapter);
 
     let Some(resource) = (match queries.resolve_book_resource(&book_id).await {
@@ -1379,8 +1401,8 @@ pub(in crate::app::compat_runtime) async fn book_readlists(
         return response;
     }
 
-    let mut adapter = SqliteDiscoveryAdapter::default();
-    seed_series_detail_data(&mut adapter);
+    let adapter = SqliteDiscoveryAdapter::default();
+    // seeded runtime disabled
     let queries = DiscoveryQueries::new(adapter);
 
     let Some(resource) = (match queries.resolve_book_resource(&book_id).await {
@@ -1591,8 +1613,8 @@ pub(in crate::app::compat_runtime) async fn readlists(
         }
     }
 
-    let mut adapter = SqliteDiscoveryAdapter::default();
-    seed_series_detail_data(&mut adapter);
+    let adapter = SqliteDiscoveryAdapter::default();
+    // seeded runtime disabled
 
     let domain_context = to_domain_query_context(context);
     let query = ReadListsQuery {
@@ -1771,7 +1793,6 @@ pub(in crate::app::compat_runtime) async fn readlist_update(
 
     match persist_readlist_update(auth_db.database_file.as_path(), &readlist_id, &input).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
-        Ok(false) if is_seeded_readlist_id(&readlist_id) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -1788,7 +1809,6 @@ pub(in crate::app::compat_runtime) async fn readlist_delete(
 
     match delete_persisted_readlist(auth_db.database_file.as_path(), &readlist_id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
-        Ok(false) if is_seeded_readlist_id(&readlist_id) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -1824,7 +1844,12 @@ pub(in crate::app::compat_runtime) async fn readlist_books(
     let read_statuses = readlist_query_values(query_string, "read_status");
     let media_statuses = readlist_query_values(query_string, "media_status");
     let tags = readlist_query_values(query_string, "tag");
-    let authors = readlist_author_query_values(query_string);
+    let authors = match readlist_author_query_values(query_string) {
+        Ok(authors) => authors,
+        Err(error) => {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response();
+        }
+    };
     let deleted = query_value(query_string, "deleted").and_then(parse_optional_query_bool);
 
     let context = match auth_state.resolve_query_context(&headers, library_ids.as_deref()) {
@@ -1832,8 +1857,8 @@ pub(in crate::app::compat_runtime) async fn readlist_books(
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    let mut adapter = SqliteDiscoveryAdapter::default();
-    seed_series_detail_data(&mut adapter);
+    let adapter = SqliteDiscoveryAdapter::default();
+    // seeded runtime disabled
 
     let is_admin = context.is_admin;
     let domain_context = to_domain_query_context(context);
@@ -1932,8 +1957,8 @@ pub(in crate::app::compat_runtime) async fn readlist_detail(
         }
     }
 
-    let mut adapter = SqliteDiscoveryAdapter::default();
-    seed_series_detail_data(&mut adapter);
+    let adapter = SqliteDiscoveryAdapter::default();
+    // seeded runtime disabled
     let queries = DiscoveryQueries::new(adapter);
     let domain_context = to_domain_query_context(context);
 
@@ -1962,8 +1987,8 @@ pub(in crate::app::compat_runtime) async fn readlist_book_sibling_previous(
         return response;
     }
 
-    let mut adapter = SqliteDiscoveryAdapter::default();
-    seed_series_detail_data(&mut adapter);
+    let adapter = SqliteDiscoveryAdapter::default();
+    // seeded runtime disabled
 
     let Some(resource) = (match adapter.resolve_book_resource(&book_id).await {
         Ok(resource) => resource,
@@ -2018,8 +2043,8 @@ pub(in crate::app::compat_runtime) async fn readlist_book_sibling_next(
         return response;
     }
 
-    let mut adapter = SqliteDiscoveryAdapter::default();
-    seed_series_detail_data(&mut adapter);
+    let adapter = SqliteDiscoveryAdapter::default();
+    // seeded runtime disabled
 
     let Some(resource) = (match adapter.resolve_book_resource(&book_id).await {
         Ok(resource) => resource,
@@ -2065,141 +2090,6 @@ pub(in crate::app::compat_runtime) async fn readlist_book_sibling_next(
     }
 }
 
-fn seed_series_detail_data(adapter: &mut SqliteDiscoveryAdapter) {
-    adapter.insert_series(
-        SeriesRow::new("series-1", "1", "series")
-            .with_url("/library/1/series")
-            .with_labels(["safe"])
-            .with_genres(["fantasy"])
-            .with_tags(["featured"])
-            .with_language("en")
-            .with_publisher("komga")
-            .with_age_rating(16)
-            .with_release_date("2024-01-01")
-            .with_status("ONGOING")
-            .with_complete(true)
-            .with_read_status("READ")
-            .with_authors(["alice"]),
-    );
-    adapter.insert_series(
-        SeriesRow::new("series-2", "1", "restricted")
-            .with_url("/library/1/restricted")
-            .with_labels(["adult"])
-            .with_age_rating(18)
-            .with_status("ONGOING")
-            .with_read_status("UNREAD"),
-    );
-    adapter.insert_series(
-        SeriesRow::new("series-oneshot", "1", "oneshot")
-            .with_url("/library/1/oneshot")
-            .with_labels(["safe"])
-            .with_oneshot(true)
-            .with_status("ENDED")
-            .with_read_status("UNREAD"),
-    );
-
-    adapter.insert_book(
-        BookRow::new("book-0", "series-1", "1", "book-0.cbr")
-            .with_url("/library1/book-0.cbr")
-            .with_last_modified("2023-12-01T03:04:05Z")
-            .with_size_bytes(111)
-            .with_media("READY", "application/zip", 1)
-            .with_media_profile("PROFILE-1")
-            .with_number_sort(1)
-            .with_read_status("UNREAD")
-            .with_release_date("2023-12-01")
-            .with_tags(["safe"])
-            .with_authors(["alice"]),
-    );
-    adapter.insert_book(
-        BookRow::new("book-1", "series-1", "1", "book.cbr")
-            .with_url("/library1/book.cbr")
-            .with_last_modified("2024-01-01T03:04:05Z")
-            .with_size_bytes(222)
-            .with_media("READY", "application/zip", 1)
-            .with_media_profile("PROFILE-1")
-            .with_number_sort(2)
-            .with_read_status("READ")
-            .with_release_date("2024-01-01")
-            .with_tags(["safe"])
-            .with_authors(["alice"]),
-    );
-    adapter.insert_book(
-        BookRow::new("book-3", "series-1", "1", "book-3.cbr")
-            .with_url("/library1/book-3.cbr")
-            .with_last_modified("2024-02-01T03:04:05Z")
-            .with_size_bytes(333)
-            .with_media("READY", "application/zip", 1)
-            .with_media_profile("PROFILE-1")
-            .with_number_sort(10)
-            .with_read_status("UNREAD")
-            .with_release_date("2024-02-01")
-            .with_tags(["safe"])
-            .with_authors(["alice"]),
-    );
-    adapter.insert_book(
-        BookRow::new("book-2", "series-2", "1", "restricted-book.cbz")
-            .with_url("/library1/restricted-book.cbz")
-            .with_last_modified("2024-01-03T03:04:05Z")
-            .with_media("READY", "application/vnd.comicbook+zip", 1)
-            .with_media_profile("PROFILE-2")
-            .with_read_status("UNREAD")
-            .with_release_date("2023-01-01")
-            .with_tags(["adult"])
-            .with_authors(["bob"]),
-    );
-    adapter.insert_book(
-        BookRow::new("book-oneshot", "series-oneshot", "1", "oneshot-book.cbz")
-            .with_url("/library1/oneshot-book.cbz")
-            .with_last_modified("2024-02-01T03:04:05Z")
-            .with_size_bytes(150)
-            .with_media("READY", "application/vnd.comicbook+zip", 1)
-            .with_media_profile("PROFILE-ONESHOT")
-            .with_number_sort(1)
-            .with_read_status("UNREAD")
-            .with_release_date("2024-02-01")
-            .with_tags(["safe"])
-            .with_authors(["alice"]),
-    );
-
-    adapter.insert_collection(
-        CollectionRow::new("collection-1", "Collection 1")
-            .with_ordered(true)
-            .with_series_ids(["series-1", "series-2"]),
-    );
-    adapter.insert_read_list(
-        ReadListRow::new("readlist-1", "ReadList 1")
-            .with_summary("alpha visible readlist")
-            .with_book_ids(["book-1"]),
-    );
-    adapter.insert_read_list(
-        ReadListRow::new("readlist-2", "ReadList 2")
-            .with_summary("alpha mixed visibility readlist")
-            .with_book_ids(["book-1", "book-2"]),
-    );
-    adapter.insert_read_list(
-        ReadListRow::new("readlist-3", "ReadList 3")
-            .with_summary("restricted-only readlist")
-            .with_book_ids(["book-2"]),
-    );
-
-    adapter.insert_read_progress(
-        ReadProgressRow::new("book-1", "0PV32486S7X3J", 7, false)
-            .with_read_date("2024-01-04T03:04:05Z")
-            .with_created("2024-01-04T03:04:05Z")
-            .with_last_modified("2024-01-04T03:04:05Z")
-            .with_device("device-android", "Android"),
-    );
-}
-
-fn is_seeded_readlist_id(readlist_id: &str) -> bool {
-    matches!(readlist_id, "readlist-1" | "readlist-2" | "readlist-3")
-}
-
-fn is_seeded_collection_id(collection_id: &str) -> bool {
-    collection_id == "collection-1"
-}
-
 #[derive(Clone)]
 struct PersistedCollectionSeriesReadModel {
     id: String,
@@ -2223,43 +2113,6 @@ struct PersistedCollectionWriteInput {
     series_ids: Vec<String>,
 }
 
-fn seeded_collections() -> Vec<CollectionReadModel> {
-    vec![seeded_collection_read_model()]
-}
-
-fn seeded_collection_read_model() -> CollectionReadModel {
-    CollectionReadModel {
-        id: "collection-1".to_string(),
-        name: "Collection 1".to_string(),
-        ordered: true,
-        series_ids: vec!["series-1".to_string(), "series-2".to_string()],
-        created_date: String::new(),
-        last_modified_date: String::new(),
-        filtered: false,
-    }
-}
-
-fn seeded_collection_detail(collection_id: &str) -> Option<CollectionReadModel> {
-    is_seeded_collection_id(collection_id).then_some(seeded_collection_read_model())
-}
-
-fn seeded_collection_series_models(
-    collection_id: &str,
-) -> Option<Vec<PersistedCollectionSeriesReadModel>> {
-    if !is_seeded_collection_id(collection_id) {
-        return None;
-    }
-
-    Some(vec![PersistedCollectionSeriesReadModel {
-        id: "series-1".to_string(),
-        library_id: "1".to_string(),
-        name: "series".to_string(),
-        title: "series".to_string(),
-        deleted: false,
-        oneshot: false,
-    }])
-}
-
 async fn persisted_collections_exist(database_file: &FsPath) -> Result<bool, String> {
     if !database_file.exists() {
         return Ok(false);
@@ -2268,11 +2121,14 @@ async fn persisted_collections_exist(database_file: &FsPath) -> Result<bool, Str
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(|error| format!("open collections exists db: {error}"))?;
-    let row = sqlx::query("SELECT 1 AS FOUND FROM COLLECTION LIMIT 1")
-        .fetch_optional(&pool)
-        .await
-        .map_err(|error| format!("query persisted collections existence: {error}"))?;
-    pool.close().await;
+    let row = sqlx::query(
+        "SELECT 1 AS FOUND \
+                           FROM COLLECTION \
+                           LIMIT 1",
+    )
+    .fetch_optional(&pool)
+    .await
+    .map_err(|error| format!("query persisted collections existence: {error}"))?;
     Ok(row.is_some())
 }
 
@@ -2284,7 +2140,9 @@ async fn load_persisted_collections(
         .map_err(|error| format!("open persisted collections db: {error}"))?;
 
     let rows = sqlx::query(
-        "SELECT ID, NAME, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE FROM COLLECTION ORDER BY NAME COLLATE NOCASE ASC",
+        "SELECT ID, NAME, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE \
+         FROM COLLECTION \
+         ORDER BY NAME COLLATE NOCASE ASC",
     )
     .fetch_all(&pool)
     .await
@@ -2304,7 +2162,6 @@ async fn load_persisted_collections(
         });
     }
 
-    pool.close().await;
     Ok(collections)
 }
 
@@ -2321,7 +2178,9 @@ async fn load_persisted_collection_detail(
         .map_err(|error| format!("open persisted collection detail db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT ID, NAME, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE FROM COLLECTION WHERE ID = ?",
+        "SELECT ID, NAME, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE \
+         FROM COLLECTION \
+         WHERE ID = ?",
     )
     .bind(collection_id)
     .fetch_optional(&pool)
@@ -2329,7 +2188,6 @@ async fn load_persisted_collection_detail(
     .map_err(|error| format!("query persisted collection detail: {error}"))?;
 
     let Some(row) = row else {
-        pool.close().await;
         return Ok(None);
     };
 
@@ -2343,7 +2201,6 @@ async fn load_persisted_collection_detail(
         filtered: false,
     };
 
-    pool.close().await;
     Ok(Some(collection))
 }
 
@@ -2352,7 +2209,10 @@ async fn load_persisted_collection_series_ids(
     collection_id: &str,
 ) -> Result<Vec<String>, String> {
     let rows = sqlx::query(
-        "SELECT SERIES_ID FROM COLLECTION_SERIES WHERE COLLECTION_ID = ? ORDER BY NUMBER ASC",
+        "SELECT SERIES_ID \
+         FROM COLLECTION_SERIES \
+         WHERE COLLECTION_ID = ? \
+         ORDER BY NUMBER ASC",
     )
     .bind(collection_id)
     .fetch_all(pool)
@@ -2377,23 +2237,28 @@ async fn load_persisted_collection_series(
         .await
         .map_err(|error| format!("open persisted collection series db: {error}"))?;
 
-    let exists = sqlx::query("SELECT 1 AS FOUND FROM COLLECTION WHERE ID = ?")
-        .bind(collection_id)
-        .fetch_optional(&pool)
-        .await
-        .map_err(|error| format!("query persisted collection existence: {error}"))?
-        .is_some();
+    let exists = sqlx::query(
+        "SELECT 1 AS FOUND \
+                              FROM COLLECTION \
+                              WHERE ID = ?",
+    )
+    .bind(collection_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|error| format!("query persisted collection existence: {error}"))?
+    .is_some();
 
     if !exists {
-        pool.close().await;
         return Ok(None);
     }
 
     let rows = sqlx::query(
-        "SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE, s.NAME, s.DELETED_DATE, s.ONESHOT \
+        "SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE, s.NAME, s.DELETED_DATE, \
+                s.ONESHOT \
          FROM COLLECTION_SERIES cs \
          JOIN SERIES s ON s.ID = cs.SERIES_ID \
-         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+         LEFT \
+         JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
          WHERE cs.COLLECTION_ID = ? \
          ORDER BY cs.NUMBER ASC",
     )
@@ -2414,8 +2279,146 @@ async fn load_persisted_collection_series(
         })
         .collect::<Vec<_>>();
 
-    pool.close().await;
     Ok(Some(series))
+}
+
+async fn series_visible_to_context(
+    database_file: &FsPath,
+    context: &DiscoveryQueryContext,
+    series_id: &str,
+    known_library_id: Option<&str>,
+) -> Result<bool, String> {
+    let library_id = match known_library_id {
+        Some(value) => value.to_string(),
+        None => {
+            let pool = connect_pool(database_file, 1)
+                .await
+                .map_err(|error| format!("open series visibility db: {error}"))?;
+            let row = sqlx::query(
+                "SELECT LIBRARY_ID \
+                                   FROM SERIES \
+                                   WHERE ID = ? \
+                                   LIMIT 1",
+            )
+            .bind(series_id)
+            .fetch_optional(&pool)
+            .await
+            .map_err(|error| format!("query series library for visibility: {error}"))?;
+
+            let Some(row) = row else {
+                return Ok(false);
+            };
+            row.get::<String, _>("LIBRARY_ID")
+        }
+    };
+
+    if let Some(authorized_libraries) = context.authorized_library_ids.as_ref()
+        && !authorized_libraries
+            .iter()
+            .any(|candidate| candidate == &library_id)
+    {
+        return Ok(false);
+    }
+
+    let Some(restrictions) = context.restrictions.as_ref() else {
+        return Ok(true);
+    };
+
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("open series restrictions db: {error}"))?;
+
+    let age_row = sqlx::query(
+        "SELECT AGE_RATING \
+                               FROM SERIES_METADATA \
+                               WHERE SERIES_ID = ? \
+                               LIMIT 1",
+    )
+    .bind(series_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|error| format!("query series age rating for visibility: {error}"))?;
+
+    let label_rows = sqlx::query(
+        "SELECT LABEL \
+                                  FROM SERIES_METADATA_SHARING \
+                                  WHERE SERIES_ID = ?",
+    )
+    .bind(series_id)
+    .fetch_all(&pool)
+    .await
+    .map_err(|error| format!("query series sharing labels for visibility: {error}"))?;
+
+    let age_rating = age_row.and_then(|row| row.get::<Option<i64>, _>("AGE_RATING"));
+    let age_rating = age_rating.and_then(|value| u16::try_from(value).ok());
+    let labels = label_rows
+        .into_iter()
+        .map(|row| row.get::<String, _>("LABEL"))
+        .collect::<Vec<_>>();
+
+    Ok(restrictions_allow_content(
+        restrictions,
+        age_rating,
+        &labels,
+    ))
+}
+
+fn restrictions_allow_content(
+    restrictions: &QueryRestrictions,
+    age_rating: Option<u16>,
+    sharing_labels: &[String],
+) -> bool {
+    let normalized_labels = sharing_labels
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+
+    let age_allowed = if restrictions.age_restriction == Some(AgeRestrictionKind::AllowOnly) {
+        restrictions
+            .age
+            .map(|age_limit| age_rating.is_some_and(|age| age <= age_limit))
+    } else {
+        None
+    };
+
+    let label_allowed = if restrictions.labels_allow.is_empty() {
+        None
+    } else {
+        Some(
+            restrictions
+                .labels_allow
+                .iter()
+                .any(|candidate| normalized_labels.contains(&candidate.to_ascii_lowercase())),
+        )
+    };
+
+    let allowed = match (age_allowed, label_allowed) {
+        (None, value) => value != Some(false),
+        (value, None) => value != Some(false),
+        (age_value, label_value) => age_value != Some(false) || label_value != Some(false),
+    };
+    if !allowed {
+        return false;
+    }
+
+    let age_denied = if restrictions.age_restriction == Some(AgeRestrictionKind::Exclude) {
+        restrictions
+            .age
+            .is_some_and(|age_limit| age_rating.is_some_and(|age| age >= age_limit))
+    } else {
+        false
+    };
+
+    let label_denied = if restrictions.labels_exclude.is_empty() {
+        false
+    } else {
+        restrictions
+            .labels_exclude
+            .iter()
+            .any(|candidate| normalized_labels.contains(&candidate.to_ascii_lowercase()))
+    };
+
+    !age_denied && !label_denied
 }
 
 fn collection_series_page_payload(
@@ -2526,11 +2529,14 @@ async fn persisted_readlists_exist(database_file: &FsPath) -> Result<bool, Strin
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(|error| format!("open readlists exists db: {error}"))?;
-    let row = sqlx::query("SELECT 1 AS FOUND FROM READLIST LIMIT 1")
-        .fetch_optional(&pool)
-        .await
-        .map_err(|error| format!("query persisted readlists existence: {error}"))?;
-    pool.close().await;
+    let row = sqlx::query(
+        "SELECT 1 AS FOUND \
+                           FROM READLIST \
+                           LIMIT 1",
+    )
+    .fetch_optional(&pool)
+    .await
+    .map_err(|error| format!("query persisted readlists existence: {error}"))?;
     Ok(row.is_some())
 }
 
@@ -2543,7 +2549,9 @@ async fn load_persisted_readlists(
         .map_err(|error| format!("open persisted readlists db: {error}"))?;
 
     let rows = sqlx::query(
-        "SELECT ID, NAME, SUMMARY, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE FROM READLIST ORDER BY NAME COLLATE NOCASE ASC",
+        "SELECT ID, NAME, SUMMARY, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE \
+         FROM READLIST \
+         ORDER BY NAME COLLATE NOCASE ASC",
     )
     .fetch_all(&pool)
     .await
@@ -2570,7 +2578,6 @@ async fn load_persisted_readlists(
         });
     }
 
-    pool.close().await;
     Ok(readlists)
 }
 
@@ -2588,7 +2595,9 @@ async fn load_persisted_readlist_detail(
         .map_err(|error| format!("open persisted readlist detail db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT ID, NAME, SUMMARY, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE FROM READLIST WHERE ID = ?",
+        "SELECT ID, NAME, SUMMARY, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE \
+         FROM READLIST \
+         WHERE ID = ?",
     )
     .bind(readlist_id)
     .fetch_optional(&pool)
@@ -2596,7 +2605,6 @@ async fn load_persisted_readlist_detail(
     .map_err(|error| format!("query persisted readlist detail: {error}"))?;
 
     let Some(row) = row else {
-        pool.close().await;
         return Ok(None);
     };
 
@@ -2614,7 +2622,6 @@ async fn load_persisted_readlist_detail(
         filtered,
     };
 
-    pool.close().await;
     Ok(Some(readlist))
 }
 
@@ -2624,7 +2631,11 @@ async fn load_persisted_readlist_book_ids(
     library_ids: Option<&[String]>,
 ) -> Result<(Vec<String>, bool), String> {
     let rows = sqlx::query(
-        "SELECT rb.BOOK_ID, b.LIBRARY_ID FROM READLIST_BOOK rb JOIN BOOK b ON b.ID = rb.BOOK_ID WHERE rb.READLIST_ID = ? ORDER BY rb.NUMBER ASC",
+        "SELECT rb.BOOK_ID, b.LIBRARY_ID \
+         FROM READLIST_BOOK rb \
+         JOIN BOOK b ON b.ID = rb.BOOK_ID \
+         WHERE rb.READLIST_ID = ? \
+         ORDER BY rb.NUMBER ASC",
     )
     .bind(readlist_id)
     .fetch_all(pool)
@@ -2718,7 +2729,9 @@ async fn persist_collection_create(
 
     let collection_id = generated_collection_id();
     sqlx::query(
-        "INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT, CREATED_DATE, LAST_MODIFIED_DATE) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+        "INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT, CREATED_DATE, \
+           LAST_MODIFIED_DATE) \
+         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
     )
     .bind(&collection_id)
     .bind(&input.name)
@@ -2735,7 +2748,6 @@ async fn persist_collection_create(
     tx.commit()
         .await
         .map_err(|error| format!("commit collection create tx: {error}"))?;
-    pool.close().await;
 
     Ok(collection_id)
 }
@@ -2758,7 +2770,9 @@ async fn persist_collection_update(
         .map_err(|error| format!("begin collection update tx: {error}"))?;
 
     let updated = sqlx::query(
-        "UPDATE COLLECTION SET NAME = ?, ORDERED = ?, SERIES_COUNT = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP WHERE ID = ?",
+        "UPDATE COLLECTION \
+         SET NAME = ?, ORDERED = ?, SERIES_COUNT = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
+         WHERE ID = ?",
     )
     .bind(&input.name)
     .bind(input.ordered)
@@ -2774,7 +2788,6 @@ async fn persist_collection_update(
         tx.rollback()
             .await
             .map_err(|error| format!("rollback collection update tx: {error}"))?;
-        pool.close().await;
         return Ok(false);
     }
 
@@ -2785,7 +2798,6 @@ async fn persist_collection_update(
     tx.commit()
         .await
         .map_err(|error| format!("commit collection update tx: {error}"))?;
-    pool.close().await;
     Ok(true)
 }
 
@@ -2805,32 +2817,38 @@ async fn delete_persisted_collection(
         .await
         .map_err(|error| format!("begin collection delete tx: {error}"))?;
 
-    sqlx::query("DELETE FROM COLLECTION_SERIES WHERE COLLECTION_ID = ?")
-        .bind(collection_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| format!("delete persisted collection series: {error}"))?;
+    sqlx::query(
+        "DELETE \
+                 FROM COLLECTION_SERIES \
+                 WHERE COLLECTION_ID = ?",
+    )
+    .bind(collection_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| format!("delete persisted collection series: {error}"))?;
 
-    let deleted = sqlx::query("DELETE FROM COLLECTION WHERE ID = ?")
-        .bind(collection_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| format!("delete persisted collection: {error}"))?
-        .rows_affected()
+    let deleted = sqlx::query(
+        "DELETE \
+                               FROM COLLECTION \
+                               WHERE ID = ?",
+    )
+    .bind(collection_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| format!("delete persisted collection: {error}"))?
+    .rows_affected()
         > 0;
 
     if !deleted {
         tx.rollback()
             .await
             .map_err(|error| format!("rollback collection delete tx: {error}"))?;
-        pool.close().await;
         return Ok(false);
     }
 
     tx.commit()
         .await
         .map_err(|error| format!("commit collection delete tx: {error}"))?;
-    pool.close().await;
     Ok(true)
 }
 
@@ -2839,14 +2857,19 @@ async fn replace_collection_series(
     collection_id: &str,
     series_ids: &[String],
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM COLLECTION_SERIES WHERE COLLECTION_ID = ?")
-        .bind(collection_id)
-        .execute(&mut **tx)
-        .await?;
+    sqlx::query(
+        "DELETE \
+                 FROM COLLECTION_SERIES \
+                 WHERE COLLECTION_ID = ?",
+    )
+    .bind(collection_id)
+    .execute(&mut **tx)
+    .await?;
 
     for (index, series_id) in series_ids.iter().enumerate() {
         sqlx::query(
-            "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
+            "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) \
+             VALUES (?, ?, ?)",
         )
         .bind(collection_id)
         .bind(series_id)
@@ -2859,12 +2882,7 @@ async fn replace_collection_series(
 }
 
 fn generated_collection_id() -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-
-    format!("collection-{nanos}")
+    format!("collection-{}", random_hex_token(12))
 }
 
 async fn persist_readlist_create(
@@ -2881,7 +2899,8 @@ async fn persist_readlist_create(
 
     let readlist_id = generated_readlist_id();
     sqlx::query(
-        "INSERT INTO READLIST (ID, NAME, BOOK_COUNT, SUMMARY, ORDERED) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO READLIST (ID, NAME, BOOK_COUNT, SUMMARY, ORDERED) \
+         VALUES (?, ?, ?, ?, ?)",
     )
     .bind(&readlist_id)
     .bind(&input.name)
@@ -2899,7 +2918,6 @@ async fn persist_readlist_create(
     tx.commit()
         .await
         .map_err(|error| format!("commit readlist create tx: {error}"))?;
-    pool.close().await;
 
     Ok(readlist_id)
 }
@@ -2922,7 +2940,10 @@ async fn persist_readlist_update(
         .map_err(|error| format!("begin readlist update tx: {error}"))?;
 
     let updated = sqlx::query(
-        "UPDATE READLIST SET NAME = ?, SUMMARY = ?, ORDERED = ?, BOOK_COUNT = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP WHERE ID = ?",
+        "UPDATE READLIST \
+         SET NAME = ?, SUMMARY = ?, ORDERED = ?, BOOK_COUNT = ?, \
+             LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
+         WHERE ID = ?",
     )
     .bind(&input.name)
     .bind(&input.summary)
@@ -2939,7 +2960,6 @@ async fn persist_readlist_update(
         tx.rollback()
             .await
             .map_err(|error| format!("rollback readlist update tx: {error}"))?;
-        pool.close().await;
         return Ok(false);
     }
 
@@ -2950,7 +2970,6 @@ async fn persist_readlist_update(
     tx.commit()
         .await
         .map_err(|error| format!("commit readlist update tx: {error}"))?;
-    pool.close().await;
     Ok(true)
 }
 
@@ -2970,37 +2989,47 @@ async fn delete_persisted_readlist(
         .await
         .map_err(|error| format!("begin readlist delete tx: {error}"))?;
 
-    sqlx::query("DELETE FROM THUMBNAIL_READLIST WHERE READLIST_ID = ?")
-        .bind(readlist_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| format!("delete persisted readlist thumbnails: {error}"))?;
-    sqlx::query("DELETE FROM READLIST_BOOK WHERE READLIST_ID = ?")
-        .bind(readlist_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| format!("delete persisted readlist books: {error}"))?;
+    sqlx::query(
+        "DELETE \
+                 FROM THUMBNAIL_READLIST \
+                 WHERE READLIST_ID = ?",
+    )
+    .bind(readlist_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| format!("delete persisted readlist thumbnails: {error}"))?;
+    sqlx::query(
+        "DELETE \
+                 FROM READLIST_BOOK \
+                 WHERE READLIST_ID = ?",
+    )
+    .bind(readlist_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| format!("delete persisted readlist books: {error}"))?;
 
-    let deleted = sqlx::query("DELETE FROM READLIST WHERE ID = ?")
-        .bind(readlist_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| format!("delete persisted readlist: {error}"))?
-        .rows_affected()
+    let deleted = sqlx::query(
+        "DELETE \
+                               FROM READLIST \
+                               WHERE ID = ?",
+    )
+    .bind(readlist_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| format!("delete persisted readlist: {error}"))?
+    .rows_affected()
         > 0;
 
     if !deleted {
         tx.rollback()
             .await
             .map_err(|error| format!("rollback readlist delete tx: {error}"))?;
-        pool.close().await;
         return Ok(false);
     }
 
     tx.commit()
         .await
         .map_err(|error| format!("commit readlist delete tx: {error}"))?;
-    pool.close().await;
     Ok(true)
 }
 
@@ -3009,30 +3038,49 @@ async fn replace_readlist_books(
     readlist_id: &str,
     book_ids: &[String],
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM READLIST_BOOK WHERE READLIST_ID = ?")
-        .bind(readlist_id)
-        .execute(&mut **tx)
-        .await?;
+    sqlx::query(
+        "DELETE \
+                 FROM READLIST_BOOK \
+                 WHERE READLIST_ID = ?",
+    )
+    .bind(readlist_id)
+    .execute(&mut **tx)
+    .await?;
 
     for (index, book_id) in book_ids.iter().enumerate() {
-        sqlx::query("INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)")
-            .bind(readlist_id)
-            .bind(book_id)
-            .bind(index as i64)
-            .execute(&mut **tx)
-            .await?;
+        sqlx::query(
+            "INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) \
+                     VALUES (?, ?, ?)",
+        )
+        .bind(readlist_id)
+        .bind(book_id)
+        .bind(index as i64)
+        .execute(&mut **tx)
+        .await?;
     }
 
     Ok(())
 }
 
 fn generated_readlist_id() -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
+    format!("readlist-{}", random_hex_token(12))
+}
 
-    format!("readlist-{nanos}")
+fn random_hex_token(byte_len: usize) -> String {
+    let mut bytes = vec![0u8; byte_len];
+    if let Ok(mut file) = std::fs::File::open("/dev/urandom") {
+        let _ = file.read_exact(&mut bytes);
+    } else {
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        for (index, byte) in bytes.iter_mut().enumerate() {
+            *byte = ((seed >> ((index % 8) * 8)) as u8) ^ (index as u8).wrapping_mul(31);
+        }
+    }
+
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn readlist_query_values(query: &str, key: &str) -> Option<Vec<String>> {
@@ -3045,39 +3093,46 @@ fn readlist_query_values(query: &str, key: &str) -> Option<Vec<String>> {
     (!values.is_empty()).then_some(values)
 }
 
-fn readlist_author_query_values(query: &str) -> Option<Vec<String>> {
+fn readlist_author_query_values(query: &str) -> Result<Option<Vec<String>>, String> {
     let raw_values = query_values(query, "author");
     if raw_values.is_empty() {
-        return None;
+        return Ok(None);
     }
 
-    let authors = raw_values
-        .into_iter()
-        .filter_map(parse_readlist_author_query_value)
-        .collect::<Vec<_>>();
+    let mut authors = Vec::with_capacity(raw_values.len());
+    for value in raw_values {
+        if let Some(author) = parse_readlist_author_query_value(value)? {
+            authors.push(author);
+        }
+    }
 
     if authors.is_empty() {
-        Some(vec!["__komga_rust_unsupported_author_role__".to_string()])
+        Err("readlist author filter must include at least one supported value".to_string())
     } else {
-        Some(authors)
+        Ok(Some(authors))
     }
 }
 
-fn parse_readlist_author_query_value(value: &str) -> Option<String> {
+fn parse_readlist_author_query_value(value: &str) -> Result<Option<String>, String> {
     let mut parts = value.splitn(2, ',');
-    let name = parts.next()?.trim();
+    let Some(name) = parts.next() else {
+        return Ok(None);
+    };
+    let name = name.trim();
     if name.is_empty() {
-        return None;
+        return Ok(None);
     }
 
     let Some(role) = parts.next() else {
-        return Some(name.to_ascii_lowercase());
+        return Ok(Some(name.to_ascii_lowercase()));
     };
     let role = role.trim();
     if role.is_empty() || role.eq_ignore_ascii_case("writer") {
-        Some(name.to_ascii_lowercase())
+        Ok(Some(name.to_ascii_lowercase()))
     } else {
-        None
+        Err(format!(
+            "unsupported readlist author role '{role}', only empty role or 'writer' is supported",
+        ))
     }
 }
 
@@ -3571,10 +3626,45 @@ fn readlist_payload(readlist: &ReadListReadModel) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::decode_query_component;
+    use super::{
+        decode_query_component, parse_readlist_author_query_value, readlist_author_query_values,
+    };
 
     #[test]
     fn decode_query_component_decodes_percent_encoded_utf8_sequences() {
         assert_eq!(decode_query_component("caf%C3%A9+au+lait"), "café au lait");
+    }
+
+    #[test]
+    fn parse_readlist_author_query_value_accepts_writer_role_and_plain_name() {
+        assert_eq!(
+            parse_readlist_author_query_value("Jane Writer")
+                .expect("plain author name should parse"),
+            Some("jane writer".to_string()),
+        );
+        assert_eq!(
+            parse_readlist_author_query_value("Jane Writer,writer")
+                .expect("writer role should parse"),
+            Some("jane writer".to_string()),
+        );
+    }
+
+    #[test]
+    fn parse_readlist_author_query_value_rejects_unsupported_roles() {
+        let error = parse_readlist_author_query_value("Jane Writer,inker")
+            .expect_err("unsupported readlist role should be rejected");
+        assert!(error.contains("unsupported readlist author role"));
+        assert!(error.contains("inker"));
+    }
+
+    #[test]
+    fn readlist_author_query_values_rejects_payloads_without_supported_author_values() {
+        let error = readlist_author_query_values("author=Jane%20Writer,inker")
+            .expect_err("unsupported role-only payload should be rejected");
+        assert!(error.contains("unsupported readlist author role"));
+
+        let empty_error = readlist_author_query_values("author=,%20")
+            .expect_err("blank author payload should be rejected");
+        assert!(empty_error.contains("must include at least one supported value"));
     }
 }

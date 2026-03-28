@@ -41,17 +41,20 @@ impl ServerSettingsStore {
 
     pub async fn load_map(&self) -> Result<BTreeMap<String, Option<String>>, sqlx::Error> {
         let context = self.context().await?;
-        let rows = sqlx::query("SELECT KEY, VALUE FROM SERVER_SETTINGS")
-            .fetch_all(context.pool())
-            .await?
-            .into_iter()
-            .map(|row| {
-                (
-                    row.get::<String, _>("KEY"),
-                    row.get::<Option<String>, _>("VALUE"),
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
+        let rows = sqlx::query(
+            "SELECT KEY, VALUE \
+                                FROM SERVER_SETTINGS",
+        )
+        .fetch_all(context.pool())
+        .await?
+        .into_iter()
+        .map(|row| {
+            (
+                row.get::<String, _>("KEY"),
+                row.get::<Option<String>, _>("VALUE"),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
         Ok(rows)
     }
 
@@ -68,8 +71,10 @@ impl ServerSettingsStore {
             match value {
                 Some(value) => {
                     sqlx::query(
-                        "INSERT INTO SERVER_SETTINGS(KEY, VALUE) VALUES(?, ?)\
-                         ON CONFLICT(KEY) DO UPDATE SET VALUE=excluded.VALUE",
+                        "INSERT INTO SERVER_SETTINGS(KEY, VALUE) \
+                         VALUES(?, ?) \
+                         ON CONFLICT(KEY) DO UPDATE \
+                         SET VALUE=excluded.VALUE",
                     )
                     .bind(key)
                     .bind(value)
@@ -77,10 +82,14 @@ impl ServerSettingsStore {
                     .await?;
                 }
                 None => {
-                    sqlx::query("DELETE FROM SERVER_SETTINGS WHERE KEY = ?")
-                        .bind(key)
-                        .execute(context.pool())
-                        .await?;
+                    sqlx::query(
+                        "DELETE \
+                                 FROM SERVER_SETTINGS \
+                                 WHERE KEY = ?",
+                    )
+                    .bind(key)
+                    .execute(context.pool())
+                    .await?;
                 }
             }
         }

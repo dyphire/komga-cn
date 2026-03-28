@@ -67,8 +67,8 @@ pub async fn get_persisted_library(
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(map_sqlx_error)?;
-    let result = queries::libraries::get_persisted_library_sqlx(pool.clone(), context, library_id)
-        .await;
+    let result =
+        queries::libraries::get_persisted_library_sqlx(pool.clone(), context, library_id).await;
     pool.close().await;
     result
 }

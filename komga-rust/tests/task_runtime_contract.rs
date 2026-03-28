@@ -298,8 +298,8 @@ async fn load_task_rows(path: &Path) -> Vec<PersistedTaskRow> {
         .await
         .expect("sqlite pool should open for task inspection");
     let rows = sqlx::query(
-        "SELECT ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER
-         FROM TASK
+        "SELECT ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER \
+         FROM TASK \
          ORDER BY PRIORITY DESC, ID ASC",
     )
     .fetch_all(&pool)
@@ -336,7 +336,7 @@ async fn insert_task_row(
         .expect("sqlite pool should open for task insertion");
 
     sqlx::query(
-        "INSERT INTO TASK (ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER)
+        "INSERT INTO TASK (ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER) \
          VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(id)

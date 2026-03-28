@@ -1,3 +1,4 @@
-# Reserved crate slot: application
+# Application crate
 
-This directory is reserved for future application-layer extraction.
+`komga-application` contains Rust application-layer services and use-case orchestration
+that are shared by the server runtime and compatibility flows.

@@ -6,27 +6,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha512};
 use sqlx::Row;
+use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-const AUTH_USER_ID_ENV: &str = "KOMGA_RUST_AUTH_USER_ID";
-const AUTH_USER_EMAIL_ENV: &str = "KOMGA_RUST_AUTH_USER_EMAIL";
-const AUTH_USER_PASSWORD_ENV: &str = "KOMGA_RUST_AUTH_USER_PASSWORD";
-const AUTH_USER_ROLES_ENV: &str = "KOMGA_RUST_AUTH_USER_ROLES";
-const AUTH_USER_SHARED_ALL_ENV: &str = "KOMGA_RUST_AUTH_USER_SHARED_ALL_LIBRARIES";
-const AUTH_USER_SHARED_IDS_ENV: &str = "KOMGA_RUST_AUTH_USER_SHARED_LIBRARY_IDS";
-const AUTH_USER_LABELS_ALLOW_ENV: &str = "KOMGA_RUST_AUTH_USER_LABELS_ALLOW";
-const AUTH_USER_LABELS_EXCLUDE_ENV: &str = "KOMGA_RUST_AUTH_USER_LABELS_EXCLUDE";
-const AUTH_USER2_ID_ENV: &str = "KOMGA_RUST_AUTH_USER2_ID";
-const AUTH_USER2_EMAIL_ENV: &str = "KOMGA_RUST_AUTH_USER2_EMAIL";
-const AUTH_USER2_PASSWORD_ENV: &str = "KOMGA_RUST_AUTH_USER2_PASSWORD";
-const AUTH_USER2_ROLES_ENV: &str = "KOMGA_RUST_AUTH_USER2_ROLES";
-const AUTH_USER2_SHARED_ALL_ENV: &str = "KOMGA_RUST_AUTH_USER2_SHARED_ALL_LIBRARIES";
-const AUTH_USER2_SHARED_IDS_ENV: &str = "KOMGA_RUST_AUTH_USER2_SHARED_LIBRARY_IDS";
-const AUTH_USER2_LABELS_ALLOW_ENV: &str = "KOMGA_RUST_AUTH_USER2_LABELS_ALLOW";
-const AUTH_USER2_LABELS_EXCLUDE_ENV: &str = "KOMGA_RUST_AUTH_USER2_LABELS_EXCLUDE";
-const API_KEY_ENV: &str = "KOMGA_COMPAT_API_KEY";
 static API_KEY_NONCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone)]
@@ -58,7 +42,7 @@ pub(in crate::app) struct PersistedApiKeyMetadata {
 }
 
 #[derive(Clone)]
-pub(in crate::app) struct PlaceholderUser {
+pub(in crate::app) struct AuthUser {
     id: String,
     email: String,
     password: String,
@@ -71,7 +55,7 @@ pub(in crate::app) struct PlaceholderUser {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub(in crate::app) struct PlaceholderUserSessionSnapshot {
+pub(in crate::app) struct AuthUserSessionSnapshot {
     pub(in crate::app) id: String,
     pub(in crate::app) email: String,
     pub(in crate::app) roles: Vec<String>,
@@ -79,11 +63,11 @@ pub(in crate::app) struct PlaceholderUserSessionSnapshot {
     pub(in crate::app) shared_library_ids: Vec<String>,
     pub(in crate::app) labels_allow: Vec<String>,
     pub(in crate::app) labels_exclude: Vec<String>,
-    pub(in crate::app) age_restriction: Option<PlaceholderUserAgeRestrictionSnapshot>,
+    pub(in crate::app) age_restriction: Option<AuthUserAgeRestrictionSnapshot>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub(in crate::app) struct PlaceholderUserAgeRestrictionSnapshot {
+pub(in crate::app) struct AuthUserAgeRestrictionSnapshot {
     pub(in crate::app) age: i64,
     pub(in crate::app) restriction: String,
 }
@@ -94,97 +78,20 @@ struct UserAgeRestriction {
     restriction: &'static str,
 }
 
-impl PlaceholderUser {
+impl AuthUser {
     pub(super) fn id(&self) -> &str {
         self.id.as_str()
     }
-
-    fn email(&self) -> &str {
-        self.email.as_str()
-    }
-
-    fn password(&self) -> &str {
-        self.password.as_str()
-    }
 }
 
-pub(in crate::app) fn user_id(user: &PlaceholderUser) -> &str {
+pub(in crate::app) fn user_id(user: &AuthUser) -> &str {
     user.id()
 }
 
 pub(in crate::app) enum AuthOutcome {
-    Valid(PlaceholderUser),
+    Valid(AuthUser),
     Invalid,
     Missing,
-}
-
-pub(in crate::app) fn basic_user(headers: &HeaderMap) -> AuthOutcome {
-    let Some(value) = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-    else {
-        return AuthOutcome::Missing;
-    };
-
-    let value = value.trim();
-    if value.is_empty() {
-        return AuthOutcome::Missing;
-    }
-
-    let Some(encoded) = value.strip_prefix("Basic ") else {
-        return AuthOutcome::Invalid;
-    };
-
-    let decoded = match STANDARD.decode(encoded) {
-        Ok(decoded) => decoded,
-        Err(_) => return AuthOutcome::Invalid,
-    };
-
-    let credentials = match String::from_utf8(decoded) {
-        Ok(credentials) => credentials,
-        Err(_) => return AuthOutcome::Invalid,
-    };
-
-    let Some((username, password)) = credentials.split_once(':') else {
-        return AuthOutcome::Invalid;
-    };
-
-    let users = configured_users();
-    if users.is_empty() {
-        return AuthOutcome::Missing;
-    }
-
-    for user in users {
-        if user.email() == username && user.password() == password {
-            return AuthOutcome::Valid(user);
-        }
-    }
-
-    AuthOutcome::Invalid
-}
-
-pub(in crate::app) fn api_key_user(headers: &HeaderMap) -> AuthOutcome {
-    let Some(value) = headers
-        .get("x-api-key")
-        .and_then(|value| value.to_str().ok())
-    else {
-        return AuthOutcome::Missing;
-    };
-
-    let value = value.trim();
-    if value.is_empty() {
-        return AuthOutcome::Invalid;
-    }
-
-    let Some(user) = configured_primary_user() else {
-        return AuthOutcome::Missing;
-    };
-
-    match configured_api_key() {
-        Some(api_key) if value == api_key => AuthOutcome::Valid(user),
-        Some(_) => AuthOutcome::Invalid,
-        None => AuthOutcome::Missing,
-    }
 }
 
 pub(in crate::app) async fn persisted_basic_user(
@@ -192,7 +99,7 @@ pub(in crate::app) async fn persisted_basic_user(
     database_file: &Path,
 ) -> Option<AuthOutcome> {
     let Some((username, password)) = basic_credentials(headers) else {
-        return Some(basic_user(headers));
+        return Some(AuthOutcome::Missing);
     };
 
     let mut users = open_persisted_users(database_file).await?;
@@ -214,22 +121,37 @@ pub(in crate::app) async fn persisted_api_key_user(
     database_file: &Path,
 ) -> Option<AuthOutcome> {
     let Some(api_key) = api_key_header_value(headers) else {
-        return Some(api_key_user(headers));
+        return Some(AuthOutcome::Missing);
     };
 
+    persisted_api_key_user_by_token(api_key.as_str(), database_file).await
+}
+
+pub(in crate::app) async fn persisted_api_key_user_by_token(
+    api_key: &str,
+    database_file: &Path,
+) -> Option<AuthOutcome> {
+    let api_key = api_key.trim();
+    if api_key.is_empty() {
+        return Some(AuthOutcome::Missing);
+    }
+
     let mut users = open_persisted_users(database_file).await?;
-    let api_key_hash = sha512_hex(&api_key);
+    let api_key_hash = sha512_hex(api_key);
     let pool = match connect_pool(database_file, 1).await {
         Ok(pool) => pool,
         Err(_) => return None,
     };
 
-    let row = sqlx::query("SELECT USER_ID FROM USER_API_KEY WHERE API_KEY = ? LIMIT 1")
-        .bind(api_key_hash)
-        .fetch_optional(&pool)
-        .await;
-
-    pool.close().await;
+    let row = sqlx::query(
+        "SELECT USER_ID \
+                           FROM USER_API_KEY \
+                           WHERE API_KEY = ? \
+                           LIMIT 1",
+    )
+    .bind(api_key_hash)
+    .fetch_optional(&pool)
+    .await;
 
     let Ok(row) = row else {
         return None;
@@ -257,12 +179,15 @@ pub(in crate::app) async fn persisted_api_key_metadata(
     let api_key = api_key_header_value(headers)?;
     let api_key_hash = sha512_hex(&api_key);
     let pool = connect_pool(database_file, 1).await.ok()?;
-    let row = sqlx::query("SELECT ID, COMMENT FROM USER_API_KEY WHERE API_KEY = ? LIMIT 1")
-        .bind(api_key_hash)
-        .fetch_optional(&pool)
-        .await;
-
-    pool.close().await;
+    let row = sqlx::query(
+        "SELECT ID, COMMENT \
+                           FROM USER_API_KEY \
+                           WHERE API_KEY = ? \
+                           LIMIT 1",
+    )
+    .bind(api_key_hash)
+    .fetch_optional(&pool)
+    .await;
 
     let row = row.ok()??;
     Some(PersistedApiKeyMetadata {
@@ -271,23 +196,37 @@ pub(in crate::app) async fn persisted_api_key_metadata(
     })
 }
 
-pub(in crate::app) fn user_is_admin(user: &PlaceholderUser) -> bool {
+pub(in crate::app) fn user_is_admin(user: &AuthUser) -> bool {
     user.roles.iter().any(|role| role == "ADMIN")
 }
 
-pub(in crate::app) fn user_shared_all_libraries(user: &PlaceholderUser) -> bool {
+pub(in crate::app) fn user_has_role(user: &AuthUser, role: &str) -> bool {
+    user.roles.iter().any(|candidate| candidate == role)
+}
+
+pub(in crate::app) fn user_shared_all_libraries(user: &AuthUser) -> bool {
     user.shared_all_libraries
 }
 
-pub(in crate::app) fn user_shared_library_ids(user: &PlaceholderUser) -> &[String] {
+pub(in crate::app) fn user_shared_library_ids(user: &AuthUser) -> &[String] {
     user.shared_library_ids.as_slice()
 }
 
-pub(in crate::app) fn placeholder_user_json(user: &PlaceholderUser) -> Value {
+pub(in crate::app) fn user_payload_json(user: &AuthUser) -> Value {
+    let mut roles = BTreeSet::new();
+    for role in &user.roles {
+        let role = role.trim();
+        if role.is_empty() {
+            continue;
+        }
+        roles.insert(role.to_string());
+    }
+    roles.insert("USER".to_string());
+
     json!({
         "id": user.id,
         "email": user.email,
-        "roles": user.roles,
+        "roles": roles,
         "sharedAllLibraries": user.shared_all_libraries,
         "sharedLibrariesIds": user.shared_library_ids,
         "labelsAllow": user.labels_allow,
@@ -301,10 +240,8 @@ pub(in crate::app) fn placeholder_user_json(user: &PlaceholderUser) -> Value {
     })
 }
 
-pub(in crate::app) fn user_session_snapshot(
-    user: &PlaceholderUser,
-) -> PlaceholderUserSessionSnapshot {
-    PlaceholderUserSessionSnapshot {
+pub(in crate::app) fn user_session_snapshot(user: &AuthUser) -> AuthUserSessionSnapshot {
+    AuthUserSessionSnapshot {
         id: user.id.clone(),
         email: user.email.clone(),
         roles: user.roles.clone(),
@@ -313,7 +250,7 @@ pub(in crate::app) fn user_session_snapshot(
         labels_allow: user.labels_allow.clone(),
         labels_exclude: user.labels_exclude.clone(),
         age_restriction: user.age_restriction.as_ref().map(|age_restriction| {
-            PlaceholderUserAgeRestrictionSnapshot {
+            AuthUserAgeRestrictionSnapshot {
                 age: age_restriction.age,
                 restriction: age_restriction.restriction.to_string(),
             }
@@ -321,10 +258,8 @@ pub(in crate::app) fn user_session_snapshot(
     }
 }
 
-pub(in crate::app) fn user_from_session_snapshot(
-    snapshot: &PlaceholderUserSessionSnapshot,
-) -> PlaceholderUser {
-    PlaceholderUser {
+pub(in crate::app) fn user_from_session_snapshot(snapshot: &AuthUserSessionSnapshot) -> AuthUser {
+    AuthUser {
         id: snapshot.id.clone(),
         email: snapshot.email.clone(),
         password: String::new(),
@@ -350,7 +285,7 @@ pub(in crate::app) fn user_from_session_snapshot(
     }
 }
 
-pub(in crate::app) async fn persisted_users(database_file: &Path) -> Option<Vec<PlaceholderUser>> {
+pub(in crate::app) async fn persisted_users(database_file: &Path) -> Option<Vec<AuthUser>> {
     open_persisted_users(database_file).await
 }
 
@@ -365,13 +300,16 @@ pub(in crate::app) async fn persisted_update_password_by_user_id(
 
     let hashed_password = hash_bcrypt_password(password, DEFAULT_COST).ok()?;
     let pool = connect_pool(database_file, 1).await.ok()?;
-    let update = sqlx::query("UPDATE USER SET PASSWORD = ? WHERE ID = ?")
-        .bind(hashed_password)
-        .bind(user_id)
-        .execute(&pool)
-        .await;
+    let update = sqlx::query(
+        "UPDATE USER \
+                              SET PASSWORD = ? \
+                              WHERE ID = ?",
+    )
+    .bind(hashed_password)
+    .bind(user_id)
+    .execute(&pool)
+    .await;
 
-    pool.close().await;
     update.ok().map(|result| result.rows_affected() > 0)
 }
 
@@ -387,26 +325,62 @@ pub(in crate::app) async fn persisted_create_api_key(
     let generated_key = generated_api_key_secret(user_id);
     let generated_key_hash = sha512_hex(&generated_key);
     let generated_id = generated_api_key_id(user_id);
+    let normalized_comment = comment.trim();
+    if normalized_comment.is_empty() {
+        return None;
+    }
     let pool = connect_pool(database_file, 1).await.ok()?;
 
-    let insert =
-        sqlx::query("INSERT INTO USER_API_KEY (ID, USER_ID, API_KEY, COMMENT) VALUES (?, ?, ?, ?)")
-            .bind(&generated_id)
-            .bind(user_id)
-            .bind(generated_key_hash)
-            .bind(comment)
-            .execute(&pool)
-            .await;
+    let insert = sqlx::query(
+        "INSERT INTO USER_API_KEY (ID, USER_ID, API_KEY, COMMENT) \
+                     VALUES (?, ?, ?, ?)",
+    )
+    .bind(&generated_id)
+    .bind(user_id)
+    .bind(generated_key_hash)
+    .bind(normalized_comment)
+    .execute(&pool)
+    .await;
 
-    pool.close().await;
     insert.ok()?;
 
     Some(PersistedApiKey {
         id: generated_id,
         user_id: user_id.to_string(),
         key: generated_key,
-        comment: comment.to_string(),
+        comment: normalized_comment.to_string(),
     })
+}
+
+pub(in crate::app) async fn persisted_api_key_comment_exists(
+    database_file: &Path,
+    user_id: &str,
+    comment: &str,
+) -> Option<bool> {
+    if !database_file.exists() {
+        return None;
+    }
+
+    let normalized_comment = comment.trim();
+    if normalized_comment.is_empty() {
+        return Some(false);
+    }
+
+    let pool = connect_pool(database_file, 1).await.ok()?;
+    let row = sqlx::query(
+        "SELECT 1 \
+         FROM USER_API_KEY \
+         WHERE USER_ID = ? \
+         AND LOWER(COMMENT) = LOWER(?) \
+         LIMIT 1",
+    )
+    .bind(user_id)
+    .bind(normalized_comment)
+    .fetch_optional(&pool)
+    .await
+    .ok()?;
+
+    Some(row.is_some())
 }
 
 pub(in crate::app) async fn persisted_list_api_keys(
@@ -418,12 +392,15 @@ pub(in crate::app) async fn persisted_list_api_keys(
     }
 
     let pool = connect_pool(database_file, 1).await.ok()?;
-    let rows = sqlx::query("SELECT ID, USER_ID, COMMENT FROM USER_API_KEY WHERE USER_ID = ? ORDER BY CREATED_DATE DESC, ID DESC")
-        .bind(user_id)
-        .fetch_all(&pool)
-        .await;
-
-    pool.close().await;
+    let rows = sqlx::query(
+        "SELECT ID, USER_ID, COMMENT \
+         FROM USER_API_KEY \
+         WHERE USER_ID = ? \
+         ORDER BY CREATED_DATE DESC, ID DESC",
+    )
+    .bind(user_id)
+    .fetch_all(&pool)
+    .await;
 
     let rows = rows.ok()?;
     Some(
@@ -448,13 +425,17 @@ pub(in crate::app) async fn persisted_delete_api_key_by_id(
     }
 
     let pool = connect_pool(database_file, 1).await.ok()?;
-    let delete = sqlx::query("DELETE FROM USER_API_KEY WHERE ID = ? AND USER_ID = ?")
-        .bind(api_key_id)
-        .bind(user_id)
-        .execute(&pool)
-        .await;
+    let delete = sqlx::query(
+        "DELETE \
+                              FROM USER_API_KEY \
+                              WHERE ID = ? \
+                              AND USER_ID = ?",
+    )
+    .bind(api_key_id)
+    .bind(user_id)
+    .execute(&pool)
+    .await;
 
-    pool.close().await;
     delete.ok().map(|result| result.rows_affected() > 0)
 }
 
@@ -469,20 +450,25 @@ pub(in crate::app) async fn persisted_list_authentication_activity(
     let pool = connect_pool(database_file, 1).await.ok()?;
     let rows = if let Some(user_id) = user_id {
         sqlx::query(
-            "SELECT USER_ID, EMAIL, IP, USER_AGENT, SUCCESS, ERROR, DATE_TIME, SOURCE, API_KEY_ID, API_KEY_COMMENT FROM AUTHENTICATION_ACTIVITY WHERE USER_ID = ? ORDER BY DATE_TIME DESC",
+            "SELECT USER_ID, EMAIL, IP, USER_AGENT, SUCCESS, ERROR, DATE_TIME, SOURCE, API_KEY_ID, \
+                    API_KEY_COMMENT \
+             FROM AUTHENTICATION_ACTIVITY \
+             WHERE USER_ID = ? \
+             ORDER BY DATE_TIME DESC",
         )
         .bind(user_id)
         .fetch_all(&pool)
         .await
     } else {
         sqlx::query(
-            "SELECT USER_ID, EMAIL, IP, USER_AGENT, SUCCESS, ERROR, DATE_TIME, SOURCE, API_KEY_ID, API_KEY_COMMENT FROM AUTHENTICATION_ACTIVITY ORDER BY DATE_TIME DESC",
+            "SELECT USER_ID, EMAIL, IP, USER_AGENT, SUCCESS, ERROR, DATE_TIME, SOURCE, API_KEY_ID, \
+                    API_KEY_COMMENT \
+             FROM AUTHENTICATION_ACTIVITY \
+             ORDER BY DATE_TIME DESC",
         )
         .fetch_all(&pool)
         .await
     };
-
-    pool.close().await;
 
     let rows = rows.ok()?;
     Some(
@@ -503,6 +489,24 @@ pub(in crate::app) async fn persisted_list_authentication_activity(
     )
 }
 
+pub(in crate::app) async fn persisted_cleanup_authentication_activity(
+    database_file: &Path,
+) -> Option<u64> {
+    if !database_file.exists() {
+        return Some(0);
+    }
+
+    let pool = connect_pool(database_file, 1).await.ok()?;
+    let deleted = sqlx::query(
+        "DELETE FROM AUTHENTICATION_ACTIVITY \
+         WHERE datetime(DATE_TIME) < datetime('now', '-1 month')",
+    )
+    .execute(&pool)
+    .await;
+
+    deleted.ok().map(|result| result.rows_affected())
+}
+
 pub(in crate::app) async fn persisted_latest_authentication_activity_by_user_and_api_key(
     database_file: &Path,
     user_id: &str,
@@ -514,14 +518,19 @@ pub(in crate::app) async fn persisted_latest_authentication_activity_by_user_and
 
     let pool = connect_pool(database_file, 1).await.ok()?;
     let row = sqlx::query(
-        "SELECT USER_ID, EMAIL, IP, USER_AGENT, SUCCESS, ERROR, DATE_TIME, SOURCE, API_KEY_ID, API_KEY_COMMENT FROM AUTHENTICATION_ACTIVITY WHERE USER_ID = ? AND API_KEY_ID = ? ORDER BY DATE_TIME DESC LIMIT 1",
+        "SELECT USER_ID, EMAIL, IP, USER_AGENT, SUCCESS, ERROR, DATE_TIME, SOURCE, API_KEY_ID, \
+                API_KEY_COMMENT \
+         FROM AUTHENTICATION_ACTIVITY \
+         WHERE USER_ID = ? \
+         AND API_KEY_ID = ? \
+         ORDER BY DATE_TIME DESC \
+         LIMIT 1",
     )
     .bind(user_id)
     .bind(api_key_id)
     .fetch_optional(&pool)
     .await;
 
-    pool.close().await;
     let row = row.ok()??;
 
     Some(PersistedAuthenticationActivity {
@@ -540,7 +549,7 @@ pub(in crate::app) async fn persisted_latest_authentication_activity_by_user_and
 
 pub(in crate::app) async fn persisted_record_successful_authentication_activity(
     database_file: &Path,
-    user: &PlaceholderUser,
+    user: &AuthUser,
     source: &str,
     api_key_id: Option<&str>,
     api_key_comment: Option<&str>,
@@ -551,7 +560,9 @@ pub(in crate::app) async fn persisted_record_successful_authentication_activity(
 
     let pool = connect_pool(database_file, 1).await.ok()?;
     let insert_with_user_id = sqlx::query(
-        "INSERT INTO AUTHENTICATION_ACTIVITY (USER_ID, EMAIL, IP, USER_AGENT, SUCCESS, ERROR, DATE_TIME, SOURCE, API_KEY_ID, API_KEY_COMMENT) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)",
+        "INSERT INTO AUTHENTICATION_ACTIVITY (USER_ID, EMAIL, IP, USER_AGENT, SUCCESS, ERROR, \
+           DATE_TIME, SOURCE, API_KEY_ID, API_KEY_COMMENT) \
+         VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)",
     )
     .bind(user.id.as_str())
     .bind(user.email.as_str())
@@ -567,114 +578,25 @@ pub(in crate::app) async fn persisted_record_successful_authentication_activity(
 
     let insert = match insert_with_user_id {
         Ok(result) => Ok(result),
-        Err(_) => {
-            sqlx::query(
-                "INSERT INTO AUTHENTICATION_ACTIVITY (USER_ID, EMAIL, IP, USER_AGENT, SUCCESS, ERROR, DATE_TIME, SOURCE, API_KEY_ID, API_KEY_COMMENT) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)",
-            )
-            .bind(Option::<String>::None)
-            .bind(user.email.as_str())
-            .bind(Option::<String>::None)
-            .bind(Option::<String>::None)
-            .bind(true)
-            .bind(Option::<String>::None)
-            .bind(source)
-            .bind(api_key_id)
-            .bind(api_key_comment)
-            .execute(&pool)
-            .await
-        }
+        Err(_) => sqlx::query(
+            "INSERT INTO AUTHENTICATION_ACTIVITY (USER_ID, EMAIL, IP, USER_AGENT, SUCCESS, ERROR, \
+                   DATE_TIME, SOURCE, API_KEY_ID, API_KEY_COMMENT) \
+                 VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)",
+        )
+        .bind(Option::<String>::None)
+        .bind(user.email.as_str())
+        .bind(Option::<String>::None)
+        .bind(Option::<String>::None)
+        .bind(true)
+        .bind(Option::<String>::None)
+        .bind(source)
+        .bind(api_key_id)
+        .bind(api_key_comment)
+        .execute(&pool)
+        .await,
     };
 
-    pool.close().await;
     insert.ok().map(|_| ())
-}
-
-fn configured_primary_user() -> Option<PlaceholderUser> {
-    load_user(
-        AUTH_USER_ID_ENV,
-        AUTH_USER_EMAIL_ENV,
-        AUTH_USER_PASSWORD_ENV,
-        AUTH_USER_ROLES_ENV,
-        AUTH_USER_SHARED_ALL_ENV,
-        AUTH_USER_SHARED_IDS_ENV,
-        AUTH_USER_LABELS_ALLOW_ENV,
-        AUTH_USER_LABELS_EXCLUDE_ENV,
-        &["ADMIN", "FILE_DOWNLOAD", "PAGE_STREAMING", "USER"],
-        true,
-    )
-}
-
-fn configured_secondary_user() -> Option<PlaceholderUser> {
-    load_user(
-        AUTH_USER2_ID_ENV,
-        AUTH_USER2_EMAIL_ENV,
-        AUTH_USER2_PASSWORD_ENV,
-        AUTH_USER2_ROLES_ENV,
-        AUTH_USER2_SHARED_ALL_ENV,
-        AUTH_USER2_SHARED_IDS_ENV,
-        AUTH_USER2_LABELS_ALLOW_ENV,
-        AUTH_USER2_LABELS_EXCLUDE_ENV,
-        &["USER"],
-        true,
-    )
-}
-
-pub(in crate::app) fn configured_users() -> Vec<PlaceholderUser> {
-    let mut users = Vec::with_capacity(2);
-    if let Some(primary) = configured_primary_user() {
-        users.push(primary);
-    }
-    if let Some(secondary) = configured_secondary_user() {
-        users.push(secondary);
-    }
-    users
-}
-
-fn configured_api_key() -> Option<String> {
-    load_configured_api_key()
-}
-
-fn load_user(
-    id_env: &str,
-    email_env: &str,
-    password_env: &str,
-    roles_env: &str,
-    shared_all_env: &str,
-    shared_ids_env: &str,
-    labels_allow_env: &str,
-    labels_exclude_env: &str,
-    default_roles: &[&str],
-    default_shared_all: bool,
-) -> Option<PlaceholderUser> {
-    let id = env_required(id_env)?;
-    let email = env_required(email_env)?;
-    let password = env_required(password_env)?;
-
-    let fallback_roles = default_roles
-        .iter()
-        .map(|role| (*role).to_string())
-        .collect::<Vec<_>>();
-
-    Some(PlaceholderUser {
-        id,
-        email,
-        password,
-        roles: env_csv(roles_env)
-            .filter(|roles| !roles.is_empty())
-            .unwrap_or(fallback_roles),
-        shared_all_libraries: env_bool_or_default(shared_all_env, default_shared_all),
-        shared_library_ids: env_csv(shared_ids_env).unwrap_or_default(),
-        labels_allow: env_csv(labels_allow_env).unwrap_or_default(),
-        labels_exclude: env_csv(labels_exclude_env).unwrap_or_default(),
-        age_restriction: None,
-    })
-}
-
-fn load_configured_api_key() -> Option<String> {
-    std::env::var(API_KEY_ENV)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
 }
 
 fn basic_credentials(headers: &HeaderMap) -> Option<(String, String)> {
@@ -706,42 +628,52 @@ fn api_key_header_value(headers: &HeaderMap) -> Option<String> {
     }
 }
 
-async fn open_persisted_users(database_file: &Path) -> Option<Vec<PlaceholderUser>> {
+async fn open_persisted_users(database_file: &Path) -> Option<Vec<AuthUser>> {
     if !database_file.exists() {
         return None;
     }
 
     let pool = connect_pool(database_file, 1).await.ok()?;
     let user_rows = sqlx::query(
-        "SELECT ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES, AGE_RESTRICTION, AGE_RESTRICTION_ALLOW_ONLY FROM USER ORDER BY EMAIL",
+        "SELECT ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES, AGE_RESTRICTION, \
+                AGE_RESTRICTION_ALLOW_ONLY \
+         FROM USER \
+         ORDER BY EMAIL",
     )
     .fetch_all(&pool)
     .await;
 
     let Ok(user_rows) = user_rows else {
-        pool.close().await;
         return None;
     };
 
     if user_rows.is_empty() {
-        pool.close().await;
         return None;
     }
 
     let mut users = Vec::with_capacity(user_rows.len());
     for row in user_rows {
         let user_id = row.get::<String, _>("ID");
-        let roles = sqlx::query("SELECT ROLE FROM USER_ROLE WHERE USER_ID = ? ORDER BY ROLE")
-            .bind(&user_id)
-            .fetch_all(&pool)
-            .await
-            .ok()?
-            .into_iter()
-            .map(|row| row.get::<String, _>("ROLE"))
-            .collect::<Vec<_>>();
+        let roles = sqlx::query(
+            "SELECT ROLE \
+                                 FROM USER_ROLE \
+                                 WHERE USER_ID = ? \
+                                 ORDER BY ROLE",
+        )
+        .bind(&user_id)
+        .fetch_all(&pool)
+        .await
+        .ok()?
+        .into_iter()
+        .map(|row| row.get::<String, _>("ROLE"))
+        .filter(|role| role != "USER")
+        .collect::<Vec<_>>();
 
         let shared_library_ids = sqlx::query(
-            "SELECT LIBRARY_ID FROM USER_LIBRARY_SHARING WHERE USER_ID = ? ORDER BY LIBRARY_ID",
+            "SELECT LIBRARY_ID \
+             FROM USER_LIBRARY_SHARING \
+             WHERE USER_ID = ? \
+             ORDER BY LIBRARY_ID",
         )
         .bind(&user_id)
         .fetch_all(&pool)
@@ -752,7 +684,10 @@ async fn open_persisted_users(database_file: &Path) -> Option<Vec<PlaceholderUse
         .collect::<Vec<_>>();
 
         let sharing_rows = sqlx::query(
-            "SELECT LABEL, ALLOW FROM USER_SHARING WHERE USER_ID = ? ORDER BY ALLOW DESC, LABEL",
+            "SELECT LABEL, ALLOW \
+             FROM USER_SHARING \
+             WHERE USER_ID = ? \
+             ORDER BY ALLOW DESC, LABEL",
         )
         .bind(&user_id)
         .fetch_all(&pool)
@@ -786,7 +721,7 @@ async fn open_persisted_users(database_file: &Path) -> Option<Vec<PlaceholderUse
             _ => None,
         };
 
-        users.push(PlaceholderUser {
+        users.push(AuthUser {
             id: user_id,
             email: row.get::<String, _>("EMAIL"),
             password: row.get::<String, _>("PASSWORD"),
@@ -799,7 +734,6 @@ async fn open_persisted_users(database_file: &Path) -> Option<Vec<PlaceholderUse
         });
     }
 
-    pool.close().await;
     Some(users)
 }
 
@@ -833,35 +767,5 @@ fn generated_api_key_id(user_id: &str) -> String {
         "komga-api-key-id:{}",
         generated_api_key_seed(user_id)
     ));
-    format!("rust-api-key-{}", &digest[..24])
-}
-
-fn env_required(name: &str) -> Option<String> {
-    std::env::var(name)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-fn env_csv(name: &str) -> Option<Vec<String>> {
-    std::env::var(name).ok().map(|value| {
-        value
-            .split(',')
-            .map(str::trim)
-            .filter(|part| !part.is_empty())
-            .map(str::to_string)
-            .collect::<Vec<_>>()
-    })
-}
-
-fn env_bool_or_default(name: &str, default: bool) -> bool {
-    std::env::var(name)
-        .ok()
-        .map(|value| value.trim().to_ascii_lowercase())
-        .and_then(|value| match value.as_str() {
-            "1" | "true" | "yes" | "on" => Some(true),
-            "0" | "false" | "no" | "off" => Some(false),
-            _ => None,
-        })
-        .unwrap_or(default)
+    digest[..24].to_string()
 }

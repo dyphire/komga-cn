@@ -189,13 +189,16 @@ impl SqliteDiscoveryAdapter {
         };
 
         for row in pending.libraries {
-            sqlx::query("INSERT INTO libraries (id, name, root) VALUES (?1, ?2, ?3)")
-                .bind(row.id)
-                .bind(row.name)
-                .bind(row.root)
-                .execute(&pool)
-                .await
-                .map_err(map_sqlx_error)?;
+            sqlx::query(
+                "INSERT INTO libraries (id, name, root) \
+                         VALUES (?1, ?2, ?3)",
+            )
+            .bind(row.id)
+            .bind(row.name)
+            .bind(row.root)
+            .execute(&pool)
+            .await
+            .map_err(map_sqlx_error)?;
         }
 
         for row in pending.series {
@@ -223,7 +226,10 @@ impl SqliteDiscoveryAdapter {
             } = row;
 
             sqlx::query(
-                "INSERT INTO series (id, library_id, title, age_rating, language, publisher, release_date, status, complete, read_status, deleted, oneshot, created, last_modified, file_last_modified, url) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                "INSERT INTO series (id, library_id, title, age_rating, language, publisher, \
+                   release_date, status, complete, read_status, deleted, oneshot, created, last_modified, \
+                   file_last_modified, url) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             )
             .bind(&id)
             .bind(&library_id)
@@ -246,39 +252,51 @@ impl SqliteDiscoveryAdapter {
             .map_err(map_sqlx_error)?;
 
             for label in labels {
-                sqlx::query("INSERT INTO series_labels (series_id, label) VALUES (?1, ?2)")
-                    .bind(&id)
-                    .bind(label)
-                    .execute(&pool)
-                    .await
-                    .map_err(map_sqlx_error)?;
+                sqlx::query(
+                    "INSERT INTO series_labels (series_id, label) \
+                             VALUES (?1, ?2)",
+                )
+                .bind(&id)
+                .bind(label)
+                .execute(&pool)
+                .await
+                .map_err(map_sqlx_error)?;
             }
 
             for genre in genres {
-                sqlx::query("INSERT INTO series_genres (series_id, genre) VALUES (?1, ?2)")
-                    .bind(&id)
-                    .bind(genre)
-                    .execute(&pool)
-                    .await
-                    .map_err(map_sqlx_error)?;
+                sqlx::query(
+                    "INSERT INTO series_genres (series_id, genre) \
+                             VALUES (?1, ?2)",
+                )
+                .bind(&id)
+                .bind(genre)
+                .execute(&pool)
+                .await
+                .map_err(map_sqlx_error)?;
             }
 
             for tag in tags {
-                sqlx::query("INSERT INTO series_tags (series_id, tag) VALUES (?1, ?2)")
-                    .bind(&id)
-                    .bind(tag)
-                    .execute(&pool)
-                    .await
-                    .map_err(map_sqlx_error)?;
+                sqlx::query(
+                    "INSERT INTO series_tags (series_id, tag) \
+                             VALUES (?1, ?2)",
+                )
+                .bind(&id)
+                .bind(tag)
+                .execute(&pool)
+                .await
+                .map_err(map_sqlx_error)?;
             }
 
             for author in authors {
-                sqlx::query("INSERT INTO series_authors (series_id, author) VALUES (?1, ?2)")
-                    .bind(&id)
-                    .bind(author)
-                    .execute(&pool)
-                    .await
-                    .map_err(map_sqlx_error)?;
+                sqlx::query(
+                    "INSERT INTO series_authors (series_id, author) \
+                             VALUES (?1, ?2)",
+                )
+                .bind(&id)
+                .bind(author)
+                .execute(&pool)
+                .await
+                .map_err(map_sqlx_error)?;
             }
         }
 
@@ -293,7 +311,8 @@ impl SqliteDiscoveryAdapter {
             } = row;
 
             sqlx::query(
-                "INSERT INTO collections (id, name, ordered, created_date, last_modified_date) VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO collections (id, name, ordered, created_date, last_modified_date) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
             )
             .bind(&id)
             .bind(name)
@@ -306,7 +325,8 @@ impl SqliteDiscoveryAdapter {
 
             for (index, series_id) in series_ids.iter().enumerate() {
                 sqlx::query(
-                    "INSERT INTO collection_series (collection_id, series_id, position) VALUES (?1, ?2, ?3)",
+                    "INSERT INTO collection_series (collection_id, series_id, position) \
+                     VALUES (?1, ?2, ?3)",
                 )
                 .bind(&id)
                 .bind(series_id)
@@ -329,7 +349,8 @@ impl SqliteDiscoveryAdapter {
             } = row;
 
             sqlx::query(
-                "INSERT INTO readlists (id, name, summary, ordered, created_date, last_modified_date) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT INTO readlists (id, name, summary, ordered, created_date, last_modified_date) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             )
             .bind(&id)
             .bind(name)
@@ -343,7 +364,8 @@ impl SqliteDiscoveryAdapter {
 
             for (index, book_id) in book_ids.iter().enumerate() {
                 sqlx::query(
-                    "INSERT INTO readlist_books (readlist_id, book_id, position) VALUES (?1, ?2, ?3)",
+                    "INSERT INTO readlist_books (readlist_id, book_id, position) \
+                     VALUES (?1, ?2, ?3)",
                 )
                 .bind(&id)
                 .bind(book_id)
@@ -379,7 +401,10 @@ impl SqliteDiscoveryAdapter {
             } = row;
 
             sqlx::query(
-                "INSERT INTO books (id, series_id, library_id, title, url, created, last_modified, file_last_modified, size_bytes, media_status, media_profile, media_type, media_pages_count, metadata_release_date, number_sort, read_status, deleted, oneshot) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+                "INSERT INTO books (id, series_id, library_id, title, url, created, last_modified, \
+                   file_last_modified, size_bytes, media_status, media_profile, media_type, \
+                   media_pages_count, metadata_release_date, number_sort, read_status, deleted, oneshot) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             )
             .bind(&id)
             .bind(&series_id)
@@ -404,27 +429,35 @@ impl SqliteDiscoveryAdapter {
             .map_err(map_sqlx_error)?;
 
             for tag in tags {
-                sqlx::query("INSERT INTO book_tags (book_id, tag) VALUES (?1, ?2)")
-                    .bind(&id)
-                    .bind(tag)
-                    .execute(&pool)
-                    .await
-                    .map_err(map_sqlx_error)?;
+                sqlx::query(
+                    "INSERT INTO book_tags (book_id, tag) \
+                             VALUES (?1, ?2)",
+                )
+                .bind(&id)
+                .bind(tag)
+                .execute(&pool)
+                .await
+                .map_err(map_sqlx_error)?;
             }
 
             for author in authors {
-                sqlx::query("INSERT INTO book_authors (book_id, author) VALUES (?1, ?2)")
-                    .bind(&id)
-                    .bind(author)
-                    .execute(&pool)
-                    .await
-                    .map_err(map_sqlx_error)?;
+                sqlx::query(
+                    "INSERT INTO book_authors (book_id, author) \
+                             VALUES (?1, ?2)",
+                )
+                .bind(&id)
+                .bind(author)
+                .execute(&pool)
+                .await
+                .map_err(map_sqlx_error)?;
             }
         }
 
         for row in pending.read_progress {
             sqlx::query(
-                "INSERT INTO read_progress (book_id, user_id, page, completed, read_date, created, last_modified, device_id, device_name) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                "INSERT INTO read_progress (book_id, user_id, page, completed, read_date, created, \
+                   last_modified, device_id, device_name) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             )
             .bind(row.book_id)
             .bind(row.user_id)

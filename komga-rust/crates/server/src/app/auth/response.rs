@@ -3,10 +3,12 @@ use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum_extra::extract::cookie::{Cookie, SameSite};
 use serde_json::json;
+use std::time::{SystemTime, UNIX_EPOCH};
+use time::Duration;
 
-use super::user::{PlaceholderUser, placeholder_user_json};
+use super::user::{AuthUser, user_payload_json};
 
-pub(in crate::app) fn bootstrap_user(user: PlaceholderUser, token: String) -> Response {
+pub(in crate::app) fn bootstrap_user(user: AuthUser, token: String) -> Response {
     let session_cookie = Cookie::build(("KOMGA-SESSION", token.clone()))
         .path("/")
         .http_only(true)
@@ -28,13 +30,13 @@ pub(in crate::app) fn bootstrap_user(user: PlaceholderUser, token: String) -> Re
                 }),
             ),
         ],
-        Json(placeholder_user_json(&user)),
+        Json(user_payload_json(&user)),
     )
         .into_response()
 }
 
 pub(in crate::app) fn bootstrap_user_with_remember_me_cookies(
-    user: PlaceholderUser,
+    user: AuthUser,
     session_token: String,
     remember_me_token: String,
 ) -> Response {
@@ -44,12 +46,15 @@ pub(in crate::app) fn bootstrap_user_with_remember_me_cookies(
         .same_site(SameSite::Lax)
         .build()
         .to_string();
-    let remember_me_cookie = format!(
-        "komga-remember-me={}; Path=/; HttpOnly; Max-Age=2592000; Expires=Sun, 18 Apr 2038 23:59:59 GMT",
-        remember_me_token
-    );
+    let remember_me_cookie = Cookie::build(("komga-remember-me", remember_me_token))
+        .path("/")
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .max_age(Duration::days(30))
+        .build()
+        .to_string();
 
-    let mut response = (StatusCode::OK, Json(placeholder_user_json(&user))).into_response();
+    let mut response = (StatusCode::OK, Json(user_payload_json(&user))).into_response();
     let headers = response.headers_mut();
     headers.append(
         header::SET_COOKIE,
@@ -66,16 +71,19 @@ pub(in crate::app) fn bootstrap_user_with_remember_me_cookies(
 }
 
 pub(in crate::app) fn bootstrap_user_with_remember_me_token(
-    user: PlaceholderUser,
+    user: AuthUser,
     token: String,
     remember_me_token: String,
 ) -> Response {
-    let remember_me_cookie = format!(
-        "komga-remember-me={}; Path=/; HttpOnly; Max-Age=2592000; Expires=Sun, 18 Apr 2038 23:59:59 GMT",
-        remember_me_token
-    );
+    let remember_me_cookie = Cookie::build(("komga-remember-me", remember_me_token))
+        .path("/")
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .max_age(Duration::days(30))
+        .build()
+        .to_string();
 
-    let mut response = (StatusCode::OK, Json(placeholder_user_json(&user))).into_response();
+    let mut response = (StatusCode::OK, Json(user_payload_json(&user))).into_response();
     let headers = response.headers_mut();
     headers.insert(
         HeaderName::from_static("x-auth-token"),
@@ -89,7 +97,7 @@ pub(in crate::app) fn bootstrap_user_with_remember_me_token(
     response
 }
 
-pub(in crate::app) fn bootstrap_api_key_user(user: PlaceholderUser, token: String) -> Response {
+pub(in crate::app) fn bootstrap_api_key_user(user: AuthUser, token: String) -> Response {
     let session_cookie = Cookie::build(("KOMGA-SESSION", token))
         .path("/")
         .http_only(true)
@@ -97,7 +105,7 @@ pub(in crate::app) fn bootstrap_api_key_user(user: PlaceholderUser, token: Strin
         .build()
         .to_string();
 
-    let mut response = (StatusCode::OK, Json(placeholder_user_json(&user))).into_response();
+    let mut response = (StatusCode::OK, Json(user_payload_json(&user))).into_response();
     response.headers_mut().append(
         header::SET_COOKIE,
         HeaderValue::from_str(&session_cookie).unwrap_or_else(|_| {
@@ -115,10 +123,17 @@ pub(in crate::app) fn unauthorized_json_response(path: &str) -> Response {
             "message": "Unauthorized",
             "path": path,
             "status": 401,
-            "timestamp": "1970-01-01T00:00:00.000+00:00",
+            "timestamp": now_epoch_millis(),
         })),
     )
         .into_response()
+}
+
+fn now_epoch_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
 }
 
 pub(in crate::app) fn expired_session_cookie() -> HeaderValue {

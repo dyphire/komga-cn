@@ -1,8 +1,9 @@
-use axum::http::{header, HeaderMap};
-use serde_json::{json, Value};
+use axum::http::{HeaderMap, header};
+use serde_json::{Value, json};
 
 pub(super) fn opds_auth_json(headers: &HeaderMap) -> Value {
-    let host = request_host(headers);
+    let auth_url = app_absolute_url(headers, "/opds/v2/auth");
+    let logo_url = app_absolute_url(headers, "/android-chrome-512x512.png");
 
     json!({
         "authentication": [
@@ -15,7 +16,7 @@ pub(super) fn opds_auth_json(headers: &HeaderMap) -> Value {
             }
         ],
         "title": "Komga",
-        "id": absolute_url(&host, "/opds/v2/auth"),
+        "id": auth_url,
         "description": "Enter your email and password to authenticate.",
         "links": [
             {
@@ -24,10 +25,49 @@ pub(super) fn opds_auth_json(headers: &HeaderMap) -> Value {
             },
             {
                 "rel": "logo",
-                "href": absolute_url(&host, "/android-chrome-512x512.png")
+                "href": logo_url
             }
         ]
     })
+}
+
+pub(super) fn app_absolute_url(headers: &HeaderMap, path: &str) -> String {
+    let base_url = request_base_url(headers);
+    let prefix = request_context_path(headers);
+    format!("{base_url}{prefix}{path}")
+}
+
+pub(super) fn request_base_url(headers: &HeaderMap) -> String {
+    let scheme = headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("http");
+    let host = request_host(headers);
+    format!("{scheme}://{host}")
+}
+
+pub(super) fn request_context_path(headers: &HeaderMap) -> String {
+    let prefix = headers
+        .get("x-forwarded-prefix")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("");
+
+    if prefix.is_empty() || prefix == "/" {
+        return String::new();
+    }
+
+    let normalized = if prefix.starts_with('/') {
+        prefix.to_string()
+    } else {
+        format!("/{prefix}")
+    };
+    normalized.trim_end_matches('/').to_string()
 }
 
 pub(super) fn request_host(headers: &HeaderMap) -> String {
@@ -37,8 +77,4 @@ pub(super) fn request_host(headers: &HeaderMap) -> String {
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("localhost")
         .to_string()
-}
-
-fn absolute_url(host: &str, path: &str) -> String {
-    format!("http://{host}{path}")
 }
