@@ -4,4 +4,9 @@ version = "0.1.0"
 edition.workspace = true
 
 [dependencies]
+base64.workspace = true
 komga-domain = { path = "../domain" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+time.workspace = true

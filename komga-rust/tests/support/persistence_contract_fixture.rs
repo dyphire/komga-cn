@@ -4,15 +4,15 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
-use komga_rust::persistence::{SqlitePersistenceContext, sqlite::connect_pool};
+use komga_rust::infrastructure::{SqlitePersistenceContext, sqlite::connect_pool};
 
-pub struct LegacyDbPaths {
+pub struct RuntimeDbPaths {
     pub config_dir: PathBuf,
     pub main_db: PathBuf,
     pub tasks_db: PathBuf,
 }
 
-pub fn new_legacy_db_paths(case_id: &str) -> std::io::Result<LegacyDbPaths> {
+pub fn new_runtime_db_paths(case_id: &str) -> std::io::Result<RuntimeDbPaths> {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system clock should be after epoch")
@@ -20,7 +20,7 @@ pub fn new_legacy_db_paths(case_id: &str) -> std::io::Result<LegacyDbPaths> {
     let root = std::env::temp_dir().join(format!("komga-persistence-contract-{case_id}-{nanos}"));
     fs::create_dir_all(&root)?;
 
-    Ok(LegacyDbPaths {
+    Ok(RuntimeDbPaths {
         main_db: root.join("database.sqlite"),
         tasks_db: root.join("tasks.sqlite"),
         config_dir: root,
@@ -39,7 +39,7 @@ pub async fn seed_tasks_db_from_flyway(path: &Path) -> anyhow::Result<()> {
     execute_sql_files(path, &migration_dir).await
 }
 
-pub fn cleanup(paths: LegacyDbPaths) {
+pub fn cleanup(paths: RuntimeDbPaths) {
     let _ = std::fs::remove_file(paths.main_db);
     let _ = std::fs::remove_file(paths.tasks_db);
     let _ = std::fs::remove_dir_all(paths.config_dir);

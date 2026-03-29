@@ -1,6 +1,7 @@
-use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext, LibraryReadModel};
+use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 
-use super::core::{DiscoveryQueries, DiscoveryQueryRepository};
+use super::query_service::{DiscoveryQueries, DiscoveryQueryRepository};
+use super::read_models::LibraryReadModel;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct LibraryListQuery {}

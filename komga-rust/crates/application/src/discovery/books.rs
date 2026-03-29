@@ -1,11 +1,15 @@
 use komga_domain::discovery::{
-    BookDetailReadModel, BookReadModel, BookResourceReadModel, DirectBrowseBooksListFamily,
-    DiscoveryError, DiscoveryQueryContext, PageEnvelope, ReadListReadModel, classify_book_sorts,
-    classify_direct_browse_books_list_sort,
+    DirectBrowseBooksListFamily, DiscoveryError, DiscoveryQueryContext, PageEnvelope,
 };
 
-use super::core::{DiscoveryQueries, DiscoveryQueryRepository};
-use super::helpers::{unsupported_book_filter, unsupported_book_sort};
+use super::query_service::{DiscoveryQueries, DiscoveryQueryRepository};
+use super::read_models::{
+    BookDetailReadModel, BookReadModel, BookResourceReadModel, ReadListReadModel,
+};
+use super::request_shape::{
+    classify_book_sorts, classify_direct_browse_books_list_sort, unsupported_book_filter,
+    unsupported_book_sort,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BooksListQuery {
@@ -51,7 +55,7 @@ pub struct BookReadlistsQuery {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct NativeBooksListQuery {
+pub struct RuntimeBooksListQuery {
     pub page: usize,
     pub size: usize,
     pub unpaged: bool,
@@ -70,7 +74,7 @@ pub struct NativeBooksListQuery {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct NativeBooksLatestQuery {
+pub struct RuntimeBooksLatestQuery {
     pub page: usize,
     pub size: usize,
     pub unpaged: bool,
@@ -88,7 +92,7 @@ where
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
         let _ = classify_book_sorts(&query.sort)?;
         self.repository
-            .list_books(context, native_books_list_query(query))
+            .list_books(context, runtime_books_list_query(query))
             .await
     }
 
@@ -99,7 +103,7 @@ where
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
         classify_direct_browse_books_list_query(&query)?;
         self.repository
-            .list_books(context, native_books_list_query(query))
+            .list_books(context, runtime_books_list_query(query))
             .await
     }
 
@@ -111,7 +115,7 @@ where
         self.repository
             .list_books_latest(
                 context,
-                NativeBooksLatestQuery {
+                RuntimeBooksLatestQuery {
                     page: query.page,
                     size: query.size,
                     unpaged: query.unpaged,
@@ -163,8 +167,8 @@ where
     }
 }
 
-pub(in crate::discovery) fn native_books_list_query(query: BooksListQuery) -> NativeBooksListQuery {
-    NativeBooksListQuery {
+pub(crate) fn runtime_books_list_query(query: BooksListQuery) -> RuntimeBooksListQuery {
+    RuntimeBooksListQuery {
         page: query.page,
         size: query.size,
         unpaged: query.unpaged,
@@ -183,7 +187,7 @@ pub(in crate::discovery) fn native_books_list_query(query: BooksListQuery) -> Na
     }
 }
 
-pub(in crate::discovery) fn classify_direct_browse_books_list_query(
+pub(crate) fn classify_direct_browse_books_list_query(
     query: &BooksListQuery,
 ) -> Result<(), DiscoveryError> {
     let Some(family) = query.direct_browse_family else {

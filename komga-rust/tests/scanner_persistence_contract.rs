@@ -2,12 +2,11 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use komga_compat_testkit::contract_matrix::assert_required_target_declared;
+use komga_contract_testkit::contract_matrix::assert_required_target_declared;
 use komga_rust::config::{RuntimeCli, RuntimeConfig};
-use komga_rust::persistence::sqlite::connect_pool;
+use komga_rust::infrastructure::sqlite::connect_pool;
 use komga_rust::scanner::{ScannerOptions, scan_root_folder};
-use komga_rust::search::{SearchEntityType, SearchIndexLifecycle};
-use komga_rust::task_queue::{TaskQueueRecord, TaskQueueScheduler};
+use komga_rust::{SearchEntityType, SearchIndexLifecycle, TaskQueueRecord, TaskQueueScheduler};
 use sqlx::Row;
 
 #[path = "support/persistence_contract_fixture.rs"]
@@ -43,7 +42,7 @@ async fn scanner_scan_output_is_persisted_into_kotlin_compatible_library_series_
         "fixture sanity: one series sidecar and one book sidecar expected",
     );
 
-    let _app = komga_rust::app::build_router_with_config(&fixture.config);
+    let _app = komga_server::app::build_router_with_config(&fixture.config);
 
     let snapshot = load_persistence_snapshot(&fixture.paths.main_db, "library-1").await;
 
@@ -90,7 +89,7 @@ async fn scanner_scan_persistence_emits_scan_and_analyze_tasks_into_persisted_ru
         "fixture sanity: one book expected"
     );
 
-    let _app = komga_rust::app::build_router_with_config(&fixture.config);
+    let _app = komga_server::app::build_router_with_config(&fixture.config);
 
     let content_snapshot = load_persistence_snapshot(&fixture.paths.main_db, "library-1").await;
     assert!(
@@ -148,7 +147,7 @@ async fn scanner_persisted_rows_remain_visible_after_runtime_rebuild() {
         "fixture sanity: one book expected"
     );
 
-    let _initial_runtime = komga_rust::app::build_router_with_config(&fixture.config);
+    let _initial_runtime = komga_server::app::build_router_with_config(&fixture.config);
     let before_restart = load_persistence_snapshot(&fixture.paths.main_db, "library-1").await;
     let task_before_restart = load_task_snapshot(&fixture.paths.tasks_db).await;
     let media_ready_before_restart = load_media_ready_count(&fixture.paths.main_db).await;
@@ -174,7 +173,7 @@ async fn scanner_persisted_rows_remain_visible_after_runtime_rebuild() {
         "runtime pre-restart queue should be empty after worker completion",
     );
 
-    let _restarted_runtime = komga_rust::app::build_router_with_config(&fixture.config);
+    let _restarted_runtime = komga_server::app::build_router_with_config(&fixture.config);
     let after_restart = load_persistence_snapshot(&fixture.paths.main_db, "library-1").await;
     let task_after_restart = load_task_snapshot(&fixture.paths.tasks_db).await;
     let media_ready_after_restart = load_media_ready_count(&fixture.paths.main_db).await;
@@ -207,7 +206,7 @@ async fn scanner_rescan_updates_existing_persisted_book_file_size_rows() {
         .await
         .expect("scanner rescan fixture should be created");
 
-    let _initial_runtime = komga_rust::app::build_router_with_config(&fixture.config);
+    let _initial_runtime = komga_server::app::build_router_with_config(&fixture.config);
 
     let book_path = fixture.library_root.join("Series-A").join("Book-001.cbz");
     let book_url = book_path.to_string_lossy().to_string();
@@ -256,14 +255,14 @@ struct TaskSnapshot {
 }
 
 struct ScannerPersistenceFixture {
-    paths: persistence_contract_fixture::LegacyDbPaths,
+    paths: persistence_contract_fixture::RuntimeDbPaths,
     library_root: PathBuf,
     config: RuntimeConfig,
 }
 
 impl ScannerPersistenceFixture {
     async fn new(case_id: &str) -> anyhow::Result<Self> {
-        let paths = persistence_contract_fixture::new_legacy_db_paths(case_id)?;
+        let paths = persistence_contract_fixture::new_runtime_db_paths(case_id)?;
         persistence_contract_fixture::seed_main_db_from_flyway(&paths.main_db).await?;
         persistence_contract_fixture::seed_tasks_db_from_flyway(&paths.tasks_db).await?;
 
@@ -310,7 +309,7 @@ async fn seed_library_row(main_db: &Path, library_id: &str, root: &Path) -> anyh
     Ok(())
 }
 
-fn runtime_config_for_paths(paths: &persistence_contract_fixture::LegacyDbPaths) -> RuntimeConfig {
+fn runtime_config_for_paths(paths: &persistence_contract_fixture::RuntimeDbPaths) -> RuntimeConfig {
     let mut env = BTreeMap::new();
     env.insert(
         "KOMGA_CONFIG_DIR".to_string(),

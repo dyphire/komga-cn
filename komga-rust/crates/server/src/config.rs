@@ -1,13 +1,20 @@
-#[path = "config/cli.rs"]
-mod cli;
+#[path = "config/cli_args.rs"]
+mod cli_args;
+#[path = "config/env_config.rs"]
+mod env_config;
 #[path = "config/error.rs"]
 mod error;
+#[path = "config/path_resolution.rs"]
+mod path_resolution;
 #[path = "config/profile.rs"]
 mod profile;
-#[path = "config/shadow.rs"]
-mod shadow;
+#[path = "config/startup_policy.rs"]
+mod startup_policy;
+#[path = "config/writer_ownership.rs"]
+mod writer_ownership;
 
-pub use cli::{OAuth2ClientConfig, RuntimeCli, RuntimeConfig};
+pub use cli_args::RuntimeCli;
+pub use env_config::{OAuth2ClientConfig, RuntimeConfig};
 pub use error::ConfigError;
-pub use profile::{CompatProfile, PlatformProfile, RuntimeMode};
-pub use shadow::{ShadowPolicy, WriterDecision, WriterKind};
+pub use profile::{PlatformProfile, RuntimeMode, RuntimeProfile};
+pub use writer_ownership::{WriterDecision, WriterKind, WriterOwnershipPolicy};

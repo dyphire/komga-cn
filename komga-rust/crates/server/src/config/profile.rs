@@ -12,14 +12,14 @@ const USERPROFILE_ENV: &str = "USERPROFILE";
 pub enum RuntimeMode {
     Snapshot,
     Localdb,
-    Shadow,
+    Isolated,
     Canary,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CompatProfile {
+pub enum RuntimeProfile {
     SnapshotAligned,
-    JavaLiveLocaldb,
+    LiveLocaldb,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -35,16 +35,16 @@ impl RuntimeMode {
         match value.trim().to_ascii_lowercase().as_str() {
             "snapshot" => Ok(Self::Snapshot),
             "localdb" => Ok(Self::Localdb),
-            "shadow" => Ok(Self::Shadow),
+            "isolated" => Ok(Self::Isolated),
             "canary" => Ok(Self::Canary),
             other => Err(ConfigError::InvalidMode(other.to_string())),
         }
     }
 
-    pub(super) fn default_compat_profile(self) -> CompatProfile {
+    pub(super) fn default_runtime_profile(self) -> RuntimeProfile {
         match self {
-            Self::Localdb => CompatProfile::JavaLiveLocaldb,
-            Self::Snapshot | Self::Shadow | Self::Canary => CompatProfile::SnapshotAligned,
+            Self::Localdb => RuntimeProfile::LiveLocaldb,
+            Self::Snapshot | Self::Isolated | Self::Canary => RuntimeProfile::SnapshotAligned,
         }
     }
 
@@ -52,18 +52,18 @@ impl RuntimeMode {
         match self {
             Self::Snapshot => "snapshot",
             Self::Localdb => "localdb",
-            Self::Shadow => "shadow",
+            Self::Isolated => "isolated",
             Self::Canary => "canary",
         }
     }
 }
 
-impl CompatProfile {
+impl RuntimeProfile {
     pub(super) fn parse(value: &str) -> Result<Self, ConfigError> {
         match value.trim().to_ascii_lowercase().as_str() {
             "snapshot-aligned" | "snapshot" => Ok(Self::SnapshotAligned),
-            "java-live-localdb" | "localdb" => Ok(Self::JavaLiveLocaldb),
-            other => Err(ConfigError::InvalidCompatProfile(other.to_string())),
+            "java-live-localdb" | "localdb" => Ok(Self::LiveLocaldb),
+            other => Err(ConfigError::InvalidRuntimeProfile(other.to_string())),
         }
     }
 }
@@ -108,6 +108,13 @@ impl PlatformProfile {
             Self::Mac => Some(PathBuf::from("kepubify")),
             Self::Windows => Some(PathBuf::from("kepubify.exe")),
             Self::Default => None,
+        }
+    }
+
+    pub(super) fn default_webui_directory(self) -> Option<PathBuf> {
+        match self {
+            Self::Docker => Some(PathBuf::from("/usr/share/komga/public")),
+            Self::Default | Self::Mac | Self::Windows => None,
         }
     }
 }

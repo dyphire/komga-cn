@@ -1,10 +1,10 @@
-use komga_domain::discovery::{
-    CollectionReadModel, DiscoveryError, DiscoveryQueryContext, PageEnvelope,
-    SeriesDetailReadModel, SeriesReadModel, SeriesResourceReadModel, SeriesSort,
-    classify_series_sorts,
-};
+use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext, PageEnvelope, SeriesSort};
 
-use super::core::{DiscoveryQueries, DiscoveryQueryRepository};
+use super::query_service::{DiscoveryQueries, DiscoveryQueryRepository};
+use super::read_models::{
+    CollectionReadModel, SeriesDetailReadModel, SeriesReadModel, SeriesResourceReadModel,
+};
+use super::request_shape::classify_series_sorts;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SeriesListQuery {
@@ -39,7 +39,7 @@ pub struct SeriesCollectionsQuery {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct NativeSeriesListQuery {
+pub struct RuntimeSeriesListQuery {
     pub page: usize,
     pub size: usize,
     pub library_ids: Option<Vec<String>>,
@@ -73,7 +73,7 @@ where
         self.repository
             .list_series(
                 context,
-                NativeSeriesListQuery {
+                RuntimeSeriesListQuery {
                     page: query.page,
                     size: query.size,
                     library_ids: query.library_ids,

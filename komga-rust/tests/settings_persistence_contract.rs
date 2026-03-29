@@ -1,7 +1,7 @@
-use komga_compat_testkit::contract_matrix::assert_required_target_declared;
-use komga_persistence::server_settings::ServerSettingsStore;
-use komga_rust::persistence::sqlite::connect_persistence_context;
-use komga_rust::persistence::sqlite::connect_pool;
+use komga_contract_testkit::contract_matrix::assert_required_target_declared;
+use komga_infrastructure::ServerSettingsStore;
+use komga_rust::infrastructure::sqlite::connect_persistence_context;
+use komga_rust::infrastructure::sqlite::connect_pool;
 
 #[path = "support/persistence_contract_fixture.rs"]
 mod persistence_contract_fixture;
@@ -13,7 +13,7 @@ fn settings_persistence_contract_target_is_registered() {
 
 #[tokio::test]
 async fn server_settings_rows_persist_in_flyway_seeded_main_db() {
-    let paths = persistence_contract_fixture::new_legacy_db_paths("settings-persistence-core")
+    let paths = persistence_contract_fixture::new_runtime_db_paths("settings-persistence-core")
         .expect("settings persistence db paths should be created");
     persistence_contract_fixture::seed_main_db_from_flyway(&paths.main_db)
         .await
@@ -54,7 +54,7 @@ async fn server_settings_rows_persist_in_flyway_seeded_main_db() {
 
 #[tokio::test]
 async fn server_settings_store_round_trips_through_context_backed_path() {
-    let paths = persistence_contract_fixture::new_legacy_db_paths("settings-persistence-context")
+    let paths = persistence_contract_fixture::new_runtime_db_paths("settings-persistence-context")
         .expect("settings persistence db paths should be created");
     persistence_contract_fixture::seed_main_db_from_flyway(&paths.main_db)
         .await

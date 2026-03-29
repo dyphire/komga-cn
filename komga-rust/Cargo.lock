@@ -1870,7 +1870,12 @@ dependencies = [
 name = "komga-application"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "komga-domain",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "time",
 ]
 
 [[package]]
@@ -1878,7 +1883,7 @@ name = "komga-benchmark-wpd3"
 version = "0.1.0"
 
 [[package]]
-name = "komga-compat-testkit"
+name = "komga-contract-testkit"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1893,12 +1898,63 @@ name = "komga-domain"
 version = "0.1.0"
 
 [[package]]
-name = "komga-persistence"
+name = "komga-infrastructure"
 version = "0.1.0"
 dependencies = [
+ "axum",
+ "axum-extra",
+ "base64",
+ "bcrypt",
+ "flate2",
  "komga-application",
  "komga-domain",
+ "komga-kepubify",
+ "lopdf",
+ "quick-xml",
+ "reqwest 0.13.2",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
  "sqlx",
+ "tantivy",
+ "tokio",
+ "zip",
+]
+
+[[package]]
+name = "komga-interfaces"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "axum-extra",
+ "base64",
+ "bcrypt",
+ "flate2",
+ "futures-util",
+ "image",
+ "komga-application",
+ "komga-domain",
+ "komga-kepubify",
+ "lopdf",
+ "oauth2",
+ "quick-xml",
+ "reqwest 0.13.2",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "sqlx",
+ "time",
+ "tokio",
+ "tokio-stream",
+ "zip",
+]
+
+[[package]]
+name = "komga-kepubify"
+version = "0.1.0"
+dependencies = [
+ "quick-xml",
+ "zip",
 ]
 
 [[package]]
@@ -1911,9 +1967,10 @@ dependencies = [
  "bcrypt",
  "komga-application",
  "komga-benchmark-wpd3",
- "komga-compat-testkit",
+ "komga-contract-testkit",
  "komga-domain",
- "komga-persistence",
+ "komga-infrastructure",
+ "komga-interfaces",
  "komga-server",
  "notify",
  "reqwest 0.13.2",
@@ -1941,7 +1998,9 @@ dependencies = [
  "image",
  "komga-application",
  "komga-domain",
- "komga-persistence",
+ "komga-infrastructure",
+ "komga-interfaces",
+ "komga-kepubify",
  "lopdf",
  "oauth2",
  "quick-xml",

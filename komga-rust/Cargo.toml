@@ -1,11 +1,13 @@
 [workspace]
 members = [
   ".",
+  "crates/kepubify",
   "crates/domain",
   "crates/application",
-  "crates/persistence",
+  "crates/infrastructure",
+  "crates/interfaces",
   "crates/server",
-  "crates/compat-testkit",
+  "crates/contract-testkit",
   "crates/benchmark-wpd3",
 ]
 
@@ -58,7 +60,8 @@ komga-server = { path = "crates/server" }
 komga-benchmark-wpd3 = { path = "crates/benchmark-wpd3" }
 komga-domain = { path = "crates/domain" }
 komga-application = { path = "crates/application" }
-komga-persistence = { path = "crates/persistence" }
+komga-infrastructure = { path = "crates/infrastructure" }
+komga-interfaces = { path = "crates/interfaces" }
 
 [dev-dependencies]
 tower.workspace = true
@@ -69,4 +72,4 @@ serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 tempfile = "3.23.0"
-komga-compat-testkit = { path = "crates/compat-testkit" }
+komga-contract-testkit = { path = "crates/contract-testkit" }

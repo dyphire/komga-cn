@@ -5,7 +5,7 @@ pub enum ConfigError {
     InvalidAddress(std::net::AddrParseError),
     InvalidPort(String),
     InvalidMode(String),
-    InvalidCompatProfile(String),
+    InvalidRuntimeProfile(String),
     InvalidPlatformProfile(String),
     InvalidBoolean(String),
     InvalidContextPath(String),
@@ -29,14 +29,14 @@ impl std::fmt::Display for ConfigError {
             Self::InvalidAddress(error) => write!(f, "invalid KOMGA_RUST_ADDR: {error}"),
             Self::InvalidPort(value) => write!(f, "invalid SERVER_PORT: {value}"),
             Self::InvalidMode(value) => write!(f, "invalid KOMGA_RUST_MODE: {value}"),
-            Self::InvalidCompatProfile(value) => {
-                write!(f, "invalid KOMGA_RUST_COMPAT_PROFILE: {value}")
+            Self::InvalidRuntimeProfile(value) => {
+                write!(f, "invalid KOMGA_RUST_RUNTIME_PROFILE: {value}")
             }
             Self::InvalidPlatformProfile(value) => {
                 write!(f, "invalid KOMGA_RUST_PLATFORM_PROFILE: {value}")
             }
             Self::InvalidBoolean(value) => {
-                write!(f, "invalid shadow write boolean value: {value}")
+                write!(f, "invalid isolated write boolean value: {value}")
             }
             Self::InvalidContextPath(_) => write!(
                 f,
@@ -59,7 +59,7 @@ impl std::fmt::Display for ConfigError {
             ),
             Self::MissingWebUiAssetsLayout { candidates } => write!(
                 f,
-                "missing WebUI runtime assets layout: expected 'public/index.html' in one of [{}]",
+                "missing WebUI runtime assets layout: expected 'index.html' in one of [{}]",
                 candidates
                     .iter()
                     .map(|path| path.display().to_string())
@@ -68,7 +68,7 @@ impl std::fmt::Display for ConfigError {
             ),
             Self::MixedWriterStorageOwnership { details } => write!(
                 f,
-                "unsafe mixed-writer storage ownership detected: {details}. keep a single writer for database.sqlite, tasks.sqlite, and legacy search directory",
+                "unsafe mixed-writer storage ownership detected: {details}. keep a single writer for database.sqlite, tasks.sqlite, and search directory",
             ),
         }
     }

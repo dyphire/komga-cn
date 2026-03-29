@@ -212,13 +212,13 @@ server.port=28123\n",
 }
 
 #[test]
-fn startup_webui_layout_resolves_legacy_public_directory_with_index() {
+fn startup_webui_layout_resolves_default_public_directory_with_index() {
     let config_dir = unique_temp_dir("komga-runtime-webui-layout");
     fs::create_dir_all(&config_dir).expect("test config directory should be created");
     let public_dir = config_dir.join("public");
     fs::create_dir_all(&public_dir).expect("public directory should be created");
-    fs::write(public_dir.join("index.html"), "<html>legacy-index</html>")
-        .expect("legacy index.html should be written");
+    fs::write(public_dir.join("index.html"), "<html>isolated-index</html>")
+        .expect("index.html should be written");
 
     let mut env = BTreeMap::new();
     env.insert(
@@ -234,12 +234,12 @@ fn startup_webui_layout_resolves_legacy_public_directory_with_index() {
 
     let webui_root = config
         .resolve_webui_assets_layout()
-        .expect("startup should resolve legacy public layout when index exists");
+        .expect("startup should resolve public layout when index exists");
     assert_eq!(webui_root, public_dir);
 }
 
 #[test]
-fn startup_webui_layout_fails_closed_when_legacy_public_layout_missing() {
+fn startup_webui_layout_fails_closed_when_default_public_layout_missing() {
     let config_dir = unique_temp_dir("komga-runtime-webui-layout-missing");
     fs::create_dir_all(&config_dir).expect("test config directory should be created");
 
@@ -257,7 +257,7 @@ fn startup_webui_layout_fails_closed_when_legacy_public_layout_missing() {
 
     let error = config
         .resolve_webui_assets_layout()
-        .expect_err("startup must fail closed when no legacy public/index.html layout exists");
+        .expect_err("startup must fail closed when no public/index.html layout exists");
     assert!(
         error
             .to_string()
@@ -404,12 +404,12 @@ fn invalid_context_path_from_config_file_fails_startup() {
 }
 
 #[test]
-fn shadow_mode_rejects_legacy_writer_targets_during_startup_resolution() {
-    let config_dir = unique_temp_dir("komga-runtime-shadow-writer-ownership");
+fn isolated_mode_rejects_default_writer_targets_during_startup_resolution() {
+    let config_dir = unique_temp_dir("komga-runtime-isolated-writer-ownership");
     fs::create_dir_all(&config_dir).expect("test config directory should be created");
 
     let mut env = BTreeMap::new();
-    env.insert("KOMGA_RUST_MODE".to_string(), "shadow".to_string());
+    env.insert("KOMGA_RUST_MODE".to_string(), "isolated".to_string());
     env.insert(
         "KOMGA_CONFIG_DIR".to_string(),
         config_dir.to_string_lossy().to_string(),
@@ -419,7 +419,7 @@ fn shadow_mode_rejects_legacy_writer_targets_during_startup_resolution() {
         &komga_rust::config::RuntimeCli::default(),
         &env,
     )
-    .expect_err("shadow mode must reject legacy writer targets by default");
+    .expect_err("isolated mode must reject default writer targets by default");
 
     assert!(
         error

@@ -1,0 +1,315 @@
+use std::path::Path;
+
+use komga_application::media_assets::{EntityThumbnailBinary, SeriesThumbnailRecord};
+use sqlx::Row;
+
+use crate::sqlite::connect_pool;
+
+use super::generated_thumbnail_id;
+
+pub async fn load_persisted_series_thumbnails(
+    database_file: &Path,
+    series_id: &str,
+) -> Result<Vec<SeriesThumbnailRecord>, String> {
+    if !database_file.exists() {
+        return Ok(vec![]);
+    }
+
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("open series thumbnails db: {error}"))?;
+    let rows = sqlx::query(
+        "SELECT ID, TYPE, SELECTED \
+         FROM THUMBNAIL_SERIES \
+         WHERE SERIES_ID = ? \
+         ORDER BY SELECTED DESC, LAST_MODIFIED_DATE DESC, ID ASC",
+    )
+    .bind(series_id)
+    .fetch_all(&pool)
+    .await
+    .map_err(|error| format!("query persisted series thumbnails: {error}"))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| SeriesThumbnailRecord {
+            id: row.get::<String, _>("ID"),
+            thumbnail_type: row.get::<String, _>("TYPE"),
+            selected: row.get::<i64, _>("SELECTED") != 0,
+        })
+        .collect())
+}
+
+pub async fn load_selected_series_thumbnail(
+    database_file: &Path,
+    series_id: &str,
+) -> Result<Option<EntityThumbnailBinary>, String> {
+    if !database_file.exists() {
+        return Ok(None);
+    }
+
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("open selected series thumbnail db: {error}"))?;
+    let row = sqlx::query(
+        "SELECT MEDIA_TYPE, THUMBNAIL \
+         FROM THUMBNAIL_SERIES \
+         WHERE SERIES_ID = ? \
+         ORDER BY SELECTED DESC, LAST_MODIFIED_DATE DESC, ID ASC \
+         LIMIT 1",
+    )
+    .bind(series_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|error| format!("query selected series thumbnail: {error}"))?;
+
+    Ok(row.map(|row| EntityThumbnailBinary {
+        media_type: row.get::<String, _>("MEDIA_TYPE"),
+        thumbnail: row
+            .get::<Option<Vec<u8>>, _>("THUMBNAIL")
+            .unwrap_or_default(),
+    }))
+}
+
+pub async fn load_series_thumbnail_by_id(
+    database_file: &Path,
+    series_id: &str,
+    thumbnail_id: &str,
+) -> Result<Option<EntityThumbnailBinary>, String> {
+    if !database_file.exists() {
+        return Ok(None);
+    }
+
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("open single series thumbnail db: {error}"))?;
+    let row = sqlx::query(
+        "SELECT MEDIA_TYPE, THUMBNAIL \
+         FROM THUMBNAIL_SERIES \
+         WHERE ID = ? AND SERIES_ID = ? \
+         LIMIT 1",
+    )
+    .bind(thumbnail_id)
+    .bind(series_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|error| format!("query single series thumbnail: {error}"))?;
+
+    Ok(row.map(|row| EntityThumbnailBinary {
+        media_type: row.get::<String, _>("MEDIA_TYPE"),
+        thumbnail: row
+            .get::<Option<Vec<u8>>, _>("THUMBNAIL")
+            .unwrap_or_default(),
+    }))
+}
+
+pub async fn insert_series_thumbnail(
+    database_file: &Path,
+    series_id: &str,
+    thumbnail: &[u8],
+    media_type: &str,
+    selected: bool,
+) -> Result<SeriesThumbnailRecord, String> {
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("open series thumbnail create db: {error}"))?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| format!("begin series thumbnail create tx: {error}"))?;
+
+    let exists = sqlx::query(
+        "SELECT 1 AS FOUND \
+         FROM SERIES \
+         WHERE ID = ? \
+         LIMIT 1",
+    )
+    .bind(series_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|error| format!("query series existence for thumbnail create: {error}"))?
+    .is_some();
+    if !exists {
+        tx.rollback()
+            .await
+            .map_err(|error| format!("rollback series thumbnail create tx: {error}"))?;
+        return Err("series does not exist".to_string());
+    }
+
+    if selected {
+        sqlx::query(
+            "UPDATE THUMBNAIL_SERIES \
+             SET SELECTED = 0 \
+             WHERE SERIES_ID = ?",
+        )
+        .bind(series_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| format!("clear selected series thumbnails: {error}"))?;
+    }
+
+    let id = generated_thumbnail_id("thumbnail-series");
+    sqlx::query(
+        "INSERT INTO THUMBNAIL_SERIES \
+         (ID, SELECTED, THUMBNAIL, TYPE, SERIES_ID, MEDIA_TYPE, FILE_SIZE) \
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&id)
+    .bind(selected)
+    .bind(thumbnail)
+    .bind("USER_UPLOADED")
+    .bind(series_id)
+    .bind(media_type)
+    .bind(thumbnail.len() as i64)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| format!("insert series thumbnail: {error}"))?;
+
+    tx.commit()
+        .await
+        .map_err(|error| format!("commit series thumbnail create tx: {error}"))?;
+
+    Ok(SeriesThumbnailRecord {
+        id,
+        thumbnail_type: "USER_UPLOADED".to_string(),
+        selected,
+    })
+}
+
+pub async fn select_series_thumbnail(
+    database_file: &Path,
+    series_id: &str,
+    thumbnail_id: &str,
+) -> Result<bool, String> {
+    if !database_file.exists() {
+        return Ok(false);
+    }
+
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("open series thumbnail select db: {error}"))?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| format!("begin series thumbnail select tx: {error}"))?;
+
+    let exists = sqlx::query(
+        "SELECT 1 AS FOUND \
+         FROM SERIES \
+         WHERE ID = ? \
+         LIMIT 1",
+    )
+    .bind(series_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|error| format!("query series existence for thumbnail select: {error}"))?
+    .is_some();
+    if !exists {
+        tx.rollback()
+            .await
+            .map_err(|error| format!("rollback series thumbnail select tx: {error}"))?;
+        return Ok(false);
+    }
+
+    let target_exists = sqlx::query(
+        "SELECT 1 AS FOUND \
+         FROM THUMBNAIL_SERIES \
+         WHERE ID = ? AND SERIES_ID = ? \
+         LIMIT 1",
+    )
+    .bind(thumbnail_id)
+    .bind(series_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|error| format!("query target series thumbnail for select: {error}"))?
+    .is_some();
+    if !target_exists {
+        tx.rollback()
+            .await
+            .map_err(|error| format!("rollback series thumbnail select tx: {error}"))?;
+        return Ok(false);
+    }
+
+    sqlx::query(
+        "UPDATE THUMBNAIL_SERIES \
+         SET SELECTED = 0 \
+         WHERE SERIES_ID = ?",
+    )
+    .bind(series_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| format!("clear selected series thumbnails for select: {error}"))?;
+    sqlx::query(
+        "UPDATE THUMBNAIL_SERIES \
+         SET SELECTED = 1 \
+         WHERE ID = ? AND SERIES_ID = ?",
+    )
+    .bind(thumbnail_id)
+    .bind(series_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| format!("mark selected series thumbnail: {error}"))?;
+
+    tx.commit()
+        .await
+        .map_err(|error| format!("commit series thumbnail select tx: {error}"))?;
+    Ok(true)
+}
+
+pub async fn delete_series_thumbnail(
+    database_file: &Path,
+    series_id: &str,
+    thumbnail_id: &str,
+) -> Result<bool, String> {
+    if !database_file.exists() {
+        return Ok(false);
+    }
+
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("open series thumbnail delete db: {error}"))?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| format!("begin series thumbnail delete tx: {error}"))?;
+
+    let exists = sqlx::query(
+        "SELECT 1 AS FOUND \
+         FROM SERIES \
+         WHERE ID = ? \
+         LIMIT 1",
+    )
+    .bind(series_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|error| format!("query series existence for thumbnail delete: {error}"))?
+    .is_some();
+    if !exists {
+        tx.rollback()
+            .await
+            .map_err(|error| format!("rollback series thumbnail delete tx: {error}"))?;
+        return Ok(false);
+    }
+
+    let deleted = sqlx::query(
+        "DELETE FROM THUMBNAIL_SERIES \
+         WHERE ID = ? AND SERIES_ID = ?",
+    )
+    .bind(thumbnail_id)
+    .bind(series_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| format!("delete series thumbnail: {error}"))?
+    .rows_affected()
+        > 0;
+    if !deleted {
+        tx.rollback()
+            .await
+            .map_err(|error| format!("rollback series thumbnail delete tx: {error}"))?;
+        return Ok(false);
+    }
+
+    tx.commit()
+        .await
+        .map_err(|error| format!("commit series thumbnail delete tx: {error}"))?;
+    Ok(true)
+}

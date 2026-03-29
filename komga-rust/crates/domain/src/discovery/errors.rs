@@ -1,14 +1,12 @@
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum NonNativeRequestShape {
+pub enum UnsupportedDiscoverySemantics {
     UnsupportedSeriesSort(String),
-    UnsupportedSeriesFilter(String),
     UnsupportedBookSort(String),
-    UnsupportedBookFilter(String),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DiscoveryError {
-    NonNativeRequestShape(NonNativeRequestShape),
-    InvalidRequest(String),
+    UnsupportedSemantics(UnsupportedDiscoverySemantics),
+    InvalidSemantics(String),
     Persistence(String),
 }

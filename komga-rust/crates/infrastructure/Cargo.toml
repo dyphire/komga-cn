@@ -1,0 +1,24 @@
+[package]
+name = "komga-infrastructure"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+axum.workspace = true
+axum-extra.workspace = true
+base64.workspace = true
+bcrypt.workspace = true
+komga-domain = { path = "../domain" }
+komga-application = { path = "../application" }
+komga-kepubify = { path = "../kepubify" }
+flate2.workspace = true
+lopdf.workspace = true
+quick-xml.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+tantivy.workspace = true
+tokio.workspace = true
+zip.workspace = true

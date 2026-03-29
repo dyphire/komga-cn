@@ -1,0 +1,186 @@
+use super::*;
+
+pub(in crate::task_queue) fn normalize_library_relative_url(
+    library_root: &PathBuf,
+    absolute_path: &PathBuf,
+) -> Result<String, TaskExecutionError> {
+    let relative = absolute_path.strip_prefix(library_root).map_err(|error| {
+        TaskExecutionError::runtime(format!(
+            "failed to derive relative path '{}' from library root '{}': {error}",
+            absolute_path.display(),
+            library_root.display(),
+        ))
+    })?;
+    Ok(relative.to_string_lossy().replace('\\', "/"))
+}
+
+pub(in crate::task_queue) fn load_rar_entries_for_conversion(
+    source_path: &PathBuf,
+) -> Result<Vec<(String, Vec<u8>)>, TaskExecutionError> {
+    let output = Command::new("unrar")
+        .arg("lb")
+        .arg(source_path)
+        .output()
+        .map_err(|error| {
+            TaskExecutionError::runtime(format!(
+                "failed to run 'unrar lb' for '{}': {error}",
+                source_path.display(),
+            ))
+        })?;
+    if !output.status.success() {
+        return Err(TaskExecutionError::runtime(format!(
+            "'unrar lb' failed for '{}': status {}",
+            source_path.display(),
+            output.status,
+        )));
+    }
+
+    let mut entries = Vec::new();
+    for entry_name in String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.ends_with('/'))
+    {
+        let entry_output = Command::new("unrar")
+            .arg("p")
+            .arg("-inul")
+            .arg(source_path)
+            .arg(entry_name)
+            .output()
+            .map_err(|error| {
+                TaskExecutionError::runtime(format!(
+                    "failed to run 'unrar p' for '{}' entry '{}': {error}",
+                    source_path.display(),
+                    entry_name,
+                ))
+            })?;
+        if !entry_output.status.success() {
+            return Err(TaskExecutionError::runtime(format!(
+                "'unrar p' failed for '{}' entry '{}': status {}",
+                source_path.display(),
+                entry_name,
+                entry_output.status,
+            )));
+        }
+        entries.push((entry_name.to_string(), entry_output.stdout));
+    }
+
+    Ok(entries)
+}
+
+pub(in crate::task_queue) fn build_stored_zip_archive(
+    entries: Vec<(String, Vec<u8>)>,
+) -> Result<Vec<u8>, TaskExecutionError> {
+    let mut payload = Vec::new();
+    let mut central_directory = Vec::new();
+    let mut entries_count: usize = 0;
+
+    for (file_name, bytes) in entries {
+        let file_name_bytes = file_name.as_bytes();
+        let name_len = u16::try_from(file_name_bytes.len()).map_err(|_| {
+            TaskExecutionError::runtime(format!("zip entry name too long: {file_name}"))
+        })?;
+        let size = u32::try_from(bytes.len()).map_err(|_| {
+            TaskExecutionError::runtime(format!("zip entry too large: {file_name}"))
+        })?;
+        let local_header_offset = u32::try_from(payload.len()).map_err(|_| {
+            TaskExecutionError::runtime("zip archive too large for classic zip format")
+        })?;
+        let crc32 = crc32_ieee(&bytes);
+
+        push_u32_le(&mut payload, 0x0403_4b50);
+        push_u16_le(&mut payload, 20);
+        push_u16_le(&mut payload, 0);
+        push_u16_le(&mut payload, 0);
+        push_u16_le(&mut payload, 0);
+        push_u16_le(&mut payload, 0);
+        push_u32_le(&mut payload, crc32);
+        push_u32_le(&mut payload, size);
+        push_u32_le(&mut payload, size);
+        push_u16_le(&mut payload, name_len);
+        push_u16_le(&mut payload, 0);
+        payload.extend_from_slice(file_name_bytes);
+        payload.extend_from_slice(&bytes);
+
+        push_u32_le(&mut central_directory, 0x0201_4b50);
+        push_u16_le(&mut central_directory, 20);
+        push_u16_le(&mut central_directory, 20);
+        push_u16_le(&mut central_directory, 0);
+        push_u16_le(&mut central_directory, 0);
+        push_u16_le(&mut central_directory, 0);
+        push_u16_le(&mut central_directory, 0);
+        push_u32_le(&mut central_directory, crc32);
+        push_u32_le(&mut central_directory, size);
+        push_u32_le(&mut central_directory, size);
+        push_u16_le(&mut central_directory, name_len);
+        push_u16_le(&mut central_directory, 0);
+        push_u16_le(&mut central_directory, 0);
+        push_u16_le(&mut central_directory, 0);
+        push_u16_le(&mut central_directory, 0);
+        push_u32_le(&mut central_directory, 0);
+        push_u32_le(&mut central_directory, local_header_offset);
+        central_directory.extend_from_slice(file_name_bytes);
+        entries_count += 1;
+    }
+
+    let central_directory_offset = u32::try_from(payload.len())
+        .map_err(|_| TaskExecutionError::runtime("zip archive too large for classic zip format"))?;
+    let central_directory_size = u32::try_from(central_directory.len()).map_err(|_| {
+        TaskExecutionError::runtime("zip central directory too large for classic zip format")
+    })?;
+    let entries_count = u16::try_from(entries_count)
+        .map_err(|_| TaskExecutionError::runtime("too many zip entries for classic zip format"))?;
+
+    payload.extend_from_slice(&central_directory);
+    push_u32_le(&mut payload, 0x0605_4b50);
+    push_u16_le(&mut payload, 0);
+    push_u16_le(&mut payload, 0);
+    push_u16_le(&mut payload, entries_count);
+    push_u16_le(&mut payload, entries_count);
+    push_u32_le(&mut payload, central_directory_size);
+    push_u32_le(&mut payload, central_directory_offset);
+    push_u16_le(&mut payload, 0);
+
+    Ok(payload)
+}
+
+pub(in crate::task_queue) fn crc32_ieee(bytes: &[u8]) -> u32 {
+    let mut crc = 0xffff_ffffu32;
+    for &byte in bytes {
+        crc ^= byte as u32;
+        for _ in 0..8 {
+            let lsb = crc & 1;
+            crc >>= 1;
+            if lsb != 0 {
+                crc ^= 0xedb8_8320;
+            }
+        }
+    }
+    !crc
+}
+
+pub(in crate::task_queue) fn push_u16_le(buffer: &mut Vec<u8>, value: u16) {
+    buffer.extend_from_slice(&value.to_le_bytes());
+}
+
+pub(in crate::task_queue) fn push_u32_le(buffer: &mut Vec<u8>, value: u32) {
+    buffer.extend_from_slice(&value.to_le_bytes());
+}
+
+pub(in crate::task_queue) fn to_unix_seconds(time: Option<std::time::SystemTime>) -> i64 {
+    time.and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|value| value.as_secs() as i64)
+        .unwrap_or_default()
+}
+
+pub(in crate::task_queue) fn metadata_updated_unix_seconds(metadata: &fs::Metadata) -> i64 {
+    let created = metadata.created().ok();
+    let modified = metadata.modified().ok();
+    let updated = match (created, modified) {
+        (Some(created), Some(modified)) => Some(created.max(modified)),
+        (Some(created), None) => Some(created),
+        (None, Some(modified)) => Some(modified),
+        (None, None) => None,
+    };
+    to_unix_seconds(updated)
+}

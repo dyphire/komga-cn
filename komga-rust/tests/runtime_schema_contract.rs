@@ -1,6 +1,6 @@
-use komga_compat_testkit::contract_matrix::assert_required_target_declared;
-use komga_rust::persistence::SqlitePersistenceContext;
-use komga_rust::persistence::sqlite::{
+use komga_contract_testkit::contract_matrix::assert_required_target_declared;
+use komga_rust::infrastructure::SqlitePersistenceContext;
+use komga_rust::infrastructure::sqlite::{
     connect_persistence_context, connect_pool, connect_tasks_pool, setup,
 };
 use sqlx::Row;
@@ -15,10 +15,10 @@ fn runtime_schema_contract_target_is_registered() {
 
 #[tokio::test]
 async fn bootstrap_fresh_install() {
-    let paths = persistence_contract_fixture::new_legacy_db_paths("runtime-schema-fresh-install")
+    let paths = persistence_contract_fixture::new_runtime_db_paths("runtime-schema-fresh-install")
         .expect("fresh install db paths should be created");
     let oracle_paths =
-        persistence_contract_fixture::new_legacy_db_paths("runtime-schema-fresh-install-oracle")
+        persistence_contract_fixture::new_runtime_db_paths("runtime-schema-fresh-install-oracle")
             .expect("oracle db paths should be created");
 
     let main_pool = connect_pool(&paths.main_db, 1)
@@ -83,7 +83,7 @@ async fn bootstrap_fresh_install() {
 
 #[tokio::test]
 async fn open_current_schema_db() {
-    let paths = persistence_contract_fixture::new_legacy_db_paths("runtime-schema-current")
+    let paths = persistence_contract_fixture::new_runtime_db_paths("runtime-schema-current")
         .expect("current schema db paths should be created");
     persistence_contract_fixture::seed_main_db_from_flyway(&paths.main_db)
         .await
@@ -136,7 +136,7 @@ async fn open_current_schema_db() {
 
 #[tokio::test]
 async fn reject_outdated_schema() {
-    let paths = persistence_contract_fixture::new_legacy_db_paths("runtime-schema-outdated")
+    let paths = persistence_contract_fixture::new_runtime_db_paths("runtime-schema-outdated")
         .expect("outdated db paths should be created");
 
     let pool = connect_pool(&paths.main_db, 1)
@@ -148,7 +148,7 @@ async fn reject_outdated_schema() {
         .pool_connection()
         .execute("CREATE TABLE IF NOT EXISTS libraries (id TEXT PRIMARY KEY)")
         .await
-        .expect("legacy-style schema fixture should be created");
+        .expect("schema fixture should be created");
 
     let error = setup::bootstrap_pool(&pool)
         .await
@@ -172,7 +172,7 @@ async fn reject_outdated_schema() {
 
 #[tokio::test]
 async fn sqlite_connect_layer_bootstraps_main_and_tasks_databases() {
-    let paths = persistence_contract_fixture::new_legacy_db_paths("runtime-schema-connect-layer")
+    let paths = persistence_contract_fixture::new_runtime_db_paths("runtime-schema-connect-layer")
         .expect("connect-layer db paths should be created");
 
     let main_context = connect_persistence_context(&paths.main_db, 1)

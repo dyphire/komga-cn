@@ -28,4 +28,6 @@ futures-util.workspace = true
 image.workspace = true
 komga-domain = { path = "../domain" }
 komga-application = { path = "../application" }
-komga-persistence = { path = "../persistence" }
+komga-infrastructure = { path = "../infrastructure" }
+komga-interfaces = { path = "../interfaces" }
+komga-kepubify = { path = "../kepubify" }

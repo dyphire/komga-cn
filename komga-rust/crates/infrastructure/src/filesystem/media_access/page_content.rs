@@ -1,0 +1,269 @@
+use std::fs;
+use std::io::Read;
+use std::path::Path;
+use std::process::Command;
+
+use komga_application::media_assets::{
+    BookMediaRecord, BookPageRecord, book_media_is_pdf, book_media_is_rar_archive,
+    book_media_is_single_image, book_media_is_zip_archive, content_type_from_filename,
+    is_supported_page_image_file_name,
+};
+use lopdf::Document as PdfDocument;
+use zip::ZipArchive;
+
+pub fn resolve_book_page_bytes(
+    media: &BookMediaRecord,
+    page: &BookPageRecord,
+    page_number: u64,
+) -> Option<Vec<u8>> {
+    let mut candidates = Vec::new();
+    if media.file_path.is_dir() {
+        candidates.push(media.file_path.join(&page.file_name));
+    }
+    if let Some(parent) = media.file_path.parent() {
+        candidates.push(parent.join(&page.file_name));
+    }
+    if book_media_is_single_image(media) && page_number == 1 {
+        candidates.push(media.file_path.clone());
+    }
+    for candidate in candidates {
+        if let Ok(bytes) = fs::read(candidate) {
+            return Some(bytes);
+        }
+    }
+    read_zip_archive_page_bytes(media, page, page_number)
+        .or_else(|| read_rar_archive_page_bytes_cli(media, page, page_number))
+        .or_else(|| read_pdf_page_bytes(media, page_number))
+        .or_else(|| {
+            if book_media_is_single_image(media) && page_number == 1 {
+                fs::read(&media.file_path).ok()
+            } else {
+                None
+            }
+        })
+}
+
+pub fn load_archive_page_row(media: &BookMediaRecord, page_number: u64) -> Option<BookPageRecord> {
+    if page_number == 0 {
+        return None;
+    }
+    load_archive_page_rows(media)?
+        .into_iter()
+        .nth(usize::try_from(page_number - 1).ok()?)
+}
+
+pub fn load_archive_page_rows(media: &BookMediaRecord) -> Option<Vec<BookPageRecord>> {
+    if book_media_is_zip_archive(media) {
+        return load_zip_archive_page_rows(media);
+    }
+    if book_media_is_rar_archive(media) {
+        return load_rar_archive_page_rows_cli(media);
+    }
+    None
+}
+
+pub fn load_pdf_page_row(media: &BookMediaRecord, page_number: u64) -> Option<BookPageRecord> {
+    if page_number == 0 {
+        return None;
+    }
+    load_generated_pdf_page_rows(media)
+        .into_iter()
+        .nth(usize::try_from(page_number - 1).ok()?)
+}
+
+pub fn load_generated_pdf_page_rows(media: &BookMediaRecord) -> Vec<BookPageRecord> {
+    if !book_media_is_pdf(media) {
+        return vec![];
+    }
+    let page_count = if media.page_count > 0 {
+        media.page_count
+    } else {
+        detect_pdf_page_count(media).unwrap_or(0)
+    };
+    if page_count == 0 {
+        return vec![];
+    }
+    (1..=page_count)
+        .map(|number| BookPageRecord {
+            number,
+            file_name: format!("page-{number}.pdf"),
+            media_type: "application/pdf".to_string(),
+            width: None,
+            height: None,
+            file_size: 0,
+        })
+        .collect()
+}
+
+fn read_pdf_page_bytes(media: &BookMediaRecord, page_number: u64) -> Option<Vec<u8>> {
+    if !book_media_is_pdf(media) || page_number == 0 {
+        return None;
+    }
+    let document = PdfDocument::load(&media.file_path).ok()?;
+    let pages = document.get_pages();
+    let object_id = *pages.get(&(page_number as u32))?;
+    document.get_page_content(object_id).ok()
+}
+
+pub fn read_pdf_page_as_single_page_pdf(
+    media: &BookMediaRecord,
+    page_number: u64,
+) -> Option<Vec<u8>> {
+    if !book_media_is_pdf(media) || page_number == 0 {
+        return None;
+    }
+    let mut document = PdfDocument::load(&media.file_path).ok()?;
+    let pages = document.get_pages();
+    if !pages.contains_key(&(page_number as u32)) {
+        return None;
+    }
+    let to_delete = pages
+        .keys()
+        .copied()
+        .filter(|number| *number != page_number as u32)
+        .collect::<Vec<_>>();
+    document.delete_pages(&to_delete);
+    document.prune_objects();
+    let mut bytes = Vec::new();
+    document.save_to(&mut bytes).ok()?;
+    Some(bytes)
+}
+
+pub fn detect_pdf_page_count(media: &BookMediaRecord) -> Option<u64> {
+    if !book_media_is_pdf(media) {
+        return None;
+    }
+    Some(PdfDocument::load(&media.file_path).ok()?.get_pages().len() as u64)
+}
+
+fn read_zip_archive_page_bytes(
+    media: &BookMediaRecord,
+    page: &BookPageRecord,
+    page_number: u64,
+) -> Option<Vec<u8>> {
+    if !book_media_is_zip_archive(media) || page_number == 0 {
+        return None;
+    }
+    let file = fs::File::open(&media.file_path).ok()?;
+    let mut archive = ZipArchive::new(file).ok()?;
+    if !page.file_name.is_empty()
+        && let Ok(mut entry) = archive.by_name(&page.file_name)
+        && is_supported_page_image_file_name(entry.name())
+    {
+        let mut bytes = Vec::new();
+        if entry.read_to_end(&mut bytes).is_ok() {
+            return Some(bytes);
+        }
+    }
+    let target_index = usize::try_from(page_number.saturating_sub(1)).ok()?;
+    let mut logical_index = 0usize;
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).ok()?;
+        if !is_supported_page_image_file_name(entry.name()) {
+            continue;
+        }
+        if logical_index != target_index {
+            logical_index += 1;
+            continue;
+        }
+        let mut bytes = Vec::new();
+        if entry.read_to_end(&mut bytes).is_ok() {
+            return Some(bytes);
+        }
+        return None;
+    }
+    None
+}
+
+fn load_zip_archive_page_rows(media: &BookMediaRecord) -> Option<Vec<BookPageRecord>> {
+    let file = fs::File::open(&media.file_path).ok()?;
+    let mut archive = ZipArchive::new(file).ok()?;
+    let mut rows = Vec::new();
+    for index in 0..archive.len() {
+        let entry = archive.by_index(index).ok()?;
+        let file_name = entry.name().to_string();
+        if !is_supported_page_image_file_name(&file_name) {
+            continue;
+        }
+        rows.push(BookPageRecord {
+            number: (rows.len() as u64) + 1,
+            media_type: content_type_from_filename(&file_name, "image/jpeg"),
+            file_name,
+            width: None,
+            height: None,
+            file_size: entry.size().try_into().unwrap_or(i64::MAX),
+        });
+    }
+    (!rows.is_empty()).then_some(rows)
+}
+
+fn load_rar_archive_page_rows_cli(media: &BookMediaRecord) -> Option<Vec<BookPageRecord>> {
+    let output = Command::new("unrar")
+        .arg("lb")
+        .arg(&media.file_path)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let rows = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && is_supported_page_image_file_name(line))
+        .enumerate()
+        .map(|(index, file_name)| BookPageRecord {
+            number: (index as u64) + 1,
+            file_name: file_name.to_string(),
+            media_type: content_type_from_filename(file_name, "image/jpeg"),
+            width: None,
+            height: None,
+            file_size: 0,
+        })
+        .collect::<Vec<_>>();
+    (!rows.is_empty()).then_some(rows)
+}
+
+fn read_rar_archive_page_bytes_cli(
+    media: &BookMediaRecord,
+    page: &BookPageRecord,
+    page_number: u64,
+) -> Option<Vec<u8>> {
+    if !book_media_is_rar_archive(media) || page_number == 0 {
+        return None;
+    }
+    if !page.file_name.is_empty()
+        && let Some(bytes) = read_rar_entry_bytes_cli(&media.file_path, &page.file_name)
+    {
+        return Some(bytes);
+    }
+    let page_index = usize::try_from(page_number.saturating_sub(1)).ok()?;
+    let page_file_name = load_rar_archive_page_rows_cli(media)?
+        .into_iter()
+        .nth(page_index)?
+        .file_name;
+    read_rar_entry_bytes_cli(&media.file_path, &page_file_name)
+}
+
+fn read_rar_entry_bytes_cli(archive_path: &Path, entry_name: &str) -> Option<Vec<u8>> {
+    let output = Command::new("unrar")
+        .arg("p")
+        .arg("-inul")
+        .arg(archive_path)
+        .arg(entry_name)
+        .output()
+        .ok()?;
+    if !output.status.success() || output.stdout.is_empty() {
+        return None;
+    }
+    Some(output.stdout)
+}
+
+pub fn read_media_file_bytes(path: &Path) -> Option<Vec<u8>> {
+    fs::read(path).ok()
+}
+
+pub fn read_media_file_size(path: &Path) -> Option<i64> {
+    fs::metadata(path)
+        .ok()
+        .and_then(|value| i64::try_from(value.len()).ok())
+}

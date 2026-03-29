@@ -1,9 +1,8 @@
-use komga_domain::discovery::{
-    BookReadModel, DiscoveryError, DiscoveryQueryContext, PageEnvelope, ReadListReadModel,
-};
+use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext, PageEnvelope};
 
-use super::core::{DiscoveryQueries, DiscoveryQueryRepository};
-use super::helpers::{unsupported_book_filter, unsupported_book_sort};
+use super::query_service::{DiscoveryQueries, DiscoveryQueryRepository};
+use super::read_models::{BookReadModel, ReadListReadModel};
+use super::request_shape::{unsupported_book_filter, unsupported_book_sort};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReadListsQuery {
@@ -16,7 +15,7 @@ pub struct ReadListsQuery {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct NativeReadListsQuery {
+pub struct RuntimeReadListsQuery {
     pub page: usize,
     pub size: usize,
     pub library_ids: Option<Vec<String>>,
@@ -38,7 +37,7 @@ pub struct ReadListBooksQuery {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct NativeReadListBooksQuery {
+pub struct RuntimeReadListBooksQuery {
     pub readlist_id: String,
     pub page: usize,
     pub size: usize,
@@ -58,7 +57,7 @@ pub struct ReadListDetailQuery {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ReadListBooksOwnership {
-    NativeOwned,
+    RuntimeOwned,
     DependencyOnly,
 }
 
@@ -81,7 +80,7 @@ where
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
         classify_readlist_books_query(&query)?;
         self.repository
-            .list_readlist_books(context, native_readlist_books_query(query))
+            .list_readlist_books(context, runtime_readlist_books_query(query))
             .await
     }
 }
@@ -90,7 +89,7 @@ pub fn classify_readlist_books_query(
     query: &ReadListBooksQuery,
 ) -> Result<ReadListBooksOwnership, DiscoveryError> {
     if !query.unpaged {
-        return Ok(ReadListBooksOwnership::NativeOwned);
+        return Ok(ReadListBooksOwnership::RuntimeOwned);
     }
 
     if query.library_ids.is_some() {
@@ -143,7 +142,7 @@ pub fn normalize_readlists_search(search: Option<String>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use komga_domain::discovery::{DiscoveryError, NonNativeRequestShape};
+    use komga_domain::discovery::{DiscoveryError, UnsupportedDiscoverySemantics};
 
     use super::{ReadListsQuery, classify_readlists_browse_query, normalize_readlists_search};
 
@@ -180,8 +179,8 @@ mod tests {
 
         assert_eq!(
             classify_readlists_browse_query(&query),
-            Err(DiscoveryError::NonNativeRequestShape(
-                NonNativeRequestShape::UnsupportedBookSort("random,asc".to_string()),
+            Err(DiscoveryError::UnsupportedSemantics(
+                UnsupportedDiscoverySemantics::UnsupportedBookSort("random,asc".to_string()),
             )),
         );
     }
@@ -201,10 +200,8 @@ mod tests {
     }
 }
 
-pub(in crate::discovery) fn native_readlist_books_query(
-    query: ReadListBooksQuery,
-) -> NativeReadListBooksQuery {
-    NativeReadListBooksQuery {
+pub(crate) fn runtime_readlist_books_query(query: ReadListBooksQuery) -> RuntimeReadListBooksQuery {
+    RuntimeReadListBooksQuery {
         readlist_id: query.readlist_id,
         page: query.page,
         size: query.size,

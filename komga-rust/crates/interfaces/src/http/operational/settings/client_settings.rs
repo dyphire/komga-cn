@@ -1,0 +1,287 @@
+use axum::Json;
+use axum::body::Bytes;
+use axum::extract::Extension;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
+use serde_json::Value;
+
+use crate::http::identity_access::auth::{
+    require_admin, require_auth, resolved_auth_user, user_id,
+};
+use crate::operational_settings_access::client_settings as client_settings_access;
+
+use super::super::super::OperationalState;
+
+pub(crate) async fn get_client_settings_global(
+    Extension(state): Extension<OperationalState>,
+    headers: HeaderMap,
+) -> Response {
+    let include_unauthorized_only = resolved_auth_user(&headers).is_none();
+    let settings = match client_settings_access::load_client_settings_global(
+        state.runtime.database_file.as_path(),
+        include_unauthorized_only,
+    )
+    .await
+    {
+        Ok(settings) => settings,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    Json(settings).into_response()
+}
+
+pub(crate) async fn get_client_settings_user(
+    Extension(state): Extension<OperationalState>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+    let Some(current_user) = resolved_auth_user(&headers) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+
+    let settings = match client_settings_access::load_client_settings_user(
+        state.runtime.database_file.as_path(),
+        user_id(&current_user),
+    )
+    .await
+    {
+        Ok(settings) => settings,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    Json(settings).into_response()
+}
+
+pub(crate) async fn patch_client_settings_global(
+    Extension(state): Extension<OperationalState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Some(response) = require_admin(&headers) {
+        return response;
+    }
+
+    let settings = match parse_client_settings_global_payload(&body) {
+        Ok(settings) => settings,
+        Err(response) => return response,
+    };
+
+    match client_settings_access::persist_upsert_client_settings_global(
+        state.runtime.database_file.as_path(),
+        &settings,
+    )
+    .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+pub(crate) async fn patch_client_settings_user(
+    Extension(state): Extension<OperationalState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+    let Some(current_user) = resolved_auth_user(&headers) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+
+    let settings = match parse_client_settings_user_payload(&body) {
+        Ok(settings) => settings,
+        Err(response) => return response,
+    };
+
+    match client_settings_access::persist_upsert_client_settings_user(
+        state.runtime.database_file.as_path(),
+        user_id(&current_user),
+        &settings,
+    )
+    .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+pub(crate) async fn delete_client_settings_global(
+    Extension(state): Extension<OperationalState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Some(response) = require_admin(&headers) {
+        return response;
+    }
+
+    let keys = match parse_client_settings_delete_keys(&body) {
+        Ok(keys) => keys,
+        Err(response) => return response,
+    };
+
+    match client_settings_access::persist_delete_client_settings_global(
+        state.runtime.database_file.as_path(),
+        &keys,
+    )
+    .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+pub(crate) async fn delete_client_settings_user(
+    Extension(state): Extension<OperationalState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+    let Some(current_user) = resolved_auth_user(&headers) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+
+    let keys = match parse_client_settings_delete_keys(&body) {
+        Ok(keys) => keys,
+        Err(response) => return response,
+    };
+
+    match client_settings_access::persist_delete_client_settings_user(
+        state.runtime.database_file.as_path(),
+        user_id(&current_user),
+        &keys,
+    )
+    .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+fn parse_client_settings_global_payload(
+    body: &[u8],
+) -> Result<Vec<(String, String, bool)>, Response> {
+    let Ok(value) = serde_json::from_slice::<Value>(body) else {
+        return Err(StatusCode::BAD_REQUEST.into_response());
+    };
+    let Some(object) = value.as_object() else {
+        return Err(StatusCode::BAD_REQUEST.into_response());
+    };
+
+    let mut settings = Vec::with_capacity(object.len());
+    for (key, item) in object {
+        if !is_valid_client_settings_key(key) {
+            return Err(StatusCode::BAD_REQUEST.into_response());
+        }
+        let Some(item) = item.as_object() else {
+            return Err(StatusCode::BAD_REQUEST.into_response());
+        };
+        let Some(value) = item
+            .get("value")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return Err(StatusCode::BAD_REQUEST.into_response());
+        };
+        let Some(allow_unauthorized) = item.get("allowUnauthorized").and_then(Value::as_bool)
+        else {
+            return Err(StatusCode::BAD_REQUEST.into_response());
+        };
+        settings.push((key.to_string(), value.to_string(), allow_unauthorized));
+    }
+
+    Ok(settings)
+}
+
+fn parse_client_settings_user_payload(body: &[u8]) -> Result<Vec<(String, String)>, Response> {
+    let Ok(value) = serde_json::from_slice::<Value>(body) else {
+        return Err(StatusCode::BAD_REQUEST.into_response());
+    };
+    let Some(object) = value.as_object() else {
+        return Err(StatusCode::BAD_REQUEST.into_response());
+    };
+
+    let mut settings = Vec::with_capacity(object.len());
+    for (key, item) in object {
+        if !is_valid_client_settings_key(key) {
+            return Err(StatusCode::BAD_REQUEST.into_response());
+        }
+        let Some(item) = item.as_object() else {
+            return Err(StatusCode::BAD_REQUEST.into_response());
+        };
+        let Some(value) = item
+            .get("value")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return Err(StatusCode::BAD_REQUEST.into_response());
+        };
+        settings.push((key.to_string(), value.to_string()));
+    }
+
+    Ok(settings)
+}
+
+fn parse_client_settings_delete_keys(body: &[u8]) -> Result<Vec<String>, Response> {
+    let Ok(value) = serde_json::from_slice::<Value>(body) else {
+        return Err(StatusCode::BAD_REQUEST.into_response());
+    };
+    let Some(items) = value.as_array() else {
+        return Err(StatusCode::BAD_REQUEST.into_response());
+    };
+
+    let mut keys = Vec::new();
+    for item in items {
+        let Some(key) = item
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return Err(StatusCode::BAD_REQUEST.into_response());
+        };
+        if !is_valid_client_settings_key(key) {
+            return Err(StatusCode::BAD_REQUEST.into_response());
+        }
+        keys.push(key.to_string());
+    }
+
+    Ok(keys)
+}
+
+fn is_valid_client_settings_key(key: &str) -> bool {
+    let mut segments = key.split('.');
+    let Some(first) = segments.next() else {
+        return false;
+    };
+    if !is_valid_client_settings_segment(first) {
+        return false;
+    }
+    segments.all(is_valid_client_settings_segment)
+}
+
+fn is_valid_client_settings_segment(segment: &str) -> bool {
+    if segment.is_empty() {
+        return false;
+    }
+    let mut chars = segment.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_lowercase() {
+        return false;
+    }
+    let Some(last) = segment.chars().last() else {
+        return false;
+    };
+    if !last.is_ascii_lowercase() && !last.is_ascii_digit() {
+        return false;
+    }
+
+    segment
+        .chars()
+        .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_' || ch == '-')
+}

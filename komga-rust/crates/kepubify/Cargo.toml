@@ -1,0 +1,8 @@
+[package]
+name = "komga-kepubify"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+quick-xml.workspace = true
+zip.workspace = true

@@ -1,0 +1,5 @@
+.git
+.github
+**/target
+**/node_modules
+komga-webui/dist

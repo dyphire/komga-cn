@@ -1,0 +1,631 @@
+use std::collections::{BTreeMap, HashSet};
+use std::path::Path;
+
+use crate::sqlite::connect_pool;
+use sqlx::Row;
+
+pub struct BrowseSeriesNavigationEntry {
+    pub id: String,
+    pub title: String,
+}
+
+pub struct BrowsePublisherEntry {
+    pub publisher: String,
+}
+
+pub struct OpdsBookFeedEntry {
+    pub id: String,
+    pub title: String,
+    pub file_name: String,
+    pub media_type: String,
+    pub library_id: String,
+    pub age_rating: Option<u16>,
+    pub sharing_labels: Vec<String>,
+    pub last_modified: String,
+}
+
+pub struct OpdsSeriesEntry {
+    pub id: String,
+    pub library_id: String,
+    pub title: String,
+    pub last_modified: String,
+}
+
+pub struct OpdsReadlistEntry {
+    pub id: String,
+    pub name: String,
+    pub last_modified: String,
+}
+
+fn sorted_authorized_library_ids(allowed_library_ids: &Option<HashSet<String>>) -> Vec<String> {
+    let mut authorized_library_ids = allowed_library_ids
+        .as_ref()
+        .map(|ids| ids.iter().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    authorized_library_ids.sort();
+    authorized_library_ids
+}
+
+fn library_visible(allowed_library_ids: &Option<HashSet<String>>, library_id: &str) -> bool {
+    match allowed_library_ids {
+        None => true,
+        Some(ids) => ids.contains(library_id),
+    }
+}
+
+pub async fn load_browse_series_navigation_entries(
+    database_file: &Path,
+    allowed_library_ids: &Option<HashSet<String>>,
+    library_id: Option<&str>,
+    publishers: &[String],
+    page: usize,
+    size: usize,
+) -> Result<(Vec<BrowseSeriesNavigationEntry>, usize), sqlx::Error> {
+    if !database_file.exists() {
+        return Ok((vec![], 0));
+    }
+
+    let pool = connect_pool(database_file, 1).await?;
+    let authorized_library_ids = sorted_authorized_library_ids(allowed_library_ids);
+    if allowed_library_ids.is_some() && authorized_library_ids.is_empty() {
+        return Ok((vec![], 0));
+    }
+
+    let mut clauses = vec!["s.DELETED_DATE IS NULL".to_string()];
+    if library_id.is_some() {
+        clauses.push("s.LIBRARY_ID = ?".to_string());
+    }
+    if !authorized_library_ids.is_empty() {
+        let placeholders = (0..authorized_library_ids.len())
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(",");
+        clauses.push(format!("s.LIBRARY_ID IN ({placeholders})"));
+    }
+    if !publishers.is_empty() {
+        for _ in publishers {
+            clauses.push("sm.PUBLISHER = ?".to_string());
+        }
+    }
+    let where_clause = clauses.join(" AND ");
+
+    let count_sql = format!(
+        "SELECT COUNT(*) AS TOTAL \
+         FROM SERIES s \
+         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+         WHERE {where_clause}",
+    );
+    let mut count_query = sqlx::query(count_sql.as_str());
+    if let Some(id) = library_id {
+        count_query = count_query.bind(id);
+    }
+    for library in &authorized_library_ids {
+        count_query = count_query.bind(library);
+    }
+    for publisher in publishers {
+        count_query = count_query.bind(publisher);
+    }
+    let total = count_query
+        .fetch_one(&pool)
+        .await?
+        .get::<i64, _>("TOTAL")
+        .max(0) as usize;
+
+    let rows_sql = format!(
+        "SELECT s.ID, COALESCE(sm.TITLE, s.NAME) AS TITLE, s.LIBRARY_ID, \
+                COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED \
+         FROM SERIES s \
+         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+         WHERE {where_clause} \
+         ORDER BY COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC, s.ID ASC \
+         LIMIT ? \
+         OFFSET ?",
+    );
+    let mut rows_query = sqlx::query(rows_sql.as_str());
+    if let Some(id) = library_id {
+        rows_query = rows_query.bind(id);
+    }
+    for library in &authorized_library_ids {
+        rows_query = rows_query.bind(library);
+    }
+    for publisher in publishers {
+        rows_query = rows_query.bind(publisher);
+    }
+    let rows = rows_query
+        .bind(size as i64)
+        .bind((page.saturating_mul(size)) as i64)
+        .fetch_all(&pool)
+        .await?;
+
+    Ok((
+        rows.into_iter()
+            .map(|row| BrowseSeriesNavigationEntry {
+                id: row.get::<String, _>("ID"),
+                title: row.get::<String, _>("TITLE"),
+            })
+            .collect(),
+        total,
+    ))
+}
+
+pub async fn load_browse_publisher_entries(
+    database_file: &Path,
+    allowed_library_ids: &Option<HashSet<String>>,
+    library_id: Option<&str>,
+) -> Result<Vec<BrowsePublisherEntry>, sqlx::Error> {
+    if !database_file.exists() {
+        return Ok(vec![]);
+    }
+
+    let pool = connect_pool(database_file, 1).await?;
+    let rows = sqlx::query(
+        "SELECT DISTINCT sm.PUBLISHER AS PUBLISHER, s.LIBRARY_ID AS LIBRARY_ID \
+         FROM SERIES_METADATA sm \
+         JOIN SERIES s ON s.ID = sm.SERIES_ID \
+         WHERE sm.PUBLISHER IS NOT NULL \
+         AND trim(sm.PUBLISHER) != '' \
+         AND s.DELETED_DATE IS NULL \
+         AND (? IS NULL OR s.LIBRARY_ID = ?) \
+         ORDER BY lower(sm.PUBLISHER), sm.PUBLISHER",
+    )
+    .bind(library_id)
+    .bind(library_id)
+    .fetch_all(&pool)
+    .await?;
+
+    let mut seen = HashSet::new();
+    let mut navigation = Vec::new();
+    for row in rows {
+        let library = row.get::<String, _>("LIBRARY_ID");
+        if !library_visible(allowed_library_ids, &library) {
+            continue;
+        }
+        let publisher = row.get::<String, _>("PUBLISHER");
+        if !seen.insert(publisher.clone()) {
+            continue;
+        }
+        navigation.push(BrowsePublisherEntry { publisher });
+    }
+
+    Ok(navigation)
+}
+
+pub async fn load_keep_reading_books(
+    database_file: &Path,
+    user_id: &str,
+    library_id: Option<&str>,
+) -> Result<Vec<OpdsBookFeedEntry>, sqlx::Error> {
+    if !database_file.exists() {
+        return Ok(vec![]);
+    }
+
+    let pool = connect_pool(database_file, 1).await?;
+    let rows = sqlx::query(
+        "SELECT b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE, b.NAME AS FILE_NAME, \
+                COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE, \
+                COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING, \
+                COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS, \
+                COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') AS LAST_MODIFIED \
+         FROM READ_PROGRESS rp \
+         JOIN BOOK b ON b.ID = rp.BOOK_ID \
+          LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
+          LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID \
+          LEFT JOIN SERIES s ON s.ID = b.SERIES_ID \
+          LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+          LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
+         WHERE rp.USER_ID = ? \
+         AND rp.COMPLETED = 0 \
+         AND b.DELETED_DATE IS NULL \
+         AND (? IS NULL OR b.LIBRARY_ID = ?) \
+         GROUP BY b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME), b.NAME, \
+                  COALESCE(m.MEDIA_TYPE, 'application/octet-stream'),
+                  COALESCE(sm.AGE_RATING, NULL),
+                  COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') \
+         ORDER BY rp.LAST_MODIFIED_DATE DESC, b.ID ASC",
+    )
+    .bind(user_id)
+    .bind(library_id)
+    .bind(library_id)
+    .fetch_all(&pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| OpdsBookFeedEntry {
+            id: row.get::<String, _>("ID"),
+            title: row.get::<String, _>("TITLE"),
+            file_name: row.get::<String, _>("FILE_NAME"),
+            media_type: row.get::<String, _>("MEDIA_TYPE"),
+            library_id: row.get::<String, _>("LIBRARY_ID"),
+            age_rating: row
+                .try_get::<i64, _>("AGE_RATING")
+                .ok()
+                .and_then(|value| u16::try_from(value).ok()),
+            sharing_labels: row
+                .get::<String, _>("SHARING_LABELS")
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .collect(),
+            last_modified: row.get::<String, _>("LAST_MODIFIED"),
+        })
+        .collect())
+}
+
+pub async fn load_on_deck_books(
+    database_file: &Path,
+    user_id: &str,
+    library_id: Option<&str>,
+) -> Result<Vec<OpdsBookFeedEntry>, sqlx::Error> {
+    if !database_file.exists() {
+        return Ok(vec![]);
+    }
+
+    let pool = connect_pool(database_file, 1).await?;
+    let rows = sqlx::query(
+        "SELECT b.ID, b.LIBRARY_ID, b.SERIES_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE, \
+                b.NAME AS FILE_NAME, \
+                COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE, \
+                COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING, \
+                COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS, \
+                COALESCE(bm.NUMBER_SORT, CAST(b.NUMBER AS REAL), 0) AS ORDER_INDEX, \
+                COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') AS LAST_MODIFIED \
+         FROM BOOK b \
+          LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
+          LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID \
+          LEFT JOIN SERIES s ON s.ID = b.SERIES_ID \
+          LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+          LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
+         WHERE b.DELETED_DATE IS NULL \
+         AND (? IS NULL OR b.LIBRARY_ID = ?) \
+         AND b.SERIES_ID IN (SELECT DISTINCT b_done.SERIES_ID \
+         FROM BOOK b_done \
+         JOIN READ_PROGRESS rp_done ON rp_done.BOOK_ID = b_done.ID \
+         WHERE rp_done.USER_ID = ? \
+         AND rp_done.COMPLETED = 1) \
+         AND b.SERIES_ID NOT IN (SELECT DISTINCT b_prog.SERIES_ID \
+         FROM BOOK b_prog \
+         JOIN READ_PROGRESS rp_prog ON rp_prog.BOOK_ID = b_prog.ID \
+         WHERE rp_prog.USER_ID = ? \
+         AND rp_prog.COMPLETED = 0) \
+         AND NOT EXISTS (SELECT 1 \
+         FROM READ_PROGRESS rp_seen \
+          WHERE rp_seen.BOOK_ID = b.ID \
+          AND rp_seen.USER_ID = ? \
+          AND rp_seen.COMPLETED = 1) \
+         GROUP BY b.ID, b.LIBRARY_ID, b.SERIES_ID, COALESCE(bm.TITLE, b.NAME), b.NAME,
+                  COALESCE(m.MEDIA_TYPE, 'application/octet-stream'), COALESCE(sm.AGE_RATING, NULL),
+                  COALESCE(bm.NUMBER_SORT, CAST(b.NUMBER AS REAL), 0),
+                  COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') \
+          ORDER BY b.SERIES_ID ASC, ORDER_INDEX ASC, b.ID ASC",
+    )
+    .bind(library_id)
+    .bind(library_id)
+    .bind(user_id)
+    .bind(user_id)
+    .bind(user_id)
+    .fetch_all(&pool)
+    .await?;
+
+    let mut first_per_series = BTreeMap::<String, OpdsBookFeedEntry>::new();
+    for row in rows {
+        let series_id = row.get::<String, _>("SERIES_ID");
+        first_per_series
+            .entry(series_id)
+            .or_insert_with(|| OpdsBookFeedEntry {
+                id: row.get::<String, _>("ID"),
+                title: row.get::<String, _>("TITLE"),
+                file_name: row.get::<String, _>("FILE_NAME"),
+                media_type: row.get::<String, _>("MEDIA_TYPE"),
+                library_id: row.get::<String, _>("LIBRARY_ID"),
+                age_rating: row
+                    .try_get::<i64, _>("AGE_RATING")
+                    .ok()
+                    .and_then(|value| u16::try_from(value).ok()),
+                sharing_labels: row
+                    .get::<String, _>("SHARING_LABELS")
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+                    .collect(),
+                last_modified: row.get::<String, _>("LAST_MODIFIED"),
+            });
+    }
+
+    Ok(first_per_series.into_values().collect())
+}
+
+pub async fn load_latest_books(
+    database_file: &Path,
+    library_id: Option<&str>,
+    limit: i64,
+) -> Result<Vec<OpdsBookFeedEntry>, sqlx::Error> {
+    load_latest_books_paged(database_file, &None, library_id, 0, limit).await
+}
+
+pub async fn load_latest_books_paged(
+    database_file: &Path,
+    allowed_library_ids: &Option<HashSet<String>>,
+    library_id: Option<&str>,
+    offset: i64,
+    limit: i64,
+) -> Result<Vec<OpdsBookFeedEntry>, sqlx::Error> {
+    if !database_file.exists() {
+        return Ok(vec![]);
+    }
+
+    let pool = connect_pool(database_file, 1).await?;
+    let authorized_library_ids = sorted_authorized_library_ids(allowed_library_ids);
+    if allowed_library_ids.is_some() && authorized_library_ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let mut clauses = vec!["b.DELETED_DATE IS NULL".to_string()];
+    if library_id.is_some() {
+        clauses.push("b.LIBRARY_ID = ?".to_string());
+    }
+    if !authorized_library_ids.is_empty() {
+        let placeholders = (0..authorized_library_ids.len())
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(",");
+        clauses.push(format!("b.LIBRARY_ID IN ({placeholders})"));
+    }
+    let where_clause = clauses.join(" AND ");
+    let sql = format!(
+        "SELECT b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE, b.NAME AS FILE_NAME, \
+                COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE, \
+                COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING, \
+                COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS, \
+                COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') AS LAST_MODIFIED \
+         FROM BOOK b \
+          LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
+          LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID \
+          LEFT JOIN SERIES s ON s.ID = b.SERIES_ID \
+          LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+          LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
+          WHERE {where_clause} \
+          GROUP BY b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME), b.NAME,
+                   COALESCE(m.MEDIA_TYPE, 'application/octet-stream'),
+                   COALESCE(sm.AGE_RATING, NULL),
+                   COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') \
+          ORDER BY b.CREATED_DATE DESC, b.ID DESC \
+          LIMIT ? \
+          OFFSET ?",
+    );
+    let mut query = sqlx::query(sql.as_str());
+    if let Some(id) = library_id {
+        query = query.bind(id);
+    }
+    for id in &authorized_library_ids {
+        query = query.bind(id);
+    }
+    let rows = query.bind(limit).bind(offset).fetch_all(&pool).await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| OpdsBookFeedEntry {
+            id: row.get::<String, _>("ID"),
+            title: row.get::<String, _>("TITLE"),
+            file_name: row.get::<String, _>("FILE_NAME"),
+            media_type: row.get::<String, _>("MEDIA_TYPE"),
+            library_id: row.get::<String, _>("LIBRARY_ID"),
+            age_rating: row
+                .try_get::<i64, _>("AGE_RATING")
+                .ok()
+                .and_then(|value| u16::try_from(value).ok()),
+            sharing_labels: row
+                .get::<String, _>("SHARING_LABELS")
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .collect(),
+            last_modified: row.get::<String, _>("LAST_MODIFIED"),
+        })
+        .collect())
+}
+
+pub async fn load_latest_series(
+    database_file: &Path,
+    library_id: Option<&str>,
+    limit: i64,
+) -> Result<Vec<OpdsSeriesEntry>, sqlx::Error> {
+    load_latest_series_paged(database_file, &None, library_id, 0, limit).await
+}
+
+pub async fn load_latest_series_paged(
+    database_file: &Path,
+    allowed_library_ids: &Option<HashSet<String>>,
+    library_id: Option<&str>,
+    offset: i64,
+    limit: i64,
+) -> Result<Vec<OpdsSeriesEntry>, sqlx::Error> {
+    if !database_file.exists() {
+        return Ok(vec![]);
+    }
+
+    let pool = connect_pool(database_file, 1).await?;
+    let authorized_library_ids = sorted_authorized_library_ids(allowed_library_ids);
+    if allowed_library_ids.is_some() && authorized_library_ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let mut clauses = vec!["s.DELETED_DATE IS NULL".to_string()];
+    if library_id.is_some() {
+        clauses.push("s.LIBRARY_ID = ?".to_string());
+    }
+    if !authorized_library_ids.is_empty() {
+        let placeholders = (0..authorized_library_ids.len())
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(",");
+        clauses.push(format!("s.LIBRARY_ID IN ({placeholders})"));
+    }
+    let where_clause = clauses.join(" AND ");
+    let sql = format!(
+        "SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE, \
+                COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED \
+         FROM SERIES s \
+         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+         WHERE {where_clause} \
+         ORDER BY s.LAST_MODIFIED_DATE DESC, s.ID DESC \
+         LIMIT ? \
+         OFFSET ?",
+    );
+    let mut query = sqlx::query(sql.as_str());
+    if let Some(id) = library_id {
+        query = query.bind(id);
+    }
+    for id in &authorized_library_ids {
+        query = query.bind(id);
+    }
+    let rows = query.bind(limit).bind(offset).fetch_all(&pool).await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| OpdsSeriesEntry {
+            id: row.get::<String, _>("ID"),
+            library_id: row.get::<String, _>("LIBRARY_ID"),
+            title: row.get::<String, _>("TITLE"),
+            last_modified: row.get::<String, _>("LAST_MODIFIED"),
+        })
+        .collect())
+}
+
+pub async fn load_library_series(
+    database_file: &Path,
+    library_id: &str,
+    offset: i64,
+    limit: i64,
+) -> Result<Vec<OpdsSeriesEntry>, sqlx::Error> {
+    if !database_file.exists() {
+        return Ok(vec![]);
+    }
+
+    let pool = connect_pool(database_file, 1).await?;
+    let rows = sqlx::query(
+        "SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE, \
+                COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED \
+         FROM SERIES s \
+         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+         WHERE s.DELETED_DATE IS NULL \
+         AND s.LIBRARY_ID = ? \
+         ORDER BY TITLE COLLATE NOCASE ASC, s.ID ASC \
+         LIMIT ? \
+         OFFSET ?",
+    )
+    .bind(library_id)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(&pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| OpdsSeriesEntry {
+            id: row.get::<String, _>("ID"),
+            library_id: row.get::<String, _>("LIBRARY_ID"),
+            title: row.get::<String, _>("TITLE"),
+            last_modified: row.get::<String, _>("LAST_MODIFIED"),
+        })
+        .collect())
+}
+
+pub async fn load_series_page(
+    database_file: &Path,
+    allowed_library_ids: &Option<HashSet<String>>,
+    search: Option<&str>,
+    publishers: &[String],
+    offset: i64,
+    limit: i64,
+) -> Result<Vec<OpdsSeriesEntry>, sqlx::Error> {
+    if !database_file.exists() {
+        return Ok(vec![]);
+    }
+
+    let pool = connect_pool(database_file, 1).await?;
+    let authorized_library_ids = sorted_authorized_library_ids(allowed_library_ids);
+    if allowed_library_ids.is_some() && authorized_library_ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let mut clauses = vec!["s.DELETED_DATE IS NULL".to_string()];
+    if !authorized_library_ids.is_empty() {
+        let placeholders = (0..authorized_library_ids.len())
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(",");
+        clauses.push(format!("s.LIBRARY_ID IN ({placeholders})"));
+    }
+    if search.is_some() {
+        clauses.push("lower(COALESCE(sm.TITLE, s.NAME)) LIKE ?".to_string());
+    }
+    if !publishers.is_empty() {
+        let placeholders = (0..publishers.len())
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(",");
+        clauses.push(format!("sm.PUBLISHER IN ({placeholders})"));
+    }
+    let where_clause = clauses.join(" AND ");
+    let sql = format!(
+        "SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE, \
+                COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED \
+         FROM SERIES s \
+         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+         WHERE {where_clause} \
+         ORDER BY COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC, s.ID ASC \
+         LIMIT ? \
+         OFFSET ?",
+    );
+    let mut query = sqlx::query(sql.as_str());
+    for id in &authorized_library_ids {
+        query = query.bind(id);
+    }
+    if let Some(value) = search {
+        query = query.bind(format!("%{}%", value.to_lowercase()));
+    }
+    for publisher in publishers {
+        query = query.bind(publisher);
+    }
+    let rows = query.bind(limit).bind(offset).fetch_all(&pool).await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| OpdsSeriesEntry {
+            id: row.get::<String, _>("ID"),
+            library_id: row.get::<String, _>("LIBRARY_ID"),
+            title: row.get::<String, _>("TITLE"),
+            last_modified: row.get::<String, _>("LAST_MODIFIED"),
+        })
+        .collect())
+}
+
+pub async fn load_all_readlists(
+    database_file: &Path,
+) -> Result<Vec<OpdsReadlistEntry>, sqlx::Error> {
+    if !database_file.exists() {
+        return Ok(vec![]);
+    }
+
+    let pool = connect_pool(database_file, 1).await?;
+    let rows = sqlx::query(
+        "SELECT ID, NAME, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED \
+         FROM READLIST \
+         ORDER BY NAME COLLATE NOCASE ASC, ID ASC",
+    )
+    .fetch_all(&pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| OpdsReadlistEntry {
+            id: row.get::<String, _>("ID"),
+            name: row.get::<String, _>("NAME"),
+            last_modified: row.get::<String, _>("LAST_MODIFIED"),
+        })
+        .collect())
+}
