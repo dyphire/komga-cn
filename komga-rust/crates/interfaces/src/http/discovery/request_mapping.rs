@@ -80,10 +80,14 @@ pub(super) fn normalize_books_condition_shape(condition: &Value) -> Result<Value
             ("title", "Title"),
             ("deleted", "Deleted"),
             ("oneShot", "OneShot"),
+            ("genre", "Genre"),
             ("tag", "Tag"),
             ("readStatus", "ReadStatus"),
             ("mediaProfile", "MediaProfile"),
             ("mediaStatus", "MediaStatus"),
+            ("language", "Language"),
+            ("publisher", "Publisher"),
+            ("ageRating", "AgeRating"),
             ("author", "Author"),
             ("numberSort", "NumberSort"),
             ("releaseDate", "ReleaseDate"),
@@ -196,6 +200,15 @@ pub(super) fn restrict_series_filters_to_persisted_shape(filters: &mut RuntimeSe
     filters.genres = None;
     filters.genres_excluded = None;
     filters.genres_null = None;
+    filters.languages = None;
+    filters.languages_excluded = None;
+    filters.publishers = None;
+    filters.publishers_excluded = None;
+    filters.age_ratings = None;
+    filters.age_ratings_excluded = None;
+    filters.age_ratings_null = None;
+    filters.age_rating_gt = None;
+    filters.age_rating_lt = None;
     filters.tags = None;
     filters.tags_excluded = None;
     filters.tags_null = None;
@@ -240,6 +253,9 @@ pub(super) fn restrict_books_filters_to_persisted_shape(filters: &mut RuntimeBoo
     filters.titles_ends_with_excluded = None;
     filters.deleted = None;
     filters.oneshot = None;
+    filters.genres = None;
+    filters.genres_excluded = None;
+    filters.genres_null = None;
     filters.tags = None;
     filters.tags_excluded = None;
     filters.tags_null = None;

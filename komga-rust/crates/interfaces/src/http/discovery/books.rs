@@ -1,10 +1,8 @@
 use super::*;
 
 pub async fn books(
-    Extension(profile): Extension<RuntimeProfile>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(auth_state): Extension<DiscoveryAuthState>,
-    Extension(state): Extension<ReadProgressState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -65,6 +63,18 @@ pub async fn books(
                 titles_ends_with_excluded: None,
                 deleted: None,
                 oneshot: None,
+                genres: None,
+                genres_excluded: None,
+                genres_null: None,
+                languages: None,
+                languages_excluded: None,
+                publishers: None,
+                publishers_excluded: None,
+                age_ratings: None,
+                age_ratings_excluded: None,
+                age_ratings_null: None,
+                age_rating_gt: None,
+                age_rating_lt: None,
                 tags: None,
                 tags_excluded: None,
                 tags_null: None,
@@ -112,9 +122,6 @@ pub async fn books(
         }
     }
 
-    let _ = profile;
-    let _ = state;
-
     empty_books_page_response(&uri, false)
 }
 
@@ -161,9 +168,6 @@ pub async fn books_list(
         return runtime_response;
     }
 
-    let _ = profile;
-    let _ = full_text_search;
-
     if !auth_db.database_file.exists() {
         return StatusCode::NOT_FOUND.into_response();
     }
@@ -177,7 +181,6 @@ pub async fn books_latest(
     Extension(profile): Extension<RuntimeProfile>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(auth_state): Extension<DiscoveryAuthState>,
-    Extension(state): Extension<ReadProgressState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -231,6 +234,18 @@ pub async fn books_latest(
                 titles_ends_with_excluded: None,
                 deleted: None,
                 oneshot: None,
+                genres: None,
+                genres_excluded: None,
+                genres_null: None,
+                languages: None,
+                languages_excluded: None,
+                publishers: None,
+                publishers_excluded: None,
+                age_ratings: None,
+                age_ratings_excluded: None,
+                age_ratings_null: None,
+                age_rating_gt: None,
+                age_rating_lt: None,
                 tags: None,
                 tags_excluded: None,
                 tags_null: None,
@@ -294,9 +309,6 @@ pub async fn books_latest(
         }
         return runtime_response;
     }
-
-    let _ = profile;
-    let _ = state;
 
     if !auth_db.database_file.exists() {
         return StatusCode::NOT_FOUND.into_response();

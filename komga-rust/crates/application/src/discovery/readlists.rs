@@ -2,8 +2,6 @@ use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext, PageEnvelop
 
 use super::query_service::{DiscoveryQueries, DiscoveryQueryRepository};
 use super::read_models::{BookReadModel, ReadListReadModel};
-use super::request_shape::{unsupported_book_filter, unsupported_book_sort};
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReadListsQuery {
     pub page: usize,
@@ -92,48 +90,7 @@ pub fn classify_readlist_books_query(
         return Ok(ReadListBooksOwnership::RuntimeOwned);
     }
 
-    if query.library_ids.is_some() {
-        return Err(unsupported_book_filter("LibraryId"));
-    }
-
-    let has_extra_filters = query.deleted.is_some()
-        || query.tags.is_some()
-        || query.read_statuses.is_some()
-        || query.media_statuses.is_some()
-        || query.authors.is_some();
-    if has_extra_filters {
-        return Err(unsupported_book_filter("extra-filters"));
-    }
-
     Ok(ReadListBooksOwnership::DependencyOnly)
-}
-
-pub fn classify_readlists_browse_query(query: &ReadListsQuery) -> Result<(), DiscoveryError> {
-    let has_unsupported_sort = query
-        .sort
-        .iter()
-        .map(|value| value.trim())
-        .find(|value| !is_supported_readlists_sort(value));
-    if let Some(sort) = has_unsupported_sort {
-        return Err(unsupported_book_sort(sort.to_string()));
-    }
-
-    Ok(())
-}
-
-fn is_supported_readlists_sort(sort: &str) -> bool {
-    if sort.is_empty() {
-        return true;
-    }
-
-    let mut parts = sort.splitn(2, ',');
-    let field = parts.next().unwrap_or_default().trim();
-    let direction = parts.next().unwrap_or("asc").trim();
-
-    field.eq_ignore_ascii_case("name")
-        && (direction.is_empty()
-            || direction.eq_ignore_ascii_case("asc")
-            || direction.eq_ignore_ascii_case("desc"))
 }
 
 pub fn normalize_readlists_search(search: Option<String>) -> Option<String> {
@@ -142,9 +99,10 @@ pub fn normalize_readlists_search(search: Option<String>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use komga_domain::discovery::{DiscoveryError, UnsupportedDiscoverySemantics};
-
-    use super::{ReadListsQuery, classify_readlists_browse_query, normalize_readlists_search};
+    use super::{
+        ReadListBooksOwnership, ReadListBooksQuery, classify_readlist_books_query,
+        normalize_readlists_search,
+    };
 
     #[test]
     fn normalize_readlists_search_returns_none_for_blank_effective_values() {
@@ -167,36 +125,24 @@ mod tests {
     }
 
     #[test]
-    fn classify_readlists_browse_query_rejects_unsupported_sort() {
-        let query = ReadListsQuery {
+    fn classify_readlist_books_query_accepts_unpaged_with_library_and_extra_filters() {
+        let query = ReadListBooksQuery {
+            readlist_id: "readlist-1".to_string(),
             page: 0,
             size: 20,
-            library_ids: None,
-            search: None,
-            unpaged: false,
-            sort: vec!["random,asc".to_string()],
+            unpaged: true,
+            library_ids: Some(vec!["library-1".to_string()]),
+            deleted: Some(false),
+            tags: Some(vec!["favorite".to_string()]),
+            read_statuses: Some(vec!["read".to_string()]),
+            media_statuses: Some(vec!["READY".to_string()]),
+            authors: Some(vec!["alice".to_string()]),
         };
 
         assert_eq!(
-            classify_readlists_browse_query(&query),
-            Err(DiscoveryError::UnsupportedSemantics(
-                UnsupportedDiscoverySemantics::UnsupportedBookSort("random,asc".to_string()),
-            )),
+            classify_readlist_books_query(&query),
+            Ok(ReadListBooksOwnership::DependencyOnly),
         );
-    }
-
-    #[test]
-    fn classify_readlists_browse_query_accepts_phase115_owned_shape() {
-        let query = ReadListsQuery {
-            page: 1,
-            size: 20,
-            library_ids: Some(vec!["1".to_string(), "2".to_string()]),
-            search: Some("alpha,beta".to_string()),
-            unpaged: true,
-            sort: vec!["name,desc".to_string()],
-        };
-
-        assert_eq!(classify_readlists_browse_query(&query), Ok(()));
     }
 }
 

@@ -45,9 +45,6 @@ pub(super) fn parse_runtime_series_filters_with_mode_impl(
         "Author" => parse_series_author_filter(condition, mode),
         "AllOfSeries" => parse_composite_filters(condition, true, mode),
         "AnyOfSeries" => parse_composite_filters(condition, false, mode),
-        _unsupported if mode.is_strict() => Err(DiscoveryError::InvalidSemantics(format!(
-            "unsupported runtime series condition type: {condition_type}",
-        ))),
         _unsupported => Ok(RuntimeSeriesFilters::default()),
     }
 }
@@ -84,19 +81,20 @@ pub(super) fn parse_runtime_books_filters_with_mode_impl(
         "Title" => parse_books_title_filter(condition, mode),
         "Deleted" => parse_books_deleted_filter(condition, mode),
         "OneShot" => parse_books_oneshot_filter(condition, mode),
+        "Genre" => parse_books_genre_filter(condition, mode),
         "Tag" => parse_books_tag_filter(condition, mode),
         "ReadStatus" => parse_books_read_status_filter(condition, mode),
         "MediaProfile" => parse_books_media_profile_filter(condition, mode),
         "MediaStatus" => parse_books_media_status_filter(condition, mode),
+        "Language" => parse_books_language_filter(condition, mode),
+        "Publisher" => parse_books_publisher_filter(condition, mode),
+        "AgeRating" => parse_books_age_rating_filter(condition, mode),
         "Author" => parse_books_author_filter(condition, mode),
         "Poster" => parse_books_poster_filter(condition, mode),
         "NumberSort" => parse_books_number_sort_filter(condition, mode),
         "ReleaseDate" => parse_books_release_date_filter(condition, mode),
         "AllOfBook" => parse_books_composite_filters(condition, true, mode),
         "AnyOfBook" => parse_books_composite_filters(condition, false, mode),
-        _unsupported if mode.is_strict() => Err(DiscoveryError::InvalidSemantics(format!(
-            "unsupported runtime books condition type: {condition_type}",
-        ))),
         _unsupported => Ok(RuntimeBooksFilters::default()),
     }
 }

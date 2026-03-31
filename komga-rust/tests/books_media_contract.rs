@@ -16,7 +16,7 @@ fn books_media_contract_target_is_registered() {
 }
 
 #[tokio::test]
-async fn router_discovery_books_list_rejects_unsupported_operator_in_runtime_owned_mode() {
+async fn router_discovery_books_list_supports_media_status_begins_with_in_runtime_owned_mode() {
     let paths = new_router_fixture("router-discovery-books-list-strict-operator").await;
     seed_router_contract_data(&paths).await;
 
@@ -45,16 +45,19 @@ async fn router_discovery_books_list_rejects_unsupported_operator_in_runtime_own
                 .expect("strict books/list request should build"),
         )
         .await
-        .expect("strict books/list request should complete");
+        .expect("strict books/list beginsWith request should complete");
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
-    let error = payload
-        .get("error")
-        .and_then(Value::as_str)
-        .expect("strict invalid request should include error message");
-    assert!(error.contains("invalid runtime books request"));
-    assert!(error.contains("MediaStatus"));
+    let content = payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("strict media-status beginsWith payload should expose content array");
+    assert_eq!(content.len(), 1);
+    assert_eq!(
+        content[0].get("id"),
+        Some(&Value::String("book-1".to_string()))
+    );
 
     cleanup_router_fixture(paths);
 }
@@ -255,7 +258,7 @@ async fn router_discovery_books_list_supports_media_status_is_not_in_runtime_own
 }
 
 #[tokio::test]
-async fn router_discovery_books_list_rejects_unknown_condition_type_in_runtime_owned_mode() {
+async fn router_discovery_books_list_supports_genre_condition_in_runtime_owned_mode() {
     let paths = new_router_fixture("router-discovery-books-list-strict-filter-combo").await;
     seed_router_contract_data(&paths).await;
 
@@ -276,7 +279,7 @@ async fn router_discovery_books_list_rejects_unknown_condition_type_in_runtime_o
                         "condition": {
                             "type": "Genre",
                             "operator": "is",
-                            "value": "Sci-Fi"
+                            "value": "SciFi"
                         }
                     })
                     .to_string(),
@@ -284,16 +287,63 @@ async fn router_discovery_books_list_rejects_unknown_condition_type_in_runtime_o
                 .expect("strict books/list unsupported condition request should build"),
         )
         .await
-        .expect("strict books/list unsupported condition request should complete");
+        .expect("strict books/list genre request should complete");
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
-    let error = payload
-        .get("error")
-        .and_then(Value::as_str)
-        .expect("strict unknown condition payload should expose error");
-    assert!(error.contains("invalid runtime books request"));
-    assert!(error.contains("unsupported runtime books condition type"));
+    let content = payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("strict genre payload should expose content array");
+    assert_eq!(content.len(), 1);
+    assert_eq!(
+        content[0].get("id"),
+        Some(&Value::String("book-1".to_string()))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_books_list_supports_series_metadata_conditions_in_runtime_owned_mode() {
+    let paths = new_router_fixture("router-discovery-books-list-strict-series-metadata").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    for condition in [
+        json!({ "type": "Language", "operator": "is", "value": "EN" }),
+        json!({ "type": "Publisher", "operator": "is", "value": "PubHouse" }),
+        json!({ "type": "AgeRating", "operator": "is", "value": 16 }),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/books/list?page=0&size=20")
+                    .header("x-auth-token", &auth_token)
+                    .header("x-komga-runtime-search-ownership", "runtime-rust-owned")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(json!({ "condition": condition }).to_string()))
+                    .expect("strict books/list series metadata request should build"),
+            )
+            .await
+            .expect("strict books/list series metadata request should complete");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let payload = response_json(response).await;
+        let content = payload
+            .get("content")
+            .and_then(Value::as_array)
+            .expect("strict series metadata payload should expose content array");
+        assert_eq!(content.len(), 1);
+        assert_eq!(
+            content[0].get("id"),
+            Some(&Value::String("book-1".to_string()))
+        );
+    }
 
     cleanup_router_fixture(paths);
 }
@@ -2836,7 +2886,10 @@ async fn router_koreader_progress_get_preserves_empty_device_fields() {
 
     let payload = response_json(response).await;
     assert_eq!(payload.get("device"), Some(&Value::String(String::new())));
-    assert_eq!(payload.get("device_id"), Some(&Value::String(String::new())));
+    assert_eq!(
+        payload.get("device_id"),
+        Some(&Value::String(String::new()))
+    );
 
     cleanup_router_fixture(paths);
 }

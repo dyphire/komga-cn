@@ -7,30 +7,26 @@ use serde_json::{Value, json};
 
 use crate::http::identity_access::auth::require_auth;
 use crate::http::request_urls::app_absolute_url;
-use crate::http::state::RuntimeProfile;
 use crate::opds_manifest_access;
 
 pub(crate) async fn opds_manifest(
-    _profile: RuntimeProfile,
     headers: HeaderMap,
     database_file: &Path,
     book_id: &str,
 ) -> Response {
-    opds_manifest_variant(_profile, headers, database_file, book_id, None).await
+    opds_manifest_variant(headers, database_file, book_id, None).await
 }
 
 pub(crate) async fn opds_manifest_with_profile(
-    _profile: RuntimeProfile,
     headers: HeaderMap,
     database_file: &Path,
     book_id: &str,
     profile: &str,
 ) -> Response {
-    opds_manifest_variant(_profile, headers, database_file, book_id, Some(profile)).await
+    opds_manifest_variant(headers, database_file, book_id, Some(profile)).await
 }
 
 async fn opds_manifest_variant(
-    _profile: RuntimeProfile,
     headers: HeaderMap,
     database_file: &Path,
     book_id: &str,

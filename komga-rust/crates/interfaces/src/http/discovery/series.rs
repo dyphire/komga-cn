@@ -323,9 +323,6 @@ pub async fn series_list(
         return runtime_response;
     }
 
-    let _ = profile;
-    let _ = full_text_search;
-
     if !auth_db.database_file.exists() {
         return StatusCode::NOT_FOUND.into_response();
     }

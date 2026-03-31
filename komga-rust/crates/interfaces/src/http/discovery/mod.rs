@@ -16,7 +16,7 @@ use crate::http::discovery_auth::DiscoveryAuthState;
 use crate::http::identity_access::auth::{require_auth, resolved_auth_user, user_id};
 use crate::http::state::RuntimeProfile;
 
-use super::super::{AuthDatabaseState, OperationalState, ReadProgressState};
+use super::super::AuthDatabaseState;
 use super::helpers::{
     DiscoveryOwnershipRoute, DiscoveryShape, books_page_payload, discovery_ownership_route,
     extract_full_text_search, mark_persisted_owned, mark_runtime_owned, matches_search_pattern,
@@ -210,12 +210,10 @@ pub(super) async fn series_detail_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
     AxumPath(series_id): AxumPath<String>,
-    uri: Uri,
 ) -> Response {
     series_detail(
         headers,
         AxumPath(series_id),
-        uri,
         auth_state,
         auth_db.database_file.as_path(),
     )
@@ -239,19 +237,11 @@ pub(super) async fn series_collections_route(
 
 pub(super) async fn series_metadata_update_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(operational): Extension<OperationalState>,
     headers: HeaderMap,
     AxumPath(series_id): AxumPath<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    series_metadata_update(
-        headers,
-        auth_db.database_file.as_path(),
-        operational.runtime.lucene_data_directory.as_path(),
-        AxumPath(series_id),
-        body,
-    )
-    .await
+    series_metadata_update(headers, auth_db.database_file.as_path(), AxumPath(series_id), body).await
 }
 
 pub(super) async fn series_alphabetical_groups_route(

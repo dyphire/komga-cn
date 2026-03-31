@@ -363,7 +363,7 @@ pub async fn book_read_progress(
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
             }
         }
-        set_read_progress(&state, token, book_id, page_count, true);
+        set_read_progress(&state, token, book_id);
         return StatusCode::NO_CONTENT.into_response();
     }
 
@@ -384,7 +384,7 @@ pub async fn book_read_progress(
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
             }
         }
-        set_read_progress(&state, token, book_id, page, false);
+        set_read_progress(&state, token, book_id);
         return StatusCode::NO_CONTENT.into_response();
     }
 

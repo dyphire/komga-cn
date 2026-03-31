@@ -41,7 +41,6 @@ pub async fn readlists(
         .filter(|value| !value.is_empty())
         .map(str::to_string)
         .collect::<Vec<_>>();
-    let unpaged = query_bool(query_string, "unpaged");
     let requested_sort = sort.first().cloned();
 
     let context = match auth_state.resolve_query_context(&headers, library_ids.as_deref()) {
@@ -160,22 +159,11 @@ pub async fn readlists(
             let page = PageEnvelope::from_slice(page_content, page, page_size, total_elements);
 
             let mut response = Json(readlists_page_payload(page)).into_response();
-            let _ = unpaged;
             mark_runtime_owned(&mut response);
             return response;
         }
     }
 
-    let _ = (
-        context,
-        page,
-        size,
-        requested_sort,
-        search,
-        sort,
-        unpaged,
-        query_string,
-    );
     StatusCode::NOT_FOUND.into_response()
 }
 
@@ -252,62 +240,10 @@ pub async fn readlist_delete(
     }
 }
 
-pub async fn readlist_books(
-    Extension(auth_state): Extension<DiscoveryAuthState>,
-    headers: HeaderMap,
-    Path(readlist_id): Path<String>,
-    uri: Uri,
-) -> Response {
+pub async fn readlist_books(headers: HeaderMap) -> Response {
     if let Some(response) = require_auth(&headers) {
         return response;
     }
-
-    let query_string = uri.query().unwrap_or_default();
-    let page = query_value(query_string, "page")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let size = query_value(query_string, "size")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(20)
-        .max(1);
-    let unpaged = query_bool(query_string, "unpaged");
-    let library_ids = {
-        let values = query_values(query_string, "library_id")
-            .into_iter()
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-            .collect::<Vec<_>>();
-        (!values.is_empty()).then_some(values)
-    };
-    let read_statuses = readlist_query_values(query_string, "read_status");
-    let media_statuses = readlist_query_values(query_string, "media_status");
-    let tags = readlist_query_values(query_string, "tag");
-    let authors = match readlist_author_query_values(query_string) {
-        Ok(authors) => authors,
-        Err(error) => {
-            return (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response();
-        }
-    };
-    let deleted = query_value(query_string, "deleted").and_then(parse_optional_query_bool);
-
-    let context = match auth_state.resolve_query_context(&headers, library_ids.as_deref()) {
-        Some(context) => context,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
-    };
-
-    let _ = (
-        context,
-        readlist_id,
-        page,
-        size,
-        unpaged,
-        library_ids,
-        read_statuses,
-        media_statuses,
-        tags,
-        authors,
-        deleted,
-    );
     StatusCode::NOT_FOUND.into_response()
 }
 
@@ -340,32 +276,19 @@ pub async fn readlist_detail(
         }
     }
 
-    let _ = context;
     StatusCode::NOT_FOUND.into_response()
 }
 
-pub async fn readlist_book_sibling_previous(
-    Extension(auth_state): Extension<DiscoveryAuthState>,
-    headers: HeaderMap,
-    Path((readlist_id, book_id)): Path<(String, String)>,
-) -> Response {
+pub async fn readlist_book_sibling_previous(headers: HeaderMap) -> Response {
     if let Some(response) = require_auth(&headers) {
         return response;
     }
-
-    let _ = (auth_state, readlist_id, book_id);
     StatusCode::NOT_FOUND.into_response()
 }
 
-pub async fn readlist_book_sibling_next(
-    Extension(auth_state): Extension<DiscoveryAuthState>,
-    headers: HeaderMap,
-    Path((readlist_id, book_id)): Path<(String, String)>,
-) -> Response {
+pub async fn readlist_book_sibling_next(headers: HeaderMap) -> Response {
     if let Some(response) = require_auth(&headers) {
         return response;
     }
-
-    let _ = (auth_state, readlist_id, book_id);
     StatusCode::NOT_FOUND.into_response()
 }

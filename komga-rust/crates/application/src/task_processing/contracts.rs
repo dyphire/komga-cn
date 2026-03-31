@@ -95,6 +95,10 @@ impl TaskProcessingError {
             message: message.into(),
         }
     }
+
+    pub fn is_unsupported_task(&self) -> bool {
+        self.message.starts_with("unsupported runtime task type: ")
+    }
 }
 
 impl std::fmt::Display for TaskProcessingError {

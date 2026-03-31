@@ -621,6 +621,10 @@ pub(super) fn compose_persisted_discovery_access_backend() -> PersistedDiscovery
                         metadata_release_date: row.metadata_release_date,
                         deleted: row.deleted,
                         oneshot: row.oneshot,
+                        genres: row.genres,
+                        language: row.language,
+                        publisher: row.publisher,
+                        age_rating: row.age_rating,
                         metadata_tags: row.metadata_tags,
                         metadata_authors: row.metadata_authors,
                     })

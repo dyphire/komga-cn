@@ -143,7 +143,6 @@ pub(crate) async fn opds_v2_libraries_readlists(
         "Read lists",
         app_absolute_url(&headers, "/opds/v2/libraries/readlists").as_str(),
         navigation,
-        None,
     )
 }
 

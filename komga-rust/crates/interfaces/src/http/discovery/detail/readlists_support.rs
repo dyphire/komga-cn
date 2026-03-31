@@ -169,69 +169,6 @@ fn generated_readlist_id() -> String {
     format!("readlist-{}", random_hex_token(12))
 }
 
-pub fn readlist_query_values(query: &str, key: &str) -> Option<Vec<String>> {
-    let values = query_values(query, key)
-        .into_iter()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    (!values.is_empty()).then_some(values)
-}
-
-pub fn readlist_author_query_values(query: &str) -> Result<Option<Vec<String>>, String> {
-    let raw_values = query_values(query, "author");
-    if raw_values.is_empty() {
-        return Ok(None);
-    }
-
-    let mut authors = Vec::with_capacity(raw_values.len());
-    for value in raw_values {
-        if let Some(author) = parse_readlist_author_query_value(value)? {
-            authors.push(author);
-        }
-    }
-
-    if authors.is_empty() {
-        Err("readlist author filter must include at least one supported value".to_string())
-    } else {
-        Ok(Some(authors))
-    }
-}
-
-pub fn parse_readlist_author_query_value(value: &str) -> Result<Option<String>, String> {
-    let mut parts = value.splitn(2, ',');
-    let Some(name) = parts.next() else {
-        return Ok(None);
-    };
-    let name = name.trim();
-    if name.is_empty() {
-        return Ok(None);
-    }
-
-    let Some(role) = parts.next() else {
-        return Ok(Some(name.to_ascii_lowercase()));
-    };
-    let role = role.trim();
-    if role.is_empty() || role.eq_ignore_ascii_case("writer") {
-        Ok(Some(name.to_ascii_lowercase()))
-    } else {
-        Err(format!(
-            "unsupported readlist author role '{role}', only empty role or 'writer' is supported",
-        ))
-    }
-}
-
-pub fn parse_optional_query_bool(value: &str) -> Option<bool> {
-    if value.eq_ignore_ascii_case("true") {
-        Some(true)
-    } else if value.eq_ignore_ascii_case("false") {
-        Some(false)
-    } else {
-        None
-    }
-}
-
 pub fn decode_query_component(value: &str) -> String {
     let mut decoded = Vec::with_capacity(value.len());
     let bytes = value.as_bytes();
@@ -358,45 +295,10 @@ pub fn readlist_payload(readlist: &ReadListReadModel) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        decode_query_component, parse_readlist_author_query_value, readlist_author_query_values,
-    };
+    use super::decode_query_component;
 
     #[test]
     fn decode_query_component_decodes_percent_encoded_utf8_sequences() {
         assert_eq!(decode_query_component("caf%C3%A9+au+lait"), "café au lait");
-    }
-
-    #[test]
-    fn parse_readlist_author_query_value_accepts_writer_role_and_plain_name() {
-        assert_eq!(
-            parse_readlist_author_query_value("Jane Writer")
-                .expect("plain author name should parse"),
-            Some("jane writer".to_string()),
-        );
-        assert_eq!(
-            parse_readlist_author_query_value("Jane Writer,writer")
-                .expect("writer role should parse"),
-            Some("jane writer".to_string()),
-        );
-    }
-
-    #[test]
-    fn parse_readlist_author_query_value_rejects_unsupported_roles() {
-        let error = parse_readlist_author_query_value("Jane Writer,inker")
-            .expect_err("unsupported readlist role should be rejected");
-        assert!(error.contains("unsupported readlist author role"));
-        assert!(error.contains("inker"));
-    }
-
-    #[test]
-    fn readlist_author_query_values_rejects_payloads_without_supported_author_values() {
-        let error = readlist_author_query_values("author=Jane%20Writer,inker")
-            .expect_err("unsupported role-only payload should be rejected");
-        assert!(error.contains("unsupported readlist author role"));
-
-        let empty_error = readlist_author_query_values("author=,%20")
-            .expect_err("blank author payload should be rejected");
-        assert!(empty_error.contains("must include at least one supported value"));
     }
 }

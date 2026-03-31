@@ -6,13 +6,11 @@ use komga_application::library_catalog::{LibraryCatalogMutationError, LibraryRec
 use komga_domain::discovery::DiscoveryError;
 use serde_json::{Value, json};
 
-use crate::http::discovery_auth::{DiscoveryAuthState, DiscoveryQueryContext};
-use crate::http::identity_access::auth::{require_admin, require_auth};
-use crate::http::state::RuntimeProfile;
-
 use super::OperationalState;
+use crate::http::discovery_auth::{DiscoveryAuthState, DiscoveryQueryContext};
 use crate::http::helpers::mark_runtime_owned;
 use crate::http::helpers::to_domain_query_context;
+use crate::http::identity_access::auth::{require_admin, require_auth};
 use crate::http::library_catalog::request_mapping::{
     is_deep_scan_query, parse_create_library_change_set, parse_update_library_change_set,
 };
@@ -22,7 +20,6 @@ use crate::http::library_catalog::task_mapping::{
 };
 
 pub async fn response(
-    _profile: RuntimeProfile,
     headers: HeaderMap,
     auth_state: DiscoveryAuthState,
     state: OperationalState,
@@ -40,7 +37,6 @@ pub async fn response(
 }
 
 pub async fn library_detail(
-    _profile: RuntimeProfile,
     headers: HeaderMap,
     auth_state: DiscoveryAuthState,
     state: OperationalState,

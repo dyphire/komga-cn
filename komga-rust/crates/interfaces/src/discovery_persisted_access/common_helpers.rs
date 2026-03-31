@@ -79,6 +79,17 @@ pub fn invalid_runtime_books_list_response(error: DiscoveryError) -> Response {
         .into_response()
 }
 
+pub fn should_ignore_runtime_filter_error(error: &DiscoveryError) -> bool {
+    match error {
+        DiscoveryError::InvalidSemantics(message) => {
+            message.starts_with("unsupported operator for ")
+                || message.starts_with("unsupported runtime books condition type: ")
+                || message.starts_with("unsupported runtime series condition type: ")
+        }
+        _ => false,
+    }
+}
+
 pub fn empty_books_page_response(uri: &Uri, is_admin: bool) -> Response {
     let query = uri.query().unwrap_or_default();
     let page = query_value(query, "page")

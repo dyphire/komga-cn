@@ -6,7 +6,7 @@ use axum::extract::{Extension, Path};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use komga_application::discovery::normalize_readlists_search;
-use komga_domain::discovery::{DiscoveryError, PageEnvelope};
+use komga_domain::discovery::PageEnvelope;
 use serde_json::{Map, Value, json};
 
 use crate::discovery_detail_access::{
@@ -19,13 +19,11 @@ use crate::http::discovery_auth::{
     DiscoveryQueryContext, QueryRestrictions,
 };
 use crate::http::helpers::{
-    apply_persisted_diagnostics, detail_access_denial_response, mark_persisted_owned,
-    mark_runtime_owned, query_bool, query_value, query_values, restricted_book_url,
+    detail_access_denial_response, mark_runtime_owned, query_bool, query_value, query_values,
+    restricted_book_url,
 };
 use crate::http::identity_access::auth::{require_admin, require_auth};
 use crate::http::state::AuthDatabaseState;
-use crate::http::state::RuntimeProfile;
-
 #[path = "detail/books_detail.rs"]
 mod books_detail;
 #[path = "detail/books_persistence.rs"]
@@ -103,10 +101,9 @@ pub use readlists::{
 };
 pub use readlists_support::{
     ReadListsSort, decode_query_component, delete_persisted_readlist,
-    load_persisted_readlist_detail, load_persisted_readlists, parse_optional_query_bool,
-    parse_readlists_sort, persist_readlist_create, persist_readlist_update,
-    persisted_readlists_exist, readlist_author_query_values, readlist_payload,
-    readlist_query_values, readlist_search_score, readlist_write_input, readlists_page_payload,
+    load_persisted_readlist_detail, load_persisted_readlists, parse_readlists_sort,
+    persist_readlist_create, persist_readlist_update, persisted_readlists_exist,
+    readlist_payload, readlist_search_score, readlist_write_input, readlists_page_payload,
 };
 pub use series_detail::{series_collections, series_detail, series_metadata_update};
 pub use series_persistence::{

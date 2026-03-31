@@ -48,15 +48,19 @@ pub async fn load_persisted_book_summaries(
                       b.FILE_SIZE,
                       s.ONESHOT AS ONESHOT,
                       b.DELETED_DATE,
-                      COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE,
-                      COALESCE(bm.TITLE, b.NAME) AS TITLE,
+                       COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE,
+                       sm.LANGUAGE AS LANGUAGE,
+                       sm.PUBLISHER AS PUBLISHER,
+                       sm.AGE_RATING AS AGE_RATING,
+                       COALESCE(bm.TITLE, b.NAME) AS TITLE,
                       bm.NUMBER_SORT AS NUMBER_SORT,
                       bm.RELEASE_DATE AS RELEASE_DATE,
                       COALESCE(m.STATUS, 'UNKNOWN') AS MEDIA_STATUS,
                       COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE,
                       COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT,
-                      COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS LABELS,
-                      COALESCE(GROUP_CONCAT(DISTINCT bmt.TAG), '') AS METADATA_TAGS,
+                       COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS LABELS,
+                       COALESCE(GROUP_CONCAT(DISTINCT smg.GENRE), '') AS GENRES,
+                       COALESCE(GROUP_CONCAT(DISTINCT bmt.TAG), '') AS METADATA_TAGS,
                       COALESCE(
                         GROUP_CONCAT(
                           DISTINCT CASE
@@ -76,6 +80,7 @@ pub async fn load_persisted_book_summaries(
                LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
                LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
                LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
+               LEFT JOIN SERIES_METADATA_GENRE smg ON smg.SERIES_ID = s.ID
                LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID
                LEFT JOIN BOOK_METADATA_TAG bmt ON bmt.BOOK_ID = b.ID
                LEFT JOIN BOOK_METADATA_AUTHOR bma ON bma.BOOK_ID = b.ID
@@ -118,15 +123,19 @@ pub async fn load_persisted_book_summaries(
                       b.FILE_SIZE,
                       s.ONESHOT AS ONESHOT,
                       b.DELETED_DATE,
-                      COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE,
-                      COALESCE(bm.TITLE, b.NAME) AS TITLE,
+                       COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE,
+                       sm.LANGUAGE AS LANGUAGE,
+                       sm.PUBLISHER AS PUBLISHER,
+                       sm.AGE_RATING AS AGE_RATING,
+                       COALESCE(bm.TITLE, b.NAME) AS TITLE,
                       bm.NUMBER_SORT AS NUMBER_SORT,
                       bm.RELEASE_DATE AS RELEASE_DATE,
                       COALESCE(m.STATUS, 'UNKNOWN') AS MEDIA_STATUS,
                       COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE,
                       COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT,
-                      COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS LABELS,
-                      COALESCE(GROUP_CONCAT(DISTINCT bmt.TAG), '') AS METADATA_TAGS,
+                       COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS LABELS,
+                       COALESCE(GROUP_CONCAT(DISTINCT smg.GENRE), '') AS GENRES,
+                       COALESCE(GROUP_CONCAT(DISTINCT bmt.TAG), '') AS METADATA_TAGS,
                       COALESCE(
                         GROUP_CONCAT(
                           DISTINCT CASE
@@ -142,6 +151,7 @@ pub async fn load_persisted_book_summaries(
                LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
                LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
                LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
+               LEFT JOIN SERIES_METADATA_GENRE smg ON smg.SERIES_ID = s.ID
                LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID
                LEFT JOIN BOOK_METADATA_TAG bmt ON bmt.BOOK_ID = b.ID
                LEFT JOIN BOOK_METADATA_AUTHOR bma ON bma.BOOK_ID = b.ID
@@ -186,6 +196,12 @@ pub async fn load_persisted_book_summaries(
             metadata_release_date: row.get::<Option<String>, _>("RELEASE_DATE"),
             deleted: row.get::<Option<String>, _>("DELETED_DATE").is_some(),
             oneshot: row.get::<bool, _>("ONESHOT"),
+            genres: common::parse_csv_values(&row.get::<String, _>("GENRES")),
+            language: row.get::<Option<String>, _>("LANGUAGE"),
+            publisher: row.get::<Option<String>, _>("PUBLISHER"),
+            age_rating: row
+                .get::<Option<i64>, _>("AGE_RATING")
+                .map(|value| value.max(0) as u16),
             metadata_tags: common::parse_csv_values(&row.get::<String, _>("METADATA_TAGS")),
             metadata_authors: common::parse_csv_values(&row.get::<String, _>("METADATA_AUTHORS")),
         })

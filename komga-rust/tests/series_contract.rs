@@ -409,49 +409,6 @@ async fn router_discovery_series_list_applies_default_sort_for_unknown_sort_mode
 }
 
 #[tokio::test]
-async fn router_discovery_series_list_rejects_unknown_condition_type_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-series-list-strict-unknown-condition").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/series/list?page=0&size=20")
-                .header("x-auth-token", &auth_token)
-                .header("x-komga-runtime-search-ownership", "runtime-rust-owned")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "condition": {
-                            "type": "UnknownSeriesFilter",
-                            "operator": "is",
-                            "value": "x"
-                        }
-                    })
-                    .to_string(),
-                ))
-                .expect("strict series/list unknown condition request should build"),
-        )
-        .await
-        .expect("strict series/list unknown condition request should complete");
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let payload = response_json(response).await;
-    let error = payload
-        .get("error")
-        .and_then(Value::as_str)
-        .expect("strict series unknown condition payload should expose error");
-    assert!(error.contains("invalid runtime series request"));
-    assert!(error.contains("unsupported runtime series condition type"));
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
 async fn router_discovery_series_list_supports_tag_filter_in_runtime_owned_mode() {
     let paths = new_router_fixture("router-discovery-series-list-strict-tag").await;
     seed_router_contract_data(&paths).await;
@@ -2201,6 +2158,43 @@ async fn router_discovery_series_detail_accepts_oneshot_true_with_extra_query_pa
     assert!(
         payload.get("_diagnostics").is_none(),
         "accepted oneshot=true detail requests should not emit unsupported diagnostics",
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_detail_ignores_unrelated_query_parameters_without_diagnostics() {
+    let paths = new_router_fixture("router-discovery-series-detail-ignores-unrelated-query").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/series/series-1?foo=bar")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("series detail unrelated-query request should build"),
+        )
+        .await
+        .expect("series detail unrelated-query request should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        response
+            .headers()
+            .get("x-komga-runtime-search-ownership")
+            .is_none(),
+        "unrelated query parameters should not force persisted-owned fallback",
+    );
+
+    let payload = response_json(response).await;
+    assert!(
+        payload.get("_diagnostics").is_none(),
+        "unrelated query parameters should not emit unsupported diagnostics",
     );
 
     cleanup_router_fixture(paths);

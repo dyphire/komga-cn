@@ -3,7 +3,6 @@ use super::*;
 pub async fn series_detail(
     headers: HeaderMap,
     Path(series_id): Path<String>,
-    uri: Uri,
     auth_state: DiscoveryAuthState,
     database_file: &FsPath,
 ) -> Response {
@@ -39,12 +38,6 @@ pub async fn series_detail(
             Err(denial) => return detail_access_denial_response(denial),
         };
     let is_admin = detail_query_context.is_admin;
-    let query_string = uri.query().unwrap_or_default();
-    let oneshot_true_requested = query_values(query_string, "oneshot")
-        .into_iter()
-        .any(|value| value.eq_ignore_ascii_case("true"));
-    let runtime_owned_shape = query_string.is_empty() || oneshot_true_requested;
-
     let Some(series) = (match load_persisted_series_detail(
         database_file,
         &series_id,
@@ -63,22 +56,7 @@ pub async fn series_detail(
         coerce_library_id_for_id_bridge(&mut payload);
     }
 
-    if !runtime_owned_shape {
-        apply_persisted_diagnostics(
-            &mut payload,
-            &DiscoveryError::UnsupportedSemantics(
-                komga_domain::discovery::UnsupportedDiscoverySemantics::UnsupportedSeriesSort(
-                    "oneshot-query-parameter".to_string(),
-                ),
-            ),
-        );
-
-        let mut response = Json(payload).into_response();
-        mark_persisted_owned(&mut response);
-        response
-    } else {
-        Json(payload).into_response()
-    }
+    Json(payload).into_response()
 }
 
 pub async fn series_collections(
@@ -124,7 +102,6 @@ pub async fn series_collections(
 pub async fn series_metadata_update(
     headers: HeaderMap,
     database_file: &FsPath,
-    lucene_data_directory: &FsPath,
     Path(series_id): Path<String>,
     body: Value,
 ) -> Response {
@@ -170,10 +147,7 @@ pub async fn series_metadata_update(
         .await
     {
         Ok(true) => {
-            if let Err(error) =
-                refresh_series_search_document(database_file, lucene_data_directory, &series_id)
-                    .await
-            {
+            if let Err(error) = refresh_series_search_document(database_file, &series_id).await {
                 return internal_error_response(error);
             }
             StatusCode::NO_CONTENT.into_response()

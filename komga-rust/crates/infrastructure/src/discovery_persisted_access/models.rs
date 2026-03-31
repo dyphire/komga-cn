@@ -46,6 +46,10 @@ pub struct BookSummary {
     pub metadata_release_date: Option<String>,
     pub deleted: bool,
     pub oneshot: bool,
+    pub genres: Vec<String>,
+    pub language: Option<String>,
+    pub publisher: Option<String>,
+    pub age_rating: Option<u16>,
     pub metadata_tags: Vec<String>,
     pub metadata_authors: Vec<String>,
 }

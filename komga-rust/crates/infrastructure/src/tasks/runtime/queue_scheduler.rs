@@ -157,6 +157,10 @@ impl TaskQueueScheduler {
                         processed += 1;
                     }
                     Err(error) => {
+                        if error.is_unsupported_task() {
+                            let _ = self.complete(&task.id);
+                            continue;
+                        }
                         self.disown_task(&task.id);
                         for remaining in batch_iter {
                             self.disown_task(&remaining.id);

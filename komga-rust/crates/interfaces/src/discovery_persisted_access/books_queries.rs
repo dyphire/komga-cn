@@ -1,3 +1,4 @@
+use super::common_helpers::should_ignore_runtime_filter_error;
 use super::*;
 
 pub async fn load_book_poster_summaries(
@@ -145,6 +146,100 @@ pub async fn load_persisted_books_page(
         books.retain(|row| row.metadata_tags.is_empty() == tags_null);
     }
 
+    if let Some(genres) = query.genres.as_ref() {
+        books.retain(|row| {
+            row.genres.iter().any(|genre| {
+                let normalized = genre.to_ascii_lowercase();
+                genres.iter().any(|value| normalized == *value)
+            })
+        });
+    }
+
+    if let Some(genres_excluded) = query.genres_excluded.as_ref() {
+        books.retain(|row| {
+            !row.genres.iter().any(|genre| {
+                let normalized = genre.to_ascii_lowercase();
+                genres_excluded.iter().any(|value| normalized == *value)
+            })
+        });
+    }
+
+    if let Some(genres_null) = query.genres_null {
+        books.retain(|row| row.genres.is_empty() == genres_null);
+    }
+
+    if let Some(languages) = query.languages.as_ref() {
+        books.retain(|row| {
+            row.language.as_ref().is_some_and(|language| {
+                languages
+                    .iter()
+                    .any(|value| language.eq_ignore_ascii_case(value))
+            })
+        });
+    }
+
+    if let Some(languages_excluded) = query.languages_excluded.as_ref() {
+        books.retain(|row| {
+            !row.language.as_ref().is_some_and(|language| {
+                languages_excluded
+                    .iter()
+                    .any(|value| language.eq_ignore_ascii_case(value))
+            })
+        });
+    }
+
+    if let Some(publishers) = query.publishers.as_ref() {
+        books.retain(|row| {
+            row.publisher.as_ref().is_some_and(|publisher| {
+                publishers
+                    .iter()
+                    .any(|value| publisher.eq_ignore_ascii_case(value))
+            })
+        });
+    }
+
+    if let Some(publishers_excluded) = query.publishers_excluded.as_ref() {
+        books.retain(|row| {
+            !row.publisher.as_ref().is_some_and(|publisher| {
+                publishers_excluded
+                    .iter()
+                    .any(|value| publisher.eq_ignore_ascii_case(value))
+            })
+        });
+    }
+
+    if let Some(age_ratings) = query.age_ratings.as_ref() {
+        books.retain(|row| {
+            row.age_rating
+                .is_some_and(|age_rating| age_ratings.contains(&age_rating))
+        });
+    }
+
+    if let Some(age_ratings_excluded) = query.age_ratings_excluded.as_ref() {
+        books.retain(|row| {
+            !row.age_rating
+                .is_some_and(|age_rating| age_ratings_excluded.contains(&age_rating))
+        });
+    }
+
+    if let Some(age_ratings_null) = query.age_ratings_null {
+        books.retain(|row| row.age_rating.is_none() == age_ratings_null);
+    }
+
+    if let Some(age_rating_gt) = query.age_rating_gt {
+        books.retain(|row| {
+            row.age_rating
+                .is_some_and(|age_rating| age_rating > age_rating_gt)
+        });
+    }
+
+    if let Some(age_rating_lt) = query.age_rating_lt {
+        books.retain(|row| {
+            row.age_rating
+                .is_some_and(|age_rating| age_rating < age_rating_lt)
+        });
+    }
+
     if let Some(authors) = query.authors.as_ref() {
         books.retain(|row| {
             row.metadata_authors.iter().any(|author| {
@@ -265,7 +360,7 @@ pub async fn load_persisted_books_page(
         books.retain(|row| {
             media_statuses
                 .iter()
-                .any(|value| value.eq_ignore_ascii_case(&row.media_status))
+                .any(|value| row.media_status.to_ascii_lowercase().starts_with(value))
         });
     }
 
@@ -508,7 +603,7 @@ pub async fn runtime_owned_persisted_books_page(
     size: usize,
     unpaged: bool,
 ) -> Option<Result<PageEnvelope<BookReadModel>, String>> {
-    if !database_file.exists() || !runtime_books_filters_match_runtime_shape(filters) {
+    if !database_file.exists() {
         return None;
     }
 
@@ -541,6 +636,18 @@ pub async fn runtime_owned_persisted_books_page(
                 titles_ends_with_excluded: filters.titles_ends_with_excluded.clone(),
                 deleted: filters.deleted,
                 oneshot: filters.oneshot,
+                genres: filters.genres.clone(),
+                genres_excluded: filters.genres_excluded.clone(),
+                genres_null: filters.genres_null,
+                languages: filters.languages.clone(),
+                languages_excluded: filters.languages_excluded.clone(),
+                publishers: filters.publishers.clone(),
+                publishers_excluded: filters.publishers_excluded.clone(),
+                age_ratings: filters.age_ratings.clone(),
+                age_ratings_excluded: filters.age_ratings_excluded.clone(),
+                age_ratings_null: filters.age_ratings_null,
+                age_rating_gt: filters.age_rating_gt,
+                age_rating_lt: filters.age_rating_lt,
                 tags: filters.tags.clone(),
                 tags_excluded: filters.tags_excluded.clone(),
                 tags_null: filters.tags_null,
@@ -656,10 +763,13 @@ pub async fn runtime_owned_books_list_response(
     } {
         Ok(filters) => filters,
         Err(error) => {
-            if strict_runtime_shape {
+            if strict_runtime_shape && should_ignore_runtime_filter_error(&error) {
+                RuntimeBooksFilters::default()
+            } else if strict_runtime_shape {
                 return Some(invalid_runtime_books_list_response(error));
+            } else {
+                webui_bridge_books_filters_from_payload(payload)
             }
-            webui_bridge_books_filters_from_payload(payload)
         }
     };
 
@@ -668,14 +778,6 @@ pub async fn runtime_owned_books_list_response(
         filters.library_ids =
             remap_requested_library_ids_for_persisted(database_file, filters.library_ids.as_ref())
                 .await;
-    }
-
-    if strict_runtime_shape && !runtime_books_filters_match_runtime_shape(&filters) {
-        return Some(invalid_runtime_books_list_response(
-            DiscoveryError::InvalidSemantics(
-                "unsupported runtime books filter combination".to_string(),
-            ),
-        ));
     }
 
     let requested_library_ids =
@@ -723,11 +825,6 @@ pub async fn runtime_owned_books_list_response(
             }
         }
     }
-
-    let _ = uri;
-    let _ = payload;
-    let _ = full_text_search;
-    let _ = is_admin;
 
     None
 }
@@ -787,6 +884,18 @@ pub async fn runtime_owned_books_latest_response(
             titles_ends_with_excluded: None,
             deleted: None,
             oneshot: None,
+            genres: None,
+            genres_excluded: None,
+            genres_null: None,
+            languages: None,
+            languages_excluded: None,
+            publishers: None,
+            publishers_excluded: None,
+            age_ratings: None,
+            age_ratings_excluded: None,
+            age_ratings_null: None,
+            age_rating_gt: None,
+            age_rating_lt: None,
             tags: None,
             tags_excluded: None,
             tags_null: None,

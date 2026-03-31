@@ -1,16 +1,16 @@
-use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
-use axum::response::{IntoResponse, Response};
 use axum::Json;
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use komga_application::discovery::BookReadModel;
 use komga_domain::common_ids::{LibraryId, UserId};
 use komga_domain::discovery::{
-    AgeRestrictionKind as DomainAgeRestrictionKind, DiscoveryError,
+    AgeRestrictionKind as DomainAgeRestrictionKind,
     DiscoveryQueryContext as DomainDiscoveryQueryContext, PageEnvelope,
-    QueryRestrictions as DomainQueryRestrictions, UnsupportedDiscoverySemantics,
+    QueryRestrictions as DomainQueryRestrictions,
 };
-use serde_json::{json, Value};
-use time::format_description::well_known::Rfc3339;
+use serde_json::{Value, json};
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 use crate::http::discovery_auth::{
     AgeRestrictionKind, DetailAccessDenial, DiscoveryQueryContext, QueryRestrictions,
@@ -18,7 +18,7 @@ use crate::http::discovery_auth::{
 use crate::http::state::RuntimeProfile;
 
 use super::super::{
-    ReadProgress, ReadProgressState, PERSISTED_OWNERSHIP_MARKER, SEARCH_OWNERSHIP_HEADER,
+    PERSISTED_OWNERSHIP_MARKER, ReadProgress, ReadProgressState, SEARCH_OWNERSHIP_HEADER,
 };
 
 const RUNTIME_OWNERSHIP_MARKER: &str = "runtime-rust-owned";
@@ -273,33 +273,6 @@ pub(crate) fn matches_search_pattern(candidate: &str, pattern: &str) -> bool {
     }
 }
 
-pub(crate) fn apply_persisted_diagnostics(payload: &mut Value, error: &DiscoveryError) {
-    let (reason, shape) = match error {
-        DiscoveryError::UnsupportedSemantics(details) => {
-            ("unsupported-semantics", unsupported_shape_label(details))
-        }
-        DiscoveryError::InvalidSemantics(message) => ("invalid-semantics", message.clone()),
-        DiscoveryError::Persistence(message) => ("persistence-error", message.clone()),
-    };
-
-    payload["_diagnostics"] = json!({
-        "discoveryOwnership": "persisted",
-        "reason": reason,
-        "shape": shape,
-    });
-}
-
-fn unsupported_shape_label(shape: &UnsupportedDiscoverySemantics) -> String {
-    match shape {
-        UnsupportedDiscoverySemantics::UnsupportedSeriesSort(value) => {
-            format!("UnsupportedSeriesSort({value})")
-        }
-        UnsupportedDiscoverySemantics::UnsupportedBookSort(value) => {
-            format!("UnsupportedBookSort({value})")
-        }
-    }
-}
-
 pub fn to_domain_query_context(context: DiscoveryQueryContext) -> DomainDiscoveryQueryContext {
     DomainDiscoveryQueryContext {
         user_id: context.user_id.map(UserId::from),
@@ -378,13 +351,7 @@ pub(crate) fn method_not_allowed_json_response(path: &str) -> Response {
         .into_response()
 }
 
-pub(crate) fn set_read_progress(
-    state: &ReadProgressState,
-    token: String,
-    book_id: String,
-    _page: u64,
-    _completed: bool,
-) {
+pub(crate) fn set_read_progress(state: &ReadProgressState, token: String, book_id: String) {
     let mut all_progress = state
         .progress_by_token
         .lock()

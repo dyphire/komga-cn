@@ -6,10 +6,7 @@ use super::query_service::{DiscoveryQueries, DiscoveryQueryRepository};
 use super::read_models::{
     BookDetailReadModel, BookReadModel, BookResourceReadModel, ReadListReadModel,
 };
-use super::request_shape::{
-    classify_book_sorts, classify_direct_browse_books_list_sort, unsupported_book_filter,
-    unsupported_book_sort,
-};
+use super::request_shape::classify_book_sorts;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BooksListQuery {
@@ -96,17 +93,6 @@ where
             .await
     }
 
-    pub async fn list_books_direct_browse(
-        &self,
-        context: &DiscoveryQueryContext,
-        query: BooksListQuery,
-    ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
-        classify_direct_browse_books_list_query(&query)?;
-        self.repository
-            .list_books(context, runtime_books_list_query(query))
-            .await
-    }
-
     pub async fn list_books_latest(
         &self,
         context: &DiscoveryQueryContext,
@@ -184,59 +170,5 @@ pub(crate) fn runtime_books_list_query(query: BooksListQuery) -> RuntimeBooksLis
         release_dates: query.release_dates,
         sort: query.sort,
         search: query.search,
-    }
-}
-
-pub(crate) fn classify_direct_browse_books_list_query(
-    query: &BooksListQuery,
-) -> Result<(), DiscoveryError> {
-    let Some(family) = query.direct_browse_family else {
-        return Err(unsupported_book_filter("direct-browse-family"));
-    };
-
-    let Some(series_ids) = query.series_ids.as_ref() else {
-        return Err(unsupported_book_filter("SeriesId"));
-    };
-    if series_ids.len() != 1 {
-        return Err(unsupported_book_filter("SeriesId"));
-    }
-
-    let has_extra_filters = query.library_ids.is_some()
-        || query.deleted.is_some()
-        || query.oneshot.is_some()
-        || query.tags.is_some()
-        || query.read_statuses.is_some()
-        || query.media_profiles.is_some()
-        || query.media_statuses.is_some()
-        || query.authors.is_some()
-        || query.release_dates.is_some()
-        || query.search.is_some();
-    if has_extra_filters {
-        return Err(unsupported_book_filter("extra-filters"));
-    }
-
-    match family {
-        DirectBrowseBooksListFamily::BrowseOneshotBootstrap => {
-            if !query.sort.is_empty() {
-                return Err(unsupported_book_sort(query.sort[0].clone()));
-            }
-            if query.unpaged {
-                return Err(unsupported_book_filter("unpaged"));
-            }
-
-            Ok(())
-        }
-        DirectBrowseBooksListFamily::BrowseSeriesPaged if query.unpaged => {
-            classify_direct_browse_books_list_sort(&query.sort)?;
-            Err(unsupported_book_filter("unpaged"))
-        }
-        DirectBrowseBooksListFamily::BrowseBookSiblingsUnpaged if !query.unpaged => {
-            classify_direct_browse_books_list_sort(&query.sort)?;
-            Err(unsupported_book_filter("paged"))
-        }
-        _ => {
-            classify_direct_browse_books_list_sort(&query.sort)?;
-            Ok(())
-        }
     }
 }

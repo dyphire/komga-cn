@@ -80,12 +80,7 @@ pub async fn book_page(
                     return asset_not_modified_response(None, Some(last_modified));
                 }
 
-                return asset_ok_response(
-                    "application/pdf",
-                    bytes,
-                    None,
-                    last_modified.as_deref(),
-                );
+                return asset_ok_response("application/pdf", bytes, None, last_modified.as_deref());
             }
             return StatusCode::NOT_FOUND.into_response();
         }
@@ -224,12 +219,7 @@ pub async fn book_page_raw(
                 return asset_not_modified_response(None, Some(last_modified));
             }
 
-            return asset_ok_response(
-                "application/pdf",
-                bytes,
-                None,
-                last_modified.as_deref(),
-            );
+            return asset_ok_response("application/pdf", bytes, None, last_modified.as_deref());
         }
     }
 

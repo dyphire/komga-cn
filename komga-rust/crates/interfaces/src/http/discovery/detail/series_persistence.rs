@@ -217,9 +217,7 @@ pub async fn persist_series_metadata_update(
 
 pub async fn refresh_series_search_document(
     database_file: &FsPath,
-    lucene_data_directory: &FsPath,
     series_id: &str,
 ) -> Result<(), String> {
-    let _ = lucene_data_directory;
     series_access::refresh_series_after_metadata_update(database_file, series_id).await
 }

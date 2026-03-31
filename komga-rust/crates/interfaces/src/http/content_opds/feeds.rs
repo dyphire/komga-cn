@@ -383,7 +383,6 @@ pub(super) fn opds_navigation_response(
     title: &str,
     self_href: &str,
     navigation: Vec<Value>,
-    _modified: Option<&str>,
 ) -> Response {
     (
         StatusCode::OK,

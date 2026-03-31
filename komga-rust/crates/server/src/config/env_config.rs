@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use super::cli_args::DEFAULT_BIND_ADDRESS;
 use super::error::ConfigError;
 use super::path_resolution::{default_log_file_for_config_dir, resolve_runtime_config_with_env};
-use super::profile::{PlatformProfile, RuntimeMode, RuntimeProfile, DEFAULT_CONFIG_DIR};
+use super::profile::{DEFAULT_CONFIG_DIR, PlatformProfile, RuntimeMode, RuntimeProfile};
 use super::startup_policy::{
     ensure_startup_runtime_layout, validate_single_writer_storage_ownership,
 };

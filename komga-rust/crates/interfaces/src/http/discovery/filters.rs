@@ -128,11 +128,39 @@ pub(super) fn parse_books_oneshot_filter(
     books::parse_books_oneshot_filter(condition, mode)
 }
 
+pub(super) fn parse_books_genre_filter(
+    condition: &Value,
+    mode: OperatorValidationMode,
+) -> Result<RuntimeBooksFilters, DiscoveryError> {
+    books::parse_books_genre_filter(condition, mode)
+}
+
 pub(super) fn parse_books_tag_filter(
     condition: &Value,
     mode: OperatorValidationMode,
 ) -> Result<RuntimeBooksFilters, DiscoveryError> {
     books::parse_books_tag_filter(condition, mode)
+}
+
+pub(super) fn parse_books_language_filter(
+    condition: &Value,
+    mode: OperatorValidationMode,
+) -> Result<RuntimeBooksFilters, DiscoveryError> {
+    books::parse_books_language_filter(condition, mode)
+}
+
+pub(super) fn parse_books_publisher_filter(
+    condition: &Value,
+    mode: OperatorValidationMode,
+) -> Result<RuntimeBooksFilters, DiscoveryError> {
+    books::parse_books_publisher_filter(condition, mode)
+}
+
+pub(super) fn parse_books_age_rating_filter(
+    condition: &Value,
+    mode: OperatorValidationMode,
+) -> Result<RuntimeBooksFilters, DiscoveryError> {
+    books::parse_books_age_rating_filter(condition, mode)
 }
 
 pub(super) fn parse_books_read_status_filter(

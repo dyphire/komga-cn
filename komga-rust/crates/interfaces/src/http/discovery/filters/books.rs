@@ -142,39 +142,39 @@ pub(super) fn parse_books_title_filter(
     let Some(value) = condition.get("value").and_then(Value::as_str) else {
         return Ok(RuntimeBooksFilters::default());
     };
-    let _value = value.to_ascii_lowercase();
+    let value = value.to_ascii_lowercase();
 
     Ok(match operator.as_str() {
         "is" => RuntimeBooksFilters {
-            titles: Some(vec![_value]),
+            titles: Some(vec![value]),
             ..RuntimeBooksFilters::default()
         },
         "isnot" => RuntimeBooksFilters {
-            titles_excluded: Some(vec![_value]),
+            titles_excluded: Some(vec![value]),
             ..RuntimeBooksFilters::default()
         },
         "contains" => RuntimeBooksFilters {
-            titles_contains: Some(vec![_value]),
+            titles_contains: Some(vec![value]),
             ..RuntimeBooksFilters::default()
         },
         "doesnotcontain" => RuntimeBooksFilters {
-            titles_contains_excluded: Some(vec![_value]),
+            titles_contains_excluded: Some(vec![value]),
             ..RuntimeBooksFilters::default()
         },
         "beginswith" => RuntimeBooksFilters {
-            titles_begins_with: Some(vec![_value]),
+            titles_begins_with: Some(vec![value]),
             ..RuntimeBooksFilters::default()
         },
         "doesnotbeginwith" => RuntimeBooksFilters {
-            titles_begins_with_excluded: Some(vec![_value]),
+            titles_begins_with_excluded: Some(vec![value]),
             ..RuntimeBooksFilters::default()
         },
         "endswith" => RuntimeBooksFilters {
-            titles_ends_with: Some(vec![_value]),
+            titles_ends_with: Some(vec![value]),
             ..RuntimeBooksFilters::default()
         },
         _ => RuntimeBooksFilters {
-            titles_ends_with_excluded: Some(vec![_value]),
+            titles_ends_with_excluded: Some(vec![value]),
             ..RuntimeBooksFilters::default()
         },
     })
@@ -193,7 +193,7 @@ pub(super) fn parse_books_deleted_filter(
         return Ok(RuntimeBooksFilters::default());
     };
 
-    let _deleted = match operator.to_ascii_lowercase().as_str() {
+    let deleted = match operator.to_ascii_lowercase().as_str() {
         "istrue" => true,
         "isfalse" => false,
         _ => {
@@ -207,7 +207,7 @@ pub(super) fn parse_books_deleted_filter(
     };
 
     Ok(RuntimeBooksFilters {
-        deleted: Some(_deleted),
+        deleted: Some(deleted),
         ..RuntimeBooksFilters::default()
     })
 }
@@ -225,7 +225,7 @@ pub(super) fn parse_books_oneshot_filter(
         return Ok(RuntimeBooksFilters::default());
     };
 
-    let _oneshot = match operator.to_ascii_lowercase().as_str() {
+    let oneshot = match operator.to_ascii_lowercase().as_str() {
         "istrue" => true,
         "isfalse" => false,
         _ => {
@@ -239,7 +239,61 @@ pub(super) fn parse_books_oneshot_filter(
     };
 
     Ok(RuntimeBooksFilters {
-        oneshot: Some(_oneshot),
+        oneshot: Some(oneshot),
+        ..RuntimeBooksFilters::default()
+    })
+}
+
+pub(super) fn parse_books_genre_filter(
+    condition: &Value,
+    mode: OperatorValidationMode,
+) -> Result<RuntimeBooksFilters, DiscoveryError> {
+    let operator = condition
+        .get("operator")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if operator != "is" && operator != "isnot" && operator != "isnull" && operator != "isnotnull" {
+        if mode.is_strict() {
+            return Err(DiscoveryError::InvalidSemantics(format!(
+                "unsupported operator for Genre: {operator}",
+            )));
+        }
+        return Ok(RuntimeBooksFilters::default());
+    }
+
+    if operator == "isnull" {
+        return Ok(RuntimeBooksFilters {
+            genres_null: Some(true),
+            ..RuntimeBooksFilters::default()
+        });
+    }
+
+    if operator == "isnotnull" {
+        return Ok(RuntimeBooksFilters {
+            genres_null: Some(false),
+            ..RuntimeBooksFilters::default()
+        });
+    }
+
+    let Some(value) = condition
+        .get("value")
+        .and_then(Value::as_str)
+        .map(|raw| raw.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(RuntimeBooksFilters::default());
+    };
+
+    if operator == "isnot" {
+        return Ok(RuntimeBooksFilters {
+            genres_excluded: Some(vec![value]),
+            ..RuntimeBooksFilters::default()
+        });
+    }
+
+    Ok(RuntimeBooksFilters {
+        genres: Some(vec![value]),
         ..RuntimeBooksFilters::default()
     })
 }
@@ -298,6 +352,151 @@ pub(super) fn parse_books_tag_filter(
     })
 }
 
+pub(super) fn parse_books_language_filter(
+    condition: &Value,
+    mode: OperatorValidationMode,
+) -> Result<RuntimeBooksFilters, DiscoveryError> {
+    let operator = condition
+        .get("operator")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if operator != "is" && operator != "isnot" {
+        if mode.is_strict() {
+            return Err(DiscoveryError::InvalidSemantics(format!(
+                "unsupported operator for Language: {operator}",
+            )));
+        }
+        return Ok(RuntimeBooksFilters::default());
+    }
+
+    let Some(value) = condition
+        .get("value")
+        .and_then(Value::as_str)
+        .map(|raw| raw.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(RuntimeBooksFilters::default());
+    };
+
+    if operator == "isnot" {
+        return Ok(RuntimeBooksFilters {
+            languages_excluded: Some(vec![value]),
+            ..RuntimeBooksFilters::default()
+        });
+    }
+
+    Ok(RuntimeBooksFilters {
+        languages: Some(vec![value]),
+        ..RuntimeBooksFilters::default()
+    })
+}
+
+pub(super) fn parse_books_publisher_filter(
+    condition: &Value,
+    mode: OperatorValidationMode,
+) -> Result<RuntimeBooksFilters, DiscoveryError> {
+    let operator = condition
+        .get("operator")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if operator != "is" && operator != "isnot" {
+        if mode.is_strict() {
+            return Err(DiscoveryError::InvalidSemantics(format!(
+                "unsupported operator for Publisher: {operator}",
+            )));
+        }
+        return Ok(RuntimeBooksFilters::default());
+    }
+
+    let Some(value) = condition
+        .get("value")
+        .and_then(Value::as_str)
+        .map(|raw| raw.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(RuntimeBooksFilters::default());
+    };
+
+    if operator == "isnot" {
+        return Ok(RuntimeBooksFilters {
+            publishers_excluded: Some(vec![value]),
+            ..RuntimeBooksFilters::default()
+        });
+    }
+
+    Ok(RuntimeBooksFilters {
+        publishers: Some(vec![value]),
+        ..RuntimeBooksFilters::default()
+    })
+}
+
+pub(super) fn parse_books_age_rating_filter(
+    condition: &Value,
+    mode: OperatorValidationMode,
+) -> Result<RuntimeBooksFilters, DiscoveryError> {
+    let operator = condition
+        .get("operator")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if operator != "is"
+        && operator != "isnot"
+        && operator != "isnull"
+        && operator != "isnotnull"
+        && operator != "greaterthan"
+        && operator != "lessthan"
+    {
+        if mode.is_strict() {
+            return Err(DiscoveryError::InvalidSemantics(format!(
+                "unsupported operator for AgeRating: {operator}",
+            )));
+        }
+        return Ok(RuntimeBooksFilters::default());
+    }
+
+    if operator == "isnull" {
+        return Ok(RuntimeBooksFilters {
+            age_ratings_null: Some(true),
+            ..RuntimeBooksFilters::default()
+        });
+    }
+    if operator == "isnotnull" {
+        return Ok(RuntimeBooksFilters {
+            age_ratings_null: Some(false),
+            ..RuntimeBooksFilters::default()
+        });
+    }
+
+    let Some(value) = condition
+        .get("value")
+        .and_then(Value::as_u64)
+        .map(|value| value as u16)
+    else {
+        return Ok(RuntimeBooksFilters::default());
+    };
+
+    match operator.as_str() {
+        "is" => Ok(RuntimeBooksFilters {
+            age_ratings: Some(vec![value]),
+            ..RuntimeBooksFilters::default()
+        }),
+        "isnot" => Ok(RuntimeBooksFilters {
+            age_ratings_excluded: Some(vec![value]),
+            ..RuntimeBooksFilters::default()
+        }),
+        "greaterthan" => Ok(RuntimeBooksFilters {
+            age_rating_gt: Some(value),
+            ..RuntimeBooksFilters::default()
+        }),
+        _ => Ok(RuntimeBooksFilters {
+            age_rating_lt: Some(value),
+            ..RuntimeBooksFilters::default()
+        }),
+    }
+}
+
 pub(super) fn parse_books_read_status_filter(
     condition: &Value,
     mode: OperatorValidationMode,
@@ -319,17 +518,17 @@ pub(super) fn parse_books_read_status_filter(
     let Some(value) = condition.get("value").and_then(Value::as_str) else {
         return Ok(RuntimeBooksFilters::default());
     };
-    let _normalized = value.to_ascii_lowercase();
+    let normalized = value.to_ascii_lowercase();
 
     if operator == "isnot" {
         return Ok(RuntimeBooksFilters {
-            read_statuses_excluded: Some(vec![_normalized]),
+            read_statuses_excluded: Some(vec![normalized]),
             ..RuntimeBooksFilters::default()
         });
     }
 
     Ok(RuntimeBooksFilters {
-        read_statuses: Some(vec![_normalized]),
+        read_statuses: Some(vec![normalized]),
         ..RuntimeBooksFilters::default()
     })
 }
@@ -355,16 +554,16 @@ pub(super) fn parse_books_media_profile_filter(
     let Some(value) = condition.get("value").and_then(Value::as_str) else {
         return Ok(RuntimeBooksFilters::default());
     };
-    let _normalized = value.to_ascii_lowercase();
+    let normalized = value.to_ascii_lowercase();
     if operator == "isnot" {
         return Ok(RuntimeBooksFilters {
-            media_profiles_excluded: Some(vec![_normalized]),
+            media_profiles_excluded: Some(vec![normalized]),
             ..RuntimeBooksFilters::default()
         });
     }
 
     Ok(RuntimeBooksFilters {
-        media_profiles: Some(vec![_normalized]),
+        media_profiles: Some(vec![normalized]),
         ..RuntimeBooksFilters::default()
     })
 }
@@ -378,7 +577,7 @@ pub(super) fn parse_books_media_status_filter(
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_ascii_lowercase();
-    if operator != "is" && operator != "isnot" {
+    if operator != "is" && operator != "isnot" && operator != "beginswith" {
         if mode.is_strict() {
             return Err(DiscoveryError::InvalidSemantics(format!(
                 "unsupported operator for MediaStatus: {operator}",

@@ -1,3 +1,4 @@
+use super::super::common_helpers::should_ignore_runtime_filter_error;
 use super::*;
 
 pub async fn runtime_owned_persisted_series_page(
@@ -10,7 +11,7 @@ pub async fn runtime_owned_persisted_series_page(
     size: usize,
     unpaged: bool,
 ) -> Option<Result<PageEnvelope<PersistedSeriesSummary>, String>> {
-    if !database_file.exists() || !runtime_series_filters_match_runtime_shape(filters) {
+    if !database_file.exists() {
         return None;
     }
 
@@ -150,10 +151,13 @@ pub async fn runtime_owned_series_list_response(
     ) {
         Ok(filters) => filters,
         Err(error) => {
-            if strict_runtime_shape {
+            if strict_runtime_shape && should_ignore_runtime_filter_error(&error) {
+                RuntimeSeriesFilters::default()
+            } else if strict_runtime_shape {
                 return Some(invalid_runtime_series_list_response(error));
+            } else {
+                webui_bridge_series_filters_from_payload(payload)
             }
-            webui_bridge_series_filters_from_payload(payload)
         }
     };
 
@@ -162,14 +166,6 @@ pub async fn runtime_owned_series_list_response(
         filters.library_ids =
             remap_requested_library_ids_for_persisted(database_file, filters.library_ids.as_ref())
                 .await;
-    }
-
-    if strict_runtime_shape && !runtime_series_filters_match_runtime_shape(&filters) {
-        return Some(invalid_runtime_series_list_response(
-            DiscoveryError::InvalidSemantics(
-                "unsupported runtime series filter combination".to_string(),
-            ),
-        ));
     }
 
     let requested_library_ids =
@@ -209,9 +205,6 @@ pub async fn runtime_owned_series_list_response(
             }
         }
     }
-
-    let _ = uri;
-    let _ = full_text_search;
 
     None
 }

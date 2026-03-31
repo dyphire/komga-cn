@@ -7,9 +7,9 @@ use axum::extract::{Extension, Path, Query};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use image::ImageFormat;
-use sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
 use std::time::{SystemTime, UNIX_EPOCH};
 use time::OffsetDateTime;
@@ -321,7 +321,7 @@ mod tests {
                     .expect("newer header date should format as HTTP date")
                     .as_str(),
             )
-                .expect("if-modified-since header should be valid"),
+            .expect("if-modified-since header should be valid"),
         );
         assert!(if_modified_since_matches(
             &newer_headers,
@@ -336,7 +336,7 @@ mod tests {
                     .expect("older header date should format as HTTP date")
                     .as_str(),
             )
-                .expect("if-modified-since header should be valid"),
+            .expect("if-modified-since header should be valid"),
         );
         assert!(!if_modified_since_matches(
             &older_headers,

@@ -1,7 +1,6 @@
 use super::*;
 
 pub async fn book_detail(
-    Extension(_profile): Extension<RuntimeProfile>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(auth_state): Extension<DiscoveryAuthState>,
     headers: HeaderMap,
@@ -58,13 +57,10 @@ pub async fn book_detail(
             Err(error) => internal_error_response(error),
         };
     }
-
-    let _ = auth_state;
     StatusCode::NOT_FOUND.into_response()
 }
 
 pub async fn book_sibling_previous(
-    Extension(_profile): Extension<RuntimeProfile>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(auth_state): Extension<DiscoveryAuthState>,
     headers: HeaderMap,
@@ -115,13 +111,10 @@ pub async fn book_sibling_previous(
             Err(error) => internal_error_response(error),
         };
     }
-
-    let _ = auth_state;
     StatusCode::NOT_FOUND.into_response()
 }
 
 pub async fn book_sibling_next(
-    Extension(_profile): Extension<RuntimeProfile>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(auth_state): Extension<DiscoveryAuthState>,
     headers: HeaderMap,
@@ -172,13 +165,10 @@ pub async fn book_sibling_next(
             Err(error) => internal_error_response(error),
         };
     }
-
-    let _ = auth_state;
     StatusCode::NOT_FOUND.into_response()
 }
 
 pub async fn book_readlists(
-    Extension(_profile): Extension<RuntimeProfile>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(auth_state): Extension<DiscoveryAuthState>,
     headers: HeaderMap,
@@ -237,7 +227,5 @@ pub async fn book_readlists(
         ))
         .into_response();
     }
-
-    let _ = auth_state;
     StatusCode::NOT_FOUND.into_response()
 }

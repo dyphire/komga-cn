@@ -240,6 +240,53 @@ async fn scanner_rescan_updates_existing_persisted_book_file_size_rows() {
     fixture.cleanup();
 }
 
+#[tokio::test]
+async fn scanner_unknown_task_type_does_not_block_supported_tasks() {
+    let fixture = ScannerPersistenceFixture::new("scanner-persistence-unknown-task-skip")
+        .await
+        .expect("scanner unknown-task fixture should be created");
+
+    let _initial_runtime = komga_server::app::build_router_with_config(&fixture.config);
+
+    let book_path = fixture.library_root.join("Series-A").join("Book-001.cbz");
+    let book_url = book_path.to_string_lossy().to_string();
+    let updated_payload = b"book-001-after-unknown-task";
+    fs::write(&book_path, updated_payload)
+        .expect("book payload rewrite should succeed for unknown task contract");
+
+    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    scheduler.enqueue(TaskQueueRecord::new(
+        "UNSUPPORTED_TASK:book-1",
+        1000,
+        Some("book-1".to_string()),
+    ));
+    scheduler.enqueue(
+        TaskQueueRecord::new("SCAN_LIBRARY:library-1", 900, Some("library-1".to_string()))
+            .with_simple_type("SCAN_LIBRARY"),
+    );
+
+    let processed = scheduler
+        .process_available(&fixture.config)
+        .expect("unknown task type should not abort supported task processing");
+    assert!(processed >= 1);
+
+    let updated_size = load_book_file_size(&fixture.paths.main_db, &book_url).await;
+    assert_eq!(updated_size, updated_payload.len() as i64);
+
+    let tasks_pool = connect_pool(fixture.paths.tasks_db.as_path(), 1)
+        .await
+        .expect("tasks db should open after unknown-task processing");
+    let remaining_tasks = sqlx::query("SELECT COUNT(*) AS COUNT FROM TASK")
+        .fetch_one(&tasks_pool)
+        .await
+        .expect("remaining task rows should be queryable")
+        .get::<i64, _>("COUNT");
+    tasks_pool.close().await;
+    assert_eq!(remaining_tasks, 0);
+
+    fixture.cleanup();
+}
+
 #[derive(Debug, Eq, PartialEq)]
 struct PersistenceSnapshot {
     library_rows: i64,

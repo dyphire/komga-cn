@@ -636,7 +636,6 @@ pub(crate) async fn opds_v1_readlist_detail(
 }
 
 pub(crate) async fn opds_v1_series(
-    profile: RuntimeProfile,
     headers: HeaderMap,
     uri: Uri,
     database_file: &Path,
@@ -644,8 +643,6 @@ pub(crate) async fn opds_v1_series(
     if let Some(response) = require_auth(&headers) {
         return response;
     }
-
-    let _ = profile;
 
     let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
         return StatusCode::UNAUTHORIZED.into_response();

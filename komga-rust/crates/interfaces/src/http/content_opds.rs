@@ -41,22 +41,19 @@ pub(crate) use self::v1::*;
 pub(crate) use self::v2::*;
 
 pub(crate) async fn opds_manifest_route(
-    Extension(profile): Extension<RuntimeProfile>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
-    opds_manifest(profile, headers, auth_db.database_file.as_path(), &book_id).await
+    opds_manifest(headers, auth_db.database_file.as_path(), &book_id).await
 }
 
 pub(crate) async fn opds_manifest_profile_route(
-    Extension(profile): Extension<RuntimeProfile>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
     AxumPath((book_id, manifest_profile)): AxumPath<(String, String)>,
 ) -> Response {
     opds_manifest_with_profile(
-        profile,
         headers,
         auth_db.database_file.as_path(),
         &book_id,
@@ -77,12 +74,11 @@ pub(crate) async fn opds_catalog_route(
 }
 
 pub(crate) async fn opds_v1_series_route(
-    Extension(profile): Extension<RuntimeProfile>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    opds_v1_series(profile, headers, uri, auth_db.database_file.as_path()).await
+    opds_v1_series(headers, uri, auth_db.database_file.as_path()).await
 }
 
 pub(crate) async fn opds_v1_catalog_route(headers: HeaderMap) -> Response {

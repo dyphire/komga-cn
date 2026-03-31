@@ -248,7 +248,6 @@ pub(super) async fn opds_v2_latest_series_feed(
         )
         .as_str(),
         navigation,
-        None,
     )
 }
 
@@ -309,6 +308,5 @@ pub(super) async fn opds_v2_collections_feed(
         )
         .as_str(),
         navigation,
-        None,
     )
 }

@@ -123,16 +123,6 @@ pub(crate) fn media_profile_for_media_type(media_type: &str) -> &'static str {
     }
 }
 
-pub(crate) fn runtime_books_filters_match_runtime_shape(filters: &RuntimeBooksFilters) -> bool {
-    let _ = filters;
-    true
-}
-
-pub(crate) fn runtime_series_filters_match_runtime_shape(filters: &RuntimeSeriesFilters) -> bool {
-    let _ = filters;
-    true
-}
-
 pub(crate) fn series_matches_read_status(
     row: &PersistedSeriesSummary,
     read_progress: Option<(i64, i64)>,
