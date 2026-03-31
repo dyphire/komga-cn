@@ -14,9 +14,11 @@ komga-domain = { path = "../domain" }
 komga-application = { path = "../application" }
 komga-kepubify = { path = "../kepubify" }
 lopdf.workspace = true
+mime_guess.workspace = true
 oauth2.workspace = true
 quick-xml.workspace = true
 reqwest.workspace = true
+rust-embed.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

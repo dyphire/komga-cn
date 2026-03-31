@@ -26,6 +26,7 @@ ARG TARGETARCH
 ARG TARGETVARIANT
 WORKDIR /workspace
 COPY komga-rust ./komga-rust
+COPY --from=webui-builder /workspace/komga-webui/dist ./komga-webui/dist
 RUN --mount=type=cache,id=komga-rust-cargo-registry-${TARGETOS}-${TARGETARCH}${TARGETVARIANT},target=/usr/local/cargo/registry \
     --mount=type=cache,id=komga-rust-cargo-git-${TARGETOS}-${TARGETARCH}${TARGETVARIANT},target=/usr/local/cargo/git \
     --mount=type=cache,id=komga-rust-target-${TARGETOS}-${TARGETARCH}${TARGETVARIANT},target=/workspace/komga-rust/target \
@@ -34,10 +35,8 @@ RUN --mount=type=cache,id=komga-rust-cargo-registry-${TARGETOS}-${TARGETARCH}${T
 FROM --platform=$TARGETPLATFORM alpine:3.23 AS runner
 WORKDIR /app
 COPY --from=rust-builder /workspace/komga-rust/target/release/komga-rust ./komga-rust
-COPY --from=webui-builder /workspace/komga-webui/dist /usr/share/komga/public
 VOLUME /config
 ENV KOMGA_CONFIG_DIR="/config"
-ENV KOMGA_WEBUI_DIR="/usr/share/komga/public"
 ENV KOMGA_RUST_MODE="localdb"
 ENV KOMGA_RUST_PLATFORM_PROFILE="docker"
 ENV LOGGING_FILE_NAME="/config/logs/komga.log"

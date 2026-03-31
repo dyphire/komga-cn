@@ -23,7 +23,6 @@ pub struct PersistedServerSettings {
     pub server_context_path: Option<String>,
     pub kobo_proxy: bool,
     pub kobo_port: Option<u16>,
-    pub kepubify_path: Option<String>,
 }
 
 #[derive(Clone)]
@@ -307,11 +306,6 @@ fn default_test_backend() -> OperationalSettingsAccessBackend {
                         .get("KOBO_PORT")
                         .and_then(|value| value.as_deref())
                         .and_then(|value| value.trim().parse::<u16>().ok()),
-                    kepubify_path: persisted
-                        .get("KEPUBIFY_PATH")
-                        .and_then(|value| value.as_ref())
-                        .map(|value| value.trim().to_string())
-                        .filter(|value| !value.is_empty()),
                 })
             })
         }),

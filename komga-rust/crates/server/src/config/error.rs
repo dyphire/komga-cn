@@ -15,9 +15,6 @@ pub enum ConfigError {
         source: std::io::Error,
     },
     InvalidTempDirectory(PathBuf),
-    MissingWebUiAssetsLayout {
-        candidates: Vec<PathBuf>,
-    },
     MixedWriterStorageOwnership {
         details: String,
     },
@@ -56,15 +53,6 @@ impl std::fmt::Display for ConfigError {
                 f,
                 "invalid temp directory '{}': directory does not exist or is not a directory",
                 path.display(),
-            ),
-            Self::MissingWebUiAssetsLayout { candidates } => write!(
-                f,
-                "missing WebUI runtime assets layout: expected 'index.html' in one of [{}]",
-                candidates
-                    .iter()
-                    .map(|path| path.display().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", "),
             ),
             Self::MixedWriterStorageOwnership { details } => write!(
                 f,

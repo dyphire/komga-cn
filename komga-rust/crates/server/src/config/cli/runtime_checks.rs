@@ -11,7 +11,6 @@ pub(crate) fn ensure_startup_runtime_layout(config: &RuntimeConfig) -> Result<()
             &config.fonts_data_directory,
         )?;
     }
-    let _ = config.resolve_webui_assets_layout()?;
     validate_temp_directory()
 }
 
@@ -99,26 +98,4 @@ pub(crate) fn validate_single_writer_storage_ownership(
     }
 
     Ok(())
-}
-
-impl RuntimeConfig {
-    pub(crate) fn webui_layout_candidates(&self) -> Vec<PathBuf> {
-        let mut candidates = Vec::new();
-
-        if let Some(webui_dir) = self.webui_dir.as_ref() {
-            candidates.push(webui_dir.clone());
-        }
-
-        if let Some(config_dir) = self.config_dir.as_ref() {
-            let default_webui_path = config_dir.join(WEBUI_DIRECTORY_NAME);
-            if !candidates
-                .iter()
-                .any(|candidate| candidate == &default_webui_path)
-            {
-                candidates.push(default_webui_path);
-            }
-        }
-
-        candidates
-    }
 }

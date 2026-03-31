@@ -101,20 +101,4 @@ impl PlatformProfile {
             _ => None,
         }
     }
-
-    pub(super) fn default_kepubify_path(self) -> Option<PathBuf> {
-        match self {
-            Self::Docker => Some(PathBuf::from("/usr/bin/kepubify")),
-            Self::Mac => Some(PathBuf::from("kepubify")),
-            Self::Windows => Some(PathBuf::from("kepubify.exe")),
-            Self::Default => None,
-        }
-    }
-
-    pub(super) fn default_webui_directory(self) -> Option<PathBuf> {
-        match self {
-            Self::Docker => Some(PathBuf::from("/usr/share/komga/public")),
-            Self::Default | Self::Mac | Self::Windows => None,
-        }
-    }
 }

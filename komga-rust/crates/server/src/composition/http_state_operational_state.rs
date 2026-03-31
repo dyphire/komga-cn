@@ -21,9 +21,7 @@ pub(super) fn compose_operational_state(
             config_dir: config.config_dir.clone(),
             bind_address: config.bind_address,
             server_context_path: config.server_context_path.clone(),
-            kepubify_path: config.kepubify_path.clone(),
         },
-        webui_assets_root: config.discover_webui_assets_layout(),
         settings_store: Arc::new(
             http_state_operational_access::compose_server_settings_store(
                 config.database_file.as_path(),

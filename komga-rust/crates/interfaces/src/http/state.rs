@@ -38,7 +38,6 @@ pub struct RuntimeState {
     pub config_dir: Option<PathBuf>,
     pub bind_address: SocketAddr,
     pub server_context_path: Option<String>,
-    pub kepubify_path: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -133,7 +132,6 @@ pub struct LibraryCatalogOperations {
 #[derive(Clone)]
 pub struct OperationalState {
     pub runtime: RuntimeState,
-    pub webui_assets_root: Option<PathBuf>,
     pub settings_store: Arc<ServerSettingsStore>,
     pub oauth2_clients: Arc<Vec<OAuth2ClientConfig>>,
     pub enqueue_task_records: EnqueueTaskRecords,
@@ -176,7 +174,6 @@ pub struct OperationalSettings {
     pub server_context_path: Option<String>,
     pub kobo_proxy: bool,
     pub kobo_port: Option<u16>,
-    pub kepubify_path: Option<String>,
 }
 
 impl OperationalSettings {
@@ -192,7 +189,6 @@ impl OperationalSettings {
             server_context_path: None,
             kobo_proxy: false,
             kobo_port: None,
-            kepubify_path: None,
         }
     }
 }

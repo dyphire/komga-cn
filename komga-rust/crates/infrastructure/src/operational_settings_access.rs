@@ -31,7 +31,6 @@ pub struct PersistedServerSettings {
     pub server_context_path: Option<String>,
     pub kobo_proxy: bool,
     pub kobo_port: Option<u16>,
-    pub kepubify_path: Option<String>,
 }
 
 struct PersistedHistoricalEvent {
@@ -90,7 +89,6 @@ pub async fn load_server_settings(
         server_context_path: parse_string(persisted.get("SERVER_CONTEXT_PATH")),
         kobo_proxy: parse_bool(persisted.get("KOBO_PROXY"), false),
         kobo_port: parse_u16(persisted.get("KOBO_PORT")),
-        kepubify_path: parse_non_blank_string(persisted.get("KEPUBIFY_PATH")),
     })
 }
 

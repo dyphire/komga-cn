@@ -10,6 +10,8 @@ mod settings;
 mod sse;
 #[path = "operational/webui.rs"]
 mod webui;
+#[path = "operational/webui_assets.rs"]
+mod webui_assets;
 
 pub(super) use actuator::{
     actuator_health, actuator_info, actuator_logfile, actuator_metric_detail,
@@ -29,3 +31,4 @@ pub(super) use settings::{
 };
 pub(super) use sse::sse_events;
 pub(super) use webui::{webui_asset, webui_entrypoint};
+pub use webui_assets::WebUiAssets;

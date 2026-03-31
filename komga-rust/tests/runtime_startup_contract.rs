@@ -75,7 +75,6 @@ komga:
     assert_eq!(config.tasks_db_file, file_root.join("tasks.sqlite"),);
     assert_eq!(config.lucene_data_directory, file_root.join("lucene"),);
     assert_eq!(config.fonts_data_directory, file_root.join("fonts"),);
-    assert_eq!(config.kepubify_path, Some(file_root.join("kepubify")),);
     assert_eq!(config.log_file, file_root.join("logs").join("komga.log"));
 }
 
@@ -212,13 +211,9 @@ server.port=28123\n",
 }
 
 #[test]
-fn startup_webui_layout_resolves_default_public_directory_with_index() {
-    let config_dir = unique_temp_dir("komga-runtime-webui-layout");
+fn startup_config_resolution_does_not_require_runtime_public_directory() {
+    let config_dir = unique_temp_dir("komga-runtime-no-public-needed");
     fs::create_dir_all(&config_dir).expect("test config directory should be created");
-    let public_dir = config_dir.join("public");
-    fs::create_dir_all(&public_dir).expect("public directory should be created");
-    fs::write(public_dir.join("index.html"), "<html>isolated-index</html>")
-        .expect("index.html should be written");
 
     let mut env = BTreeMap::new();
     env.insert(
@@ -230,17 +225,23 @@ fn startup_webui_layout_resolves_default_public_directory_with_index() {
         &komga_rust::config::RuntimeCli::default(),
         &env,
     )
-    .expect("runtime config should resolve");
+    .expect("runtime config should resolve without runtime public directory");
 
-    let webui_root = config
-        .resolve_webui_assets_layout()
-        .expect("startup should resolve public layout when index exists");
-    assert_eq!(webui_root, public_dir);
+    assert!(
+        !config_dir.join("public").exists(),
+        "test contract should not create or require a runtime public directory",
+    );
+    assert_eq!(config.config_dir.as_deref(), Some(config_dir.as_path()));
+    assert_eq!(config.database_file, config_dir.join("database.sqlite"));
+    assert_eq!(config.tasks_db_file, config_dir.join("tasks.sqlite"));
+    assert_eq!(config.lucene_data_directory, config_dir.join("lucene"));
+    assert_eq!(config.fonts_data_directory, config_dir.join("fonts"));
+    assert_eq!(config.log_file, config_dir.join("logs").join("komga.log"));
 }
 
 #[test]
-fn startup_webui_layout_fails_closed_when_default_public_layout_missing() {
-    let config_dir = unique_temp_dir("komga-runtime-webui-layout-missing");
+fn obsolete_webui_env_var_is_silently_ignored_during_startup_resolution() {
+    let config_dir = unique_temp_dir("komga-runtime-ignored-webui-env");
     fs::create_dir_all(&config_dir).expect("test config directory should be created");
 
     let mut env = BTreeMap::new();
@@ -248,22 +249,19 @@ fn startup_webui_layout_fails_closed_when_default_public_layout_missing() {
         "KOMGA_CONFIG_DIR".to_string(),
         config_dir.to_string_lossy().to_string(),
     );
+    env.insert(
+        "KOMGA_WEBUI_DIR".to_string(),
+        "/tmp/ignored-webui".to_string(),
+    );
 
     let config = komga_rust::config::RuntimeConfig::resolve_with_env(
         &komga_rust::config::RuntimeCli::default(),
         &env,
     )
-    .expect("runtime config should resolve");
+    .expect("obsolete WebUI env var should be ignored, not rejected");
 
-    let error = config
-        .resolve_webui_assets_layout()
-        .expect_err("startup must fail closed when no public/index.html layout exists");
-    assert!(
-        error
-            .to_string()
-            .contains("missing WebUI runtime assets layout"),
-        "startup error should deterministically explain missing WebUI layout: {error}",
-    );
+    assert_eq!(config.config_dir.as_deref(), Some(config_dir.as_path()));
+    assert_eq!(config.database_file, config_dir.join("database.sqlite"));
 }
 
 #[test]

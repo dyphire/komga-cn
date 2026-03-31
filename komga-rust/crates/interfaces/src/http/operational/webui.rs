@@ -3,51 +3,50 @@ use axum::extract::Path as AxumPath;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use super::super::OperationalState;
+use super::{super::OperationalState, WebUiAssets};
 
-pub(crate) async fn webui_entrypoint(Extension(state): Extension<OperationalState>) -> Response {
-    serve_webui_asset(&state, "")
+pub(crate) async fn webui_entrypoint(Extension(_state): Extension<OperationalState>) -> Response {
+    serve_webui_asset("")
 }
 
 pub(crate) async fn webui_asset(
     AxumPath(webui_path): AxumPath<String>,
-    Extension(state): Extension<OperationalState>,
+    Extension(_state): Extension<OperationalState>,
 ) -> Response {
     if is_runtime_owned_prefix(webui_path.as_str()) {
         return StatusCode::NOT_FOUND.into_response();
     }
-    serve_webui_asset(&state, webui_path.as_str())
+    serve_webui_asset(webui_path.as_str())
 }
 
-fn serve_webui_asset(state: &OperationalState, webui_path: &str) -> Response {
-    let Some(root) = state.webui_assets_root.as_ref() else {
+fn serve_webui_asset(webui_path: &str) -> Response {
+    let Some(asset_path) = resolve_embedded_asset_path(webui_path) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let Some(asset) = WebUiAssets::get(asset_path.as_str()) else {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             [(header::CONTENT_TYPE, "application/json")],
             axum::Json(json!({
-                "message": "webui assets layout was not resolved at startup",
+                "message": format!("embedded webui asset missing: {asset_path}"),
             })),
         )
             .into_response();
     };
 
-    let Some(asset_file) = resolve_asset_file(root.as_path(), webui_path) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    let Ok(bytes) = std::fs::read(asset_file.as_path()) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
     (
-        [(header::CONTENT_TYPE, content_type_for(asset_file.as_path()))],
-        bytes,
+        [(
+            header::CONTENT_TYPE,
+            content_type_for(Path::new(asset_path.as_str())),
+        )],
+        asset.data,
     )
         .into_response()
 }
 
-fn resolve_asset_file(root: &Path, webui_path: &str) -> Option<PathBuf> {
+fn resolve_embedded_asset_path(webui_path: &str) -> Option<String> {
     let normalized = webui_path.trim_matches('/');
     if normalized
         .split('/')
@@ -57,19 +56,18 @@ fn resolve_asset_file(root: &Path, webui_path: &str) -> Option<PathBuf> {
     }
 
     if normalized.is_empty() {
-        return Some(root.join("index.html"));
+        return Some("index.html".to_string());
     }
 
-    let candidate = root.join(normalized);
     if is_index_html_candidate(normalized) {
-        if candidate.is_file() {
-            return Some(candidate);
+        if WebUiAssets::get(normalized).is_some() {
+            return Some(normalized.to_string());
         }
-        return Some(root.join("index.html"));
+        return Some("index.html".to_string());
     }
 
-    if candidate.is_file() {
-        Some(candidate)
+    if WebUiAssets::get(normalized).is_some() {
+        Some(normalized.to_string())
     } else {
         None
     }
@@ -102,54 +100,97 @@ fn is_runtime_owned_prefix(path: &str) -> bool {
         || normalized.starts_with("login/oauth2/")
 }
 
-fn content_type_for(path: &Path) -> &'static str {
-    match path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(|extension| extension.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("html") => "text/html; charset=utf-8",
-        Some("js") => "application/javascript; charset=utf-8",
-        Some("css") => "text/css; charset=utf-8",
-        Some("json") => "application/json; charset=utf-8",
-        Some("svg") => "image/svg+xml",
-        Some("png") => "image/png",
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("gif") => "image/gif",
-        Some("ico") => "image/x-icon",
-        Some("woff") => "font/woff",
-        Some("woff2") => "font/woff2",
-        Some("ttf") => "font/ttf",
-        _ => "application/octet-stream",
-    }
+fn content_type_for(path: &Path) -> String {
+    mime_guess::from_path(path)
+        .first_or_octet_stream()
+        .essence_str()
+        .to_string()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{is_runtime_owned_prefix, resolve_asset_file};
-    use std::fs;
-    use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use super::{
+        WebUiAssets, content_type_for, is_runtime_owned_prefix, resolve_embedded_asset_path,
+        serve_webui_asset,
+    };
+    use axum::body::to_bytes;
+    use axum::http::{StatusCode, header};
+    use std::path::Path;
 
-    fn unique_temp_dir(prefix: &str) -> PathBuf {
-        let millis = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock should be after unix epoch")
-            .as_millis();
-        std::env::temp_dir().join(format!("{prefix}-{millis}"))
+    #[tokio::test]
+    async fn webui_entrypoint_serves_embedded_index_html() {
+        let response = serve_webui_asset("");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            content_type_for(Path::new("index.html")).as_str(),
+        );
+
+        let response_body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("webui entrypoint body should be readable");
+        let index_html = WebUiAssets::get("index.html").expect("embedded index.html should exist");
+
+        assert_eq!(response_body.as_ref(), index_html.data.as_ref());
+    }
+
+    #[tokio::test]
+    async fn extensionless_spa_routes_fall_back_to_embedded_index_html() {
+        let response = serve_webui_asset("series/123");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            content_type_for(Path::new("index.html")).as_str(),
+        );
+
+        let response_body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("spa fallback body should be readable");
+        let index_html = WebUiAssets::get("index.html").expect("embedded index.html should exist");
+
+        assert_eq!(response_body.as_ref(), index_html.data.as_ref());
+    }
+
+    #[tokio::test]
+    async fn root_level_embedded_assets_are_served_from_embed_storage() {
+        for asset_path in ["manifest.json", "android-chrome-192x192.png"] {
+            let response = serve_webui_asset(asset_path);
+
+            assert_eq!(
+                response.status(),
+                StatusCode::OK,
+                "{asset_path} should be served"
+            );
+            assert_eq!(
+                response.headers().get(header::CONTENT_TYPE).unwrap(),
+                content_type_for(Path::new(asset_path)).as_str(),
+                "{asset_path} should use mime_guess content type",
+            );
+
+            let response_body = to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("embedded asset body should be readable");
+            let embedded_asset =
+                WebUiAssets::get(asset_path).expect("embedded asset should exist in rust-embed");
+
+            assert_eq!(response_body.as_ref(), embedded_asset.data.as_ref());
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_extensionful_assets_return_not_found() {
+        let response = serve_webui_asset("missing.js");
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[test]
-    fn resolve_asset_file_rejects_hidden_nested_prefix_stripping_for_static_assets() {
-        let root = unique_temp_dir("komga-webui-asset-resolution");
-        let js_dir = root.join("js");
-        fs::create_dir_all(&js_dir).expect("js directory should be created");
-        fs::write(js_dir.join("app.js"), "console.log('ok')")
-            .expect("asset file should be created");
-
-        let resolved = resolve_asset_file(root.as_path(), "library/1/js/app.js");
-        assert_eq!(resolved, None);
+    fn resolve_embedded_asset_path_rejects_traversal_and_hidden_nested_prefix_stripping() {
+        assert_eq!(resolve_embedded_asset_path("../index.html"), None);
+        assert_eq!(resolve_embedded_asset_path("folder\\index.html"), None);
+        assert_eq!(resolve_embedded_asset_path("library/1/js/app.js"), None);
     }
 
     #[test]
@@ -161,6 +202,14 @@ mod tests {
         assert!(
             is_runtime_owned_prefix("login/oauth2/code/provider-a"),
             "runtime must continue reserving /login/oauth2/code/{{id}} callback endpoint ownership",
+        );
+    }
+
+    #[test]
+    fn content_type_for_uses_octet_stream_fallback_for_unknown_extensions() {
+        assert_eq!(
+            content_type_for(Path::new("asset.unknown-extension")),
+            "application/octet-stream",
         );
     }
 }

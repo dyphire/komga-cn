@@ -1,7 +1,7 @@
-use axum::Json;
-use axum::http::{StatusCode, header};
+use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
-use serde_json::{Value, json};
+use axum::Json;
+use serde_json::{json, Value};
 
 use super::super::OperationalSettings;
 use super::super::RuntimeState;
@@ -48,18 +48,6 @@ pub(super) fn effective_server_context_path(
         .clone()
         .or_else(|| runtime.server_context_path.clone())
         .unwrap_or_default()
-}
-
-pub(super) fn effective_kepubify_path(
-    runtime: &RuntimeState,
-    settings: &OperationalSettings,
-) -> Option<String> {
-    settings.kepubify_path.clone().or_else(|| {
-        runtime
-            .kepubify_path
-            .as_ref()
-            .map(|path| path.to_string_lossy().to_string())
-    })
 }
 
 pub(super) fn invalid_settings_payload(message: &str) -> Response {

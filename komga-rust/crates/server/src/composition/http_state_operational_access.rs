@@ -529,11 +529,6 @@ pub(super) fn compose_operational_settings_access_backend() -> OperationalSettin
                         .get("KOBO_PORT")
                         .and_then(|value| value.as_deref())
                         .and_then(|value| value.trim().parse::<u16>().ok()),
-                    kepubify_path: persisted
-                        .get("KEPUBIFY_PATH")
-                        .and_then(|value| value.as_ref())
-                        .map(|value| value.trim().to_string())
-                        .filter(|value| !value.is_empty()),
                 })
             })
         }),

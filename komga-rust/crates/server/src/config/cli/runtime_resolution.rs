@@ -66,46 +66,6 @@ pub(crate) fn resolve_with_env(
     let derived_paths =
         resolve_derived_runtime_paths(cli, env, &layered, &resolved_config_dir, platform_profile);
 
-    let webui_dir = cli
-        .webui_dir
-        .as_ref()
-        .map(path_to_string)
-        .or_else(|| {
-            preferred_string(None, env.get(WEBUI_DIRECTORY_ENV).map(String::as_str))
-                .map(str::to_string)
-        })
-        .or_else(|| {
-            read_string(
-                &layered,
-                &[
-                    "komga.webui.directory",
-                    "komga.webui.dir",
-                    "komga.webui.path",
-                ],
-            )
-        })
-        .map(|value| PathBuf::from(expand_path_placeholders(&value, &resolved_config_dir, env)))
-        .or_else(|| platform_profile.default_webui_directory());
-
-    let kepubify_path = cli
-        .kepubify_path
-        .as_ref()
-        .map(path_to_string)
-        .or_else(|| env.get(KEPUBIFY_PATH_ENV).cloned())
-        .or_else(|| env.get(KOBO_KEPUBIFY_PATH_ENV).cloned())
-        .or_else(|| {
-            read_string(
-                &layered,
-                &[
-                    "komga.kobo.kepubify-path",
-                    "komga.kobo.kepubify.path",
-                    "komga.kobo.kepubifypath",
-                ],
-            )
-        })
-        .map(|value| PathBuf::from(expand_path_placeholders(&value, &resolved_config_dir, env)))
-        .or_else(|| platform_profile.default_kepubify_path());
-
     let oauth2_clients = resolve_oauth2_clients_for_startup_slice(&layered, env);
 
     let writer_ownership_policy = resolve_writer_ownership_policy_for_startup_slice(cli, env)?;
@@ -122,8 +82,6 @@ pub(crate) fn resolve_with_env(
         tasks_db_file: derived_paths.tasks_db_file,
         lucene_data_directory: derived_paths.lucene_data_directory,
         fonts_data_directory: derived_paths.fonts_data_directory,
-        kepubify_path,
-        webui_dir,
         oauth2_clients,
         writer_ownership_policy,
     };

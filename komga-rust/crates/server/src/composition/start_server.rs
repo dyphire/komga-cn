@@ -30,9 +30,6 @@ pub async fn serve_with_config(
     listener: TcpListener,
     config: RuntimeConfig,
 ) -> std::io::Result<()> {
-    config.resolve_webui_assets_layout().map_err(|error| {
-        std::io::Error::other(format!("webui startup layout check failed: {error}"))
-    })?;
     let has_existing_search_index = config.lucene_data_directory.join("meta.json").exists();
     let mut startup_search_task = if has_existing_search_index {
         Some("UPGRADE_INDEX")

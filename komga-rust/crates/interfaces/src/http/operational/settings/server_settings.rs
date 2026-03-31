@@ -7,8 +7,8 @@ use serde_json::{Value, json};
 
 use crate::http::identity_access::auth::require_admin;
 use crate::http::operational::helpers::{
-    effective_kepubify_path, effective_server_context_path, effective_server_port,
-    invalid_settings_payload, is_valid_context_path, multi_source_number, multi_source_string,
+    effective_server_context_path, effective_server_port, invalid_settings_payload,
+    is_valid_context_path, multi_source_number, multi_source_string,
 };
 use crate::http::state::OperationalSettings;
 use crate::operational_settings_access::server_settings as server_settings_access;
@@ -249,20 +249,6 @@ pub(crate) async fn update_server_settings(
         ));
     }
 
-    if payload.get("kepubifyPath").is_some() {
-        match payload.get("kepubifyPath") {
-            Some(Value::Null) => settings.kepubify_path = None,
-            Some(value) => {
-                let Some(value) = value.as_str() else {
-                    return invalid_settings_payload("kepubifyPath must be a string or null");
-                };
-                settings.kepubify_path = Some(value.to_string());
-            }
-            None => {}
-        }
-        persistence_changes.push(("KEPUBIFY_PATH".to_string(), settings.kepubify_path.clone()));
-    }
-
     if let Err(error) = server_settings_access::apply_server_settings_changes(
         state.settings_store.as_ref(),
         &persistence_changes,
@@ -303,7 +289,6 @@ fn operational_settings_from_persisted(
     operational.server_context_path = settings.server_context_path;
     operational.kobo_proxy = settings.kobo_proxy;
     operational.kobo_port = settings.kobo_port;
-    operational.kepubify_path = settings.kepubify_path;
     operational
 }
 
@@ -326,11 +311,6 @@ fn settings_json(runtime: &crate::http::RuntimeState, settings: &OperationalSett
         ),
         "koboProxy": settings.kobo_proxy,
         "koboPort": settings.kobo_port,
-        "kepubifyPath": multi_source_string(
-            runtime.kepubify_path.as_ref().and_then(|path| path.to_str()),
-            settings.kepubify_path.as_deref(),
-            effective_kepubify_path(runtime, settings),
-        ),
     })
 }
 

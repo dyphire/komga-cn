@@ -3,10 +3,10 @@ use std::env;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use super::cli_args::{DEFAULT_BIND_ADDRESS, WEBUI_ENTRYPOINT};
+use super::cli_args::DEFAULT_BIND_ADDRESS;
 use super::error::ConfigError;
 use super::path_resolution::{default_log_file_for_config_dir, resolve_runtime_config_with_env};
-use super::profile::{DEFAULT_CONFIG_DIR, PlatformProfile, RuntimeMode, RuntimeProfile};
+use super::profile::{PlatformProfile, RuntimeMode, RuntimeProfile, DEFAULT_CONFIG_DIR};
 use super::startup_policy::{
     ensure_startup_runtime_layout, validate_single_writer_storage_ownership,
 };
@@ -35,8 +35,6 @@ pub struct RuntimeConfig {
     pub tasks_db_file: PathBuf,
     pub lucene_data_directory: PathBuf,
     pub fonts_data_directory: PathBuf,
-    pub kepubify_path: Option<PathBuf>,
-    pub webui_dir: Option<PathBuf>,
     pub oauth2_clients: Vec<OAuth2ClientConfig>,
     pub writer_ownership_policy: WriterOwnershipPolicy,
 }
@@ -76,27 +74,12 @@ impl RuntimeConfig {
             tasks_db_file: config_dir.join("tasks.sqlite"),
             lucene_data_directory: config_dir.join("lucene"),
             fonts_data_directory: config_dir.join("fonts"),
-            kepubify_path: None,
-            webui_dir: None,
             oauth2_clients: vec![],
             writer_ownership_policy: WriterOwnershipPolicy {
                 isolation_root: None,
                 allow_isolated_writes: false,
             },
         }
-    }
-
-    pub fn discover_webui_assets_layout(&self) -> Option<PathBuf> {
-        self.webui_layout_candidates()
-            .into_iter()
-            .find(|candidate| candidate.join(WEBUI_ENTRYPOINT).is_file())
-    }
-
-    pub fn resolve_webui_assets_layout(&self) -> Result<PathBuf, ConfigError> {
-        self.discover_webui_assets_layout()
-            .ok_or_else(|| ConfigError::MissingWebUiAssetsLayout {
-                candidates: self.webui_layout_candidates(),
-            })
     }
 
     pub(crate) fn validate_single_writer_storage_ownership(
