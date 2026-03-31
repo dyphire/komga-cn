@@ -86,16 +86,8 @@ pub async fn koreader_get_progress(
             document: book_hash,
             percentage,
             progress: progress_value,
-            device: if progress.device_name.is_empty() {
-                "KOReader".to_string()
-            } else {
-                progress.device_name
-            },
-            device_id: if progress.device_id.is_empty() {
-                "koreader-device".to_string()
-            } else {
-                progress.device_id
-            },
+            device: progress.device_name,
+            device_id: progress.device_id,
         }),
     )
         .into_response()

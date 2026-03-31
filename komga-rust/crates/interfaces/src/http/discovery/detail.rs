@@ -20,7 +20,7 @@ use crate::http::discovery_auth::{
 };
 use crate::http::helpers::{
     apply_persisted_diagnostics, detail_access_denial_response, mark_persisted_owned,
-    mark_runtime_owned, query_bool, query_has_key, query_value, query_values, restricted_book_url,
+    mark_runtime_owned, query_bool, query_value, query_values, restricted_book_url,
 };
 use crate::http::identity_access::auth::{require_admin, require_auth};
 use crate::http::state::AuthDatabaseState;

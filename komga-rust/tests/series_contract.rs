@@ -2170,6 +2170,43 @@ async fn router_discovery_series_detail_id_bridge_preserves_real_library_id() {
 }
 
 #[tokio::test]
+async fn router_discovery_series_detail_accepts_oneshot_true_with_extra_query_parameters() {
+    let paths = new_router_fixture("router-discovery-series-detail-oneshot-query-shape").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/series/series-1?oneshot=true&extra=ignored")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("series detail oneshot query request should build"),
+        )
+        .await
+        .expect("series detail oneshot query request should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        response
+            .headers()
+            .get("x-komga-runtime-search-ownership")
+            .is_none(),
+        "accepted oneshot=true detail requests should not be marked persisted-owned",
+    );
+
+    let payload = response_json(response).await;
+    assert!(
+        payload.get("_diagnostics").is_none(),
+        "accepted oneshot=true detail requests should not emit unsupported diagnostics",
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_discovery_series_metadata_update_refreshes_series_last_modified() {
     let paths = new_router_fixture("router-discovery-series-metadata-refresh").await;
     seed_router_contract_data(&paths).await;

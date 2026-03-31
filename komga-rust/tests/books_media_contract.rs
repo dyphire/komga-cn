@@ -2813,6 +2813,35 @@ async fn router_koreader_progress_put_then_get_roundtrip() {
 }
 
 #[tokio::test]
+async fn router_koreader_progress_get_preserves_empty_device_fields() {
+    let paths = new_router_fixture("router-koreader-progress-empty-device").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_read_progress(&paths, false).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/koreader/syncs/progress/hash-book-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("koreader progress get request should build"),
+        )
+        .await
+        .expect("koreader progress get request should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let payload = response_json(response).await;
+    assert_eq!(payload.get("device"), Some(&Value::String(String::new())));
+    assert_eq!(payload.get("device_id"), Some(&Value::String(String::new())));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_discovery_book_detail_includes_persisted_authors_tags_and_read_progress() {
     let paths = new_router_fixture("router-discovery-book-detail-persisted-metadata").await;
     seed_router_contract_data(&paths).await;

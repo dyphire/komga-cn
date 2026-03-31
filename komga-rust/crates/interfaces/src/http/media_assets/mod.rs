@@ -7,8 +7,13 @@ use axum::extract::{Extension, Path, Query};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use image::ImageFormat;
+use sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::fmt::Write as _;
+use std::time::{SystemTime, UNIX_EPOCH};
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc2822;
 
 use crate::http::discovery::{resolve_book_id_for_persisted, resolve_series_id_for_persisted};
 use crate::http::discovery_auth::principal_from_user_payload;
@@ -23,9 +28,7 @@ use crate::http::state::RuntimeProfile;
 use crate::media_assets_runtime_access::*;
 use komga_application::task_processing::TaskQueueRecord;
 
-use super::super::{
-    CACHE_CONTROL_PRIVATE, LAST_MODIFIED, OperationalState, ReadProgressState, THUMBNAIL_ETAG,
-};
+use super::super::{CACHE_CONTROL_PRIVATE, OperationalState, ReadProgressState};
 use super::helpers::{
     invalid_progression_payload, invalid_read_progress_payload, mark_runtime_owned,
     method_not_allowed_json_response, set_read_progress,
@@ -96,6 +99,101 @@ fn enqueue_task_records(
 
     let mut response = StatusCode::ACCEPTED.into_response();
     mark_runtime_owned(&mut response);
+    response
+}
+
+fn asset_etag(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        let _ = write!(&mut hex, "{byte:02x}");
+    }
+    format!("\"{hex}\"")
+}
+
+fn format_http_date(time: SystemTime) -> Option<String> {
+    let duration = time.duration_since(UNIX_EPOCH).ok()?;
+    let timestamp = i64::try_from(duration.as_secs()).ok()?;
+    OffsetDateTime::from_unix_timestamp(timestamp)
+        .ok()?
+        .format(&Rfc2822)
+        .ok()
+}
+
+fn file_last_modified_header_value(path: &FsPath) -> Option<String> {
+    let metadata = std::fs::metadata(path).ok()?;
+    let modified = metadata.modified().ok()?;
+    format_http_date(modified)
+}
+
+fn if_none_match_matches(headers: &HeaderMap, expected_etag: &str) -> bool {
+    headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .any(|candidate| candidate == "*" || candidate == expected_etag)
+        })
+        .unwrap_or(false)
+}
+
+fn if_modified_since_matches(headers: &HeaderMap, expected_last_modified: &str) -> bool {
+    let Some(expected) = OffsetDateTime::parse(expected_last_modified, &Rfc2822).ok() else {
+        return false;
+    };
+
+    headers
+        .get(header::IF_MODIFIED_SINCE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| OffsetDateTime::parse(value, &Rfc2822).ok())
+        .is_some_and(|value| value >= expected)
+}
+
+fn asset_not_modified_response(etag: Option<&str>, last_modified: Option<&str>) -> Response {
+    let mut response = StatusCode::NOT_MODIFIED.into_response();
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static(CACHE_CONTROL_PRIVATE),
+    );
+    if let Some(last_modified) = last_modified
+        && let Ok(value) = HeaderValue::from_str(last_modified)
+    {
+        response.headers_mut().insert(header::LAST_MODIFIED, value);
+    }
+    if let Some(etag) = etag
+        && let Ok(value) = HeaderValue::from_str(etag)
+    {
+        response.headers_mut().insert(header::ETAG, value);
+    }
+    response
+}
+
+fn asset_ok_response(
+    content_type: &str,
+    bytes: Vec<u8>,
+    etag: Option<&str>,
+    last_modified: Option<&str>,
+) -> Response {
+    let mut response = (StatusCode::OK, bytes).into_response();
+    if let Ok(value) = HeaderValue::from_str(content_type) {
+        response.headers_mut().insert(header::CONTENT_TYPE, value);
+    }
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static(CACHE_CONTROL_PRIVATE),
+    );
+    if let Some(last_modified) = last_modified
+        && let Ok(value) = HeaderValue::from_str(last_modified)
+    {
+        response.headers_mut().insert(header::LAST_MODIFIED, value);
+    }
+    if let Some(etag) = etag
+        && let Ok(value) = HeaderValue::from_str(etag)
+    {
+        response.headers_mut().insert(header::ETAG, value);
+    }
     response
 }
 
@@ -207,6 +305,43 @@ mod tests {
             page_count: 0,
         };
         assert!(book_media_supports_page_api(&pdf_media));
+    }
+
+    #[test]
+    fn if_modified_since_uses_http_date_ordering() {
+        let resource_time = UNIX_EPOCH + std::time::Duration::from_secs(10);
+        let expected_last_modified =
+            format_http_date(resource_time).expect("resource date should format as HTTP date");
+
+        let mut newer_headers = HeaderMap::new();
+        newer_headers.insert(
+            header::IF_MODIFIED_SINCE,
+            HeaderValue::from_str(
+                format_http_date(UNIX_EPOCH + std::time::Duration::from_secs(20))
+                    .expect("newer header date should format as HTTP date")
+                    .as_str(),
+            )
+                .expect("if-modified-since header should be valid"),
+        );
+        assert!(if_modified_since_matches(
+            &newer_headers,
+            expected_last_modified.as_str(),
+        ));
+
+        let mut older_headers = HeaderMap::new();
+        older_headers.insert(
+            header::IF_MODIFIED_SINCE,
+            HeaderValue::from_str(
+                format_http_date(UNIX_EPOCH + std::time::Duration::from_secs(5))
+                    .expect("older header date should format as HTTP date")
+                    .as_str(),
+            )
+                .expect("if-modified-since header should be valid"),
+        );
+        assert!(!if_modified_since_matches(
+            &older_headers,
+            expected_last_modified.as_str(),
+        ));
     }
 
     #[test]

@@ -43,7 +43,5 @@ pub use runtime_identity_access::{
 pub use http::state::{AuthDatabaseState, OperationalState, ReadProgress, ReadProgressState};
 
 pub const CACHE_CONTROL_PRIVATE: &str = "max-age=0, must-revalidate, private";
-pub const LAST_MODIFIED: &str = "Mon, 01 Jan 2024 22:04:05 GMT";
-pub const THUMBNAIL_ETAG: &str = "\"048bbf960d13687d84948688ab74aaa59\"";
 pub const SEARCH_OWNERSHIP_HEADER: &str = "x-komga-runtime-search-ownership";
 pub const PERSISTED_OWNERSHIP_MARKER: &str = "persisted-owned-writer";

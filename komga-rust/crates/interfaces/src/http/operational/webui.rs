@@ -37,13 +37,35 @@ fn serve_webui_asset(webui_path: &str) -> Response {
     };
 
     (
-        [(
-            header::CONTENT_TYPE,
-            content_type_for(Path::new(asset_path.as_str())),
-        )],
+        [
+            (
+                header::CONTENT_TYPE,
+                content_type_for(Path::new(asset_path.as_str())),
+            ),
+            (
+                header::CACHE_CONTROL,
+                cache_control_for(asset_path.as_str()).to_string(),
+            ),
+        ],
         asset.data,
     )
         .into_response()
+}
+
+fn cache_control_for(asset_path: &str) -> &'static str {
+    match asset_path {
+        "index.html"
+        | "favicon.ico"
+        | "favicon-16x16.png"
+        | "favicon-32x32.png"
+        | "mstile-144x144.png"
+        | "apple-touch-icon.png"
+        | "apple-touch-icon-180x180.png"
+        | "android-chrome-192x192.png"
+        | "android-chrome-512x512.png"
+        | "manifest.json" => "no-store",
+        _ => "max-age=31536000, public",
+    }
 }
 
 fn resolve_embedded_asset_path(webui_path: &str) -> Option<String> {
@@ -177,6 +199,40 @@ mod tests {
 
             assert_eq!(response_body.as_ref(), embedded_asset.data.as_ref());
         }
+    }
+
+    #[tokio::test]
+    async fn html_entry_assets_are_served_with_no_store_cache_control() {
+        for asset_path in ["", "index.html", "manifest.json"] {
+            let response = serve_webui_asset(asset_path);
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response
+                    .headers()
+                    .get(header::CACHE_CONTROL)
+                    .and_then(|value| value.to_str().ok()),
+                Some("no-store"),
+                "{asset_path:?} should disable caching like Kotlin entry resources",
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn versioned_static_assets_are_served_with_long_lived_public_cache_control() {
+        let static_asset = WebUiAssets::iter()
+            .find(|path| path.contains('/'))
+            .expect("embedded webui should expose at least one nested static asset");
+
+        let response = serve_webui_asset(static_asset.as_ref());
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CACHE_CONTROL)
+                .and_then(|value| value.to_str().ok()),
+            Some("max-age=31536000, public"),
+            "nested hashed static assets should be cacheable long-term",
+        );
     }
 
     #[tokio::test]

@@ -73,16 +73,19 @@ pub async fn book_page(
             if let Some(bytes) =
                 read_pdf_page_as_single_page_pdf(&media, requested_page_number as u64)
             {
-                return (
-                    StatusCode::OK,
-                    [
-                        (header::CONTENT_TYPE, "application/pdf"),
-                        (header::LAST_MODIFIED, LAST_MODIFIED),
-                        (header::CACHE_CONTROL, CACHE_CONTROL_PRIVATE),
-                    ],
+                let last_modified = file_last_modified_header_value(media.file_path.as_path());
+                if let Some(last_modified) = last_modified.as_deref()
+                    && if_modified_since_matches(&headers, last_modified)
+                {
+                    return asset_not_modified_response(None, Some(last_modified));
+                }
+
+                return asset_ok_response(
+                    "application/pdf",
                     bytes,
-                )
-                    .into_response();
+                    None,
+                    last_modified.as_deref(),
+                );
             }
             return StatusCode::NOT_FOUND.into_response();
         }
@@ -127,21 +130,6 @@ pub async fn book_page(
                 page_row.media_type
             };
 
-            if headers
-                .get(header::IF_MODIFIED_SINCE)
-                .and_then(|value| value.to_str().ok())
-                == Some(LAST_MODIFIED)
-            {
-                return (
-                    StatusCode::NOT_MODIFIED,
-                    [
-                        (header::LAST_MODIFIED, LAST_MODIFIED),
-                        (header::CACHE_CONTROL, CACHE_CONTROL_PRIVATE),
-                    ],
-                )
-                    .into_response();
-            }
-
             let mut effective_content_type = content_type;
             if let Some(requested_convert) = requested_convert {
                 let target_content_type = match requested_convert {
@@ -161,16 +149,19 @@ pub async fn book_page(
                 effective_content_type = target_content_type.to_string();
             }
 
-            return (
-                StatusCode::OK,
-                [
-                    (header::CONTENT_TYPE, effective_content_type.as_str()),
-                    (header::LAST_MODIFIED, LAST_MODIFIED),
-                    (header::CACHE_CONTROL, CACHE_CONTROL_PRIVATE),
-                ],
+            let last_modified = file_last_modified_header_value(media.file_path.as_path());
+            if let Some(last_modified) = last_modified.as_deref()
+                && if_modified_since_matches(&headers, last_modified)
+            {
+                return asset_not_modified_response(None, Some(last_modified));
+            }
+
+            return asset_ok_response(
+                effective_content_type.as_str(),
                 effective_bytes,
-            )
-                .into_response();
+                None,
+                last_modified.as_deref(),
+            );
         }
     }
 
@@ -226,31 +217,19 @@ pub async fn book_page_raw(
         }
 
         if let Some(bytes) = read_pdf_page_as_single_page_pdf(&media, page_number as u64) {
-            if headers
-                .get(header::IF_MODIFIED_SINCE)
-                .and_then(|value| value.to_str().ok())
-                == Some(LAST_MODIFIED)
+            let last_modified = file_last_modified_header_value(media.file_path.as_path());
+            if let Some(last_modified) = last_modified.as_deref()
+                && if_modified_since_matches(&headers, last_modified)
             {
-                return (
-                    StatusCode::NOT_MODIFIED,
-                    [
-                        (header::LAST_MODIFIED, LAST_MODIFIED),
-                        (header::CACHE_CONTROL, CACHE_CONTROL_PRIVATE),
-                    ],
-                )
-                    .into_response();
+                return asset_not_modified_response(None, Some(last_modified));
             }
 
-            return (
-                StatusCode::OK,
-                [
-                    (header::CONTENT_TYPE, "application/pdf"),
-                    (header::LAST_MODIFIED, LAST_MODIFIED),
-                    (header::CACHE_CONTROL, CACHE_CONTROL_PRIVATE),
-                ],
+            return asset_ok_response(
+                "application/pdf",
                 bytes,
-            )
-                .into_response();
+                None,
+                last_modified.as_deref(),
+            );
         }
     }
 
@@ -460,32 +439,23 @@ pub async fn book_page_thumbnail(
                 page_row.media_type
             };
 
-            if headers
-                .get(header::IF_MODIFIED_SINCE)
-                .and_then(|value| value.to_str().ok())
-                == Some(LAST_MODIFIED)
+            let etag = asset_etag(bytes.as_slice());
+            let last_modified = file_last_modified_header_value(media.file_path.as_path());
+            if if_none_match_matches(&headers, etag.as_str()) {
+                return asset_not_modified_response(Some(etag.as_str()), last_modified.as_deref());
+            }
+            if let Some(last_modified) = last_modified.as_deref()
+                && if_modified_since_matches(&headers, last_modified)
             {
-                return (
-                    StatusCode::NOT_MODIFIED,
-                    [
-                        (header::LAST_MODIFIED, LAST_MODIFIED),
-                        (header::CACHE_CONTROL, CACHE_CONTROL_PRIVATE),
-                    ],
-                )
-                    .into_response();
+                return asset_not_modified_response(Some(etag.as_str()), Some(last_modified));
             }
 
-            return (
-                StatusCode::OK,
-                [
-                    (header::CONTENT_TYPE, content_type.as_str()),
-                    (header::CACHE_CONTROL, CACHE_CONTROL_PRIVATE),
-                    (header::LAST_MODIFIED, LAST_MODIFIED),
-                    (header::ETAG, THUMBNAIL_ETAG),
-                ],
+            return asset_ok_response(
+                content_type.as_str(),
                 bytes,
-            )
-                .into_response();
+                Some(etag.as_str()),
+                last_modified.as_deref(),
+            );
         }
     }
 

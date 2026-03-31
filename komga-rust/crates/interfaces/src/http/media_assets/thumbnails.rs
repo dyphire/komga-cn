@@ -22,17 +22,17 @@ pub async fn book_thumbnail(
 
         match load_selected_book_thumbnail(auth_db.database_file.as_path(), &book_id).await {
             Ok(Some(thumbnail)) => {
-                return (
-                    StatusCode::OK,
-                    [
-                        (header::CONTENT_TYPE, thumbnail.media_type.as_str()),
-                        (header::CACHE_CONTROL, CACHE_CONTROL_PRIVATE),
-                        (header::LAST_MODIFIED, LAST_MODIFIED),
-                        (header::ETAG, THUMBNAIL_ETAG),
-                    ],
+                let etag = asset_etag(thumbnail.thumbnail.as_slice());
+                if if_none_match_matches(&headers, etag.as_str()) {
+                    return asset_not_modified_response(Some(etag.as_str()), None);
+                }
+
+                return asset_ok_response(
+                    thumbnail.media_type.as_str(),
                     thumbnail.thumbnail,
-                )
-                    .into_response();
+                    Some(etag.as_str()),
+                    None,
+                );
             }
             Ok(None) => {}
             Err(error) => return internal_error_response(error),
@@ -42,17 +42,18 @@ pub async fn book_thumbnail(
             && let Some(bytes) = read_media_file_bytes(&media.file_path)
         {
             let content_type = content_type_from_filename(&media.file_name, &media.media_type);
-            return (
-                StatusCode::OK,
-                [
-                    (header::CONTENT_TYPE, content_type.as_str()),
-                    (header::CACHE_CONTROL, CACHE_CONTROL_PRIVATE),
-                    (header::LAST_MODIFIED, LAST_MODIFIED),
-                    (header::ETAG, THUMBNAIL_ETAG),
-                ],
+            let etag = asset_etag(bytes.as_slice());
+            let last_modified = file_last_modified_header_value(media.file_path.as_path());
+            if if_none_match_matches(&headers, etag.as_str()) {
+                return asset_not_modified_response(Some(etag.as_str()), last_modified.as_deref());
+            }
+
+            return asset_ok_response(
+                content_type.as_str(),
                 bytes,
-            )
-                .into_response();
+                Some(etag.as_str()),
+                last_modified.as_deref(),
+            );
         }
 
         return StatusCode::NOT_FOUND.into_response();
@@ -87,17 +88,19 @@ pub async fn book_thumbnail_by_id(
         )
         .await
         {
-            Ok(Some(thumbnail)) => (
-                StatusCode::OK,
-                [
-                    (header::CONTENT_TYPE, thumbnail.media_type.as_str()),
-                    (header::CACHE_CONTROL, CACHE_CONTROL_PRIVATE),
-                    (header::LAST_MODIFIED, LAST_MODIFIED),
-                    (header::ETAG, THUMBNAIL_ETAG),
-                ],
-                thumbnail.thumbnail,
-            )
-                .into_response(),
+            Ok(Some(thumbnail)) => {
+                let etag = asset_etag(thumbnail.thumbnail.as_slice());
+                if if_none_match_matches(&headers, etag.as_str()) {
+                    asset_not_modified_response(Some(etag.as_str()), None)
+                } else {
+                    asset_ok_response(
+                        thumbnail.media_type.as_str(),
+                        thumbnail.thumbnail,
+                        Some(etag.as_str()),
+                        None,
+                    )
+                }
+            }
             Ok(None) => StatusCode::NOT_FOUND.into_response(),
             Err(error) => internal_error_response(error),
         };
@@ -246,17 +249,17 @@ pub async fn readlist_thumbnail(
     match load_persisted_readlist_thumbnails(auth_db.database_file.as_path(), &readlist_id).await {
         Ok(rows) => {
             if let Some(thumbnail) = rows.first() {
-                return (
-                    StatusCode::OK,
-                    [
-                        (header::CONTENT_TYPE, thumbnail.media_type.as_str()),
-                        (header::CACHE_CONTROL, CACHE_CONTROL_PRIVATE),
-                        (header::LAST_MODIFIED, LAST_MODIFIED),
-                        (header::ETAG, THUMBNAIL_ETAG),
-                    ],
+                let etag = asset_etag(thumbnail.thumbnail.as_slice());
+                if if_none_match_matches(&headers, etag.as_str()) {
+                    return asset_not_modified_response(Some(etag.as_str()), None);
+                }
+
+                return asset_ok_response(
+                    thumbnail.media_type.as_str(),
                     thumbnail.thumbnail.clone(),
-                )
-                    .into_response();
+                    Some(etag.as_str()),
+                    None,
+                );
             }
 
             if persisted_readlist_exists(auth_db.database_file.as_path(), &readlist_id)
@@ -323,17 +326,17 @@ pub async fn readlist_thumbnail_by_id(
     match load_persisted_readlist_thumbnails(auth_db.database_file.as_path(), &readlist_id).await {
         Ok(rows) => {
             if let Some(thumbnail) = rows.into_iter().find(|row| row.id == thumbnail_id) {
-                return (
-                    StatusCode::OK,
-                    [
-                        (header::CONTENT_TYPE, thumbnail.media_type.as_str()),
-                        (header::CACHE_CONTROL, CACHE_CONTROL_PRIVATE),
-                        (header::LAST_MODIFIED, LAST_MODIFIED),
-                        (header::ETAG, THUMBNAIL_ETAG),
-                    ],
+                let etag = asset_etag(thumbnail.thumbnail.as_slice());
+                if if_none_match_matches(&headers, etag.as_str()) {
+                    return asset_not_modified_response(Some(etag.as_str()), None);
+                }
+
+                return asset_ok_response(
+                    thumbnail.media_type.as_str(),
                     thumbnail.thumbnail,
-                )
-                    .into_response();
+                    Some(etag.as_str()),
+                    None,
+                );
             }
 
             if persisted_readlist_exists(auth_db.database_file.as_path(), &readlist_id)
@@ -460,17 +463,17 @@ pub async fn collection_thumbnail(
     {
         Ok(rows) => {
             if let Some(thumbnail) = rows.first() {
-                (
-                    StatusCode::OK,
-                    [
-                        (header::CONTENT_TYPE, thumbnail.media_type.as_str()),
-                        (header::CACHE_CONTROL, CACHE_CONTROL_PRIVATE),
-                        (header::LAST_MODIFIED, LAST_MODIFIED),
-                        (header::ETAG, THUMBNAIL_ETAG),
-                    ],
-                    thumbnail.thumbnail.clone(),
-                )
-                    .into_response()
+                let etag = asset_etag(thumbnail.thumbnail.as_slice());
+                if if_none_match_matches(&headers, etag.as_str()) {
+                    asset_not_modified_response(Some(etag.as_str()), None)
+                } else {
+                    asset_ok_response(
+                        thumbnail.media_type.as_str(),
+                        thumbnail.thumbnail.clone(),
+                        Some(etag.as_str()),
+                        None,
+                    )
+                }
             } else {
                 StatusCode::NOT_FOUND.into_response()
             }
@@ -535,17 +538,17 @@ pub async fn collection_thumbnail_by_id(
     {
         Ok(rows) => {
             if let Some(thumbnail) = rows.into_iter().find(|row| row.id == thumbnail_id) {
-                (
-                    StatusCode::OK,
-                    [
-                        (header::CONTENT_TYPE, thumbnail.media_type.as_str()),
-                        (header::CACHE_CONTROL, CACHE_CONTROL_PRIVATE),
-                        (header::LAST_MODIFIED, LAST_MODIFIED),
-                        (header::ETAG, THUMBNAIL_ETAG),
-                    ],
-                    thumbnail.thumbnail,
-                )
-                    .into_response()
+                let etag = asset_etag(thumbnail.thumbnail.as_slice());
+                if if_none_match_matches(&headers, etag.as_str()) {
+                    asset_not_modified_response(Some(etag.as_str()), None)
+                } else {
+                    asset_ok_response(
+                        thumbnail.media_type.as_str(),
+                        thumbnail.thumbnail,
+                        Some(etag.as_str()),
+                        None,
+                    )
+                }
             } else {
                 StatusCode::NOT_FOUND.into_response()
             }
@@ -676,17 +679,17 @@ pub async fn series_thumbnail(
     match load_selected_series_thumbnail(auth_db.database_file.as_path(), &resolved_series_id).await
     {
         Ok(Some(thumbnail)) => {
-            return (
-                StatusCode::OK,
-                [
-                    (header::CONTENT_TYPE, thumbnail.media_type.as_str()),
-                    (header::CACHE_CONTROL, CACHE_CONTROL_PRIVATE),
-                    (header::LAST_MODIFIED, LAST_MODIFIED),
-                    (header::ETAG, THUMBNAIL_ETAG),
-                ],
+            let etag = asset_etag(thumbnail.thumbnail.as_slice());
+            if if_none_match_matches(&headers, etag.as_str()) {
+                return asset_not_modified_response(Some(etag.as_str()), None);
+            }
+
+            return asset_ok_response(
+                thumbnail.media_type.as_str(),
                 thumbnail.thumbnail,
-            )
-                .into_response();
+                Some(etag.as_str()),
+                None,
+            );
         }
         Ok(None) => {}
         Err(error) => return internal_error_response(error),
@@ -697,17 +700,18 @@ pub async fn series_thumbnail(
             .await
         && let Some(bytes) = read_media_file_bytes(&media.file_path)
     {
-        return (
-            StatusCode::OK,
-            [
-                (header::CONTENT_TYPE, "image/jpeg"),
-                (header::CACHE_CONTROL, CACHE_CONTROL_PRIVATE),
-                (header::LAST_MODIFIED, LAST_MODIFIED),
-                (header::ETAG, THUMBNAIL_ETAG),
-            ],
+        let etag = asset_etag(bytes.as_slice());
+        let last_modified = file_last_modified_header_value(media.file_path.as_path());
+        if if_none_match_matches(&headers, etag.as_str()) {
+            return asset_not_modified_response(Some(etag.as_str()), last_modified.as_deref());
+        }
+
+        return asset_ok_response(
+            "image/jpeg",
             bytes,
-        )
-            .into_response();
+            Some(etag.as_str()),
+            last_modified.as_deref(),
+        );
     }
 
     StatusCode::NOT_FOUND.into_response()
@@ -775,17 +779,19 @@ pub async fn series_thumbnail_by_id(
     )
     .await
     {
-        Ok(Some(thumbnail)) => (
-            StatusCode::OK,
-            [
-                (header::CONTENT_TYPE, thumbnail.media_type.as_str()),
-                (header::CACHE_CONTROL, CACHE_CONTROL_PRIVATE),
-                (header::LAST_MODIFIED, LAST_MODIFIED),
-                (header::ETAG, THUMBNAIL_ETAG),
-            ],
-            thumbnail.thumbnail,
-        )
-            .into_response(),
+        Ok(Some(thumbnail)) => {
+            let etag = asset_etag(thumbnail.thumbnail.as_slice());
+            if if_none_match_matches(&headers, etag.as_str()) {
+                asset_not_modified_response(Some(etag.as_str()), None)
+            } else {
+                asset_ok_response(
+                    thumbnail.media_type.as_str(),
+                    thumbnail.thumbnail,
+                    Some(etag.as_str()),
+                    None,
+                )
+            }
+        }
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }

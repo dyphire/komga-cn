@@ -10,10 +10,7 @@ pub mod request_urls;
 pub mod router;
 pub mod state;
 
-pub use crate::{
-    CACHE_CONTROL_PRIVATE, LAST_MODIFIED, PERSISTED_OWNERSHIP_MARKER, SEARCH_OWNERSHIP_HEADER,
-    THUMBNAIL_ETAG,
-};
+pub use crate::{CACHE_CONTROL_PRIVATE, PERSISTED_OWNERSHIP_MARKER, SEARCH_OWNERSHIP_HEADER};
 pub use state::{
     AuthDatabaseState, BookImportSseEvent, OAuth2ClientConfig, OperationalSettings,
     OperationalState, ReadProgress, ReadProgressState, RemoteCacheEntry, RuntimeProfile,

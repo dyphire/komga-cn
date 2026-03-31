@@ -40,12 +40,10 @@ pub async fn series_detail(
         };
     let is_admin = detail_query_context.is_admin;
     let query_string = uri.query().unwrap_or_default();
-    let exact_oneshot_true_shape = query_has_key(query_string, "oneshot")
-        && query_values(query_string, "oneshot").as_slice() == ["true"]
-        && query_string
-            .split('&')
-            .all(|pair| pair.split('=').next().unwrap_or_default() == "oneshot");
-    let runtime_owned_shape = query_string.is_empty() || exact_oneshot_true_shape;
+    let oneshot_true_requested = query_values(query_string, "oneshot")
+        .into_iter()
+        .any(|value| value.eq_ignore_ascii_case("true"));
+    let runtime_owned_shape = query_string.is_empty() || oneshot_true_requested;
 
     let Some(series) = (match load_persisted_series_detail(
         database_file,

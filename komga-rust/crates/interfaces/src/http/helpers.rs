@@ -1,6 +1,6 @@
-use axum::Json;
-use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
+use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::Json;
 use komga_application::discovery::BookReadModel;
 use komga_domain::common_ids::{LibraryId, UserId};
 use komga_domain::discovery::{
@@ -8,9 +8,9 @@ use komga_domain::discovery::{
     DiscoveryQueryContext as DomainDiscoveryQueryContext, PageEnvelope,
     QueryRestrictions as DomainQueryRestrictions, UnsupportedDiscoverySemantics,
 };
-use serde_json::{Value, json};
-use time::OffsetDateTime;
+use serde_json::{json, Value};
 use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 
 use crate::http::discovery_auth::{
     AgeRestrictionKind, DetailAccessDenial, DiscoveryQueryContext, QueryRestrictions,
@@ -18,7 +18,7 @@ use crate::http::discovery_auth::{
 use crate::http::state::RuntimeProfile;
 
 use super::super::{
-    PERSISTED_OWNERSHIP_MARKER, ReadProgress, ReadProgressState, SEARCH_OWNERSHIP_HEADER,
+    ReadProgress, ReadProgressState, PERSISTED_OWNERSHIP_MARKER, SEARCH_OWNERSHIP_HEADER,
 };
 
 const RUNTIME_OWNERSHIP_MARKER: &str = "runtime-rust-owned";
@@ -237,12 +237,6 @@ pub(crate) fn query_bool(query: &str, key: &str) -> bool {
     query_value(query, key)
         .map(|value| value.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
-}
-
-pub(crate) fn query_has_key(query: &str, key: &str) -> bool {
-    query
-        .split('&')
-        .any(|pair| pair.split('=').next().unwrap_or_default() == key)
 }
 
 pub(crate) fn parse_search_regex(value: &str) -> Option<(String, String)> {
