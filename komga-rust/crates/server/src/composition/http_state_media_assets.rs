@@ -172,15 +172,6 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
                 .await
             })
         }),
-        load_series_library_id: Arc::new(|database_file, series_id| {
-            Box::pin(async move {
-                infrastructure_filesystem::load_series_library_id(
-                    database_file.as_path(),
-                    &series_id,
-                )
-                .await
-            })
-        }),
         load_series_book_ids: Arc::new(|database_file, series_id| {
             Box::pin(async move {
                 infrastructure_filesystem::load_series_book_ids(database_file.as_path(), &series_id)
@@ -291,13 +282,15 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
             })
         }),
         insert_book_thumbnail: Arc::new(
-            |database_file, book_id, thumbnail, media_type, selected| {
+            |database_file, book_id, thumbnail, media_type, width, height, selected| {
                 Box::pin(async move {
                     infrastructure_metadata::insert_book_thumbnail(
                         database_file.as_path(),
                         &book_id,
                         thumbnail.as_slice(),
                         &media_type,
+                        width,
+                        height,
                         selected,
                     )
                     .await
@@ -334,13 +327,15 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
             })
         }),
         insert_readlist_thumbnail: Arc::new(
-            |database_file, readlist_id, thumbnail, media_type, selected| {
+            |database_file, readlist_id, thumbnail, media_type, width, height, selected| {
                 Box::pin(async move {
                     infrastructure_metadata::insert_readlist_thumbnail(
                         database_file.as_path(),
                         &readlist_id,
                         thumbnail.as_slice(),
                         &media_type,
+                        width,
+                        height,
                         selected,
                     )
                     .await
@@ -377,13 +372,15 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
             })
         }),
         insert_collection_thumbnail: Arc::new(
-            |database_file, collection_id, thumbnail, media_type, selected| {
+            |database_file, collection_id, thumbnail, media_type, width, height, selected| {
                 Box::pin(async move {
                     infrastructure_metadata::insert_collection_thumbnail(
                         database_file.as_path(),
                         &collection_id,
                         thumbnail.as_slice(),
                         &media_type,
+                        width,
+                        height,
                         selected,
                     )
                     .await
@@ -439,13 +436,15 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
             })
         }),
         insert_series_thumbnail: Arc::new(
-            |database_file, series_id, thumbnail, media_type, selected| {
+            |database_file, series_id, thumbnail, media_type, width, height, selected| {
                 Box::pin(async move {
                     infrastructure_metadata::insert_series_thumbnail(
                         database_file.as_path(),
                         &series_id,
                         thumbnail.as_slice(),
                         &media_type,
+                        width,
+                        height,
                         selected,
                     )
                     .await
@@ -571,7 +570,6 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
             Box::pin(async move {
                 infrastructure_metadata::load_book_page_count(database_file.as_path(), &book_id)
                     .await
-                    .map(|value| value.map(|count| count.max(0) as u64))
             })
         }),
         persist_book_progression: Arc::new(|database_file, book_id, user_id, page| {

@@ -72,9 +72,7 @@ pub(crate) fn parse_iso8601_duration_to_days(raw: &str) -> Option<i64> {
         text = stripped;
     }
 
-    let Some(stripped) = text.strip_prefix('P') else {
-        return None;
-    };
+    let stripped = text.strip_prefix('P')?;
 
     let mut in_time = false;
     let mut number = String::new();
@@ -252,14 +250,14 @@ pub(super) fn merge_f64_groups(groups: Vec<Vec<f64>>, all_of: bool) -> Option<Ve
     if all_of {
         let mut intersection = groups[0].clone();
         for group in groups.iter().skip(1) {
-            intersection.retain(|candidate| group.iter().any(|value| *value == *candidate));
+            intersection.retain(|candidate| group.contains(candidate));
         }
         Some(intersection)
     } else {
         let mut union = vec![];
         for group in groups {
             for candidate in group {
-                if !union.iter().any(|value| *value == candidate) {
+                if !union.contains(&candidate) {
                     union.push(candidate);
                 }
             }

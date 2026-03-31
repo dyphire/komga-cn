@@ -33,10 +33,10 @@ pub fn empty_trash_rows(database_file: &Path, library_id: &str) -> Result<(), St
 
             sqlx::query(
                 r#"
-DELETE FROM BOOK
-WHERE LIBRARY_ID = ?
-  AND DELETED_DATE IS NOT NULL
-"#,
+                DELETE FROM BOOK
+                WHERE LIBRARY_ID = ?
+                AND DELETED_DATE IS NOT NULL
+                "#,
             )
             .bind(&library_id)
             .execute(&mut *tx)
@@ -47,14 +47,14 @@ WHERE LIBRARY_ID = ?
 
             sqlx::query(
                 r#"
-UPDATE SERIES
-SET BOOK_COUNT = (
-  SELECT COUNT(*)
-  FROM BOOK
-  WHERE BOOK.SERIES_ID = SERIES.ID
-)
-WHERE LIBRARY_ID = ?
-"#,
+                UPDATE SERIES
+                SET BOOK_COUNT = (
+                SELECT COUNT(*)
+                FROM BOOK
+                WHERE BOOK.SERIES_ID = SERIES.ID
+                )
+                WHERE LIBRARY_ID = ?
+                "#,
             )
             .bind(&library_id)
             .execute(&mut *tx)
@@ -73,13 +73,13 @@ WHERE LIBRARY_ID = ?
 
             sqlx::query(
                 r#"
-DELETE FROM SERIES
-WHERE LIBRARY_ID = ?
-  AND (
-    DELETED_DATE IS NOT NULL
-    OR BOOK_COUNT = 0
-  )
-"#,
+                DELETE FROM SERIES
+                WHERE LIBRARY_ID = ?
+                AND (
+                    DELETED_DATE IS NOT NULL
+                    OR BOOK_COUNT = 0
+                )
+                "#,
             )
             .bind(&library_id)
             .execute(&mut *tx)
@@ -148,10 +148,10 @@ async fn load_cleanup_empty_sets_flags_from_pool(
 ) -> Result<PersistedCleanupEmptySetsFlags, String> {
     let rows = sqlx::query(
         r#"
-SELECT KEY, VALUE
-FROM SERVER_SETTINGS
-WHERE KEY IN ('DELETE_EMPTY_COLLECTIONS', 'DELETE_EMPTY_READLISTS')
-"#,
+        SELECT KEY, VALUE
+        FROM SERVER_SETTINGS
+        WHERE KEY IN ('DELETE_EMPTY_COLLECTIONS', 'DELETE_EMPTY_READLISTS')
+        "#,
     )
     .fetch_all(pool)
     .await

@@ -27,7 +27,7 @@ pub async fn book_detail(
         let detail_context = DetailResourceContext {
             library_id: Some(resource.library_id),
             content: Some(DetailContentContext {
-                age_rating: resource.age_rating,
+                age_rating: resource.age_rating.map(u32::from),
                 sharing_labels: resource.sharing_labels,
             }),
         };
@@ -86,7 +86,7 @@ pub async fn book_sibling_previous(
         let detail_context = DetailResourceContext {
             library_id: Some(resource.library_id),
             content: Some(DetailContentContext {
-                age_rating: resource.age_rating,
+                age_rating: resource.age_rating.map(u32::from),
                 sharing_labels: resource.sharing_labels,
             }),
         };
@@ -140,7 +140,7 @@ pub async fn book_sibling_next(
         let detail_context = DetailResourceContext {
             library_id: Some(resource.library_id),
             content: Some(DetailContentContext {
-                age_rating: resource.age_rating,
+                age_rating: resource.age_rating.map(u32::from),
                 sharing_labels: resource.sharing_labels,
             }),
         };
@@ -194,7 +194,7 @@ pub async fn book_readlists(
         let detail_context = DetailResourceContext {
             library_id: Some(resource.library_id),
             content: Some(DetailContentContext {
-                age_rating: resource.age_rating,
+                age_rating: resource.age_rating.map(u32::from),
                 sharing_labels: resource.sharing_labels,
             }),
         };

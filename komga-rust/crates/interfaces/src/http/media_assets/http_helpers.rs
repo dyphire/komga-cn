@@ -12,6 +12,10 @@ pub(super) fn attachment_disposition(file_name: &str) -> String {
     format!("attachment; filename=\"=?UTF-8?Q?{file_name}?=\"; filename*=UTF-8''{file_name}",)
 }
 
+pub(super) fn inline_disposition(file_name: &str) -> String {
+    format!("inline; filename=\"=?UTF-8?Q?{file_name}?=\"; filename*=UTF-8''{file_name}",)
+}
+
 pub(super) fn format_size_bytes(size_bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
 

@@ -1,13 +1,39 @@
 use axum::Router;
 use komga_infrastructure::sqlite::close_all_shared_pools;
-use komga_infrastructure::{SearchError, reset_for_rebuild, startup_recover};
+use komga_infrastructure::{SearchStartupLifecycle, decide_startup_lifecycle, prepare_for_rebuild};
 use tokio::net::TcpListener;
 use tokio::signal;
 use tokio::sync::watch;
 
 use crate::composition::http_state::compose_http_runtime;
-use crate::config::RuntimeConfig;
+use crate::config::{RuntimeConfig, WriterKind};
 use crate::runtime::background_workers::{prepare_task_queue, spawn_runtime_workers};
+
+pub(crate) fn prepare_startup_search_task(
+    config: &RuntimeConfig,
+) -> std::io::Result<Option<&'static str>> {
+    if !config
+        .writer_decision(WriterKind::SearchIndex)
+        .allows_write()
+    {
+        return Ok(None);
+    }
+
+    match decide_startup_lifecycle(config.lucene_data_directory.as_path()) {
+        Ok(SearchStartupLifecycle::Ready) => Ok(None),
+        Ok(SearchStartupLifecycle::RebuildRequired) => {
+            prepare_for_rebuild(config.lucene_data_directory.as_path()).map_err(|error| {
+                std::io::Error::other(format!(
+                    "search startup rebuild preparation failed: {error}"
+                ))
+            })?;
+            Ok(Some("REBUILD_INDEX"))
+        }
+        Err(error) => Err(std::io::Error::other(format!(
+            "search startup lifecycle decision failed: {error}"
+        ))),
+    }
+}
 
 pub fn build_router_with_config(config: &RuntimeConfig) -> Router {
     let background = prepare_task_queue(config, None);
@@ -30,27 +56,7 @@ pub async fn serve_with_config(
     listener: TcpListener,
     config: RuntimeConfig,
 ) -> std::io::Result<()> {
-    let has_existing_search_index = config.lucene_data_directory.join("meta.json").exists();
-    let mut startup_search_task = if has_existing_search_index {
-        Some("UPGRADE_INDEX")
-    } else {
-        Some("REBUILD_INDEX")
-    };
-
-    match startup_recover(config.lucene_data_directory.as_path()) {
-        Ok(()) => {}
-        Err(SearchError::CorruptedIndexRequiresExplicitRebuild(_, _)) => {
-            reset_for_rebuild(config.lucene_data_directory.as_path()).map_err(|error| {
-                std::io::Error::other(format!("search startup recovery failed: {error}"))
-            })?;
-            startup_search_task = Some("REBUILD_INDEX");
-        }
-        Err(error) => {
-            return Err(std::io::Error::other(format!(
-                "search startup recovery failed: {error}"
-            )));
-        }
-    }
+    let startup_search_task = prepare_startup_search_task(&config)?;
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let background = prepare_task_queue(&config, startup_search_task);

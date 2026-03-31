@@ -54,7 +54,7 @@ impl StdError for Wpd3Error {}
 
 pub fn run_from_env() -> Result<String, Wpd3Error> {
     let runtime = RuntimeConfig::from_env()?;
-    let manifest = Manifest::from_str(DEFAULT_MANIFEST)?;
+    let manifest = Manifest::parse(DEFAULT_MANIFEST)?;
     Ok(render_plan(&manifest, &runtime))
 }
 
@@ -82,7 +82,7 @@ pub fn render_plan(manifest: &Manifest, runtime: &RuntimeConfig) -> String {
 }
 
 impl Manifest {
-    pub fn from_str(input: &str) -> Result<Self, Wpd3Error> {
+    pub fn parse(input: &str) -> Result<Self, Wpd3Error> {
         let mut suite = None;
         let mut baseline = None;
         let mut scenarios = Vec::new();
@@ -238,53 +238,6 @@ impl ScenarioBuilder {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_default_manifest_with_expected_names() {
-        let manifest = Manifest::from_str(DEFAULT_MANIFEST).expect("default manifest should parse");
-
-        let names: Vec<&str> = manifest
-            .scenarios
-            .iter()
-            .map(|scenario| scenario.name.as_str())
-            .collect();
-
-        assert_eq!(manifest.suite, "wp-d3");
-        assert_eq!(manifest.baseline, "java");
-        assert_eq!(names, vec!["browse", "dashboard", "unsorted"]);
-    }
-
-    #[test]
-    fn rejects_missing_base_url() {
-        let error = RuntimeConfig::from_components(None, None, None, None)
-            .expect_err("missing base url must fail");
-
-        assert!(matches!(error, Wpd3Error::InvalidEnvironment(_)));
-    }
-
-    #[test]
-    fn renders_deterministic_plan() {
-        let manifest = Manifest::from_str(DEFAULT_MANIFEST).expect("default manifest should parse");
-        let runtime = RuntimeConfig::from_components(
-            Some(String::from("https://komga.example.org/")),
-            Some(String::from("session=abc")),
-            None,
-            None,
-        )
-        .expect("runtime config should parse");
-
-        let plan = render_plan(&manifest, &runtime);
-
-        assert!(plan.contains("suite: wp-d3"));
-        assert!(plan.contains("base_url: https://komga.example.org"));
-        assert!(plan.contains("auth: cookie"));
-        assert!(plan.contains("  - browse | BrowseBenchmark::browseSeries | GET /api/v1/libraries/{libraryId}/series?sort=metadata.titleSort,asc"));
-    }
-}
-
 impl RuntimeConfig {
     pub(crate) fn from_components(
         base_url: Option<String>,
@@ -314,5 +267,52 @@ impl RuntimeConfig {
         };
 
         Ok(Self { base_url, auth })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_default_manifest_with_expected_names() {
+        let manifest = Manifest::parse(DEFAULT_MANIFEST).expect("default manifest should parse");
+
+        let names: Vec<&str> = manifest
+            .scenarios
+            .iter()
+            .map(|scenario| scenario.name.as_str())
+            .collect();
+
+        assert_eq!(manifest.suite, "wp-d3");
+        assert_eq!(manifest.baseline, "java");
+        assert_eq!(names, vec!["browse", "dashboard", "unsorted"]);
+    }
+
+    #[test]
+    fn rejects_missing_base_url() {
+        let error = RuntimeConfig::from_components(None, None, None, None)
+            .expect_err("missing base url must fail");
+
+        assert!(matches!(error, Wpd3Error::InvalidEnvironment(_)));
+    }
+
+    #[test]
+    fn renders_deterministic_plan() {
+        let manifest = Manifest::parse(DEFAULT_MANIFEST).expect("default manifest should parse");
+        let runtime = RuntimeConfig::from_components(
+            Some(String::from("https://komga.example.org/")),
+            Some(String::from("session=abc")),
+            None,
+            None,
+        )
+        .expect("runtime config should parse");
+
+        let plan = render_plan(&manifest, &runtime);
+
+        assert!(plan.contains("suite: wp-d3"));
+        assert!(plan.contains("base_url: https://komga.example.org"));
+        assert!(plan.contains("auth: cookie"));
+        assert!(plan.contains("  - browse | BrowseBenchmark::browseSeries | GET /api/v1/libraries/{libraryId}/series?sort=metadata.titleSort,asc"));
     }
 }

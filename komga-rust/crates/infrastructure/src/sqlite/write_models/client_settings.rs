@@ -10,7 +10,11 @@ pub async fn upsert_client_settings_global(
     let mut tx = pool.begin().await?;
     for (key, value, allow_unauthorized) in settings {
         sqlx::query(
-            "INSERT INTO CLIENT_SETTINGS_GLOBAL (KEY, VALUE, ALLOW_UNAUTHORIZED)\n             VALUES (?, ?, ?)\n             ON CONFLICT(KEY) DO UPDATE\n             SET VALUE = excluded.VALUE,\n                 ALLOW_UNAUTHORIZED = excluded.ALLOW_UNAUTHORIZED",
+            "INSERT INTO CLIENT_SETTINGS_GLOBAL (KEY, VALUE, ALLOW_UNAUTHORIZED) \
+             VALUES (?, ?, ?) \
+             ON CONFLICT(KEY) DO UPDATE \
+             SET VALUE = excluded.VALUE, \
+                 ALLOW_UNAUTHORIZED = excluded.ALLOW_UNAUTHORIZED",
         )
         .bind(key)
         .bind(value)
@@ -31,7 +35,10 @@ pub async fn upsert_client_settings_user(
     let mut tx = pool.begin().await?;
     for (key, value) in settings {
         sqlx::query(
-            "INSERT INTO CLIENT_SETTINGS_USER (USER_ID, KEY, VALUE)\n             VALUES (?, ?, ?)\n             ON CONFLICT(USER_ID, KEY) DO UPDATE\n             SET VALUE = excluded.VALUE",
+            "INSERT INTO CLIENT_SETTINGS_USER (USER_ID, KEY, VALUE) \
+             VALUES (?, ?, ?) \
+             ON CONFLICT(USER_ID, KEY) DO UPDATE \
+             SET VALUE = excluded.VALUE",
         )
         .bind(user_id)
         .bind(key)
@@ -76,7 +83,10 @@ pub async fn delete_client_settings_user(
     let mut tx = pool.begin().await?;
     for key in keys {
         sqlx::query(
-            "DELETE\n             FROM CLIENT_SETTINGS_USER\n             WHERE USER_ID = ?\n             AND KEY = ?",
+            "DELETE \
+             FROM CLIENT_SETTINGS_USER \
+             WHERE USER_ID = ? \
+             AND KEY = ?",
         )
         .bind(user_id)
         .bind(key)

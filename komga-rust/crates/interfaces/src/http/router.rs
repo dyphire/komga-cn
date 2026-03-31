@@ -2,6 +2,7 @@ use axum::Router;
 use axum::middleware;
 use axum::routing::{delete, get, patch, post, put};
 
+use crate::http::cache;
 use crate::http::discovery_auth::DiscoveryAuthState;
 use crate::http::{discovery, identity_access, library_catalog, media_assets, opds, operational};
 
@@ -269,7 +270,9 @@ pub fn build_router(
         )
         .route(
             "/api/v1/series/{series_id}/read-progress",
-            post(media_assets::series_read_progress_post).delete(media_assets::series_read_progress_delete),
+            get(media_assets::series_read_progress_get)
+                .post(media_assets::series_read_progress_post)
+                .delete(media_assets::series_read_progress_delete),
         )
         .route(
             "/api/v1/series/{series_id}/file",
@@ -473,7 +476,9 @@ pub fn build_router(
         )
         .route(
             "/api/v1/books/{book_id}/progression",
-            get(media_assets::book_progression_get).patch(media_assets::book_progression),
+            get(media_assets::book_progression_get)
+                .patch(media_assets::book_progression)
+                .put(media_assets::book_progression),
         )
         .route(
             "/api/v2/users",
@@ -654,7 +659,9 @@ pub fn build_router(
         )
         .route(
             "/opds/v2/books/{book_id}/progression",
-            get(media_assets::book_progression_get).patch(media_assets::book_progression),
+            get(media_assets::book_progression_get)
+                .patch(media_assets::book_progression)
+                .put(media_assets::book_progression),
         )
         .route(
             "/api/v1/login/set-cookie",
@@ -690,14 +697,15 @@ pub fn build_router(
         router
     };
 
-    let router = router
+    let router = router.route_layer(middleware::from_fn(cache::cache_workflow_middleware));
+
+    #[allow(clippy::let_and_return)]
+    router
         .layer(axum::extract::Extension(read_progress))
         .layer(axum::extract::Extension(auth_db))
         .layer(axum::extract::Extension(discovery_auth))
         .layer(axum::extract::Extension(operational))
-        .layer(axum::extract::Extension(profile));
-
-    router
+        .layer(axum::extract::Extension(profile))
 }
 
 fn should_expose_actuator_default_contract() -> bool {

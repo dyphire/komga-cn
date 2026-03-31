@@ -96,16 +96,18 @@ pub async fn series_read_progress_post(
 
     let resolved_series_id =
         resolve_series_id_for_persisted(auth_db.database_file.as_path(), &series_id).await;
-    let Some(library_id) =
-        (match load_series_library_id(auth_db.database_file.as_path(), &resolved_series_id).await {
-            Ok(library_id) => library_id,
-            Err(error) => return internal_error_response(error),
-        })
-    else {
+    if !persisted_series_exists(auth_db.database_file.as_path(), &resolved_series_id)
+        .await
+        .unwrap_or(false)
+    {
         return StatusCode::NOT_FOUND.into_response();
-    };
-    if !user_can_access_library(&user, &library_id) {
-        return StatusCode::FORBIDDEN.into_response();
+    }
+    match user_can_access_series_media(auth_db.database_file.as_path(), &resolved_series_id, &user)
+        .await
+    {
+        Ok(true) => {}
+        Ok(false) => return StatusCode::FORBIDDEN.into_response(),
+        Err(error) => return internal_error_response(error),
     }
 
     let book_ids =
@@ -154,16 +156,18 @@ pub async fn series_read_progress_delete(
 
     let resolved_series_id =
         resolve_series_id_for_persisted(auth_db.database_file.as_path(), &series_id).await;
-    let Some(library_id) =
-        (match load_series_library_id(auth_db.database_file.as_path(), &resolved_series_id).await {
-            Ok(library_id) => library_id,
-            Err(error) => return internal_error_response(error),
-        })
-    else {
+    if !persisted_series_exists(auth_db.database_file.as_path(), &resolved_series_id)
+        .await
+        .unwrap_or(false)
+    {
         return StatusCode::NOT_FOUND.into_response();
-    };
-    if !user_can_access_library(&user, &library_id) {
-        return StatusCode::FORBIDDEN.into_response();
+    }
+    match user_can_access_series_media(auth_db.database_file.as_path(), &resolved_series_id, &user)
+        .await
+    {
+        Ok(true) => {}
+        Ok(false) => return StatusCode::FORBIDDEN.into_response(),
+        Err(error) => return internal_error_response(error),
     }
 
     let book_ids =
@@ -210,16 +214,18 @@ pub async fn series_tachiyomi_read_progress_get(
 
     let resolved_series_id =
         resolve_series_id_for_persisted(auth_db.database_file.as_path(), &series_id).await;
-    let Some(library_id) =
-        (match load_series_library_id(auth_db.database_file.as_path(), &resolved_series_id).await {
-            Ok(library_id) => library_id,
-            Err(error) => return internal_error_response(error),
-        })
-    else {
+    if !persisted_series_exists(auth_db.database_file.as_path(), &resolved_series_id)
+        .await
+        .unwrap_or(false)
+    {
         return StatusCode::NOT_FOUND.into_response();
-    };
-    if !user_can_access_library(&user, &library_id) {
-        return StatusCode::FORBIDDEN.into_response();
+    }
+    match user_can_access_series_media(auth_db.database_file.as_path(), &resolved_series_id, &user)
+        .await
+    {
+        Ok(true) => {}
+        Ok(false) => return StatusCode::FORBIDDEN.into_response(),
+        Err(error) => return internal_error_response(error),
     }
 
     match load_series_tachiyomi_progress(
@@ -268,16 +274,18 @@ pub async fn series_tachiyomi_read_progress_put(
 
     let resolved_series_id =
         resolve_series_id_for_persisted(auth_db.database_file.as_path(), &series_id).await;
-    let Some(library_id) =
-        (match load_series_library_id(auth_db.database_file.as_path(), &resolved_series_id).await {
-            Ok(library_id) => library_id,
-            Err(error) => return internal_error_response(error),
-        })
-    else {
+    if !persisted_series_exists(auth_db.database_file.as_path(), &resolved_series_id)
+        .await
+        .unwrap_or(false)
+    {
         return StatusCode::NOT_FOUND.into_response();
-    };
-    if !user_can_access_library(&user, &library_id) {
-        return StatusCode::FORBIDDEN.into_response();
+    }
+    match user_can_access_series_media(auth_db.database_file.as_path(), &resolved_series_id, &user)
+        .await
+    {
+        Ok(true) => {}
+        Ok(false) => return StatusCode::FORBIDDEN.into_response(),
+        Err(error) => return internal_error_response(error),
     }
 
     let book_numbers =
@@ -315,6 +323,38 @@ pub async fn series_tachiyomi_read_progress_put(
     StatusCode::NO_CONTENT.into_response()
 }
 
+pub async fn series_read_progress_get(
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    Path(series_id): Path<String>,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+    let Some(user) = resolved_auth_user(&headers) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+
+    let resolved_series_id =
+        resolve_series_id_for_persisted(auth_db.database_file.as_path(), &series_id).await;
+    if !persisted_series_exists(auth_db.database_file.as_path(), &resolved_series_id)
+        .await
+        .unwrap_or(false)
+    {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    match user_can_access_series_media(auth_db.database_file.as_path(), &resolved_series_id, &user)
+        .await
+    {
+        Ok(true) => {}
+        Ok(false) => return StatusCode::FORBIDDEN.into_response(),
+        Err(error) => return internal_error_response(error),
+    }
+
+    let path = format!("/api/v1/series/{series_id}/read-progress");
+    method_not_allowed_json_response(&path)
+}
+
 pub async fn book_read_progress(
     Extension(_profile): Extension<RuntimeProfile>,
     Extension(auth_db): Extension<AuthDatabaseState>,
@@ -349,8 +389,8 @@ pub async fn book_read_progress(
     let token = resolved_token(&headers);
 
     if payload.get("completed").and_then(|value| value.as_bool()) == Some(true) {
-        if let Some(user_id) = persisted_user_id.as_deref() {
-            if persist_read_progress(
+        if let Some(user_id) = persisted_user_id.as_deref()
+            && persist_read_progress(
                 auth_db.database_file.as_path(),
                 &book_id,
                 user_id,
@@ -359,9 +399,8 @@ pub async fn book_read_progress(
             )
             .await
             .is_err()
-            {
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-            }
+        {
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
         set_read_progress(&state, token, book_id);
         return StatusCode::NO_CONTENT.into_response();
@@ -370,8 +409,8 @@ pub async fn book_read_progress(
     if let Some(page) = payload.get("page").and_then(|value| value.as_u64())
         && (1..=page_count).contains(&page)
     {
-        if let Some(user_id) = persisted_user_id.as_deref() {
-            if persist_read_progress(
+        if let Some(user_id) = persisted_user_id.as_deref()
+            && persist_read_progress(
                 auth_db.database_file.as_path(),
                 &book_id,
                 user_id,
@@ -380,9 +419,8 @@ pub async fn book_read_progress(
             )
             .await
             .is_err()
-            {
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-            }
+        {
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
         set_read_progress(&state, token, book_id);
         return StatusCode::NO_CONTENT.into_response();
@@ -463,6 +501,21 @@ pub async fn book_progression(
         return StatusCode::NOT_FOUND.into_response();
     }
 
+    let Some(user) = resolved_auth_user(&headers) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let Some(media) =
+        (match load_persisted_book_media(auth_db.database_file.as_path(), &book_id).await {
+            Ok(media) => media,
+            Err(error) => return internal_error_response(error),
+        })
+    else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if !user_can_access_book_media(auth_db.database_file.as_path(), &book_id, &user, &media).await {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
     let Ok(payload) = serde_json::from_slice::<Value>(&body) else {
         return invalid_progression_payload();
     };
@@ -479,10 +532,6 @@ pub async fn book_progression(
     if !(0.0..=1.0).contains(&progression) {
         return invalid_progression_payload();
     }
-
-    let Some(user) = resolved_auth_user(&headers) else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
 
     match persist_book_progression(
         auth_db.database_file.as_path(),
@@ -517,6 +566,17 @@ pub async fn book_progression_get(
     let Some(user) = resolved_auth_user(&headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
+    let Some(media) =
+        (match load_persisted_book_media(auth_db.database_file.as_path(), &book_id).await {
+            Ok(media) => media,
+            Err(error) => return internal_error_response(error),
+        })
+    else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if !user_can_access_book_media(auth_db.database_file.as_path(), &book_id, &user, &media).await {
+        return StatusCode::FORBIDDEN.into_response();
+    }
 
     match load_book_progression(auth_db.database_file.as_path(), &book_id, user_id(&user)).await {
         Ok(Some(progression)) => Json(json!({

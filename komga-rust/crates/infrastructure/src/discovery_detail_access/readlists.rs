@@ -19,6 +19,22 @@ pub struct PersistedReadlistBookRecord {
     pub library_id: String,
 }
 
+#[derive(Clone)]
+pub struct PersistedComicrackMatchCandidateRecord {
+    pub series_id: String,
+    pub series_title: String,
+    pub series_release_date: Option<String>,
+    pub book_id: String,
+    pub book_title: String,
+    pub book_number: String,
+}
+
+#[derive(Clone)]
+pub struct PersistedBookAuthorRecord {
+    pub name: String,
+    pub role: String,
+}
+
 pub async fn persisted_readlists_exist(database_file: &FsPath) -> Result<bool, String> {
     if !database_file.exists() {
         return Ok(false);
@@ -124,6 +140,70 @@ pub async fn load_persisted_readlist_book_rows(
         .map(|row| PersistedReadlistBookRecord {
             book_id: row.get::<String, _>("BOOK_ID"),
             library_id: row.get::<String, _>("LIBRARY_ID"),
+        })
+        .collect())
+}
+
+pub async fn load_comicrack_match_candidates(
+    database_file: &FsPath,
+) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String> {
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("open comicrack match candidates db: {error}"))?;
+
+    let rows = sqlx::query(
+        "SELECT s.ID AS SERIES_ID, \
+                COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE, \
+                b.ID AS BOOK_ID, \
+                COALESCE(bm.TITLE, b.NAME) AS BOOK_TITLE, \
+                COALESCE(bm.NUMBER, CAST(b.NUMBER AS TEXT)) AS BOOK_NUMBER, \
+                bma.RELEASE_DATE AS SERIES_RELEASE_DATE \
+         FROM BOOK b \
+         JOIN SERIES s ON s.ID = b.SERIES_ID \
+         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+         LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
+         LEFT JOIN BOOK_METADATA_AGGREGATION bma ON bma.SERIES_ID = s.ID",
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|error| format!("query comicrack match candidates: {error}"))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| PersistedComicrackMatchCandidateRecord {
+            series_id: row.get::<String, _>("SERIES_ID"),
+            series_title: row.get::<String, _>("SERIES_TITLE"),
+            series_release_date: row.get::<Option<String>, _>("SERIES_RELEASE_DATE"),
+            book_id: row.get::<String, _>("BOOK_ID"),
+            book_title: row.get::<String, _>("BOOK_TITLE"),
+            book_number: row.get::<String, _>("BOOK_NUMBER"),
+        })
+        .collect())
+}
+
+pub async fn load_persisted_book_authors(
+    database_file: &FsPath,
+    book_id: &str,
+) -> Result<Vec<PersistedBookAuthorRecord>, String> {
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("open persisted book authors db: {error}"))?;
+
+    let rows = sqlx::query(
+        "SELECT NAME, COALESCE(ROLE, '') AS ROLE \
+         FROM BOOK_METADATA_AUTHOR \
+         WHERE BOOK_ID = ?",
+    )
+    .bind(book_id)
+    .fetch_all(&pool)
+    .await
+    .map_err(|error| format!("query persisted book authors: {error}"))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| PersistedBookAuthorRecord {
+            name: row.get::<String, _>("NAME"),
+            role: row.get::<String, _>("ROLE"),
         })
         .collect())
 }

@@ -1,4 +1,5 @@
 use super::*;
+use std::ops::{Deref, DerefMut};
 
 #[derive(Clone)]
 pub struct PersistedBookBrowseEntry {
@@ -11,7 +12,8 @@ pub struct PersistedBookBrowseEntry {
 #[derive(Clone)]
 pub enum PersistedBookTagsScope {
     Series(String),
-    Library(String),
+    Libraries(Vec<String>),
+    ReadList(String),
 }
 
 #[derive(Clone)]
@@ -29,8 +31,8 @@ pub struct PersistedAuthorEntry {
     pub role: String,
 }
 
-#[derive(Clone)]
-pub(crate) struct PersistedSeriesBrowseQuery {
+#[derive(Clone, Debug, Default)]
+pub(crate) struct SeriesFilterCriteria {
     pub(crate) library_ids: Option<Vec<String>>,
     pub(crate) collection_ids: Option<Vec<String>>,
     pub(crate) titles: Option<Vec<String>>,
@@ -53,7 +55,6 @@ pub(crate) struct PersistedSeriesBrowseQuery {
     pub(crate) oneshot: Option<bool>,
     pub(crate) read_statuses: Option<Vec<String>>,
     pub(crate) read_statuses_excluded: Option<Vec<String>>,
-    pub(crate) complete: Option<bool>,
     pub(crate) genres: Option<Vec<String>>,
     pub(crate) genres_excluded: Option<Vec<String>>,
     pub(crate) genres_null: Option<bool>,
@@ -69,11 +70,6 @@ pub(crate) struct PersistedSeriesBrowseQuery {
     pub(crate) tags: Option<Vec<String>>,
     pub(crate) tags_excluded: Option<Vec<String>>,
     pub(crate) tags_null: Option<bool>,
-    pub(crate) sharing_labels: Option<Vec<String>>,
-    pub(crate) sharing_labels_excluded: Option<Vec<String>>,
-    pub(crate) sharing_labels_null: Option<bool>,
-    pub(crate) authors: Option<Vec<String>>,
-    pub(crate) authors_excluded: Option<Vec<String>>,
     pub(crate) release_dates: Option<Vec<String>>,
     pub(crate) release_dates_excluded: Option<Vec<String>>,
     pub(crate) release_dates_null: Option<bool>,
@@ -86,20 +82,145 @@ pub(crate) struct PersistedSeriesBrowseQuery {
     pub(crate) release_date_ends_with_excluded: Option<Vec<String>>,
     pub(crate) release_date_in_last_days: Option<i64>,
     pub(crate) release_date_not_in_last_days: Option<i64>,
+    pub(crate) sharing_labels: Option<Vec<String>>,
+    pub(crate) sharing_labels_excluded: Option<Vec<String>>,
+    pub(crate) sharing_labels_null: Option<bool>,
     pub(crate) series_statuses: Option<Vec<String>>,
     pub(crate) series_statuses_excluded: Option<Vec<String>>,
+    pub(crate) complete: Option<bool>,
+    pub(crate) authors: Option<Vec<String>>,
+    pub(crate) authors_excluded: Option<Vec<String>>,
+}
+
+impl SeriesFilterCriteria {
+    pub(crate) fn restrict_for_persisted_webui_shape(&mut self) {
+        self.collection_ids = None;
+        self.titles = None;
+        self.titles_excluded = None;
+        self.titles_contains = None;
+        self.titles_contains_excluded = None;
+        self.titles_begins_with = None;
+        self.titles_begins_with_excluded = None;
+        self.titles_ends_with = None;
+        self.titles_ends_with_excluded = None;
+        self.title_sorts = None;
+        self.title_sorts_excluded = None;
+        self.title_sorts_contains = None;
+        self.title_sorts_contains_excluded = None;
+        self.title_sorts_begins_with = None;
+        self.title_sorts_begins_with_excluded = None;
+        self.title_sorts_ends_with = None;
+        self.title_sorts_ends_with_excluded = None;
+        self.deleted = None;
+        self.oneshot = None;
+        self.read_statuses = None;
+        self.read_statuses_excluded = None;
+        self.genres = None;
+        self.genres_excluded = None;
+        self.genres_null = None;
+        self.languages = None;
+        self.languages_excluded = None;
+        self.publishers = None;
+        self.publishers_excluded = None;
+        self.age_ratings = None;
+        self.age_ratings_excluded = None;
+        self.age_ratings_null = None;
+        self.age_rating_gt = None;
+        self.age_rating_lt = None;
+        self.tags = None;
+        self.tags_excluded = None;
+        self.tags_null = None;
+        self.release_dates = None;
+        self.release_dates_excluded = None;
+        self.release_dates_null = None;
+        self.release_date_gt = None;
+        self.release_date_lt = None;
+        self.release_date_begins_with = None;
+        self.release_date_ends_with = None;
+        self.release_date_contains_excluded = None;
+        self.release_date_begins_with_excluded = None;
+        self.release_date_ends_with_excluded = None;
+        self.release_date_in_last_days = None;
+        self.release_date_not_in_last_days = None;
+        self.sharing_labels = None;
+        self.sharing_labels_excluded = None;
+        self.sharing_labels_null = None;
+        self.series_statuses = None;
+        self.series_statuses_excluded = None;
+        self.complete = None;
+        self.authors = None;
+        self.authors_excluded = None;
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct PersistedSeriesBrowseQuery {
+    pub(crate) filters: SeriesFilterCriteria,
     pub(crate) search: Option<String>,
-    pub(crate) search_regex: Option<(String, String)>,
     pub(crate) page: usize,
     pub(crate) size: usize,
     pub(crate) unpaged: bool,
     pub(crate) sort_modes: Vec<PersistedSeriesSortMode>,
 }
 
+impl PersistedSeriesBrowseQuery {
+    pub(crate) fn from_filters(
+        filters: SeriesFilterCriteria,
+        search: Option<String>,
+        page: usize,
+        size: usize,
+        unpaged: bool,
+        sort_modes: Vec<PersistedSeriesSortMode>,
+    ) -> Self {
+        Self {
+            filters,
+            search,
+            page,
+            size,
+            unpaged,
+            sort_modes,
+        }
+    }
+
+    pub(crate) fn from_runtime_filters(
+        filters: &RuntimeSeriesFilters,
+        search: Option<String>,
+        page: usize,
+        size: usize,
+        unpaged: bool,
+        sort_modes: Vec<PersistedSeriesSortMode>,
+    ) -> Self {
+        Self::from_filters(
+            filters.criteria.clone(),
+            search,
+            page,
+            size,
+            unpaged,
+            sort_modes,
+        )
+    }
+}
+
+impl Deref for PersistedSeriesBrowseQuery {
+    type Target = SeriesFilterCriteria;
+
+    fn deref(&self) -> &Self::Target {
+        &self.filters
+    }
+}
+
+impl DerefMut for PersistedSeriesBrowseQuery {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.filters
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PersistedSeriesSortMode {
     TitleAsc,
     Latest,
+    RelevanceAsc,
+    RelevanceDesc,
 }
 
 #[derive(Clone)]
@@ -140,68 +261,35 @@ pub struct PersistedSeriesSummary {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RuntimeSeriesFilters {
-    pub(crate) library_ids: Option<Vec<String>>,
-    pub(crate) collection_ids: Option<Vec<String>>,
-    pub(crate) titles: Option<Vec<String>>,
-    pub(crate) titles_excluded: Option<Vec<String>>,
-    pub(crate) titles_contains: Option<Vec<String>>,
-    pub(crate) titles_contains_excluded: Option<Vec<String>>,
-    pub(crate) titles_begins_with: Option<Vec<String>>,
-    pub(crate) titles_begins_with_excluded: Option<Vec<String>>,
-    pub(crate) titles_ends_with: Option<Vec<String>>,
-    pub(crate) titles_ends_with_excluded: Option<Vec<String>>,
-    pub(crate) title_sorts: Option<Vec<String>>,
-    pub(crate) title_sorts_excluded: Option<Vec<String>>,
-    pub(crate) title_sorts_contains: Option<Vec<String>>,
-    pub(crate) title_sorts_contains_excluded: Option<Vec<String>>,
-    pub(crate) title_sorts_begins_with: Option<Vec<String>>,
-    pub(crate) title_sorts_begins_with_excluded: Option<Vec<String>>,
-    pub(crate) title_sorts_ends_with: Option<Vec<String>>,
-    pub(crate) title_sorts_ends_with_excluded: Option<Vec<String>>,
-    pub(crate) deleted: Option<bool>,
-    pub(crate) oneshot: Option<bool>,
-    pub(crate) read_statuses: Option<Vec<String>>,
-    pub(crate) read_statuses_excluded: Option<Vec<String>>,
-    pub(crate) genres: Option<Vec<String>>,
-    pub(crate) genres_excluded: Option<Vec<String>>,
-    pub(crate) genres_null: Option<bool>,
-    pub(crate) languages: Option<Vec<String>>,
-    pub(crate) languages_excluded: Option<Vec<String>>,
-    pub(crate) publishers: Option<Vec<String>>,
-    pub(crate) publishers_excluded: Option<Vec<String>>,
-    pub(crate) age_ratings: Option<Vec<u16>>,
-    pub(crate) age_ratings_excluded: Option<Vec<u16>>,
-    pub(crate) age_ratings_null: Option<bool>,
-    pub(crate) age_rating_gt: Option<u16>,
-    pub(crate) age_rating_lt: Option<u16>,
-    pub(crate) tags: Option<Vec<String>>,
-    pub(crate) tags_excluded: Option<Vec<String>>,
-    pub(crate) tags_null: Option<bool>,
-    pub(crate) release_dates: Option<Vec<String>>,
-    pub(crate) release_dates_excluded: Option<Vec<String>>,
-    pub(crate) release_dates_null: Option<bool>,
-    pub(crate) release_date_gt: Option<String>,
-    pub(crate) release_date_lt: Option<String>,
-    pub(crate) release_date_begins_with: Option<Vec<String>>,
-    pub(crate) release_date_ends_with: Option<Vec<String>>,
-    pub(crate) release_date_contains_excluded: Option<Vec<String>>,
-    pub(crate) release_date_begins_with_excluded: Option<Vec<String>>,
-    pub(crate) release_date_ends_with_excluded: Option<Vec<String>>,
-    pub(crate) release_date_in_last_days: Option<i64>,
-    pub(crate) release_date_not_in_last_days: Option<i64>,
-    pub(crate) sharing_labels: Option<Vec<String>>,
-    pub(crate) sharing_labels_excluded: Option<Vec<String>>,
-    pub(crate) sharing_labels_null: Option<bool>,
-    pub(crate) series_statuses: Option<Vec<String>>,
-    pub(crate) series_statuses_excluded: Option<Vec<String>>,
-    pub(crate) complete: Option<bool>,
-    pub(crate) authors: Option<Vec<String>>,
-    pub(crate) authors_excluded: Option<Vec<String>>,
+    pub(crate) criteria: SeriesFilterCriteria,
+}
+
+impl RuntimeSeriesFilters {
+    pub(crate) fn from_criteria(criteria: SeriesFilterCriteria) -> Self {
+        Self { criteria }
+    }
+
+    pub(crate) fn into_criteria(self) -> SeriesFilterCriteria {
+        self.criteria
+    }
+}
+
+impl Deref for RuntimeSeriesFilters {
+    type Target = SeriesFilterCriteria;
+
+    fn deref(&self) -> &Self::Target {
+        &self.criteria
+    }
+}
+
+impl DerefMut for RuntimeSeriesFilters {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.criteria
+    }
 }
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct RuntimeBooksFilters {
-    pub(crate) direct_browse_family: Option<DirectBrowseBooksListFamily>,
+pub(crate) struct BooksFilterCriteria {
     pub(crate) library_ids: Option<Vec<String>>,
     pub(crate) series_ids: Option<Vec<String>>,
     pub(crate) series_ids_excluded: Option<Vec<String>>,
@@ -260,6 +348,88 @@ pub(crate) struct RuntimeBooksFilters {
     pub(crate) number_sorts_excluded: Option<Vec<f64>>,
     pub(crate) number_sort_gt: Option<f64>,
     pub(crate) number_sort_lt: Option<f64>,
+}
+
+impl BooksFilterCriteria {
+    pub(crate) fn restrict_for_persisted_webui_shape(&mut self) {
+        self.series_ids = None;
+        self.series_ids_excluded = None;
+        self.read_list_ids = None;
+        self.read_list_ids_excluded = None;
+        self.titles = None;
+        self.titles_excluded = None;
+        self.titles_contains = None;
+        self.titles_contains_excluded = None;
+        self.titles_begins_with = None;
+        self.titles_begins_with_excluded = None;
+        self.titles_ends_with = None;
+        self.titles_ends_with_excluded = None;
+        self.deleted = None;
+        self.oneshot = None;
+        self.genres = None;
+        self.genres_excluded = None;
+        self.genres_null = None;
+        self.tags = None;
+        self.tags_excluded = None;
+        self.tags_null = None;
+        self.read_statuses = None;
+        self.read_statuses_excluded = None;
+        self.media_profiles = None;
+        self.media_profiles_excluded = None;
+        self.media_statuses = None;
+        self.media_statuses_excluded = None;
+        self.authors = None;
+        self.authors_excluded = None;
+        self.poster_types = None;
+        self.poster_types_excluded = None;
+        self.poster_selected = None;
+        self.poster_selected_excluded = None;
+        self.release_dates = None;
+        self.release_dates_excluded = None;
+        self.release_dates_null = None;
+        self.release_date_gt = None;
+        self.release_date_lt = None;
+        self.release_date_begins_with = None;
+        self.release_date_ends_with = None;
+        self.release_date_contains_excluded = None;
+        self.release_date_begins_with_excluded = None;
+        self.release_date_ends_with_excluded = None;
+        self.release_date_in_last_days = None;
+        self.release_date_not_in_last_days = None;
+        self.number_sorts = None;
+        self.number_sorts_excluded = None;
+        self.number_sort_gt = None;
+        self.number_sort_lt = None;
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct RuntimeBooksFilters {
+    pub(crate) direct_browse_family: Option<DirectBrowseBooksListFamily>,
+    pub(crate) criteria: BooksFilterCriteria,
+}
+
+impl RuntimeBooksFilters {
+    pub(crate) fn from_criteria(criteria: BooksFilterCriteria) -> Self {
+        Self {
+            direct_browse_family: None,
+            criteria,
+        }
+    }
+}
+
+impl Deref for RuntimeBooksFilters {
+    type Target = BooksFilterCriteria;
+
+    fn deref(&self) -> &Self::Target {
+        &self.criteria
+    }
+}
+
+impl DerefMut for RuntimeBooksFilters {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.criteria
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -268,73 +438,70 @@ pub(crate) enum PersistedBooksSortMode {
     CreatedDateDesc,
     LastModifiedDateDesc,
     ReleaseDateDesc,
+    RelevanceAsc,
+    RelevanceDesc,
 }
 
 #[derive(Clone)]
 pub(crate) struct PersistedBooksBrowseQuery {
-    pub(crate) library_ids: Option<Vec<String>>,
-    pub(crate) series_ids: Option<Vec<String>>,
-    pub(crate) series_ids_excluded: Option<Vec<String>>,
-    pub(crate) read_list_ids: Option<Vec<String>>,
-    pub(crate) read_list_ids_excluded: Option<Vec<String>>,
-    pub(crate) titles: Option<Vec<String>>,
-    pub(crate) titles_excluded: Option<Vec<String>>,
-    pub(crate) titles_contains: Option<Vec<String>>,
-    pub(crate) titles_contains_excluded: Option<Vec<String>>,
-    pub(crate) titles_begins_with: Option<Vec<String>>,
-    pub(crate) titles_begins_with_excluded: Option<Vec<String>>,
-    pub(crate) titles_ends_with: Option<Vec<String>>,
-    pub(crate) titles_ends_with_excluded: Option<Vec<String>>,
-    pub(crate) deleted: Option<bool>,
-    pub(crate) oneshot: Option<bool>,
-    pub(crate) genres: Option<Vec<String>>,
-    pub(crate) genres_excluded: Option<Vec<String>>,
-    pub(crate) genres_null: Option<bool>,
-    pub(crate) languages: Option<Vec<String>>,
-    pub(crate) languages_excluded: Option<Vec<String>>,
-    pub(crate) publishers: Option<Vec<String>>,
-    pub(crate) publishers_excluded: Option<Vec<String>>,
-    pub(crate) age_ratings: Option<Vec<u16>>,
-    pub(crate) age_ratings_excluded: Option<Vec<u16>>,
-    pub(crate) age_ratings_null: Option<bool>,
-    pub(crate) age_rating_gt: Option<u16>,
-    pub(crate) age_rating_lt: Option<u16>,
-    pub(crate) tags: Option<Vec<String>>,
-    pub(crate) tags_excluded: Option<Vec<String>>,
-    pub(crate) tags_null: Option<bool>,
-    pub(crate) media_profiles: Option<Vec<String>>,
-    pub(crate) media_profiles_excluded: Option<Vec<String>>,
-    pub(crate) authors: Option<Vec<String>>,
-    pub(crate) authors_excluded: Option<Vec<String>>,
-    pub(crate) poster_types: Option<Vec<String>>,
-    pub(crate) poster_types_excluded: Option<Vec<String>>,
-    pub(crate) poster_selected: Option<bool>,
-    pub(crate) poster_selected_excluded: Option<bool>,
-    pub(crate) media_statuses: Option<Vec<String>>,
-    pub(crate) media_statuses_excluded: Option<Vec<String>>,
-    pub(crate) read_statuses: Option<Vec<String>>,
-    pub(crate) read_statuses_excluded: Option<Vec<String>>,
-    pub(crate) release_dates: Option<Vec<String>>,
-    pub(crate) release_dates_excluded: Option<Vec<String>>,
-    pub(crate) release_dates_null: Option<bool>,
-    pub(crate) release_date_gt: Option<String>,
-    pub(crate) release_date_lt: Option<String>,
-    pub(crate) release_date_begins_with: Option<Vec<String>>,
-    pub(crate) release_date_ends_with: Option<Vec<String>>,
-    pub(crate) release_date_contains_excluded: Option<Vec<String>>,
-    pub(crate) release_date_begins_with_excluded: Option<Vec<String>>,
-    pub(crate) release_date_ends_with_excluded: Option<Vec<String>>,
-    pub(crate) release_date_in_last_days: Option<i64>,
-    pub(crate) release_date_not_in_last_days: Option<i64>,
-    pub(crate) number_sorts: Option<Vec<f64>>,
-    pub(crate) number_sorts_excluded: Option<Vec<f64>>,
-    pub(crate) number_sort_gt: Option<f64>,
-    pub(crate) number_sort_lt: Option<f64>,
+    pub(crate) filters: BooksFilterCriteria,
     pub(crate) search: Option<String>,
     pub(crate) page: usize,
     pub(crate) size: usize,
     pub(crate) unpaged: bool,
     pub(crate) sort_modes: Vec<PersistedBooksSortMode>,
+}
+
+impl PersistedBooksBrowseQuery {
+    pub(crate) fn from_filters(
+        filters: BooksFilterCriteria,
+        search: Option<String>,
+        page: usize,
+        size: usize,
+        unpaged: bool,
+        sort_modes: Vec<PersistedBooksSortMode>,
+    ) -> Self {
+        Self {
+            filters,
+            search,
+            page,
+            size,
+            unpaged,
+            sort_modes,
+        }
+    }
+
+    pub(crate) fn from_runtime_filters(
+        filters: &RuntimeBooksFilters,
+        search: Option<String>,
+        page: usize,
+        size: usize,
+        unpaged: bool,
+        sort_modes: Vec<PersistedBooksSortMode>,
+    ) -> Self {
+        Self::from_filters(
+            filters.criteria.clone(),
+            search,
+            page,
+            size,
+            unpaged,
+            sort_modes,
+        )
+    }
+}
+
+impl Deref for PersistedBooksBrowseQuery {
+    type Target = BooksFilterCriteria;
+
+    fn deref(&self) -> &Self::Target {
+        &self.filters
+    }
+}
+
+impl DerefMut for PersistedBooksBrowseQuery {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.filters
+    }
 }
 
 #[derive(Clone)]

@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use axum::Json;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};

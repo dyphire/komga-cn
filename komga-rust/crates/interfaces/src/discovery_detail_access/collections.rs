@@ -7,6 +7,7 @@ use std::sync::{Arc, OnceLock};
 type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
 #[derive(Clone)]
+#[allow(clippy::type_complexity)]
 pub struct DiscoveryDetailCollectionsAccessBackend {
     pub persisted_collections_exist:
         Arc<dyn Fn(PathBuf) -> BoxFuture<Result<bool, String>> + Send + Sync>,
@@ -17,13 +18,6 @@ pub struct DiscoveryDetailCollectionsAccessBackend {
         Arc<dyn Fn(PathBuf, String) -> BoxFuture<Result<Vec<String>, String>> + Send + Sync>,
     pub load_persisted_collection_detail: Arc<
         dyn Fn(PathBuf, String) -> BoxFuture<Result<Option<PersistedCollectionRecord>, String>>
-            + Send
-            + Sync,
-    >,
-    pub persisted_collection_exists:
-        Arc<dyn Fn(PathBuf, String) -> BoxFuture<Result<bool, String>> + Send + Sync>,
-    pub load_persisted_collection_series: Arc<
-        dyn Fn(PathBuf, String) -> BoxFuture<Result<Vec<PersistedCollectionSeriesRecord>, String>>
             + Send
             + Sync,
     >,
@@ -46,6 +40,10 @@ pub struct DiscoveryDetailCollectionsAccessBackend {
     >,
     pub delete_persisted_collection:
         Arc<dyn Fn(PathBuf, String) -> BoxFuture<Result<bool, String>> + Send + Sync>,
+    pub upsert_collection_search_document:
+        Arc<dyn Fn(PathBuf, PathBuf, String) -> BoxFuture<Result<bool, String>> + Send + Sync>,
+    pub delete_collection_search_document:
+        Arc<dyn Fn(PathBuf, String) -> BoxFuture<Result<(), String>> + Send + Sync>,
 }
 
 static BACKEND: OnceLock<DiscoveryDetailCollectionsAccessBackend> = OnceLock::new();
@@ -76,16 +74,6 @@ fn backend() -> &'static DiscoveryDetailCollectionsAccessBackend {
                 Err("discovery detail collections backend is not configured".to_string())
             })
         }),
-        persisted_collection_exists: Arc::new(|_, _| {
-            Box::pin(async {
-                Err("discovery detail collections backend is not configured".to_string())
-            })
-        }),
-        load_persisted_collection_series: Arc::new(|_, _| {
-            Box::pin(async {
-                Err("discovery detail collections backend is not configured".to_string())
-            })
-        }),
         load_series_library_id: Arc::new(|_, _| {
             Box::pin(async {
                 Err("discovery detail collections backend is not configured".to_string())
@@ -111,6 +99,16 @@ fn backend() -> &'static DiscoveryDetailCollectionsAccessBackend {
                 Err("discovery detail collections backend is not configured".to_string())
             })
         }),
+        upsert_collection_search_document: Arc::new(|_, _, _| {
+            Box::pin(async {
+                Err("discovery detail collections backend is not configured".to_string())
+            })
+        }),
+        delete_collection_search_document: Arc::new(|_, _| {
+            Box::pin(async {
+                Err("discovery detail collections backend is not configured".to_string())
+            })
+        }),
     })
 }
 
@@ -121,16 +119,6 @@ pub struct PersistedCollectionRecord {
     pub ordered: bool,
     pub created_date: String,
     pub last_modified_date: String,
-}
-
-#[derive(Clone)]
-pub struct PersistedCollectionSeriesRecord {
-    pub id: String,
-    pub library_id: String,
-    pub name: String,
-    pub title: String,
-    pub deleted: bool,
-    pub oneshot: bool,
 }
 
 pub struct PersistedSeriesRestrictionRecord {
@@ -164,25 +152,6 @@ pub async fn load_persisted_collection_detail(
     collection_id: &str,
 ) -> Result<Option<PersistedCollectionRecord>, String> {
     (backend().load_persisted_collection_detail)(
-        database_file.to_path_buf(),
-        collection_id.to_string(),
-    )
-    .await
-}
-
-pub async fn persisted_collection_exists(
-    database_file: &FsPath,
-    collection_id: &str,
-) -> Result<bool, String> {
-    (backend().persisted_collection_exists)(database_file.to_path_buf(), collection_id.to_string())
-        .await
-}
-
-pub async fn load_persisted_collection_series(
-    database_file: &FsPath,
-    collection_id: &str,
-) -> Result<Vec<PersistedCollectionSeriesRecord>, String> {
-    (backend().load_persisted_collection_series)(
         database_file.to_path_buf(),
         collection_id.to_string(),
     )
@@ -243,4 +212,28 @@ pub async fn delete_persisted_collection(
 ) -> Result<bool, String> {
     (backend().delete_persisted_collection)(database_file.to_path_buf(), collection_id.to_string())
         .await
+}
+
+pub async fn upsert_collection_search_document(
+    database_file: &FsPath,
+    index_dir: &FsPath,
+    collection_id: &str,
+) -> Result<bool, String> {
+    (backend().upsert_collection_search_document)(
+        database_file.to_path_buf(),
+        index_dir.to_path_buf(),
+        collection_id.to_string(),
+    )
+    .await
+}
+
+pub async fn delete_collection_search_document(
+    index_dir: &FsPath,
+    collection_id: &str,
+) -> Result<(), String> {
+    (backend().delete_collection_search_document)(
+        index_dir.to_path_buf(),
+        collection_id.to_string(),
+    )
+    .await
 }

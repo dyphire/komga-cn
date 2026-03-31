@@ -75,9 +75,19 @@ pub struct KoboMetadataRecord {
     pub title: String,
     pub summary: String,
     pub release_date: Option<String>,
+    pub created_date: Option<String>,
     pub language: String,
     pub file_size: u64,
     pub file_name: String,
+    pub contributor_names: Vec<String>,
+    pub isbn: Option<String>,
+    pub publisher_name: Option<String>,
+    pub cover_image_id: Option<String>,
+    pub series_id: Option<String>,
+    pub series_name: Option<String>,
+    pub series_number: Option<String>,
+    pub series_number_float: Option<f64>,
+    pub oneshot: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -87,6 +97,7 @@ pub enum KoreaderBookLookupError {
 }
 
 #[derive(Clone)]
+#[allow(clippy::type_complexity)]
 pub struct RuntimeIdentityAccessBackend {
     pub auth_token_user: Arc<dyn Fn(HeaderMap) -> Option<AuthUser> + Send + Sync>,
     pub session_token_for_user_with_namespace:

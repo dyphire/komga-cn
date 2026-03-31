@@ -402,9 +402,19 @@ fn map_kobo_metadata_record(
         title: record.title,
         summary: record.summary,
         release_date: record.release_date,
+        created_date: record.created_date,
         language: record.language,
         file_size: record.file_size,
         file_name: record.file_name,
+        contributor_names: record.contributor_names,
+        isbn: record.isbn,
+        publisher_name: record.publisher_name,
+        cover_image_id: record.cover_image_id,
+        series_id: record.series_id,
+        series_name: record.series_name,
+        series_number: record.series_number,
+        series_number_float: record.series_number_float,
+        oneshot: record.oneshot,
     }
 }
 

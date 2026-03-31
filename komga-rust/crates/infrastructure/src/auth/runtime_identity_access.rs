@@ -78,7 +78,7 @@ pub async fn persisted_basic_user(
     };
 
     match verify_bcrypt_password(&password, &user.password) {
-        Ok(true) => Some(AuthOutcome::Valid(user.clone())),
+        Ok(true) => Some(AuthOutcome::Valid(Box::new(user.clone()))),
         Ok(false) | Err(_) => Some(AuthOutcome::Invalid),
     }
 }
@@ -127,7 +127,7 @@ pub async fn persisted_api_key_user_by_token(
         return Some(AuthOutcome::Invalid);
     };
 
-    Some(AuthOutcome::Valid(user.clone()))
+    Some(AuthOutcome::Valid(Box::new(user.clone())))
 }
 
 pub async fn persisted_api_key_metadata(

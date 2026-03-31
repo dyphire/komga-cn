@@ -10,7 +10,10 @@ pub async fn load_announcement_read_ids(
 ) -> Result<Vec<String>, sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
     let rows = sqlx::query(
-        "SELECT ANNOUNCEMENT_ID\n         FROM ANNOUNCEMENTS_READ\n         WHERE USER_ID = ?\n         ORDER BY ANNOUNCEMENT_ID ASC",
+        "SELECT ANNOUNCEMENT_ID \
+         FROM ANNOUNCEMENTS_READ \
+         WHERE USER_ID = ? \
+         ORDER BY ANNOUNCEMENT_ID ASC",
     )
     .bind(user_id)
     .fetch_all(&pool)

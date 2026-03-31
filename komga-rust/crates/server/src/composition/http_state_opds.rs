@@ -1,6 +1,14 @@
 use super::*;
+use std::collections::HashMap;
 
-pub(super) fn install_opds_access_backends() {
+use komga_infrastructure::{SearchEntityType, SearchIndexLifecycle};
+
+use super::http_state_discovery::resolve_discovery_index_dir;
+
+const OPDS_SEARCH_GROUP_LIMIT: i64 = 20;
+
+pub(super) fn install_opds_access_backends(lucene_data_directory: &std::path::Path) {
+    let lucene_data_directory = lucene_data_directory.to_path_buf();
     install_opds_manifest_access(OpdsManifestAccessBackend {
         load_manifest_book_record: Arc::new(|database_file, book_id| {
             Box::pin(async move {
@@ -278,32 +286,70 @@ pub(super) fn install_opds_access_backends() {
                 .map_err(|error| error.to_string())
             })
         }),
-        load_search_results: Arc::new(|database_file, query| {
-            Box::pin(async move {
-                infrastructure_opds_persisted::load_search_results(database_file.as_path(), &query)
-                    .await
-                    .map(|(series, books, collections, readlists)| {
+        load_unified_search_results: Arc::new({
+            let default_index_dir = lucene_data_directory.clone();
+            move |database_file, query| {
+                let default_index_dir = default_index_dir.clone();
+                Box::pin(async move {
+                    let trimmed_query = query.trim().to_string();
+                    let (series, books, collections, readlists) = if trimmed_query.is_empty() {
+                        load_blank_opds_search_results(database_file.as_path()).await?
+                    } else {
+                        let index_dir = resolve_discovery_index_dir(
+                            database_file.as_path(),
+                            default_index_dir.as_path(),
+                        );
+                        let index = SearchIndexLifecycle::bootstrap(index_dir.as_path())
+                            .map_err(|error| format!("bootstrap OPDS search index: {error}"))?;
+
                         (
-                            series
-                                .into_iter()
-                                .map(map_persisted_series_search_record)
-                                .collect(),
-                            books
-                                .into_iter()
-                                .map(map_persisted_book_search_record)
-                                .collect(),
-                            collections
-                                .into_iter()
-                                .map(map_persisted_named_record)
-                                .collect(),
-                            readlists
-                                .into_iter()
-                                .map(map_persisted_named_record)
-                                .collect(),
+                            load_ranked_series_search_results(
+                                database_file.as_path(),
+                                &index,
+                                &trimmed_query,
+                            )
+                            .await?,
+                            load_ranked_book_search_results(
+                                database_file.as_path(),
+                                &index,
+                                &trimmed_query,
+                            )
+                            .await?,
+                            load_ranked_collection_search_results(
+                                database_file.as_path(),
+                                &index,
+                                &trimmed_query,
+                            )
+                            .await?,
+                            load_ranked_readlist_search_results(
+                                database_file.as_path(),
+                                &index,
+                                &trimmed_query,
+                            )
+                            .await?,
                         )
-                    })
-                    .map_err(|error| error.to_string())
-            })
+                    };
+
+                    Ok((
+                        series
+                            .into_iter()
+                            .map(map_persisted_series_search_record)
+                            .collect(),
+                        books
+                            .into_iter()
+                            .map(map_persisted_book_search_record)
+                            .collect(),
+                        collections
+                            .into_iter()
+                            .map(map_persisted_named_record)
+                            .collect(),
+                        readlists
+                            .into_iter()
+                            .map(map_persisted_named_record)
+                            .collect(),
+                    ))
+                })
+            }
         }),
         load_publishers: Arc::new(|database_file, allowed_library_ids| {
             Box::pin(async move {
@@ -492,4 +538,161 @@ fn map_persisted_book_feed_record(
         sharing_labels: row.sharing_labels,
         last_modified: row.last_modified,
     }
+}
+
+async fn load_blank_opds_search_results(
+    database_file: &std::path::Path,
+) -> Result<
+    (
+        Vec<infrastructure_opds_persisted::PersistedSeriesSearchRecord>,
+        Vec<infrastructure_opds_persisted::PersistedBookSearchRecord>,
+        Vec<infrastructure_opds_persisted::PersistedNamedRecord>,
+        Vec<infrastructure_opds_persisted::PersistedNamedRecord>,
+    ),
+    String,
+> {
+    Ok((
+        infrastructure_opds_persisted::load_series_search_records_limited(
+            database_file,
+            OPDS_SEARCH_GROUP_LIMIT,
+        )
+        .await
+        .map_err(|error| format!("load blank OPDS series search rows: {error}"))?,
+        infrastructure_opds_persisted::load_book_search_records_limited(
+            database_file,
+            OPDS_SEARCH_GROUP_LIMIT,
+        )
+        .await
+        .map_err(|error| format!("load blank OPDS book search rows: {error}"))?,
+        infrastructure_opds_persisted::load_collection_search_records_limited(
+            database_file,
+            OPDS_SEARCH_GROUP_LIMIT,
+        )
+        .await
+        .map_err(|error| format!("load blank OPDS collection search rows: {error}"))?,
+        infrastructure_opds_persisted::load_readlist_search_records_limited(
+            database_file,
+            OPDS_SEARCH_GROUP_LIMIT,
+        )
+        .await
+        .map_err(|error| format!("load blank OPDS readlist search rows: {error}"))?,
+    ))
+}
+
+async fn load_ranked_series_search_results(
+    database_file: &std::path::Path,
+    index: &SearchIndexLifecycle,
+    query: &str,
+) -> Result<Vec<infrastructure_opds_persisted::PersistedSeriesSearchRecord>, String> {
+    let limit = infrastructure_opds_persisted::load_series_search_count(database_file)
+        .await
+        .map_err(|error| format!("load OPDS series search count: {error}"))?
+        .max(1);
+    let ids = index
+        .search_ids(query, SearchEntityType::Series, limit)
+        .map_err(|error| format!("search OPDS series query: {error}"))?;
+    ordered_series_search_rows(database_file, &ids).await
+}
+
+async fn load_ranked_book_search_results(
+    database_file: &std::path::Path,
+    index: &SearchIndexLifecycle,
+    query: &str,
+) -> Result<Vec<infrastructure_opds_persisted::PersistedBookSearchRecord>, String> {
+    let limit = infrastructure_opds_persisted::load_book_search_count(database_file)
+        .await
+        .map_err(|error| format!("load OPDS book search count: {error}"))?
+        .max(1);
+    let ids = index
+        .search_ids(query, SearchEntityType::Book, limit)
+        .map_err(|error| format!("search OPDS book query: {error}"))?;
+    ordered_book_search_rows(database_file, &ids).await
+}
+
+async fn load_ranked_collection_search_results(
+    database_file: &std::path::Path,
+    index: &SearchIndexLifecycle,
+    query: &str,
+) -> Result<Vec<infrastructure_opds_persisted::PersistedNamedRecord>, String> {
+    let limit = infrastructure_opds_persisted::load_collection_search_count(database_file)
+        .await
+        .map_err(|error| format!("load OPDS collection search count: {error}"))?
+        .max(1);
+    let ids = index
+        .search_ids(query, SearchEntityType::Collection, limit)
+        .map_err(|error| format!("search OPDS collection query: {error}"))?;
+    ordered_collection_search_rows(database_file, &ids).await
+}
+
+async fn load_ranked_readlist_search_results(
+    database_file: &std::path::Path,
+    index: &SearchIndexLifecycle,
+    query: &str,
+) -> Result<Vec<infrastructure_opds_persisted::PersistedNamedRecord>, String> {
+    let limit = infrastructure_opds_persisted::load_readlist_search_count(database_file)
+        .await
+        .map_err(|error| format!("load OPDS readlist search count: {error}"))?
+        .max(1);
+    let ids = index
+        .search_ids(query, SearchEntityType::ReadList, limit)
+        .map_err(|error| format!("search OPDS readlist query: {error}"))?;
+    ordered_readlist_search_rows(database_file, &ids).await
+}
+
+async fn ordered_series_search_rows(
+    database_file: &std::path::Path,
+    ids: &[String],
+) -> Result<Vec<infrastructure_opds_persisted::PersistedSeriesSearchRecord>, String> {
+    let rows = infrastructure_opds_persisted::load_series_search_records_by_ids(database_file, ids)
+        .await
+        .map_err(|error| format!("load OPDS series search rows by ids: {error}"))?;
+    let mut by_id = rows
+        .into_iter()
+        .map(|row| (row.id.clone(), row))
+        .collect::<HashMap<_, _>>();
+    Ok(ids.iter().filter_map(|id| by_id.remove(id)).collect())
+}
+
+async fn ordered_book_search_rows(
+    database_file: &std::path::Path,
+    ids: &[String],
+) -> Result<Vec<infrastructure_opds_persisted::PersistedBookSearchRecord>, String> {
+    let rows = infrastructure_opds_persisted::load_book_search_records_by_ids(database_file, ids)
+        .await
+        .map_err(|error| format!("load OPDS book search rows by ids: {error}"))?;
+    let mut by_id = rows
+        .into_iter()
+        .map(|row| (row.id.clone(), row))
+        .collect::<HashMap<_, _>>();
+    Ok(ids.iter().filter_map(|id| by_id.remove(id)).collect())
+}
+
+async fn ordered_collection_search_rows(
+    database_file: &std::path::Path,
+    ids: &[String],
+) -> Result<Vec<infrastructure_opds_persisted::PersistedNamedRecord>, String> {
+    let rows =
+        infrastructure_opds_persisted::load_collection_search_records_by_ids(database_file, ids)
+            .await
+            .map_err(|error| format!("load OPDS collection search rows by ids: {error}"))?;
+    let mut by_id = rows
+        .into_iter()
+        .map(|row| (row.id.clone(), row))
+        .collect::<HashMap<_, _>>();
+    Ok(ids.iter().filter_map(|id| by_id.remove(id)).collect())
+}
+
+async fn ordered_readlist_search_rows(
+    database_file: &std::path::Path,
+    ids: &[String],
+) -> Result<Vec<infrastructure_opds_persisted::PersistedNamedRecord>, String> {
+    let rows =
+        infrastructure_opds_persisted::load_readlist_search_records_by_ids(database_file, ids)
+            .await
+            .map_err(|error| format!("load OPDS readlist search rows by ids: {error}"))?;
+    let mut by_id = rows
+        .into_iter()
+        .map(|row| (row.id.clone(), row))
+        .collect::<HashMap<_, _>>();
+    Ok(ids.iter().filter_map(|id| by_id.remove(id)).collect())
 }

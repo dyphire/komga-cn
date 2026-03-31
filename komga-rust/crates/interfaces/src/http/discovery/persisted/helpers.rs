@@ -88,29 +88,6 @@ pub(crate) fn books_page_for_entries(entries: Vec<PersistedBookBrowseEntry>, uri
     })
 }
 
-pub(crate) fn extract_regex_search(payload: &Value) -> Option<(String, String)> {
-    let regex_search = payload
-        .get("regexSearch")
-        .or_else(|| payload.get("searchRegex"))?;
-    let regex = regex_search
-        .get("regex")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())?
-        .to_string();
-    let field = regex_search
-        .get("field")
-        .and_then(Value::as_str)
-        .map(|value| value.to_ascii_lowercase())
-        .and_then(|value| match value.as_str() {
-            "title" => Some("title".to_string()),
-            "title_sort" => Some("title_sort".to_string()),
-            _ => None,
-        })
-        .unwrap_or_else(|| "title".to_string());
-    Some((regex, field))
-}
-
 pub(crate) fn media_profile_for_media_type(media_type: &str) -> &'static str {
     match media_type {
         "application/zip"

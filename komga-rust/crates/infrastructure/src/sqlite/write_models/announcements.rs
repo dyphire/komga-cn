@@ -12,7 +12,8 @@ pub async fn save_announcements_read(
 
     for announcement_id in announcement_ids {
         sqlx::query(
-            "INSERT OR IGNORE INTO ANNOUNCEMENTS_READ (USER_ID, ANNOUNCEMENT_ID)\n             VALUES (?, ?)",
+            "INSERT OR IGNORE INTO ANNOUNCEMENTS_READ (USER_ID, ANNOUNCEMENT_ID) \
+             VALUES (?, ?)",
         )
         .bind(user_id)
         .bind(announcement_id)

@@ -19,7 +19,7 @@ pub async fn load_persisted_readlist_thumbnails(
         .await
         .map_err(|error| format!("open readlist thumbnails db: {error}"))?;
     let rows = sqlx::query(
-        "SELECT ID, TYPE, SELECTED, MEDIA_TYPE, THUMBNAIL \
+        "SELECT ID, READLIST_ID, TYPE, SELECTED, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT, THUMBNAIL \
          FROM THUMBNAIL_READLIST \
          WHERE READLIST_ID = ? \
          ORDER BY SELECTED DESC, LAST_MODIFIED_DATE DESC, ID ASC",
@@ -33,9 +33,13 @@ pub async fn load_persisted_readlist_thumbnails(
         .into_iter()
         .map(|row| ReadlistThumbnailRecord {
             id: row.get::<String, _>("ID"),
+            readlist_id: row.get::<String, _>("READLIST_ID"),
             thumbnail_type: row.get::<String, _>("TYPE"),
             selected: row.get::<i64, _>("SELECTED") != 0,
             media_type: row.get::<String, _>("MEDIA_TYPE"),
+            file_size: row.get::<i64, _>("FILE_SIZE"),
+            width: row.get::<i64, _>("WIDTH"),
+            height: row.get::<i64, _>("HEIGHT"),
             thumbnail: row.get::<Vec<u8>, _>("THUMBNAIL"),
         })
         .collect())
@@ -46,6 +50,8 @@ pub async fn insert_readlist_thumbnail(
     readlist_id: &str,
     thumbnail: &[u8],
     media_type: &str,
+    width: i64,
+    height: i64,
     selected: bool,
 ) -> Result<ReadlistThumbnailRecord, String> {
     let pool = connect_pool(database_file, 1)
@@ -89,8 +95,8 @@ pub async fn insert_readlist_thumbnail(
     let id = generated_thumbnail_id("thumbnail-readlist");
     sqlx::query(
         "INSERT INTO THUMBNAIL_READLIST \
-         (ID, SELECTED, THUMBNAIL, TYPE, READLIST_ID, MEDIA_TYPE, FILE_SIZE) \
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+         (ID, SELECTED, THUMBNAIL, TYPE, READLIST_ID, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(selected)
@@ -99,6 +105,8 @@ pub async fn insert_readlist_thumbnail(
     .bind(readlist_id)
     .bind(media_type)
     .bind(thumbnail.len() as i64)
+    .bind(width)
+    .bind(height)
     .execute(&mut *tx)
     .await
     .map_err(|error| format!("insert readlist thumbnail: {error}"))?;
@@ -109,9 +117,13 @@ pub async fn insert_readlist_thumbnail(
 
     Ok(ReadlistThumbnailRecord {
         id,
+        readlist_id: readlist_id.to_string(),
         thumbnail_type: "USER_UPLOADED".to_string(),
         selected,
         media_type: media_type.to_string(),
+        file_size: thumbnail.len() as i64,
+        width,
+        height,
         thumbnail: thumbnail.to_vec(),
     })
 }

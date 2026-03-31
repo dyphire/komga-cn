@@ -29,14 +29,24 @@ pub fn new_runtime_db_paths(case_id: &str) -> std::io::Result<RuntimeDbPaths> {
 
 pub async fn seed_main_db_from_flyway(path: &Path) -> anyhow::Result<()> {
     let migration_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../komga/src/flyway/resources/db/migration/sqlite");
-    execute_sql_files(path, &migration_dir).await
+        .join("crates/infrastructure/sqlx-migrations/main");
+    execute_sql_files(path, &migration_dir, None).await
+}
+
+#[allow(dead_code)]
+pub async fn seed_main_db_from_flyway_through(
+    path: &Path,
+    through_version: i64,
+) -> anyhow::Result<()> {
+    let migration_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("crates/infrastructure/sqlx-migrations/main");
+    execute_sql_files(path, &migration_dir, Some(through_version)).await
 }
 
 pub async fn seed_tasks_db_from_flyway(path: &Path) -> anyhow::Result<()> {
     let migration_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../komga/src/flyway/resources/tasks/migration/sqlite");
-    execute_sql_files(path, &migration_dir).await
+    execute_sql_files(path, &migration_dir, None).await
 }
 
 pub fn cleanup(paths: RuntimeDbPaths) {
@@ -45,11 +55,21 @@ pub fn cleanup(paths: RuntimeDbPaths) {
     let _ = std::fs::remove_dir_all(paths.config_dir);
 }
 
-async fn execute_sql_files(db_path: &Path, migration_dir: &Path) -> anyhow::Result<()> {
+async fn execute_sql_files(
+    db_path: &Path,
+    migration_dir: &Path,
+    through_version: Option<i64>,
+) -> anyhow::Result<()> {
     let pool = connect_pool(db_path, 1).await?;
     let context = SqlitePersistenceContext::new(pool.clone());
 
     for file in sorted_migration_files(migration_dir)? {
+        if let Some(max_version) = through_version
+            && parse_flyway_version(&file)? > max_version
+        {
+            break;
+        }
+
         let content = std::fs::read_to_string(&file)?;
         let normalized = replace_flyway_placeholders(&content);
 
@@ -89,6 +109,25 @@ fn sorted_migration_files(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
     });
 
     Ok(files)
+}
+
+fn parse_flyway_version(path: &Path) -> anyhow::Result<i64> {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("migration filename should be valid utf-8")?;
+    let base = file_name
+        .strip_suffix(".sql")
+        .context("migration file should have .sql suffix")?;
+    let (version, _) = base
+        .split_once("__")
+        .context("migration file should contain Flyway version separator")?;
+    let version = version
+        .strip_prefix('V')
+        .context("migration file should start with Flyway V prefix")?;
+    version
+        .parse::<i64>()
+        .context("migration version should parse as integer")
 }
 
 fn replace_flyway_placeholders(content: &str) -> String {

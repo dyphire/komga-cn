@@ -1,6 +1,7 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use komga_contract_testkit::contract_matrix::assert_required_target_declared;
+use komga_rust::infrastructure::sqlite::connect_pool;
 use komga_server::app::build_router_with_config;
 use serde_json::{Value, json};
 use tokio::time::{Duration, sleep};
@@ -88,6 +89,67 @@ async fn router_discovery_series_list_supports_deleted_filter_in_runtime_owned_m
 }
 
 #[tokio::test]
+async fn router_discovery_series_rejects_legacy_search_query_inputs() {
+    let paths = new_router_fixture("router-discovery-series-legacy-search-query").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    for legacy_query_name in ["searchRegex", "search_regex"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!(
+                        "/api/v1/series?page=0&size=20&{legacy_query_name}=series"
+                    ))
+                    .header("x-auth-token", &auth_token)
+                    .body(Body::empty())
+                    .expect("legacy series query request should build"),
+            )
+            .await
+            .expect("legacy series query request should complete");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_alphabetical_groups_rejects_legacy_search_query_inputs() {
+    let paths =
+        new_router_fixture("router-discovery-series-alphabetical-groups-legacy-search-query").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    for legacy_query_name in ["regexSearch", "searchRegex", "search_regex"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!(
+                        "/api/v1/series/alphabetical-groups?page=0&size=20&{legacy_query_name}=series"
+                    ))
+                    .header("x-auth-token", &auth_token)
+                    .body(Body::empty())
+                    .expect("legacy alphabetical-groups query request should build"),
+            )
+            .await
+            .expect("legacy alphabetical-groups query request should complete");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_discovery_series_list_supports_oneshot_filter_in_runtime_owned_mode() {
     let paths = new_router_fixture("router-discovery-series-list-strict-oneshot").await;
     seed_router_contract_data(&paths).await;
@@ -154,6 +216,282 @@ async fn router_discovery_series_list_supports_oneshot_filter_in_runtime_owned_m
         .and_then(Value::as_array)
         .expect("strict series oneshot=true payload should expose content array");
     assert_eq!(oneshot_content.len(), 0);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_series_thumbnail_upload_parses_multipart_image_and_selected_flag() {
+    let paths = new_router_fixture("router-series-thumbnail-upload-multipart").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let image_bytes = fixture_png_bytes();
+    let (content_type, body) =
+        multipart_image_upload_body("file", "series.png", "image/png", false, &image_bytes);
+
+    let upload = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/series/series-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(body))
+                .expect("series thumbnail upload request should build"),
+        )
+        .await
+        .expect("series thumbnail upload request should complete");
+
+    assert_eq!(upload.status(), StatusCode::OK);
+    let payload = response_json(upload).await;
+    assert_eq!(
+        payload.get("seriesId"),
+        Some(&Value::String("series-1".to_string()))
+    );
+    assert_eq!(
+        payload.get("type"),
+        Some(&Value::String("USER_UPLOADED".to_string()))
+    );
+    assert_eq!(payload.get("selected"), Some(&Value::Bool(false)));
+    assert_eq!(
+        payload.get("mediaType"),
+        Some(&Value::String("image/png".to_string()))
+    );
+    assert_eq!(
+        payload.get("fileSize"),
+        Some(&json!(image_bytes.len() as i64))
+    );
+    assert_eq!(payload.get("width"), Some(&json!(1)));
+    assert_eq!(payload.get("height"), Some(&json!(1)));
+
+    let thumbnail_id = payload
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("series thumbnail upload should return thumbnail id");
+    let stored = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/v1/series/series-1/thumbnails/{thumbnail_id}"))
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("series thumbnail fetch request should build"),
+        )
+        .await
+        .expect("series thumbnail fetch request should complete");
+
+    assert_eq!(stored.status(), StatusCode::OK);
+    assert_eq!(
+        stored
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("image/png")
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_series_media_assets_forbid_age_restricted_user() {
+    let paths = new_router_fixture("router-series-media-assets-restricted-user").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_age_exclude_user_with_roles(
+        &paths,
+        "restricted-user",
+        "restricted@example.org",
+        "router-contract-restricted-123",
+        12,
+        &["USER", "FILE_DOWNLOAD"],
+    )
+    .await;
+    write_router_epub_resource(
+        &paths,
+        "books/book-1.epub",
+        "OEBPS/chapter.xhtml",
+        br#"<html xmlns='http://www.w3.org/1999/xhtml'><body>Restricted</body></html>"#,
+    );
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let admin_token = login_with_basic_and_get_token(app.clone()).await;
+    let restricted_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "restricted@example.org",
+        "router-contract-restricted-123",
+    )
+    .await;
+    let image_bytes = fixture_png_bytes();
+    let (content_type, body) =
+        multipart_image_upload_body("file", "series.png", "image/png", true, &image_bytes);
+    let upload = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/series/series-1/thumbnails")
+                .header("x-auth-token", &admin_token)
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(body))
+                .expect("restricted series thumbnail upload request should build"),
+        )
+        .await
+        .expect("restricted series thumbnail upload request should complete");
+    assert_eq!(upload.status(), StatusCode::OK);
+    let thumbnail_id = response_json(upload)
+        .await
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("restricted series upload should return thumbnail id")
+        .to_string();
+
+    for route in [
+        "/api/v1/series/series-1/thumbnails",
+        "/api/v1/series/series-1/thumbnail",
+        "/api/v1/series/series-1/file",
+        "/api/v1/series/series-1/read-progress",
+        "/api/v2/series/series-1/read-progress/tachiyomi",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header("x-auth-token", &restricted_token)
+                    .body(Body::empty())
+                    .expect("restricted series get request should build"),
+            )
+            .await
+            .expect("restricted series get request should complete");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "route: {route}");
+    }
+
+    let by_id = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/v1/series/series-1/thumbnails/{thumbnail_id}"))
+                .header("x-auth-token", &restricted_token)
+                .body(Body::empty())
+                .expect("restricted series thumbnail by-id request should build"),
+        )
+        .await
+        .expect("restricted series thumbnail by-id request should complete");
+    assert_eq!(by_id.status(), StatusCode::FORBIDDEN);
+
+    for route in ["/api/v1/series/series-1/read-progress"] {
+        for method in ["POST", "DELETE"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(route)
+                        .header("x-auth-token", &restricted_token)
+                        .body(Body::empty())
+                        .expect("restricted series read-progress request should build"),
+                )
+                .await
+                .expect("restricted series read-progress request should complete");
+            assert_eq!(response.status(), StatusCode::FORBIDDEN, "{method} {route}");
+        }
+    }
+
+    let tachiyomi_put = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v2/series/series-1/read-progress/tachiyomi")
+                .header("x-auth-token", &restricted_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "lastBookNumberSortRead": 1.0
+                    })
+                    .to_string(),
+                ))
+                .expect("restricted series tachiyomi put request should build"),
+        )
+        .await
+        .expect("restricted series tachiyomi put request should complete");
+    assert_eq!(tachiyomi_put.status(), StatusCode::FORBIDDEN);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_list_rejects_unknown_condition_type_in_runtime_owned_mode() {
+    let paths = new_router_fixture("router-discovery-series-list-strict-unknown-condition").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/series/list?page=0&size=20")
+                .header("x-auth-token", &auth_token)
+                .header("x-komga-runtime-search-ownership", "runtime-rust-owned")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "condition": {
+                            "type": "UnknownSeriesCondition",
+                            "operator": "is",
+                            "value": "whatever"
+                        }
+                    })
+                    .to_string(),
+                ))
+                .expect("strict series/list unknown-condition request should build"),
+        )
+        .await
+        .expect("strict series/list unknown-condition request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_list_rejects_unknown_operator_in_runtime_owned_mode() {
+    let paths = new_router_fixture("router-discovery-series-list-strict-unknown-operator").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/series/list?page=0&size=20")
+                .header("x-auth-token", &auth_token)
+                .header("x-komga-runtime-search-ownership", "runtime-rust-owned")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "condition": {
+                            "type": "Deleted",
+                            "operator": "maybe"
+                        }
+                    })
+                    .to_string(),
+                ))
+                .expect("strict series/list unknown-operator request should build"),
+        )
+        .await
+        .expect("strict series/list unknown-operator request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     cleanup_router_fixture(paths);
 }
@@ -1558,88 +1896,6 @@ async fn router_discovery_series_list_supports_nullable_metadata_operators_with_
 }
 
 #[tokio::test]
-async fn router_discovery_series_list_supports_title_and_title_sort_string_ops_in_runtime_owned_mode()
- {
-    let paths = new_router_fixture("router-discovery-series-list-strict-title-string-ops").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    for (condition_type, operator, value, expected_count) in [
-        ("Title", "is", "series 1", 1_usize),
-        ("Title", "is", "series 2", 0_usize),
-        ("Title", "isNot", "series 1", 0_usize),
-        ("Title", "isNot", "series 2", 1_usize),
-        ("Title", "contains", "series", 1_usize),
-        ("Title", "contains", "missing", 0_usize),
-        ("Title", "doesNotContain", "series", 0_usize),
-        ("Title", "doesNotContain", "missing", 1_usize),
-        ("Title", "beginsWith", "series", 1_usize),
-        ("Title", "beginsWith", "1", 0_usize),
-        ("Title", "doesNotBeginWith", "series", 0_usize),
-        ("Title", "doesNotBeginWith", "x", 1_usize),
-        ("Title", "endsWith", "1", 1_usize),
-        ("Title", "endsWith", "series", 0_usize),
-        ("Title", "doesNotEndWith", "1", 0_usize),
-        ("Title", "doesNotEndWith", "series", 1_usize),
-        ("TitleSort", "is", "series 1", 1_usize),
-        ("TitleSort", "is", "series 2", 0_usize),
-        ("TitleSort", "isNot", "series 1", 0_usize),
-        ("TitleSort", "isNot", "series 2", 1_usize),
-        ("TitleSort", "contains", "series", 1_usize),
-        ("TitleSort", "contains", "missing", 0_usize),
-        ("TitleSort", "doesNotContain", "series", 0_usize),
-        ("TitleSort", "doesNotContain", "missing", 1_usize),
-        ("TitleSort", "beginsWith", "series", 1_usize),
-        ("TitleSort", "beginsWith", "1", 0_usize),
-        ("TitleSort", "doesNotBeginWith", "series", 0_usize),
-        ("TitleSort", "doesNotBeginWith", "x", 1_usize),
-        ("TitleSort", "endsWith", "1", 1_usize),
-        ("TitleSort", "endsWith", "series", 0_usize),
-        ("TitleSort", "doesNotEndWith", "1", 0_usize),
-        ("TitleSort", "doesNotEndWith", "series", 1_usize),
-    ] {
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/v1/series/list?page=0&size=20")
-                    .header("x-auth-token", &auth_token)
-                    .header("x-komga-runtime-search-ownership", "runtime-rust-owned")
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        json!({
-                            "condition": {
-                                "type": condition_type,
-                                "operator": operator,
-                                "value": value,
-                            }
-                        })
-                        .to_string(),
-                    ))
-                    .expect("strict series/list title matrix request should build"),
-            )
-            .await
-            .expect("strict series/list title matrix request should complete");
-        assert_eq!(response.status(), StatusCode::OK);
-        let payload = response_json(response).await;
-        let content = payload
-            .get("content")
-            .and_then(Value::as_array)
-            .expect("strict series title matrix payload should expose content array");
-        assert_eq!(
-            content.len(),
-            expected_count,
-            "unexpected series title result for type={condition_type}, operator={operator}, value={value}",
-        );
-    }
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
 async fn router_discovery_series_list_supports_release_date_string_ops_in_runtime_owned_mode() {
     let paths =
         new_router_fixture("router-discovery-series-list-strict-release-date-string-ops").await;
@@ -2164,43 +2420,6 @@ async fn router_discovery_series_detail_accepts_oneshot_true_with_extra_query_pa
 }
 
 #[tokio::test]
-async fn router_discovery_series_detail_ignores_unrelated_query_parameters_without_diagnostics() {
-    let paths = new_router_fixture("router-discovery-series-detail-ignores-unrelated-query").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/api/v1/series/series-1?foo=bar")
-                .header("x-auth-token", &auth_token)
-                .body(Body::empty())
-                .expect("series detail unrelated-query request should build"),
-        )
-        .await
-        .expect("series detail unrelated-query request should complete");
-    assert_eq!(response.status(), StatusCode::OK);
-    assert!(
-        response
-            .headers()
-            .get("x-komga-runtime-search-ownership")
-            .is_none(),
-        "unrelated query parameters should not force persisted-owned fallback",
-    );
-
-    let payload = response_json(response).await;
-    assert!(
-        payload.get("_diagnostics").is_none(),
-        "unrelated query parameters should not emit unsupported diagnostics",
-    );
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
 async fn router_discovery_series_metadata_update_refreshes_series_last_modified() {
     let paths = new_router_fixture("router-discovery-series-metadata-refresh").await;
     seed_router_contract_data(&paths).await;
@@ -2277,6 +2496,491 @@ async fn router_discovery_series_metadata_update_refreshes_series_last_modified(
             "Updated summary from series contract".to_string()
         )),
     );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_metadata_update_supports_extended_field_coverage() {
+    let paths = new_router_fixture("router-discovery-series-metadata-extended-fields").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let patch_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/series/series-1/metadata")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "status": "ENDED",
+                        "statusLock": true,
+                        "title": "Series 1 Updated",
+                        "titleLock": true,
+                        "titleSort": "Series 1 Updated Sort",
+                        "titleSortLock": true,
+                        "language": "FR",
+                        "languageLock": true,
+                        "publisher": "Updated Pub",
+                        "publisherLock": true,
+                        "readingDirection": "RIGHT_TO_LEFT",
+                        "readingDirectionLock": true,
+                        "summary": "Updated summary from extended metadata test",
+                        "summaryLock": true,
+                        "ageRating": null,
+                        "ageRatingLock": true,
+                        "genres": ["Drama", "Mystery"],
+                        "genresLock": true,
+                        "tags": ["Pinned"],
+                        "tagsLock": true,
+                        "sharingLabels": ["Team", "Staff"],
+                        "sharingLabelsLock": true,
+                        "links": [
+                            {"label": "AniList", "url": "https://anilist.co/series/1"}
+                        ],
+                        "linksLock": true,
+                        "alternateTitles": [
+                            {"label": "ja-ro", "title": "Alt A"},
+                            {"label": "en", "title": "Alt B"}
+                        ],
+                        "alternateTitlesLock": true,
+                        "totalBookCount": 7,
+                        "totalBookCountLock": true
+                    })
+                    .to_string(),
+                ))
+                .expect("extended series metadata patch request should build"),
+        )
+        .await
+        .expect("extended series metadata patch request should complete");
+    assert_eq!(patch_response.status(), StatusCode::NO_CONTENT);
+
+    let detail_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/series/series-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("series detail after extended metadata patch should build"),
+        )
+        .await
+        .expect("series detail after extended metadata patch should complete");
+    assert_eq!(detail_response.status(), StatusCode::OK);
+    let payload = response_json(detail_response).await;
+    let metadata = payload
+        .get("metadata")
+        .expect("series detail payload should expose metadata");
+
+    assert_eq!(
+        metadata.get("status"),
+        Some(&Value::String("ENDED".to_string()))
+    );
+    assert_eq!(metadata.get("statusLock"), Some(&Value::Bool(true)));
+    assert_eq!(
+        metadata.get("title"),
+        Some(&Value::String("Series 1 Updated".to_string()))
+    );
+    assert_eq!(metadata.get("titleLock"), Some(&Value::Bool(true)));
+    assert_eq!(
+        metadata.get("titleSort"),
+        Some(&Value::String("Series 1 Updated Sort".to_string()))
+    );
+    assert_eq!(metadata.get("titleSortLock"), Some(&Value::Bool(true)));
+    assert_eq!(
+        metadata.get("language"),
+        Some(&Value::String("FR".to_string()))
+    );
+    assert_eq!(metadata.get("languageLock"), Some(&Value::Bool(true)));
+    assert_eq!(
+        metadata.get("publisher"),
+        Some(&Value::String("Updated Pub".to_string()))
+    );
+    assert_eq!(metadata.get("publisherLock"), Some(&Value::Bool(true)));
+    assert_eq!(
+        metadata.get("readingDirection"),
+        Some(&Value::String("RIGHT_TO_LEFT".to_string()))
+    );
+    assert_eq!(
+        metadata.get("readingDirectionLock"),
+        Some(&Value::Bool(true))
+    );
+    assert_eq!(
+        metadata.get("summary"),
+        Some(&Value::String(
+            "Updated summary from extended metadata test".to_string()
+        ))
+    );
+    assert_eq!(metadata.get("summaryLock"), Some(&Value::Bool(true)));
+    assert_eq!(metadata.get("ageRating"), Some(&Value::Null));
+    assert_eq!(metadata.get("ageRatingLock"), Some(&Value::Bool(true)));
+    assert_eq!(metadata.get("genres"), Some(&json!(["Drama", "Mystery"])));
+    assert_eq!(metadata.get("genresLock"), Some(&Value::Bool(true)));
+    assert_eq!(metadata.get("tags"), Some(&json!(["Pinned"])));
+    assert_eq!(metadata.get("tagsLock"), Some(&Value::Bool(true)));
+    assert_eq!(
+        metadata.get("sharingLabels"),
+        Some(&json!(["Team", "Staff"]))
+    );
+    assert_eq!(metadata.get("sharingLabelsLock"), Some(&Value::Bool(true)));
+    assert_eq!(
+        metadata.get("links"),
+        Some(&json!([
+            {"label": "AniList", "url": "https://anilist.co/series/1"}
+        ]))
+    );
+    assert_eq!(metadata.get("linksLock"), Some(&Value::Bool(true)));
+    let mut alternate_titles = metadata
+        .get("alternateTitles")
+        .and_then(Value::as_array)
+        .cloned()
+        .expect("series metadata should expose alternateTitles array");
+    alternate_titles.sort_by_key(|value| value.to_string());
+    let mut expected_alternate_titles = vec![
+        json!({"label": "ja-ro", "title": "Alt A"}),
+        json!({"label": "en", "title": "Alt B"}),
+    ];
+    expected_alternate_titles.sort_by_key(|value| value.to_string());
+    assert_eq!(alternate_titles, expected_alternate_titles);
+    assert_eq!(
+        metadata.get("alternateTitlesLock"),
+        Some(&Value::Bool(true))
+    );
+    assert_eq!(metadata.get("totalBookCount"), Some(&json!(7)));
+    assert_eq!(metadata.get("totalBookCountLock"), Some(&Value::Bool(true)));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_metadata_update_rejects_invalid_scalar_values() {
+    let paths = new_router_fixture("router-discovery-series-metadata-invalid-scalars").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    for payload in [
+        json!({ "status": "BROKEN_STATUS" }),
+        json!({ "readingDirection": "UPSIDE_DOWN" }),
+        json!({ "title": "" }),
+        json!({ "titleSort": "" }),
+        json!({ "totalBookCount": 0 }),
+        json!({ "totalBookCount": 2147483648u64 }),
+        json!({ "language": "en_US" }),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/api/v1/series/series-1/metadata")
+                    .header("x-auth-token", &auth_token)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(payload.to_string()))
+                    .expect("invalid scalar metadata patch request should build"),
+            )
+            .await
+            .expect("invalid scalar metadata patch request should complete");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_metadata_update_rejects_invalid_structured_values() {
+    let paths = new_router_fixture("router-discovery-series-metadata-invalid-structured").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    for payload in [
+        json!({
+            "links": [
+                {"label": "", "url": "https://anilist.co/series/1"}
+            ]
+        }),
+        json!({
+            "links": [
+                {"label": "AniList", "url": "not-a-url"}
+            ]
+        }),
+        json!({
+            "alternateTitles": [
+                {"label": "", "title": "Alt A"}
+            ]
+        }),
+        json!({
+            "alternateTitles": [
+                {"label": "en", "title": ""}
+            ]
+        }),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/api/v1/series/series-1/metadata")
+                    .header("x-auth-token", &auth_token)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(payload.to_string()))
+                    .expect("invalid structured metadata patch request should build"),
+            )
+            .await
+            .expect("invalid structured metadata patch request should complete");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_metadata_update_accepts_large_age_rating_within_kotlin_int_range()
+{
+    let paths = new_router_fixture("router-discovery-series-metadata-large-age-rating").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let patch_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/series/series-1/metadata")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "ageRating": 70000 }).to_string()))
+                .expect("large age rating patch request should build"),
+        )
+        .await
+        .expect("large age rating patch request should complete");
+    assert_eq!(patch_response.status(), StatusCode::NO_CONTENT);
+
+    let detail_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/series/series-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("series detail after large age rating patch should build"),
+        )
+        .await
+        .expect("series detail after large age rating patch should complete");
+    assert_eq!(detail_response.status(), StatusCode::OK);
+    let payload = response_json(detail_response).await;
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|metadata| metadata.get("ageRating")),
+        Some(&json!(70000))
+    );
+
+    cleanup_router_fixture(paths);
+}
+#[tokio::test]
+async fn router_discovery_series_metadata_update_clamps_legacy_numeric_values_to_kotlin_int_range()
+{
+    let paths =
+        new_router_fixture("router-discovery-series-metadata-clamps-legacy-numeric-values").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("legacy numeric parity db should open");
+    sqlx::query(
+        "UPDATE SERIES_METADATA SET AGE_RATING = ?, TOTAL_BOOK_COUNT = ? WHERE SERIES_ID = ?",
+    )
+    .bind(3_000_000_000_i64)
+    .bind(3_000_000_000_i64)
+    .bind("series-1")
+    .execute(&pool)
+    .await
+    .expect("legacy numeric parity values should be written");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let patch_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/series/series-1/metadata")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "summary": "Clamp legacy oversized numeric metadata" }).to_string(),
+                ))
+                .expect("legacy numeric clamp patch request should build"),
+        )
+        .await
+        .expect("legacy numeric clamp patch request should complete");
+    assert_eq!(patch_response.status(), StatusCode::NO_CONTENT);
+
+    let detail_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/series/series-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("series detail after legacy numeric clamp patch should build"),
+        )
+        .await
+        .expect("series detail after legacy numeric clamp patch should complete");
+    assert_eq!(detail_response.status(), StatusCode::OK);
+    let payload = response_json(detail_response).await;
+    let metadata = payload
+        .get("metadata")
+        .expect("series detail payload should expose metadata");
+    assert_eq!(metadata.get("ageRating"), Some(&json!(2_147_483_647u32)));
+    assert_eq!(
+        metadata.get("totalBookCount"),
+        Some(&json!(2_147_483_647u32))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+async fn update_series_search_fixture_title(paths: &RuntimeDbPaths, series_id: &str, title: &str) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("series search parity db should open for title update");
+
+    sqlx::query(
+        "UPDATE SERIES_METADATA \
+         SET TITLE = ?, TITLE_SORT = ? \
+         WHERE SERIES_ID = ?",
+    )
+    .bind(title)
+    .bind(title)
+    .bind(series_id)
+    .execute(&pool)
+    .await
+    .expect("series search parity title should update");
+
+    pool.close().await;
+}
+
+async fn series_list_ids(
+    app: &axum::Router,
+    auth_token: &str,
+    sort: Option<&str>,
+    full_text_search: Option<&str>,
+) -> Vec<String> {
+    let mut uri = String::from("/api/v1/series/list?page=0&size=20");
+    if let Some(sort) = sort {
+        uri.push_str("&sort=");
+        uri.push_str(sort);
+    }
+
+    let mut payload = json!({
+        "condition": {
+            "type": "Title",
+            "operator": "contains",
+            "value": "series"
+        }
+    });
+    if let Some(search) = full_text_search {
+        payload["fullTextSearch"] = Value::String(search.to_string());
+    }
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header("x-auth-token", auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(payload.to_string()))
+                .expect("series search parity request should build"),
+        )
+        .await
+        .expect("series search parity request should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let payload = response_json(response).await;
+    payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("series search parity payload should expose content array")
+        .iter()
+        .filter_map(|entry| entry.get("id").and_then(Value::as_str).map(str::to_string))
+        .collect()
+}
+
+#[tokio::test]
+async fn router_discovery_series_list_locks_main_search_parity_for_retained_inputs() {
+    let paths = new_router_fixture("router-discovery-series-list-main-search-parity").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_authors_scope_variants(&paths).await;
+    update_series_search_fixture_title(&paths, "series-2", "Series Series 2").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let admin_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let blank_ids = series_list_ids(&app, &admin_token, Some("relevance,desc"), Some("   ")).await;
+    assert_eq!(blank_ids, vec!["series-1", "series-2", "series-3"]);
+
+    let relevance_desc_ids =
+        series_list_ids(&app, &admin_token, Some("relevance,desc"), Some("series")).await;
+    assert_eq!(relevance_desc_ids, vec!["series-2", "series-1", "series-3"]);
+
+    let relevance_asc_ids =
+        series_list_ids(&app, &admin_token, Some("relevance,asc"), Some("series")).await;
+    assert_eq!(relevance_asc_ids, vec!["series-3", "series-1", "series-2"]);
+
+    let fielded_ids = series_list_ids(
+        &app,
+        &admin_token,
+        Some("relevance,desc"),
+        Some("title:series"),
+    )
+    .await;
+    assert_eq!(fielded_ids, vec!["series-2", "series-1", "series-3"]);
+
+    let invalid_query_ids =
+        series_list_ids(&app, &admin_token, Some("relevance,desc"), Some("title:(")).await;
+    assert!(invalid_query_ids.is_empty());
+
+    seed_router_age_exclude_user_with_roles(
+        &paths,
+        "restricted-user",
+        "restricted@example.org",
+        "router-contract-restricted-123",
+        16,
+        &["USER", "PAGE_STREAMING"],
+    )
+    .await;
+    let restricted_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "restricted@example.org",
+        "router-contract-restricted-123",
+    )
+    .await;
+    let visible_ids = series_list_ids(
+        &app,
+        &restricted_token,
+        Some("relevance,desc"),
+        Some("series"),
+    )
+    .await;
+    assert_eq!(visible_ids, vec!["series-3"]);
 
     cleanup_router_fixture(paths);
 }

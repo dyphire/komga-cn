@@ -381,13 +381,7 @@ pub(crate) async fn opds_v2_search_route(
                 (key == "query").then_some(value)
             })
         })
-        .map(|value| value.replace('+', " "))
-        .unwrap_or_default();
+        .map(|value| percent_decode(&value.replace('+', " ")));
 
-    opds_v2_search(
-        headers,
-        auth_db.database_file.as_path(),
-        Some(query.as_str()),
-    )
-    .await
+    opds_v2_search(headers, auth_db.database_file.as_path(), query.as_deref()).await
 }

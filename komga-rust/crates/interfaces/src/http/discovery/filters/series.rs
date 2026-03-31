@@ -1,5 +1,11 @@
 use super::*;
 
+macro_rules! series_filters {
+    ($($tt:tt)*) => {
+        RuntimeSeriesFilters::from_criteria(SeriesFilterCriteria { $($tt)* })
+    };
+}
+
 pub(super) fn parse_series_string_filter<F>(
     condition: &Value,
     filter_name: &str,
@@ -97,9 +103,9 @@ pub(super) fn parse_library_id_filter(
         return Ok(RuntimeSeriesFilters::default());
     };
 
-    Ok(RuntimeSeriesFilters {
+    Ok(series_filters! {
         library_ids: Some(vec![value.to_string()]),
-        ..RuntimeSeriesFilters::default()
+        ..SeriesFilterCriteria::default()
     })
 }
 
@@ -130,9 +136,9 @@ pub(super) fn parse_collection_id_filter(
         return Ok(RuntimeSeriesFilters::default());
     };
 
-    Ok(RuntimeSeriesFilters {
+    Ok(series_filters! {
         collection_ids: Some(vec![value.to_string()]),
-        ..RuntimeSeriesFilters::default()
+        ..SeriesFilterCriteria::default()
     })
 }
 
@@ -172,37 +178,37 @@ pub(super) fn parse_series_title_filter(
     };
 
     Ok(match operator.as_str() {
-        "is" => RuntimeSeriesFilters {
+        "is" => series_filters! {
             titles: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         },
-        "isnot" => RuntimeSeriesFilters {
+        "isnot" => series_filters! {
             titles_excluded: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         },
-        "contains" => RuntimeSeriesFilters {
+        "contains" => series_filters! {
             titles_contains: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         },
-        "doesnotcontain" => RuntimeSeriesFilters {
+        "doesnotcontain" => series_filters! {
             titles_contains_excluded: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         },
-        "beginswith" => RuntimeSeriesFilters {
+        "beginswith" => series_filters! {
             titles_begins_with: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         },
-        "doesnotbeginwith" => RuntimeSeriesFilters {
+        "doesnotbeginwith" => series_filters! {
             titles_begins_with_excluded: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         },
-        "endswith" => RuntimeSeriesFilters {
+        "endswith" => series_filters! {
             titles_ends_with: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         },
-        _ => RuntimeSeriesFilters {
+        _ => series_filters! {
             titles_ends_with_excluded: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         },
     })
 }
@@ -243,37 +249,37 @@ pub(super) fn parse_series_title_sort_filter(
     };
 
     Ok(match operator.as_str() {
-        "is" => RuntimeSeriesFilters {
+        "is" => series_filters! {
             title_sorts: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         },
-        "isnot" => RuntimeSeriesFilters {
+        "isnot" => series_filters! {
             title_sorts_excluded: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         },
-        "contains" => RuntimeSeriesFilters {
+        "contains" => series_filters! {
             title_sorts_contains: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         },
-        "doesnotcontain" => RuntimeSeriesFilters {
+        "doesnotcontain" => series_filters! {
             title_sorts_contains_excluded: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         },
-        "beginswith" => RuntimeSeriesFilters {
+        "beginswith" => series_filters! {
             title_sorts_begins_with: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         },
-        "doesnotbeginwith" => RuntimeSeriesFilters {
+        "doesnotbeginwith" => series_filters! {
             title_sorts_begins_with_excluded: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         },
-        "endswith" => RuntimeSeriesFilters {
+        "endswith" => series_filters! {
             title_sorts_ends_with: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         },
-        _ => RuntimeSeriesFilters {
+        _ => series_filters! {
             title_sorts_ends_with_excluded: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         },
     })
 }
@@ -304,9 +310,9 @@ pub(super) fn parse_deleted_filter(
         }
     };
 
-    Ok(RuntimeSeriesFilters {
+    Ok(series_filters! {
         deleted: Some(deleted),
-        ..RuntimeSeriesFilters::default()
+        ..SeriesFilterCriteria::default()
     })
 }
 
@@ -336,9 +342,9 @@ pub(super) fn parse_oneshot_filter(
         }
     };
 
-    Ok(RuntimeSeriesFilters {
+    Ok(series_filters! {
         oneshot: Some(oneshot),
-        ..RuntimeSeriesFilters::default()
+        ..SeriesFilterCriteria::default()
     })
 }
 
@@ -370,15 +376,15 @@ pub(super) fn parse_series_read_status_filter(
     };
 
     if operator == "isnot" {
-        return Ok(RuntimeSeriesFilters {
+        return Ok(series_filters! {
             read_statuses_excluded: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         });
     }
 
-    Ok(RuntimeSeriesFilters {
+    Ok(series_filters! {
         read_statuses: Some(vec![value]),
-        ..RuntimeSeriesFilters::default()
+        ..SeriesFilterCriteria::default()
     })
 }
 
@@ -390,17 +396,23 @@ pub(super) fn parse_series_genre_filter(
         condition,
         mode,
         "Genre",
-        |value| RuntimeSeriesFilters {
-            genres: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+        |value| {
+            series_filters! {
+                genres: Some(vec![value]),
+                ..SeriesFilterCriteria::default()
+            }
         },
-        |value| RuntimeSeriesFilters {
-            genres_excluded: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+        |value| {
+            series_filters! {
+                genres_excluded: Some(vec![value]),
+                ..SeriesFilterCriteria::default()
+            }
         },
-        |is_null| RuntimeSeriesFilters {
-            genres_null: Some(is_null),
-            ..RuntimeSeriesFilters::default()
+        |is_null| {
+            series_filters! {
+                genres_null: Some(is_null),
+                ..SeriesFilterCriteria::default()
+            }
         },
     )
 }
@@ -413,17 +425,23 @@ pub(super) fn parse_series_tag_filter(
         condition,
         mode,
         "Tag",
-        |value| RuntimeSeriesFilters {
-            tags: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+        |value| {
+            series_filters! {
+                tags: Some(vec![value]),
+                ..SeriesFilterCriteria::default()
+            }
         },
-        |value| RuntimeSeriesFilters {
-            tags_excluded: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+        |value| {
+            series_filters! {
+                tags_excluded: Some(vec![value]),
+                ..SeriesFilterCriteria::default()
+            }
         },
-        |is_null| RuntimeSeriesFilters {
-            tags_null: Some(is_null),
-            ..RuntimeSeriesFilters::default()
+        |is_null| {
+            series_filters! {
+                tags_null: Some(is_null),
+                ..SeriesFilterCriteria::default()
+            }
         },
     )
 }
@@ -456,15 +474,15 @@ pub(super) fn parse_series_language_filter(
     };
 
     if operator == "isnot" {
-        return Ok(RuntimeSeriesFilters {
+        return Ok(series_filters! {
             languages_excluded: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         });
     }
 
-    Ok(RuntimeSeriesFilters {
+    Ok(series_filters! {
         languages: Some(vec![value]),
-        ..RuntimeSeriesFilters::default()
+        ..SeriesFilterCriteria::default()
     })
 }
 
@@ -496,15 +514,15 @@ pub(super) fn parse_series_publisher_filter(
     };
 
     if operator == "isnot" {
-        return Ok(RuntimeSeriesFilters {
+        return Ok(series_filters! {
             publishers_excluded: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         });
     }
 
-    Ok(RuntimeSeriesFilters {
+    Ok(series_filters! {
         publishers: Some(vec![value]),
-        ..RuntimeSeriesFilters::default()
+        ..SeriesFilterCriteria::default()
     })
 }
 
@@ -533,15 +551,15 @@ pub(super) fn parse_series_age_rating_filter(
     }
 
     if operator == "isnull" {
-        return Ok(RuntimeSeriesFilters {
+        return Ok(series_filters! {
             age_ratings_null: Some(true),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         });
     }
     if operator == "isnotnull" {
-        return Ok(RuntimeSeriesFilters {
+        return Ok(series_filters! {
             age_ratings_null: Some(false),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         });
     }
 
@@ -561,21 +579,21 @@ pub(super) fn parse_series_age_rating_filter(
     };
 
     match operator.as_str() {
-        "isnot" => Ok(RuntimeSeriesFilters {
+        "isnot" => Ok(series_filters! {
             age_ratings_excluded: Some(vec![parsed]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         }),
-        "greaterthan" => Ok(RuntimeSeriesFilters {
+        "greaterthan" => Ok(series_filters! {
             age_rating_gt: Some(parsed),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         }),
-        "lessthan" => Ok(RuntimeSeriesFilters {
+        "lessthan" => Ok(series_filters! {
             age_rating_lt: Some(parsed),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         }),
-        _ => Ok(RuntimeSeriesFilters {
+        _ => Ok(series_filters! {
             age_ratings: Some(vec![parsed]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         }),
     }
 }
@@ -614,16 +632,16 @@ pub(super) fn parse_series_release_date_filter(
     }
 
     if operator == "isnull" {
-        return Ok(RuntimeSeriesFilters {
+        return Ok(series_filters! {
             release_dates_null: Some(true),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         });
     }
 
     if operator == "isnotnull" {
-        return Ok(RuntimeSeriesFilters {
+        return Ok(series_filters! {
             release_dates_null: Some(false),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         });
     }
 
@@ -636,9 +654,9 @@ pub(super) fn parse_series_release_date_filter(
             return Ok(RuntimeSeriesFilters::default());
         };
 
-        return Ok(RuntimeSeriesFilters {
+        return Ok(series_filters! {
             release_date_gt: Some(date_time),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         });
     }
 
@@ -651,9 +669,9 @@ pub(super) fn parse_series_release_date_filter(
             return Ok(RuntimeSeriesFilters::default());
         };
 
-        return Ok(RuntimeSeriesFilters {
+        return Ok(series_filters! {
             release_date_lt: Some(date_time),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         });
     }
 
@@ -666,9 +684,9 @@ pub(super) fn parse_series_release_date_filter(
             return Ok(RuntimeSeriesFilters::default());
         };
 
-        return Ok(RuntimeSeriesFilters {
+        return Ok(series_filters! {
             release_date_in_last_days: Some(days),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         });
     }
 
@@ -681,9 +699,9 @@ pub(super) fn parse_series_release_date_filter(
             return Ok(RuntimeSeriesFilters::default());
         };
 
-        return Ok(RuntimeSeriesFilters {
+        return Ok(series_filters! {
             release_date_not_in_last_days: Some(days),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         });
     }
 
@@ -697,64 +715,64 @@ pub(super) fn parse_series_release_date_filter(
     };
 
     if operator == "greaterthan" {
-        return Ok(RuntimeSeriesFilters {
+        return Ok(series_filters! {
             release_date_gt: Some(value),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         });
     }
 
     if operator == "lessthan" {
-        return Ok(RuntimeSeriesFilters {
+        return Ok(series_filters! {
             release_date_lt: Some(value),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         });
     }
 
     if operator == "beginswith" {
-        return Ok(RuntimeSeriesFilters {
+        return Ok(series_filters! {
             release_date_begins_with: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         });
     }
 
     if operator == "endswith" {
-        return Ok(RuntimeSeriesFilters {
+        return Ok(series_filters! {
             release_date_ends_with: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         });
     }
 
     if operator == "doesnotcontain" {
-        return Ok(RuntimeSeriesFilters {
+        return Ok(series_filters! {
             release_date_contains_excluded: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         });
     }
 
     if operator == "doesnotbeginwith" {
-        return Ok(RuntimeSeriesFilters {
+        return Ok(series_filters! {
             release_date_begins_with_excluded: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         });
     }
 
     if operator == "doesnotendwith" {
-        return Ok(RuntimeSeriesFilters {
+        return Ok(series_filters! {
             release_date_ends_with_excluded: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         });
     }
 
     if operator == "isnot" {
-        return Ok(RuntimeSeriesFilters {
+        return Ok(series_filters! {
             release_dates_excluded: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         });
     }
 
-    Ok(RuntimeSeriesFilters {
+    Ok(series_filters! {
         release_dates: Some(vec![value]),
-        ..RuntimeSeriesFilters::default()
+        ..SeriesFilterCriteria::default()
     })
 }
 
@@ -766,17 +784,23 @@ pub(super) fn parse_series_sharing_label_filter(
         condition,
         mode,
         "SharingLabel",
-        |value| RuntimeSeriesFilters {
-            sharing_labels: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+        |value| {
+            series_filters! {
+                sharing_labels: Some(vec![value]),
+                ..SeriesFilterCriteria::default()
+            }
         },
-        |value| RuntimeSeriesFilters {
-            sharing_labels_excluded: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+        |value| {
+            series_filters! {
+                sharing_labels_excluded: Some(vec![value]),
+                ..SeriesFilterCriteria::default()
+            }
         },
-        |is_null| RuntimeSeriesFilters {
-            sharing_labels_null: Some(is_null),
-            ..RuntimeSeriesFilters::default()
+        |is_null| {
+            series_filters! {
+                sharing_labels_null: Some(is_null),
+                ..SeriesFilterCriteria::default()
+            }
         },
     )
 }
@@ -809,15 +833,15 @@ pub(super) fn parse_series_status_filter(
     };
 
     if operator == "isnot" {
-        return Ok(RuntimeSeriesFilters {
+        return Ok(series_filters! {
             series_statuses_excluded: Some(vec![value]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         });
     }
 
-    Ok(RuntimeSeriesFilters {
+    Ok(series_filters! {
         series_statuses: Some(vec![value]),
-        ..RuntimeSeriesFilters::default()
+        ..SeriesFilterCriteria::default()
     })
 }
 
@@ -847,9 +871,9 @@ pub(super) fn parse_series_complete_filter(
         }
     };
 
-    Ok(RuntimeSeriesFilters {
+    Ok(series_filters! {
         complete: Some(complete),
-        ..RuntimeSeriesFilters::default()
+        ..SeriesFilterCriteria::default()
     })
 }
 
@@ -865,9 +889,9 @@ pub(super) fn parse_series_author_filter(
 
     if operator == "contains" {
         return parse_series_string_filter(condition, "Author", "contains_or_is", mode, |value| {
-            RuntimeSeriesFilters {
+            series_filters! {
                 authors: Some(vec![value]),
-                ..RuntimeSeriesFilters::default()
+                ..SeriesFilterCriteria::default()
             }
         });
     }
@@ -888,14 +912,14 @@ pub(super) fn parse_series_author_filter(
     };
 
     if operator == "isnot" {
-        return Ok(RuntimeSeriesFilters {
+        return Ok(series_filters! {
             authors_excluded: Some(vec![encoded]),
-            ..RuntimeSeriesFilters::default()
+            ..SeriesFilterCriteria::default()
         });
     }
 
-    Ok(RuntimeSeriesFilters {
+    Ok(series_filters! {
         authors: Some(vec![encoded]),
-        ..RuntimeSeriesFilters::default()
+        ..SeriesFilterCriteria::default()
     })
 }

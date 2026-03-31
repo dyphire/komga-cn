@@ -421,7 +421,7 @@ pub(crate) async fn opds_v2_search(
     let search_query = query.unwrap_or_default().trim();
 
     let (series, books, collections, readlists) =
-        match load_search_results(database_file, search_query).await {
+        match load_unified_search_results(database_file, search_query).await {
             Ok(results) => results,
             Err(error) => {
                 return (
@@ -432,7 +432,7 @@ pub(crate) async fn opds_v2_search(
             }
         };
 
-    let series_navigation = series
+    let mut series_navigation = series
         .into_iter()
         .filter(|item| library_visible(&allowed_library_ids, &item.library_id))
         .map(|item| {
@@ -443,8 +443,9 @@ pub(crate) async fn opds_v2_search(
             })
         })
         .collect::<Vec<_>>();
+    series_navigation.truncate(20);
 
-    let book_publications = books
+    let mut book_publications = books
         .into_iter()
         .filter(|item| library_visible(&allowed_library_ids, &item.library_id))
         .map(|item| {
@@ -462,6 +463,7 @@ pub(crate) async fn opds_v2_search(
             })
         })
         .collect::<Vec<_>>();
+    book_publications.truncate(20);
 
     let mut collections_navigation = Vec::new();
     for item in collections {
@@ -480,6 +482,7 @@ pub(crate) async fn opds_v2_search(
             }));
         }
     }
+    collections_navigation.truncate(20);
 
     let mut readlist_navigation = Vec::new();
     for item in readlists {
@@ -497,6 +500,41 @@ pub(crate) async fn opds_v2_search(
                 "type": "application/opds+json",
             }));
         }
+    }
+    readlist_navigation.truncate(20);
+
+    let mut groups = Vec::new();
+    if !series_navigation.is_empty() {
+        groups.push(json!({
+            "metadata": {
+                "title": "Series",
+            },
+            "navigation": series_navigation,
+        }));
+    }
+    if !book_publications.is_empty() {
+        groups.push(json!({
+            "metadata": {
+                "title": "Books",
+            },
+            "publications": book_publications,
+        }));
+    }
+    if !collections_navigation.is_empty() {
+        groups.push(json!({
+            "metadata": {
+                "title": "Collections",
+            },
+            "navigation": collections_navigation,
+        }));
+    }
+    if !readlist_navigation.is_empty() {
+        groups.push(json!({
+            "metadata": {
+                "title": "Read Lists",
+            },
+            "navigation": readlist_navigation,
+        }));
     }
 
     (
@@ -522,32 +560,7 @@ pub(crate) async fn opds_v2_search(
                     "templated": true,
                 }
             ],
-            "groups": [
-                {
-                    "metadata": {
-                        "title": "Series",
-                    },
-                    "navigation": series_navigation,
-                },
-                {
-                    "metadata": {
-                        "title": "Books",
-                    },
-                    "publications": book_publications,
-                },
-                {
-                    "metadata": {
-                        "title": "Collections",
-                    },
-                    "navigation": collections_navigation,
-                },
-                {
-                    "metadata": {
-                        "title": "Read Lists",
-                    },
-                    "navigation": readlist_navigation,
-                }
-            ],
+            "groups": groups,
         })),
     )
         .into_response()

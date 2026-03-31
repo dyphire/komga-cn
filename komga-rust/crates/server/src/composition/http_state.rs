@@ -27,15 +27,16 @@ use komga_interfaces::http::discovery::{
     DiscoveryDetailAccessBackends, DiscoveryDetailBooksAccessBackend,
     DiscoveryDetailCollectionsAccessBackend, DiscoveryDetailReadlistsAccessBackend,
     DiscoveryDetailSeriesAccessBackend, ExistingSeriesMetadataRecord, PersistedAuthorEntry,
-    PersistedAuthorsScope, PersistedBookBrowseEntry, PersistedBookDetailRecord,
-    PersistedBookPosterSummary, PersistedBookResourceRecord, PersistedBookSiblingDirectionRecord,
-    PersistedBookSummary, PersistedBookTagsScope, PersistedCollectionAccessRecord,
-    PersistedCollectionSeriesAccessRecord, PersistedDiscoveryAccessBackend,
+    PersistedAuthorsScope, PersistedBookAuthorRecord, PersistedBookBrowseEntry,
+    PersistedBookDetailRecord, PersistedBookPosterSummary, PersistedBookResourceRecord,
+    PersistedBookSiblingDirectionRecord, PersistedBookSummary, PersistedBookTagsScope,
+    PersistedCollectionAccessRecord, PersistedComicrackMatchCandidateRecord,
+    PersistedDiscoveryAccessBackend,
     PersistedReadProgressRecord as PersistedBookReadProgressRecord, PersistedReadlistBookRecord,
     PersistedReadlistRecord, PersistedSeriesCollectionRecord, PersistedSeriesDetailRecord,
     PersistedSeriesResourceRecord, PersistedSeriesRestrictionRecord, PersistedSeriesSummary,
-    SeriesSummaryRecord, install_discovery_detail_access_backends,
-    install_persisted_discovery_access,
+    SeriesAlternateTitleRecord, SeriesMetadataLinkRecord, SeriesSummaryRecord,
+    install_discovery_detail_access_backends, install_persisted_discovery_access,
 };
 use komga_interfaces::http::discovery_auth::DiscoveryAuthState;
 use komga_interfaces::http::identity_access::auth::configure_remember_me_store;
@@ -129,9 +130,12 @@ pub fn compose_http_runtime(
         http_state_discovery::compose_discovery_detail_access_backends(),
     );
     install_persisted_discovery_access(
-        http_state_discovery::compose_persisted_discovery_access_backend(),
+        http_state_discovery::compose_persisted_discovery_access_backend(
+            config.database_file.as_path(),
+            config.lucene_data_directory.as_path(),
+        ),
     );
-    http_state_opds::install_opds_access_backends();
+    http_state_opds::install_opds_access_backends(config.lucene_data_directory.as_path());
 
     let remember_me_store_root = config
         .config_dir

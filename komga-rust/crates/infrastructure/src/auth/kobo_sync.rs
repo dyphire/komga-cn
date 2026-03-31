@@ -91,7 +91,13 @@ pub async fn load_kobo_sync_snapshot(
     let pool = connect_pool(database_file, 1).await?;
 
     let books_rows = sqlx::query(
-        "SELECT b.ID AS BOOK_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE, COALESCE(bm.SUMMARY, '') AS SUMMARY, bm.RELEASE_DATE AS RELEASE_DATE, COALESCE(sm.LANGUAGE, 'en') AS LANGUAGE, COALESCE(b.FILE_SIZE, 0) AS FILE_SIZE, COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT, COALESCE(b.CREATED_DATE, '') AS CREATED_DATE, COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') AS LAST_MODIFIED_DATE FROM BOOK b LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = b.SERIES_ID JOIN MEDIA m ON m.BOOK_ID = b.ID WHERE b.DELETED_DATE IS NULL AND m.STATUS = 'READY' AND m.MEDIA_TYPE = 'application/epub+zip' ORDER BY b.ID ASC",
+        "SELECT b.ID AS BOOK_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE, COALESCE(bm.SUMMARY, '') AS SUMMARY, bm.RELEASE_DATE AS RELEASE_DATE, COALESCE(sm.LANGUAGE, 'en') AS LANGUAGE, COALESCE(b.FILE_SIZE, 0) AS FILE_SIZE, COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT, COALESCE(b.CREATED_DATE, '') AS CREATED_DATE, COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') AS LAST_MODIFIED_DATE, NULLIF(TRIM(bm.ISBN), '') AS ISBN, NULLIF(TRIM(sm.PUBLISHER), '') AS PUBLISHER_NAME, tb.ID AS COVER_IMAGE_ID, sm.SERIES_ID AS SERIES_ID, sm.TITLE AS SERIES_NAME, NULLIF(TRIM(bm.NUMBER), '') AS SERIES_NUMBER, bm.NUMBER_SORT AS SERIES_NUMBER_FLOAT, COALESCE(b.ONESHOT, FALSE) AS ONESHOT FROM BOOK b LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = b.SERIES_ID LEFT JOIN THUMBNAIL_BOOK tb ON tb.BOOK_ID = b.ID AND tb.SELECTED = TRUE JOIN MEDIA m ON m.BOOK_ID = b.ID WHERE b.DELETED_DATE IS NULL AND m.STATUS = 'READY' AND m.MEDIA_TYPE = 'application/epub+zip' ORDER BY b.ID ASC",
+    )
+    .fetch_all(&pool)
+    .await?;
+
+    let author_rows = sqlx::query(
+        "SELECT BOOK_ID, NAME FROM BOOK_METADATA_AUTHOR WHERE NAME IS NOT NULL AND TRIM(NAME) <> '' ORDER BY BOOK_ID ASC, NAME ASC",
     )
     .fetch_all(&pool)
     .await?;
@@ -109,13 +115,21 @@ pub async fn load_kobo_sync_snapshot(
     .fetch_all(&pool)
     .await?;
 
+    let mut authors_by_book = HashMap::<String, Vec<String>>::new();
+    for row in author_rows {
+        authors_by_book
+            .entry(row.get::<String, _>("BOOK_ID"))
+            .or_default()
+            .push(row.get::<String, _>("NAME"));
+    }
+
     let mut books = HashMap::new();
     for row in books_rows {
         let id = row.get::<String, _>("BOOK_ID");
         books.insert(
             id.clone(),
             KoboSyncBookSnapshot {
-                id,
+                id: id.clone(),
                 title: row.get::<String, _>("TITLE"),
                 summary: row.get::<String, _>("SUMMARY"),
                 release_date: row.get::<Option<String>, _>("RELEASE_DATE"),
@@ -124,6 +138,15 @@ pub async fn load_kobo_sync_snapshot(
                 page_count: row.get::<i64, _>("PAGE_COUNT").max(1) as u64,
                 created: row.get::<String, _>("CREATED_DATE"),
                 last_modified: row.get::<String, _>("LAST_MODIFIED_DATE"),
+                contributor_names: authors_by_book.remove(&id).unwrap_or_default(),
+                isbn: row.get::<Option<String>, _>("ISBN"),
+                publisher_name: row.get::<Option<String>, _>("PUBLISHER_NAME"),
+                cover_image_id: row.get::<Option<String>, _>("COVER_IMAGE_ID"),
+                series_id: row.get::<Option<String>, _>("SERIES_ID"),
+                series_name: row.get::<Option<String>, _>("SERIES_NAME"),
+                series_number: row.get::<Option<String>, _>("SERIES_NUMBER"),
+                series_number_float: row.get::<Option<f64>, _>("SERIES_NUMBER_FLOAT"),
+                oneshot: row.get::<bool, _>("ONESHOT"),
             },
         );
     }

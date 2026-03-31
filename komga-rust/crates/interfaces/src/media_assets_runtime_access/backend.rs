@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
@@ -121,15 +123,6 @@ pub struct MediaAssetsRuntimeAccessBackend {
             > + Send
             + Sync,
     >,
-    pub load_series_library_id: Arc<
-        dyn Fn(
-                PathBuf,
-                String,
-            )
-                -> futures_util::future::BoxFuture<'static, Result<Option<String>, String>>
-            + Send
-            + Sync,
-    >,
     pub load_series_book_ids: Arc<
         dyn Fn(
                 PathBuf,
@@ -244,6 +237,8 @@ pub struct MediaAssetsRuntimeAccessBackend {
                 String,
                 Vec<u8>,
                 String,
+                i64,
+                i64,
                 bool,
             )
                 -> futures_util::future::BoxFuture<'static, Result<EntityThumbnailRecord, String>>
@@ -284,6 +279,8 @@ pub struct MediaAssetsRuntimeAccessBackend {
                 String,
                 Vec<u8>,
                 String,
+                i64,
+                i64,
                 bool,
             )
                 -> futures_util::future::BoxFuture<'static, Result<ReadlistThumbnailRecord, String>>
@@ -324,6 +321,8 @@ pub struct MediaAssetsRuntimeAccessBackend {
                 String,
                 Vec<u8>,
                 String,
+                i64,
+                i64,
                 bool,
             ) -> futures_util::future::BoxFuture<
                 'static,
@@ -386,6 +385,8 @@ pub struct MediaAssetsRuntimeAccessBackend {
                 String,
                 Vec<u8>,
                 String,
+                i64,
+                i64,
                 bool,
             )
                 -> futures_util::future::BoxFuture<'static, Result<SeriesThumbnailRecord, String>>
@@ -529,7 +530,7 @@ pub(super) fn backend() -> &'static MediaAssetsRuntimeAccessBackend {
 
     #[cfg(test)]
     {
-        return TEST_BACKEND.get_or_init(super::test_backend::default_test_backend);
+        TEST_BACKEND.get_or_init(super::test_backend::default_test_backend)
     }
 
     #[cfg(not(test))]

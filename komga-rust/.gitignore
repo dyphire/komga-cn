@@ -32,3 +32,6 @@ Thumbs.db
 # For applications, you should commit Cargo.lock.
 # For libraries, you might want to ignore it.
 # Cargo.lock
+
+/vendor/pdfium-binaries/*
+!/vendor/pdfium-binaries/.gitkeep

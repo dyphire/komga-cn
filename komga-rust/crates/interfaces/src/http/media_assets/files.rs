@@ -9,6 +9,17 @@ pub async fn readlist_file(
         return response;
     }
 
+    let Some(user) = resolved_auth_user(&headers) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+
+    match user_can_access_readlist_media(auth_db.database_file.as_path(), &readlist_id, &user).await
+    {
+        Ok(true) => {}
+        Ok(false) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => return internal_error_response(error),
+    }
+
     match load_persisted_readlist_name(auth_db.database_file.as_path(), &readlist_id).await {
         Ok(Some(name)) => {
             let file_name = format!("{name}.zip");
@@ -53,9 +64,13 @@ pub async fn series_file(
     };
 
     match load_series_archive_entries(auth_db.database_file.as_path(), &series_id).await {
-        Ok(Some((series_title, library_id, entries))) => {
-            if !user_can_access_library(&user, &library_id) {
-                return StatusCode::FORBIDDEN.into_response();
+        Ok(Some((series_title, _library_id, entries))) => {
+            match user_can_access_series_media(auth_db.database_file.as_path(), &series_id, &user)
+                .await
+            {
+                Ok(true) => {}
+                Ok(false) => return StatusCode::FORBIDDEN.into_response(),
+                Err(error) => return internal_error_response(error),
             }
 
             let archive_entries = entries
@@ -137,21 +152,41 @@ pub async fn book_resource(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    (
-        StatusCode::OK,
-        [
-            (
-                header::CONTENT_TYPE,
-                content_type_from_filename(resource_name, "application/octet-stream"),
-            ),
-            (
-                header::CONTENT_SECURITY_POLICY,
-                "script-src 'none'; object-src 'none';".to_string(),
-            ),
-        ],
+    let last_modified = file_last_modified_header_value(media.file_path.as_path());
+    if let Some(last_modified) = last_modified.as_deref()
+        && if_modified_since_matches(&headers, last_modified)
+    {
+        let mut response = asset_not_modified_response(None, Some(last_modified));
+        response.headers_mut().insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static("script-src 'none'; object-src 'none';"),
+        );
+        return response;
+    }
+
+    let file_name = resource_name
+        .rsplit('/')
+        .next()
+        .filter(|name| !name.is_empty())
+        .unwrap_or(resource_name);
+    let content_disposition = inline_disposition(file_name);
+
+    let mut response = asset_ok_response(
+        content_type_from_filename(resource_name, "application/octet-stream").as_str(),
         bytes,
-    )
-        .into_response()
+        None,
+        last_modified.as_deref(),
+    );
+    response.headers_mut().insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_str(&content_disposition)
+            .expect("resource content disposition should be valid"),
+    );
+    response.headers_mut().insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("script-src 'none'; object-src 'none';"),
+    );
+    response
 }
 
 pub async fn book_file(
@@ -186,7 +221,8 @@ async fn book_file_response(
         && let Some(body) = read_media_file_bytes(&media.file_path)
     {
         if let Some(user) = resolved_auth_user(headers)
-            && !user_can_access_library(&user, &media.library_id)
+            && !user_can_access_book_media(auth_db.database_file.as_path(), book_id, &user, &media)
+                .await
         {
             return StatusCode::FORBIDDEN.into_response();
         }

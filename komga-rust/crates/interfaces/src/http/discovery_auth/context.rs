@@ -18,7 +18,7 @@ pub struct DiscoveryQueryContext {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DetailContentContext {
-    pub age_rating: Option<u16>,
+    pub age_rating: Option<u32>,
     pub sharing_labels: Vec<String>,
 }
 

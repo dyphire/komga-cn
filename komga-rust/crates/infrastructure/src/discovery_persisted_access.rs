@@ -22,10 +22,12 @@ mod runtime_queries;
 mod series;
 
 pub use authors::{
-    load_persisted_author_names, load_persisted_author_roles, load_persisted_authors,
-    load_persisted_authors_by_scope,
+    load_persisted_author_names, load_persisted_author_roles, load_persisted_authors_by_scope,
 };
-pub use books::{load_book_poster_summaries, load_persisted_book_summaries, persisted_books_exist};
+pub use books::{
+    load_book_poster_summaries, load_persisted_book_count, load_persisted_book_summaries,
+    load_persisted_book_summaries_by_ids, persisted_books_exist,
+};
 pub use facets::{
     load_persisted_age_ratings, load_persisted_genres, load_persisted_languages,
     load_persisted_publishers, load_persisted_series_release_dates, load_persisted_series_tags,
@@ -42,4 +44,7 @@ pub use runtime_queries::{
     load_persisted_book_tags, load_persisted_duplicate_books, load_persisted_ondeck_books,
     load_series_read_progress_counts, load_series_total_book_counts, persisted_utc_date_minus_days,
 };
-pub use series::{load_persisted_series_summaries, persisted_series_exist};
+pub use series::{
+    load_persisted_series_count, load_persisted_series_summaries,
+    load_persisted_series_summaries_by_ids, persisted_series_exist,
+};

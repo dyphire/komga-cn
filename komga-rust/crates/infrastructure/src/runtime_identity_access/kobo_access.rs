@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use std::path::Path;
 
 use komga_application::identity_access::{

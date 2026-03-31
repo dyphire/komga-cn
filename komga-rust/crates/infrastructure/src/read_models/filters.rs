@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use komga_domain::common_ids::LibraryId;
 use komga_domain::discovery::{AgeRestrictionKind, DiscoveryQueryContext, QueryRestrictions};
 use sqlx::{QueryBuilder, Sqlite};

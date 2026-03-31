@@ -5,14 +5,39 @@ use crate::discovery_detail_access::series as series_access;
 #[derive(Clone)]
 pub struct PersistedSeriesResource {
     pub library_id: String,
-    pub age_rating: Option<u16>,
+    pub age_rating: Option<u32>,
     pub sharing_labels: Vec<String>,
 }
 
 pub struct ExistingSeriesMetadata {
+    pub status: String,
+    pub status_lock: bool,
     pub title: String,
+    pub title_lock: bool,
     pub title_sort: String,
+    pub title_sort_lock: bool,
     pub summary: String,
+    pub summary_lock: bool,
+    pub reading_direction: Option<String>,
+    pub reading_direction_lock: bool,
+    pub publisher: String,
+    pub publisher_lock: bool,
+    pub age_rating: Option<u32>,
+    pub age_rating_lock: bool,
+    pub language: String,
+    pub language_lock: bool,
+    pub genres: Vec<String>,
+    pub genres_lock: bool,
+    pub tags: Vec<String>,
+    pub tags_lock: bool,
+    pub total_book_count: Option<u32>,
+    pub total_book_count_lock: bool,
+    pub sharing_labels: Vec<String>,
+    pub sharing_labels_lock: bool,
+    pub links: Vec<SeriesMetadataLinkRecord>,
+    pub links_lock: bool,
+    pub alternate_titles: Vec<SeriesAlternateTitleRecord>,
+    pub alternate_titles_lock: bool,
 }
 
 pub async fn load_persisted_series_resource(
@@ -67,6 +92,9 @@ pub async fn load_persisted_series_detail(
     else {
         return Ok(None);
     };
+    let metadata = load_existing_series_metadata(database_file, series_id)
+        .await?
+        .ok_or_else(|| format!("persisted series metadata missing for {series_id}"))?;
 
     let persisted_summary = series_access::load_persisted_series_summaries(database_file)
         .await?
@@ -77,7 +105,7 @@ pub async fn load_persisted_series_detail(
         .await?
         .get(series_id)
         .copied()
-        .map(|value| value.clamp(0, i64::from(u32::MAX)) as u32);
+        .map(|value| value.clamp(0, i64::from(i32::MAX)) as u32);
 
     let (books_read_count, books_in_progress_count) = if let Some(user_id) = user_id {
         let counts = series_access::load_series_read_progress_counts(database_file, user_id)
@@ -113,25 +141,37 @@ pub async fn load_persisted_series_detail(
         books_unread_count,
         books_in_progress_count,
         status: row.status,
+        status_lock: metadata.status_lock,
         summary: row.summary,
+        summary_lock: metadata.summary_lock,
         reading_direction: row.reading_direction,
+        reading_direction_lock: metadata.reading_direction_lock,
         publisher: row.publisher,
+        publisher_lock: metadata.publisher_lock,
         age_rating: row.age_rating,
+        age_rating_lock: metadata.age_rating_lock,
         language: row.language,
+        language_lock: metadata.language_lock,
         genres: persisted_summary
             .as_ref()
             .map(|entry| entry.genres.clone())
             .unwrap_or_default(),
+        genres_lock: metadata.genres_lock,
         tags: persisted_summary
             .as_ref()
             .map(|entry| entry.tags.clone())
             .unwrap_or_default(),
+        tags_lock: metadata.tags_lock,
         total_book_count,
+        total_book_count_lock: metadata.total_book_count_lock,
         sharing_labels: parse_csv_values(&row.sharing_labels),
-        alternate_titles: persisted_summary
-            .as_ref()
-            .map(|entry| entry.alternate_titles.clone())
-            .unwrap_or_default(),
+        sharing_labels_lock: metadata.sharing_labels_lock,
+        links: metadata.links,
+        links_lock: metadata.links_lock,
+        alternate_titles: metadata.alternate_titles,
+        alternate_titles_lock: metadata.alternate_titles_lock,
+        title_lock: metadata.title_lock,
+        title_sort_lock: metadata.title_sort_lock,
         metadata_created: row.metadata_created.clone(),
         metadata_last_modified: row.metadata_last_modified.clone(),
         books_metadata_tags: persisted_summary
@@ -190,9 +230,34 @@ pub async fn load_existing_series_metadata(
     let metadata = series_access::load_existing_series_metadata(database_file, series_id)
         .await?
         .map(|row| ExistingSeriesMetadata {
+            status: row.status,
+            status_lock: row.status_lock,
             title: row.title,
+            title_lock: row.title_lock,
             title_sort: row.title_sort,
+            title_sort_lock: row.title_sort_lock,
             summary: row.summary,
+            summary_lock: row.summary_lock,
+            reading_direction: row.reading_direction,
+            reading_direction_lock: row.reading_direction_lock,
+            publisher: row.publisher,
+            publisher_lock: row.publisher_lock,
+            age_rating: row.age_rating,
+            age_rating_lock: row.age_rating_lock,
+            language: row.language,
+            language_lock: row.language_lock,
+            genres: row.genres,
+            genres_lock: row.genres_lock,
+            tags: row.tags,
+            tags_lock: row.tags_lock,
+            total_book_count: row.total_book_count,
+            total_book_count_lock: row.total_book_count_lock,
+            sharing_labels: row.sharing_labels,
+            sharing_labels_lock: row.sharing_labels_lock,
+            links: row.links,
+            links_lock: row.links_lock,
+            alternate_titles: row.alternate_titles,
+            alternate_titles_lock: row.alternate_titles_lock,
         });
 
     Ok(metadata)
@@ -201,23 +266,20 @@ pub async fn load_existing_series_metadata(
 pub async fn persist_series_metadata_update(
     database_file: &FsPath,
     series_id: &str,
-    title: &str,
-    title_sort: &str,
-    summary: &str,
+    update: SeriesMetadataUpdateRecord,
 ) -> Result<bool, String> {
-    series_access::persist_series_metadata_update(
-        database_file,
-        series_id,
-        title,
-        title_sort,
-        summary,
-    )
-    .await
+    series_access::persist_series_metadata_update(database_file, series_id, update).await
 }
 
-pub async fn refresh_series_search_document(
+pub async fn sync_series_search_documents_after_metadata_update(
     database_file: &FsPath,
+    index_dir: &FsPath,
     series_id: &str,
 ) -> Result<(), String> {
-    series_access::refresh_series_after_metadata_update(database_file, series_id).await
+    series_access::refresh_series_search_documents_after_metadata_update(
+        database_file,
+        index_dir,
+        series_id,
+    )
+    .await
 }

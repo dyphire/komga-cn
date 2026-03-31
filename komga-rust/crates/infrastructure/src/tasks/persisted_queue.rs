@@ -39,7 +39,9 @@ impl SqliteTaskQueueStore {
         self.run(|pool| {
             Box::pin(async move {
                 let rows = sqlx::query(
-                    "SELECT ID, PRIORITY, GROUP_ID, SIMPLE_TYPE, PAYLOAD, OWNER\n                     FROM TASK\n                     ORDER BY PRIORITY DESC, LAST_MODIFIED_DATE ASC, ID ASC",
+                    "SELECT ID, PRIORITY, GROUP_ID, SIMPLE_TYPE, PAYLOAD, OWNER \
+                     FROM TASK \
+                     ORDER BY PRIORITY DESC, LAST_MODIFIED_DATE ASC, ID ASC",
                 )
                 .fetch_all(&pool)
                 .await
@@ -64,7 +66,16 @@ impl SqliteTaskQueueStore {
         self.run(move |pool| {
             Box::pin(async move {
                 sqlx::query(
-                    "INSERT INTO TASK (ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER)\n                     VALUES (?, ?, ?, ?, ?, ?, ?)\n                     ON CONFLICT(ID) DO UPDATE\n                     SET PRIORITY = excluded.PRIORITY,\n                         GROUP_ID = excluded.GROUP_ID,\n                         CLASS = excluded.CLASS,\n                         SIMPLE_TYPE = excluded.SIMPLE_TYPE,\n                         PAYLOAD = excluded.PAYLOAD,\n                         OWNER = excluded.OWNER,\n                         LAST_MODIFIED_DATE = CURRENT_TIMESTAMP",
+                    "INSERT INTO TASK (ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?) \
+                     ON CONFLICT(ID) DO UPDATE \
+                     SET PRIORITY = excluded.PRIORITY, \
+                         GROUP_ID = excluded.GROUP_ID, \
+                         CLASS = excluded.CLASS, \
+                         SIMPLE_TYPE = excluded.SIMPLE_TYPE, \
+                         PAYLOAD = excluded.PAYLOAD, \
+                         OWNER = excluded.OWNER, \
+                         LAST_MODIFIED_DATE = CURRENT_TIMESTAMP",
                 )
                 .bind(row.id)
                 .bind(row.priority)
@@ -86,7 +97,9 @@ impl SqliteTaskQueueStore {
         self.run(move |pool| {
             Box::pin(async move {
                 sqlx::query(
-                    "UPDATE TASK\n                     SET OWNER = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP\n                     WHERE ID = ?",
+                    "UPDATE TASK \
+                     SET OWNER = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
+                     WHERE ID = ?",
                 )
                 .bind(owner)
                 .bind(task_id)
@@ -116,7 +129,9 @@ impl SqliteTaskQueueStore {
         self.run(|pool| {
             Box::pin(async move {
                 sqlx::query(
-                    "UPDATE TASK\n                     SET OWNER = NULL, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP\n                     WHERE OWNER IS NOT NULL",
+                    "UPDATE TASK \
+                     SET OWNER = NULL, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
+                     WHERE OWNER IS NOT NULL",
                 )
                 .execute(&pool)
                 .await
@@ -130,7 +145,9 @@ impl SqliteTaskQueueStore {
         self.run(move |pool| {
             Box::pin(async move {
                 sqlx::query(
-                    "UPDATE TASK\n                     SET OWNER = NULL, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP\n                     WHERE ID = ?",
+                    "UPDATE TASK \
+                     SET OWNER = NULL, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
+                     WHERE ID = ?",
                 )
                 .bind(task_id)
                 .execute(&pool)

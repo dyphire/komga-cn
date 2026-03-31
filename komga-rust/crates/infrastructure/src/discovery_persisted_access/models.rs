@@ -22,7 +22,8 @@ pub struct BookBrowseEntry {
 
 pub enum BookTagsScope {
     Series(String),
-    Library(String),
+    Libraries(Vec<String>),
+    ReadList(String),
 }
 
 #[derive(Clone)]

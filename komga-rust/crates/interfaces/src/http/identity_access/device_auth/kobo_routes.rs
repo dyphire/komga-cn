@@ -1,5 +1,37 @@
 use super::*;
 
+fn kobo_description(summary: &str) -> Value {
+    if summary.trim().is_empty() {
+        Value::String(" ".to_string())
+    } else {
+        Value::String(summary.to_string())
+    }
+}
+
+fn kobo_language(language: &str) -> String {
+    let language = language.trim();
+    if language.is_empty() {
+        "en".to_string()
+    } else {
+        language
+            .chars()
+            .take(2)
+            .collect::<String>()
+            .to_ascii_lowercase()
+    }
+}
+
+fn kobo_publication_date_value(value: &str) -> Option<Value> {
+    let value = value.trim();
+    if value.is_empty() {
+        None
+    } else if value.len() == 10 && value.as_bytes().get(4) == Some(&b'-') {
+        Some(Value::String(format!("{value}T00:00:00Z")))
+    } else {
+        Some(Value::String(value.to_string()))
+    }
+}
+
 pub async fn kobo_library_sync(
     Extension(state): Extension<OperationalState>,
     Path(auth_token): Path<String>,
@@ -194,16 +226,14 @@ pub async fn kobo_library_sync(
     if !merged_should_continue
         && let Some(from_sync_point_id) = from_sync_point_id
         && from_sync_point_id != to_sync_point_id
-    {
-        if remove_sync_point(
+        && remove_sync_point(
             state.runtime.database_file.as_path(),
             from_sync_point_id.as_str(),
         )
         .await
         .is_err()
-        {
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
+    {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
     let sync_token_payload_sanitized = sync_token_payload.map(|mut payload| {
@@ -270,17 +300,60 @@ pub async fn kobo_library_book_metadata(
     } else {
         "EPUB3"
     };
+    let contributor_roles = metadata
+        .contributor_names
+        .iter()
+        .map(|name| json!({ "Name": name }))
+        .collect::<Vec<_>>();
+    let contributors = metadata
+        .contributor_names
+        .iter()
+        .map(|name| Value::String(name.clone()))
+        .collect::<Vec<_>>();
+    let publication_date = metadata
+        .release_date
+        .as_deref()
+        .or(metadata.created_date.as_deref())
+        .and_then(kobo_publication_date_value)
+        .unwrap_or(Value::Null);
+    let publisher = metadata
+        .publisher_name
+        .as_ref()
+        .map(|name| json!({ "Imprint": "", "Name": name }))
+        .unwrap_or(Value::Null);
+    let series = if metadata.oneshot {
+        Value::Null
+    } else if let (
+        Some(series_id),
+        Some(series_name),
+        Some(series_number),
+        Some(series_number_float),
+    ) = (
+        metadata.series_id.as_ref(),
+        metadata.series_name.as_ref(),
+        metadata.series_number.as_ref(),
+        metadata.series_number_float,
+    ) {
+        json!({
+            "Id": series_id,
+            "Name": series_name,
+            "Number": series_number,
+            "NumberFloat": series_number_float,
+        })
+    } else {
+        Value::Null
+    };
 
     Json(json!([
         {
             "Categories": ["00000000-0000-0000-0000-000000000001"],
-            "ContributorRoles": [],
-            "Contributors": [],
-            "CoverImageId": book_id,
+            "ContributorRoles": contributor_roles,
+            "Contributors": contributors,
+            "CoverImageId": metadata.cover_image_id,
             "CrossRevisionId": book_id,
             "CurrentDisplayPrice": {"CurrencyCode": "USD", "TotalAmount": 0},
             "CurrentLoveDisplayPrice": {"CurrencyCode": "USD", "TotalAmount": 0},
-            "Description": metadata.summary,
+            "Description": kobo_description(&metadata.summary),
             "DownloadUrls": [
                 {
                     "DrmType": "None",
@@ -297,13 +370,13 @@ pub async fn kobo_library_book_metadata(
             "IsInternetArchive": false,
             "IsPreOrder": false,
             "IsSocialEnabled": true,
-            "ISBN": Value::Null,
-            "Language": if metadata.language.is_empty() { "en".to_string() } else { metadata.language },
+            "ISBN": metadata.isbn,
+            "Language": kobo_language(&metadata.language),
             "PhoneticPronunciations": {},
-            "PublicationDate": metadata.release_date,
-            "Publisher": Value::Null,
+            "PublicationDate": publication_date,
+            "Publisher": publisher,
             "RevisionId": book_id,
-            "Series": Value::Null,
+            "Series": series,
             "Slug": Value::Null,
             "SubTitle": Value::Null,
             "Title": metadata.title,
@@ -343,7 +416,7 @@ pub async fn kobo_library_book_state(
         .max(1);
     let created_timestamp = load_book_created_timestamp(database_file, &book_id)
         .await
-        .unwrap_or_else(|_| None)
+        .unwrap_or(None)
         .unwrap_or_else(now_sync_marker);
 
     let progress = match load_read_progress(database_file, &book_id, &user_id_value).await {
@@ -758,14 +831,17 @@ pub async fn kobo_book_thumbnail_with_quality(
 }
 
 pub async fn kobo_catch_all(
-    Extension(auth_db): Extension<super::AuthDatabaseState>,
-    Path((auth_token, _path)): Path<(String, String)>,
+    Extension(state): Extension<OperationalState>,
+    Path((auth_token, path)): Path<(String, String)>,
     headers: HeaderMap,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    body: Bytes,
 ) -> Response {
     if resolved_kobo_user(
         auth_token.as_str(),
         &headers,
-        auth_db.database_file.as_path(),
+        state.runtime.database_file.as_path(),
     )
     .await
     .is_none()
@@ -773,7 +849,67 @@ pub async fn kobo_catch_all(
         return StatusCode::UNAUTHORIZED.into_response();
     }
 
-    StatusCode::NOT_FOUND.into_response()
+    if !load_kobo_proxy_enabled(&state).await {
+        return Json(json!({})).into_response();
+    }
+
+    match proxy_kobo_catch_all_request(&method, &path, uri.query(), &headers, &body).await {
+        Ok(response) => response,
+        Err(()) => StatusCode::BAD_GATEWAY.into_response(),
+    }
+}
+
+async fn proxy_kobo_catch_all_request(
+    method: &axum::http::Method,
+    path: &str,
+    query: Option<&str>,
+    headers: &HeaderMap,
+    body: &Bytes,
+) -> Result<Response, ()> {
+    let mut target = format!("https://storeapi.kobo.com/{}", path.trim_start_matches('/'));
+    if let Some(query) = query.map(str::trim).filter(|query| !query.is_empty()) {
+        target.push('?');
+        target.push_str(query);
+    }
+
+    let client = Client::builder().build().map_err(|_| ())?;
+    let request_method = reqwest::Method::from_bytes(method.as_str().as_bytes()).map_err(|_| ())?;
+    let mut request = client.request(request_method, target);
+
+    for (name, value) in headers {
+        let header_name = name.as_str();
+        let lower = header_name.to_ascii_lowercase();
+        let should_forward = matches!(
+            lower.as_str(),
+            "authorization" | "user-agent" | "accept" | "accept-language" | "content-type"
+        ) || lower.starts_with("x-kobo-");
+        if !should_forward || lower == "x-kobo-synctoken" {
+            continue;
+        }
+        let Ok(value) = value.to_str() else {
+            continue;
+        };
+        request = request.header(header_name, value);
+    }
+
+    if !body.is_empty() {
+        request = request.body(body.clone());
+    }
+
+    let response = request.send().await.map_err(|_| ())?;
+    let status =
+        StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let response_headers = response.headers().clone();
+    let response_body = response.json::<Value>().await.unwrap_or_else(|_| json!({}));
+
+    let mut proxied = Json(response_body).into_response();
+    *proxied.status_mut() = status;
+    for (name, value) in &response_headers {
+        if name.as_str().to_ascii_lowercase().starts_with("x-kobo-") {
+            proxied.headers_mut().append(name.clone(), value.clone());
+        }
+    }
+    Ok(proxied)
 }
 
 fn random_uuid_like() -> String {

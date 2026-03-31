@@ -635,11 +635,7 @@ pub(crate) async fn opds_v1_readlist_detail(
     )
 }
 
-pub(crate) async fn opds_v1_series(
-    headers: HeaderMap,
-    uri: Uri,
-    database_file: &Path,
-) -> Response {
+pub(crate) async fn opds_v1_series(headers: HeaderMap, uri: Uri, database_file: &Path) -> Response {
     if let Some(response) = require_auth(&headers) {
         return response;
     }
@@ -650,22 +646,23 @@ pub(crate) async fn opds_v1_series(
 
     let query = uri.query().unwrap_or_default();
     let (page, size) = parse_page_size(query);
-    let search = query_value(query, "search").map(percent_decode);
+    let search = query_value(query, "search")
+        .map(percent_decode)
+        .and_then(|value| {
+            let trimmed = value.trim();
+            (!trimmed.is_empty()).then_some(trimmed.to_string())
+        });
     let publishers = query_values(query, "publisher");
 
-    let rows = load_series_page(
-        database_file,
-        &allowed_library_ids,
-        search.as_deref(),
-        publishers.as_slice(),
-        page.saturating_mul(size) as i64,
-        (size + 1) as i64,
-    )
-    .await
-    .unwrap_or_default();
-    let (rows, has_next) = paginate_vec(rows, 0, size);
-
-    let entries = rows
+    let search_rows = if let Some(search_term) = search.as_deref() {
+        load_opds_v1_series_search_results(
+            database_file,
+            &allowed_library_ids,
+            search_term,
+            publishers.as_slice(),
+        )
+        .await
+        .unwrap_or_default()
         .into_iter()
         .map(|series| {
             let series_id = series.id;
@@ -675,12 +672,43 @@ pub(crate) async fn opds_v1_series(
                 format!("/opds/v1.2/series/{series_id}"),
             )
         })
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>()
+    } else {
+        load_series_page(
+            database_file,
+            &allowed_library_ids,
+            None,
+            publishers.as_slice(),
+            page.saturating_mul(size) as i64,
+            (size + 1) as i64,
+        )
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|series| {
+            let series_id = series.id;
+            (
+                series_id.clone(),
+                series.title,
+                format!("/opds/v1.2/series/{series_id}"),
+            )
+        })
+        .collect::<Vec<_>>()
+    };
+    let (entries, has_next) = if search.is_some() {
+        paginate_vec(search_rows, page, size)
+    } else {
+        paginate_vec(search_rows, 0, size)
+    };
 
     opds_v1_navigation_feed_response(
         &headers,
         "allSeries",
-        "All series",
+        search
+            .as_deref()
+            .map(|term| format!("Series search for: {term}"))
+            .unwrap_or_else(|| "All series".to_string())
+            .as_str(),
         "/opds/v1.2/series",
         entries,
         Some((page, has_next)),

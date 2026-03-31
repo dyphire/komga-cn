@@ -101,7 +101,6 @@ pub(super) fn default_test_backend() -> MediaAssetsRuntimeAccessBackend {
         }),
         detect_pdf_page_count: Arc::new(|media| detect_pdf_page_count_for_tests(&media)),
         load_persisted_epub_extension_blob: Arc::new(|_, _| Box::pin(async { Ok(None) })),
-        load_series_library_id: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         load_series_book_ids: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),
         refresh_series_read_progress_row: Arc::new(|_, _, _| Box::pin(async { Ok(()) })),
         load_series_tachiyomi_progress: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),
@@ -113,7 +112,7 @@ pub(super) fn default_test_backend() -> MediaAssetsRuntimeAccessBackend {
         load_selected_book_thumbnail: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         load_book_thumbnail_by_id: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),
         load_persisted_book_thumbnails: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),
-        insert_book_thumbnail: Arc::new(|_, _, _, _, _| {
+        insert_book_thumbnail: Arc::new(|_, _, _, _, _, _, _| {
             Box::pin(async {
                 Err(
                     "media assets runtime access backend is not configured for thumbnail writes"
@@ -124,7 +123,7 @@ pub(super) fn default_test_backend() -> MediaAssetsRuntimeAccessBackend {
         select_book_thumbnail: Arc::new(|_, _, _| Box::pin(async { Ok(false) })),
         delete_book_thumbnail: Arc::new(|_, _, _| Box::pin(async { Ok(false) })),
         load_persisted_readlist_thumbnails: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),
-        insert_readlist_thumbnail: Arc::new(|_, _, _, _, _| {
+        insert_readlist_thumbnail: Arc::new(|_, _, _, _, _, _, _| {
             Box::pin(async {
                 Err(
                     "media assets runtime access backend is not configured for thumbnail writes"
@@ -135,7 +134,7 @@ pub(super) fn default_test_backend() -> MediaAssetsRuntimeAccessBackend {
         select_readlist_thumbnail: Arc::new(|_, _, _| Box::pin(async { Ok(false) })),
         delete_readlist_thumbnail: Arc::new(|_, _, _| Box::pin(async { Ok(false) })),
         load_persisted_collection_thumbnails: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),
-        insert_collection_thumbnail: Arc::new(|_, _, _, _, _| {
+        insert_collection_thumbnail: Arc::new(|_, _, _, _, _, _, _| {
             Box::pin(async {
                 Err(
                     "media assets runtime access backend is not configured for thumbnail writes"
@@ -148,7 +147,7 @@ pub(super) fn default_test_backend() -> MediaAssetsRuntimeAccessBackend {
         load_selected_series_thumbnail: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         load_series_thumbnail_by_id: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),
         load_persisted_series_thumbnails: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),
-        insert_series_thumbnail: Arc::new(|_, _, _, _, _| {
+        insert_series_thumbnail: Arc::new(|_, _, _, _, _, _, _| {
             Box::pin(async {
                 Err(
                     "media assets runtime access backend is not configured for thumbnail writes"

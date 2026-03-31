@@ -64,29 +64,29 @@ pub fn load_sidecar_url_for_parent(
         Box::pin(async move {
             let sql = if metadata_only {
                 r#"
-SELECT URL
-FROM SIDECAR
-WHERE PARENT_URL = ?
-  AND LOWER(URL) LIKE '%.xml'
-ORDER BY LAST_MODIFIED_TIME DESC
-LIMIT 1
-"#
+                SELECT URL
+                FROM SIDECAR
+                WHERE PARENT_URL = ?
+                AND LOWER(URL) LIKE '%.xml'
+                ORDER BY LAST_MODIFIED_TIME DESC
+                LIMIT 1
+                "#
             } else {
                 r#"
-SELECT URL
-FROM SIDECAR
-WHERE PARENT_URL = ?
-  AND (
-    LOWER(URL) LIKE '%.jpg'
-    OR LOWER(URL) LIKE '%.jpeg'
-    OR LOWER(URL) LIKE '%.png'
-    OR LOWER(URL) LIKE '%.webp'
-    OR LOWER(URL) LIKE '%.gif'
-    OR LOWER(URL) LIKE '%.avif'
-  )
-ORDER BY LAST_MODIFIED_TIME DESC
-LIMIT 1
-"#
+                SELECT URL
+                FROM SIDECAR
+                WHERE PARENT_URL = ?
+                AND (
+                    LOWER(URL) LIKE '%.jpg'
+                    OR LOWER(URL) LIKE '%.jpeg'
+                    OR LOWER(URL) LIKE '%.png'
+                    OR LOWER(URL) LIKE '%.webp'
+                    OR LOWER(URL) LIKE '%.gif'
+                    OR LOWER(URL) LIKE '%.avif'
+                )
+                ORDER BY LAST_MODIFIED_TIME DESC
+                LIMIT 1
+                "#
             };
 
             let row = sqlx::query(sql)
@@ -112,14 +112,14 @@ pub fn load_library_hashing_flags(
         Box::pin(async move {
             let row = sqlx::query(
                 r#"
-SELECT
-  COALESCE(HASH_FILES, 0) AS HASH_FILES,
-  COALESCE(HASH_PAGES, 0) AS HASH_PAGES,
-  COALESCE(HASH_KOREADER, 0) AS HASH_KOREADER
-FROM LIBRARY
-WHERE ID = ?
-LIMIT 1
-"#,
+                SELECT
+                COALESCE(HASH_FILES, 0) AS HASH_FILES,
+                COALESCE(HASH_PAGES, 0) AS HASH_PAGES,
+                COALESCE(HASH_KOREADER, 0) AS HASH_KOREADER
+                FROM LIBRARY
+                WHERE ID = ?
+                LIMIT 1
+                "#,
             )
             .bind(&library_id)
             .fetch_optional(&pool)
@@ -156,13 +156,13 @@ pub fn load_library_maintenance_flags(
         Box::pin(async move {
             let row = sqlx::query(
                 r#"
-SELECT
-  COALESCE(REPAIR_EXTENSIONS, 0) AS REPAIR_EXTENSIONS,
-  COALESCE(CONVERT_TO_CBZ, 0) AS CONVERT_TO_CBZ
-FROM LIBRARY
-WHERE ID = ?
-LIMIT 1
-"#,
+                SELECT
+                COALESCE(REPAIR_EXTENSIONS, 0) AS REPAIR_EXTENSIONS,
+                COALESCE(CONVERT_TO_CBZ, 0) AS CONVERT_TO_CBZ
+                FROM LIBRARY
+                WHERE ID = ?
+                LIMIT 1
+                "#,
             )
             .bind(&library_id)
             .fetch_optional(&pool)
@@ -194,14 +194,14 @@ pub fn load_book_file_path(database_file: &Path, book_id: &str) -> Result<Option
         Box::pin(async move {
             let row = sqlx::query(
                 r#"
-SELECT
-  b.URL AS URL,
-  l.ROOT AS ROOT
-FROM BOOK b
-JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
-WHERE b.ID = ?
-LIMIT 1
-"#,
+                SELECT
+                b.URL AS URL,
+                l.ROOT AS ROOT
+                FROM BOOK b
+                JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+                WHERE b.ID = ?
+                LIMIT 1
+                "#,
             )
             .bind(&book_id)
             .fetch_optional(&pool)
@@ -224,14 +224,14 @@ pub fn load_books_without_selected_thumbnails(database_file: &Path) -> Result<Ve
         Box::pin(async move {
             let rows = sqlx::query(
                 r#"
-SELECT b.ID
-FROM BOOK b
-LEFT JOIN THUMBNAIL_BOOK tb
-  ON tb.BOOK_ID = b.ID
-  AND tb.SELECTED = 1
-WHERE tb.ID IS NULL
-  AND b.DELETED_DATE IS NULL
-"#,
+                SELECT b.ID
+                FROM BOOK b
+                LEFT JOIN THUMBNAIL_BOOK tb
+                ON tb.BOOK_ID = b.ID
+                AND tb.SELECTED = 1
+                WHERE tb.ID IS NULL
+                AND b.DELETED_DATE IS NULL
+                "#,
             )
             .fetch_all(&pool)
             .await
@@ -259,12 +259,12 @@ pub fn load_books_with_missing_page_hash(
             let rows = if let Some(library_id) = library_id.as_deref() {
                 sqlx::query(
                     r#"
-SELECT DISTINCT mp.BOOK_ID AS BOOK_ID
-FROM MEDIA_PAGE mp
-JOIN BOOK b ON b.ID = mp.BOOK_ID
-WHERE b.LIBRARY_ID = ?
-  AND (mp.FILE_HASH = '' OR mp.FILE_HASH IS NULL)
-"#,
+                SELECT DISTINCT mp.BOOK_ID AS BOOK_ID
+                FROM MEDIA_PAGE mp
+                JOIN BOOK b ON b.ID = mp.BOOK_ID
+                WHERE b.LIBRARY_ID = ?
+                AND (mp.FILE_HASH = '' OR mp.FILE_HASH IS NULL)
+                "#,
                 )
                 .bind(library_id)
                 .fetch_all(&pool)
@@ -272,11 +272,11 @@ WHERE b.LIBRARY_ID = ?
             } else {
                 sqlx::query(
                     r#"
-SELECT DISTINCT BOOK_ID
-FROM MEDIA_PAGE
-WHERE FILE_HASH = ''
-   OR FILE_HASH IS NULL
-"#,
+                    SELECT DISTINCT BOOK_ID
+                    FROM MEDIA_PAGE
+                    WHERE FILE_HASH = ''
+                    OR FILE_HASH IS NULL
+                    "#,
                 )
                 .fetch_all(&pool)
                 .await
@@ -303,31 +303,31 @@ pub fn load_duplicate_pages_to_delete(
         Box::pin(async move {
             let rows = sqlx::query(
                 r#"
-SELECT
-  mp.BOOK_ID AS BOOK_ID,
-  mp.FILE_HASH AS FILE_HASH,
-  mp.NUMBER AS PAGE_NUMBER,
-  mp.FILE_NAME AS FILE_NAME,
-  mp.MEDIA_TYPE AS MEDIA_TYPE
-FROM MEDIA_PAGE mp
-JOIN BOOK b ON b.ID = mp.BOOK_ID
-JOIN PAGE_HASH ph ON ph.HASH = mp.FILE_HASH
-WHERE b.LIBRARY_ID = ?
-  AND b.DELETED_DATE IS NULL
-  AND mp.FILE_HASH <> ''
-  AND ph.ACTION = 'DELETE_AUTO'
-  AND mp.FILE_HASH IN (
-    SELECT mp2.FILE_HASH
-    FROM MEDIA_PAGE mp2
-    JOIN BOOK b2 ON b2.ID = mp2.BOOK_ID
-    WHERE b2.LIBRARY_ID = ?
-      AND b2.DELETED_DATE IS NULL
-      AND mp2.FILE_HASH <> ''
-    GROUP BY mp2.FILE_HASH
-    HAVING COUNT(*) > 1
-  )
-ORDER BY mp.BOOK_ID ASC, mp.NUMBER ASC
-"#,
+                SELECT
+                mp.BOOK_ID AS BOOK_ID,
+                mp.FILE_HASH AS FILE_HASH,
+                mp.NUMBER AS PAGE_NUMBER,
+                mp.FILE_NAME AS FILE_NAME,
+                mp.MEDIA_TYPE AS MEDIA_TYPE
+                FROM MEDIA_PAGE mp
+                JOIN BOOK b ON b.ID = mp.BOOK_ID
+                JOIN PAGE_HASH ph ON ph.HASH = mp.FILE_HASH
+                WHERE b.LIBRARY_ID = ?
+                AND b.DELETED_DATE IS NULL
+                AND mp.FILE_HASH <> ''
+                AND ph.ACTION = 'DELETE_AUTO'
+                AND mp.FILE_HASH IN (
+                    SELECT mp2.FILE_HASH
+                    FROM MEDIA_PAGE mp2
+                    JOIN BOOK b2 ON b2.ID = mp2.BOOK_ID
+                    WHERE b2.LIBRARY_ID = ?
+                    AND b2.DELETED_DATE IS NULL
+                    AND mp2.FILE_HASH <> ''
+                    GROUP BY mp2.FILE_HASH
+                    HAVING COUNT(*) > 1
+                )
+                ORDER BY mp.BOOK_ID ASC, mp.NUMBER ASC
+                "#,
             )
             .bind(&library_id)
             .bind(&library_id)
@@ -375,11 +375,11 @@ pub fn load_books_requiring_analysis(
             for book_id in book_ids {
                 let status = sqlx::query(
                     r#"
-SELECT STATUS
-FROM MEDIA
-WHERE BOOK_ID = ?
-LIMIT 1
-"#,
+                    SELECT STATUS
+                    FROM MEDIA
+                    WHERE BOOK_ID = ?
+                    LIMIT 1
+                    "#,
                 )
                 .bind(&book_id)
                 .fetch_optional(&pool)
@@ -418,20 +418,20 @@ pub fn load_books_with_missing_file_hash(
         Box::pin(async move {
             let sql = if koreader {
                 r#"
-SELECT ID
-FROM BOOK
-WHERE LIBRARY_ID = ?
-  AND DELETED_DATE IS NULL
-  AND (FILE_HASH_KOREADER = '' OR FILE_HASH_KOREADER IS NULL)
-"#
+                SELECT ID
+                FROM BOOK
+                WHERE LIBRARY_ID = ?
+                AND DELETED_DATE IS NULL
+                AND (FILE_HASH_KOREADER = '' OR FILE_HASH_KOREADER IS NULL)
+                "#
             } else {
                 r#"
-SELECT ID
-FROM BOOK
-WHERE LIBRARY_ID = ?
-  AND DELETED_DATE IS NULL
-  AND (FILE_HASH = '' OR FILE_HASH IS NULL)
-"#
+                SELECT ID
+                FROM BOOK
+                WHERE LIBRARY_ID = ?
+                AND DELETED_DATE IS NULL
+                AND (FILE_HASH = '' OR FILE_HASH IS NULL)
+                "#
             };
 
             let rows = sqlx::query(sql)
@@ -464,16 +464,16 @@ pub fn load_books_to_convert(
         Box::pin(async move {
             let rows = sqlx::query(
                 r#"
-SELECT ID
-FROM BOOK
-JOIN MEDIA ON MEDIA.BOOK_ID = BOOK.ID
-WHERE LIBRARY_ID = ?
-  AND DELETED_DATE IS NULL
-  AND LOWER(MEDIA.MEDIA_TYPE) IN (
-    'application/vnd.comicbook-rar',
-    'application/x-rar-compressed'
-  )
-"#,
+                SELECT ID
+                FROM BOOK
+                JOIN MEDIA ON MEDIA.BOOK_ID = BOOK.ID
+                WHERE LIBRARY_ID = ?
+                AND DELETED_DATE IS NULL
+                AND LOWER(MEDIA.MEDIA_TYPE) IN (
+                    'application/vnd.comicbook-rar',
+                    'application/x-rar-compressed'
+                )
+                "#,
             )
             .bind(&library_id)
             .fetch_all(&pool)
@@ -502,19 +502,19 @@ pub fn load_book_conversion_target(
         Box::pin(async move {
             let row = sqlx::query(
                 r#"
-SELECT
-  b.URL AS BOOK_URL,
-  b.LIBRARY_ID AS LIBRARY_ID,
-  l.ROOT AS LIBRARY_ROOT,
-  COALESCE(l.CONVERT_TO_CBZ, 0) AS CONVERT_TO_CBZ,
-  COALESCE(m.MEDIA_TYPE, '') AS MEDIA_TYPE,
-  COALESCE(m.STATUS, '') AS MEDIA_STATUS
-FROM BOOK b
-JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
-LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
-WHERE b.ID = ?
-LIMIT 1
-"#,
+                SELECT
+                b.URL AS BOOK_URL,
+                b.LIBRARY_ID AS LIBRARY_ID,
+                l.ROOT AS LIBRARY_ROOT,
+                COALESCE(l.CONVERT_TO_CBZ, 0) AS CONVERT_TO_CBZ,
+                COALESCE(m.MEDIA_TYPE, '') AS MEDIA_TYPE,
+                COALESCE(m.STATUS, '') AS MEDIA_STATUS
+                FROM BOOK b
+                JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+                LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
+                WHERE b.ID = ?
+                LIMIT 1
+                "#,
             )
             .bind(&book_id)
             .fetch_optional(&pool)
@@ -547,17 +547,17 @@ pub fn load_books_for_extension_repair(
         Box::pin(async move {
             let rows = sqlx::query(
                 r#"
-SELECT
-  b.ID AS BOOK_ID,
-  b.URL AS BOOK_URL,
-  l.ROOT AS LIBRARY_ROOT,
-  m.MEDIA_TYPE AS MEDIA_TYPE
-FROM BOOK b
-JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
-JOIN MEDIA m ON m.BOOK_ID = b.ID
-WHERE b.LIBRARY_ID = ?
-  AND b.DELETED_DATE IS NULL
-"#,
+                SELECT
+                b.ID AS BOOK_ID,
+                b.URL AS BOOK_URL,
+                l.ROOT AS LIBRARY_ROOT,
+                m.MEDIA_TYPE AS MEDIA_TYPE
+                FROM BOOK b
+                JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+                JOIN MEDIA m ON m.BOOK_ID = b.ID
+                WHERE b.LIBRARY_ID = ?
+                AND b.DELETED_DATE IS NULL
+                "#,
             )
             .bind(&library_id)
             .fetch_all(&pool)
@@ -591,17 +591,17 @@ pub fn load_book_archive_source(
         Box::pin(async move {
             let row = sqlx::query(
                 r#"
-SELECT
-  b.URL AS BOOK_URL,
-  l.ROOT AS LIBRARY_ROOT,
-  COALESCE(m.MEDIA_TYPE, '') AS MEDIA_TYPE,
-  COALESCE(m.STATUS, '') AS MEDIA_STATUS
-FROM BOOK b
-JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
-LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
-WHERE b.ID = ?
-LIMIT 1
-"#,
+                SELECT
+                b.URL AS BOOK_URL,
+                l.ROOT AS LIBRARY_ROOT,
+                COALESCE(m.MEDIA_TYPE, '') AS MEDIA_TYPE,
+                COALESCE(m.STATUS, '') AS MEDIA_STATUS
+                FROM BOOK b
+                JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+                LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
+                WHERE b.ID = ?
+                LIMIT 1
+                "#,
             )
             .bind(&book_id)
             .fetch_optional(&pool)

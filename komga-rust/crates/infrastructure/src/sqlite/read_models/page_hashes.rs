@@ -29,7 +29,26 @@ pub async fn load_page_hashes_page(
     let offset = page.saturating_mul(size);
 
     let content = sqlx::query(
-        "SELECT\n             ph.HASH,\n             ph.SIZE,\n             ph.ACTION,\n             ph.DELETE_COUNT,\n             ph.CREATED_DATE,\n             ph.LAST_MODIFIED_DATE,\n             COUNT(mp.BOOK_ID) AS MATCH_COUNT\n         FROM PAGE_HASH ph\n         LEFT JOIN MEDIA_PAGE mp ON mp.FILE_HASH = ph.HASH\n         GROUP BY\n             ph.HASH,\n             ph.SIZE,\n             ph.ACTION,\n             ph.DELETE_COUNT,\n             ph.CREATED_DATE,\n             ph.LAST_MODIFIED_DATE\n         ORDER BY ph.LAST_MODIFIED_DATE DESC, ph.HASH DESC\n         LIMIT ?\n         OFFSET ?",
+        "SELECT \
+             ph.HASH, \
+             ph.SIZE, \
+             ph.ACTION, \
+             ph.DELETE_COUNT, \
+             ph.CREATED_DATE, \
+             ph.LAST_MODIFIED_DATE, \
+             COUNT(mp.BOOK_ID) AS MATCH_COUNT \
+         FROM PAGE_HASH ph \
+         LEFT JOIN MEDIA_PAGE mp ON mp.FILE_HASH = ph.HASH \
+         GROUP BY \
+             ph.HASH, \
+             ph.SIZE, \
+             ph.ACTION, \
+             ph.DELETE_COUNT, \
+             ph.CREATED_DATE, \
+             ph.LAST_MODIFIED_DATE \
+         ORDER BY ph.LAST_MODIFIED_DATE DESC, ph.HASH DESC \
+         LIMIT ? \
+         OFFSET ?",
     )
     .bind((size.min(i64::MAX as u64)) as i64)
     .bind((offset.min(i64::MAX as u64)) as i64)
@@ -60,7 +79,15 @@ pub async fn load_page_hashes_unknown_page(
     let pool = connect_pool(database_file, 1).await?;
 
     let total_elements = sqlx::query(
-        "SELECT COUNT(*) AS COUNT\n         FROM (\n             SELECT mp.FILE_HASH\n             FROM MEDIA_PAGE mp\n             WHERE mp.FILE_HASH <> ''\n             AND NOT EXISTS (SELECT 1 FROM PAGE_HASH ph WHERE ph.HASH = mp.FILE_HASH)\n             GROUP BY mp.FILE_HASH\n             HAVING COUNT(mp.BOOK_ID) > 1\n         ) unknown_hashes",
+        "SELECT COUNT(*) AS COUNT \
+         FROM ( \
+             SELECT mp.FILE_HASH \
+             FROM MEDIA_PAGE mp \
+             WHERE mp.FILE_HASH <> '' \
+             AND NOT EXISTS (SELECT 1 FROM PAGE_HASH ph WHERE ph.HASH = mp.FILE_HASH) \
+             GROUP BY mp.FILE_HASH \
+             HAVING COUNT(mp.BOOK_ID) > 1 \
+         ) unknown_hashes",
     )
     .fetch_one(&pool)
     .await?
@@ -70,7 +97,15 @@ pub async fn load_page_hashes_unknown_page(
     let offset = page.saturating_mul(size);
 
     let content = sqlx::query(
-        "SELECT mp.FILE_HASH AS HASH, mp.FILE_SIZE AS SIZE, COUNT(mp.BOOK_ID) AS MATCH_COUNT\n         FROM MEDIA_PAGE mp\n         WHERE mp.FILE_HASH <> ''\n         AND NOT EXISTS (SELECT 1 FROM PAGE_HASH ph WHERE ph.HASH = mp.FILE_HASH)\n         GROUP BY mp.FILE_HASH, mp.FILE_SIZE\n         HAVING COUNT(mp.BOOK_ID) > 1\n         ORDER BY MATCH_COUNT DESC, HASH ASC\n         LIMIT ?\n         OFFSET ?",
+        "SELECT mp.FILE_HASH AS HASH, mp.FILE_SIZE AS SIZE, COUNT(mp.BOOK_ID) AS MATCH_COUNT \
+         FROM MEDIA_PAGE mp \
+         WHERE mp.FILE_HASH <> '' \
+         AND NOT EXISTS (SELECT 1 FROM PAGE_HASH ph WHERE ph.HASH = mp.FILE_HASH) \
+         GROUP BY mp.FILE_HASH, mp.FILE_SIZE \
+         HAVING COUNT(mp.BOOK_ID) > 1 \
+         ORDER BY MATCH_COUNT DESC, HASH ASC \
+         LIMIT ? \
+         OFFSET ?",
     )
     .bind((size.min(i64::MAX as u64)) as i64)
     .bind((offset.min(i64::MAX as u64)) as i64)
@@ -107,7 +142,13 @@ pub async fn load_page_hash_matches_page(
     let offset = page.saturating_mul(size);
 
     let content = sqlx::query(
-        "SELECT mp.BOOK_ID, b.URL, mp.NUMBER, mp.FILE_NAME, mp.FILE_SIZE, mp.MEDIA_TYPE\n         FROM MEDIA_PAGE mp\n         LEFT JOIN BOOK b ON b.ID = mp.BOOK_ID\n         WHERE mp.FILE_HASH = ?\n         ORDER BY mp.BOOK_ID ASC, mp.NUMBER ASC\n         LIMIT ?\n         OFFSET ?",
+        "SELECT mp.BOOK_ID, b.URL, mp.NUMBER, mp.FILE_NAME, mp.FILE_SIZE, mp.MEDIA_TYPE \
+         FROM MEDIA_PAGE mp \
+         LEFT JOIN BOOK b ON b.ID = mp.BOOK_ID \
+         WHERE mp.FILE_HASH = ? \
+         ORDER BY mp.BOOK_ID ASC, mp.NUMBER ASC \
+         LIMIT ? \
+         OFFSET ?",
     )
     .bind(page_hash)
     .bind((size.min(i64::MAX as u64)) as i64)
@@ -149,7 +190,17 @@ pub async fn load_unknown_page_hash_source(
 ) -> Result<Option<PageHashUnknownSource>, sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
     let row = sqlx::query(
-        "SELECT\n             l.ROOT AS LIBRARY_ROOT,\n             b.URL AS BOOK_URL,\n             mp.FILE_NAME AS FILE_NAME,\n             mp.MEDIA_TYPE AS MEDIA_TYPE\n         FROM MEDIA_PAGE mp\n         INNER JOIN BOOK b ON b.ID = mp.BOOK_ID\n         INNER JOIN LIBRARY l ON l.ID = b.LIBRARY_ID\n         WHERE mp.FILE_HASH = ?\n         ORDER BY mp.BOOK_ID ASC, mp.NUMBER ASC\n         LIMIT 1",
+        "SELECT \
+             l.ROOT AS LIBRARY_ROOT, \
+             b.URL AS BOOK_URL, \
+             mp.FILE_NAME AS FILE_NAME, \
+             mp.MEDIA_TYPE AS MEDIA_TYPE \
+         FROM MEDIA_PAGE mp \
+         INNER JOIN BOOK b ON b.ID = mp.BOOK_ID \
+         INNER JOIN LIBRARY l ON l.ID = b.LIBRARY_ID \
+         WHERE mp.FILE_HASH = ? \
+         ORDER BY mp.BOOK_ID ASC, mp.NUMBER ASC \
+         LIMIT 1",
     )
     .bind(page_hash)
     .fetch_optional(&pool)

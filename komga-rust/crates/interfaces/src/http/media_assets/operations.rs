@@ -5,6 +5,21 @@ use komga_application::media_assets::{
     BookMetadataPatch as ApplicationBookMetadataPatch,
 };
 
+#[derive(Deserialize)]
+pub struct BooksThumbnailsRegenerateQuery {
+    #[serde(default)]
+    pub for_bigger_result_only: bool,
+}
+
+fn thumbnail_max_edge(thumbnail_size: &str) -> i64 {
+    match thumbnail_size {
+        "MEDIUM" => 600,
+        "LARGE" => 900,
+        "XLARGE" => 1200,
+        _ => 300,
+    }
+}
+
 pub async fn book_analyze(
     Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(state): Extension<OperationalState>,
@@ -370,27 +385,63 @@ pub async fn books_thumbnails_regenerate(
     Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(state): Extension<OperationalState>,
     headers: HeaderMap,
+    Query(query): Query<BooksThumbnailsRegenerateQuery>,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
         return response;
     }
 
-    match persisted_book_ids(auth_db.database_file.as_path()).await {
-        Ok(book_ids) => enqueue_task_records(
-            &state,
-            book_ids
-                .into_iter()
-                .map(|book_id| {
-                    TaskQueueRecord::new(
-                        format!("REFRESH_BOOK_LOCAL_ARTWORK:{book_id}"),
-                        10,
-                        Some(book_id),
-                    )
-                })
-                .collect(),
-        ),
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    }
+    let book_ids = match persisted_book_ids(auth_db.database_file.as_path()).await {
+        Ok(book_ids) => book_ids,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
+    let book_ids = if query.for_bigger_result_only {
+        let settings =
+            match crate::operational_settings_access::server_settings::load_server_settings(
+                state.settings_store.as_ref(),
+            )
+            .await
+            {
+                Ok(settings) => settings,
+                Err(error) => return internal_error_response(error),
+            };
+        let max_edge = thumbnail_max_edge(settings.thumbnail_size);
+        let mut filtered = Vec::new();
+        for book_id in book_ids {
+            let thumbnails =
+                match load_persisted_book_thumbnails(auth_db.database_file.as_path(), &book_id)
+                    .await
+                {
+                    Ok(thumbnails) => thumbnails,
+                    Err(error) => return internal_error_response(error),
+                };
+            if thumbnails.iter().any(|thumbnail| {
+                thumbnail.thumbnail_type == "GENERATED"
+                    && thumbnail.width < max_edge
+                    && thumbnail.height < max_edge
+            }) {
+                filtered.push(book_id);
+            }
+        }
+        filtered
+    } else {
+        book_ids
+    };
+
+    enqueue_task_records(
+        &state,
+        book_ids
+            .into_iter()
+            .map(|book_id| {
+                TaskQueueRecord::new(
+                    format!("GENERATE_BOOK_THUMBNAIL:{book_id}"),
+                    10,
+                    Some(book_id),
+                )
+            })
+            .collect(),
+    )
 }
 
 pub async fn series_file_delete(

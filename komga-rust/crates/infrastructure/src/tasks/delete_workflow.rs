@@ -36,11 +36,11 @@ pub fn load_book_delete_decision(
         Box::pin(async move {
             let row = sqlx::query(
                 r#"
-SELECT SERIES_ID, COALESCE(oneshot, 0) AS ONESHOT
-FROM BOOK
-WHERE ID = ?
-LIMIT 1
-"#,
+                SELECT SERIES_ID, COALESCE(oneshot, 0) AS ONESHOT
+                FROM BOOK
+                WHERE ID = ?
+                LIMIT 1
+                "#,
             )
             .bind(&book_id)
             .fetch_optional(&pool)
@@ -68,15 +68,15 @@ pub fn load_book_delete_work(
         Box::pin(async move {
             let row = sqlx::query(
                 r#"
-SELECT
-  b.SERIES_ID AS SERIES_ID,
-  b.URL AS BOOK_URL,
-  l.ROOT AS LIBRARY_ROOT
-FROM BOOK b
-JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
-WHERE b.ID = ?
-LIMIT 1
-"#,
+                SELECT
+                b.SERIES_ID AS SERIES_ID,
+                b.URL AS BOOK_URL,
+                l.ROOT AS LIBRARY_ROOT
+                FROM BOOK b
+                JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+                WHERE b.ID = ?
+                LIMIT 1
+                "#,
             )
             .bind(&book_id)
             .fetch_optional(&pool)
@@ -121,9 +121,9 @@ pub fn delete_book_rows(
 
             sqlx::query(
                 r#"
-DELETE FROM BOOK
-WHERE ID = ?
-"#,
+                DELETE FROM BOOK
+                WHERE ID = ?
+                "#,
             )
             .bind(&book_id)
             .execute(&mut *tx)
@@ -132,14 +132,14 @@ WHERE ID = ?
 
             sqlx::query(
                 r#"
-UPDATE SERIES
-SET BOOK_COUNT = (
-  SELECT COUNT(*)
-  FROM BOOK
-  WHERE BOOK.SERIES_ID = SERIES.ID
-)
-WHERE ID = ?
-"#,
+                UPDATE SERIES
+                SET BOOK_COUNT = (
+                SELECT COUNT(*)
+                FROM BOOK
+                WHERE BOOK.SERIES_ID = SERIES.ID
+                )
+                WHERE ID = ?
+                "#,
             )
             .bind(&series_id)
             .execute(&mut *tx)
@@ -166,14 +166,14 @@ pub fn load_series_delete_work(
         Box::pin(async move {
             let rows = sqlx::query(
                 r#"
-SELECT
-  b.ID AS BOOK_ID,
-  b.URL AS BOOK_URL,
-  l.ROOT AS LIBRARY_ROOT
-FROM BOOK b
-JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
-WHERE b.SERIES_ID = ?
-"#,
+                SELECT
+                b.ID AS BOOK_ID,
+                b.URL AS BOOK_URL,
+                l.ROOT AS LIBRARY_ROOT
+                FROM BOOK b
+                JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+                WHERE b.SERIES_ID = ?
+                "#,
             )
             .bind(&series_id)
             .fetch_all(&pool)
@@ -228,9 +228,9 @@ pub fn delete_series_rows(
 
             sqlx::query(
                 r#"
-DELETE FROM BOOK
-WHERE SERIES_ID = ?
-"#,
+                DELETE FROM BOOK
+                WHERE SERIES_ID = ?
+                "#,
             )
             .bind(&series_id)
             .execute(&mut *tx)
@@ -251,9 +251,9 @@ WHERE SERIES_ID = ?
 
             sqlx::query(
                 r#"
-DELETE FROM SERIES
-WHERE ID = ?
-"#,
+                DELETE FROM SERIES
+                WHERE ID = ?
+                "#,
             )
             .bind(&series_id)
             .execute(&mut *tx)

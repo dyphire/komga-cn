@@ -185,8 +185,12 @@ pub(crate) async fn post_transient_book_analyze(
             entry.series_id = analysis.series_id.or(inferred_series_id);
         }
         Err(comment) => {
-            entry.status = "ERROR".to_string();
             entry.media_type = transient_book_media_type(record.path.as_str());
+            entry.status = if entry.media_type == "application/octet-stream" {
+                "UNSUPPORTED".to_string()
+            } else {
+                "ERROR".to_string()
+            };
             entry.pages.clear();
             entry.files.clear();
             entry.comment = comment;

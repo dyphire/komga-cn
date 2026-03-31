@@ -39,9 +39,7 @@ impl RuntimeConfig {
     pub fn writer_decision(&self, writer: WriterKind) -> WriterDecision {
         match self.mode {
             RuntimeMode::Snapshot | RuntimeMode::Localdb => WriterDecision::Allowed,
-            RuntimeMode::Canary => WriterDecision::Blocked {
-                reason: "canary mode requires explicit cutover wiring",
-            },
+            RuntimeMode::Canary => WriterDecision::Allowed,
             RuntimeMode::Isolated => {
                 if matches!(writer, WriterKind::SearchIndex) {
                     return WriterDecision::Blocked {
@@ -109,7 +107,7 @@ mod tests {
     }
 
     #[test]
-    fn canary_mode_blocks_all_writers_with_cutover_reason() {
+    fn canary_mode_allows_all_writers() {
         let config = runtime_config_for(RuntimeMode::Canary, false, None);
         for writer in [
             WriterKind::MainDatabase,
@@ -118,12 +116,7 @@ mod tests {
             WriterKind::FilesystemScanOutput,
             WriterKind::SidecarOutput,
         ] {
-            assert_eq!(
-                config.writer_decision(writer),
-                WriterDecision::Blocked {
-                    reason: "canary mode requires explicit cutover wiring",
-                },
-            );
+            assert_eq!(config.writer_decision(writer), WriterDecision::Allowed);
         }
     }
 

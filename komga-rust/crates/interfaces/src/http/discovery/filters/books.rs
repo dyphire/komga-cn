@@ -1,5 +1,11 @@
 use super::*;
 
+macro_rules! books_filters {
+    ($($tt:tt)*) => {
+        RuntimeBooksFilters::from_criteria(BooksFilterCriteria { $($tt)* })
+    };
+}
+
 pub(super) fn parse_books_library_id_filter(
     condition: &Value,
     mode: OperatorValidationMode,
@@ -27,9 +33,9 @@ pub(super) fn parse_books_library_id_filter(
         return Ok(RuntimeBooksFilters::default());
     };
 
-    Ok(RuntimeBooksFilters {
+    Ok(books_filters! {
         library_ids: Some(vec![value.to_string()]),
-        ..RuntimeBooksFilters::default()
+        ..BooksFilterCriteria::default()
     })
 }
 
@@ -61,15 +67,15 @@ pub(super) fn parse_books_series_id_filter(
     };
 
     if operator == "isnot" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             series_ids_excluded: Some(vec![value.to_string()]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
-    Ok(RuntimeBooksFilters {
+    Ok(books_filters! {
         series_ids: Some(vec![value.to_string()]),
-        ..RuntimeBooksFilters::default()
+        ..BooksFilterCriteria::default()
     })
 }
 
@@ -101,15 +107,15 @@ pub(super) fn parse_books_read_list_id_filter(
     };
 
     if operator == "isnot" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             read_list_ids_excluded: Some(vec![value.to_string()]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
-    Ok(RuntimeBooksFilters {
+    Ok(books_filters! {
         read_list_ids: Some(vec![value.to_string()]),
-        ..RuntimeBooksFilters::default()
+        ..BooksFilterCriteria::default()
     })
 }
 
@@ -145,37 +151,37 @@ pub(super) fn parse_books_title_filter(
     let value = value.to_ascii_lowercase();
 
     Ok(match operator.as_str() {
-        "is" => RuntimeBooksFilters {
+        "is" => books_filters! {
             titles: Some(vec![value]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         },
-        "isnot" => RuntimeBooksFilters {
+        "isnot" => books_filters! {
             titles_excluded: Some(vec![value]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         },
-        "contains" => RuntimeBooksFilters {
+        "contains" => books_filters! {
             titles_contains: Some(vec![value]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         },
-        "doesnotcontain" => RuntimeBooksFilters {
+        "doesnotcontain" => books_filters! {
             titles_contains_excluded: Some(vec![value]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         },
-        "beginswith" => RuntimeBooksFilters {
+        "beginswith" => books_filters! {
             titles_begins_with: Some(vec![value]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         },
-        "doesnotbeginwith" => RuntimeBooksFilters {
+        "doesnotbeginwith" => books_filters! {
             titles_begins_with_excluded: Some(vec![value]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         },
-        "endswith" => RuntimeBooksFilters {
+        "endswith" => books_filters! {
             titles_ends_with: Some(vec![value]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         },
-        _ => RuntimeBooksFilters {
+        _ => books_filters! {
             titles_ends_with_excluded: Some(vec![value]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         },
     })
 }
@@ -206,9 +212,9 @@ pub(super) fn parse_books_deleted_filter(
         }
     };
 
-    Ok(RuntimeBooksFilters {
+    Ok(books_filters! {
         deleted: Some(deleted),
-        ..RuntimeBooksFilters::default()
+        ..BooksFilterCriteria::default()
     })
 }
 
@@ -238,9 +244,9 @@ pub(super) fn parse_books_oneshot_filter(
         }
     };
 
-    Ok(RuntimeBooksFilters {
+    Ok(books_filters! {
         oneshot: Some(oneshot),
-        ..RuntimeBooksFilters::default()
+        ..BooksFilterCriteria::default()
     })
 }
 
@@ -263,16 +269,16 @@ pub(super) fn parse_books_genre_filter(
     }
 
     if operator == "isnull" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             genres_null: Some(true),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
     if operator == "isnotnull" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             genres_null: Some(false),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
@@ -286,15 +292,15 @@ pub(super) fn parse_books_genre_filter(
     };
 
     if operator == "isnot" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             genres_excluded: Some(vec![value]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
-    Ok(RuntimeBooksFilters {
+    Ok(books_filters! {
         genres: Some(vec![value]),
-        ..RuntimeBooksFilters::default()
+        ..BooksFilterCriteria::default()
     })
 }
 
@@ -317,16 +323,16 @@ pub(super) fn parse_books_tag_filter(
     }
 
     if operator == "isnull" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             tags_null: Some(true),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
     if operator == "isnotnull" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             tags_null: Some(false),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
@@ -340,15 +346,15 @@ pub(super) fn parse_books_tag_filter(
     };
 
     if operator == "isnot" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             tags_excluded: Some(vec![value]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
-    Ok(RuntimeBooksFilters {
+    Ok(books_filters! {
         tags: Some(vec![value]),
-        ..RuntimeBooksFilters::default()
+        ..BooksFilterCriteria::default()
     })
 }
 
@@ -380,15 +386,15 @@ pub(super) fn parse_books_language_filter(
     };
 
     if operator == "isnot" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             languages_excluded: Some(vec![value]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
-    Ok(RuntimeBooksFilters {
+    Ok(books_filters! {
         languages: Some(vec![value]),
-        ..RuntimeBooksFilters::default()
+        ..BooksFilterCriteria::default()
     })
 }
 
@@ -420,15 +426,15 @@ pub(super) fn parse_books_publisher_filter(
     };
 
     if operator == "isnot" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             publishers_excluded: Some(vec![value]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
-    Ok(RuntimeBooksFilters {
+    Ok(books_filters! {
         publishers: Some(vec![value]),
-        ..RuntimeBooksFilters::default()
+        ..BooksFilterCriteria::default()
     })
 }
 
@@ -457,15 +463,15 @@ pub(super) fn parse_books_age_rating_filter(
     }
 
     if operator == "isnull" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             age_ratings_null: Some(true),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
     if operator == "isnotnull" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             age_ratings_null: Some(false),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
@@ -478,21 +484,21 @@ pub(super) fn parse_books_age_rating_filter(
     };
 
     match operator.as_str() {
-        "is" => Ok(RuntimeBooksFilters {
+        "is" => Ok(books_filters! {
             age_ratings: Some(vec![value]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         }),
-        "isnot" => Ok(RuntimeBooksFilters {
+        "isnot" => Ok(books_filters! {
             age_ratings_excluded: Some(vec![value]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         }),
-        "greaterthan" => Ok(RuntimeBooksFilters {
+        "greaterthan" => Ok(books_filters! {
             age_rating_gt: Some(value),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         }),
-        _ => Ok(RuntimeBooksFilters {
+        _ => Ok(books_filters! {
             age_rating_lt: Some(value),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         }),
     }
 }
@@ -521,15 +527,15 @@ pub(super) fn parse_books_read_status_filter(
     let normalized = value.to_ascii_lowercase();
 
     if operator == "isnot" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             read_statuses_excluded: Some(vec![normalized]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
-    Ok(RuntimeBooksFilters {
+    Ok(books_filters! {
         read_statuses: Some(vec![normalized]),
-        ..RuntimeBooksFilters::default()
+        ..BooksFilterCriteria::default()
     })
 }
 
@@ -556,15 +562,15 @@ pub(super) fn parse_books_media_profile_filter(
     };
     let normalized = value.to_ascii_lowercase();
     if operator == "isnot" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             media_profiles_excluded: Some(vec![normalized]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
-    Ok(RuntimeBooksFilters {
+    Ok(books_filters! {
         media_profiles: Some(vec![normalized]),
-        ..RuntimeBooksFilters::default()
+        ..BooksFilterCriteria::default()
     })
 }
 
@@ -596,15 +602,15 @@ pub(super) fn parse_books_media_status_filter(
     };
 
     if operator == "isnot" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             media_statuses_excluded: Some(vec![value]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
-    Ok(RuntimeBooksFilters {
+    Ok(books_filters! {
         media_statuses: Some(vec![value]),
-        ..RuntimeBooksFilters::default()
+        ..BooksFilterCriteria::default()
     })
 }
 
@@ -620,9 +626,9 @@ pub(super) fn parse_books_author_filter(
 
     if operator == "contains" {
         return parse_books_string_filter(condition, "Author", "contains_or_is", mode, |value| {
-            RuntimeBooksFilters {
+            books_filters! {
                 authors: Some(vec![value]),
-                ..RuntimeBooksFilters::default()
+                ..BooksFilterCriteria::default()
             }
         });
     }
@@ -643,15 +649,15 @@ pub(super) fn parse_books_author_filter(
     };
 
     if operator == "isnot" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             authors_excluded: Some(vec![_encoded]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
-    Ok(RuntimeBooksFilters {
+    Ok(books_filters! {
         authors: Some(vec![_encoded]),
-        ..RuntimeBooksFilters::default()
+        ..BooksFilterCriteria::default()
     })
 }
 
@@ -688,17 +694,17 @@ pub(super) fn parse_books_poster_filter(
     }
 
     if operator == "isnot" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             poster_types_excluded: poster_type.map(|value| vec![value]),
             poster_selected_excluded: poster_selected,
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
-    Ok(RuntimeBooksFilters {
+    Ok(books_filters! {
         poster_types: poster_type.map(|value| vec![value]),
         poster_selected,
-        ..RuntimeBooksFilters::default()
+        ..BooksFilterCriteria::default()
     })
 }
 
@@ -750,29 +756,29 @@ pub(super) fn parse_books_number_sort_filter(
     };
 
     if operator == "is" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             number_sorts: Some(vec![value]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
     if operator == "isnot" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             number_sorts_excluded: Some(vec![value]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
     if operator == "greaterthan" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             number_sort_gt: Some(value),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
-    Ok(RuntimeBooksFilters {
+    Ok(books_filters! {
         number_sort_lt: Some(value),
-        ..RuntimeBooksFilters::default()
+        ..BooksFilterCriteria::default()
     })
 }
 
@@ -810,16 +816,16 @@ pub(super) fn parse_books_release_date_filter(
     }
 
     if operator == "isnull" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             release_dates_null: Some(true),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
     if operator == "isnotnull" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             release_dates_null: Some(false),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
@@ -832,9 +838,9 @@ pub(super) fn parse_books_release_date_filter(
             return Ok(RuntimeBooksFilters::default());
         };
 
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             release_date_gt: Some(_date_time),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
@@ -847,9 +853,9 @@ pub(super) fn parse_books_release_date_filter(
             return Ok(RuntimeBooksFilters::default());
         };
 
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             release_date_lt: Some(_date_time),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
@@ -862,9 +868,9 @@ pub(super) fn parse_books_release_date_filter(
             return Ok(RuntimeBooksFilters::default());
         };
 
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             release_date_in_last_days: Some(_days),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
@@ -877,9 +883,9 @@ pub(super) fn parse_books_release_date_filter(
             return Ok(RuntimeBooksFilters::default());
         };
 
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             release_date_not_in_last_days: Some(_days),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
@@ -893,64 +899,64 @@ pub(super) fn parse_books_release_date_filter(
     };
 
     if operator == "greaterthan" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             release_date_gt: Some(value),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
     if operator == "lessthan" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             release_date_lt: Some(value),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
     if operator == "beginswith" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             release_date_begins_with: Some(vec![value]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
     if operator == "endswith" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             release_date_ends_with: Some(vec![value]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
     if operator == "doesnotcontain" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             release_date_contains_excluded: Some(vec![value]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
     if operator == "doesnotbeginwith" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             release_date_begins_with_excluded: Some(vec![value]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
     if operator == "doesnotendwith" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             release_date_ends_with_excluded: Some(vec![value]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
     if operator == "isnot" {
-        return Ok(RuntimeBooksFilters {
+        return Ok(books_filters! {
             release_dates_excluded: Some(vec![value]),
-            ..RuntimeBooksFilters::default()
+            ..BooksFilterCriteria::default()
         });
     }
 
-    Ok(RuntimeBooksFilters {
+    Ok(books_filters! {
         release_dates: Some(vec![value]),
-        ..RuntimeBooksFilters::default()
+        ..BooksFilterCriteria::default()
     })
 }
 

@@ -80,7 +80,10 @@ pub fn load_library_scan_config(
         let library_id = library_id.clone();
         Box::pin(async move {
             let row = sqlx::query(
-                "SELECT ROOT, SCAN_CBX, SCAN_PDF, SCAN_EPUB, SCAN_FORCE_MODIFIED_TIME, ONESHOTS_DIRECTORY\n                 FROM LIBRARY\n                 WHERE ID = ?\n                 LIMIT 1",
+                "SELECT ROOT, SCAN_CBX, SCAN_PDF, SCAN_EPUB, SCAN_FORCE_MODIFIED_TIME, ONESHOTS_DIRECTORY \
+                 FROM LIBRARY \
+                 WHERE ID = ? \
+                 LIMIT 1",
             )
             .bind(&library_id)
             .fetch_optional(&pool)
@@ -92,12 +95,16 @@ pub fn load_library_scan_config(
             };
 
             let exclusions = sqlx::query(
-                "SELECT EXCLUSION\n                 FROM LIBRARY_EXCLUSIONS\n                 WHERE LIBRARY_ID = ?",
+                "SELECT EXCLUSION \
+                 FROM LIBRARY_EXCLUSIONS \
+                 WHERE LIBRARY_ID = ?",
             )
             .bind(&library_id)
             .fetch_all(&pool)
             .await
-            .map_err(|error| format!("failed to load library exclusions for '{library_id}': {error}"))?
+            .map_err(|error| {
+                format!("failed to load library exclusions for '{library_id}': {error}")
+            })?
             .into_iter()
             .map(|row| row.get::<String, _>("EXCLUSION"))
             .collect::<Vec<_>>();
@@ -287,12 +294,17 @@ pub fn library_empty_trash_after_scan(
         let library_id = library_id.clone();
         Box::pin(async move {
             let value = sqlx::query(
-                "SELECT EMPTY_TRASH_AFTER_SCAN\n                 FROM LIBRARY\n                 WHERE ID = ?\n                 LIMIT 1",
+                "SELECT EMPTY_TRASH_AFTER_SCAN \
+                 FROM LIBRARY \
+                 WHERE ID = ? \
+                 LIMIT 1",
             )
             .bind(&library_id)
             .fetch_optional(&pool)
             .await
-            .map_err(|error| format!("failed to load empty-trash-after-scan flag for '{library_id}': {error}"))?
+            .map_err(|error| {
+                format!("failed to load empty-trash-after-scan flag for '{library_id}': {error}")
+            })?
             .map(|row| row.get::<bool, _>("EMPTY_TRASH_AFTER_SCAN"))
             .unwrap_or(false);
 
@@ -314,7 +326,9 @@ pub fn persist_scanned_library(
         Box::pin(async move {
             if !scanned.root_available {
                 sqlx::query(
-                    "UPDATE LIBRARY\n                     SET UNAVAILABLE_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP\n                     WHERE ID = ?",
+                    "UPDATE LIBRARY \
+                     SET UNAVAILABLE_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
+                     WHERE ID = ?",
                 )
                 .bind(&library_id)
                 .execute(&pool)
@@ -324,19 +338,26 @@ pub fn persist_scanned_library(
             }
 
             sqlx::query(
-                "UPDATE LIBRARY\n                 SET UNAVAILABLE_DATE = NULL, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP\n                 WHERE ID = ?",
+                "UPDATE LIBRARY \
+                 SET UNAVAILABLE_DATE = NULL, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
+                 WHERE ID = ?",
             )
             .bind(&library_id)
             .execute(&pool)
             .await
-            .map_err(|error| format!("failed to clear library unavailable marker for '{library_id}': {error}"))?;
+            .map_err(|error| {
+                format!("failed to clear library unavailable marker for '{library_id}': {error}")
+            })?;
 
             let discovered_series_ids = scanned.discovered_series_ids.clone();
             let discovered_book_ids = scanned.discovered_book_ids.clone();
 
             for series in &scanned.series_rows {
                 let series_updated = sqlx::query(
-                    "UPDATE SERIES\n                     SET FILE_LAST_MODIFIED = ?, NAME = ?, URL = ?, LIBRARY_ID = ?, oneshot = ?,\n                         LAST_MODIFIED_DATE = CURRENT_TIMESTAMP, DELETED_DATE = NULL\n                     WHERE ID = ?",
+                    "UPDATE SERIES \
+                     SET FILE_LAST_MODIFIED = ?, NAME = ?, URL = ?, LIBRARY_ID = ?, oneshot = ?, \
+                         LAST_MODIFIED_DATE = CURRENT_TIMESTAMP, DELETED_DATE = NULL \
+                     WHERE ID = ?",
                 )
                 .bind(series.series_last_modified_unix_seconds)
                 .bind(&series.series_name)
@@ -351,7 +372,8 @@ pub fn persist_scanned_library(
 
                 if series_updated == 0 {
                     sqlx::query(
-                        "INSERT OR IGNORE INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot)\n                         VALUES (?, ?, ?, ?, ?, ?)",
+                        "INSERT OR IGNORE INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot) \
+                         VALUES (?, ?, ?, ?, ?, ?)",
                     )
                     .bind(&series.series_id)
                     .bind(series.series_last_modified_unix_seconds)
@@ -366,7 +388,10 @@ pub fn persist_scanned_library(
 
                 for book in &series.books {
                     let book_updated = sqlx::query(
-                        "UPDATE BOOK\n                         SET FILE_LAST_MODIFIED = ?, URL = ?, SERIES_ID = ?, FILE_SIZE = ?,\n                             LIBRARY_ID = ?, oneshot = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP, DELETED_DATE = NULL\n                         WHERE ID = ?",
+                        "UPDATE BOOK \
+                         SET FILE_LAST_MODIFIED = ?, URL = ?, SERIES_ID = ?, FILE_SIZE = ?, \
+                             LIBRARY_ID = ?, oneshot = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP, DELETED_DATE = NULL \
+                         WHERE ID = ?",
                     )
                     .bind(book.file_last_modified_unix_seconds)
                     .bind(&book.book_url)
@@ -382,7 +407,9 @@ pub fn persist_scanned_library(
 
                     if book_updated == 0 {
                         sqlx::query(
-                            "INSERT OR IGNORE INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE,\n                                                        LIBRARY_ID, oneshot)\n                             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                            "INSERT OR IGNORE INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, \
+                                                        LIBRARY_ID, oneshot) \
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                         )
                         .bind(&book.book_id)
                         .bind(book.file_last_modified_unix_seconds)
@@ -398,7 +425,10 @@ pub fn persist_scanned_library(
                     }
 
                     let media_updated = sqlx::query(
-                        "UPDATE MEDIA_FILE\n                         SET FILE_SIZE = ?\n                         WHERE FILE_NAME = ?\n                           AND BOOK_ID = ?",
+                        "UPDATE MEDIA_FILE \
+                         SET FILE_SIZE = ? \
+                         WHERE FILE_NAME = ? \
+                           AND BOOK_ID = ?",
                     )
                     .bind(book.file_size)
                     .bind(&book.file_name)
@@ -410,7 +440,8 @@ pub fn persist_scanned_library(
 
                     if media_updated == 0 {
                         sqlx::query(
-                            "INSERT INTO MEDIA_FILE (FILE_NAME, BOOK_ID, FILE_SIZE)\n                             VALUES (?, ?, ?)",
+                            "INSERT INTO MEDIA_FILE (FILE_NAME, BOOK_ID, FILE_SIZE) \
+                             VALUES (?, ?, ?)",
                         )
                         .bind(&book.file_name)
                         .bind(&book.book_id)
@@ -424,7 +455,10 @@ pub fn persist_scanned_library(
 
             for sidecar in &scanned.sidecars {
                 let sidecar_updated = sqlx::query(
-                    "UPDATE SIDECAR\n                     SET PARENT_URL = ?, LAST_MODIFIED_TIME = ?\n                     WHERE URL = ?\n                       AND LIBRARY_ID = ?",
+                    "UPDATE SIDECAR \
+                     SET PARENT_URL = ?, LAST_MODIFIED_TIME = ? \
+                     WHERE URL = ? \
+                       AND LIBRARY_ID = ?",
                 )
                 .bind(&sidecar.parent_url)
                 .bind(sidecar.last_modified_unix_seconds)
@@ -437,7 +471,8 @@ pub fn persist_scanned_library(
 
                 if sidecar_updated == 0 {
                     sqlx::query(
-                        "INSERT OR IGNORE INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID)\n                         VALUES (?, ?, ?, ?)",
+                        "INSERT OR IGNORE INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID) \
+                         VALUES (?, ?, ?, ?)",
                     )
                     .bind(&sidecar.url)
                     .bind(&sidecar.parent_url)
@@ -451,19 +486,26 @@ pub fn persist_scanned_library(
 
             if scanned.root_available {
                 let existing_series = sqlx::query(
-                    "SELECT ID\n                     FROM SERIES\n                     WHERE LIBRARY_ID = ?\n                       AND DELETED_DATE IS NULL",
+                    "SELECT ID \
+                     FROM SERIES \
+                     WHERE LIBRARY_ID = ? \
+                       AND DELETED_DATE IS NULL",
                 )
                 .bind(&library_id)
                 .fetch_all(&pool)
                 .await
-                .map_err(|error| format!("failed to query existing SERIES rows for '{library_id}': {error}"))?;
+                .map_err(|error| {
+                    format!("failed to query existing SERIES rows for '{library_id}': {error}")
+                })?;
                 for row in existing_series {
                     let series_id = row.get::<String, _>("ID");
                     if discovered_series_ids.contains(&series_id) {
                         continue;
                     }
                     sqlx::query(
-                        "UPDATE SERIES\n                         SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP\n                         WHERE ID = ?",
+                        "UPDATE SERIES \
+                         SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
+                         WHERE ID = ?",
                     )
                     .bind(&series_id)
                     .execute(&pool)
@@ -472,19 +514,26 @@ pub fn persist_scanned_library(
                 }
 
                 let existing_books = sqlx::query(
-                    "SELECT ID\n                     FROM BOOK\n                     WHERE LIBRARY_ID = ?\n                       AND DELETED_DATE IS NULL",
+                    "SELECT ID \
+                     FROM BOOK \
+                     WHERE LIBRARY_ID = ? \
+                       AND DELETED_DATE IS NULL",
                 )
                 .bind(&library_id)
                 .fetch_all(&pool)
                 .await
-                .map_err(|error| format!("failed to query existing BOOK rows for '{library_id}': {error}"))?;
+                .map_err(|error| {
+                    format!("failed to query existing BOOK rows for '{library_id}': {error}")
+                })?;
                 for row in existing_books {
                     let book_id = row.get::<String, _>("ID");
                     if discovered_book_ids.contains(&book_id) {
                         continue;
                     }
                     sqlx::query(
-                        "UPDATE BOOK\n                         SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP\n                         WHERE ID = ?",
+                        "UPDATE BOOK \
+                         SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
+                         WHERE ID = ?",
                     )
                     .bind(&book_id)
                     .execute(&pool)
@@ -494,12 +543,21 @@ pub fn persist_scanned_library(
             }
 
             sqlx::query(
-                "UPDATE SERIES\n                 SET BOOK_COUNT = (SELECT COUNT(*)\n                                   FROM BOOK\n                                   WHERE BOOK.SERIES_ID = SERIES.ID\n                                     AND BOOK.DELETED_DATE IS NULL)\n                 WHERE LIBRARY_ID = ?",
+                "UPDATE SERIES \
+                 SET BOOK_COUNT = (SELECT COUNT(*) \
+                                   FROM BOOK \
+                                   WHERE BOOK.SERIES_ID = SERIES.ID \
+                                     AND BOOK.DELETED_DATE IS NULL) \
+                 WHERE LIBRARY_ID = ?",
             )
             .bind(&library_id)
             .execute(&pool)
             .await
-            .map_err(|error| format!("failed to refresh series book counts after scan for '{library_id}': {error}"))?;
+            .map_err(|error| {
+                format!(
+                    "failed to refresh series book counts after scan for '{library_id}': {error}"
+                )
+            })?;
 
             Ok(())
         })
@@ -524,12 +582,16 @@ pub fn load_changed_sidecars(
         let scanned_sidecars = scanned_sidecars.clone();
         Box::pin(async move {
             let existing_rows = sqlx::query(
-                "SELECT URL, LAST_MODIFIED_TIME\n                 FROM SIDECAR\n                 WHERE LIBRARY_ID = ?",
+                "SELECT URL, LAST_MODIFIED_TIME \
+                 FROM SIDECAR \
+                 WHERE LIBRARY_ID = ?",
             )
             .bind(&library_id)
             .fetch_all(&pool)
             .await
-            .map_err(|error| format!("failed to load existing sidecars for '{library_id}': {error}"))?;
+            .map_err(|error| {
+                format!("failed to load existing sidecars for '{library_id}': {error}")
+            })?;
 
             let existing = existing_rows
                 .into_iter()

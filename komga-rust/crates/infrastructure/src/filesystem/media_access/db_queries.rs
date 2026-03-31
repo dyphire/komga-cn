@@ -124,8 +124,8 @@ pub async fn load_persisted_book_pages(
             number: row.get::<i64, _>("NUMBER") as u64,
             file_name: row.get::<String, _>("FILE_NAME"),
             media_type: row.get::<String, _>("MEDIA_TYPE"),
-            width: row.get::<Option<i64>, _>("WIDTH"),
-            height: row.get::<Option<i64>, _>("HEIGHT"),
+            width: row.get::<Option<i64>, _>("width"),
+            height: row.get::<Option<i64>, _>("height"),
             file_size: row.get::<i64, _>("FILE_SIZE"),
         })
         .collect())
@@ -155,8 +155,8 @@ pub async fn load_persisted_book_page_row(
         number: row.get::<i64, _>("NUMBER") as u64,
         file_name: row.get::<String, _>("FILE_NAME"),
         media_type: row.get::<String, _>("MEDIA_TYPE"),
-        width: row.get::<Option<i64>, _>("WIDTH"),
-        height: row.get::<Option<i64>, _>("HEIGHT"),
+        width: row.get::<Option<i64>, _>("width"),
+        height: row.get::<Option<i64>, _>("height"),
         file_size: row.get::<i64, _>("FILE_SIZE"),
     }))
 }

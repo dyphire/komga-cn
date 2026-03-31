@@ -1,7 +1,13 @@
 use super::*;
 
+fn should_use_strict_runtime_shape(payload: Option<&Value>) -> bool {
+    payload
+        .and_then(|value| value.get("condition"))
+        .and_then(|condition| condition.get("type"))
+        .is_some()
+}
+
 pub async fn series(
-    profile: RuntimeProfile,
     headers: HeaderMap,
     uri: Uri,
     auth_state: DiscoveryAuthState,
@@ -16,6 +22,9 @@ pub async fn series(
     }
 
     let query = uri.query().unwrap_or_default();
+    if contains_legacy_search_query(query) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
     let requested_library_ids = requested_query_values(query, "library_id");
     let library_ids =
         remap_requested_library_ids_for_persisted(database_file, requested_library_ids.as_ref())
@@ -31,7 +40,6 @@ pub async fn series(
         .unwrap_or(20)
         .max(1);
     let unpaged = query_bool(query, "unpaged");
-    let search_regex = query_value(query, "search_regex").and_then(parse_search_regex);
 
     let context = match auth_state.resolve_query_context(&headers, library_ids.as_deref()) {
         Some(context) => context,
@@ -41,71 +49,18 @@ pub async fn series(
     let series_page = match load_persisted_series_page(
         database_file,
         &context,
-        PersistedSeriesBrowseQuery {
-            library_ids,
-            collection_ids,
-            titles: None,
-            titles_excluded: None,
-            titles_contains: None,
-            titles_contains_excluded: None,
-            titles_begins_with: None,
-            titles_begins_with_excluded: None,
-            titles_ends_with: None,
-            titles_ends_with_excluded: None,
-            title_sorts: None,
-            title_sorts_excluded: None,
-            title_sorts_contains: None,
-            title_sorts_contains_excluded: None,
-            title_sorts_begins_with: None,
-            title_sorts_begins_with_excluded: None,
-            title_sorts_ends_with: None,
-            title_sorts_ends_with_excluded: None,
-            deleted: None,
-            oneshot: None,
-            read_statuses: None,
-            read_statuses_excluded: None,
-            complete: None,
-            genres: None,
-            genres_excluded: None,
-            genres_null: None,
-            tags: None,
-            tags_excluded: None,
-            tags_null: None,
-            languages: None,
-            languages_excluded: None,
-            publishers: None,
-            publishers_excluded: None,
-            age_ratings: None,
-            age_ratings_excluded: None,
-            age_ratings_null: None,
-            age_rating_gt: None,
-            age_rating_lt: None,
-            sharing_labels: None,
-            sharing_labels_excluded: None,
-            sharing_labels_null: None,
-            authors: None,
-            authors_excluded: None,
-            release_dates: None,
-            release_dates_excluded: None,
-            release_dates_null: None,
-            release_date_gt: None,
-            release_date_lt: None,
-            release_date_begins_with: None,
-            release_date_ends_with: None,
-            release_date_contains_excluded: None,
-            release_date_begins_with_excluded: None,
-            release_date_ends_with_excluded: None,
-            release_date_in_last_days: None,
-            release_date_not_in_last_days: None,
-            series_statuses: None,
-            series_statuses_excluded: None,
+        PersistedSeriesBrowseQuery::from_filters(
+            SeriesFilterCriteria {
+                library_ids,
+                collection_ids,
+                ..SeriesFilterCriteria::default()
+            },
             search,
-            search_regex,
             page,
             size,
             unpaged,
-            sort_modes: vec![PersistedSeriesSortMode::TitleAsc],
-        },
+            vec![PersistedSeriesSortMode::TitleAsc],
+        ),
     )
     .await
     {
@@ -116,10 +71,6 @@ pub async fn series(
     let mut response = Json(series_page_payload(series_page, !unpaged)).into_response();
     if wants_persisted_marker(&headers, None) {
         mark_persisted_owned(&mut response);
-    } else if discovery_ownership_route(profile, &headers, DiscoveryShape::SeriesList)
-        == DiscoveryOwnershipRoute::RuntimeOwned
-    {
-        mark_runtime_owned(&mut response);
     }
 
     response
@@ -158,71 +109,17 @@ pub async fn series_latest(
     match load_persisted_series_page(
         database_file,
         &context,
-        PersistedSeriesBrowseQuery {
-            library_ids,
-            collection_ids: None,
-            titles: None,
-            titles_excluded: None,
-            titles_contains: None,
-            titles_contains_excluded: None,
-            titles_begins_with: None,
-            titles_begins_with_excluded: None,
-            titles_ends_with: None,
-            titles_ends_with_excluded: None,
-            title_sorts: None,
-            title_sorts_excluded: None,
-            title_sorts_contains: None,
-            title_sorts_contains_excluded: None,
-            title_sorts_begins_with: None,
-            title_sorts_begins_with_excluded: None,
-            title_sorts_ends_with: None,
-            title_sorts_ends_with_excluded: None,
-            deleted: None,
-            oneshot: None,
-            read_statuses: None,
-            read_statuses_excluded: None,
-            complete: None,
-            genres: None,
-            genres_excluded: None,
-            genres_null: None,
-            tags: None,
-            tags_excluded: None,
-            tags_null: None,
-            languages: None,
-            languages_excluded: None,
-            publishers: None,
-            publishers_excluded: None,
-            age_ratings: None,
-            age_ratings_excluded: None,
-            age_ratings_null: None,
-            age_rating_gt: None,
-            age_rating_lt: None,
-            sharing_labels: None,
-            sharing_labels_excluded: None,
-            sharing_labels_null: None,
-            authors: None,
-            authors_excluded: None,
-            release_dates: None,
-            release_dates_excluded: None,
-            release_dates_null: None,
-            release_date_gt: None,
-            release_date_lt: None,
-            release_date_begins_with: None,
-            release_date_ends_with: None,
-            release_date_contains_excluded: None,
-            release_date_begins_with_excluded: None,
-            release_date_ends_with_excluded: None,
-            release_date_in_last_days: None,
-            release_date_not_in_last_days: None,
-            series_statuses: None,
-            series_statuses_excluded: None,
-            search: None,
-            search_regex: None,
+        PersistedSeriesBrowseQuery::from_filters(
+            SeriesFilterCriteria {
+                library_ids,
+                ..SeriesFilterCriteria::default()
+            },
+            None,
             page,
             size,
             unpaged,
-            sort_modes: vec![PersistedSeriesSortMode::Latest],
-        },
+            vec![PersistedSeriesSortMode::Latest],
+        ),
     )
     .await
     {
@@ -256,31 +153,22 @@ pub async fn series_alphabetical_groups(
         }
     };
 
-    let filters = RuntimeSeriesFilters {
-        library_ids: remap_requested_library_ids_for_persisted(
-            database_file,
-            filters.library_ids.as_ref(),
-        )
-        .await,
-        ..filters
-    };
+    let mut filters = filters;
+    filters.criteria.library_ids = remap_requested_library_ids_for_persisted(
+        database_file,
+        filters.criteria.library_ids.as_ref(),
+    )
+    .await;
 
     let full_text_search = extract_full_text_search(&body);
-    let search_regex = extract_regex_search(&body);
 
     let context = match auth_state.resolve_query_context(&headers, None) {
         Some(context) => context,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    match load_persisted_alphabetical_groups(
-        database_file,
-        &context,
-        filters,
-        full_text_search,
-        search_regex,
-    )
-    .await
+    match load_persisted_alphabetical_groups(database_file, &context, filters, full_text_search)
+        .await
     {
         Ok(groups) => Json(Value::Array(groups)).into_response(),
         Err(error) => internal_error_response(error),
@@ -288,7 +176,6 @@ pub async fn series_alphabetical_groups(
 }
 
 pub async fn series_list(
-    Extension(profile): Extension<RuntimeProfile>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(auth_state): Extension<DiscoveryAuthState>,
     headers: HeaderMap,
@@ -299,27 +186,22 @@ pub async fn series_list(
         return response;
     }
 
-    let ownership_route = discovery_ownership_route(profile, &headers, DiscoveryShape::SeriesList);
     let payload = serde_json::from_slice::<Value>(&body).ok();
     let full_text_search = payload.as_ref().and_then(extract_full_text_search);
+    let strict_runtime_shape = should_use_strict_runtime_shape(payload.as_ref());
 
     if auth_db.database_file.exists()
-        && let Some(mut runtime_response) = runtime_owned_series_list_response(
+        && let Some(runtime_response) = runtime_owned_series_list_response(
             &headers,
             &uri,
             payload.as_ref(),
             full_text_search.clone(),
             &auth_state,
             auth_db.database_file.as_path(),
-            ownership_route == DiscoveryOwnershipRoute::RuntimeOwned,
+            strict_runtime_shape,
         )
         .await
     {
-        if ownership_route != DiscoveryOwnershipRoute::RuntimeOwned {
-            runtime_response
-                .headers_mut()
-                .remove("x-komga-runtime-search-ownership");
-        }
         return runtime_response;
     }
 

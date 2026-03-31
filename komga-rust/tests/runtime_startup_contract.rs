@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tantivy::Index;
+use tantivy::schema::{STORED, STRING, Schema};
 
 fn unique_temp_dir(prefix: &str) -> PathBuf {
     let millis = SystemTime::now()
@@ -9,6 +11,18 @@ fn unique_temp_dir(prefix: &str) -> PathBuf {
         .expect("system clock should be after unix epoch")
         .as_millis();
     std::env::temp_dir().join(format!("{prefix}-{millis}"))
+}
+
+fn create_stale_schema_search_index(index_dir: &std::path::Path) {
+    fs::create_dir_all(index_dir).expect("stale schema index directory should be created");
+
+    let mut schema_builder = Schema::builder();
+    schema_builder.add_text_field("doc_key", STRING | STORED);
+    schema_builder.add_text_field("entity_id", STRING | STORED);
+    let stale_schema = schema_builder.build();
+
+    Index::create_in_dir(index_dir, stale_schema)
+        .expect("stale schema runtime index should be created");
 }
 
 #[test]
@@ -428,5 +442,196 @@ fn isolated_mode_rejects_default_writer_targets_during_startup_resolution() {
     assert!(
         error.to_string().contains("database.sqlite"),
         "mixed-writer error should attribute blocked target details: {error}",
+    );
+}
+
+#[test]
+fn canary_mode_rejects_default_writer_targets_during_startup_resolution() {
+    let config_dir = unique_temp_dir("komga-runtime-canary-default-writer-ownership");
+    fs::create_dir_all(&config_dir).expect("test config directory should be created");
+
+    let mut env = BTreeMap::new();
+    env.insert("KOMGA_RUST_MODE".to_string(), "canary".to_string());
+    env.insert(
+        "KOMGA_CONFIG_DIR".to_string(),
+        config_dir.to_string_lossy().to_string(),
+    );
+
+    let error = komga_rust::config::RuntimeConfig::resolve_with_env(
+        &komga_rust::config::RuntimeCli::default(),
+        &env,
+    )
+    .expect_err("canary mode must reject default writer targets");
+
+    assert!(
+        error
+            .to_string()
+            .contains("unsafe mixed-writer storage ownership detected"),
+        "startup should fail with mixed-writer ownership error: {error}",
+    );
+    assert!(
+        error.to_string().contains("database.sqlite"),
+        "mixed-writer error should attribute blocked target details: {error}",
+    );
+}
+
+#[test]
+fn canary_mode_accepts_non_default_writer_targets_during_startup_resolution() {
+    let config_dir = unique_temp_dir("komga-runtime-canary-owned-writer-targets");
+    let canary_root = config_dir.join("canary-owned");
+    fs::create_dir_all(&config_dir).expect("test config directory should be created");
+
+    let mut env = BTreeMap::new();
+    env.insert("KOMGA_RUST_MODE".to_string(), "canary".to_string());
+    env.insert(
+        "KOMGA_CONFIG_DIR".to_string(),
+        config_dir.to_string_lossy().to_string(),
+    );
+    env.insert(
+        "KOMGA_DATABASE_FILE".to_string(),
+        canary_root
+            .join("database.sqlite")
+            .to_string_lossy()
+            .to_string(),
+    );
+    env.insert(
+        "KOMGA_TASKS_DB_FILE".to_string(),
+        canary_root
+            .join("tasks.sqlite")
+            .to_string_lossy()
+            .to_string(),
+    );
+    env.insert(
+        "KOMGA_LUCENE_DATA_DIRECTORY".to_string(),
+        canary_root.join("lucene").to_string_lossy().to_string(),
+    );
+
+    let config = komga_rust::config::RuntimeConfig::resolve_with_env(
+        &komga_rust::config::RuntimeCli::default(),
+        &env,
+    )
+    .expect("canary mode should accept non-default writer targets");
+
+    assert_eq!(config.mode, komga_rust::config::RuntimeMode::Canary);
+    assert_eq!(config.database_file, canary_root.join("database.sqlite"));
+    assert_eq!(config.tasks_db_file, canary_root.join("tasks.sqlite"));
+    assert_eq!(config.lucene_data_directory, canary_root.join("lucene"));
+}
+
+#[test]
+fn startup_search_lifecycle_missing_index_enqueues_rebuild_contract() {
+    let lucene_dir = unique_temp_dir("komga-runtime-startup-search-missing-index");
+    fs::create_dir_all(&lucene_dir).expect("lucene directory should be created");
+
+    let mut config = komga_rust::config::RuntimeConfig::for_runtime_profile(
+        komga_rust::config::RuntimeProfile::SnapshotAligned,
+    );
+    config.lucene_data_directory = lucene_dir.clone();
+
+    let startup_task = komga_server::app::prepare_startup_search_task_for_contract(&config)
+        .expect("missing index startup preparation should succeed");
+
+    assert_eq!(startup_task, Some("REBUILD_INDEX"));
+    assert!(
+        !lucene_dir.join("meta.json").exists(),
+        "startup lifecycle decision must not create an index before the rebuild task runs",
+    );
+}
+
+#[test]
+fn startup_search_lifecycle_existing_runtime_index_skips_startup_task_contract() {
+    let lucene_dir = unique_temp_dir("komga-runtime-startup-search-existing-index");
+    fs::create_dir_all(&lucene_dir).expect("lucene directory should be created");
+    komga_rust::SearchIndexLifecycle::bootstrap(lucene_dir.as_path())
+        .expect("runtime index bootstrap should create an existing index");
+
+    let mut config = komga_rust::config::RuntimeConfig::for_runtime_profile(
+        komga_rust::config::RuntimeProfile::SnapshotAligned,
+    );
+    config.lucene_data_directory = lucene_dir.clone();
+
+    let startup_task = komga_server::app::prepare_startup_search_task_for_contract(&config)
+        .expect("existing runtime index startup preparation should succeed");
+
+    assert_eq!(startup_task, None);
+}
+
+#[test]
+fn startup_search_lifecycle_stale_schema_forces_rebuild_contract() {
+    let lucene_dir = unique_temp_dir("komga-runtime-startup-search-stale-schema");
+    create_stale_schema_search_index(lucene_dir.as_path());
+    let stale_meta_before = fs::read_to_string(lucene_dir.join("meta.json"))
+        .expect("stale schema index should expose meta.json");
+
+    let mut config = komga_rust::config::RuntimeConfig::for_runtime_profile(
+        komga_rust::config::RuntimeProfile::SnapshotAligned,
+    );
+    config.lucene_data_directory = lucene_dir.clone();
+
+    let startup_task = komga_server::app::prepare_startup_search_task_for_contract(&config)
+        .expect("stale schema startup preparation should recover through explicit rebuild");
+
+    assert_eq!(startup_task, Some("REBUILD_INDEX"));
+    assert_eq!(
+        fs::read_to_string(lucene_dir.join("meta.json")).ok(),
+        None,
+        "startup lifecycle must clear stale schema state without recreating the index before rebuild",
+    );
+    assert!(
+        !stale_meta_before.is_empty(),
+        "fixture sanity: stale schema test should start from a real legacy meta.json",
+    );
+}
+
+#[test]
+fn startup_search_lifecycle_corrupt_index_forces_rebuild_contract() {
+    let lucene_dir = unique_temp_dir("komga-runtime-startup-search-corrupt-index");
+    fs::create_dir_all(&lucene_dir).expect("lucene directory should be created");
+    fs::write(lucene_dir.join("meta.json"), b"not-valid-json")
+        .expect("corrupted meta marker should be written");
+
+    let mut config = komga_rust::config::RuntimeConfig::for_runtime_profile(
+        komga_rust::config::RuntimeProfile::SnapshotAligned,
+    );
+    config.lucene_data_directory = lucene_dir.clone();
+
+    let startup_task = komga_server::app::prepare_startup_search_task_for_contract(&config)
+        .expect("corrupt index startup preparation should recover through explicit rebuild");
+
+    assert_eq!(startup_task, Some("REBUILD_INDEX"));
+    assert_eq!(
+        fs::read_to_string(lucene_dir.join("meta.json")).ok(),
+        None,
+        "startup lifecycle must clear corrupt index state without recreating the index before rebuild",
+    );
+}
+
+#[test]
+fn startup_search_lifecycle_external_owned_index_skips_recovery_contract() {
+    let config_root = unique_temp_dir("komga-runtime-startup-search-external-owned");
+    let lucene_dir = config_root.join("lucene");
+    fs::create_dir_all(&lucene_dir).expect("lucene directory should be created");
+    fs::write(lucene_dir.join("meta.json"), b"not-valid-json")
+        .expect("corrupted meta marker should be written");
+
+    let mut config = komga_rust::config::RuntimeConfig::for_runtime_profile(
+        komga_rust::config::RuntimeProfile::SnapshotAligned,
+    );
+    config.mode = komga_rust::config::RuntimeMode::Isolated;
+    config.writer_ownership_policy = komga_rust::config::WriterOwnershipPolicy {
+        isolation_root: Some(config_root.clone()),
+        allow_isolated_writes: true,
+    };
+    config.lucene_data_directory = lucene_dir.clone();
+
+    let startup_task = komga_server::app::prepare_startup_search_task_for_contract(&config)
+        .expect("external-owned search index startup should skip recovery");
+
+    assert_eq!(startup_task, None);
+    assert_eq!(
+        fs::read_to_string(lucene_dir.join("meta.json"))
+            .expect("external-owned meta should remain readable"),
+        "not-valid-json",
+        "startup must not rewrite external-owned search index",
     );
 }

@@ -3,10 +3,8 @@ use super::*;
 type BoxFutureResult<T> = Pin<Box<dyn Future<Output = Result<T, String>> + Send>>;
 
 #[derive(Clone)]
+#[allow(clippy::type_complexity)]
 pub struct PersistedDiscoveryAccessBackend {
-    pub load_persisted_authors: Arc<
-        dyn Fn(PathBuf, Option<String>) -> BoxFutureResult<Vec<PersistedAuthorEntry>> + Send + Sync,
-    >,
     pub load_persisted_author_names:
         Arc<dyn Fn(PathBuf, String) -> BoxFutureResult<Vec<String>> + Send + Sync>,
     pub load_persisted_author_roles:
@@ -24,23 +22,50 @@ pub struct PersistedDiscoveryAccessBackend {
     pub load_persisted_book_summaries: Arc<
         dyn Fn(PathBuf, Option<String>) -> BoxFutureResult<Vec<PersistedBookSummary>> + Send + Sync,
     >,
+    pub load_persisted_book_summaries_by_ids: Arc<
+        dyn Fn(PathBuf, Option<String>, Vec<String>) -> BoxFutureResult<Vec<PersistedBookSummary>>
+            + Send
+            + Sync,
+    >,
+    pub load_persisted_book_count: Arc<dyn Fn(PathBuf) -> BoxFutureResult<usize> + Send + Sync>,
     pub persisted_books_exist: Arc<dyn Fn(PathBuf) -> BoxFutureResult<bool> + Send + Sync>,
-    pub load_persisted_genres:
-        Arc<dyn Fn(PathBuf, Option<String>) -> BoxFutureResult<Vec<String>> + Send + Sync>,
-    pub load_persisted_tags:
-        Arc<dyn Fn(PathBuf, Option<String>) -> BoxFutureResult<Vec<String>> + Send + Sync>,
-    pub load_persisted_languages:
-        Arc<dyn Fn(PathBuf, Option<String>) -> BoxFutureResult<Vec<String>> + Send + Sync>,
-    pub load_persisted_publishers:
-        Arc<dyn Fn(PathBuf, Option<String>) -> BoxFutureResult<Vec<String>> + Send + Sync>,
-    pub load_persisted_age_ratings:
-        Arc<dyn Fn(PathBuf, Option<String>) -> BoxFutureResult<Vec<u16>> + Send + Sync>,
-    pub load_persisted_sharing_labels:
-        Arc<dyn Fn(PathBuf, Option<String>) -> BoxFutureResult<Vec<String>> + Send + Sync>,
-    pub load_persisted_series_release_dates:
-        Arc<dyn Fn(PathBuf, Option<String>) -> BoxFutureResult<Vec<String>> + Send + Sync>,
+    pub load_persisted_genres: Arc<
+        dyn Fn(PathBuf, Option<Vec<String>>, Option<String>) -> BoxFutureResult<Vec<String>>
+            + Send
+            + Sync,
+    >,
+    pub load_persisted_tags: Arc<
+        dyn Fn(PathBuf, Option<Vec<String>>, Option<String>) -> BoxFutureResult<Vec<String>>
+            + Send
+            + Sync,
+    >,
+    pub load_persisted_languages: Arc<
+        dyn Fn(PathBuf, Option<Vec<String>>, Option<String>) -> BoxFutureResult<Vec<String>>
+            + Send
+            + Sync,
+    >,
+    pub load_persisted_publishers: Arc<
+        dyn Fn(PathBuf, Option<Vec<String>>, Option<String>) -> BoxFutureResult<Vec<String>>
+            + Send
+            + Sync,
+    >,
+    pub load_persisted_age_ratings: Arc<
+        dyn Fn(PathBuf, Option<Vec<String>>, Option<String>) -> BoxFutureResult<Vec<u16>>
+            + Send
+            + Sync,
+    >,
+    pub load_persisted_sharing_labels: Arc<
+        dyn Fn(PathBuf, Option<Vec<String>>, Option<String>) -> BoxFutureResult<Vec<String>>
+            + Send
+            + Sync,
+    >,
+    pub load_persisted_series_release_dates: Arc<
+        dyn Fn(PathBuf, Option<Vec<String>>, Option<String>) -> BoxFutureResult<Vec<String>>
+            + Send
+            + Sync,
+    >,
     pub load_persisted_series_tags: Arc<
-        dyn Fn(PathBuf, Option<String>, Option<String>) -> BoxFutureResult<Vec<String>>
+        dyn Fn(PathBuf, Option<Vec<String>>, Option<String>) -> BoxFutureResult<Vec<String>>
             + Send
             + Sync,
     >,
@@ -68,7 +93,15 @@ pub struct PersistedDiscoveryAccessBackend {
         Arc<dyn Fn(PathBuf) -> BoxFutureResult<HashMap<String, i64>> + Send + Sync>,
     pub load_persisted_series_summaries:
         Arc<dyn Fn(PathBuf) -> BoxFutureResult<Vec<PersistedSeriesSummary>> + Send + Sync>,
+    pub load_persisted_series_summaries_by_ids: Arc<
+        dyn Fn(PathBuf, Vec<String>) -> BoxFutureResult<Vec<PersistedSeriesSummary>> + Send + Sync,
+    >,
+    pub load_persisted_series_count: Arc<dyn Fn(PathBuf) -> BoxFutureResult<usize> + Send + Sync>,
     pub persisted_series_exist: Arc<dyn Fn(PathBuf) -> BoxFutureResult<bool> + Send + Sync>,
+    pub search_book_ids:
+        Arc<dyn Fn(PathBuf, String, usize) -> BoxFutureResult<Vec<String>> + Send + Sync>,
+    pub search_series_ids:
+        Arc<dyn Fn(PathBuf, String, usize) -> BoxFutureResult<Vec<String>> + Send + Sync>,
 }
 
 static PERSISTED_DISCOVERY_ACCESS_BACKEND: OnceLock<PersistedDiscoveryAccessBackend> =
@@ -82,15 +115,6 @@ fn persisted_discovery_backend() -> Result<&'static PersistedDiscoveryAccessBack
     PERSISTED_DISCOVERY_ACCESS_BACKEND
         .get()
         .ok_or_else(|| "persisted discovery backend is not installed".to_string())
-}
-
-pub(super) async fn persisted_backend_load_persisted_authors(
-    database_file: &FsPath,
-    library_id: Option<&str>,
-) -> Result<Vec<PersistedAuthorEntry>, String> {
-    let backend = persisted_discovery_backend()?;
-    (backend.load_persisted_authors)(database_file.to_path_buf(), library_id.map(str::to_string))
-        .await
 }
 
 pub(super) async fn persisted_backend_load_persisted_author_names(
@@ -135,6 +159,27 @@ pub(super) async fn persisted_backend_load_persisted_book_summaries(
     .await
 }
 
+pub(super) async fn persisted_backend_load_persisted_book_summaries_by_ids(
+    database_file: &FsPath,
+    user_id: Option<&str>,
+    ids: &[String],
+) -> Result<Vec<PersistedBookSummary>, String> {
+    let backend = persisted_discovery_backend()?;
+    (backend.load_persisted_book_summaries_by_ids)(
+        database_file.to_path_buf(),
+        user_id.map(str::to_string),
+        ids.to_vec(),
+    )
+    .await
+}
+
+pub(super) async fn persisted_backend_load_persisted_book_count(
+    database_file: &FsPath,
+) -> Result<usize, String> {
+    let backend = persisted_discovery_backend()?;
+    (backend.load_persisted_book_count)(database_file.to_path_buf()).await
+}
+
 pub(super) async fn persisted_backend_persisted_books_exist(
     database_file: &FsPath,
 ) -> Result<bool, String> {
@@ -144,84 +189,111 @@ pub(super) async fn persisted_backend_persisted_books_exist(
 
 pub(super) async fn persisted_backend_load_persisted_genres(
     database_file: &FsPath,
-    library_id: Option<&str>,
+    library_ids: Option<&[String]>,
+    collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
     let backend = persisted_discovery_backend()?;
-    (backend.load_persisted_genres)(database_file.to_path_buf(), library_id.map(str::to_string))
-        .await
+    (backend.load_persisted_genres)(
+        database_file.to_path_buf(),
+        library_ids.map(|ids| ids.to_vec()),
+        collection_id.map(str::to_string),
+    )
+    .await
 }
 
 pub(super) async fn persisted_backend_load_persisted_tags(
     database_file: &FsPath,
-    library_id: Option<&str>,
+    library_ids: Option<&[String]>,
+    collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
     let backend = persisted_discovery_backend()?;
-    (backend.load_persisted_tags)(database_file.to_path_buf(), library_id.map(str::to_string)).await
+    (backend.load_persisted_tags)(
+        database_file.to_path_buf(),
+        library_ids.map(|ids| ids.to_vec()),
+        collection_id.map(str::to_string),
+    )
+    .await
 }
 
 pub(super) async fn persisted_backend_load_persisted_languages(
     database_file: &FsPath,
-    library_id: Option<&str>,
+    library_ids: Option<&[String]>,
+    collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
     let backend = persisted_discovery_backend()?;
-    (backend.load_persisted_languages)(database_file.to_path_buf(), library_id.map(str::to_string))
-        .await
+    (backend.load_persisted_languages)(
+        database_file.to_path_buf(),
+        library_ids.map(|ids| ids.to_vec()),
+        collection_id.map(str::to_string),
+    )
+    .await
 }
 
 pub(super) async fn persisted_backend_load_persisted_publishers(
     database_file: &FsPath,
-    library_id: Option<&str>,
+    library_ids: Option<&[String]>,
+    collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
     let backend = persisted_discovery_backend()?;
-    (backend.load_persisted_publishers)(database_file.to_path_buf(), library_id.map(str::to_string))
-        .await
+    (backend.load_persisted_publishers)(
+        database_file.to_path_buf(),
+        library_ids.map(|ids| ids.to_vec()),
+        collection_id.map(str::to_string),
+    )
+    .await
 }
 
 pub(super) async fn persisted_backend_load_persisted_age_ratings(
     database_file: &FsPath,
-    library_id: Option<&str>,
+    library_ids: Option<&[String]>,
+    collection_id: Option<&str>,
 ) -> Result<Vec<u16>, String> {
     let backend = persisted_discovery_backend()?;
     (backend.load_persisted_age_ratings)(
         database_file.to_path_buf(),
-        library_id.map(str::to_string),
+        library_ids.map(|ids| ids.to_vec()),
+        collection_id.map(str::to_string),
     )
     .await
 }
 
 pub(super) async fn persisted_backend_load_persisted_sharing_labels(
     database_file: &FsPath,
-    library_id: Option<&str>,
+    library_ids: Option<&[String]>,
+    collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
     let backend = persisted_discovery_backend()?;
     (backend.load_persisted_sharing_labels)(
         database_file.to_path_buf(),
-        library_id.map(str::to_string),
+        library_ids.map(|ids| ids.to_vec()),
+        collection_id.map(str::to_string),
     )
     .await
 }
 
 pub(super) async fn persisted_backend_load_persisted_series_release_dates(
     database_file: &FsPath,
-    library_id: Option<&str>,
+    library_ids: Option<&[String]>,
+    collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
     let backend = persisted_discovery_backend()?;
     (backend.load_persisted_series_release_dates)(
         database_file.to_path_buf(),
-        library_id.map(str::to_string),
+        library_ids.map(|ids| ids.to_vec()),
+        collection_id.map(str::to_string),
     )
     .await
 }
 
 pub(super) async fn persisted_backend_load_persisted_series_tags(
     database_file: &FsPath,
-    library_id: Option<&str>,
+    library_ids: Option<&[String]>,
     collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
     let backend = persisted_discovery_backend()?;
     (backend.load_persisted_series_tags)(
         database_file.to_path_buf(),
-        library_id.map(str::to_string),
+        library_ids.map(|ids| ids.to_vec()),
         collection_id.map(str::to_string),
     )
     .await
@@ -302,9 +374,43 @@ pub(super) async fn persisted_backend_load_persisted_series_summaries(
     (backend.load_persisted_series_summaries)(database_file.to_path_buf()).await
 }
 
+pub(super) async fn persisted_backend_load_persisted_series_summaries_by_ids(
+    database_file: &FsPath,
+    ids: &[String],
+) -> Result<Vec<PersistedSeriesSummary>, String> {
+    let backend = persisted_discovery_backend()?;
+    (backend.load_persisted_series_summaries_by_ids)(database_file.to_path_buf(), ids.to_vec())
+        .await
+}
+
+pub(super) async fn persisted_backend_load_persisted_series_count(
+    database_file: &FsPath,
+) -> Result<usize, String> {
+    let backend = persisted_discovery_backend()?;
+    (backend.load_persisted_series_count)(database_file.to_path_buf()).await
+}
+
 pub(super) async fn persisted_backend_persisted_series_exist(
     database_file: &FsPath,
 ) -> Result<bool, String> {
     let backend = persisted_discovery_backend()?;
     (backend.persisted_series_exist)(database_file.to_path_buf()).await
+}
+
+pub(super) async fn persisted_backend_search_book_ids(
+    database_file: &FsPath,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<String>, String> {
+    let backend = persisted_discovery_backend()?;
+    (backend.search_book_ids)(database_file.to_path_buf(), query.to_string(), limit).await
+}
+
+pub(super) async fn persisted_backend_search_series_ids(
+    database_file: &FsPath,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<String>, String> {
+    let backend = persisted_discovery_backend()?;
+    (backend.search_series_ids)(database_file.to_path_buf(), query.to_string(), limit).await
 }

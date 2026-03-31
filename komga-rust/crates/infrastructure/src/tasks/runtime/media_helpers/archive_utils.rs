@@ -1,8 +1,10 @@
 use super::*;
+use crate::rar_support::{list_rar_entries, read_rar_entry_bytes};
+use std::path::Path;
 
 pub(in crate::task_queue) fn normalize_library_relative_url(
     library_root: &PathBuf,
-    absolute_path: &PathBuf,
+    absolute_path: &Path,
 ) -> Result<String, TaskExecutionError> {
     let relative = absolute_path.strip_prefix(library_root).map_err(|error| {
         TaskExecutionError::runtime(format!(
@@ -15,54 +17,20 @@ pub(in crate::task_queue) fn normalize_library_relative_url(
 }
 
 pub(in crate::task_queue) fn load_rar_entries_for_conversion(
-    source_path: &PathBuf,
+    source_path: &Path,
 ) -> Result<Vec<(String, Vec<u8>)>, TaskExecutionError> {
-    let output = Command::new("unrar")
-        .arg("lb")
-        .arg(source_path)
-        .output()
-        .map_err(|error| {
-            TaskExecutionError::runtime(format!(
-                "failed to run 'unrar lb' for '{}': {error}",
-                source_path.display(),
-            ))
-        })?;
-    if !output.status.success() {
-        return Err(TaskExecutionError::runtime(format!(
-            "'unrar lb' failed for '{}': status {}",
-            source_path.display(),
-            output.status,
-        )));
-    }
-
     let mut entries = Vec::new();
-    for entry_name in String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.ends_with('/'))
-    {
-        let entry_output = Command::new("unrar")
-            .arg("p")
-            .arg("-inul")
-            .arg(source_path)
-            .arg(entry_name)
-            .output()
-            .map_err(|error| {
+    for entry in list_rar_entries(source_path).map_err(TaskExecutionError::runtime)? {
+        let bytes = read_rar_entry_bytes(source_path, &entry.file_name)
+            .map_err(TaskExecutionError::runtime)?
+            .ok_or_else(|| {
                 TaskExecutionError::runtime(format!(
-                    "failed to run 'unrar p' for '{}' entry '{}': {error}",
-                    source_path.display(),
-                    entry_name,
+                    "rar entry '{}' was not found in '{}'",
+                    entry.file_name,
+                    source_path.display()
                 ))
             })?;
-        if !entry_output.status.success() {
-            return Err(TaskExecutionError::runtime(format!(
-                "'unrar p' failed for '{}' entry '{}': status {}",
-                source_path.display(),
-                entry_name,
-                entry_output.status,
-            )));
-        }
-        entries.push((entry_name.to_string(), entry_output.stdout));
+        entries.push((entry.file_name, bytes));
     }
 
     Ok(entries)

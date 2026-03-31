@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,6 +13,28 @@ use tantivy::schema::{
 use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, Term};
 
 const LUCENE_ARTIFACT_PREFIXES: &[&str] = &["segments_", "write.lock", "segments.gen"];
+const SUPPORTED_QUERY_FIELDS: &[&str] = &[
+    "title",
+    "isbn",
+    "name",
+    "publisher",
+    "status",
+    "reading_direction",
+    "age_rating",
+    "language",
+    "genre",
+    "sharing_label",
+    "tag",
+    "series_tag",
+    "book_tag",
+    "author",
+    "release_date",
+    "deleted",
+    "oneshot",
+    "complete",
+    "total_book_count",
+    "book_count",
+];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SearchEntityType {
@@ -30,6 +53,15 @@ impl SearchEntityType {
             SearchEntityType::ReadList => "readlist",
         }
     }
+
+    fn default_fields(&self) -> &'static [&'static str] {
+        match self {
+            SearchEntityType::Book => &["title", "isbn"],
+            SearchEntityType::Series => &["title"],
+            SearchEntityType::Collection => &["name"],
+            SearchEntityType::ReadList => &["name"],
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -37,6 +69,13 @@ pub struct SearchDocument {
     pub entity_type: SearchEntityType,
     pub id: String,
     pub title: String,
+    pub fields: Vec<SearchFieldEntry>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SearchFieldEntry {
+    pub field: String,
+    pub value: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -57,6 +96,12 @@ pub enum SearchError {
     WriterPoisoned,
     UnsafeLuceneIndexOwnership(PathBuf),
     CorruptedIndexRequiresExplicitRebuild(PathBuf, String),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SearchStartupLifecycle {
+    Ready,
+    RebuildRequired,
 }
 
 impl Display for SearchError {
@@ -104,16 +149,25 @@ pub struct SearchIndexLifecycle {
     fields: SearchFields,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct SearchFields {
     doc_key: Field,
     entity_type: Field,
     entity_id: Field,
     title: Field,
+    query_fields: BTreeMap<String, Field>,
 }
 
 impl SearchFields {
     fn from_schema(schema: &Schema) -> Result<Self, SearchError> {
+        let mut query_fields = BTreeMap::new();
+        for field_name in SUPPORTED_QUERY_FIELDS {
+            let field = schema
+                .get_field(field_name)
+                .map_err(|_| SearchError::MissingStoredField(field_name))?;
+            query_fields.insert((*field_name).to_string(), field);
+        }
+
         Ok(Self {
             doc_key: schema
                 .get_field("doc_key")
@@ -127,22 +181,36 @@ impl SearchFields {
             title: schema
                 .get_field("title")
                 .map_err(|_| SearchError::MissingStoredField("title"))?,
+            query_fields,
         })
     }
 }
 
-pub fn startup_recover(index_dir: &Path) -> Result<(), SearchError> {
+pub fn decide_startup_lifecycle(index_dir: &Path) -> Result<SearchStartupLifecycle, SearchError> {
     prepare_index_directory(index_dir)?;
-    let _ = open_or_rebuild_index(index_dir, build_schema())?;
-    Ok(())
+
+    if !index_dir.join("meta.json").exists() {
+        return Ok(SearchStartupLifecycle::RebuildRequired);
+    }
+
+    match open_existing_index(index_dir) {
+        Ok(index) => match SearchFields::from_schema(&index.schema()) {
+            Ok(_) => Ok(SearchStartupLifecycle::Ready),
+            Err(SearchError::MissingStoredField(_)) => Ok(SearchStartupLifecycle::RebuildRequired),
+            Err(error) => Err(error),
+        },
+        Err(SearchError::CorruptedIndexRequiresExplicitRebuild(_, _)) => {
+            Ok(SearchStartupLifecycle::RebuildRequired)
+        }
+        Err(error) => Err(error),
+    }
 }
 
-pub fn reset_for_rebuild(index_dir: &Path) -> Result<(), SearchError> {
+pub fn prepare_for_rebuild(index_dir: &Path) -> Result<(), SearchError> {
     if index_dir.exists() {
         fs::remove_dir_all(index_dir)?;
     }
     fs::create_dir_all(index_dir)?;
-    let _ = open_or_rebuild_index(index_dir, build_schema())?;
     Ok(())
 }
 
@@ -151,7 +219,7 @@ impl SearchIndexLifecycle {
         prepare_index_directory(index_dir)?;
 
         let schema = build_schema();
-        let index = open_or_rebuild_index(index_dir, schema.clone())?;
+        let index = open_or_create_index(index_dir, schema.clone())?;
         let fields = SearchFields::from_schema(&schema)?;
 
         let reader = index
@@ -175,7 +243,7 @@ impl SearchIndexLifecycle {
             .map_err(|_| SearchError::WriterPoisoned)?;
         writer.delete_all_documents()?;
         for document in docs {
-            add_doc(&mut writer, self.fields, document)?;
+            add_doc(&mut writer, &self.fields, document)?;
         }
         writer.commit()?;
         self.reader.reload()?;
@@ -192,7 +260,7 @@ impl SearchIndexLifecycle {
             SearchEvent::Upsert(document) => {
                 let key = document_key(document.entity_type, &document.id);
                 writer.delete_term(Term::from_field_text(self.fields.doc_key, &key));
-                add_doc(&mut writer, self.fields, &document)?;
+                add_doc(&mut writer, &self.fields, &document)?;
             }
             SearchEvent::Delete { entity_type, id } => {
                 let key = document_key(entity_type, &id);
@@ -212,10 +280,23 @@ impl SearchIndexLifecycle {
         limit: usize,
     ) -> Result<Vec<String>, SearchError> {
         let searcher = self.reader.searcher();
-        let parser = QueryParser::for_index(&self.index, vec![self.fields.title]);
-        let parsed = parser
-            .parse_query(query)
-            .map_err(|error| SearchError::Query(error.to_string()))?;
+        let default_fields = entity_type
+            .default_fields()
+            .iter()
+            .filter_map(|field_name| {
+                self.fields
+                    .query_fields
+                    .get(translate_public_field_name(field_name))
+                    .copied()
+            })
+            .collect::<Vec<_>>();
+        let mut parser = QueryParser::for_index(&self.index, default_fields);
+        parser.set_conjunction_by_default();
+
+        let parsed = match parser.parse_query(query) {
+            Ok(parsed) => parsed,
+            Err(_) => return Ok(Vec::new()),
+        };
         let type_query = TermQuery::new(
             Term::from_field_text(self.fields.entity_type, entity_type.as_str()),
             IndexRecordOption::Basic,
@@ -225,18 +306,23 @@ impl SearchIndexLifecycle {
             (Occur::Must, Box::new(type_query)),
         ]);
 
-        let top_docs = searcher.search(&query, &TopDocs::with_limit(limit))?;
-        let mut ids = Vec::with_capacity(top_docs.len());
-        for (_score, address) in top_docs {
+        let mut ranked_ids = Vec::new();
+        let top_docs = searcher.search(&query, &TopDocs::with_limit(limit).order_by_score())?;
+        for (score, address) in top_docs {
             let document: TantivyDocument = searcher.doc(address)?;
             let id: &str = document
                 .get_first(self.fields.entity_id)
                 .and_then(|value| value.as_str())
                 .ok_or(SearchError::MissingStoredField("entity_id"))?;
-            ids.push(id.to_string());
+            ranked_ids.push((score, id.to_string()));
         }
 
-        Ok(ids)
+        ranked_ids.sort_by(|left, right| match right.0.total_cmp(&left.0) {
+            std::cmp::Ordering::Equal => left.1.cmp(&right.1),
+            ordering => ordering,
+        });
+
+        Ok(ranked_ids.into_iter().map(|(_, id)| id).collect())
     }
 }
 
@@ -245,41 +331,68 @@ fn build_schema() -> Schema {
     schema.add_text_field("doc_key", STRING | STORED);
     schema.add_text_field("entity_type", STRING | STORED);
     schema.add_text_field("entity_id", STRING | STORED);
-    schema.add_text_field("title", TEXT | STORED);
+    for field in SUPPORTED_QUERY_FIELDS {
+        schema.add_text_field(field, TEXT | STORED);
+    }
     schema.build()
 }
 
 fn add_doc(
     writer: &mut IndexWriter,
-    fields: SearchFields,
+    fields: &SearchFields,
     document: &SearchDocument,
 ) -> Result<(), SearchError> {
     let doc_key = document_key(document.entity_type, &document.id);
-    writer.add_document(doc!(
+    let mut tantivy_document = doc!(
         fields.doc_key => doc_key,
         fields.entity_type => document.entity_type.as_str(),
         fields.entity_id => document.id.clone(),
         fields.title => document.title.clone(),
-    ))?;
+    );
+
+    for extra in &document.fields {
+        let field_name = translate_public_field_name(&extra.field);
+        if let Some(field) = fields.query_fields.get(field_name) {
+            tantivy_document.add_text(*field, extra.value.clone());
+        }
+    }
+
+    writer.add_document(tantivy_document)?;
     Ok(())
+}
+
+fn translate_public_field_name(field_name: &str) -> &str {
+    field_name
 }
 
 fn document_key(entity_type: SearchEntityType, id: &str) -> String {
     format!("{}:{id}", entity_type.as_str())
 }
 
-fn open_or_rebuild_index(index_dir: &Path, schema: Schema) -> Result<Index, SearchError> {
-    let has_meta = index_dir.join("meta.json").exists();
-    if has_meta {
-        return Index::open_in_dir(index_dir).map_err(|error| {
+fn open_or_create_index(index_dir: &Path, schema: Schema) -> Result<Index, SearchError> {
+    if index_dir.join("meta.json").exists() {
+        let index = open_existing_index(index_dir)?;
+
+        SearchFields::from_schema(&index.schema()).map_err(|error| {
             SearchError::CorruptedIndexRequiresExplicitRebuild(
                 index_dir.to_path_buf(),
-                error.to_string(),
+                format!("stale search schema/version detected: {error}"),
             )
-        });
+        })?;
+
+        return Ok(index);
     }
 
     Ok(Index::create_in_dir(index_dir, schema)?)
+}
+
+fn open_existing_index(index_dir: &Path) -> Result<Index, SearchError> {
+    Index::open_in_dir(index_dir).map_err(|error| {
+        SearchError::CorruptedIndexRequiresExplicitRebuild(
+            index_dir.to_path_buf(),
+            error.to_string(),
+        )
+    })
 }
 
 fn prepare_index_directory(index_dir: &Path) -> Result<(), SearchError> {
@@ -313,7 +426,10 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{SearchError, SearchIndexLifecycle, startup_recover};
+    use super::{
+        SearchDocument, SearchEntityType, SearchError, SearchFieldEntry, SearchIndexLifecycle,
+        SearchStartupLifecycle, decide_startup_lifecycle,
+    };
 
     #[test]
     fn bootstrap_rejects_lucene_artifacts() {
@@ -334,18 +450,18 @@ mod tests {
     }
 
     #[test]
-    fn startup_recover_rejects_lucene_artifacts() {
-        let index_dir = temp_index_dir("startup-recover-rejects-lucene");
+    fn startup_lifecycle_rejects_lucene_artifacts() {
+        let index_dir = temp_index_dir("startup-lifecycle-rejects-lucene");
         std::fs::write(index_dir.join("segments.gen"), b"owned").expect("write ownership marker");
 
-        let result = startup_recover(index_dir.as_path());
+        let result = decide_startup_lifecycle(index_dir.as_path());
 
         assert!(
             matches!(
                 result,
                 Err(SearchError::UnsafeLuceneIndexOwnership(path)) if path == index_dir
             ),
-            "startup recovery must fail-closed when Lucene ownership artifacts are present",
+            "startup lifecycle must fail-closed when Lucene ownership artifacts are present",
         );
 
         let _ = std::fs::remove_dir_all(index_dir);
@@ -371,6 +487,21 @@ mod tests {
     }
 
     #[test]
+    fn startup_lifecycle_marks_existing_runtime_index_ready() {
+        let index_dir = temp_index_dir("startup-lifecycle-existing-runtime-index");
+
+        SearchIndexLifecycle::bootstrap(index_dir.as_path())
+            .expect("bootstrap should create the runtime index fixture");
+
+        let state = decide_startup_lifecycle(index_dir.as_path())
+            .expect("startup lifecycle decision should inspect existing runtime index");
+
+        assert_eq!(state, SearchStartupLifecycle::Ready);
+
+        let _ = std::fs::remove_dir_all(index_dir);
+    }
+
+    #[test]
     fn bootstrap_opens_existing_runtime_index_without_rebuild() {
         let index_dir = temp_index_dir("bootstrap-opens-existing-runtime-index");
 
@@ -382,6 +513,157 @@ mod tests {
         assert!(
             second.is_ok(),
             "second bootstrap should open existing runtime index without rebuild",
+        );
+
+        let _ = std::fs::remove_dir_all(index_dir);
+    }
+
+    #[test]
+    fn search_preserves_fielded_kotlin_visible_queries() {
+        let index_dir = temp_index_dir("search-preserves-fielded-kotlin-queries");
+        let index = SearchIndexLifecycle::bootstrap(index_dir.as_path())
+            .expect("index bootstrap should work");
+
+        index
+            .rebuild(&[
+                SearchDocument {
+                    entity_type: SearchEntityType::Collection,
+                    id: "collection-1".to_string(),
+                    title: "Alpha Shelf".to_string(),
+                    fields: vec![SearchFieldEntry {
+                        field: "name".to_string(),
+                        value: "Alpha Shelf".to_string(),
+                    }],
+                },
+                SearchDocument {
+                    entity_type: SearchEntityType::Collection,
+                    id: "collection-2".to_string(),
+                    title: "Beta Rack".to_string(),
+                    fields: vec![SearchFieldEntry {
+                        field: "name".to_string(),
+                        value: "Beta Rack".to_string(),
+                    }],
+                },
+            ])
+            .expect("index rebuild should insert fixtures");
+
+        let ids = index
+            .search_ids("name:alpha", SearchEntityType::Collection, 10)
+            .expect("fielded query should parse and execute");
+
+        assert_eq!(
+            ids,
+            vec!["collection-1".to_string()],
+            "kotlin-visible field names should remain usable in retained fielded queries",
+        );
+
+        let _ = std::fs::remove_dir_all(index_dir);
+    }
+
+    #[test]
+    fn search_uses_default_and_semantics() {
+        let index_dir = temp_index_dir("search-default-and-semantics");
+        let index = SearchIndexLifecycle::bootstrap(index_dir.as_path())
+            .expect("index bootstrap should work");
+
+        index
+            .rebuild(&[
+                SearchDocument {
+                    entity_type: SearchEntityType::Book,
+                    id: "book-1".to_string(),
+                    title: "alpha beta".to_string(),
+                    fields: vec![],
+                },
+                SearchDocument {
+                    entity_type: SearchEntityType::Book,
+                    id: "book-2".to_string(),
+                    title: "alpha only".to_string(),
+                    fields: vec![],
+                },
+            ])
+            .expect("index rebuild should insert fixtures");
+
+        let ids = index
+            .search_ids("alpha beta", SearchEntityType::Book, 10)
+            .expect("default query should parse and execute");
+
+        assert_eq!(
+            ids,
+            vec!["book-1".to_string()],
+            "default query terms must use AND semantics to match Kotlin behavior",
+        );
+
+        let _ = std::fs::remove_dir_all(index_dir);
+    }
+
+    #[test]
+    fn search_maps_parse_failure_to_empty_result_set() {
+        let index_dir = temp_index_dir("search-parse-failure-empty-results");
+        let index = SearchIndexLifecycle::bootstrap(index_dir.as_path())
+            .expect("index bootstrap should work");
+
+        index
+            .rebuild(&[SearchDocument {
+                entity_type: SearchEntityType::Book,
+                id: "book-1".to_string(),
+                title: "alpha".to_string(),
+                fields: vec![],
+            }])
+            .expect("index rebuild should insert fixture");
+
+        let ids = index
+            .search_ids("title:(", SearchEntityType::Book, 10)
+            .expect("invalid retained syntax should map to empty result set");
+
+        assert!(
+            ids.is_empty(),
+            "invalid retained query syntax should return an empty candidate set",
+        );
+
+        let _ = std::fs::remove_dir_all(index_dir);
+    }
+
+    #[test]
+    fn search_orders_equal_scores_by_id_for_determinism() {
+        let index_dir = temp_index_dir("search-deterministic-id-tiebreak");
+        let index = SearchIndexLifecycle::bootstrap(index_dir.as_path())
+            .expect("index bootstrap should work");
+
+        index
+            .rebuild(&[
+                SearchDocument {
+                    entity_type: SearchEntityType::Book,
+                    id: "book-3".to_string(),
+                    title: "book".to_string(),
+                    fields: vec![],
+                },
+                SearchDocument {
+                    entity_type: SearchEntityType::Book,
+                    id: "book-1".to_string(),
+                    title: "book".to_string(),
+                    fields: vec![],
+                },
+                SearchDocument {
+                    entity_type: SearchEntityType::Book,
+                    id: "book-2".to_string(),
+                    title: "book".to_string(),
+                    fields: vec![],
+                },
+            ])
+            .expect("index rebuild should insert equal-score fixtures");
+
+        let ids = index
+            .search_ids("book", SearchEntityType::Book, 10)
+            .expect("search should return deterministic ids for equal scores");
+
+        assert_eq!(
+            ids,
+            vec![
+                "book-1".to_string(),
+                "book-2".to_string(),
+                "book-3".to_string()
+            ],
+            "equal-score retained results should use id ordering as deterministic tie-break",
         );
 
         let _ = std::fs::remove_dir_all(index_dir);

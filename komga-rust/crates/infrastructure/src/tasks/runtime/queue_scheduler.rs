@@ -14,7 +14,11 @@ impl TaskQueueScheduler {
     pub fn for_runtime(config: impl TaskRuntimeConfig, consumer_owner: impl Into<String>) -> Self {
         let runtime = config.task_runtime_context();
         let consumes_queue = runtime.consumes_queue;
-        let persisted_store = SqliteTaskQueueStore::new(runtime.tasks_db_file.clone());
+        let persisted_store = if consumes_queue {
+            SqliteTaskQueueStore::new(runtime.tasks_db_file.clone())
+        } else {
+            None
+        };
         let consumer_owner = consumer_owner.into();
         let admin = persisted_store
             .as_ref()
@@ -153,15 +157,11 @@ impl TaskQueueScheduler {
             while let Some(task) = batch_iter.next() {
                 match self.execute_claimed_task(runtime, &task) {
                     Ok(()) => {
-                        let _ = self.complete(&task.id);
+                        self.complete(&task.id);
                         processed += 1;
                     }
                     Err(error) => {
-                        if error.is_unsupported_task() {
-                            let _ = self.complete(&task.id);
-                            continue;
-                        }
-                        self.disown_task(&task.id);
+                        self.complete(&task.id);
                         for remaining in batch_iter {
                             self.disown_task(&remaining.id);
                         }

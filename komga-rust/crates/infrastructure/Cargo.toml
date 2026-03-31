@@ -12,7 +12,9 @@ komga-domain = { path = "../domain" }
 komga-application = { path = "../application" }
 komga-kepubify = { path = "../kepubify" }
 flate2.workspace = true
+image.workspace = true
 lopdf.workspace = true
+pdfium-render.workspace = true
 quick-xml.workspace = true
 reqwest.workspace = true
 serde.workspace = true
@@ -21,4 +23,12 @@ sha2.workspace = true
 sqlx.workspace = true
 tantivy.workspace = true
 tokio.workspace = true
+unrar.workspace = true
 zip.workspace = true
+
+[build-dependencies]
+flate2.workspace = true
+reqwest.workspace = true
+rusqlite = { workspace = true, features = ["bundled"] }
+serde_json.workspace = true
+tar = "0.4.44"

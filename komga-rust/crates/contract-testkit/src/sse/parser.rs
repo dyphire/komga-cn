@@ -39,10 +39,10 @@ pub fn parse_event_log_with_options(
         let line = raw_line.trim_end_matches('\r');
 
         if line.is_empty() {
-            if !frame.is_empty() {
-                if let Some(event) = frame.finish(options)? {
-                    events.push(event);
-                }
+            if !frame.is_empty()
+                && let Some(event) = frame.finish(options)?
+            {
+                events.push(event);
             }
             continue;
         }
@@ -67,10 +67,10 @@ pub fn parse_event_log_with_options(
         }
     }
 
-    if !frame.is_empty() {
-        if let Some(event) = frame.finish(options)? {
-            events.push(event);
-        }
+    if !frame.is_empty()
+        && let Some(event) = frame.finish(options)?
+    {
+        events.push(event);
     }
 
     Ok(NormalizedEventLog { events })

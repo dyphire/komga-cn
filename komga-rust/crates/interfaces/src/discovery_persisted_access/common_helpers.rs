@@ -59,6 +59,10 @@ pub fn internal_error_response(error: String) -> Response {
         .into_response()
 }
 
+pub fn filter_rows<T>(rows: Vec<T>, mut predicate: impl FnMut(&T) -> bool) -> Vec<T> {
+    rows.into_iter().filter(|row| predicate(row)).collect()
+}
+
 pub fn invalid_runtime_series_list_response(error: DiscoveryError) -> Response {
     (
         StatusCode::BAD_REQUEST,
@@ -77,17 +81,6 @@ pub fn invalid_runtime_books_list_response(error: DiscoveryError) -> Response {
         })),
     )
         .into_response()
-}
-
-pub fn should_ignore_runtime_filter_error(error: &DiscoveryError) -> bool {
-    match error {
-        DiscoveryError::InvalidSemantics(message) => {
-            message.starts_with("unsupported operator for ")
-                || message.starts_with("unsupported runtime books condition type: ")
-                || message.starts_with("unsupported runtime series condition type: ")
-        }
-        _ => false,
-    }
 }
 
 pub fn empty_books_page_response(uri: &Uri, is_admin: bool) -> Response {
@@ -111,4 +104,16 @@ pub fn empty_books_page_response(uri: &Uri, is_admin: bool) -> Response {
     .into_response();
     mark_persisted_owned(&mut response);
     response
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn filter_rows_preserves_input_order() {
+        let rows = vec!["book-2", "book-1", "book-3"];
+
+        let filtered = super::filter_rows(rows, |row| *row != "book-1");
+
+        assert_eq!(filtered, vec!["book-2", "book-3"]);
+    }
 }

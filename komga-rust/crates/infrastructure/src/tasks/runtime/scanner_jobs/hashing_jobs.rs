@@ -6,8 +6,12 @@ pub(super) fn try_execute(
     task: &TaskQueueRecord,
     task_target: Option<&str>,
 ) -> Option<Result<(), TaskExecutionError>> {
+    let owns_main_database = runtime.task_runtime_context().owns_main_database;
     let result = match task.simple_type.as_str() {
         "HASH_BOOK_PAGES" => {
+            if !owns_main_database {
+                return Some(Ok(()));
+            }
             let Some(book_id) = task_target else {
                 return Some(Err(TaskExecutionError::invalid_task(
                     "HASH_BOOK_PAGES task must include a book id",
@@ -32,6 +36,9 @@ pub(super) fn try_execute(
             super::super::hash_book(runtime, book_id, true)
         }
         "FIND_BOOKS_WITH_MISSING_PAGE_HASH" => {
+            if !owns_main_database {
+                return Some(Ok(()));
+            }
             let book_ids = match find_books_with_missing_page_hash(runtime, task_target) {
                 Ok(ids) => ids,
                 Err(error) => return Some(Err(error)),
@@ -46,6 +53,9 @@ pub(super) fn try_execute(
             Ok(())
         }
         "FIND_DUPLICATE_PAGES_TO_DELETE" => {
+            if !owns_main_database {
+                return Some(Ok(()));
+            }
             let Some(library_id) = task_target else {
                 return Some(Err(TaskExecutionError::invalid_task(
                     "FIND_DUPLICATE_PAGES_TO_DELETE task must include a library id",
@@ -78,6 +88,9 @@ pub(super) fn try_execute(
             Ok(())
         }
         "REMOVE_HASHED_PAGES" => {
+            if !owns_main_database {
+                return Some(Ok(()));
+            }
             let Some(book_id) = task_target else {
                 return Some(Err(TaskExecutionError::invalid_task(
                     "REMOVE_HASHED_PAGES task must include a book id",

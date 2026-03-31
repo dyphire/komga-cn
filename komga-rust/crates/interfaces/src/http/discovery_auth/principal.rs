@@ -63,14 +63,14 @@ impl DiscoveryPrincipal {
         }
     }
 
-    pub fn is_content_allowed(&self, age_rating: Option<u16>, sharing_labels: &[String]) -> bool {
+    pub fn is_content_allowed(&self, age_rating: Option<u32>, sharing_labels: &[String]) -> bool {
         let labels = normalized_sharing_labels(sharing_labels);
 
         let age_allowed =
             if self.restrictions.age_restriction == Some(AgeRestrictionKind::AllowOnly) {
                 self.restrictions
                     .age
-                    .map(|age_limit| age_rating.is_some_and(|age| age <= age_limit))
+                    .map(|age_limit| age_rating.is_some_and(|age| age <= u32::from(age_limit)))
             } else {
                 None
             };
@@ -100,7 +100,7 @@ impl DiscoveryPrincipal {
         let age_denied = if self.restrictions.age_restriction == Some(AgeRestrictionKind::Exclude) {
             self.restrictions
                 .age
-                .is_some_and(|age_limit| age_rating.is_some_and(|age| age >= age_limit))
+                .is_some_and(|age_limit| age_rating.is_some_and(|age| age >= u32::from(age_limit)))
         } else {
             false
         };

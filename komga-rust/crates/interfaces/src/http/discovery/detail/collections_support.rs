@@ -2,16 +2,6 @@ use super::*;
 
 use crate::discovery_detail_access::collections as collections_access;
 
-#[derive(Clone)]
-pub struct PersistedCollectionSeriesReadModel {
-    pub id: String,
-    pub library_id: String,
-    pub name: String,
-    pub title: String,
-    pub deleted: bool,
-    pub oneshot: bool,
-}
-
 pub struct PersistedCollectionWriteInput {
     pub name: String,
     pub ordered: bool,
@@ -75,33 +65,11 @@ pub async fn load_persisted_collection_detail(
     Ok(Some(collection))
 }
 
-pub async fn load_persisted_collection_series(
+pub async fn load_series_library_id(
     database_file: &FsPath,
-    collection_id: &str,
-) -> Result<Option<Vec<PersistedCollectionSeriesReadModel>>, String> {
-    let exists =
-        collections_access::persisted_collection_exists(database_file, collection_id).await?;
-
-    if !exists {
-        return Ok(None);
-    }
-
-    let rows =
-        collections_access::load_persisted_collection_series(database_file, collection_id).await?;
-
-    let series = rows
-        .into_iter()
-        .map(|row| PersistedCollectionSeriesReadModel {
-            id: row.id,
-            library_id: row.library_id,
-            name: row.name,
-            title: row.title,
-            deleted: row.deleted,
-            oneshot: row.oneshot,
-        })
-        .collect::<Vec<_>>();
-
-    Ok(Some(series))
+    series_id: &str,
+) -> Result<Option<String>, String> {
+    collections_access::load_series_library_id(database_file, series_id).await
 }
 
 pub async fn series_visible_to_context(
@@ -202,92 +170,6 @@ fn restrictions_allow_content(
     !age_denied && !label_denied
 }
 
-pub fn collection_series_page_payload(
-    mut series: Vec<PersistedCollectionSeriesReadModel>,
-    page: usize,
-    size: usize,
-    unpaged: bool,
-) -> Value {
-    let total_elements = series.len();
-    if unpaged {
-        return json!({
-            "content": collection_series_payload(&series),
-            "pageable": {
-                "pageNumber": 0,
-                "pageSize": total_elements.max(1),
-                "sort": {
-                    "empty": false,
-                    "sorted": true,
-                    "unsorted": false
-                },
-                "offset": 0,
-                "paged": false,
-                "unpaged": true
-            },
-            "last": true,
-            "totalElements": total_elements,
-            "totalPages": if total_elements == 0 { 0 } else { 1 },
-            "first": true,
-            "size": total_elements.max(1),
-            "number": 0,
-            "sort": {
-                "empty": false,
-                "sorted": true,
-                "unsorted": false
-            },
-            "numberOfElements": total_elements,
-            "empty": total_elements == 0
-        });
-    }
-
-    let page_size = size.max(1);
-    let offset = page.saturating_mul(page_size);
-    let page_content = if offset >= total_elements {
-        vec![]
-    } else {
-        series
-            .drain(offset..(offset + page_size).min(total_elements))
-            .collect()
-    };
-    let total_pages = if total_elements == 0 {
-        0
-    } else {
-        ((total_elements - 1) / page_size) + 1
-    };
-    let number_of_elements = page_content.len();
-    let first = page == 0;
-    let last = total_pages == 0 || page + 1 >= total_pages;
-
-    json!({
-        "content": collection_series_payload(&page_content),
-        "pageable": {
-            "pageNumber": page,
-            "pageSize": page_size,
-            "sort": {
-                "empty": false,
-                "sorted": true,
-                "unsorted": false
-            },
-            "offset": offset,
-            "paged": true,
-            "unpaged": false
-        },
-        "last": last,
-        "totalElements": total_elements,
-        "totalPages": total_pages,
-        "first": first,
-        "size": page_size,
-        "number": page,
-        "sort": {
-            "empty": false,
-            "sorted": true,
-            "unsorted": false
-        },
-        "numberOfElements": number_of_elements,
-        "empty": number_of_elements == 0
-    })
-}
-
 pub fn collection_write_input(payload: &Value) -> PersistedCollectionWriteInput {
     let name = payload
         .get("name")
@@ -353,6 +235,22 @@ pub async fn delete_persisted_collection(
     collections_access::delete_persisted_collection(database_file, collection_id).await
 }
 
+pub async fn upsert_collection_search_document(
+    database_file: &FsPath,
+    index_dir: &FsPath,
+    collection_id: &str,
+) -> Result<bool, String> {
+    collections_access::upsert_collection_search_document(database_file, index_dir, collection_id)
+        .await
+}
+
+pub async fn delete_collection_search_document(
+    index_dir: &FsPath,
+    collection_id: &str,
+) -> Result<(), String> {
+    collections_access::delete_collection_search_document(index_dir, collection_id).await
+}
+
 fn generated_collection_id() -> String {
     format!("collection-{}", random_hex_token(12))
 }
@@ -398,6 +296,40 @@ pub fn collections_page_payload(page: PageEnvelope<CollectionReadModel>) -> Valu
     })
 }
 
+pub fn collections_unpaged_payload(content: Vec<CollectionReadModel>) -> Value {
+    let total_elements = content.len();
+    let content = content.iter().map(collection_payload).collect::<Vec<_>>();
+
+    json!({
+        "content": content,
+        "pageable": {
+            "pageNumber": 0,
+            "pageSize": total_elements.max(1),
+            "sort": {
+                "empty": false,
+                "sorted": true,
+                "unsorted": false
+            },
+            "offset": 0,
+            "paged": false,
+            "unpaged": true
+        },
+        "last": true,
+        "totalElements": total_elements,
+        "totalPages": if total_elements == 0 { 0 } else { 1 },
+        "first": true,
+        "size": total_elements.max(1),
+        "number": 0,
+        "sort": {
+            "empty": false,
+            "sorted": true,
+            "unsorted": false
+        },
+        "numberOfElements": total_elements,
+        "empty": total_elements == 0
+    })
+}
+
 pub fn collection_payload(collection: &CollectionReadModel) -> Value {
     json!({
         "id": collection.id,
@@ -408,25 +340,4 @@ pub fn collection_payload(collection: &CollectionReadModel) -> Value {
         "lastModifiedDate": collection.last_modified_date,
         "filtered": collection.filtered,
     })
-}
-
-pub fn collection_series_payload(series: &[PersistedCollectionSeriesReadModel]) -> Value {
-    Value::Array(
-        series
-            .iter()
-            .map(|series| {
-                json!({
-                    "id": series.id,
-                    "libraryId": series.library_id,
-                    "name": series.name,
-                    "metadata": {
-                        "title": series.title,
-                        "sharingLabels": []
-                    },
-                    "deleted": series.deleted,
-                    "oneshot": series.oneshot,
-                })
-            })
-            .collect(),
-    )
 }

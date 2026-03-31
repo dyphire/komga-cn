@@ -20,9 +20,13 @@ pub struct InitialBootstrapUserWriteModel {
 
 pub async fn list_persisted_user_emails(database_file: &Path) -> Result<Vec<String>, sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
-    let rows = sqlx::query("SELECT EMAIL\n         FROM USER\n         ORDER BY EMAIL")
-        .fetch_all(&pool)
-        .await?;
+    let rows = sqlx::query(
+        "SELECT EMAIL \
+         FROM USER \
+         ORDER BY EMAIL",
+    )
+    .fetch_all(&pool)
+    .await?;
 
     Ok(rows
         .into_iter()
@@ -36,7 +40,10 @@ pub async fn load_persisted_user_by_email(
 ) -> Result<Option<PersistedBootstrapUser>, sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
     let row = sqlx::query(
-        "SELECT ID, EMAIL\n         FROM USER\n         WHERE LOWER(EMAIL) = LOWER(?)\n         LIMIT 1",
+        "SELECT ID, EMAIL \
+         FROM USER \
+         WHERE LOWER(EMAIL) = LOWER(?) \
+         LIMIT 1",
     )
     .bind(email)
     .fetch_optional(&pool)
@@ -54,13 +61,16 @@ pub async fn update_persisted_user_password(
     hashed_password: &str,
 ) -> Result<bool, sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
-    let rows_affected =
-        sqlx::query("UPDATE USER\n         SET PASSWORD = ?\n         WHERE ID = ?")
-            .bind(hashed_password)
-            .bind(user_id)
-            .execute(&pool)
-            .await?
-            .rows_affected();
+    let rows_affected = sqlx::query(
+        "UPDATE USER \
+             SET PASSWORD = ? \
+             WHERE ID = ?",
+    )
+    .bind(hashed_password)
+    .bind(user_id)
+    .execute(&pool)
+    .await?
+    .rows_affected();
 
     Ok(rows_affected > 0)
 }
@@ -74,7 +84,8 @@ pub async fn persist_initial_bootstrap_users(
 
     for user in users {
         sqlx::query(
-            "INSERT INTO USER (ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES, AGE_RESTRICTION, AGE_RESTRICTION_ALLOW_ONLY)\n             VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO USER (ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES, AGE_RESTRICTION, AGE_RESTRICTION_ALLOW_ONLY) \
+             VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(&user.id)
         .bind(&user.email)

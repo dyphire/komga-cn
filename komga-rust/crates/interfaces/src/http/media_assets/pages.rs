@@ -35,6 +35,14 @@ pub async fn book_page(
     if let Ok(Some(media)) =
         load_persisted_book_media(auth_db.database_file.as_path(), &resolved_book_id).await
     {
+        let book_display_name =
+            load_persisted_manifest_book(auth_db.database_file.as_path(), &resolved_book_id)
+                .await
+                .ok()
+                .flatten()
+                .map(|(_, title, _)| title)
+                .unwrap_or_else(|| media.file_name.clone());
+
         if !book_media_is_ready_status(auth_db.database_file.as_path(), &resolved_book_id)
             .await
             .unwrap_or(false)
@@ -80,7 +88,19 @@ pub async fn book_page(
                     return asset_not_modified_response(None, Some(last_modified));
                 }
 
-                return asset_ok_response("application/pdf", bytes, None, last_modified.as_deref());
+                let mut response =
+                    asset_ok_response("application/pdf", bytes, None, last_modified.as_deref());
+                let file_name = page_response_file_name(
+                    &book_display_name,
+                    requested_page_number,
+                    "application/pdf",
+                );
+                response.headers_mut().insert(
+                    header::CONTENT_DISPOSITION,
+                    HeaderValue::from_str(&inline_disposition(&file_name))
+                        .expect("page pdf content disposition should be valid"),
+                );
+                return response;
             }
             return StatusCode::NOT_FOUND.into_response();
         }
@@ -151,12 +171,23 @@ pub async fn book_page(
                 return asset_not_modified_response(None, Some(last_modified));
             }
 
-            return asset_ok_response(
+            let mut response = asset_ok_response(
                 effective_content_type.as_str(),
                 effective_bytes,
                 None,
                 last_modified.as_deref(),
             );
+            let file_name = page_response_file_name(
+                &book_display_name,
+                requested_page_number,
+                effective_content_type.as_str(),
+            );
+            response.headers_mut().insert(
+                header::CONTENT_DISPOSITION,
+                HeaderValue::from_str(&inline_disposition(&file_name))
+                    .expect("page content disposition should be valid"),
+            );
+            return response;
         }
     }
 
@@ -179,6 +210,14 @@ pub async fn book_page_raw(
     if let Ok(Some(media)) =
         load_persisted_book_media(auth_db.database_file.as_path(), &resolved_book_id).await
     {
+        let book_display_name =
+            load_persisted_manifest_book(auth_db.database_file.as_path(), &resolved_book_id)
+                .await
+                .ok()
+                .flatten()
+                .map(|(_, title, _)| title)
+                .unwrap_or_else(|| media.file_name.clone());
+
         if !book_media_is_ready_status(auth_db.database_file.as_path(), &resolved_book_id)
             .await
             .unwrap_or(false)
@@ -219,7 +258,16 @@ pub async fn book_page_raw(
                 return asset_not_modified_response(None, Some(last_modified));
             }
 
-            return asset_ok_response("application/pdf", bytes, None, last_modified.as_deref());
+            let mut response =
+                asset_ok_response("application/pdf", bytes, None, last_modified.as_deref());
+            let file_name =
+                page_response_file_name(&book_display_name, page_number, "application/pdf");
+            response.headers_mut().insert(
+                header::CONTENT_DISPOSITION,
+                HeaderValue::from_str(&inline_disposition(&file_name))
+                    .expect("raw page content disposition should be valid"),
+            );
+            return response;
         }
     }
 
@@ -241,6 +289,13 @@ pub struct BookPageQuery {
 
 fn book_page_content_negotiation_default() -> bool {
     true
+}
+
+fn page_response_file_name(book_display_name: &str, page_number: u32, media_type: &str) -> String {
+    let extension = mime_guess::get_mime_extensions_str(media_type)
+        .and_then(|extensions| extensions.first().copied())
+        .unwrap_or("bin");
+    format!("{book_display_name}-{page_number}.{extension}")
 }
 
 fn accept_header_prefers_pdf(headers: &HeaderMap) -> bool {

@@ -52,6 +52,20 @@ fn query_value<'a>(query: &'a str, key: &str) -> Option<&'a str> {
     })
 }
 
+fn query_values<'a>(query: &'a str, key: &str) -> Vec<&'a str> {
+    query
+        .split('&')
+        .filter_map(|pair| {
+            let mut parts = pair.splitn(2, '=');
+            let name = parts.next().unwrap_or_default();
+            if name != key {
+                return None;
+            }
+            Some(parts.next().unwrap_or_default())
+        })
+        .collect()
+}
+
 fn normalize_requested_path(requested_path: &str, runtime_config_dir: Option<&PathBuf>) -> PathBuf {
     let raw = PathBuf::from(requested_path);
     let candidate = if raw.is_absolute() {

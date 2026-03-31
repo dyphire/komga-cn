@@ -142,7 +142,7 @@ pub(super) fn webui_bridge_series_filters_from_payload(
     if !library_ids.is_empty() {
         library_ids.sort();
         library_ids.dedup();
-        filters.library_ids = Some(library_ids);
+        filters.criteria.library_ids = Some(library_ids);
     }
 
     filters
@@ -161,7 +161,7 @@ pub(super) fn webui_bridge_books_filters_from_payload(
     if !library_ids.is_empty() {
         library_ids.sort();
         library_ids.dedup();
-        filters.library_ids = Some(library_ids);
+        filters.criteria.library_ids = Some(library_ids);
     }
 
     let mut series_ids = vec![];
@@ -169,123 +169,19 @@ pub(super) fn webui_bridge_books_filters_from_payload(
     if !series_ids.is_empty() {
         series_ids.sort();
         series_ids.dedup();
-        filters.series_ids = Some(series_ids);
+        filters.criteria.series_ids = Some(series_ids);
     }
 
     filters
 }
 
 pub(super) fn restrict_series_filters_to_persisted_shape(filters: &mut RuntimeSeriesFilters) {
-    filters.collection_ids = None;
-    filters.titles = None;
-    filters.titles_excluded = None;
-    filters.titles_contains = None;
-    filters.titles_contains_excluded = None;
-    filters.titles_begins_with = None;
-    filters.titles_begins_with_excluded = None;
-    filters.titles_ends_with = None;
-    filters.titles_ends_with_excluded = None;
-    filters.title_sorts = None;
-    filters.title_sorts_excluded = None;
-    filters.title_sorts_contains = None;
-    filters.title_sorts_contains_excluded = None;
-    filters.title_sorts_begins_with = None;
-    filters.title_sorts_begins_with_excluded = None;
-    filters.title_sorts_ends_with = None;
-    filters.title_sorts_ends_with_excluded = None;
-    filters.deleted = None;
-    filters.oneshot = None;
-    filters.read_statuses = None;
-    filters.read_statuses_excluded = None;
-    filters.genres = None;
-    filters.genres_excluded = None;
-    filters.genres_null = None;
-    filters.languages = None;
-    filters.languages_excluded = None;
-    filters.publishers = None;
-    filters.publishers_excluded = None;
-    filters.age_ratings = None;
-    filters.age_ratings_excluded = None;
-    filters.age_ratings_null = None;
-    filters.age_rating_gt = None;
-    filters.age_rating_lt = None;
-    filters.tags = None;
-    filters.tags_excluded = None;
-    filters.tags_null = None;
-    filters.languages = None;
-    filters.publishers = None;
-    filters.age_ratings = None;
-    filters.release_dates = None;
-    filters.release_dates_excluded = None;
-    filters.release_dates_null = None;
-    filters.release_date_gt = None;
-    filters.release_date_lt = None;
-    filters.release_date_begins_with = None;
-    filters.release_date_ends_with = None;
-    filters.release_date_contains_excluded = None;
-    filters.release_date_begins_with_excluded = None;
-    filters.release_date_ends_with_excluded = None;
-    filters.release_date_in_last_days = None;
-    filters.release_date_not_in_last_days = None;
-    filters.sharing_labels = None;
-    filters.sharing_labels_excluded = None;
-    filters.sharing_labels_null = None;
-    filters.series_statuses = None;
-    filters.series_statuses_excluded = None;
-    filters.complete = None;
-    filters.authors = None;
-    filters.authors_excluded = None;
+    filters.criteria.restrict_for_persisted_webui_shape();
 }
 
 pub(super) fn restrict_books_filters_to_persisted_shape(filters: &mut RuntimeBooksFilters) {
     filters.direct_browse_family = None;
-    filters.series_ids = None;
-    filters.series_ids_excluded = None;
-    filters.read_list_ids = None;
-    filters.read_list_ids_excluded = None;
-    filters.titles = None;
-    filters.titles_excluded = None;
-    filters.titles_contains = None;
-    filters.titles_contains_excluded = None;
-    filters.titles_begins_with = None;
-    filters.titles_begins_with_excluded = None;
-    filters.titles_ends_with = None;
-    filters.titles_ends_with_excluded = None;
-    filters.deleted = None;
-    filters.oneshot = None;
-    filters.genres = None;
-    filters.genres_excluded = None;
-    filters.genres_null = None;
-    filters.tags = None;
-    filters.tags_excluded = None;
-    filters.tags_null = None;
-    filters.read_statuses = None;
-    filters.media_profiles = None;
-    filters.media_statuses = None;
-    filters.media_statuses_excluded = None;
-    filters.authors = None;
-    filters.authors_excluded = None;
-    filters.poster_types = None;
-    filters.poster_types_excluded = None;
-    filters.poster_selected = None;
-    filters.poster_selected_excluded = None;
-    filters.release_dates = None;
-    filters.release_dates_excluded = None;
-    filters.release_dates_null = None;
-    filters.release_date_gt = None;
-    filters.release_date_lt = None;
-    filters.release_date_begins_with = None;
-    filters.release_date_ends_with = None;
-    filters.release_date_contains_excluded = None;
-    filters.release_date_begins_with_excluded = None;
-    filters.release_date_ends_with_excluded = None;
-    filters.release_date_in_last_days = None;
-    filters.release_date_not_in_last_days = None;
-    filters.number_sorts = None;
-    filters.number_sorts_excluded = None;
-    filters.number_sort_gt = None;
-    filters.number_sort_lt = None;
-    filters.read_statuses_excluded = None;
+    filters.criteria.restrict_for_persisted_webui_shape();
 }
 
 pub(super) fn collect_webui_string_condition_values(

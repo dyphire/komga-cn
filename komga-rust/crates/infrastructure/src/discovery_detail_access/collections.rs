@@ -12,16 +12,6 @@ pub struct PersistedCollectionRecord {
     pub last_modified_date: String,
 }
 
-#[derive(Clone)]
-pub struct PersistedCollectionSeriesRecord {
-    pub id: String,
-    pub library_id: String,
-    pub name: String,
-    pub title: String,
-    pub deleted: bool,
-    pub oneshot: bool,
-}
-
 pub struct PersistedSeriesRestrictionRecord {
     pub age_rating: Option<u16>,
     pub labels: Vec<String>,
@@ -127,68 +117,6 @@ pub async fn load_persisted_collection_series_ids(
     Ok(rows
         .into_iter()
         .map(|row| row.get::<String, _>("SERIES_ID"))
-        .collect())
-}
-
-pub async fn persisted_collection_exists(
-    database_file: &FsPath,
-    collection_id: &str,
-) -> Result<bool, String> {
-    if !database_file.exists() {
-        return Ok(false);
-    }
-
-    let pool = connect_pool(database_file, 1)
-        .await
-        .map_err(|error| format!("open persisted collection existence db: {error}"))?;
-
-    let exists = sqlx::query(
-        "SELECT 1 AS FOUND \
-         FROM COLLECTION \
-         WHERE ID = ?",
-    )
-    .bind(collection_id)
-    .fetch_optional(&pool)
-    .await
-    .map_err(|error| format!("query persisted collection existence: {error}"))?
-    .is_some();
-
-    Ok(exists)
-}
-
-pub async fn load_persisted_collection_series(
-    database_file: &FsPath,
-    collection_id: &str,
-) -> Result<Vec<PersistedCollectionSeriesRecord>, String> {
-    let pool = connect_pool(database_file, 1)
-        .await
-        .map_err(|error| format!("open persisted collection series db: {error}"))?;
-
-    let rows = sqlx::query(
-        "SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE, s.NAME, s.DELETED_DATE, \
-                s.ONESHOT \
-         FROM COLLECTION_SERIES cs \
-         JOIN SERIES s ON s.ID = cs.SERIES_ID \
-         LEFT \
-         JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
-         WHERE cs.COLLECTION_ID = ? \
-         ORDER BY cs.NUMBER ASC",
-    )
-    .bind(collection_id)
-    .fetch_all(&pool)
-    .await
-    .map_err(|error| format!("query persisted collection series: {error}"))?;
-
-    Ok(rows
-        .into_iter()
-        .map(|row| PersistedCollectionSeriesRecord {
-            id: row.get::<String, _>("ID"),
-            library_id: row.get::<String, _>("LIBRARY_ID"),
-            name: row.get::<String, _>("NAME"),
-            title: row.get::<String, _>("TITLE"),
-            deleted: row.get::<Option<String>, _>("DELETED_DATE").is_some(),
-            oneshot: row.get::<bool, _>("ONESHOT"),
-        })
         .collect())
 }
 

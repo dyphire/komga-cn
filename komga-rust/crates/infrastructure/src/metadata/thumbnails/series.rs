@@ -19,7 +19,7 @@ pub async fn load_persisted_series_thumbnails(
         .await
         .map_err(|error| format!("open series thumbnails db: {error}"))?;
     let rows = sqlx::query(
-        "SELECT ID, TYPE, SELECTED \
+        "SELECT ID, SERIES_ID, TYPE, SELECTED, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT \
          FROM THUMBNAIL_SERIES \
          WHERE SERIES_ID = ? \
          ORDER BY SELECTED DESC, LAST_MODIFIED_DATE DESC, ID ASC",
@@ -33,8 +33,13 @@ pub async fn load_persisted_series_thumbnails(
         .into_iter()
         .map(|row| SeriesThumbnailRecord {
             id: row.get::<String, _>("ID"),
+            series_id: row.get::<String, _>("SERIES_ID"),
             thumbnail_type: row.get::<String, _>("TYPE"),
             selected: row.get::<i64, _>("SELECTED") != 0,
+            media_type: row.get::<String, _>("MEDIA_TYPE"),
+            file_size: row.get::<i64, _>("FILE_SIZE"),
+            width: row.get::<i64, _>("WIDTH"),
+            height: row.get::<i64, _>("HEIGHT"),
         })
         .collect())
 }
@@ -107,6 +112,8 @@ pub async fn insert_series_thumbnail(
     series_id: &str,
     thumbnail: &[u8],
     media_type: &str,
+    width: i64,
+    height: i64,
     selected: bool,
 ) -> Result<SeriesThumbnailRecord, String> {
     let pool = connect_pool(database_file, 1)
@@ -150,8 +157,8 @@ pub async fn insert_series_thumbnail(
     let id = generated_thumbnail_id("thumbnail-series");
     sqlx::query(
         "INSERT INTO THUMBNAIL_SERIES \
-         (ID, SELECTED, THUMBNAIL, TYPE, SERIES_ID, MEDIA_TYPE, FILE_SIZE) \
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+         (ID, SELECTED, THUMBNAIL, TYPE, SERIES_ID, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(selected)
@@ -160,6 +167,8 @@ pub async fn insert_series_thumbnail(
     .bind(series_id)
     .bind(media_type)
     .bind(thumbnail.len() as i64)
+    .bind(width)
+    .bind(height)
     .execute(&mut *tx)
     .await
     .map_err(|error| format!("insert series thumbnail: {error}"))?;
@@ -170,8 +179,13 @@ pub async fn insert_series_thumbnail(
 
     Ok(SeriesThumbnailRecord {
         id,
+        series_id: series_id.to_string(),
         thumbnail_type: "USER_UPLOADED".to_string(),
         selected,
+        media_type: media_type.to_string(),
+        file_size: thumbnail.len() as i64,
+        width,
+        height,
     })
 }
 

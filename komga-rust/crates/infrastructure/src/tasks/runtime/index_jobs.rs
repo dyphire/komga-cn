@@ -15,7 +15,7 @@ pub(super) fn try_execute(
             };
             super::index_tasks::analyze_book(runtime, book_id)
         }
-        "REBUILD_INDEX" | "UPGRADE_INDEX" => super::index_tasks::rebuild_index(runtime),
+        "REBUILD_INDEX" => super::index_tasks::rebuild_index(runtime),
         "FIND_BOOK_THUMBNAILS_TO_REGENERATE" => {
             let book_ids = match super::find_books_without_selected_thumbnails(runtime) {
                 Ok(ids) => ids,

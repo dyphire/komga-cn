@@ -1,5 +1,13 @@
 use super::*;
 
+fn should_use_strict_runtime_shape(payload: Option<&Value>, has_oneshot_bootstrap: bool) -> bool {
+    has_oneshot_bootstrap
+        || payload
+            .and_then(|value| value.get("condition"))
+            .and_then(|condition| condition.get("type"))
+            .is_some()
+}
+
 pub async fn books(
     Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(auth_state): Extension<DiscoveryAuthState>,
@@ -47,71 +55,17 @@ pub async fn books(
         match load_persisted_books_page(
             auth_db.database_file.as_path(),
             &context,
-            PersistedBooksBrowseQuery {
-                library_ids,
-                series_ids: None,
-                series_ids_excluded: None,
-                read_list_ids: None,
-                read_list_ids_excluded: None,
-                titles: None,
-                titles_excluded: None,
-                titles_contains: None,
-                titles_contains_excluded: None,
-                titles_begins_with: None,
-                titles_begins_with_excluded: None,
-                titles_ends_with: None,
-                titles_ends_with_excluded: None,
-                deleted: None,
-                oneshot: None,
-                genres: None,
-                genres_excluded: None,
-                genres_null: None,
-                languages: None,
-                languages_excluded: None,
-                publishers: None,
-                publishers_excluded: None,
-                age_ratings: None,
-                age_ratings_excluded: None,
-                age_ratings_null: None,
-                age_rating_gt: None,
-                age_rating_lt: None,
-                tags: None,
-                tags_excluded: None,
-                tags_null: None,
-                media_profiles: None,
-                media_profiles_excluded: None,
-                authors: None,
-                authors_excluded: None,
-                poster_types: None,
-                poster_types_excluded: None,
-                poster_selected: None,
-                poster_selected_excluded: None,
-                media_statuses: None,
-                media_statuses_excluded: None,
-                read_statuses: None,
-                read_statuses_excluded: None,
-                release_dates: None,
-                release_dates_excluded: None,
-                release_dates_null: None,
-                release_date_gt: None,
-                release_date_lt: None,
-                release_date_begins_with: None,
-                release_date_ends_with: None,
-                release_date_contains_excluded: None,
-                release_date_begins_with_excluded: None,
-                release_date_ends_with_excluded: None,
-                release_date_in_last_days: None,
-                release_date_not_in_last_days: None,
-                number_sorts: None,
-                number_sorts_excluded: None,
-                number_sort_gt: None,
-                number_sort_lt: None,
+            PersistedBooksBrowseQuery::from_filters(
+                BooksFilterCriteria {
+                    library_ids,
+                    ..BooksFilterCriteria::default()
+                },
                 search,
                 page,
                 size,
                 unpaged,
                 sort_modes,
-            },
+            ),
         )
         .await
         {
@@ -126,7 +80,6 @@ pub async fn books(
 }
 
 pub async fn books_list(
-    Extension(profile): Extension<RuntimeProfile>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(auth_state): Extension<DiscoveryAuthState>,
     headers: HeaderMap,
@@ -141,30 +94,27 @@ pub async fn books_list(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let ownership_route = discovery_ownership_route(profile, &headers, DiscoveryShape::BooksList);
     let payload = serde_json::from_slice::<Value>(&body).ok();
+    if payload.as_ref().is_some_and(contains_legacy_search_input) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
     let full_text_search = payload.as_ref().and_then(extract_full_text_search);
     let is_exact_oneshot_bootstrap = exact_oneshot_bootstrap_series_id(payload.as_ref()).is_some();
+    let strict_runtime_shape =
+        should_use_strict_runtime_shape(payload.as_ref(), is_exact_oneshot_bootstrap);
 
-    if (auth_db.database_file.exists()
-        || ownership_route == DiscoveryOwnershipRoute::RuntimeOwned
-        || is_exact_oneshot_bootstrap)
-        && let Some(mut runtime_response) = runtime_owned_books_list_response(
+    if (auth_db.database_file.exists() || is_exact_oneshot_bootstrap)
+        && let Some(runtime_response) = runtime_owned_books_list_response(
             &headers,
             &uri,
             payload.as_ref(),
             full_text_search.clone(),
             &auth_state,
             auth_db.database_file.as_path(),
-            ownership_route == DiscoveryOwnershipRoute::RuntimeOwned,
+            strict_runtime_shape,
         )
         .await
     {
-        if ownership_route != DiscoveryOwnershipRoute::RuntimeOwned {
-            runtime_response
-                .headers_mut()
-                .remove("x-komga-runtime-search-ownership");
-        }
         return runtime_response;
     }
 
@@ -178,7 +128,6 @@ pub async fn books_list(
 }
 
 pub async fn books_latest(
-    Extension(profile): Extension<RuntimeProfile>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(auth_state): Extension<DiscoveryAuthState>,
     headers: HeaderMap,
@@ -188,7 +137,6 @@ pub async fn books_latest(
         return response;
     }
 
-    let ownership_route = discovery_ownership_route(profile, &headers, DiscoveryShape::BooksLatest);
     let query = uri.query().unwrap_or_default();
     let sorts = query_values(query, "sort");
 
@@ -218,71 +166,17 @@ pub async fn books_latest(
         match load_persisted_books_page(
             auth_db.database_file.as_path(),
             &context,
-            PersistedBooksBrowseQuery {
-                library_ids,
-                series_ids: None,
-                series_ids_excluded: None,
-                read_list_ids: None,
-                read_list_ids_excluded: None,
-                titles: None,
-                titles_excluded: None,
-                titles_contains: None,
-                titles_contains_excluded: None,
-                titles_begins_with: None,
-                titles_begins_with_excluded: None,
-                titles_ends_with: None,
-                titles_ends_with_excluded: None,
-                deleted: None,
-                oneshot: None,
-                genres: None,
-                genres_excluded: None,
-                genres_null: None,
-                languages: None,
-                languages_excluded: None,
-                publishers: None,
-                publishers_excluded: None,
-                age_ratings: None,
-                age_ratings_excluded: None,
-                age_ratings_null: None,
-                age_rating_gt: None,
-                age_rating_lt: None,
-                tags: None,
-                tags_excluded: None,
-                tags_null: None,
-                media_profiles: None,
-                media_profiles_excluded: None,
-                authors: None,
-                authors_excluded: None,
-                poster_types: None,
-                poster_types_excluded: None,
-                poster_selected: None,
-                poster_selected_excluded: None,
-                media_statuses: None,
-                media_statuses_excluded: None,
-                read_statuses: None,
-                read_statuses_excluded: None,
-                release_dates: None,
-                release_dates_excluded: None,
-                release_dates_null: None,
-                release_date_gt: None,
-                release_date_lt: None,
-                release_date_begins_with: None,
-                release_date_ends_with: None,
-                release_date_contains_excluded: None,
-                release_date_begins_with_excluded: None,
-                release_date_ends_with_excluded: None,
-                release_date_in_last_days: None,
-                release_date_not_in_last_days: None,
-                number_sorts: None,
-                number_sorts_excluded: None,
-                number_sort_gt: None,
-                number_sort_lt: None,
-                search: None,
+            PersistedBooksBrowseQuery::from_filters(
+                BooksFilterCriteria {
+                    library_ids,
+                    ..BooksFilterCriteria::default()
+                },
+                None,
                 page,
                 size,
                 unpaged,
-                sort_modes: vec![PersistedBooksSortMode::LastModifiedDateDesc],
-            },
+                vec![PersistedBooksSortMode::LastModifiedDateDesc],
+            ),
         )
         .await
         {
@@ -293,8 +187,8 @@ pub async fn books_latest(
         }
     }
 
-    if (auth_db.database_file.exists() || ownership_route == DiscoveryOwnershipRoute::RuntimeOwned)
-        && let Some(mut runtime_response) = runtime_owned_books_latest_response(
+    if auth_db.database_file.exists()
+        && let Some(runtime_response) = runtime_owned_books_latest_response(
             &headers,
             &uri,
             &auth_state,
@@ -302,11 +196,6 @@ pub async fn books_latest(
         )
         .await
     {
-        if ownership_route != DiscoveryOwnershipRoute::RuntimeOwned {
-            runtime_response
-                .headers_mut()
-                .remove("x-komga-runtime-search-ownership");
-        }
         return runtime_response;
     }
 
@@ -384,13 +273,22 @@ pub async fn book_tags(
     }
 
     let query = uri.query().unwrap_or_default();
+    let library_ids = query_values(query, "library_id")
+        .into_iter()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(decode_query_component)
+        .collect::<Vec<_>>();
     let scope = query_value(query, "series_id")
         .filter(|value| !value.is_empty())
         .map(|value| PersistedBookTagsScope::Series(decode_query_component(value)))
         .or_else(|| {
-            query_value(query, "library_id")
+            query_value(query, "readlist_id")
                 .filter(|value| !value.is_empty())
-                .map(|value| PersistedBookTagsScope::Library(decode_query_component(value)))
+                .map(|value| PersistedBookTagsScope::ReadList(decode_query_component(value)))
+        })
+        .or_else(|| {
+            (!library_ids.is_empty()).then_some(PersistedBookTagsScope::Libraries(library_ids))
         });
 
     match load_persisted_book_tags(auth_db.database_file.as_path(), scope.as_ref()).await {

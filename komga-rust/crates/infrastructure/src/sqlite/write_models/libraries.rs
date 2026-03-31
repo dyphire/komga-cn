@@ -73,12 +73,16 @@ pub async fn delete_persisted_library(
 ) -> Result<bool, sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
     let mut tx = pool.begin().await?;
-    let exists =
-        sqlx::query("SELECT 1\n         FROM LIBRARY\n         WHERE ID = ?\n         LIMIT 1")
-            .bind(library_id)
-            .fetch_optional(&mut *tx)
-            .await?
-            .is_some();
+    let exists = sqlx::query(
+        "SELECT 1 \
+         FROM LIBRARY \
+         WHERE ID = ? \
+         LIMIT 1",
+    )
+    .bind(library_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .is_some();
     if !exists {
         tx.rollback().await?;
         return Ok(false);
@@ -112,7 +116,38 @@ pub async fn load_persisted_library_write_model(
 
     let pool = connect_pool(database_file, 1).await?;
     let row = sqlx::query(
-        "SELECT\n             ID,\n             NAME,\n             ROOT,\n             IMPORT_COMICINFO_BOOK,\n             IMPORT_COMICINFO_SERIES,\n             IMPORT_COMICINFO_COLLECTION,\n             IMPORT_COMICINFO_READLIST,\n             IMPORT_COMICINFO_SERIES_APPEND_VOLUME,\n             IMPORT_EPUB_BOOK,\n             IMPORT_EPUB_SERIES,\n             IMPORT_MYLAR_SERIES,\n             IMPORT_LOCAL_ARTWORK,\n             IMPORT_BARCODE_ISBN,\n             SCAN_FORCE_MODIFIED_TIME,\n             SCAN_INTERVAL,\n             SCAN_STARTUP,\n             SCAN_CBX,\n             SCAN_PDF,\n             SCAN_EPUB,\n             REPAIR_EXTENSIONS,\n             CONVERT_TO_CBZ,\n             EMPTY_TRASH_AFTER_SCAN,\n             SERIES_COVER,\n             HASH_FILES,\n             HASH_PAGES,\n             HASH_KOREADER,\n             ANALYZE_DIMENSIONS,\n             ONESHOTS_DIRECTORY,\n             UNAVAILABLE_DATE\n         FROM LIBRARY\n         WHERE ID = ?",
+        "SELECT \
+             ID, \
+             NAME, \
+             ROOT, \
+             IMPORT_COMICINFO_BOOK, \
+             IMPORT_COMICINFO_SERIES, \
+             IMPORT_COMICINFO_COLLECTION, \
+             IMPORT_COMICINFO_READLIST, \
+             IMPORT_COMICINFO_SERIES_APPEND_VOLUME, \
+             IMPORT_EPUB_BOOK, \
+             IMPORT_EPUB_SERIES, \
+             IMPORT_MYLAR_SERIES, \
+             IMPORT_LOCAL_ARTWORK, \
+             IMPORT_BARCODE_ISBN, \
+             SCAN_FORCE_MODIFIED_TIME, \
+             SCAN_INTERVAL, \
+             SCAN_STARTUP, \
+             SCAN_CBX, \
+             SCAN_PDF, \
+             SCAN_EPUB, \
+             REPAIR_EXTENSIONS, \
+             CONVERT_TO_CBZ, \
+             EMPTY_TRASH_AFTER_SCAN, \
+             SERIES_COVER, \
+             HASH_FILES, \
+             HASH_PAGES, \
+             HASH_KOREADER, \
+             ANALYZE_DIMENSIONS, \
+             ONESHOTS_DIRECTORY, \
+             UNAVAILABLE_DATE \
+         FROM LIBRARY \
+         WHERE ID = ?",
     )
     .bind(library_id)
     .fetch_optional(&pool)
@@ -124,7 +159,10 @@ pub async fn load_persisted_library_write_model(
 
     let mut library = map_persisted_library_row(row);
     let exclusions = sqlx::query(
-        "SELECT EXCLUSION\n         FROM LIBRARY_EXCLUSIONS\n         WHERE LIBRARY_ID = ?\n         ORDER BY EXCLUSION COLLATE NOCASE ASC",
+        "SELECT EXCLUSION \
+         FROM LIBRARY_EXCLUSIONS \
+         WHERE LIBRARY_ID = ? \
+         ORDER BY EXCLUSION COLLATE NOCASE ASC",
     )
     .bind(library_id)
     .fetch_all(&pool)
@@ -199,9 +237,17 @@ pub async fn library_book_ids_with_empty_hash(
         .map_err(|error| format!("open library hash query db: {error}"))?;
 
     let sql = if koreader {
-        "SELECT ID\n         FROM BOOK\n         WHERE LIBRARY_ID = ?\n         AND DELETED_DATE IS NULL\n         AND (FILE_HASH_KOREADER = '' OR FILE_HASH_KOREADER IS NULL)"
+        "SELECT ID \
+         FROM BOOK \
+         WHERE LIBRARY_ID = ? \
+         AND DELETED_DATE IS NULL \
+         AND (FILE_HASH_KOREADER = '' OR FILE_HASH_KOREADER IS NULL)"
     } else {
-        "SELECT ID\n         FROM BOOK\n         WHERE LIBRARY_ID = ?\n         AND DELETED_DATE IS NULL\n         AND (FILE_HASH = '' OR FILE_HASH IS NULL)"
+        "SELECT ID \
+         FROM BOOK \
+         WHERE LIBRARY_ID = ? \
+         AND DELETED_DATE IS NULL \
+         AND (FILE_HASH = '' OR FILE_HASH IS NULL)"
     };
 
     let rows = sqlx::query(sql)
@@ -226,7 +272,10 @@ pub async fn library_book_ids(
 
     let pool = connect_pool(database_file, 1).await?;
     let rows = sqlx::query(
-        "SELECT ID\n         FROM BOOK\n         WHERE LIBRARY_ID = ?\n         ORDER BY ID ASC",
+        "SELECT ID \
+         FROM BOOK \
+         WHERE LIBRARY_ID = ? \
+         ORDER BY ID ASC",
     )
     .bind(library_id)
     .fetch_all(&pool)
@@ -249,13 +298,19 @@ pub async fn library_series_and_book_ids(
 
     let pool = connect_pool(database_file, 1).await?;
     let series_rows = sqlx::query(
-        "SELECT ID\n         FROM SERIES\n         WHERE LIBRARY_ID = ?\n         ORDER BY ID ASC",
+        "SELECT ID \
+         FROM SERIES \
+         WHERE LIBRARY_ID = ? \
+         ORDER BY ID ASC",
     )
     .bind(library_id)
     .fetch_all(&pool)
     .await?;
     let book_rows = sqlx::query(
-        "SELECT ID\n         FROM BOOK\n         WHERE LIBRARY_ID = ?\n         ORDER BY ID ASC",
+        "SELECT ID \
+         FROM BOOK \
+         WHERE LIBRARY_ID = ? \
+         ORDER BY ID ASC",
     )
     .bind(library_id)
     .fetch_all(&pool)
@@ -278,7 +333,37 @@ async fn insert_library_row(
     library: &PersistedLibraryWriteModel,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "INSERT INTO LIBRARY (\n             ID,\n             NAME,\n             ROOT,\n             IMPORT_COMICINFO_BOOK,\n             IMPORT_COMICINFO_SERIES,\n             IMPORT_COMICINFO_COLLECTION,\n             IMPORT_COMICINFO_READLIST,\n             IMPORT_COMICINFO_SERIES_APPEND_VOLUME,\n             IMPORT_EPUB_BOOK,\n             IMPORT_EPUB_SERIES,\n             IMPORT_MYLAR_SERIES,\n             IMPORT_LOCAL_ARTWORK,\n             IMPORT_BARCODE_ISBN,\n             SCAN_FORCE_MODIFIED_TIME,\n             SCAN_INTERVAL,\n             SCAN_STARTUP,\n             SCAN_CBX,\n             SCAN_PDF,\n             SCAN_EPUB,\n             REPAIR_EXTENSIONS,\n             CONVERT_TO_CBZ,\n             EMPTY_TRASH_AFTER_SCAN,\n             SERIES_COVER,\n             HASH_FILES,\n             HASH_PAGES,\n             HASH_KOREADER,\n             ANALYZE_DIMENSIONS,\n             ONESHOTS_DIRECTORY\n         )\n         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO LIBRARY ( \
+             ID, \
+             NAME, \
+             ROOT, \
+             IMPORT_COMICINFO_BOOK, \
+             IMPORT_COMICINFO_SERIES, \
+             IMPORT_COMICINFO_COLLECTION, \
+             IMPORT_COMICINFO_READLIST, \
+             IMPORT_COMICINFO_SERIES_APPEND_VOLUME, \
+             IMPORT_EPUB_BOOK, \
+             IMPORT_EPUB_SERIES, \
+             IMPORT_MYLAR_SERIES, \
+             IMPORT_LOCAL_ARTWORK, \
+             IMPORT_BARCODE_ISBN, \
+             SCAN_FORCE_MODIFIED_TIME, \
+             SCAN_INTERVAL, \
+             SCAN_STARTUP, \
+             SCAN_CBX, \
+             SCAN_PDF, \
+             SCAN_EPUB, \
+             REPAIR_EXTENSIONS, \
+             CONVERT_TO_CBZ, \
+             EMPTY_TRASH_AFTER_SCAN, \
+             SERIES_COVER, \
+             HASH_FILES, \
+             HASH_PAGES, \
+             HASH_KOREADER, \
+             ANALYZE_DIMENSIONS, \
+             ONESHOTS_DIRECTORY \
+         ) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&library.id)
     .bind(&library.name)
@@ -318,7 +403,36 @@ async fn update_library_row(
     library: &PersistedLibraryWriteModel,
 ) -> Result<bool, sqlx::Error> {
     let updated = sqlx::query(
-        "UPDATE LIBRARY\n         SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP,\n             NAME = ?,\n             ROOT = ?,\n             IMPORT_COMICINFO_BOOK = ?,\n             IMPORT_COMICINFO_SERIES = ?,\n             IMPORT_COMICINFO_COLLECTION = ?,\n             IMPORT_COMICINFO_READLIST = ?,\n             IMPORT_COMICINFO_SERIES_APPEND_VOLUME = ?,\n             IMPORT_EPUB_BOOK = ?,\n             IMPORT_EPUB_SERIES = ?,\n             IMPORT_MYLAR_SERIES = ?,\n             IMPORT_LOCAL_ARTWORK = ?,\n             IMPORT_BARCODE_ISBN = ?,\n             SCAN_FORCE_MODIFIED_TIME = ?,\n             SCAN_INTERVAL = ?,\n             SCAN_STARTUP = ?,\n             SCAN_CBX = ?,\n             SCAN_PDF = ?,\n             SCAN_EPUB = ?,\n             REPAIR_EXTENSIONS = ?,\n             CONVERT_TO_CBZ = ?,\n             EMPTY_TRASH_AFTER_SCAN = ?,\n             SERIES_COVER = ?,\n             HASH_FILES = ?,\n             HASH_PAGES = ?,\n             HASH_KOREADER = ?,\n             ANALYZE_DIMENSIONS = ?,\n             ONESHOTS_DIRECTORY = ?\n         WHERE ID = ?",
+        "UPDATE LIBRARY \
+         SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP, \
+             NAME = ?, \
+             ROOT = ?, \
+             IMPORT_COMICINFO_BOOK = ?, \
+             IMPORT_COMICINFO_SERIES = ?, \
+             IMPORT_COMICINFO_COLLECTION = ?, \
+             IMPORT_COMICINFO_READLIST = ?, \
+             IMPORT_COMICINFO_SERIES_APPEND_VOLUME = ?, \
+             IMPORT_EPUB_BOOK = ?, \
+             IMPORT_EPUB_SERIES = ?, \
+             IMPORT_MYLAR_SERIES = ?, \
+             IMPORT_LOCAL_ARTWORK = ?, \
+             IMPORT_BARCODE_ISBN = ?, \
+             SCAN_FORCE_MODIFIED_TIME = ?, \
+             SCAN_INTERVAL = ?, \
+             SCAN_STARTUP = ?, \
+             SCAN_CBX = ?, \
+             SCAN_PDF = ?, \
+             SCAN_EPUB = ?, \
+             REPAIR_EXTENSIONS = ?, \
+             CONVERT_TO_CBZ = ?, \
+             EMPTY_TRASH_AFTER_SCAN = ?, \
+             SERIES_COVER = ?, \
+             HASH_FILES = ?, \
+             HASH_PAGES = ?, \
+             HASH_KOREADER = ?, \
+             ANALYZE_DIMENSIONS = ?, \
+             ONESHOTS_DIRECTORY = ? \
+         WHERE ID = ?",
     )
     .bind(&library.name)
     .bind(&library.root)

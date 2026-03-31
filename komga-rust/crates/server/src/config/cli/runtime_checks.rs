@@ -77,13 +77,6 @@ pub(crate) fn validate_single_writer_storage_ownership(
         }
     }
 
-    if config.mode == RuntimeMode::Canary {
-        return Err(ConfigError::MixedWriterStorageOwnership {
-            details: "canary mode storage ownership is not wired yet and is blocked by design"
-                .to_string(),
-        });
-    }
-
     if is_default_home_config_dir(config_dir, env)
         && (config.database_file == default_main_db
             || config.tasks_db_file == default_tasks_db

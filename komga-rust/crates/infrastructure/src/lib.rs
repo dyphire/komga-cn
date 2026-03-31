@@ -13,6 +13,7 @@ pub mod opds_persisted_access;
 pub mod operational_metrics_access;
 pub mod operational_settings_access;
 pub mod page_hashes_access;
+mod rar_support;
 pub mod read_models;
 pub mod runtime_identity_access;
 pub mod search;
@@ -25,6 +26,8 @@ pub mod tasks;
 pub use context::{SqlitePersistenceConnection, SqlitePersistenceContext, SqliteUnitOfWork};
 pub use search::{
     SearchDocument, SearchEntityType, SearchError, SearchEvent, SearchIndexLifecycle,
-    reset_for_rebuild, startup_recover,
+    SearchStartupLifecycle, decide_startup_lifecycle, prepare_for_rebuild,
+    rebuild_index_from_database, sync_entity_delete_from_index, sync_entity_upsert_from_database,
+    sync_series_and_oneshot_books_after_metadata_update,
 };
 pub use sqlite::write_models::ServerSettingsStore;

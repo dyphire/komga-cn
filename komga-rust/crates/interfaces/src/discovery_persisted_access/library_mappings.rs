@@ -8,9 +8,7 @@ pub async fn remap_requested_library_ids_for_persisted(
     database_file: &FsPath,
     requested: Option<&Vec<String>>,
 ) -> Option<Vec<String>> {
-    let Some(requested) = requested else {
-        return None;
-    };
+    let requested = requested?;
 
     if requested.is_empty() || !database_file.exists() {
         return None;

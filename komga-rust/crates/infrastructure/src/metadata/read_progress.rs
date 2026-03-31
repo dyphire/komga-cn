@@ -233,7 +233,18 @@ pub async fn persist_readlist_tachiyomi_progress(
         }
 
         let book_id = row.get::<String, _>("BOOK_ID");
-        persist_read_progress(database_file, &book_id, user_id_value, 10, true)
+        let page_count = sqlx::query(
+            "SELECT COALESCE(PAGE_COUNT, 0) AS PAGE_COUNT FROM MEDIA WHERE BOOK_ID = ? LIMIT 1",
+        )
+        .bind(&book_id)
+        .fetch_optional(&pool)
+        .await
+        .map_err(|error| format!("query page count for tachiyomi write: {error}"))?
+        .map(|row| row.get::<i64, _>("PAGE_COUNT").max(0) as u64)
+        .unwrap_or(1)
+        .max(1);
+
+        persist_read_progress(database_file, &book_id, user_id_value, page_count, true)
             .await
             .map_err(|error| format!("persist read progress for tachiyomi write: {error}"))?;
     }

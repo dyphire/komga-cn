@@ -46,10 +46,11 @@ pub async fn library_detail(
         return response;
     }
 
-    let context = match auth_state.resolve_query_context(&headers, Some(&[library_id.clone()])) {
-        Some(context) => context,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
-    };
+    let context =
+        match auth_state.resolve_query_context(&headers, Some(std::slice::from_ref(&library_id))) {
+            Some(context) => context,
+            None => return StatusCode::UNAUTHORIZED.into_response(),
+        };
 
     runtime_owned_library_detail_response(context, &state, &library_id).await
 }

@@ -8,6 +8,7 @@ use std::sync::{Arc, OnceLock};
 type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
 #[derive(Clone)]
+#[allow(clippy::type_complexity)]
 pub struct DiscoveryDetailSeriesAccessBackend {
     pub load_persisted_series_resource: Arc<
         dyn Fn(PathBuf, String) -> BoxFuture<Result<Option<PersistedSeriesResourceRecord>, String>>
@@ -41,12 +42,12 @@ pub struct DiscoveryDetailSeriesAccessBackend {
             + Sync,
     >,
     pub persist_series_metadata_update: Arc<
-        dyn Fn(PathBuf, String, String, String, String) -> BoxFuture<Result<bool, String>>
+        dyn Fn(PathBuf, String, SeriesMetadataUpdateRecord) -> BoxFuture<Result<bool, String>>
             + Send
             + Sync,
     >,
-    pub refresh_series_after_metadata_update:
-        Arc<dyn Fn(PathBuf, String) -> BoxFuture<Result<(), String>> + Send + Sync>,
+    pub refresh_series_search_documents_after_metadata_update:
+        Arc<dyn Fn(PathBuf, PathBuf, String) -> BoxFuture<Result<(), String>> + Send + Sync>,
 }
 
 static BACKEND: OnceLock<DiscoveryDetailSeriesAccessBackend> = OnceLock::new();
@@ -81,10 +82,10 @@ fn backend() -> &'static DiscoveryDetailSeriesAccessBackend {
         load_existing_series_metadata: Arc::new(|_, _| {
             Box::pin(async { Err("discovery detail series backend is not configured".to_string()) })
         }),
-        persist_series_metadata_update: Arc::new(|_, _, _, _, _| {
+        persist_series_metadata_update: Arc::new(|_, _, _| {
             Box::pin(async { Err("discovery detail series backend is not configured".to_string()) })
         }),
-        refresh_series_after_metadata_update: Arc::new(|_, _| {
+        refresh_series_search_documents_after_metadata_update: Arc::new(|_, _, _| {
             Box::pin(async { Err("discovery detail series backend is not configured".to_string()) })
         }),
     })
@@ -93,7 +94,7 @@ fn backend() -> &'static DiscoveryDetailSeriesAccessBackend {
 #[derive(Clone)]
 pub struct PersistedSeriesResourceRecord {
     pub library_id: String,
-    pub age_rating: Option<u16>,
+    pub age_rating: Option<u32>,
     pub sharing_labels: String,
 }
 
@@ -112,7 +113,7 @@ pub struct PersistedSeriesDetailRecord {
     pub summary: String,
     pub reading_direction: String,
     pub publisher: String,
-    pub age_rating: Option<u16>,
+    pub age_rating: Option<u32>,
     pub language: String,
     pub sharing_labels: String,
     pub metadata_created: String,
@@ -132,9 +133,78 @@ pub struct PersistedCollectionRecord {
 }
 
 pub struct ExistingSeriesMetadataRecord {
+    pub status: String,
+    pub status_lock: bool,
     pub title: String,
+    pub title_lock: bool,
     pub title_sort: String,
+    pub title_sort_lock: bool,
     pub summary: String,
+    pub summary_lock: bool,
+    pub reading_direction: Option<String>,
+    pub reading_direction_lock: bool,
+    pub publisher: String,
+    pub publisher_lock: bool,
+    pub age_rating: Option<u32>,
+    pub age_rating_lock: bool,
+    pub language: String,
+    pub language_lock: bool,
+    pub genres: Vec<String>,
+    pub genres_lock: bool,
+    pub tags: Vec<String>,
+    pub tags_lock: bool,
+    pub total_book_count: Option<u32>,
+    pub total_book_count_lock: bool,
+    pub sharing_labels: Vec<String>,
+    pub sharing_labels_lock: bool,
+    pub links: Vec<SeriesMetadataLinkRecord>,
+    pub links_lock: bool,
+    pub alternate_titles: Vec<SeriesAlternateTitleRecord>,
+    pub alternate_titles_lock: bool,
+}
+
+#[derive(Clone)]
+pub struct SeriesMetadataLinkRecord {
+    pub label: String,
+    pub url: String,
+}
+
+#[derive(Clone)]
+pub struct SeriesAlternateTitleRecord {
+    pub label: String,
+    pub title: String,
+}
+
+#[derive(Clone)]
+pub struct SeriesMetadataUpdateRecord {
+    pub status: String,
+    pub status_lock: bool,
+    pub title: String,
+    pub title_lock: bool,
+    pub title_sort: String,
+    pub title_sort_lock: bool,
+    pub summary: String,
+    pub summary_lock: bool,
+    pub reading_direction: Option<String>,
+    pub reading_direction_lock: bool,
+    pub publisher: String,
+    pub publisher_lock: bool,
+    pub age_rating: Option<u32>,
+    pub age_rating_lock: bool,
+    pub language: String,
+    pub language_lock: bool,
+    pub genres: Vec<String>,
+    pub genres_lock: bool,
+    pub tags: Vec<String>,
+    pub tags_lock: bool,
+    pub total_book_count: Option<u32>,
+    pub total_book_count_lock: bool,
+    pub sharing_labels: Vec<String>,
+    pub sharing_labels_lock: bool,
+    pub links: Vec<SeriesMetadataLinkRecord>,
+    pub links_lock: bool,
+    pub alternate_titles: Vec<SeriesAlternateTitleRecord>,
+    pub alternate_titles_lock: bool,
 }
 
 #[derive(Clone)]
@@ -216,26 +286,24 @@ pub async fn load_existing_series_metadata(
 pub async fn persist_series_metadata_update(
     database_file: &FsPath,
     series_id: &str,
-    title: &str,
-    title_sort: &str,
-    summary: &str,
+    update: SeriesMetadataUpdateRecord,
 ) -> Result<bool, String> {
     (backend().persist_series_metadata_update)(
         database_file.to_path_buf(),
         series_id.to_string(),
-        title.to_string(),
-        title_sort.to_string(),
-        summary.to_string(),
+        update,
     )
     .await
 }
 
-pub async fn refresh_series_after_metadata_update(
+pub async fn refresh_series_search_documents_after_metadata_update(
     database_file: &FsPath,
+    index_dir: &FsPath,
     series_id: &str,
 ) -> Result<(), String> {
-    (backend().refresh_series_after_metadata_update)(
+    (backend().refresh_series_search_documents_after_metadata_update)(
         database_file.to_path_buf(),
+        index_dir.to_path_buf(),
         series_id.to_string(),
     )
     .await

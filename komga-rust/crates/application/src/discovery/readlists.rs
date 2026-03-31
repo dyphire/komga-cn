@@ -97,6 +97,21 @@ pub fn normalize_readlists_search(search: Option<String>) -> Option<String> {
     search.and_then(|value| (!value.trim().is_empty()).then_some(value))
 }
 
+pub(crate) fn runtime_readlist_books_query(query: ReadListBooksQuery) -> RuntimeReadListBooksQuery {
+    RuntimeReadListBooksQuery {
+        readlist_id: query.readlist_id,
+        page: query.page,
+        size: query.size,
+        unpaged: query.unpaged,
+        library_ids: query.library_ids,
+        deleted: query.deleted,
+        tags: query.tags,
+        read_statuses: query.read_statuses,
+        media_statuses: query.media_statuses,
+        authors: query.authors,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -143,20 +158,5 @@ mod tests {
             classify_readlist_books_query(&query),
             Ok(ReadListBooksOwnership::DependencyOnly),
         );
-    }
-}
-
-pub(crate) fn runtime_readlist_books_query(query: ReadListBooksQuery) -> RuntimeReadListBooksQuery {
-    RuntimeReadListBooksQuery {
-        readlist_id: query.readlist_id,
-        page: query.page,
-        size: query.size,
-        unpaged: query.unpaged,
-        library_ids: query.library_ids,
-        deleted: query.deleted,
-        tags: query.tags,
-        read_statuses: query.read_statuses,
-        media_statuses: query.media_statuses,
-        authors: query.authors,
     }
 }

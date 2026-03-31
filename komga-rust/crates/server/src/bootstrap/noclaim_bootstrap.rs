@@ -124,7 +124,7 @@ fn generate_startup_user_id(seed: &str) -> String {
         .duration_since(UNIX_EPOCH)
         .map(|value| value.as_nanos())
         .unwrap_or_default();
-    let normalized_seed = seed.replace('@', "-").replace('.', "-");
+    let normalized_seed = seed.replace(['@', '.'], "-");
     format!("startup-{normalized_seed}-{nanos}")
 }
 

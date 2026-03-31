@@ -1,4 +1,6 @@
 use super::*;
+use crate::rar_support::list_rar_entries;
+use std::path::Path;
 
 pub(in crate::task_queue) fn media_type_from_path(path: &str) -> String {
     let extension = PathBuf::from(path)
@@ -46,17 +48,12 @@ pub(in crate::task_queue) fn analyze_book_media_file(
     }
 
     let pages = match media_type.as_str() {
-        "application/zip" => analyze_zip_media_pages(file_path, false)
-            .unwrap_or_else(|_| single_file_media_analysis_pages(file_path, media_type.as_str())),
-        "application/epub+zip" => analyze_zip_media_pages(file_path, true)
-            .unwrap_or_else(|_| single_file_media_analysis_pages(file_path, media_type.as_str())),
+        "application/zip" => analyze_zip_media_pages(file_path, false).unwrap_or_default(),
+        "application/epub+zip" => analyze_zip_media_pages(file_path, true).unwrap_or_default(),
         "application/vnd.comicbook-rar" | "application/x-rar-compressed" => {
-            analyze_rar_media_pages(file_path).unwrap_or_else(|_| {
-                single_file_media_analysis_pages(file_path, media_type.as_str())
-            })
+            analyze_rar_media_pages(file_path).unwrap_or_default()
         }
-        "application/pdf" => analyze_pdf_media_pages(file_path)
-            .unwrap_or_else(|_| single_file_media_analysis_pages(file_path, media_type.as_str())),
+        "application/pdf" => analyze_pdf_media_pages(file_path).unwrap_or_default(),
         _ => {
             return Ok(BookMediaAnalysis {
                 status: "UNSUPPORTED".to_string(),
@@ -73,28 +70,6 @@ pub(in crate::task_queue) fn analyze_book_media_file(
         media_type,
         pages,
     })
-}
-
-pub(in crate::task_queue) fn single_file_media_analysis_pages(
-    file_path: &PathBuf,
-    media_type: &str,
-) -> Vec<AnalyzedMediaPageRow> {
-    let file_name = file_path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or_default()
-        .to_string();
-    let file_size = fs::metadata(file_path)
-        .ok()
-        .map(|metadata| metadata.len())
-        .and_then(|value| i64::try_from(value).ok())
-        .unwrap_or_default();
-
-    vec![AnalyzedMediaPageRow {
-        file_name,
-        media_type: media_type.to_string(),
-        file_size,
-    }]
 }
 
 pub(in crate::task_queue) fn analyze_zip_media_pages(
@@ -137,35 +112,21 @@ pub(in crate::task_queue) fn analyze_zip_media_pages(
 }
 
 pub(in crate::task_queue) fn analyze_rar_media_pages(
-    file_path: &PathBuf,
+    file_path: &Path,
 ) -> Result<Vec<AnalyzedMediaPageRow>, String> {
-    let output = Command::new("unrar")
-        .arg("lb")
-        .arg(file_path)
-        .output()
-        .map_err(|error| format!("run 'unrar lb' for '{}': {error}", file_path.display()))?;
-    if !output.status.success() {
-        return Err(format!(
-            "'unrar lb' failed for '{}': status {}",
-            file_path.display(),
-            output.status,
-        ));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && is_supported_page_image_file_name(line))
-        .map(|file_name| AnalyzedMediaPageRow {
-            file_name: file_name.to_string(),
-            media_type: media_type_from_entry_name(file_name),
-            file_size: 0,
+    Ok(list_rar_entries(file_path)?
+        .into_iter()
+        .filter(|entry| is_supported_page_image_file_name(&entry.file_name))
+        .map(|entry| AnalyzedMediaPageRow {
+            media_type: media_type_from_entry_name(&entry.file_name),
+            file_name: entry.file_name,
+            file_size: entry.unpacked_size.try_into().unwrap_or(i64::MAX),
         })
         .collect::<Vec<_>>())
 }
 
 pub(in crate::task_queue) fn analyze_pdf_media_pages(
-    file_path: &PathBuf,
+    file_path: &Path,
 ) -> Result<Vec<AnalyzedMediaPageRow>, String> {
     let document = lopdf::Document::load(file_path)
         .map_err(|error| format!("load pdf '{}': {error}", file_path.display()))?;
@@ -240,4 +201,30 @@ pub(in crate::task_queue) fn is_rar_media_type(media_type: &str) -> bool {
         media_type,
         "application/vnd.comicbook-rar" | "application/x-rar-compressed"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn analyze_book_media_file_marks_invalid_pdf_as_error_instead_of_ready() {
+        let fixture_path = std::env::temp_dir().join(format!(
+            "komga-invalid-pdf-{}.pdf",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::write(&fixture_path, b"not a real pdf").expect("invalid pdf fixture should be written");
+
+        let analysis = analyze_book_media_file(&fixture_path, "broken.pdf")
+            .expect("invalid pdf analysis should not raise runtime error");
+
+        assert_eq!(analysis.status, "ERROR");
+        assert!(analysis.pages.is_empty());
+
+        let _ = fs::remove_file(fixture_path);
+    }
 }

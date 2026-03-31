@@ -31,7 +31,7 @@ pub(in crate::task_queue) fn hash_book_pages(
                 &book_id,
             )
             .await
-            .map_err(|error| TaskExecutionError::runtime(error))
+            .map_err(TaskExecutionError::runtime)
         })
     })
     .join()
@@ -44,6 +44,10 @@ pub(in crate::task_queue) fn hash_book(
     koreader: bool,
 ) -> Result<(), TaskExecutionError> {
     let runtime = runtime.task_runtime_context();
+    if !runtime.owns_main_database {
+        return Ok(());
+    }
+
     let Some(file_path) = load_book_file_path(runtime.database_file.as_path(), book_id)
         .map_err(TaskExecutionError::runtime)?
     else {

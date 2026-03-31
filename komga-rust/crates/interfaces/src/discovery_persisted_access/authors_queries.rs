@@ -1,12 +1,5 @@
 use super::*;
 
-pub async fn load_persisted_authors(
-    database_file: &FsPath,
-    library_id: Option<&str>,
-) -> Result<Vec<PersistedAuthorEntry>, String> {
-    persisted_backend_load_persisted_authors(database_file, library_id).await
-}
-
 pub async fn load_persisted_author_names(
     database_file: &FsPath,
     search: &str,

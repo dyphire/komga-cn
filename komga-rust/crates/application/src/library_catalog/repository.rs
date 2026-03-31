@@ -6,6 +6,8 @@ use crate::task_processing::TaskQueueRecord;
 
 use super::LibraryRecord;
 
+type LibrarySeriesAndBookIds = Option<(Vec<String>, Vec<String>)>;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LibraryCatalogMutationError {
     NotFound,
@@ -73,5 +75,5 @@ pub trait LibraryCatalogMutationPort {
     fn library_series_and_book_ids(
         &self,
         library_id: &str,
-    ) -> impl Future<Output = Result<Option<(Vec<String>, Vec<String>)>, String>>;
+    ) -> impl Future<Output = Result<LibrarySeriesAndBookIds, String>>;
 }

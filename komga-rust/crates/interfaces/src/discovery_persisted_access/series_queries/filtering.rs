@@ -11,31 +11,94 @@ pub async fn load_persisted_series_page(
     context: &DiscoveryQueryContext,
     query: PersistedSeriesBrowseQuery,
 ) -> Result<PageEnvelope<PersistedSeriesSummary>, String> {
-    let mut series = load_persisted_series_summaries(database_file).await?;
+    let mut series = Vec::new();
+    let filters = &query.filters;
+    let mut relevance_ranks: HashMap<String, usize> = HashMap::new();
+    if let Some(search) = query.search.as_ref().map(|value| value.trim())
+        && !search.is_empty()
+    {
+        let total_count = persisted_backend_load_persisted_series_count(database_file).await?;
+        let candidate_ids =
+            persisted_backend_search_series_ids(database_file, search, total_count.max(1)).await?;
+        if candidate_ids.is_empty() {
+            series.clear();
+        } else {
+            relevance_ranks = candidate_ids
+                .iter()
+                .enumerate()
+                .map(|(index, id)| (id.clone(), index))
+                .collect();
+            series = persisted_backend_load_persisted_series_summaries_by_ids(
+                database_file,
+                &candidate_ids,
+            )
+            .await?;
+        }
+    } else {
+        series = load_persisted_series_summaries(database_file).await?;
+    }
 
     if let Some(allowed_ids) = context.authorized_library_ids.as_ref() {
-        series.retain(|row| allowed_ids.iter().any(|id| id == row.library_id.as_str()));
+        series = filter_rows(series, |row| {
+            allowed_ids.iter().any(|id| id == row.library_id.as_str())
+        });
     }
-    if let Some(library_ids) = query.library_ids.as_ref() {
-        series.retain(|row| library_ids.iter().any(|id| id == row.library_id.as_str()));
-    }
-
-    if let Some(titles) = query.titles.as_ref() {
-        series.retain(|row| {
-            let normalized = row.title.to_ascii_lowercase();
-            titles.iter().any(|value| normalized == *value)
+    if let Some(library_ids) = filters.library_ids.as_ref() {
+        series = filter_rows(series, |row| {
+            library_ids.iter().any(|id| id == row.library_id.as_str())
         });
     }
 
-    if let Some(titles_excluded) = query.titles_excluded.as_ref() {
-        series.retain(|row| {
+    if let Some(restrictions) = context.restrictions.as_ref() {
+        if let (Some(age), Some(crate::http::discovery_auth::AgeRestrictionKind::Exclude)) =
+            (restrictions.age, restrictions.age_restriction)
+        {
+            series = filter_rows(series, |row| {
+                row.age_rating
+                    .map(|age_rating| age_rating < age)
+                    .unwrap_or(true)
+            });
+        }
+
+        if !restrictions.labels_exclude.is_empty() {
+            series = filter_rows(series, |row| {
+                !row.labels.iter().any(|label| {
+                    restrictions
+                        .labels_exclude
+                        .iter()
+                        .any(|excluded| label.eq_ignore_ascii_case(excluded))
+                })
+            });
+        }
+
+        if !restrictions.labels_allow.is_empty() {
+            series = filter_rows(series, |row| {
+                row.labels.iter().any(|label| {
+                    restrictions
+                        .labels_allow
+                        .iter()
+                        .any(|allowed| label.eq_ignore_ascii_case(allowed))
+                })
+            });
+        }
+    }
+
+    if let Some(titles) = filters.titles.as_ref() {
+        series = filter_rows(series, |row| {
             let normalized = row.title.to_ascii_lowercase();
-            !titles_excluded.iter().any(|value| normalized == *value)
+            titles.contains(&normalized)
         });
     }
 
-    if let Some(titles_contains) = query.titles_contains.as_ref() {
-        series.retain(|row| {
+    if let Some(titles_excluded) = filters.titles_excluded.as_ref() {
+        series = filter_rows(series, |row| {
+            let normalized = row.title.to_ascii_lowercase();
+            !titles_excluded.contains(&normalized)
+        });
+    }
+
+    if let Some(titles_contains) = filters.titles_contains.as_ref() {
+        series = filter_rows(series, |row| {
             let normalized = row.title.to_ascii_lowercase();
             titles_contains
                 .iter()
@@ -43,8 +106,8 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(titles_contains_excluded) = query.titles_contains_excluded.as_ref() {
-        series.retain(|row| {
+    if let Some(titles_contains_excluded) = filters.titles_contains_excluded.as_ref() {
+        series = filter_rows(series, |row| {
             let normalized = row.title.to_ascii_lowercase();
             !titles_contains_excluded
                 .iter()
@@ -52,8 +115,8 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(titles_begins_with) = query.titles_begins_with.as_ref() {
-        series.retain(|row| {
+    if let Some(titles_begins_with) = filters.titles_begins_with.as_ref() {
+        series = filter_rows(series, |row| {
             let normalized = row.title.to_ascii_lowercase();
             titles_begins_with
                 .iter()
@@ -61,8 +124,8 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(titles_begins_with_excluded) = query.titles_begins_with_excluded.as_ref() {
-        series.retain(|row| {
+    if let Some(titles_begins_with_excluded) = filters.titles_begins_with_excluded.as_ref() {
+        series = filter_rows(series, |row| {
             let normalized = row.title.to_ascii_lowercase();
             !titles_begins_with_excluded
                 .iter()
@@ -70,8 +133,8 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(titles_ends_with) = query.titles_ends_with.as_ref() {
-        series.retain(|row| {
+    if let Some(titles_ends_with) = filters.titles_ends_with.as_ref() {
+        series = filter_rows(series, |row| {
             let normalized = row.title.to_ascii_lowercase();
             titles_ends_with
                 .iter()
@@ -79,8 +142,8 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(titles_ends_with_excluded) = query.titles_ends_with_excluded.as_ref() {
-        series.retain(|row| {
+    if let Some(titles_ends_with_excluded) = filters.titles_ends_with_excluded.as_ref() {
+        series = filter_rows(series, |row| {
             let normalized = row.title.to_ascii_lowercase();
             !titles_ends_with_excluded
                 .iter()
@@ -88,24 +151,22 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(title_sorts) = query.title_sorts.as_ref() {
-        series.retain(|row| {
+    if let Some(title_sorts) = filters.title_sorts.as_ref() {
+        series = filter_rows(series, |row| {
             let normalized = row.title_sort.to_ascii_lowercase();
-            title_sorts.iter().any(|value| normalized == *value)
+            title_sorts.contains(&normalized)
         });
     }
 
-    if let Some(title_sorts_excluded) = query.title_sorts_excluded.as_ref() {
-        series.retain(|row| {
+    if let Some(title_sorts_excluded) = filters.title_sorts_excluded.as_ref() {
+        series = filter_rows(series, |row| {
             let normalized = row.title_sort.to_ascii_lowercase();
-            !title_sorts_excluded
-                .iter()
-                .any(|value| normalized == *value)
+            !title_sorts_excluded.contains(&normalized)
         });
     }
 
-    if let Some(title_sorts_contains) = query.title_sorts_contains.as_ref() {
-        series.retain(|row| {
+    if let Some(title_sorts_contains) = filters.title_sorts_contains.as_ref() {
+        series = filter_rows(series, |row| {
             let normalized = row.title_sort.to_ascii_lowercase();
             title_sorts_contains
                 .iter()
@@ -113,8 +174,8 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(title_sorts_contains_excluded) = query.title_sorts_contains_excluded.as_ref() {
-        series.retain(|row| {
+    if let Some(title_sorts_contains_excluded) = filters.title_sorts_contains_excluded.as_ref() {
+        series = filter_rows(series, |row| {
             let normalized = row.title_sort.to_ascii_lowercase();
             !title_sorts_contains_excluded
                 .iter()
@@ -122,8 +183,8 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(title_sorts_begins_with) = query.title_sorts_begins_with.as_ref() {
-        series.retain(|row| {
+    if let Some(title_sorts_begins_with) = filters.title_sorts_begins_with.as_ref() {
+        series = filter_rows(series, |row| {
             let normalized = row.title_sort.to_ascii_lowercase();
             title_sorts_begins_with
                 .iter()
@@ -131,9 +192,10 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(title_sorts_begins_with_excluded) = query.title_sorts_begins_with_excluded.as_ref()
+    if let Some(title_sorts_begins_with_excluded) =
+        filters.title_sorts_begins_with_excluded.as_ref()
     {
-        series.retain(|row| {
+        series = filter_rows(series, |row| {
             let normalized = row.title_sort.to_ascii_lowercase();
             !title_sorts_begins_with_excluded
                 .iter()
@@ -141,8 +203,8 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(title_sorts_ends_with) = query.title_sorts_ends_with.as_ref() {
-        series.retain(|row| {
+    if let Some(title_sorts_ends_with) = filters.title_sorts_ends_with.as_ref() {
+        series = filter_rows(series, |row| {
             let normalized = row.title_sort.to_ascii_lowercase();
             title_sorts_ends_with
                 .iter()
@@ -150,8 +212,8 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(title_sorts_ends_with_excluded) = query.title_sorts_ends_with_excluded.as_ref() {
-        series.retain(|row| {
+    if let Some(title_sorts_ends_with_excluded) = filters.title_sorts_ends_with_excluded.as_ref() {
+        series = filter_rows(series, |row| {
             let normalized = row.title_sort.to_ascii_lowercase();
             !title_sorts_ends_with_excluded
                 .iter()
@@ -159,15 +221,15 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(deleted) = query.deleted {
-        series.retain(|row| row.deleted == deleted);
+    if let Some(deleted) = filters.deleted {
+        series = filter_rows(series, |row| row.deleted == deleted);
     }
 
-    if let Some(oneshot) = query.oneshot {
-        series.retain(|row| row.oneshot == oneshot);
+    if let Some(oneshot) = filters.oneshot {
+        series = filter_rows(series, |row| row.oneshot == oneshot);
     }
 
-    if query.read_statuses.is_some() || query.read_statuses_excluded.is_some() {
+    if filters.read_statuses.is_some() || filters.read_statuses_excluded.is_some() {
         let Some(user_id) = context.user_id.as_deref() else {
             series.clear();
             let page = PageEnvelope::from_slice(vec![], query.page, query.size, 0);
@@ -176,8 +238,8 @@ pub async fn load_persisted_series_page(
 
         let read_progress = load_series_read_progress_counts(database_file, user_id).await?;
 
-        if let Some(read_statuses) = query.read_statuses.as_ref() {
-            series.retain(|row| {
+        if let Some(read_statuses) = filters.read_statuses.as_ref() {
+            series = filter_rows(series, |row| {
                 read_statuses.iter().any(|status| {
                     series_matches_read_status(
                         row,
@@ -188,8 +250,8 @@ pub async fn load_persisted_series_page(
             });
         }
 
-        if let Some(read_statuses_excluded) = query.read_statuses_excluded.as_ref() {
-            series.retain(|row| {
+        if let Some(read_statuses_excluded) = filters.read_statuses_excluded.as_ref() {
+            series = filter_rows(series, |row| {
                 !read_statuses_excluded.iter().any(|status| {
                     series_matches_read_status(
                         row,
@@ -201,9 +263,9 @@ pub async fn load_persisted_series_page(
         }
     }
 
-    if let Some(complete) = query.complete {
+    if let Some(complete) = filters.complete {
         let total_book_counts = load_series_total_book_counts(database_file).await?;
-        series.retain(|row| {
+        series = filter_rows(series, |row| {
             let Some(total_book_count) = total_book_counts.get(&row.id).copied() else {
                 return false;
             };
@@ -216,8 +278,8 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(genres) = query.genres.as_ref() {
-        series.retain(|row| {
+    if let Some(genres) = filters.genres.as_ref() {
+        series = filter_rows(series, |row| {
             row.genres.iter().any(|genre| {
                 let normalized = genre.to_ascii_lowercase();
                 genres.iter().any(|value| normalized.contains(value))
@@ -225,8 +287,8 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(genres_excluded) = query.genres_excluded.as_ref() {
-        series.retain(|row| {
+    if let Some(genres_excluded) = filters.genres_excluded.as_ref() {
+        series = filter_rows(series, |row| {
             !row.genres.iter().any(|genre| {
                 let normalized = genre.to_ascii_lowercase();
                 genres_excluded
@@ -236,12 +298,12 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(genres_null) = query.genres_null {
-        series.retain(|row| row.genres.is_empty() == genres_null);
+    if let Some(genres_null) = filters.genres_null {
+        series = filter_rows(series, |row| row.genres.is_empty() == genres_null);
     }
 
-    if let Some(tags) = query.tags.as_ref() {
-        series.retain(|row| {
+    if let Some(tags) = filters.tags.as_ref() {
+        series = filter_rows(series, |row| {
             row.tags.iter().any(|tag| {
                 let normalized = tag.to_ascii_lowercase();
                 tags.iter().any(|value| normalized.contains(value))
@@ -249,8 +311,8 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(tags_excluded) = query.tags_excluded.as_ref() {
-        series.retain(|row| {
+    if let Some(tags_excluded) = filters.tags_excluded.as_ref() {
+        series = filter_rows(series, |row| {
             !row.tags.iter().any(|tag| {
                 let normalized = tag.to_ascii_lowercase();
                 tags_excluded.iter().any(|value| normalized.contains(value))
@@ -258,80 +320,80 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(tags_null) = query.tags_null {
-        series.retain(|row| row.tags.is_empty() == tags_null);
+    if let Some(tags_null) = filters.tags_null {
+        series = filter_rows(series, |row| row.tags.is_empty() == tags_null);
     }
 
-    if let Some(languages) = query.languages.as_ref() {
-        series.retain(|row| {
+    if let Some(languages) = filters.languages.as_ref() {
+        series = filter_rows(series, |row| {
             languages
                 .iter()
                 .any(|value| value.eq_ignore_ascii_case(&row.language))
         });
     }
 
-    if let Some(languages_excluded) = query.languages_excluded.as_ref() {
-        series.retain(|row| {
+    if let Some(languages_excluded) = filters.languages_excluded.as_ref() {
+        series = filter_rows(series, |row| {
             !languages_excluded
                 .iter()
                 .any(|value| value.eq_ignore_ascii_case(&row.language))
         });
     }
 
-    if let Some(publishers) = query.publishers.as_ref() {
-        series.retain(|row| {
+    if let Some(publishers) = filters.publishers.as_ref() {
+        series = filter_rows(series, |row| {
             publishers
                 .iter()
                 .any(|value| value.eq_ignore_ascii_case(&row.publisher))
         });
     }
 
-    if let Some(publishers_excluded) = query.publishers_excluded.as_ref() {
-        series.retain(|row| {
+    if let Some(publishers_excluded) = filters.publishers_excluded.as_ref() {
+        series = filter_rows(series, |row| {
             !publishers_excluded
                 .iter()
                 .any(|value| value.eq_ignore_ascii_case(&row.publisher))
         });
     }
 
-    if let Some(age_ratings) = query.age_ratings.as_ref() {
-        series.retain(|row| {
+    if let Some(age_ratings) = filters.age_ratings.as_ref() {
+        series = filter_rows(series, |row| {
             row.age_rating
-                .map(|rating| age_ratings.iter().any(|value| *value == rating))
+                .map(|rating| age_ratings.contains(&rating))
                 .unwrap_or(false)
         });
     }
 
-    if let Some(age_ratings_excluded) = query.age_ratings_excluded.as_ref() {
-        series.retain(|row| {
+    if let Some(age_ratings_excluded) = filters.age_ratings_excluded.as_ref() {
+        series = filter_rows(series, |row| {
             row.age_rating
-                .map(|rating| !age_ratings_excluded.iter().any(|value| *value == rating))
+                .map(|rating| !age_ratings_excluded.contains(&rating))
                 .unwrap_or(true)
         });
     }
 
-    if let Some(age_ratings_null) = query.age_ratings_null {
-        series.retain(|row| row.age_rating.is_none() == age_ratings_null);
+    if let Some(age_ratings_null) = filters.age_ratings_null {
+        series = filter_rows(series, |row| row.age_rating.is_none() == age_ratings_null);
     }
 
-    if let Some(age_rating_gt) = query.age_rating_gt {
-        series.retain(|row| {
+    if let Some(age_rating_gt) = filters.age_rating_gt {
+        series = filter_rows(series, |row| {
             row.age_rating
                 .map(|rating| rating > age_rating_gt)
                 .unwrap_or(false)
         });
     }
 
-    if let Some(age_rating_lt) = query.age_rating_lt {
-        series.retain(|row| {
+    if let Some(age_rating_lt) = filters.age_rating_lt {
+        series = filter_rows(series, |row| {
             row.age_rating
                 .map(|rating| rating < age_rating_lt)
                 .unwrap_or(false)
         });
     }
 
-    if let Some(sharing_labels) = query.sharing_labels.as_ref() {
-        series.retain(|row| {
+    if let Some(sharing_labels) = filters.sharing_labels.as_ref() {
+        series = filter_rows(series, |row| {
             row.labels.iter().any(|label| {
                 let normalized = label.to_ascii_lowercase();
                 sharing_labels
@@ -341,8 +403,8 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(sharing_labels_excluded) = query.sharing_labels_excluded.as_ref() {
-        series.retain(|row| {
+    if let Some(sharing_labels_excluded) = filters.sharing_labels_excluded.as_ref() {
+        series = filter_rows(series, |row| {
             !row.labels.iter().any(|label| {
                 let normalized = label.to_ascii_lowercase();
                 sharing_labels_excluded
@@ -352,12 +414,12 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(sharing_labels_null) = query.sharing_labels_null {
-        series.retain(|row| row.labels.is_empty() == sharing_labels_null);
+    if let Some(sharing_labels_null) = filters.sharing_labels_null {
+        series = filter_rows(series, |row| row.labels.is_empty() == sharing_labels_null);
     }
 
-    if let Some(authors) = query.authors.as_ref() {
-        series.retain(|row| {
+    if let Some(authors) = filters.authors.as_ref() {
+        series = filter_rows(series, |row| {
             row.books_metadata_authors.iter().any(|author| {
                 let normalized = author.to_ascii_lowercase();
                 authors
@@ -367,8 +429,8 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(authors_excluded) = query.authors_excluded.as_ref() {
-        series.retain(|row| {
+    if let Some(authors_excluded) = filters.authors_excluded.as_ref() {
+        series = filter_rows(series, |row| {
             !row.books_metadata_authors.iter().any(|author| {
                 let normalized = author.to_ascii_lowercase();
                 authors_excluded
@@ -378,24 +440,24 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(series_statuses) = query.series_statuses.as_ref() {
-        series.retain(|row| {
+    if let Some(series_statuses) = filters.series_statuses.as_ref() {
+        series = filter_rows(series, |row| {
             series_statuses
                 .iter()
                 .any(|value| value.eq_ignore_ascii_case(&row.status))
         });
     }
 
-    if let Some(series_statuses_excluded) = query.series_statuses_excluded.as_ref() {
-        series.retain(|row| {
+    if let Some(series_statuses_excluded) = filters.series_statuses_excluded.as_ref() {
+        series = filter_rows(series, |row| {
             !series_statuses_excluded
                 .iter()
                 .any(|value| value.eq_ignore_ascii_case(&row.status))
         });
     }
 
-    if let Some(release_dates) = query.release_dates.as_ref() {
-        series.retain(|row| {
+    if let Some(release_dates) = filters.release_dates.as_ref() {
+        series = filter_rows(series, |row| {
             let Some(release_date) = row.books_metadata_release_date.as_ref() else {
                 return false;
             };
@@ -403,8 +465,8 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(release_dates_excluded) = query.release_dates_excluded.as_ref() {
-        series.retain(|row| {
+    if let Some(release_dates_excluded) = filters.release_dates_excluded.as_ref() {
+        series = filter_rows(series, |row| {
             let Some(release_date) = row.books_metadata_release_date.as_ref() else {
                 return true;
             };
@@ -414,12 +476,14 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(release_dates_null) = query.release_dates_null {
-        series.retain(|row| row.books_metadata_release_date.is_none() == release_dates_null);
+    if let Some(release_dates_null) = filters.release_dates_null {
+        series = filter_rows(series, |row| {
+            row.books_metadata_release_date.is_none() == release_dates_null
+        });
     }
 
-    if let Some(release_date_gt) = query.release_date_gt.as_ref() {
-        series.retain(|row| {
+    if let Some(release_date_gt) = filters.release_date_gt.as_ref() {
+        series = filter_rows(series, |row| {
             let Some(release_date) = row.books_metadata_release_date.as_ref() else {
                 return false;
             };
@@ -427,8 +491,8 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(release_date_lt) = query.release_date_lt.as_ref() {
-        series.retain(|row| {
+    if let Some(release_date_lt) = filters.release_date_lt.as_ref() {
+        series = filter_rows(series, |row| {
             let Some(release_date) = row.books_metadata_release_date.as_ref() else {
                 return false;
             };
@@ -436,11 +500,11 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(release_date_in_last_days) = query.release_date_in_last_days
+    if let Some(release_date_in_last_days) = filters.release_date_in_last_days
         && let Some(cutoff) =
             persisted_utc_date_minus_days(database_file, release_date_in_last_days).await?
     {
-        series.retain(|row| {
+        series = filter_rows(series, |row| {
             let Some(release_date) = row.books_metadata_release_date.as_ref() else {
                 return false;
             };
@@ -448,11 +512,11 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(release_date_not_in_last_days) = query.release_date_not_in_last_days
+    if let Some(release_date_not_in_last_days) = filters.release_date_not_in_last_days
         && let Some(cutoff) =
             persisted_utc_date_minus_days(database_file, release_date_not_in_last_days).await?
     {
-        series.retain(|row| {
+        series = filter_rows(series, |row| {
             let Some(release_date) = row.books_metadata_release_date.as_ref() else {
                 return false;
             };
@@ -460,8 +524,8 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(release_date_begins_with) = query.release_date_begins_with.as_ref() {
-        series.retain(|row| {
+    if let Some(release_date_begins_with) = filters.release_date_begins_with.as_ref() {
+        series = filter_rows(series, |row| {
             let Some(release_date) = row.books_metadata_release_date.as_ref() else {
                 return false;
             };
@@ -472,8 +536,8 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(release_date_ends_with) = query.release_date_ends_with.as_ref() {
-        series.retain(|row| {
+    if let Some(release_date_ends_with) = filters.release_date_ends_with.as_ref() {
+        series = filter_rows(series, |row| {
             let Some(release_date) = row.books_metadata_release_date.as_ref() else {
                 return false;
             };
@@ -485,9 +549,9 @@ pub async fn load_persisted_series_page(
     }
 
     if let Some(release_date_begins_with_excluded) =
-        query.release_date_begins_with_excluded.as_ref()
+        filters.release_date_begins_with_excluded.as_ref()
     {
-        series.retain(|row| {
+        series = filter_rows(series, |row| {
             let Some(release_date) = row.books_metadata_release_date.as_ref() else {
                 return true;
             };
@@ -498,8 +562,9 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(release_date_ends_with_excluded) = query.release_date_ends_with_excluded.as_ref() {
-        series.retain(|row| {
+    if let Some(release_date_ends_with_excluded) = filters.release_date_ends_with_excluded.as_ref()
+    {
+        series = filter_rows(series, |row| {
             let Some(release_date) = row.books_metadata_release_date.as_ref() else {
                 return true;
             };
@@ -510,8 +575,8 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(release_date_contains_excluded) = query.release_date_contains_excluded.as_ref() {
-        series.retain(|row| {
+    if let Some(release_date_contains_excluded) = filters.release_date_contains_excluded.as_ref() {
+        series = filter_rows(series, |row| {
             let Some(release_date) = row.books_metadata_release_date.as_ref() else {
                 return true;
             };
@@ -522,35 +587,14 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(collection_ids) = query.collection_ids.as_ref() {
+    if let Some(collection_ids) = filters.collection_ids.as_ref() {
         let memberships = load_collection_memberships(database_file).await?;
-        series.retain(|row| {
+        series = filter_rows(series, |row| {
             memberships
                 .get(&row.id)
                 .into_iter()
                 .flatten()
                 .any(|collection_id| collection_ids.iter().any(|id| id == collection_id))
-        });
-    }
-
-    if let Some(search) = query.search.as_ref() {
-        let normalized = search.trim().to_ascii_lowercase();
-        if !normalized.is_empty() {
-            series.retain(|row| {
-                row.title.to_ascii_lowercase().contains(&normalized)
-                    || row.title_sort.to_ascii_lowercase().contains(&normalized)
-            });
-        }
-    }
-
-    if let Some((pattern, field)) = query.search_regex.as_ref() {
-        series.retain(|row| {
-            let candidate = if field == "title_sort" {
-                row.title_sort.as_str()
-            } else {
-                row.title.as_str()
-            };
-            matches_search_pattern(candidate, pattern)
         });
     }
 
@@ -562,6 +606,12 @@ pub async fn load_persisted_series_page(
                     .to_ascii_lowercase()
                     .cmp(&right.title_sort.to_ascii_lowercase()),
                 PersistedSeriesSortMode::Latest => right.last_modified.cmp(&left.last_modified),
+                PersistedSeriesSortMode::RelevanceAsc => {
+                    compare_relevance_ranks(&relevance_ranks, &left.id, &right.id, false)
+                }
+                PersistedSeriesSortMode::RelevanceDesc => {
+                    compare_relevance_ranks(&relevance_ranks, &left.id, &right.id, true)
+                }
             };
             if ordering != std::cmp::Ordering::Equal {
                 return ordering;
@@ -594,4 +644,19 @@ pub async fn load_persisted_series_page(
         page_size,
         total_elements,
     ))
+}
+
+fn compare_relevance_ranks(
+    relevance_ranks: &HashMap<String, usize>,
+    left_id: &str,
+    right_id: &str,
+    descending: bool,
+) -> std::cmp::Ordering {
+    let left_rank = relevance_ranks.get(left_id).copied();
+    let right_rank = relevance_ranks.get(right_id).copied();
+    match (left_rank, right_rank) {
+        (Some(left), Some(right)) if descending => left.cmp(&right),
+        (Some(left), Some(right)) => right.cmp(&left),
+        _ => std::cmp::Ordering::Equal,
+    }
 }

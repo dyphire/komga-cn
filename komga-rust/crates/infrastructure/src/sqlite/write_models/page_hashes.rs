@@ -10,7 +10,12 @@ pub async fn upsert_page_hash(
 ) -> Result<(), sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
     sqlx::query(
-        "INSERT INTO PAGE_HASH (HASH, SIZE, ACTION, DELETE_COUNT, CREATED_DATE, LAST_MODIFIED_DATE)\n         VALUES (?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)\n         ON CONFLICT(HASH) DO UPDATE\n         SET SIZE = excluded.SIZE,\n             ACTION = excluded.ACTION,\n             LAST_MODIFIED_DATE = CURRENT_TIMESTAMP",
+        "INSERT INTO PAGE_HASH (HASH, SIZE, ACTION, DELETE_COUNT, CREATED_DATE, LAST_MODIFIED_DATE) \
+         VALUES (?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) \
+         ON CONFLICT(HASH) DO UPDATE \
+         SET SIZE = excluded.SIZE, \
+             ACTION = excluded.ACTION, \
+             LAST_MODIFIED_DATE = CURRENT_TIMESTAMP",
     )
     .bind(page_hash)
     .bind(size)
@@ -35,7 +40,10 @@ pub async fn delete_all_page_hash_matches(
 
     if deleted > 0 {
         sqlx::query(
-            "UPDATE PAGE_HASH\n             SET DELETE_COUNT = DELETE_COUNT + ?,\n                 LAST_MODIFIED_DATE = CURRENT_TIMESTAMP\n             WHERE HASH = ?",
+            "UPDATE PAGE_HASH \
+             SET DELETE_COUNT = DELETE_COUNT + ?, \
+                 LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
+             WHERE HASH = ?",
         )
         .bind(deleted as i64)
         .bind(page_hash)
@@ -57,7 +65,11 @@ pub async fn delete_page_hash_match(
     let mut tx = pool.begin().await?;
 
     let deleted = sqlx::query(
-        "DELETE\n         FROM MEDIA_PAGE\n         WHERE FILE_HASH = ?\n         AND BOOK_ID = ?\n         AND NUMBER = ?",
+        "DELETE \
+         FROM MEDIA_PAGE \
+         WHERE FILE_HASH = ? \
+         AND BOOK_ID = ? \
+         AND NUMBER = ?",
     )
     .bind(page_hash)
     .bind(book_id)
@@ -68,7 +80,10 @@ pub async fn delete_page_hash_match(
 
     if deleted > 0 {
         sqlx::query(
-            "UPDATE PAGE_HASH\n             SET DELETE_COUNT = DELETE_COUNT + ?,\n                 LAST_MODIFIED_DATE = CURRENT_TIMESTAMP\n             WHERE HASH = ?",
+            "UPDATE PAGE_HASH \
+             SET DELETE_COUNT = DELETE_COUNT + ?, \
+                 LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
+             WHERE HASH = ?",
         )
         .bind(deleted as i64)
         .bind(page_hash)

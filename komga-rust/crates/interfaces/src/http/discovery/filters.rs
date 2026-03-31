@@ -270,6 +270,7 @@ pub(super) fn parse_books_composite_filters(
     for child in children {
         child_count += 1;
         let parsed = parse_runtime_books_filters_with_mode(Some(child), mode)?;
+        let parsed = parsed.criteria;
         let is_series_leaf = parsed.series_ids.is_some()
             && parsed.series_ids_excluded.is_none()
             && parsed.read_list_ids.is_none()
@@ -694,6 +695,7 @@ pub(super) fn parse_composite_filters(
 
     for child in children {
         let parsed = parse_runtime_series_filters_with_mode(Some(child), mode)?;
+        let parsed = parsed.criteria;
         if let Some(ids) = parsed.library_ids {
             library_groups.push(ids);
         }

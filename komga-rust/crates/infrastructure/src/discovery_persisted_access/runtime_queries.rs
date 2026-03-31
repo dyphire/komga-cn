@@ -114,15 +114,30 @@ pub async fn load_persisted_book_tags(
             .fetch_all(&pool)
             .await
         }
-        BookTagsScope::Library(library_id) => {
+        BookTagsScope::Libraries(library_ids) => {
+            let mut query = QueryBuilder::<Sqlite>::new(
+                "SELECT bt.TAG \
+                 FROM BOOK_METADATA_TAG bt \
+                 JOIN BOOK b ON b.ID = bt.BOOK_ID \
+                 WHERE b.LIBRARY_ID IN (",
+            );
+            let mut separated = query.separated(",");
+            for library_id in library_ids {
+                separated.push_bind(library_id);
+            }
+            separated.push_unseparated(") ORDER BY lower(bt.TAG), bt.TAG, b.ID");
+            query.build().fetch_all(&pool).await
+        }
+        BookTagsScope::ReadList(readlist_id) => {
             sqlx::query(
                 "SELECT bt.TAG \
                  FROM BOOK_METADATA_TAG bt \
                  JOIN BOOK b ON b.ID = bt.BOOK_ID \
-                 WHERE b.LIBRARY_ID = ? \
+                 JOIN READLIST_BOOK rb ON rb.BOOK_ID = b.ID \
+                 WHERE rb.READLIST_ID = ? \
                  ORDER BY lower(bt.TAG), bt.TAG, b.ID",
             )
-            .bind(library_id)
+            .bind(readlist_id)
             .fetch_all(&pool)
             .await
         }

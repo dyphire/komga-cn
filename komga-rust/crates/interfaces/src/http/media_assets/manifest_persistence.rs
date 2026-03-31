@@ -90,6 +90,13 @@ pub(super) async fn build_persisted_book_manifest(
         return Ok(ManifestBuildOutcome::Forbidden);
     }
 
+    let Some(media) = load_persisted_book_media(database_file, book_id).await? else {
+        return Ok(ManifestBuildOutcome::NotFound);
+    };
+    if !user_can_access_book_media(database_file, book_id, &user, &media).await {
+        return Ok(ManifestBuildOutcome::Forbidden);
+    }
+
     let profile = manifest_profile_from_media_type(&media_type);
     if !manifest_variant_matches_profile(variant, profile) {
         return Ok(ManifestBuildOutcome::NotFound);

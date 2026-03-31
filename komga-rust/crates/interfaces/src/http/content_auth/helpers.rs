@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use super::*;
 use komga_application::identity_access::random_uuid_like;
 
@@ -228,7 +230,7 @@ pub(super) async fn authenticated_user(
         .await
         .unwrap_or(AuthOutcome::Missing)
     {
-        AuthOutcome::Valid(user) => return Some(user),
+        AuthOutcome::Valid(user) => return Some(*user),
         AuthOutcome::Invalid => return None,
         AuthOutcome::Missing => {}
     }
@@ -241,7 +243,7 @@ pub(super) async fn authenticated_user(
         .await
         .unwrap_or(AuthOutcome::Missing)
     {
-        AuthOutcome::Valid(user) => Some(user),
+        AuthOutcome::Valid(user) => Some(*user),
         AuthOutcome::Invalid | AuthOutcome::Missing => None,
     }
 }

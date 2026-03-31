@@ -1,3 +1,4 @@
+pub mod cache;
 pub mod discovery;
 pub mod discovery_auth;
 pub mod helpers;

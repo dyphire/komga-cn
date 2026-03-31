@@ -14,13 +14,12 @@ use serde_json::{Value, json};
 
 use crate::http::discovery_auth::DiscoveryAuthState;
 use crate::http::identity_access::auth::{require_auth, resolved_auth_user, user_id};
-use crate::http::state::RuntimeProfile;
 
-use super::super::AuthDatabaseState;
+use super::super::{AuthDatabaseState, OperationalState};
 use super::helpers::{
-    DiscoveryOwnershipRoute, DiscoveryShape, books_page_payload, discovery_ownership_route,
-    extract_full_text_search, mark_persisted_owned, mark_runtime_owned, matches_search_pattern,
-    parse_search_regex, query_bool, query_value, query_values, wants_persisted_marker,
+    books_page_payload, contains_legacy_search_input, contains_legacy_search_query,
+    extract_full_text_search, mark_persisted_owned, mark_runtime_owned, query_bool, query_value,
+    query_values, wants_persisted_marker,
 };
 
 #[path = "books.rs"]
@@ -38,15 +37,15 @@ pub use books::{book_tags, books, books_duplicates, books_latest, books_list, bo
 pub use detail::{
     DiscoveryDetailAccessBackends, DiscoveryDetailBooksAccessBackend,
     DiscoveryDetailCollectionsAccessBackend, DiscoveryDetailReadlistsAccessBackend,
-    DiscoveryDetailSeriesAccessBackend, ExistingSeriesMetadataRecord, PersistedBookDetailRecord,
-    PersistedBookResourceRecord, PersistedBookSiblingDirectionRecord,
-    PersistedCollectionAccessRecord, PersistedCollectionSeriesAccessRecord,
+    DiscoveryDetailSeriesAccessBackend, ExistingSeriesMetadataRecord, PersistedBookAuthorRecord,
+    PersistedBookDetailRecord, PersistedBookResourceRecord, PersistedBookSiblingDirectionRecord,
+    PersistedCollectionAccessRecord, PersistedComicrackMatchCandidateRecord,
     PersistedReadProgressRecord, PersistedReadlistBookRecord, PersistedReadlistRecord,
     PersistedSeriesCollectionRecord, PersistedSeriesDetailRecord, PersistedSeriesResourceRecord,
-    PersistedSeriesRestrictionRecord, SeriesSummaryRecord, book_detail, book_readlists,
-    book_sibling_next, book_sibling_previous, collection_create, collection_delete,
-    collection_detail, collection_series, collection_update, collections,
-    install_discovery_detail_access_backends, readlist_book_sibling_next,
+    PersistedSeriesRestrictionRecord, SeriesAlternateTitleRecord, SeriesMetadataLinkRecord,
+    SeriesSummaryRecord, book_detail, book_readlists, book_sibling_next, book_sibling_previous,
+    collection_create, collection_delete, collection_detail, collection_series, collection_update,
+    collections, install_discovery_detail_access_backends, readlist_book_sibling_next,
     readlist_book_sibling_previous, readlist_books, readlist_create, readlist_delete,
     readlist_detail, readlist_match_comicrack, readlist_update, readlists,
     resolve_book_id_for_persisted, resolve_series_id_for_persisted, series_collections,
@@ -154,20 +153,12 @@ pub(super) async fn sharing_labels_route(
 }
 
 pub(super) async fn series_route(
-    Extension(profile): Extension<RuntimeProfile>,
     Extension(auth_state): Extension<DiscoveryAuthState>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    series(
-        profile,
-        headers,
-        uri,
-        auth_state,
-        auth_db.database_file.as_path(),
-    )
-    .await
+    series(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn series_new_route(
@@ -237,11 +228,19 @@ pub(super) async fn series_collections_route(
 
 pub(super) async fn series_metadata_update_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(operational): Extension<OperationalState>,
     headers: HeaderMap,
     AxumPath(series_id): AxumPath<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    series_metadata_update(headers, auth_db.database_file.as_path(), AxumPath(series_id), body).await
+    series_metadata_update(
+        headers,
+        auth_db.database_file.as_path(),
+        operational.runtime.lucene_data_directory.as_path(),
+        AxumPath(series_id),
+        body,
+    )
+    .await
 }
 
 pub(super) async fn series_alphabetical_groups_route(

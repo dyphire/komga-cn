@@ -1,11 +1,11 @@
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 use zip::ZipArchive;
 
+use crate::rar_support::read_rar_entry_bytes;
 use crate::sqlite::read_models::{
     load_page_hash_matches_page as load_page_hash_matches_page_model,
     load_page_hash_thumbnail as load_page_hash_thumbnail_model,
@@ -128,16 +128,7 @@ fn read_unknown_thumbnail_bytes(source_path: &Path, file_name: &str) -> Option<V
     }
 
     if matches!(extension.as_str(), "cbr" | "rar") {
-        let output = Command::new("unrar")
-            .arg("p")
-            .arg("-inul")
-            .arg(source_path)
-            .arg(file_name)
-            .output()
-            .ok()?;
-        if output.status.success() && !output.stdout.is_empty() {
-            return Some(output.stdout);
-        }
+        return read_rar_entry_bytes(source_path, file_name).ok().flatten();
     }
 
     None

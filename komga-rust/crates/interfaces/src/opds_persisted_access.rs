@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use std::collections::HashSet;
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -112,7 +114,7 @@ pub struct OpdsPersistedAccessBackend {
             + Send
             + Sync,
     >,
-    pub load_search_results: Arc<
+    pub load_unified_search_results: Arc<
         dyn Fn(
                 PathBuf,
                 String,
@@ -223,7 +225,7 @@ pub async fn load_readlist_books(
     (backend().load_readlist_books)(database_file.to_path_buf(), readlist_id.to_string()).await
 }
 
-pub async fn load_search_results(
+pub async fn load_unified_search_results(
     database_file: &Path,
     query: &str,
 ) -> Result<
@@ -235,7 +237,7 @@ pub async fn load_search_results(
     ),
     String,
 > {
-    (backend().load_search_results)(database_file.to_path_buf(), query.to_string()).await
+    (backend().load_unified_search_results)(database_file.to_path_buf(), query.to_string()).await
 }
 
 pub async fn load_publishers(

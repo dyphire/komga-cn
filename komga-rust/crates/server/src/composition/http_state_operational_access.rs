@@ -362,12 +362,21 @@ pub(super) fn compose_operational_settings_access_backend() -> OperationalSettin
         load_font_file: Arc::new(|path, family, file| {
             infrastructure_filesystem::load_font_file(path.as_path(), &family, &file)
         }),
-        delete_syncpoints_by_user_and_key_id: Arc::new(|database_file, user_id, key_id| {
+        delete_syncpoints_by_user: Arc::new(|database_file, user_id| {
             Box::pin(async move {
-                infrastructure_operational_settings::delete_syncpoints_by_user_and_key_id(
+                infrastructure_operational_settings::delete_syncpoints_by_user(
                     database_file.as_path(),
                     &user_id,
-                    &key_id,
+                )
+                .await
+            })
+        }),
+        delete_syncpoints_by_user_and_key_ids: Arc::new(|database_file, user_id, key_ids| {
+            Box::pin(async move {
+                infrastructure_operational_settings::delete_syncpoints_by_user_and_key_ids(
+                    database_file.as_path(),
+                    &user_id,
+                    key_ids.as_slice(),
                 )
                 .await
             })

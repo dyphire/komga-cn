@@ -85,7 +85,7 @@ pub async fn load_persisted_book_detail(
             metadata_number: row.metadata_number,
             metadata_number_sort: row.metadata_number_sort,
             metadata_release_date: row.metadata_release_date,
-            metadata_authors: parse_csv_values(&row.metadata_authors),
+            metadata_authors: parse_metadata_authors(&row.metadata_authors),
             metadata_tags: parse_csv_values(&row.metadata_tags),
             metadata_isbn: row.metadata_isbn,
             metadata_created: row.metadata_created,
@@ -104,6 +104,22 @@ pub async fn load_persisted_book_detail(
             oneshot: row.oneshot,
         });
     Ok(model)
+}
+
+fn parse_metadata_authors(raw: &str) -> Vec<BookMetadataAuthorReadModel> {
+    raw.split('\u{001F}')
+        .filter(|entry| !entry.is_empty())
+        .map(|author| match author.split_once('\u{001E}') {
+            Some((name, role)) => BookMetadataAuthorReadModel {
+                name: name.to_string(),
+                role: role.to_string(),
+            },
+            None => BookMetadataAuthorReadModel {
+                name: author.to_string(),
+                role: String::new(),
+            },
+        })
+        .collect()
 }
 
 pub async fn load_persisted_book_sibling_detail(

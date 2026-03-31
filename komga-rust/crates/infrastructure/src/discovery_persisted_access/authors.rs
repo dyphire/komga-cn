@@ -1,49 +1,5 @@
 use super::*;
 
-pub async fn load_persisted_authors(
-    database_file: &FsPath,
-    library_id: Option<&str>,
-) -> Result<Vec<AuthorEntry>, String> {
-    let pool = connect_pool(database_file, 1)
-        .await
-        .map_err(|error| format!("open authors db: {error}"))?;
-
-    let rows = if let Some(library_id) = library_id {
-        sqlx::query(
-            "SELECT a.NAME, a.ROLE \
-             FROM BOOK_METADATA_AUTHOR a \
-             JOIN BOOK b ON b.ID = a.BOOK_ID \
-             WHERE b.LIBRARY_ID = ? \
-             ORDER BY lower(a.NAME), lower(a.ROLE), a.NAME, a.ROLE, b.ID",
-        )
-        .bind(library_id)
-        .fetch_all(&pool)
-        .await
-    } else {
-        sqlx::query(
-            "SELECT a.NAME, a.ROLE \
-             FROM BOOK_METADATA_AUTHOR a \
-             JOIN BOOK b ON b.ID = a.BOOK_ID \
-             ORDER BY lower(a.NAME), lower(a.ROLE), a.NAME, a.ROLE, b.ID",
-        )
-        .fetch_all(&pool)
-        .await
-    }
-    .map_err(|error| format!("query persisted authors: {error}"))?;
-
-    let mut authors = Vec::with_capacity(rows.len());
-    let mut seen = BTreeSet::new();
-    for row in rows {
-        let name = row.get::<String, _>("NAME");
-        let role = row.get::<String, _>("ROLE");
-        if seen.insert((name.clone(), role.clone())) {
-            authors.push(AuthorEntry { name, role });
-        }
-    }
-
-    Ok(authors)
-}
-
 pub async fn load_persisted_author_names(
     database_file: &FsPath,
     search: &str,

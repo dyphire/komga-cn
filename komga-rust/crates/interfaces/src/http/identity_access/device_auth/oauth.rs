@@ -327,7 +327,7 @@ fn oauth2_userinfo_candidates(client: &crate::http::state::OAuth2ClientConfig) -
     let mut candidates = Vec::new();
     if let Ok(token_url) = reqwest::Url::parse(client.token_uri.as_str()) {
         let mut userinfo = token_url.clone();
-        if let Some(mut segments) = userinfo.path_segments_mut().ok() {
+        if let Ok(mut segments) = userinfo.path_segments_mut() {
             segments.pop_if_empty();
             segments.pop();
             segments.push("userinfo");
@@ -337,7 +337,7 @@ fn oauth2_userinfo_candidates(client: &crate::http::state::OAuth2ClientConfig) -
 
     if let Ok(auth_url) = reqwest::Url::parse(client.authorization_uri.as_str()) {
         let mut userinfo = auth_url.clone();
-        if let Some(mut segments) = userinfo.path_segments_mut().ok() {
+        if let Ok(mut segments) = userinfo.path_segments_mut() {
             segments.pop_if_empty();
             segments.pop();
             segments.push("userinfo");

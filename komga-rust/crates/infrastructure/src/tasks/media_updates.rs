@@ -21,18 +21,18 @@ pub fn persist_book_hash(
         Box::pin(async move {
             let sql = if koreader {
                 r#"
-UPDATE BOOK
-SET FILE_HASH_KOREADER = ?,
-    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-WHERE ID = ?
-"#
+                UPDATE BOOK
+                SET FILE_HASH_KOREADER = ?,
+                    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+                WHERE ID = ?
+                "#
             } else {
                 r#"
-UPDATE BOOK
-SET FILE_HASH = ?,
-    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-WHERE ID = ?
-"#
+                UPDATE BOOK
+                SET FILE_HASH = ?,
+                    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+                WHERE ID = ?
+                "#
             };
 
             sqlx::query(sql)
@@ -69,11 +69,11 @@ pub fn persist_removed_hashed_pages(
             for (hash, deleted) in deleted_count_by_hash {
                 sqlx::query(
                     r#"
-UPDATE PAGE_HASH
-SET DELETE_COUNT = DELETE_COUNT + ?,
-    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-WHERE HASH = ?
-"#,
+                    UPDATE PAGE_HASH
+                    SET DELETE_COUNT = DELETE_COUNT + ?,
+                        LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+                    WHERE HASH = ?
+                    "#,
                 )
                 .bind(deleted)
                 .bind(hash)
@@ -86,14 +86,14 @@ WHERE HASH = ?
 
             sqlx::query(
                 r#"
-UPDATE BOOK
-SET FILE_LAST_MODIFIED = ?,
-    FILE_SIZE = ?,
-    FILE_HASH = '',
-    FILE_HASH_KOREADER = '',
-    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-WHERE ID = ?
-"#,
+                UPDATE BOOK
+                SET FILE_LAST_MODIFIED = ?,
+                    FILE_SIZE = ?,
+                    FILE_HASH = '',
+                    FILE_HASH_KOREADER = '',
+                    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+                WHERE ID = ?
+                "#,
             )
             .bind(file_last_modified)
             .bind(file_size)
@@ -138,13 +138,13 @@ pub fn persist_book_extension_repair(
 
             sqlx::query(
                 r#"
-UPDATE BOOK
-SET URL = ?,
-    FILE_LAST_MODIFIED = ?,
-    FILE_SIZE = ?,
-    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-WHERE ID = ?
-"#,
+                UPDATE BOOK
+                SET URL = ?,
+                    FILE_LAST_MODIFIED = ?,
+                    FILE_SIZE = ?,
+                    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+                WHERE ID = ?
+                "#,
             )
             .bind(&destination_url)
             .bind(file_last_modified)
@@ -160,11 +160,11 @@ WHERE ID = ?
 
             sqlx::query(
                 r#"
-UPDATE SIDECAR
-SET PARENT_URL = ?
-WHERE LIBRARY_ID = ?
-  AND PARENT_URL = ?
-"#,
+                UPDATE SIDECAR
+                SET PARENT_URL = ?
+                WHERE LIBRARY_ID = ?
+                AND PARENT_URL = ?
+                "#,
             )
             .bind(&destination_url)
             .bind(&library_id)
@@ -213,15 +213,15 @@ pub fn persist_book_conversion(
 
             sqlx::query(
                 r#"
-UPDATE BOOK
-SET URL = ?,
-    FILE_LAST_MODIFIED = ?,
-    FILE_SIZE = ?,
-    FILE_HASH = '',
-    FILE_HASH_KOREADER = '',
-    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-WHERE ID = ?
-"#,
+                UPDATE BOOK
+                SET URL = ?,
+                    FILE_LAST_MODIFIED = ?,
+                    FILE_SIZE = ?,
+                    FILE_HASH = '',
+                    FILE_HASH_KOREADER = '',
+                    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+                WHERE ID = ?
+                "#,
             )
             .bind(&destination_url)
             .bind(file_last_modified)
@@ -235,11 +235,11 @@ WHERE ID = ?
 
             sqlx::query(
                 r#"
-UPDATE SIDECAR
-SET PARENT_URL = ?
-WHERE LIBRARY_ID = ?
-  AND PARENT_URL = ?
-"#,
+                UPDATE SIDECAR
+                SET PARENT_URL = ?
+                WHERE LIBRARY_ID = ?
+                AND PARENT_URL = ?
+                "#,
             )
             .bind(&destination_url)
             .bind(&library_id)
@@ -252,12 +252,12 @@ WHERE LIBRARY_ID = ?
 
             sqlx::query(
                 r#"
-UPDATE MEDIA
-SET STATUS = 'OUTDATED',
-    MEDIA_TYPE = 'application/zip',
-    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-WHERE BOOK_ID = ?
-"#,
+                UPDATE MEDIA
+                SET STATUS = 'OUTDATED',
+                    MEDIA_TYPE = 'application/zip',
+                    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+                WHERE BOOK_ID = ?
+                "#,
             )
             .bind(&book_id)
             .execute(&mut *tx)

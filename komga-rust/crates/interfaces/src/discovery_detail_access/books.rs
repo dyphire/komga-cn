@@ -7,6 +7,7 @@ use std::sync::{Arc, OnceLock};
 type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
 #[derive(Clone)]
+#[allow(clippy::type_complexity)]
 pub struct DiscoveryDetailBooksAccessBackend {
     pub load_book_id_by_sorted_position:
         Arc<dyn Fn(PathBuf, usize) -> BoxFuture<Result<Option<String>, String>> + Send + Sync>,

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use axum::Json;
@@ -234,7 +234,7 @@ pub(super) async fn load_readlist_books(
     Ok(records.into_iter().map(map_readlist_book_record).collect())
 }
 
-pub(super) async fn load_search_results(
+pub(super) async fn load_unified_search_results(
     database_file: &Path,
     query: &str,
 ) -> Result<
@@ -247,7 +247,7 @@ pub(super) async fn load_search_results(
     String,
 > {
     let (series_rows, book_rows, collection_rows, readlist_rows) =
-        opds_persisted_access::load_search_results(database_file, query).await?;
+        opds_persisted_access::load_unified_search_results(database_file, query).await?;
 
     Ok((
         series_rows
@@ -281,6 +281,50 @@ pub(super) async fn load_search_results(
             })
             .collect(),
     ))
+}
+
+pub(super) async fn load_opds_v1_series_search_results(
+    database_file: &Path,
+    allowed_library_ids: &Option<HashSet<String>>,
+    search: &str,
+    publishers: &[String],
+) -> Result<Vec<PersistedSeriesSearchResult>, String> {
+    let (series, _, _, _) = load_unified_search_results(database_file, search).await?;
+
+    if publishers.is_empty() {
+        return Ok(series
+            .into_iter()
+            .filter(|row| library_visible(allowed_library_ids, &row.library_id))
+            .collect());
+    }
+
+    let visible_publisher_rows = load_series_page(
+        database_file,
+        allowed_library_ids,
+        None,
+        publishers,
+        0,
+        i64::MAX,
+    )
+    .await?;
+    let visible_by_id = visible_publisher_rows
+        .into_iter()
+        .map(|row| (row.id.clone(), row))
+        .collect::<HashMap<_, _>>();
+
+    Ok(series
+        .into_iter()
+        .filter(|row| library_visible(allowed_library_ids, &row.library_id))
+        .filter_map(|row| {
+            visible_by_id
+                .contains_key(&row.id)
+                .then_some(PersistedSeriesSearchResult {
+                    id: row.id,
+                    title: row.title,
+                    library_id: row.library_id,
+                })
+        })
+        .collect())
 }
 
 pub(super) async fn load_publishers(
@@ -613,9 +657,7 @@ pub(super) async fn validate_library_scope(
     allowed_library_ids: &Option<HashSet<String>>,
     library_id: Option<&str>,
 ) -> Option<Response> {
-    let Some(library_id) = library_id else {
-        return None;
-    };
+    let library_id = library_id?;
 
     let library = match load_library(database_file, library_id).await {
         Ok(library) => library,

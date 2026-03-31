@@ -45,7 +45,15 @@ pub(super) fn parse_runtime_series_filters_with_mode_impl(
         "Author" => parse_series_author_filter(condition, mode),
         "AllOfSeries" => parse_composite_filters(condition, true, mode),
         "AnyOfSeries" => parse_composite_filters(condition, false, mode),
-        _unsupported => Ok(RuntimeSeriesFilters::default()),
+        unsupported => {
+            if mode.is_strict() {
+                Err(DiscoveryError::InvalidSemantics(format!(
+                    "unsupported series condition type: {unsupported}",
+                )))
+            } else {
+                Ok(RuntimeSeriesFilters::default())
+            }
+        }
     }
 }
 
@@ -95,7 +103,15 @@ pub(super) fn parse_runtime_books_filters_with_mode_impl(
         "ReleaseDate" => parse_books_release_date_filter(condition, mode),
         "AllOfBook" => parse_books_composite_filters(condition, true, mode),
         "AnyOfBook" => parse_books_composite_filters(condition, false, mode),
-        _unsupported => Ok(RuntimeBooksFilters::default()),
+        unsupported => {
+            if mode.is_strict() {
+                Err(DiscoveryError::InvalidSemantics(format!(
+                    "unsupported books condition type: {unsupported}",
+                )))
+            } else {
+                Ok(RuntimeBooksFilters::default())
+            }
+        }
     }
 }
 

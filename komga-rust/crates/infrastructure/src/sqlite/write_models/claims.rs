@@ -29,7 +29,15 @@ pub async fn persist_initial_admin_user(
     let mut tx = pool.begin().await?;
 
     sqlx::query(
-        "INSERT INTO USER (\n             ID,\n             EMAIL,\n             PASSWORD,\n             SHARED_ALL_LIBRARIES,\n             AGE_RESTRICTION,\n             AGE_RESTRICTION_ALLOW_ONLY\n         )\n         VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO USER ( \
+             ID, \
+             EMAIL, \
+             PASSWORD, \
+             SHARED_ALL_LIBRARIES, \
+             AGE_RESTRICTION, \
+             AGE_RESTRICTION_ALLOW_ONLY \
+         ) \
+         VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(user_id)
     .bind(email)

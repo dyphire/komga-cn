@@ -71,6 +71,12 @@ pub struct PersistedBookFeedRecord {
     pub last_modified: String,
 }
 
+fn placeholder_list(count: usize) -> String {
+    std::iter::repeat_n("?", count)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 pub async fn load_libraries(
     database_file: &Path,
 ) -> Result<Vec<PersistedLibraryRecord>, sqlx::Error> {
@@ -285,7 +291,10 @@ pub async fn load_readlist_books(
          JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
          WHERE rb.READLIST_ID = ? \
          AND b.DELETED_DATE IS NULL \
-         GROUP BY b.ID, b.LIBRARY_ID, TITLE, FILE_NAME, MEDIA_TYPE, AGE_RATING, LAST_MODIFIED \
+         GROUP BY b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME), b.NAME, \
+                  COALESCE(m.MEDIA_TYPE, 'application/octet-stream'), \
+                  COALESCE(sm.AGE_RATING, NULL), \
+                  COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') \
          ORDER BY rb.NUMBER ASC",
     )
     .bind(readlist_id)
@@ -316,111 +325,304 @@ pub async fn load_readlist_books(
         .collect())
 }
 
-pub async fn load_search_results(
-    database_file: &Path,
-    query: &str,
-) -> Result<
-    (
-        Vec<PersistedSeriesSearchRecord>,
-        Vec<PersistedBookSearchRecord>,
-        Vec<PersistedNamedRecord>,
-        Vec<PersistedNamedRecord>,
-    ),
-    sqlx::Error,
-> {
+pub async fn load_series_search_count(database_file: &Path) -> Result<usize, sqlx::Error> {
     if !database_file.exists() {
-        return Ok((vec![], vec![], vec![], vec![]));
+        return Ok(0);
     }
 
     let pool = connect_pool(database_file, 1).await?;
-    let pattern = if query.is_empty() {
-        "%".to_string()
-    } else {
-        format!("%{query}%")
-    };
+    let row = sqlx::query(
+        "SELECT COUNT(*) AS TOTAL \
+         FROM SERIES s \
+         WHERE s.DELETED_DATE IS NULL",
+    )
+    .fetch_one(&pool)
+    .await?;
+    Ok(row.get::<i64, _>("TOTAL") as usize)
+}
 
-    let series_rows = sqlx::query(
+pub async fn load_book_search_count(database_file: &Path) -> Result<usize, sqlx::Error> {
+    if !database_file.exists() {
+        return Ok(0);
+    }
+
+    let pool = connect_pool(database_file, 1).await?;
+    let row = sqlx::query(
+        "SELECT COUNT(*) AS TOTAL \
+         FROM BOOK b \
+         WHERE b.DELETED_DATE IS NULL",
+    )
+    .fetch_one(&pool)
+    .await?;
+    Ok(row.get::<i64, _>("TOTAL") as usize)
+}
+
+pub async fn load_collection_search_count(database_file: &Path) -> Result<usize, sqlx::Error> {
+    if !database_file.exists() {
+        return Ok(0);
+    }
+
+    let pool = connect_pool(database_file, 1).await?;
+    let row = sqlx::query("SELECT COUNT(*) AS TOTAL FROM COLLECTION")
+        .fetch_one(&pool)
+        .await?;
+    Ok(row.get::<i64, _>("TOTAL") as usize)
+}
+
+pub async fn load_readlist_search_count(database_file: &Path) -> Result<usize, sqlx::Error> {
+    if !database_file.exists() {
+        return Ok(0);
+    }
+
+    let pool = connect_pool(database_file, 1).await?;
+    let row = sqlx::query("SELECT COUNT(*) AS TOTAL FROM READLIST")
+        .fetch_one(&pool)
+        .await?;
+    Ok(row.get::<i64, _>("TOTAL") as usize)
+}
+
+pub async fn load_series_search_records_by_ids(
+    database_file: &Path,
+    ids: &[String],
+) -> Result<Vec<PersistedSeriesSearchRecord>, sqlx::Error> {
+    if !database_file.exists() || ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let pool = connect_pool(database_file, 1).await?;
+    let sql = format!(
         "SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE \
          FROM SERIES s \
          LEFT \
          JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
          WHERE s.DELETED_DATE IS NULL \
-         AND LOWER(COALESCE(sm.TITLE, s.NAME)) LIKE LOWER(?) \
-         ORDER BY TITLE COLLATE NOCASE ASC, s.ID ASC \
-         LIMIT 20",
-    )
-    .bind(&pattern)
-    .fetch_all(&pool)
-    .await?;
+         AND s.ID IN ({})",
+        placeholder_list(ids.len())
+    );
+    let mut query = sqlx::query(&sql);
+    for id in ids {
+        query = query.bind(id);
+    }
 
-    let book_rows = sqlx::query(
+    let rows = query.fetch_all(&pool).await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| PersistedSeriesSearchRecord {
+            id: row.get::<String, _>("ID"),
+            title: row.get::<String, _>("TITLE"),
+            library_id: row.get::<String, _>("LIBRARY_ID"),
+        })
+        .collect())
+}
+
+pub async fn load_book_search_records_by_ids(
+    database_file: &Path,
+    ids: &[String],
+) -> Result<Vec<PersistedBookSearchRecord>, sqlx::Error> {
+    if !database_file.exists() || ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let pool = connect_pool(database_file, 1).await?;
+    let sql = format!(
         "SELECT b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE \
          FROM BOOK b \
          LEFT \
          JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
          WHERE b.DELETED_DATE IS NULL \
-         AND LOWER(COALESCE(bm.TITLE, b.NAME)) LIKE LOWER(?) \
-         ORDER BY TITLE COLLATE NOCASE ASC, b.ID ASC \
-         LIMIT 20",
-    )
-    .bind(&pattern)
-    .fetch_all(&pool)
-    .await?;
+         AND b.ID IN ({})",
+        placeholder_list(ids.len())
+    );
+    let mut query = sqlx::query(&sql);
+    for id in ids {
+        query = query.bind(id);
+    }
 
-    let readlist_rows = sqlx::query(
-        "SELECT ID, NAME \
-         FROM READLIST \
-         WHERE LOWER(NAME) LIKE LOWER(?) \
-         ORDER BY NAME COLLATE NOCASE ASC, ID ASC \
-         LIMIT 20",
-    )
-    .bind(&pattern)
-    .fetch_all(&pool)
-    .await?;
+    let rows = query.fetch_all(&pool).await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| PersistedBookSearchRecord {
+            id: row.get::<String, _>("ID"),
+            title: row.get::<String, _>("TITLE"),
+            library_id: row.get::<String, _>("LIBRARY_ID"),
+        })
+        .collect())
+}
 
-    let collection_rows = sqlx::query(
+pub async fn load_collection_search_records_by_ids(
+    database_file: &Path,
+    ids: &[String],
+) -> Result<Vec<PersistedNamedRecord>, sqlx::Error> {
+    if !database_file.exists() || ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let pool = connect_pool(database_file, 1).await?;
+    let sql = format!(
         "SELECT ID, NAME \
          FROM COLLECTION \
-         WHERE LOWER(NAME) LIKE LOWER(?) \
-         ORDER BY NAME COLLATE NOCASE ASC, ID ASC \
-         LIMIT 20",
+         WHERE ID IN ({})",
+        placeholder_list(ids.len())
+    );
+    let mut query = sqlx::query(&sql);
+    for id in ids {
+        query = query.bind(id);
+    }
+
+    let rows = query.fetch_all(&pool).await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| PersistedNamedRecord {
+            id: row.get::<String, _>("ID"),
+            name: row.get::<String, _>("NAME"),
+        })
+        .collect())
+}
+
+pub async fn load_readlist_search_records_by_ids(
+    database_file: &Path,
+    ids: &[String],
+) -> Result<Vec<PersistedNamedRecord>, sqlx::Error> {
+    if !database_file.exists() || ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let pool = connect_pool(database_file, 1).await?;
+    let sql = format!(
+        "SELECT ID, NAME \
+         FROM READLIST \
+         WHERE ID IN ({})",
+        placeholder_list(ids.len())
+    );
+    let mut query = sqlx::query(&sql);
+    for id in ids {
+        query = query.bind(id);
+    }
+
+    let rows = query.fetch_all(&pool).await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| PersistedNamedRecord {
+            id: row.get::<String, _>("ID"),
+            name: row.get::<String, _>("NAME"),
+        })
+        .collect())
+}
+
+pub async fn load_series_search_records_limited(
+    database_file: &Path,
+    limit: i64,
+) -> Result<Vec<PersistedSeriesSearchRecord>, sqlx::Error> {
+    if !database_file.exists() {
+        return Ok(vec![]);
+    }
+
+    let pool = connect_pool(database_file, 1).await?;
+    let rows = sqlx::query(
+        "SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE \
+         FROM SERIES s \
+         LEFT \
+         JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+         WHERE s.DELETED_DATE IS NULL \
+         ORDER BY TITLE COLLATE NOCASE ASC, s.ID ASC \
+         LIMIT ?",
     )
-    .bind(&pattern)
+    .bind(limit)
     .fetch_all(&pool)
     .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| PersistedSeriesSearchRecord {
+            id: row.get::<String, _>("ID"),
+            title: row.get::<String, _>("TITLE"),
+            library_id: row.get::<String, _>("LIBRARY_ID"),
+        })
+        .collect())
+}
 
-    Ok((
-        series_rows
-            .into_iter()
-            .map(|row| PersistedSeriesSearchRecord {
-                id: row.get::<String, _>("ID"),
-                title: row.get::<String, _>("TITLE"),
-                library_id: row.get::<String, _>("LIBRARY_ID"),
-            })
-            .collect(),
-        book_rows
-            .into_iter()
-            .map(|row| PersistedBookSearchRecord {
-                id: row.get::<String, _>("ID"),
-                title: row.get::<String, _>("TITLE"),
-                library_id: row.get::<String, _>("LIBRARY_ID"),
-            })
-            .collect(),
-        collection_rows
-            .into_iter()
-            .map(|row| PersistedNamedRecord {
-                id: row.get::<String, _>("ID"),
-                name: row.get::<String, _>("NAME"),
-            })
-            .collect(),
-        readlist_rows
-            .into_iter()
-            .map(|row| PersistedNamedRecord {
-                id: row.get::<String, _>("ID"),
-                name: row.get::<String, _>("NAME"),
-            })
-            .collect(),
-    ))
+pub async fn load_book_search_records_limited(
+    database_file: &Path,
+    limit: i64,
+) -> Result<Vec<PersistedBookSearchRecord>, sqlx::Error> {
+    if !database_file.exists() {
+        return Ok(vec![]);
+    }
+
+    let pool = connect_pool(database_file, 1).await?;
+    let rows = sqlx::query(
+        "SELECT b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE \
+         FROM BOOK b \
+         LEFT \
+         JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
+         WHERE b.DELETED_DATE IS NULL \
+         ORDER BY TITLE COLLATE NOCASE ASC, b.ID ASC \
+         LIMIT ?",
+    )
+    .bind(limit)
+    .fetch_all(&pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| PersistedBookSearchRecord {
+            id: row.get::<String, _>("ID"),
+            title: row.get::<String, _>("TITLE"),
+            library_id: row.get::<String, _>("LIBRARY_ID"),
+        })
+        .collect())
+}
+
+pub async fn load_collection_search_records_limited(
+    database_file: &Path,
+    limit: i64,
+) -> Result<Vec<PersistedNamedRecord>, sqlx::Error> {
+    if !database_file.exists() {
+        return Ok(vec![]);
+    }
+
+    let pool = connect_pool(database_file, 1).await?;
+    let rows = sqlx::query(
+        "SELECT ID, NAME \
+         FROM COLLECTION \
+         ORDER BY NAME COLLATE NOCASE ASC, ID ASC \
+         LIMIT ?",
+    )
+    .bind(limit)
+    .fetch_all(&pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| PersistedNamedRecord {
+            id: row.get::<String, _>("ID"),
+            name: row.get::<String, _>("NAME"),
+        })
+        .collect())
+}
+
+pub async fn load_readlist_search_records_limited(
+    database_file: &Path,
+    limit: i64,
+) -> Result<Vec<PersistedNamedRecord>, sqlx::Error> {
+    if !database_file.exists() {
+        return Ok(vec![]);
+    }
+
+    let pool = connect_pool(database_file, 1).await?;
+    let rows = sqlx::query(
+        "SELECT ID, NAME \
+         FROM READLIST \
+         ORDER BY NAME COLLATE NOCASE ASC, ID ASC \
+         LIMIT ?",
+    )
+    .bind(limit)
+    .fetch_all(&pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| PersistedNamedRecord {
+            id: row.get::<String, _>("ID"),
+            name: row.get::<String, _>("NAME"),
+        })
+        .collect())
 }
 
 pub async fn load_publishers(

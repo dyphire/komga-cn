@@ -32,6 +32,10 @@ fn handle_scan_library(
         .and_then(parse_scan_library_payload_deep)
         .unwrap_or(false);
     let runtime_context = runtime.task_runtime_context();
+    if !runtime_context.owns_filesystem_scan_output {
+        return Ok(());
+    }
+
     let scan = scan_library(
         runtime_context.database_file.as_path(),
         &library_id,

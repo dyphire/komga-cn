@@ -11,5 +11,5 @@ CREATE TABLE TASK
     LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx__tasks__owner_group_id
+create index idx__tasks__owner_group_id
     on TASK (OWNER, GROUP_ID);

@@ -69,7 +69,7 @@ pub struct AuthUserAgeRestriction {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AuthOutcome {
-    Valid(AuthUser),
+    Valid(Box<AuthUser>),
     Invalid,
     Missing,
 }

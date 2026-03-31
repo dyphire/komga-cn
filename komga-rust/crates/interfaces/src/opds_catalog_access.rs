@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use std::collections::HashSet;
 use std::future::Future;
 use std::path::{Path, PathBuf};

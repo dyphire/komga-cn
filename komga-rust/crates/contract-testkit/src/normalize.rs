@@ -61,15 +61,14 @@ fn sort_value(value: serde_json::Value, base_url: &str) -> serde_json::Value {
 fn normalize_url(value: &str, base_url: &str) -> String {
     let base_url = base_url.trim_end_matches('/');
 
-    if let Some(remainder) = value.strip_prefix(base_url) {
-        if remainder.is_empty()
+    if let Some(remainder) = value.strip_prefix(base_url)
+        && (remainder.is_empty()
             || matches!(
                 remainder.as_bytes().first(),
                 Some(b'/') | Some(b'?') | Some(b'#')
-            )
-        {
-            return format!("{CANONICAL_ORIGIN}{remainder}");
-        }
+            ))
+    {
+        return format!("{CANONICAL_ORIGIN}{remainder}");
     }
 
     value.to_string()

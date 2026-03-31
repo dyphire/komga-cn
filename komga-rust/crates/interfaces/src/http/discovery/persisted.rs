@@ -47,23 +47,29 @@ pub use models::{
 use backend::{
     persisted_backend_load_book_poster_summaries, persisted_backend_load_collection_memberships,
     persisted_backend_load_persisted_age_ratings, persisted_backend_load_persisted_author_names,
-    persisted_backend_load_persisted_author_roles, persisted_backend_load_persisted_authors,
-    persisted_backend_load_persisted_authors_by_scope,
-    persisted_backend_load_persisted_book_summaries, persisted_backend_load_persisted_book_tags,
-    persisted_backend_load_persisted_duplicate_books, persisted_backend_load_persisted_genres,
-    persisted_backend_load_persisted_languages, persisted_backend_load_persisted_library_ids,
-    persisted_backend_load_persisted_ondeck_books, persisted_backend_load_persisted_publishers,
+    persisted_backend_load_persisted_author_roles,
+    persisted_backend_load_persisted_authors_by_scope, persisted_backend_load_persisted_book_count,
+    persisted_backend_load_persisted_book_summaries,
+    persisted_backend_load_persisted_book_summaries_by_ids,
+    persisted_backend_load_persisted_book_tags, persisted_backend_load_persisted_duplicate_books,
+    persisted_backend_load_persisted_genres, persisted_backend_load_persisted_languages,
+    persisted_backend_load_persisted_library_ids, persisted_backend_load_persisted_ondeck_books,
+    persisted_backend_load_persisted_publishers, persisted_backend_load_persisted_series_count,
     persisted_backend_load_persisted_series_release_dates,
     persisted_backend_load_persisted_series_summaries,
+    persisted_backend_load_persisted_series_summaries_by_ids,
     persisted_backend_load_persisted_series_tags, persisted_backend_load_persisted_sharing_labels,
     persisted_backend_load_persisted_tags, persisted_backend_load_readlist_memberships,
     persisted_backend_load_series_read_progress_counts,
     persisted_backend_load_series_total_book_counts, persisted_backend_persisted_books_exist,
     persisted_backend_persisted_series_exist, persisted_backend_persisted_utc_date_minus_days,
+    persisted_backend_search_book_ids, persisted_backend_search_series_ids,
 };
+pub(super) use common_helpers::filter_rows;
 pub(super) use delegates::*;
 pub(super) use helpers::*;
 pub(super) use models::{
-    PersistedBooksBrowseQuery, PersistedBooksSortMode, PersistedSeriesBrowseQuery,
-    PersistedSeriesSortMode, RuntimeBooksFilters, RuntimeSeriesFilters,
+    BooksFilterCriteria, PersistedBooksBrowseQuery, PersistedBooksSortMode,
+    PersistedSeriesBrowseQuery, PersistedSeriesSortMode, RuntimeBooksFilters, RuntimeSeriesFilters,
+    SeriesFilterCriteria,
 };

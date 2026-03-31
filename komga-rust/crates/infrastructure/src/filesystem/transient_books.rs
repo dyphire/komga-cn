@@ -1,14 +1,15 @@
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use lopdf::Document as PdfDocument;
+use image::GenericImageView;
+use lopdf::{Document as PdfDocument, Object};
 use serde_json::{Value, json};
 use sqlx::Row;
 use zip::ZipArchive;
 
+use crate::rar_support::{list_rar_entries, read_rar_entry_bytes};
 use crate::sqlite::connect_pool;
 
 #[derive(Clone, Debug)]
@@ -53,7 +54,12 @@ pub async fn infer_transient_series_and_number(
     };
 
     let exact_match = sqlx::query(
-        "SELECT s.ID AS ID\n         FROM SERIES s\n         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID\n         WHERE LOWER(COALESCE(sm.TITLE, s.NAME)) = LOWER(?)\n         ORDER BY s.LAST_MODIFIED_DATE DESC, s.ID ASC\n         LIMIT 1",
+        "SELECT s.ID AS ID \
+         FROM SERIES s \
+         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+         WHERE LOWER(COALESCE(sm.TITLE, s.NAME)) = LOWER(?) \
+         ORDER BY s.LAST_MODIFIED_DATE DESC, s.ID ASC \
+         LIMIT 1",
     )
     .bind(series_title_candidate.as_str())
     .fetch_optional(&pool)
@@ -64,7 +70,12 @@ pub async fn infer_transient_series_and_number(
 
     let fuzzy_match = if exact_match.is_none() {
         sqlx::query(
-            "SELECT s.ID AS ID\n             FROM SERIES s\n             LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID\n             WHERE LOWER(COALESCE(sm.TITLE, s.NAME)) LIKE LOWER(?)\n             ORDER BY s.LAST_MODIFIED_DATE DESC, s.ID ASC\n             LIMIT 1",
+            "SELECT s.ID AS ID \
+             FROM SERIES s \
+             LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+             WHERE LOWER(COALESCE(sm.TITLE, s.NAME)) LIKE LOWER(?) \
+             ORDER BY s.LAST_MODIFIED_DATE DESC, s.ID ASC \
+             LIMIT 1",
         )
         .bind(format!("%{}%", series_title_candidate))
         .fetch_optional(&pool)
@@ -104,7 +115,7 @@ pub fn analyze_transient_book(path: &str) -> Result<TransientBookAnalysis, Strin
     let (pages, files) = if transient_media_is_image(path, &media_type) {
         analyze_transient_image(path)
     } else if transient_media_is_zip_archive(path, &media_type) {
-        analyze_transient_zip_archive(path)?
+        analyze_transient_zip_archive(path, media_type == "application/epub+zip")?
     } else if transient_media_is_rar_archive(path, &media_type) {
         analyze_transient_rar_archive(path)?
     } else if transient_media_is_pdf(path, &media_type) {
@@ -167,7 +178,9 @@ pub fn transient_book_page_content(
     }
 
     if transient_media_is_rar_archive(path, media_type.as_str()) {
-        let bytes = read_rar_entry_bytes_cli(path, page.file_name.as_str())?;
+        let bytes = read_rar_entry_bytes(Path::new(path), page.file_name.as_str())
+            .ok()
+            .flatten()?;
         return Some((page.media_type, bytes));
     }
 
@@ -227,14 +240,19 @@ fn analyze_transient_image(path: &str) -> (Vec<TransientBookPage>, Vec<String>) 
         .unwrap_or_default()
         .to_string();
     let size_bytes = fs::metadata(path).ok().map(|meta| meta.len());
+    let (width, height) = fs::read(path)
+        .ok()
+        .and_then(|bytes| image_dimensions_from_bytes(&bytes))
+        .map(|(width, height)| (Some(width), Some(height)))
+        .unwrap_or((None, None));
 
     (
         vec![TransientBookPage {
             number: 1,
             file_name: file_name.clone(),
             media_type: transient_entry_media_type(&file_name),
-            width: None,
-            height: None,
+            width,
+            height,
             size_bytes,
         }],
         vec![file_name],
@@ -243,6 +261,7 @@ fn analyze_transient_image(path: &str) -> (Vec<TransientBookPage>, Vec<String>) 
 
 fn analyze_transient_zip_archive(
     path: &str,
+    include_epub_resources: bool,
 ) -> Result<(Vec<TransientBookPage>, Vec<String>), String> {
     let file = fs::File::open(path).map_err(|error| format!("open archive: {error}"))?;
     let mut archive = ZipArchive::new(file).map_err(|error| format!("read archive: {error}"))?;
@@ -250,7 +269,7 @@ fn analyze_transient_zip_archive(
     let mut files = Vec::new();
     let mut pages = Vec::new();
     for index in 0..archive.len() {
-        let entry = archive
+        let mut entry = archive
             .by_index(index)
             .map_err(|error| format!("read archive entry: {error}"))?;
         let file_name = entry.name().trim().to_string();
@@ -259,16 +278,22 @@ fn analyze_transient_zip_archive(
         }
 
         files.push(file_name.clone());
-        if !is_supported_page_image_file_name(&file_name) {
+        let include = if include_epub_resources {
+            is_epub_page_resource_file_name(&file_name)
+        } else {
+            is_supported_page_image_file_name(&file_name)
+        };
+        if !include {
             continue;
         }
 
+        let dimensions = image_dimensions_from_reader(&mut entry);
         pages.push(TransientBookPage {
             number: (pages.len() as u32) + 1,
             file_name: file_name.clone(),
             media_type: transient_entry_media_type(&file_name),
-            width: None,
-            height: None,
+            width: dimensions.map(|(width, _)| width),
+            height: dimensions.map(|(_, height)| height),
             size_bytes: Some(entry.size()),
         });
     }
@@ -280,34 +305,31 @@ fn analyze_transient_zip_archive(
 fn analyze_transient_rar_archive(
     path: &str,
 ) -> Result<(Vec<TransientBookPage>, Vec<String>), String> {
-    let output = Command::new("unrar")
-        .arg("lb")
-        .arg(path)
-        .output()
-        .map_err(|error| format!("list rar entries: {error}"))?;
-    if !output.status.success() {
-        return Err("Book analysis failed".to_string());
-    }
-
-    let mut files = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .filter(|value| !value.is_empty() && !value.ends_with('/'))
-        .map(str::to_string)
+    let entries =
+        list_rar_entries(Path::new(path)).map_err(|_| "Book analysis failed".to_string())?;
+    let mut files = entries
+        .iter()
+        .map(|entry| entry.file_name.clone())
         .collect::<Vec<_>>();
     files.sort();
 
-    let pages = files
-        .iter()
-        .filter(|file_name| is_supported_page_image_file_name(file_name))
+    let pages = entries
+        .into_iter()
+        .filter(|entry| is_supported_page_image_file_name(&entry.file_name))
         .enumerate()
-        .map(|(index, file_name)| TransientBookPage {
-            number: (index as u32) + 1,
-            file_name: file_name.clone(),
-            media_type: transient_entry_media_type(file_name),
-            width: None,
-            height: None,
-            size_bytes: None,
+        .map(|(index, entry)| {
+            let entry_bytes = read_rar_entry_bytes(Path::new(path), &entry.file_name)
+                .ok()
+                .flatten();
+            let dimensions = entry_bytes.as_deref().and_then(image_dimensions_from_bytes);
+            TransientBookPage {
+                number: (index as u32) + 1,
+                file_name: entry.file_name.clone(),
+                media_type: transient_entry_media_type(&entry.file_name),
+                width: dimensions.map(|(width, _)| width),
+                height: dimensions.map(|(_, height)| height),
+                size_bytes: Some(entry.unpacked_size),
+            }
         })
         .collect::<Vec<_>>();
 
@@ -318,13 +340,16 @@ fn analyze_transient_pdf(path: &str) -> Result<(Vec<TransientBookPage>, Vec<Stri
     let document = PdfDocument::load(path).map_err(|error| format!("open pdf: {error}"))?;
     let page_count = document.get_pages().len() as u32;
     let pages = (1..=page_count)
-        .map(|number| TransientBookPage {
-            number,
-            file_name: format!("page-{number}.pdf"),
-            media_type: "application/pdf".to_string(),
-            width: None,
-            height: None,
-            size_bytes: None,
+        .map(|number| {
+            let dimensions = pdf_page_dimensions(&document, number);
+            TransientBookPage {
+                number,
+                file_name: format!("page-{number}.pdf"),
+                media_type: "application/pdf".to_string(),
+                width: dimensions.map(|(width, _)| width),
+                height: dimensions.map(|(_, height)| height),
+                size_bytes: None,
+            }
         })
         .collect::<Vec<_>>();
 
@@ -337,25 +362,40 @@ fn analyze_transient_pdf(path: &str) -> Result<(Vec<TransientBookPage>, Vec<Stri
     Ok((pages, vec![file_name]))
 }
 
-fn read_rar_entry_bytes_cli(archive_path: &str, entry_name: &str) -> Option<Vec<u8>> {
-    let output = Command::new("unrar")
-        .arg("p")
-        .arg("-inul")
-        .arg(archive_path)
-        .arg(entry_name)
-        .output()
-        .ok()?;
-    if !output.status.success() || output.stdout.is_empty() {
-        return None;
-    }
-    Some(output.stdout)
-}
-
 fn read_pdf_page_content_bytes(path: &str, page_number: u32) -> Option<Vec<u8>> {
     let document = PdfDocument::load(path).ok()?;
     let pages = document.get_pages();
     let object_id = *pages.get(&page_number)?;
     document.get_page_content(object_id).ok()
+}
+
+fn pdf_page_dimensions(document: &PdfDocument, page_number: u32) -> Option<(u32, u32)> {
+    let object_id = *document.get_pages().get(&page_number)?;
+    let page = document.get_dictionary(object_id).ok()?;
+    let media_box = page.get(b"MediaBox").ok()?.as_array().ok()?;
+    if media_box.len() != 4 {
+        return None;
+    }
+
+    let left = pdf_numeric_value(&media_box[0])?;
+    let bottom = pdf_numeric_value(&media_box[1])?;
+    let right = pdf_numeric_value(&media_box[2])?;
+    let top = pdf_numeric_value(&media_box[3])?;
+    let width = (right - left).abs().round();
+    let height = (top - bottom).abs().round();
+    if width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+
+    Some((width as u32, height as u32))
+}
+
+fn pdf_numeric_value(object: &Object) -> Option<f64> {
+    match object {
+        Object::Integer(value) => Some(*value as f64),
+        Object::Real(value) => Some((*value).into()),
+        _ => None,
+    }
 }
 
 fn transient_media_is_image(path: &str, media_type: &str) -> bool {
@@ -399,6 +439,7 @@ fn transient_entry_media_type(file_name: &str) -> String {
         "gif" => "image/gif".to_string(),
         "webp" => "image/webp".to_string(),
         "avif" => "image/avif".to_string(),
+        "xhtml" | "html" | "htm" => "application/xhtml+xml".to_string(),
         "pdf" => "application/pdf".to_string(),
         _ => "application/octet-stream".to_string(),
     }
@@ -413,6 +454,28 @@ fn is_supported_page_image_file_name(file_name: &str) -> bool {
             .as_str(),
         "jpg" | "jpeg" | "png" | "gif" | "webp" | "avif"
     )
+}
+
+fn is_epub_page_resource_file_name(file_name: &str) -> bool {
+    matches!(
+        file_name
+            .rsplit_once('.')
+            .map(|(_, ext)| ext.to_ascii_lowercase())
+            .unwrap_or_default()
+            .as_str(),
+        "xhtml" | "html" | "htm"
+    )
+}
+
+fn image_dimensions_from_bytes(bytes: &[u8]) -> Option<(u32, u32)> {
+    let image = image::load_from_memory(bytes).ok()?;
+    Some(image.dimensions())
+}
+
+fn image_dimensions_from_reader(reader: &mut dyn Read) -> Option<(u32, u32)> {
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes).ok()?;
+    image_dimensions_from_bytes(&bytes)
 }
 
 fn to_unix_seconds(time: Option<SystemTime>) -> i64 {
@@ -522,4 +585,171 @@ fn is_recognized_transient_book_file(path: &Path) -> bool {
                 || extension.eq_ignore_ascii_case("webp")
                 || extension.eq_ignore_ascii_case("avif")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{ImageBuffer, Rgba};
+    use lopdf::{Object, Stream, dictionary};
+    use std::fs::File;
+    use std::io::Write;
+    use zip::CompressionMethod;
+    use zip::ZipWriter;
+    use zip::write::SimpleFileOptions;
+
+    fn unique_temp_path(case: &str, extension: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        std::env::temp_dir().join(format!("komga-transient-{case}-{nanos}.{extension}"))
+    }
+
+    fn png_bytes(width: u32, height: u32) -> Vec<u8> {
+        let image =
+            ImageBuffer::<Rgba<u8>, Vec<u8>>::from_pixel(width, height, Rgba([1, 2, 3, 255]));
+        let mut output = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image)
+            .write_to(&mut output, image::ImageFormat::Png)
+            .expect("png fixture should encode");
+        output.into_inner()
+    }
+
+    fn write_single_page_pdf(path: &Path, width: i64, height: i64) {
+        let mut document = PdfDocument::with_version("1.5");
+        let pages_id = document.new_object_id();
+        let page_id = document.new_object_id();
+        let content_id = document.add_object(Stream::new(dictionary! {}, Vec::new()));
+        let resources_id = document.add_object(dictionary! {});
+
+        document.objects.insert(
+            page_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Page",
+                "Parent" => pages_id,
+                "MediaBox" => vec![0.into(), 0.into(), width.into(), height.into()],
+                "Contents" => content_id,
+                "Resources" => resources_id,
+            }),
+        );
+        document.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![page_id.into()],
+                "Count" => 1,
+            }),
+        );
+
+        let catalog_id = document.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        document.trailer.set("Root", catalog_id);
+        document.compress();
+        document
+            .save(path)
+            .expect("single-page pdf fixture should save");
+    }
+
+    #[test]
+    fn analyze_transient_book_populates_image_dimensions_for_single_image() {
+        let path = unique_temp_path("single-image", "png");
+        fs::write(&path, png_bytes(3, 5)).expect("transient image fixture should be written");
+
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
+            .expect("single image transient analysis should succeed");
+
+        assert_eq!(analysis.status, "READY");
+        assert_eq!(analysis.pages.len(), 1);
+        assert_eq!(analysis.pages[0].width, Some(3));
+        assert_eq!(analysis.pages[0].height, Some(5));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn analyze_transient_book_populates_image_dimensions_for_cbz_pages() {
+        let path = unique_temp_path("cbz-image-dimensions", "cbz");
+        let file = File::create(&path).expect("cbz fixture should be created");
+        let mut zip = ZipWriter::new(file);
+        let options = SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Stored)
+            .unix_permissions(0o644);
+        zip.start_file("page-1.png", options)
+            .expect("cbz page entry should be created");
+        zip.write_all(&png_bytes(7, 11))
+            .expect("cbz page bytes should be written");
+        zip.finish()
+            .expect("cbz fixture should finish successfully");
+
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
+            .expect("cbz transient analysis should succeed");
+
+        assert_eq!(analysis.status, "READY");
+        assert_eq!(analysis.pages.len(), 1);
+        assert_eq!(analysis.pages[0].width, Some(7));
+        assert_eq!(analysis.pages[0].height, Some(11));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn analyze_transient_book_populates_pdf_page_dimensions() {
+        let path = unique_temp_path("pdf-page-dimensions", "pdf");
+        write_single_page_pdf(&path, 595, 842);
+
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
+            .expect("pdf transient analysis should succeed");
+
+        assert_eq!(analysis.status, "READY");
+        assert_eq!(analysis.pages.len(), 1);
+        assert_eq!(analysis.pages[0].width, Some(595));
+        assert_eq!(analysis.pages[0].height, Some(842));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn analyze_transient_book_populates_rar_page_dimensions() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../komga/src/test/resources/archives/rar4.rar");
+
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
+            .expect("rar transient analysis should succeed when fixture is available");
+
+        assert_eq!(analysis.status, "READY");
+        assert!(
+            !analysis.pages.is_empty(),
+            "rar transient pages should not be empty"
+        );
+        assert!(
+            analysis.pages[0].width.is_some(),
+            "rar page width should be populated"
+        );
+        assert!(
+            analysis.pages[0].height.is_some(),
+            "rar page height should be populated"
+        );
+    }
+
+    #[test]
+    fn analyze_transient_book_populates_rar_page_size_bytes() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../komga/src/test/resources/archives/rar4.rar");
+
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
+            .expect("rar transient analysis should succeed when fixture is available");
+
+        assert_eq!(analysis.status, "READY");
+        assert!(
+            !analysis.pages.is_empty(),
+            "rar transient pages should not be empty"
+        );
+        assert!(
+            analysis.pages[0].size_bytes.is_some_and(|size| size > 0),
+            "rar page size_bytes should be populated"
+        );
+    }
 }

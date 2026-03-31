@@ -53,7 +53,7 @@ pub struct KoboSyncDeltas {
     pub deleted_reading_state: Vec<Value>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct KoboSyncBookSnapshot {
     pub id: String,
     pub title: String,
@@ -64,6 +64,15 @@ pub struct KoboSyncBookSnapshot {
     pub page_count: u64,
     pub created: String,
     pub last_modified: String,
+    pub contributor_names: Vec<String>,
+    pub isbn: Option<String>,
+    pub publisher_name: Option<String>,
+    pub cover_image_id: Option<String>,
+    pub series_id: Option<String>,
+    pub series_name: Option<String>,
+    pub series_number: Option<String>,
+    pub series_number_float: Option<f64>,
+    pub oneshot: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -84,7 +93,7 @@ pub struct KoboSyncReadListSnapshot {
     pub items: Vec<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct KoboSyncSnapshot {
     pub books: HashMap<String, KoboSyncBookSnapshot>,
     pub progress: HashMap<String, KoboSyncReadProgressSnapshot>,
@@ -92,6 +101,38 @@ pub struct KoboSyncSnapshot {
 }
 
 pub const KOBO_SYNC_ITEM_LIMIT: usize = 200;
+
+fn kobo_description(summary: &str) -> Value {
+    if summary.trim().is_empty() {
+        Value::String(" ".to_string())
+    } else {
+        Value::String(summary.to_string())
+    }
+}
+
+fn kobo_language(language: &str) -> String {
+    let language = language.trim();
+    if language.is_empty() {
+        "en".to_string()
+    } else {
+        language
+            .chars()
+            .take(2)
+            .collect::<String>()
+            .to_ascii_lowercase()
+    }
+}
+
+fn kobo_publication_date_value(value: &str) -> Option<Value> {
+    let value = value.trim();
+    if value.is_empty() {
+        None
+    } else if value.len() == 10 && value.as_bytes().get(4) == Some(&b'-') {
+        Some(Value::String(format!("{value}T00:00:00Z")))
+    } else {
+        Some(Value::String(value.to_string()))
+    }
+}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -114,7 +155,7 @@ pub struct KomgaSyncTokenPayload {
     pub last_successful_sync_point_id: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct KoboSyncPointState {
     pub user_id: String,
     pub marker: String,
@@ -459,9 +500,31 @@ fn kobo_book_metadata_from_snapshot(
             "00000000-0000-0000-0000-000000000001".to_string(),
         )]),
     );
-    metadata.insert("ContributorRoles".to_string(), Value::Array(vec![]));
-    metadata.insert("Contributors".to_string(), Value::Array(vec![]));
-    metadata.insert("CoverImageId".to_string(), Value::String(book.id.clone()));
+    metadata.insert(
+        "ContributorRoles".to_string(),
+        Value::Array(
+            book.contributor_names
+                .iter()
+                .map(|name| json!({ "Name": name }))
+                .collect(),
+        ),
+    );
+    metadata.insert(
+        "Contributors".to_string(),
+        Value::Array(
+            book.contributor_names
+                .iter()
+                .map(|name| Value::String(name.clone()))
+                .collect(),
+        ),
+    );
+    metadata.insert(
+        "CoverImageId".to_string(),
+        book.cover_image_id
+            .as_ref()
+            .map(|value| Value::String(value.clone()))
+            .unwrap_or(Value::Null),
+    );
     metadata.insert(
         "CrossRevisionId".to_string(),
         Value::String(book.id.clone()),
@@ -474,12 +537,7 @@ fn kobo_book_metadata_from_snapshot(
         "CurrentLoveDisplayPrice".to_string(),
         json!({"CurrencyCode": "USD", "TotalAmount": 0}),
     );
-    if !book.summary.trim().is_empty() {
-        metadata.insert(
-            "Description".to_string(),
-            Value::String(book.summary.clone()),
-        );
-    }
+    metadata.insert("Description".to_string(), kobo_description(&book.summary));
     metadata.insert(
         "DownloadUrls".to_string(),
         json!([
@@ -503,24 +561,61 @@ fn kobo_book_metadata_from_snapshot(
     metadata.insert("IsPreOrder".to_string(), Value::Bool(false));
     metadata.insert("IsSocialEnabled".to_string(), Value::Bool(true));
     metadata.insert(
+        "ISBN".to_string(),
+        book.isbn
+            .as_ref()
+            .map(|value| Value::String(value.clone()))
+            .unwrap_or(Value::Null),
+    );
+    metadata.insert(
         "Language".to_string(),
-        Value::String(if book.language.trim().is_empty() {
-            "en".to_string()
-        } else {
-            book.language.clone()
-        }),
+        Value::String(kobo_language(&book.language)),
     );
     metadata.insert(
         "PhoneticPronunciations".to_string(),
         Value::Object(serde_json::Map::new()),
     );
-    if let Some(release_date) = book.release_date.as_ref() {
-        metadata.insert(
-            "PublicationDate".to_string(),
-            Value::String(release_date.clone()),
-        );
-    }
+    metadata.insert(
+        "PublicationDate".to_string(),
+        book.release_date
+            .as_deref()
+            .or(Some(book.created.as_str()))
+            .and_then(kobo_publication_date_value)
+            .unwrap_or(Value::Null),
+    );
+    metadata.insert(
+        "Publisher".to_string(),
+        book.publisher_name
+            .as_ref()
+            .map(|name| json!({ "Imprint": "", "Name": name }))
+            .unwrap_or(Value::Null),
+    );
     metadata.insert("RevisionId".to_string(), Value::String(book.id.clone()));
+    metadata.insert(
+        "Series".to_string(),
+        if book.oneshot {
+            Value::Null
+        } else if let (
+            Some(series_id),
+            Some(series_name),
+            Some(series_number),
+            Some(series_number_float),
+        ) = (
+            book.series_id.as_ref(),
+            book.series_name.as_ref(),
+            book.series_number.as_ref(),
+            book.series_number_float,
+        ) {
+            json!({
+                "Id": series_id,
+                "Name": series_name,
+                "Number": series_number,
+                "NumberFloat": series_number_float,
+            })
+        } else {
+            Value::Null
+        },
+    );
     metadata.insert("Title".to_string(), Value::String(book.title.clone()));
     metadata.insert("WorkId".to_string(), Value::String(book.id.clone()));
     Value::Object(metadata)

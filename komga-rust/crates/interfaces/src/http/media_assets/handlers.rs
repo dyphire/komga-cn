@@ -18,8 +18,9 @@ pub use super::pages::{book_page, book_page_raw, book_page_thumbnail, book_pages
 pub use super::read_progress::{
     book_progression, book_progression_get, book_read_progress, book_read_progress_delete,
     book_read_progress_get, readlist_tachiyomi_read_progress_get,
-    readlist_tachiyomi_read_progress_put, series_read_progress_delete, series_read_progress_post,
-    series_tachiyomi_read_progress_get, series_tachiyomi_read_progress_put,
+    readlist_tachiyomi_read_progress_put, series_read_progress_delete, series_read_progress_get,
+    series_read_progress_post, series_tachiyomi_read_progress_get,
+    series_tachiyomi_read_progress_put,
 };
 pub use super::thumbnails::{
     book_thumbnail, book_thumbnail_by_id, book_thumbnail_delete, book_thumbnail_select,

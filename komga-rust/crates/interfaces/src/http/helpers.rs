@@ -15,45 +15,10 @@ use time::format_description::well_known::Rfc3339;
 use crate::http::discovery_auth::{
     AgeRestrictionKind, DetailAccessDenial, DiscoveryQueryContext, QueryRestrictions,
 };
-use crate::http::state::RuntimeProfile;
 
 use super::super::{
     PERSISTED_OWNERSHIP_MARKER, ReadProgress, ReadProgressState, SEARCH_OWNERSHIP_HEADER,
 };
-
-const RUNTIME_OWNERSHIP_MARKER: &str = "runtime-rust-owned";
-
-#[derive(Clone, Copy)]
-pub(crate) enum DiscoveryShape {
-    SeriesList,
-    BooksList,
-    BooksLatest,
-}
-
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub(crate) enum DiscoveryOwnershipRoute {
-    RuntimeOwned,
-    PersistedOwned,
-}
-
-pub(crate) fn discovery_ownership_route(
-    profile: RuntimeProfile,
-    headers: &HeaderMap,
-    _shape: DiscoveryShape,
-) -> DiscoveryOwnershipRoute {
-    if profile == RuntimeProfile::SnapshotAligned && has_runtime_ownership_marker(headers) {
-        DiscoveryOwnershipRoute::RuntimeOwned
-    } else {
-        DiscoveryOwnershipRoute::PersistedOwned
-    }
-}
-
-fn has_runtime_ownership_marker(headers: &HeaderMap) -> bool {
-    headers
-        .get(SEARCH_OWNERSHIP_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value == RUNTIME_OWNERSHIP_MARKER)
-}
 
 pub(crate) fn books_page_payload(
     page: PageEnvelope<BookReadModel>,
@@ -176,6 +141,18 @@ pub(crate) fn extract_full_text_search(payload: &Value) -> Option<String> {
         .map(str::to_owned)
 }
 
+pub(crate) fn contains_legacy_search_input(payload: &Value) -> bool {
+    payload.get("regexSearch").is_some()
+        || payload.get("searchRegex").is_some()
+        || payload.get("search_regex").is_some()
+}
+
+pub(crate) fn contains_legacy_search_query(query: &str) -> bool {
+    query_value(query, "regexSearch").is_some()
+        || query_value(query, "searchRegex").is_some()
+        || query_value(query, "search_regex").is_some()
+}
+
 pub(crate) fn wants_persisted_marker(headers: &HeaderMap, payload: Option<&Value>) -> bool {
     let ownership = payload
         .and_then(|payload| payload.get("ownership"))
@@ -204,7 +181,7 @@ pub(crate) fn mark_persisted_owned(response: &mut Response) {
 pub fn mark_runtime_owned(response: &mut Response) {
     response.headers_mut().insert(
         HeaderName::from_static(SEARCH_OWNERSHIP_HEADER),
-        HeaderValue::from_static(RUNTIME_OWNERSHIP_MARKER),
+        HeaderValue::from_static("runtime-rust-owned"),
     );
 }
 
@@ -237,40 +214,6 @@ pub(crate) fn query_bool(query: &str, key: &str) -> bool {
     query_value(query, key)
         .map(|value| value.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
-}
-
-pub(crate) fn parse_search_regex(value: &str) -> Option<(String, String)> {
-    let mut parts = value.splitn(2, ',');
-    let pattern = parts.next()?.trim();
-    let field = parts.next()?.trim().to_ascii_lowercase();
-    if pattern.is_empty() || (field != "title" && field != "title_sort") {
-        return None;
-    }
-    Some((pattern.to_string(), field))
-}
-
-pub(crate) fn matches_search_pattern(candidate: &str, pattern: &str) -> bool {
-    let text = candidate.to_ascii_lowercase();
-    let mut expected = pattern.to_ascii_lowercase();
-
-    let anchored_start = expected.starts_with('^');
-    let anchored_end = expected.ends_with('$');
-    if anchored_start {
-        expected.remove(0);
-    }
-    if anchored_end {
-        expected.pop();
-    }
-
-    if anchored_start && anchored_end {
-        text == expected
-    } else if anchored_start {
-        text.starts_with(&expected)
-    } else if anchored_end {
-        text.ends_with(&expected)
-    } else {
-        text.contains(&expected)
-    }
 }
 
 pub fn to_domain_query_context(context: DiscoveryQueryContext) -> DomainDiscoveryQueryContext {

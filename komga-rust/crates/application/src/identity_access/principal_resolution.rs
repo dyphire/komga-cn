@@ -5,7 +5,7 @@ pub fn resolve_kobo_user(
     session_user: Option<AuthUser>,
 ) -> Option<AuthUser> {
     if let Some(AuthOutcome::Valid(user)) = api_key_user {
-        Some(user)
+        Some(*user)
     } else {
         session_user
     }

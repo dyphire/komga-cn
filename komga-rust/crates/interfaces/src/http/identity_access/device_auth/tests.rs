@@ -211,13 +211,22 @@ fn build_kobo_sync_events_initial_sync_uses_nested_dto_shape() {
         KoboSyncBookSnapshot {
             id: "book-1".to_string(),
             title: "Book One".to_string(),
-            summary: "summary".to_string(),
-            release_date: Some("2026-01-01T00:00:00Z".to_string()),
-            language: "en".to_string(),
+            summary: String::new(),
+            release_date: None,
+            language: "EN".to_string(),
             file_size: 123,
             page_count: 10,
             created: "2026-01-01T00:00:00Z".to_string(),
             last_modified: "2026-01-02T00:00:00Z".to_string(),
+            contributor_names: vec!["Jane Writer".to_string()],
+            isbn: Some("9781234567890".to_string()),
+            publisher_name: Some("PubHouse".to_string()),
+            cover_image_id: Some("thumb-book-1".to_string()),
+            series_id: Some("series-1".to_string()),
+            series_name: Some("Series 1".to_string()),
+            series_number: Some("1".to_string()),
+            series_number_float: Some(1.0),
+            oneshot: false,
         },
     );
 
@@ -277,6 +286,72 @@ fn build_kobo_sync_events_initial_sync_uses_nested_dto_shape() {
     assert_eq!(
         entitlement
             .get("BookMetadata")
+            .and_then(|value| value.get("Description")),
+        Some(&Value::String(" ".to_string()))
+    );
+    assert_eq!(
+        entitlement
+            .get("BookMetadata")
+            .and_then(|value| value.get("Language")),
+        Some(&Value::String("en".to_string()))
+    );
+    assert_eq!(
+        entitlement
+            .get("BookMetadata")
+            .and_then(|value| value.get("CoverImageId")),
+        Some(&Value::String("thumb-book-1".to_string()))
+    );
+    assert_eq!(
+        entitlement
+            .get("BookMetadata")
+            .and_then(|value| value.get("ISBN")),
+        Some(&Value::String("9781234567890".to_string()))
+    );
+    assert_eq!(
+        entitlement
+            .get("BookMetadata")
+            .and_then(|value| value.get("Publisher"))
+            .and_then(|value| value.get("Name")),
+        Some(&Value::String("PubHouse".to_string()))
+    );
+    assert_eq!(
+        entitlement
+            .get("BookMetadata")
+            .and_then(|value| value.get("Series"))
+            .and_then(|value| value.get("Id")),
+        Some(&Value::String("series-1".to_string()))
+    );
+    assert_eq!(
+        entitlement
+            .get("BookMetadata")
+            .and_then(|value| value.get("Series"))
+            .and_then(|value| value.get("NumberFloat")),
+        Some(&json!(1.0))
+    );
+    assert_eq!(
+        entitlement
+            .get("BookMetadata")
+            .and_then(|value| value.get("Contributors")),
+        Some(&json!(["Jane Writer"]))
+    );
+    assert_eq!(
+        entitlement
+            .get("BookMetadata")
+            .and_then(|value| value.get("ContributorRoles"))
+            .and_then(Value::as_array)
+            .and_then(|items| items.first())
+            .and_then(|item| item.get("Name")),
+        Some(&Value::String("Jane Writer".to_string()))
+    );
+    assert_eq!(
+        entitlement
+            .get("BookMetadata")
+            .and_then(|value| value.get("PublicationDate")),
+        Some(&Value::String("2026-01-01T00:00:00Z".to_string()))
+    );
+    assert_eq!(
+        entitlement
+            .get("BookMetadata")
             .and_then(|value| value.get("DownloadUrls"))
             .and_then(Value::as_array)
             .and_then(|items| items.first())
@@ -327,6 +402,15 @@ fn build_kobo_sync_events_incremental_sync_emits_changed_and_removed_shapes() {
                 page_count: 10,
                 created: "2026-01-01T00:00:00Z".to_string(),
                 last_modified: "2026-01-01T00:00:00Z".to_string(),
+                contributor_names: vec![],
+                isbn: None,
+                publisher_name: None,
+                cover_image_id: None,
+                series_id: None,
+                series_name: None,
+                series_number: None,
+                series_number_float: None,
+                oneshot: false,
             },
         )]),
         progress: HashMap::new(),
@@ -354,6 +438,15 @@ fn build_kobo_sync_events_incremental_sync_emits_changed_and_removed_shapes() {
                 page_count: 10,
                 created: "2026-01-02T00:00:00Z".to_string(),
                 last_modified: "2026-01-02T00:00:00Z".to_string(),
+                contributor_names: vec![],
+                isbn: None,
+                publisher_name: None,
+                cover_image_id: None,
+                series_id: None,
+                series_name: None,
+                series_number: None,
+                series_number_float: None,
+                oneshot: false,
             },
         )]),
         progress: HashMap::from([(

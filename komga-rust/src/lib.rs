@@ -7,7 +7,7 @@ pub use komga_infrastructure as infrastructure;
 pub use komga_infrastructure::task_queue::{TaskQueueAdmin, TaskQueueScheduler};
 pub use komga_infrastructure::{
     SearchDocument, SearchEntityType, SearchError, SearchEvent, SearchIndexLifecycle,
-    reset_for_rebuild, startup_recover,
+    SearchStartupLifecycle, decide_startup_lifecycle, prepare_for_rebuild,
 };
 pub use komga_interfaces as interfaces;
 pub use komga_server::config;

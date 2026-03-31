@@ -25,9 +25,13 @@ pub fn prepare_task_queue(
 ) -> RuntimeBackgroundState {
     let runtime = config.task_runtime_context();
     let mut task_queue = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-runtime-http");
-    let _ = task_queue.disown_all();
+    if runtime.consumes_queue {
+        let _ = task_queue.disown_all();
+    }
     let scheduled_scans = bootstrap_startup_library_scans(&mut task_queue, &runtime);
-    bootstrap_startup_search_task(&mut task_queue, &runtime, startup_search_task);
+    if runtime.consumes_queue {
+        bootstrap_startup_search_task(&mut task_queue, &runtime, startup_search_task);
+    }
 
     RuntimeBackgroundState {
         task_queue: Arc::new(Mutex::new(task_queue)),
@@ -55,14 +59,19 @@ pub fn bootstrap_startup_search_task(
     };
 
     task_queue.enqueue(TaskQueueRecord::new(task_name.to_string(), 1_000, None));
-    let _ = task_queue.process_available(runtime);
+    drop(task_queue.process_available(runtime));
 }
 
 pub fn bootstrap_startup_library_scans(
     task_queue: &mut TaskQueueScheduler,
     runtime: &TaskRuntimeContext,
 ) -> Vec<ScheduledLibraryScan> {
+    if !runtime.owns_main_database {
+        return Vec::new();
+    }
+
     let profiles = load_persisted_library_scan_profiles(runtime.database_file.as_path())
+        .unwrap_or_else(|error| panic!("load startup library scan profiles: {error}"))
         .into_iter()
         .map(|profile| LibraryScanProfile {
             library_id: profile.library_id,
@@ -80,11 +89,17 @@ pub fn bootstrap_startup_library_scans(
     }
 
     build_scheduled_library_scans(&profiles)
+        .unwrap_or_else(|error| panic!("build scheduled library scans: {error}"))
 }
 
 pub fn process_startup_library_scans(config: impl TaskRuntimeConfig) {
     let runtime = config.task_runtime_context();
-    let library_ids = load_persisted_library_ids(runtime.database_file.as_path());
+    if !runtime.owns_main_database {
+        return;
+    }
+
+    let library_ids = load_persisted_library_ids(runtime.database_file.as_path())
+        .unwrap_or_else(|error| panic!("load startup library ids: {error}"));
     if library_ids.is_empty() {
         return;
     }
@@ -93,7 +108,7 @@ pub fn process_startup_library_scans(config: impl TaskRuntimeConfig) {
     for task in build_library_scan_tasks(&library_ids) {
         task_queue.enqueue(task);
     }
-    let _ = task_queue.process_available(&runtime);
+    drop(task_queue.process_available(&runtime));
 }
 
 fn spawn_periodic_library_scan_workers(
@@ -114,6 +129,7 @@ fn spawn_periodic_library_scan_workers(
             ticker.tick().await;
 
             let profiles = load_persisted_library_scan_profiles(runtime.database_file.as_path())
+                .unwrap_or_else(|error| panic!("load periodic library scan profiles: {error}"))
                 .into_iter()
                 .map(|profile| LibraryScanProfile {
                     library_id: profile.library_id,
@@ -121,7 +137,8 @@ fn spawn_periodic_library_scan_workers(
                     scan_interval: profile.scan_interval,
                 })
                 .collect::<Vec<_>>();
-            let active_libraries = library_scan_due_periods(&profiles);
+            let active_libraries = library_scan_due_periods(&profiles)
+                .unwrap_or_else(|error| panic!("build periodic library scan periods: {error}"));
 
             for (library_id, period) in active_libraries.clone() {
                 let next_due = last_run_by_library
@@ -140,7 +157,7 @@ fn spawn_periodic_library_scan_workers(
                     100,
                     Some(library_id),
                 ));
-                let _ = queue.process_available(&runtime);
+                drop(queue.process_available(&runtime));
                 *next_due = tokio::time::Instant::now();
             }
 
@@ -163,7 +180,7 @@ fn spawn_background_task_worker(task_queue: SharedTaskQueue, runtime: TaskRuntim
             let mut task_queue = task_queue
                 .lock()
                 .expect("task queue state lock should not be poisoned");
-            let _ = task_queue.process_available(&runtime);
+            drop(task_queue.process_available(&runtime));
         }
     });
 }
@@ -179,10 +196,16 @@ fn spawn_authentication_activity_cleanup_worker(runtime: TaskRuntimeContext) {
 
         loop {
             ticker.tick().await;
-            let _ = crate::auth::persisted_cleanup_authentication_activity(
-                runtime.database_file.as_path(),
-            )
-            .await;
+            cleanup_authentication_activity_once(&runtime).await;
         }
     });
+}
+
+pub async fn cleanup_authentication_activity_once(runtime: &TaskRuntimeContext) {
+    if !runtime.owns_main_database {
+        return;
+    }
+
+    let _ = crate::auth::persisted_cleanup_authentication_activity(runtime.database_file.as_path())
+        .await;
 }

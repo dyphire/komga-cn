@@ -373,32 +373,32 @@ fn recurse_directory(dir: &Path, options: &ScannerOptions, temp: &mut TempScan) 
             continue;
         };
 
-        if let Some(sidecar_type) = options.series_sidecar_for(file_name) {
-            if let Some(parent) = entry_path.parent() {
-                temp.path_to_series_sidecars
-                    .entry(parent.to_path_buf())
-                    .or_default()
-                    .push(ScanSidecar {
-                        path: entry_path.clone(),
-                        target_path: parent.to_path_buf(),
-                        file_last_modified: updated_time(&symlink_metadata),
-                        sidecar_type,
-                        source: ScanSidecarSource::Series,
-                    });
-            }
+        if let Some(sidecar_type) = options.series_sidecar_for(file_name)
+            && let Some(parent) = entry_path.parent()
+        {
+            temp.path_to_series_sidecars
+                .entry(parent.to_path_buf())
+                .or_default()
+                .push(ScanSidecar {
+                    path: entry_path.clone(),
+                    target_path: parent.to_path_buf(),
+                    file_last_modified: updated_time(&symlink_metadata),
+                    sidecar_type,
+                    source: ScanSidecarSource::Series,
+                });
         }
 
-        if options.book_sidecar_candidate(file_name) {
-            if let Some(parent) = entry_path.parent() {
-                temp.path_to_book_sidecars
-                    .entry(parent.to_path_buf())
-                    .or_default()
-                    .push(TempSidecar {
-                        name: file_name.to_string(),
-                        path: entry_path,
-                        file_last_modified: updated_time(&symlink_metadata),
-                    });
-            }
+        if options.book_sidecar_candidate(file_name)
+            && let Some(parent) = entry_path.parent()
+        {
+            temp.path_to_book_sidecars
+                .entry(parent.to_path_buf())
+                .or_default()
+                .push(TempSidecar {
+                    name: file_name.to_string(),
+                    path: entry_path,
+                    file_last_modified: updated_time(&symlink_metadata),
+                });
         }
     }
 
@@ -524,17 +524,9 @@ pub enum WatchBackend {
     DeterministicFallback,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct NotifyWatcherOptions {
     pub scanner: ScannerOptions,
-}
-
-impl Default for NotifyWatcherOptions {
-    fn default() -> Self {
-        Self {
-            scanner: ScannerOptions::default(),
-        }
-    }
 }
 
 pub struct NotifyLibraryWatcher {

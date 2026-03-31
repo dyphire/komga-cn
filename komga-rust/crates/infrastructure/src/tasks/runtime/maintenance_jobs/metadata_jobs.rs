@@ -67,7 +67,7 @@ pub(super) fn try_execute(
                     "GENERATE_BOOK_THUMBNAIL task must include a book id",
                 )));
             };
-            super::super::metadata_tasks::refresh_book_local_artwork(runtime, book_id)
+            super::super::metadata_tasks::generate_book_thumbnail(runtime, book_id)
         }
         "REFRESH_SERIES_LOCAL_ARTWORK" => {
             let Some(series_id) = task_target else {

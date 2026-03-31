@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::Extension;

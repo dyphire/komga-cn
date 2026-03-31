@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use axum::response::Response;
 use komga_application::library_catalog::LibraryChangeSet;
 use serde_json::Value;

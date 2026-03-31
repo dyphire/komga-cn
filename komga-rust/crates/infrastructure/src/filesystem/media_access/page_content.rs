@@ -1,7 +1,6 @@
 use std::fs;
 use std::io::Read;
 use std::path::Path;
-use std::process::Command;
 
 use komga_application::media_assets::{
     BookMediaRecord, BookPageRecord, book_media_is_pdf, book_media_is_rar_archive,
@@ -10,6 +9,8 @@ use komga_application::media_assets::{
 };
 use lopdf::Document as PdfDocument;
 use zip::ZipArchive;
+
+use crate::rar_support::{list_rar_entries, read_rar_entry_bytes};
 
 pub fn resolve_book_page_bytes(
     media: &BookMediaRecord,
@@ -32,15 +33,8 @@ pub fn resolve_book_page_bytes(
         }
     }
     read_zip_archive_page_bytes(media, page, page_number)
-        .or_else(|| read_rar_archive_page_bytes_cli(media, page, page_number))
+        .or_else(|| read_rar_archive_page_bytes(media, page, page_number))
         .or_else(|| read_pdf_page_bytes(media, page_number))
-        .or_else(|| {
-            if book_media_is_single_image(media) && page_number == 1 {
-                fs::read(&media.file_path).ok()
-            } else {
-                None
-            }
-        })
 }
 
 pub fn load_archive_page_row(media: &BookMediaRecord, page_number: u64) -> Option<BookPageRecord> {
@@ -57,7 +51,7 @@ pub fn load_archive_page_rows(media: &BookMediaRecord) -> Option<Vec<BookPageRec
         return load_zip_archive_page_rows(media);
     }
     if book_media_is_rar_archive(media) {
-        return load_rar_archive_page_rows_cli(media);
+        return load_rar_archive_page_rows(media);
     }
     None
 }
@@ -197,33 +191,25 @@ fn load_zip_archive_page_rows(media: &BookMediaRecord) -> Option<Vec<BookPageRec
     (!rows.is_empty()).then_some(rows)
 }
 
-fn load_rar_archive_page_rows_cli(media: &BookMediaRecord) -> Option<Vec<BookPageRecord>> {
-    let output = Command::new("unrar")
-        .arg("lb")
-        .arg(&media.file_path)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let rows = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && is_supported_page_image_file_name(line))
+fn load_rar_archive_page_rows(media: &BookMediaRecord) -> Option<Vec<BookPageRecord>> {
+    let rows = list_rar_entries(&media.file_path)
+        .ok()?
+        .into_iter()
+        .filter(|entry| is_supported_page_image_file_name(&entry.file_name))
         .enumerate()
-        .map(|(index, file_name)| BookPageRecord {
+        .map(|(index, entry)| BookPageRecord {
             number: (index as u64) + 1,
-            file_name: file_name.to_string(),
-            media_type: content_type_from_filename(file_name, "image/jpeg"),
+            file_name: entry.file_name.clone(),
+            media_type: content_type_from_filename(&entry.file_name, "image/jpeg"),
             width: None,
             height: None,
-            file_size: 0,
+            file_size: entry.unpacked_size.try_into().unwrap_or(i64::MAX),
         })
         .collect::<Vec<_>>();
     (!rows.is_empty()).then_some(rows)
 }
 
-fn read_rar_archive_page_bytes_cli(
+fn read_rar_archive_page_bytes(
     media: &BookMediaRecord,
     page: &BookPageRecord,
     page_number: u64,
@@ -232,30 +218,20 @@ fn read_rar_archive_page_bytes_cli(
         return None;
     }
     if !page.file_name.is_empty()
-        && let Some(bytes) = read_rar_entry_bytes_cli(&media.file_path, &page.file_name)
+        && let Some(bytes) = read_rar_entry_bytes(&media.file_path, &page.file_name)
+            .ok()
+            .flatten()
     {
         return Some(bytes);
     }
     let page_index = usize::try_from(page_number.saturating_sub(1)).ok()?;
-    let page_file_name = load_rar_archive_page_rows_cli(media)?
+    let page_file_name = load_rar_archive_page_rows(media)?
         .into_iter()
         .nth(page_index)?
         .file_name;
-    read_rar_entry_bytes_cli(&media.file_path, &page_file_name)
-}
-
-fn read_rar_entry_bytes_cli(archive_path: &Path, entry_name: &str) -> Option<Vec<u8>> {
-    let output = Command::new("unrar")
-        .arg("p")
-        .arg("-inul")
-        .arg(archive_path)
-        .arg(entry_name)
-        .output()
-        .ok()?;
-    if !output.status.success() || output.stdout.is_empty() {
-        return None;
-    }
-    Some(output.stdout)
+    read_rar_entry_bytes(&media.file_path, &page_file_name)
+        .ok()
+        .flatten()
 }
 
 pub fn read_media_file_bytes(path: &Path) -> Option<Vec<u8>> {

@@ -17,6 +17,8 @@ node_modules
 *.bak
 .slim
 .sisyphus
+CLAUDE.md
+AGENTS.md
 
 ### SQLite databases
 *.sqlite

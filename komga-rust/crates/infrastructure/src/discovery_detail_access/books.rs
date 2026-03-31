@@ -138,10 +138,9 @@ pub async fn load_persisted_book_detail(
                 b.DELETED_DATE AS DELETED_DATE, bm.TITLE AS METADATA_TITLE, \
                 bm.SUMMARY AS METADATA_SUMMARY, bm.NUMBER AS METADATA_NUMBER, \
                 bm.NUMBER_SORT AS METADATA_NUMBER_SORT, bm.RELEASE_DATE AS METADATA_RELEASE_DATE, \
-                COALESCE((SELECT GROUP_CONCAT(ba.NAME) \
+                COALESCE((SELECT GROUP_CONCAT(ba.NAME || X'1E' || COALESCE(ba.ROLE, ''), X'1F') \
                           FROM BOOK_METADATA_AUTHOR ba \
-                          WHERE ba.BOOK_ID = b.ID \
-                            AND LOWER(COALESCE(ba.ROLE, 'writer')) = 'writer'), '') AS METADATA_AUTHORS, \
+                          WHERE ba.BOOK_ID = b.ID), '') AS METADATA_AUTHORS, \
                 COALESCE((SELECT GROUP_CONCAT(bt.TAG) \
                           FROM BOOK_METADATA_TAG bt \
                           WHERE bt.BOOK_ID = b.ID), '') AS METADATA_TAGS, \

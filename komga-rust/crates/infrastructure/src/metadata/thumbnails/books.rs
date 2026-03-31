@@ -20,7 +20,7 @@ pub async fn load_persisted_book_thumbnails(
         .map_err(|error| format!("open book thumbnails db: {error}"))?;
 
     let rows = sqlx::query(
-        "SELECT ID, TYPE, SELECTED \
+        "SELECT ID, BOOK_ID, TYPE, SELECTED, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT \
          FROM THUMBNAIL_BOOK \
          WHERE BOOK_ID = ? \
          ORDER BY SELECTED DESC, LAST_MODIFIED_DATE DESC, ID ASC",
@@ -34,8 +34,13 @@ pub async fn load_persisted_book_thumbnails(
         .into_iter()
         .map(|row| EntityThumbnailRecord {
             id: row.get::<String, _>("ID"),
+            book_id: row.get::<String, _>("BOOK_ID"),
             thumbnail_type: row.get::<String, _>("TYPE"),
             selected: row.get::<i64, _>("SELECTED") != 0,
+            media_type: row.get::<String, _>("MEDIA_TYPE"),
+            file_size: row.get::<i64, _>("FILE_SIZE"),
+            width: row.get::<i64, _>("WIDTH"),
+            height: row.get::<i64, _>("HEIGHT"),
         })
         .collect())
 }
@@ -106,6 +111,8 @@ pub async fn insert_book_thumbnail(
     book_id: &str,
     thumbnail: &[u8],
     media_type: &str,
+    width: i64,
+    height: i64,
     selected: bool,
 ) -> Result<EntityThumbnailRecord, String> {
     let pool = connect_pool(database_file, 1)
@@ -149,8 +156,8 @@ pub async fn insert_book_thumbnail(
     let id = generated_thumbnail_id("thumbnail-book");
     sqlx::query(
         "INSERT INTO THUMBNAIL_BOOK \
-         (ID, SELECTED, THUMBNAIL, TYPE, BOOK_ID, MEDIA_TYPE, FILE_SIZE) \
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+         (ID, SELECTED, THUMBNAIL, TYPE, BOOK_ID, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(selected)
@@ -159,6 +166,8 @@ pub async fn insert_book_thumbnail(
     .bind(book_id)
     .bind(media_type)
     .bind(thumbnail.len() as i64)
+    .bind(width)
+    .bind(height)
     .execute(&mut *tx)
     .await
     .map_err(|error| format!("insert book thumbnail: {error}"))?;
@@ -169,8 +178,13 @@ pub async fn insert_book_thumbnail(
 
     Ok(EntityThumbnailRecord {
         id,
+        book_id: book_id.to_string(),
         thumbnail_type: "USER_UPLOADED".to_string(),
         selected,
+        media_type: media_type.to_string(),
+        file_size: thumbnail.len() as i64,
+        width,
+        height,
     })
 }
 

@@ -6,6 +6,10 @@ pub(in crate::task_queue) fn analyze_book(
 ) -> Result<(), TaskExecutionError> {
     let book_id = book_id.to_string();
     let runtime = runtime.task_runtime_context();
+    if !runtime.owns_main_database {
+        return Ok(());
+    }
+
     let Some(input) = analyze_book_input(runtime.database_file.as_path(), &book_id)
         .map_err(TaskExecutionError::runtime)?
     else {
@@ -39,6 +43,7 @@ pub(in crate::task_queue) fn analyze_book(
         runtime.lucene_data_directory.as_path(),
         &book_id,
         &persisted,
+        runtime.owns_search_index,
     )
     .map_err(TaskExecutionError::runtime)?;
 

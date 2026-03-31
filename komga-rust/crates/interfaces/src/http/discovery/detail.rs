@@ -64,16 +64,18 @@ pub use detail_access_books::{
 };
 pub use detail_access_collections::DiscoveryDetailCollectionsAccessBackend;
 pub use detail_access_collections::{
-    PersistedCollectionRecord as PersistedCollectionAccessRecord,
-    PersistedCollectionSeriesRecord as PersistedCollectionSeriesAccessRecord,
-    PersistedSeriesRestrictionRecord,
+    PersistedCollectionRecord as PersistedCollectionAccessRecord, PersistedSeriesRestrictionRecord,
 };
 pub use detail_access_readlists::DiscoveryDetailReadlistsAccessBackend;
-pub use detail_access_readlists::{PersistedReadlistBookRecord, PersistedReadlistRecord};
+pub use detail_access_readlists::{
+    PersistedBookAuthorRecord, PersistedComicrackMatchCandidateRecord, PersistedReadlistBookRecord,
+    PersistedReadlistRecord,
+};
 pub use detail_access_series::DiscoveryDetailSeriesAccessBackend;
 pub use detail_access_series::{
     ExistingSeriesMetadataRecord, PersistedCollectionRecord as PersistedSeriesCollectionRecord,
-    PersistedSeriesDetailRecord, PersistedSeriesResourceRecord, SeriesSummaryRecord,
+    PersistedSeriesDetailRecord, PersistedSeriesResourceRecord, SeriesAlternateTitleRecord,
+    SeriesMetadataLinkRecord, SeriesMetadataUpdateRecord, SeriesSummaryRecord,
 };
 
 pub use books_detail::{book_detail, book_readlists, book_sibling_next, book_sibling_previous};
@@ -86,10 +88,11 @@ pub use collections::{
     collections,
 };
 pub use collections_support::{
-    collection_payload, collection_series_page_payload, collection_write_input,
-    collections_page_payload, delete_persisted_collection, load_persisted_collection_detail,
-    load_persisted_collection_series, load_persisted_collections, persist_collection_create,
-    persist_collection_update, persisted_collections_exist, series_visible_to_context,
+    collection_payload, collection_write_input, collections_page_payload,
+    collections_unpaged_payload, delete_collection_search_document, delete_persisted_collection,
+    load_persisted_collection_detail, load_persisted_collections, load_series_library_id,
+    persist_collection_create, persist_collection_update, persisted_collections_exist,
+    series_visible_to_context, upsert_collection_search_document,
 };
 pub use detail_utils::{
     coerce_library_id_for_id_bridge, format_size_bytes, internal_error_response,
@@ -100,16 +103,20 @@ pub use readlists::{
     readlist_delete, readlist_detail, readlist_match_comicrack, readlist_update, readlists,
 };
 pub use readlists_support::{
-    ReadListsSort, decode_query_component, delete_persisted_readlist,
-    load_persisted_readlist_detail, load_persisted_readlists, parse_readlists_sort,
-    persist_readlist_create, persist_readlist_update, persisted_readlists_exist,
-    readlist_payload, readlist_search_score, readlist_write_input, readlists_page_payload,
+    PersistedReadlistBooksQuery, ReadListsSort, comicrack_error_payload, decode_query_component,
+    delete_persisted_readlist, delete_readlist_search_document, load_persisted_readlist_detail,
+    load_persisted_readlists, load_visible_persisted_readlist_books, match_comicrack_readlist,
+    paginate_persisted_readlist_books, parse_comicrack_readlist,
+    parse_persisted_readlist_books_query, parse_readlists_sort, persist_readlist_create,
+    persist_readlist_update, persisted_readlists_exist, readlist_payload, readlist_search_score,
+    readlist_write_input, readlists_page_payload, sort_visible_persisted_readlist_books,
+    upsert_readlist_search_document,
 };
 pub use series_detail::{series_collections, series_detail, series_metadata_update};
 pub use series_persistence::{
     load_existing_series_metadata, load_persisted_series_collections, load_persisted_series_detail,
-    load_persisted_series_resource, persist_series_metadata_update, refresh_series_search_document,
-    resolve_series_id_for_persisted,
+    load_persisted_series_resource, persist_series_metadata_update,
+    resolve_series_id_for_persisted, sync_series_search_documents_after_metadata_update,
 };
 
 #[derive(Clone)]
@@ -121,6 +128,12 @@ struct PersistedReadProgress {
     last_modified: String,
     device_id: Option<String>,
     device_name: Option<String>,
+}
+
+#[derive(Clone)]
+struct BookMetadataAuthorReadModel {
+    name: String,
+    role: String,
 }
 
 #[derive(Clone)]
@@ -145,7 +158,7 @@ pub(super) struct BookDetailReadModel {
     metadata_number: String,
     metadata_number_sort: f64,
     metadata_release_date: Option<String>,
-    metadata_authors: Vec<String>,
+    metadata_authors: Vec<BookMetadataAuthorReadModel>,
     metadata_tags: Vec<String>,
     metadata_isbn: String,
     metadata_created: String,
@@ -194,16 +207,31 @@ pub(super) struct SeriesDetailReadModel {
     books_unread_count: u32,
     books_in_progress_count: u32,
     status: String,
+    status_lock: bool,
     summary: String,
+    summary_lock: bool,
     reading_direction: String,
+    reading_direction_lock: bool,
     publisher: String,
-    age_rating: Option<u16>,
+    publisher_lock: bool,
+    age_rating: Option<u32>,
+    age_rating_lock: bool,
     language: String,
+    language_lock: bool,
     genres: Vec<String>,
+    genres_lock: bool,
     tags: Vec<String>,
+    tags_lock: bool,
     total_book_count: Option<u32>,
+    total_book_count_lock: bool,
     sharing_labels: Vec<String>,
-    alternate_titles: Vec<String>,
+    sharing_labels_lock: bool,
+    links: Vec<SeriesMetadataLinkRecord>,
+    links_lock: bool,
+    alternate_titles: Vec<SeriesAlternateTitleRecord>,
+    alternate_titles_lock: bool,
+    title_lock: bool,
+    title_sort_lock: bool,
     metadata_created: String,
     metadata_last_modified: String,
     books_metadata_tags: Vec<String>,
@@ -253,7 +281,7 @@ fn book_detail_payload(book: &BookDetailReadModel, is_admin: bool) -> Value {
             "numberSortLock": false,
             "releaseDate": book.metadata_release_date,
             "releaseDateLock": false,
-            "authors": book.metadata_authors.iter().map(|name| json!({ "name": name, "role": "writer" })).collect::<Vec<_>>(),
+            "authors": book.metadata_authors.iter().map(|author| json!({ "name": author.name, "role": author.role })).collect::<Vec<_>>(),
             "authorsLock": false,
             "tags": book.metadata_tags,
             "tagsLock": false,
@@ -288,55 +316,73 @@ fn series_detail_payload(series: &SeriesDetailReadModel, is_admin: bool) -> Valu
 
     let mut metadata = Map::new();
     metadata.insert("status".to_string(), Value::String(series.status.clone()));
-    metadata.insert("statusLock".to_string(), Value::Bool(false));
+    metadata.insert("statusLock".to_string(), Value::Bool(series.status_lock));
     metadata.insert("title".to_string(), Value::String(series.title.clone()));
-    metadata.insert("titleLock".to_string(), Value::Bool(false));
+    metadata.insert("titleLock".to_string(), Value::Bool(series.title_lock));
     metadata.insert(
         "titleSort".to_string(),
         Value::String(series.title_sort.clone()),
     );
-    metadata.insert("titleSortLock".to_string(), Value::Bool(false));
+    metadata.insert(
+        "titleSortLock".to_string(),
+        Value::Bool(series.title_sort_lock),
+    );
     metadata.insert("summary".to_string(), Value::String(series.summary.clone()));
-    metadata.insert("summaryLock".to_string(), Value::Bool(false));
+    metadata.insert("summaryLock".to_string(), Value::Bool(series.summary_lock));
     metadata.insert(
         "readingDirection".to_string(),
         Value::String(series.reading_direction.clone()),
     );
-    metadata.insert("readingDirectionLock".to_string(), Value::Bool(false));
+    metadata.insert(
+        "readingDirectionLock".to_string(),
+        Value::Bool(series.reading_direction_lock),
+    );
     metadata.insert(
         "publisher".to_string(),
         Value::String(series.publisher.clone()),
     );
-    metadata.insert("publisherLock".to_string(), Value::Bool(false));
+    metadata.insert(
+        "publisherLock".to_string(),
+        Value::Bool(series.publisher_lock),
+    );
     metadata.insert(
         "ageRating".to_string(),
         series
             .age_rating
             .map_or(Value::Null, |it| Value::Number(it.into())),
     );
-    metadata.insert("ageRatingLock".to_string(), Value::Bool(false));
+    metadata.insert(
+        "ageRatingLock".to_string(),
+        Value::Bool(series.age_rating_lock),
+    );
     metadata.insert(
         "language".to_string(),
         Value::String(series.language.clone()),
     );
-    metadata.insert("languageLock".to_string(), Value::Bool(false));
+    metadata.insert(
+        "languageLock".to_string(),
+        Value::Bool(series.language_lock),
+    );
     metadata.insert(
         "genres".to_string(),
         Value::Array(series.genres.iter().cloned().map(Value::String).collect()),
     );
-    metadata.insert("genresLock".to_string(), Value::Bool(false));
+    metadata.insert("genresLock".to_string(), Value::Bool(series.genres_lock));
     metadata.insert(
         "tags".to_string(),
         Value::Array(series.tags.iter().cloned().map(Value::String).collect()),
     );
-    metadata.insert("tagsLock".to_string(), Value::Bool(false));
+    metadata.insert("tagsLock".to_string(), Value::Bool(series.tags_lock));
     metadata.insert(
         "totalBookCount".to_string(),
         series
             .total_book_count
             .map_or(Value::Null, |it| Value::Number(it.into())),
     );
-    metadata.insert("totalBookCountLock".to_string(), Value::Bool(false));
+    metadata.insert(
+        "totalBookCountLock".to_string(),
+        Value::Bool(series.total_book_count_lock),
+    );
     metadata.insert(
         "sharingLabels".to_string(),
         Value::Array(
@@ -348,21 +394,35 @@ fn series_detail_payload(series: &SeriesDetailReadModel, is_admin: bool) -> Valu
                 .collect(),
         ),
     );
-    metadata.insert("sharingLabelsLock".to_string(), Value::Bool(false));
-    metadata.insert("links".to_string(), Value::Array(vec![]));
-    metadata.insert("linksLock".to_string(), Value::Bool(false));
+    metadata.insert(
+        "sharingLabelsLock".to_string(),
+        Value::Bool(series.sharing_labels_lock),
+    );
+    metadata.insert(
+        "links".to_string(),
+        Value::Array(
+            series
+                .links
+                .iter()
+                .map(|link| json!({ "label": link.label, "url": link.url }))
+                .collect(),
+        ),
+    );
+    metadata.insert("linksLock".to_string(), Value::Bool(series.links_lock));
     metadata.insert(
         "alternateTitles".to_string(),
         Value::Array(
             series
                 .alternate_titles
                 .iter()
-                .cloned()
-                .map(Value::String)
+                .map(|title| json!({ "label": title.label, "title": title.title }))
                 .collect(),
         ),
     );
-    metadata.insert("alternateTitlesLock".to_string(), Value::Bool(false));
+    metadata.insert(
+        "alternateTitlesLock".to_string(),
+        Value::Bool(series.alternate_titles_lock),
+    );
     metadata.insert(
         "created".to_string(),
         Value::String(series.metadata_created.clone()),

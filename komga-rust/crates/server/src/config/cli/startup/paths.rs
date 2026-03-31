@@ -13,6 +13,7 @@ pub(crate) fn read_string(layered: &LayeredConfig, keys: &[&str]) -> Option<Stri
     keys.iter().find_map(|key| layered.get_string(key).ok())
 }
 
+#[allow(clippy::ptr_arg)]
 pub(crate) fn path_to_string(path: &PathBuf) -> String {
     path.to_string_lossy().to_string()
 }

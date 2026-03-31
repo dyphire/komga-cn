@@ -43,7 +43,7 @@ pub async fn load_persisted_collection_thumbnails(
         .await
         .map_err(|error| format!("open collection thumbnails db: {error}"))?;
     let rows = sqlx::query(
-        "SELECT ID, TYPE, SELECTED, MEDIA_TYPE, THUMBNAIL \
+        "SELECT ID, COLLECTION_ID, TYPE, SELECTED, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT, THUMBNAIL \
          FROM THUMBNAIL_COLLECTION \
          WHERE COLLECTION_ID = ? \
          ORDER BY SELECTED DESC, LAST_MODIFIED_DATE DESC, ID ASC",
@@ -57,9 +57,13 @@ pub async fn load_persisted_collection_thumbnails(
         .into_iter()
         .map(|row| CollectionThumbnailRecord {
             id: row.get::<String, _>("ID"),
+            collection_id: row.get::<String, _>("COLLECTION_ID"),
             thumbnail_type: row.get::<String, _>("TYPE"),
             selected: row.get::<i64, _>("SELECTED") != 0,
             media_type: row.get::<String, _>("MEDIA_TYPE"),
+            file_size: row.get::<i64, _>("FILE_SIZE"),
+            width: row.get::<i64, _>("WIDTH"),
+            height: row.get::<i64, _>("HEIGHT"),
             thumbnail: row.get::<Vec<u8>, _>("THUMBNAIL"),
         })
         .collect())
@@ -70,6 +74,8 @@ pub async fn insert_collection_thumbnail(
     collection_id: &str,
     thumbnail: &[u8],
     media_type: &str,
+    width: i64,
+    height: i64,
     selected: bool,
 ) -> Result<CollectionThumbnailRecord, String> {
     let pool = connect_pool(database_file, 1)
@@ -113,8 +119,8 @@ pub async fn insert_collection_thumbnail(
     let id = generated_thumbnail_id("thumbnail-collection");
     sqlx::query(
         "INSERT INTO THUMBNAIL_COLLECTION \
-         (ID, SELECTED, THUMBNAIL, TYPE, COLLECTION_ID, MEDIA_TYPE, FILE_SIZE) \
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+         (ID, SELECTED, THUMBNAIL, TYPE, COLLECTION_ID, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(selected)
@@ -123,6 +129,8 @@ pub async fn insert_collection_thumbnail(
     .bind(collection_id)
     .bind(media_type)
     .bind(thumbnail.len() as i64)
+    .bind(width)
+    .bind(height)
     .execute(&mut *tx)
     .await
     .map_err(|error| format!("insert collection thumbnail: {error}"))?;
@@ -133,9 +141,13 @@ pub async fn insert_collection_thumbnail(
 
     Ok(CollectionThumbnailRecord {
         id,
+        collection_id: collection_id.to_string(),
         thumbnail_type: "USER_UPLOADED".to_string(),
         selected,
         media_type: media_type.to_string(),
+        file_size: thumbnail.len() as i64,
+        width,
+        height,
         thumbnail: thumbnail.to_vec(),
     })
 }

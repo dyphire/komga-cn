@@ -139,13 +139,6 @@ pub(crate) async fn load_persisted_epub_extension_blob(
         .await
 }
 
-pub(crate) async fn load_series_library_id(
-    database_file: &Path,
-    series_id: &str,
-) -> Result<Option<String>, String> {
-    (backend().load_series_library_id)(database_file.to_path_buf(), series_id.to_string()).await
-}
-
 pub(crate) async fn load_series_book_ids(
     database_file: &Path,
     series_id: &str,
@@ -283,6 +276,8 @@ pub(crate) async fn insert_book_thumbnail(
     book_id: &str,
     thumbnail: &[u8],
     media_type: &str,
+    width: i64,
+    height: i64,
     selected: bool,
 ) -> Result<EntityThumbnailRecord, String> {
     (backend().insert_book_thumbnail)(
@@ -290,6 +285,8 @@ pub(crate) async fn insert_book_thumbnail(
         book_id.to_string(),
         thumbnail.to_vec(),
         media_type.to_string(),
+        width,
+        height,
         selected,
     )
     .await
@@ -337,6 +334,8 @@ pub(crate) async fn insert_readlist_thumbnail(
     readlist_id: &str,
     thumbnail: &[u8],
     media_type: &str,
+    width: i64,
+    height: i64,
     selected: bool,
 ) -> Result<ReadlistThumbnailRecord, String> {
     (backend().insert_readlist_thumbnail)(
@@ -344,6 +343,8 @@ pub(crate) async fn insert_readlist_thumbnail(
         readlist_id.to_string(),
         thumbnail.to_vec(),
         media_type.to_string(),
+        width,
+        height,
         selected,
     )
     .await
@@ -391,6 +392,8 @@ pub(crate) async fn insert_collection_thumbnail(
     collection_id: &str,
     thumbnail: &[u8],
     media_type: &str,
+    width: i64,
+    height: i64,
     selected: bool,
 ) -> Result<CollectionThumbnailRecord, String> {
     (backend().insert_collection_thumbnail)(
@@ -398,6 +401,8 @@ pub(crate) async fn insert_collection_thumbnail(
         collection_id.to_string(),
         thumbnail.to_vec(),
         media_type.to_string(),
+        width,
+        height,
         selected,
     )
     .await
@@ -463,6 +468,8 @@ pub(crate) async fn insert_series_thumbnail(
     series_id: &str,
     thumbnail: &[u8],
     media_type: &str,
+    width: i64,
+    height: i64,
     selected: bool,
 ) -> Result<SeriesThumbnailRecord, String> {
     (backend().insert_series_thumbnail)(
@@ -470,6 +477,8 @@ pub(crate) async fn insert_series_thumbnail(
         series_id.to_string(),
         thumbnail.to_vec(),
         media_type.to_string(),
+        width,
+        height,
         selected,
     )
     .await

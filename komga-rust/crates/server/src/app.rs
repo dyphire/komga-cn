@@ -30,6 +30,12 @@ pub fn build_router_with_config(config: &RuntimeConfig) -> Router {
     start_server::build_router_with_config(config)
 }
 
+pub fn prepare_startup_search_task_for_contract(
+    config: &RuntimeConfig,
+) -> std::io::Result<Option<&'static str>> {
+    start_server::prepare_startup_search_task(config)
+}
+
 pub async fn serve(listener: TcpListener) -> std::io::Result<()> {
     let config = RuntimeConfig::from_env().expect("invalid runtime config");
     serve_with_config(listener, config).await
@@ -64,6 +70,22 @@ impl TaskRuntimeConfig for RuntimeConfig {
             lucene_data_directory: self.lucene_data_directory.clone(),
             consumes_queue: matches!(
                 self.writer_decision(crate::config::WriterKind::TasksDatabase),
+                crate::config::WriterDecision::Allowed | crate::config::WriterDecision::Isolated
+            ),
+            owns_main_database: matches!(
+                self.writer_decision(crate::config::WriterKind::MainDatabase),
+                crate::config::WriterDecision::Allowed | crate::config::WriterDecision::Isolated
+            ),
+            owns_filesystem_scan_output: matches!(
+                self.writer_decision(crate::config::WriterKind::FilesystemScanOutput),
+                crate::config::WriterDecision::Allowed | crate::config::WriterDecision::Isolated
+            ),
+            owns_sidecar_output: matches!(
+                self.writer_decision(crate::config::WriterKind::SidecarOutput),
+                crate::config::WriterDecision::Allowed | crate::config::WriterDecision::Isolated
+            ),
+            owns_search_index: matches!(
+                self.writer_decision(crate::config::WriterKind::SearchIndex),
                 crate::config::WriterDecision::Allowed | crate::config::WriterDecision::Isolated
             ),
         }

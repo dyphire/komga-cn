@@ -41,22 +41,42 @@ struct PersistedHistoricalEvent {
     timestamp: String,
 }
 
-pub async fn delete_syncpoints_by_user_and_key_id(
+pub async fn delete_syncpoints_by_user(
     database_file: &Path,
     user_id: &str,
-    key_id: &str,
 ) -> Result<(), sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
     sqlx::query(
         "DELETE \
          FROM SYNC_POINT \
-         WHERE USER_ID = ? \
-         AND API_KEY_ID = ?",
+         WHERE USER_ID = ?",
     )
     .bind(user_id)
-    .bind(key_id)
     .execute(&pool)
     .await?;
+    Ok(())
+}
+
+pub async fn delete_syncpoints_by_user_and_key_ids(
+    database_file: &Path,
+    user_id: &str,
+    key_ids: &[String],
+) -> Result<(), sqlx::Error> {
+    if key_ids.is_empty() {
+        return delete_syncpoints_by_user(database_file, user_id).await;
+    }
+
+    let pool = connect_pool(database_file, 1).await?;
+    let mut query =
+        sqlx::QueryBuilder::<sqlx::Sqlite>::new("DELETE FROM SYNC_POINT WHERE USER_ID = ");
+    query.push_bind(user_id);
+    query.push(" AND API_KEY_ID IN (");
+    let mut separated = query.separated(", ");
+    for key_id in key_ids {
+        separated.push_bind(key_id);
+    }
+    separated.push_unseparated(")");
+    query.build().execute(&pool).await?;
     Ok(())
 }
 
@@ -195,7 +215,7 @@ pub async fn load_history_page(
     let total_pages = if total_elements == 0 {
         0
     } else {
-        (total_elements + size - 1) / size
+        total_elements.div_ceil(size)
     };
     let number_of_elements = content.len() as u64;
     let first = page == 0;
@@ -607,8 +627,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delete_syncpoints_by_user_and_key_id_removes_only_matching_rows() {
-        let (db_path, pool) = create_syncpoint_test_db("syncpoints-delete").await;
+    async fn delete_syncpoints_by_user_removes_all_rows_for_user() {
+        let (db_path, pool) = create_syncpoint_test_db("syncpoints-delete-all").await;
 
         for (id, user_id, key_id) in [
             ("sp-1", "user-1", "key-1"),
@@ -624,9 +644,9 @@ mod tests {
                 .expect("sync point should be inserted");
         }
 
-        delete_syncpoints_by_user_and_key_id(db_path.as_path(), "user-1", "key-1")
+        delete_syncpoints_by_user(db_path.as_path(), "user-1")
             .await
-            .expect("matching sync point should delete");
+            .expect("all sync points for user should delete");
 
         let rows = sqlx::query("SELECT ID FROM SYNC_POINT ORDER BY ID")
             .fetch_all(&pool)
@@ -636,6 +656,44 @@ mod tests {
             .iter()
             .map(|row| row.get::<String, _>("ID"))
             .collect::<Vec<_>>();
-        assert_eq!(ids, vec!["sp-2".to_string(), "sp-3".to_string()]);
+        assert_eq!(ids, vec!["sp-3".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn delete_syncpoints_by_user_and_key_ids_removes_matching_key_set() {
+        let (db_path, pool) = create_syncpoint_test_db("syncpoints-delete-many").await;
+
+        for (id, user_id, key_id) in [
+            ("sp-1", "user-1", "key-1"),
+            ("sp-2", "user-1", "key-2"),
+            ("sp-3", "user-1", "key-3"),
+            ("sp-4", "user-2", "key-1"),
+        ] {
+            sqlx::query("INSERT INTO SYNC_POINT (ID, USER_ID, API_KEY_ID) VALUES (?, ?, ?)")
+                .bind(id)
+                .bind(user_id)
+                .bind(key_id)
+                .execute(&pool)
+                .await
+                .expect("sync point should be inserted");
+        }
+
+        delete_syncpoints_by_user_and_key_ids(
+            db_path.as_path(),
+            "user-1",
+            &["key-1".to_string(), "key-3".to_string()],
+        )
+        .await
+        .expect("matching sync points for key set should delete");
+
+        let rows = sqlx::query("SELECT ID FROM SYNC_POINT ORDER BY ID")
+            .fetch_all(&pool)
+            .await
+            .expect("remaining sync points should load");
+        let ids = rows
+            .iter()
+            .map(|row| row.get::<String, _>("ID"))
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["sp-2".to_string(), "sp-4".to_string()]);
     }
 }

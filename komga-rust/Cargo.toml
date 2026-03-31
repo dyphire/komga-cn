@@ -16,7 +16,7 @@ edition = "2024"
 
 [workspace.dependencies]
 axum = "0.8.6"
-axum-extra = { version = "0.12.5", features = ["cookie"] }
+axum-extra = { version = "0.12.5", features = ["cookie", "multipart"] }
 base64 = "0.22.1"
 bcrypt = "0.19.0"
 config = "0.15.19"
@@ -25,15 +25,15 @@ serde_json = "1.0.149"
 sha2 = "0.11.0"
 tokio = { version = "1.43.0", features = ["macros", "rt-multi-thread", "net", "signal"] }
 tokio-stream = "0.1.17"
-sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio-rustls"] }
+sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio-rustls", "migrate"] }
 tracing-subscriber = { version = "0.3.19", features = ["fmt", "env-filter"] }
 anyhow = "1.0.102"
 reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "json", "rustls"] }
-toml = "1.1.0"
+toml = "1.1.1"
 tower = { version = "0.5.2", features = ["util"] }
 tower-sessions = "0.15.0"
 oauth2 = "5.0.0"
-tantivy = "0.25.0"
+tantivy = "0.26.0"
 zip = "8.4.0"
 flate2 = "1.1.9"
 lopdf = "0.40.0"
@@ -43,6 +43,10 @@ futures-util = "0.3.31"
 image = "0.25.8"
 mime_guess = "2.0.5"
 rust-embed = { version = "8.11.0", features = ["debug-embed"] }
+language-tags = "0.3.2"
+rusqlite = "0.32.1"
+pdfium-render = { version = "0.9.0", features = ["thread_safe"] }
+unrar = "0.5.8"
 
 [package]
 name = "komga-rust"
@@ -73,5 +77,8 @@ toml.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
+zip.workspace = true
+lopdf.workspace = true
+tantivy.workspace = true
 tempfile = "3.23.0"
 komga-contract-testkit = { path = "crates/contract-testkit" }

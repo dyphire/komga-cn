@@ -77,7 +77,7 @@ pub(super) async fn users_me(
                 &crate::http::identity_access::auth::user_payload_json(&user),
                 &token,
             );
-            return bootstrap_api_key_user(user, token);
+            return bootstrap_api_key_user(*user, token);
         }
         AuthOutcome::Invalid => return unauthorized_json_response(uri.path()),
         AuthOutcome::Missing => {}
@@ -124,7 +124,7 @@ pub(super) async fn users_me(
                     &crate::http::identity_access::auth::user_payload_json(&user),
                     &token,
                 );
-                bootstrap_user_with_remember_me_token(user, token, remember_me_token)
+                bootstrap_user_with_remember_me_token(*user, token, remember_me_token)
             } else {
                 let token = session_token_for_user_with_namespace(
                     &user,
@@ -135,7 +135,7 @@ pub(super) async fn users_me(
                     &crate::http::identity_access::auth::user_payload_json(&user),
                     &token,
                 );
-                bootstrap_user_with_remember_me_cookies(user, token, remember_me_token)
+                bootstrap_user_with_remember_me_cookies(*user, token, remember_me_token)
             }
         }
         AuthOutcome::Valid(user) => {
@@ -156,7 +156,7 @@ pub(super) async fn users_me(
                 &crate::http::identity_access::auth::user_payload_json(&user),
                 &token,
             );
-            bootstrap_user(user, token)
+            bootstrap_user(*user, token)
         }
         AuthOutcome::Invalid => StatusCode::UNAUTHORIZED.into_response(),
         AuthOutcome::Missing => StatusCode::UNAUTHORIZED.into_response(),

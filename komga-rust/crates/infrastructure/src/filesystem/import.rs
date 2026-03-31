@@ -41,17 +41,37 @@ impl MediaImportPort for FilesystemImportPort {
         let target =
             match load_import_series_target(self.database_file.as_path(), &entry.series_id).await {
                 Ok(Some(target)) => target,
-                Ok(None) => return Ok(None),
-                Err(_) => return Ok(None),
+                Ok(None) => {
+                    return Err(format!(
+                        "series target for import was not found: {}",
+                        entry.series_id
+                    ));
+                }
+                Err(error) => return Err(error),
             };
 
         let mut upgrade_destination_name: Option<String> = None;
-        if let Some(upgrade_book_id) = entry.upgrade_book_id.as_deref()
-            && let Ok(Some(upgrade_target)) =
-                load_import_upgrade_book_target(self.database_file.as_path(), upgrade_book_id).await
-        {
+        if let Some(upgrade_book_id) = entry.upgrade_book_id.as_deref() {
+            let upgrade_target = match load_import_upgrade_book_target(
+                self.database_file.as_path(),
+                upgrade_book_id,
+            )
+            .await
+            {
+                Ok(Some(target)) => target,
+                Ok(None) => {
+                    return Err(format!(
+                        "upgrade target for import was not found: {upgrade_book_id}"
+                    ));
+                }
+                Err(error) => return Err(error),
+            };
+
             if upgrade_target.series_id != entry.series_id {
-                return Ok(None);
+                return Err(format!(
+                    "upgrade target series mismatch for import: expected {}, got {}",
+                    entry.series_id, upgrade_target.series_id
+                ));
             }
 
             upgrade_destination_name = Some(upgrade_target.file_name.clone());
@@ -67,20 +87,18 @@ impl MediaImportPort for FilesystemImportPort {
                 .as_deref()
                 .or(entry.destination_name.as_deref()),
         ) else {
-            return Ok(None);
+            return Err(format!(
+                "destination name for import is invalid: {}",
+                entry.destination_name.as_deref().unwrap_or_default()
+            ));
         };
 
         let destination_dir = PathBuf::from(&target.library_root).join(&target.series_url);
-        if fs::create_dir_all(&destination_dir).is_err() {
-            return Ok(None);
-        }
+        fs::create_dir_all(&destination_dir)
+            .map_err(|error| format!("create destination directory for import: {error}"))?;
 
         let destination_file = destination_dir.join(destination_name);
-        if apply_import_copy_mode(copy_mode, entry.source_file.as_path(), &destination_file)
-            .is_err()
-        {
-            return Ok(None);
-        }
+        apply_import_copy_mode(copy_mode, entry.source_file.as_path(), &destination_file)?;
 
         let sidecar_imported =
             import_book_sidecars(copy_mode, entry.source_file.as_path(), &destination_file)
@@ -558,4 +576,220 @@ fn random_hex_token(byte_len: usize) -> String {
     }
 
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unique_temp_dir(case: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "komga-import-{case}-{nanos}-{}",
+            std::process::id()
+        ))
+    }
+
+    async fn create_test_db(case: &str) -> (PathBuf, sqlx::Pool<sqlx::Sqlite>, PathBuf) {
+        let root = unique_temp_dir(case);
+        fs::create_dir_all(&root).expect("temp root should be created");
+        let db_path = root.join("import.sqlite");
+        let pool = connect_pool(&db_path, 1)
+            .await
+            .expect("test db should open");
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .expect("library table should be created");
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS SERIES (ID varchar NOT NULL PRIMARY KEY, LIBRARY_ID varchar NOT NULL, URL varchar NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .expect("series table should be created");
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS BOOK (ID varchar NOT NULL PRIMARY KEY, SERIES_ID varchar NOT NULL, LIBRARY_ID varchar NOT NULL, NAME varchar NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .expect("book table should be created");
+
+        let library_root = root.join("library-root");
+        fs::create_dir_all(&library_root).expect("library root should be created");
+        sqlx::query("INSERT INTO LIBRARY (ID, ROOT) VALUES (?, ?)")
+            .bind("library-1")
+            .bind(library_root.to_string_lossy().to_string())
+            .execute(&pool)
+            .await
+            .expect("library row should be inserted");
+        sqlx::query("INSERT INTO SERIES (ID, LIBRARY_ID, URL) VALUES (?, ?, ?)")
+            .bind("series-1")
+            .bind("library-1")
+            .bind("series-one")
+            .execute(&pool)
+            .await
+            .expect("series row should be inserted");
+        sqlx::query("INSERT INTO SERIES (ID, LIBRARY_ID, URL) VALUES (?, ?, ?)")
+            .bind("series-2")
+            .bind("library-1")
+            .bind("series-two")
+            .execute(&pool)
+            .await
+            .expect("second series row should be inserted");
+
+        (db_path, pool, root)
+    }
+
+    #[tokio::test]
+    async fn import_book_returns_error_when_source_file_is_missing() {
+        let (db_path, pool, root) = create_test_db("missing-source").await;
+        let port = FilesystemImportPort::new(&db_path);
+
+        let result = port
+            .import_book(
+                ImportCopyMode::Copy,
+                BooksImportEntry {
+                    source_file: root.join("missing.cbz"),
+                    series_id: "series-1".to_string(),
+                    destination_name: None,
+                    upgrade_book_id: None,
+                },
+            )
+            .await;
+
+        let error = result.expect_err("missing source import should return an error");
+        assert!(
+            error.contains("source file does not exist"),
+            "unexpected import error: {error}"
+        );
+
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn import_book_returns_error_when_series_target_is_missing() {
+        let (db_path, pool, root) = create_test_db("missing-series-target").await;
+        let port = FilesystemImportPort::new(&db_path);
+        let source_path = root.join("book.cbz");
+        fs::write(&source_path, b"fixture").expect("source fixture should be written");
+
+        let result = port
+            .import_book(
+                ImportCopyMode::Copy,
+                BooksImportEntry {
+                    source_file: source_path,
+                    series_id: "missing-series".to_string(),
+                    destination_name: None,
+                    upgrade_book_id: None,
+                },
+            )
+            .await;
+
+        let error = result.expect_err("missing series target import should return an error");
+        assert!(
+            error.contains("series target") || error.contains("missing-series"),
+            "unexpected import error: {error}"
+        );
+
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn import_book_returns_error_when_destination_name_is_invalid() {
+        let (db_path, pool, root) = create_test_db("invalid-destination-name").await;
+        let port = FilesystemImportPort::new(&db_path);
+        let source_path = root.join("book.cbz");
+        fs::write(&source_path, b"fixture").expect("source fixture should be written");
+
+        let result = port
+            .import_book(
+                ImportCopyMode::Copy,
+                BooksImportEntry {
+                    source_file: source_path,
+                    series_id: "series-1".to_string(),
+                    destination_name: Some("nested/book.cbz".to_string()),
+                    upgrade_book_id: None,
+                },
+            )
+            .await;
+
+        let error = result.expect_err("invalid destination name import should return an error");
+        assert!(
+            error.contains("destination") || error.contains("nested/book.cbz"),
+            "unexpected import error: {error}"
+        );
+
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn import_book_returns_error_when_upgrade_target_series_mismatches() {
+        let (db_path, pool, root) = create_test_db("upgrade-series-mismatch").await;
+        let port = FilesystemImportPort::new(&db_path);
+        let source_path = root.join("book.cbz");
+        fs::write(&source_path, b"fixture").expect("source fixture should be written");
+
+        sqlx::query("INSERT INTO BOOK (ID, SERIES_ID, LIBRARY_ID, NAME) VALUES (?, ?, ?, ?)")
+            .bind("book-upgrade")
+            .bind("series-2")
+            .bind("library-1")
+            .bind("existing.cbz")
+            .execute(&pool)
+            .await
+            .expect("upgrade book row should be inserted");
+
+        let result = port
+            .import_book(
+                ImportCopyMode::Copy,
+                BooksImportEntry {
+                    source_file: source_path,
+                    series_id: "series-1".to_string(),
+                    destination_name: None,
+                    upgrade_book_id: Some("book-upgrade".to_string()),
+                },
+            )
+            .await;
+
+        let error = result.expect_err("upgrade series mismatch should return an error");
+        assert!(
+            error.contains("upgrade") || error.contains("series"),
+            "unexpected import error: {error}"
+        );
+
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn import_book_returns_error_when_upgrade_target_is_missing() {
+        let (db_path, pool, root) = create_test_db("upgrade-target-missing").await;
+        let port = FilesystemImportPort::new(&db_path);
+        let source_path = root.join("book.cbz");
+        fs::write(&source_path, b"fixture").expect("source fixture should be written");
+
+        let result = port
+            .import_book(
+                ImportCopyMode::Copy,
+                BooksImportEntry {
+                    source_file: source_path,
+                    series_id: "series-1".to_string(),
+                    destination_name: None,
+                    upgrade_book_id: Some("missing-upgrade-book".to_string()),
+                },
+            )
+            .await;
+
+        let error = result.expect_err("missing upgrade target should return an error");
+        assert!(
+            error.contains("upgrade") || error.contains("missing-upgrade-book"),
+            "unexpected import error: {error}"
+        );
+
+        pool.close().await;
+    }
 }

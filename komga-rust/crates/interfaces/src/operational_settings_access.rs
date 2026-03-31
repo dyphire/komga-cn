@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity, clippy::large_enum_variant)]
+
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -105,8 +107,11 @@ pub struct OperationalSettingsAccessBackend {
     pub list_font_families: Arc<dyn Fn(PathBuf) -> Vec<String> + Send + Sync>,
     pub load_font_family_css: Arc<dyn Fn(PathBuf, String) -> Option<String> + Send + Sync>,
     pub load_font_file: Arc<dyn Fn(PathBuf, String, String) -> Option<Vec<u8>> + Send + Sync>,
-    pub delete_syncpoints_by_user_and_key_id:
-        Arc<dyn Fn(PathBuf, String, String) -> BoxFuture<Result<(), sqlx::Error>> + Send + Sync>,
+    pub delete_syncpoints_by_user:
+        Arc<dyn Fn(PathBuf, String) -> BoxFuture<Result<(), sqlx::Error>> + Send + Sync>,
+    pub delete_syncpoints_by_user_and_key_ids: Arc<
+        dyn Fn(PathBuf, String, Vec<String>) -> BoxFuture<Result<(), sqlx::Error>> + Send + Sync,
+    >,
     pub load_history_page:
         Arc<dyn Fn(PathBuf, u64, u64) -> BoxFuture<Result<Value, sqlx::Error>> + Send + Sync>,
     pub load_page_hash_matches_page: Arc<
@@ -177,7 +182,7 @@ fn backend() -> &'static OperationalSettingsAccessBackend {
 
     #[cfg(test)]
     {
-        return TEST_BACKEND.get_or_init(default_test_backend);
+        TEST_BACKEND.get_or_init(default_test_backend)
     }
 
     #[cfg(not(test))]
@@ -221,7 +226,8 @@ fn default_test_backend() -> OperationalSettingsAccessBackend {
         list_font_families: Arc::new(|_| Vec::new()),
         load_font_family_css: Arc::new(|_, _| None),
         load_font_file: Arc::new(|_, _, _| None),
-        delete_syncpoints_by_user_and_key_id: Arc::new(|_, _, _| Box::pin(async { Ok(()) })),
+        delete_syncpoints_by_user: Arc::new(|_, _| Box::pin(async { Ok(()) })),
+        delete_syncpoints_by_user_and_key_ids: Arc::new(|_, _, _| Box::pin(async { Ok(()) })),
         load_history_page: Arc::new(|_, _, _| {
             Box::pin(async { Ok(Value::Object(Default::default())) })
         }),
@@ -475,15 +481,23 @@ pub(crate) mod fonts {
 pub(crate) mod operations {
     use super::*;
 
-    pub(crate) async fn delete_syncpoints_by_user_and_key_id(
+    pub(crate) async fn delete_syncpoints_by_user(
         database_file: &std::path::Path,
         user_id: &str,
-        key_id: &str,
     ) -> Result<(), sqlx::Error> {
-        (backend().delete_syncpoints_by_user_and_key_id)(
+        (backend().delete_syncpoints_by_user)(database_file.to_path_buf(), user_id.to_string())
+            .await
+    }
+
+    pub(crate) async fn delete_syncpoints_by_user_and_key_ids(
+        database_file: &std::path::Path,
+        user_id: &str,
+        key_ids: &[String],
+    ) -> Result<(), sqlx::Error> {
+        (backend().delete_syncpoints_by_user_and_key_ids)(
             database_file.to_path_buf(),
             user_id.to_string(),
-            key_id.to_string(),
+            key_ids.to_vec(),
         )
         .await
     }

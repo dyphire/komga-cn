@@ -42,6 +42,10 @@ fn process_import_books_batch_task(
         TaskExecutionError::invalid_task("IMPORT_BOOKS_BATCH task requires serialized payload")
     })?;
     let runtime = runtime.task_runtime_context();
+    if !runtime.owns_main_database {
+        return Ok(Vec::new());
+    }
+
     let database_file = runtime.database_file.clone();
 
     std::thread::spawn(move || {
@@ -58,7 +62,7 @@ fn process_import_books_batch_task(
             MediaImportService::new(FilesystemImportPort::new(database_file.as_path()))
                 .process_queued_books_payload(&payload)
                 .await
-                .map_err(|error| TaskExecutionError::runtime(error))
+                .map_err(TaskExecutionError::runtime)
         })
     })
     .join()
@@ -73,6 +77,10 @@ fn process_import_book_task(
         TaskExecutionError::invalid_task("IMPORT_BOOK task requires serialized payload")
     })?;
     let runtime = runtime.task_runtime_context();
+    if !runtime.owns_main_database {
+        return Ok(Vec::new());
+    }
+
     let database_file = runtime.database_file.clone();
 
     std::thread::spawn(move || {
@@ -87,7 +95,7 @@ fn process_import_book_task(
             MediaImportService::new(FilesystemImportPort::new(database_file.as_path()))
                 .process_queued_book_payload(&payload)
                 .await
-                .map_err(|error| TaskExecutionError::runtime(error))
+                .map_err(TaskExecutionError::runtime)
         })
     })
     .join()

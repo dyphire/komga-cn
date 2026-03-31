@@ -1,5 +1,8 @@
+#![allow(clippy::type_complexity)]
+
 #[cfg(test)]
 use std::collections::HashMap;
+
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -79,9 +82,19 @@ pub struct KoboMetadataRecord {
     pub title: String,
     pub summary: String,
     pub release_date: Option<String>,
+    pub created_date: Option<String>,
     pub language: String,
     pub file_size: u64,
     pub file_name: String,
+    pub contributor_names: Vec<String>,
+    pub isbn: Option<String>,
+    pub publisher_name: Option<String>,
+    pub cover_image_id: Option<String>,
+    pub series_id: Option<String>,
+    pub series_name: Option<String>,
+    pub series_number: Option<String>,
+    pub series_number_float: Option<f64>,
+    pub oneshot: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -256,7 +269,7 @@ fn backend() -> &'static RuntimeIdentityAccessBackend {
 
     #[cfg(test)]
     {
-        return TEST_BACKEND.get_or_init(default_test_backend);
+        TEST_BACKEND.get_or_init(default_test_backend)
     }
 
     #[cfg(not(test))]

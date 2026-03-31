@@ -20,13 +20,6 @@ pub(crate) async fn load_persisted_book_tags(
     persisted_runtime_queries::load_persisted_book_tags(database_file, scope).await
 }
 
-pub(crate) async fn load_persisted_authors(
-    database_file: &FsPath,
-    library_id: Option<&str>,
-) -> Result<Vec<PersistedAuthorEntry>, String> {
-    authors_queries::load_persisted_authors(database_file, library_id).await
-}
-
 pub(crate) async fn load_persisted_author_names(
     database_file: &FsPath,
     search: &str,
@@ -49,10 +42,10 @@ pub(crate) async fn load_persisted_authors_by_scope(
 
 pub(crate) async fn load_persisted_series_tags(
     database_file: &FsPath,
-    library_id: Option<&str>,
+    library_ids: Option<&[String]>,
     collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
-    facets_queries::load_persisted_series_tags(database_file, library_id, collection_id).await
+    facets_queries::load_persisted_series_tags(database_file, library_ids, collection_id).await
 }
 
 pub(crate) fn authors_v2_page_payload(
@@ -66,51 +59,59 @@ pub(crate) fn authors_v2_page_payload(
 
 pub(crate) async fn load_persisted_genres(
     database_file: &FsPath,
-    library_id: Option<&str>,
+    library_ids: Option<&[String]>,
+    collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
-    facets_queries::load_persisted_genres(database_file, library_id).await
+    facets_queries::load_persisted_genres(database_file, library_ids, collection_id).await
 }
 
 pub(crate) async fn load_persisted_tags(
     database_file: &FsPath,
-    library_id: Option<&str>,
+    library_ids: Option<&[String]>,
+    collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
-    facets_queries::load_persisted_tags(database_file, library_id).await
+    facets_queries::load_persisted_tags(database_file, library_ids, collection_id).await
 }
 
 pub(crate) async fn load_persisted_languages(
     database_file: &FsPath,
-    library_id: Option<&str>,
+    library_ids: Option<&[String]>,
+    collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
-    facets_queries::load_persisted_languages(database_file, library_id).await
+    facets_queries::load_persisted_languages(database_file, library_ids, collection_id).await
 }
 
 pub(crate) async fn load_persisted_publishers(
     database_file: &FsPath,
-    library_id: Option<&str>,
+    library_ids: Option<&[String]>,
+    collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
-    facets_queries::load_persisted_publishers(database_file, library_id).await
+    facets_queries::load_persisted_publishers(database_file, library_ids, collection_id).await
 }
 
 pub(crate) async fn load_persisted_age_ratings(
     database_file: &FsPath,
-    library_id: Option<&str>,
+    library_ids: Option<&[String]>,
+    collection_id: Option<&str>,
 ) -> Result<Vec<u16>, String> {
-    facets_queries::load_persisted_age_ratings(database_file, library_id).await
+    facets_queries::load_persisted_age_ratings(database_file, library_ids, collection_id).await
 }
 
 pub(crate) async fn load_persisted_sharing_labels(
     database_file: &FsPath,
-    library_id: Option<&str>,
+    library_ids: Option<&[String]>,
+    collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
-    facets_queries::load_persisted_sharing_labels(database_file, library_id).await
+    facets_queries::load_persisted_sharing_labels(database_file, library_ids, collection_id).await
 }
 
 pub(crate) async fn load_persisted_series_release_dates(
     database_file: &FsPath,
-    library_id: Option<&str>,
+    library_ids: Option<&[String]>,
+    collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
-    facets_queries::load_persisted_series_release_dates(database_file, library_id).await
+    facets_queries::load_persisted_series_release_dates(database_file, library_ids, collection_id)
+        .await
 }
 
 pub(crate) async fn load_persisted_series_page(
@@ -126,14 +127,12 @@ pub(crate) async fn load_persisted_alphabetical_groups(
     context: &DiscoveryQueryContext,
     filters: RuntimeSeriesFilters,
     full_text_search: Option<String>,
-    search_regex: Option<(String, String)>,
 ) -> Result<Vec<Value>, String> {
     series_queries::load_persisted_alphabetical_groups(
         database_file,
         context,
         filters,
         full_text_search,
-        search_regex,
     )
     .await
 }

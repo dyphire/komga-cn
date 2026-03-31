@@ -9,6 +9,9 @@ pub async fn series_alphabetical_groups_deprecated(
     uri: Uri,
 ) -> Response {
     let query = uri.query().unwrap_or_default();
+    if contains_legacy_search_query(query) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
     let mut conditions: Vec<Value> = vec![];
 
     push_series_any_of_string_conditions(&mut conditions, query, "library_id", "LibraryId");
@@ -119,13 +122,6 @@ pub async fn series_alphabetical_groups_deprecated(
         body["fullTextSearch"] = Value::String(search);
     }
 
-    if let Some((pattern, field)) = query_search_regex(query) {
-        body["regexSearch"] = json!({
-            "regex": pattern,
-            "field": field,
-        });
-    }
-
     discovery::series_alphabetical_groups(
         headers,
         body,
@@ -136,7 +132,6 @@ pub async fn series_alphabetical_groups_deprecated(
 }
 
 pub async fn series_books(
-    Extension(profile): Extension<RuntimeProfile>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(auth_state): Extension<DiscoveryAuthState>,
     headers: HeaderMap,
@@ -229,7 +224,6 @@ pub async fn series_books(
     let request_uri = ensure_sort_query(uri, "series,metadata.numberSort,asc");
 
     discovery::books_list(
-        Extension(profile),
         Extension(auth_db),
         Extension(auth_state),
         headers,
@@ -329,20 +323,6 @@ fn author_query_to_book_condition(value: String) -> Value {
     })
 }
 
-pub(super) fn query_search_regex(query: &str) -> Option<(String, String)> {
-    let regex = query_value(query, "search_regex").map(decode_query_component)?;
-    let (pattern, field) = regex.split_once(',')?;
-    let normalized_field = match field.trim().to_ascii_lowercase().as_str() {
-        "title" => "TITLE",
-        "title_sort" => "TITLE_SORT",
-        _ => return None,
-    };
-    if pattern.trim().is_empty() {
-        return None;
-    }
-    Some((pattern.trim().to_string(), normalized_field.to_string()))
-}
-
 pub(super) fn ensure_sort_query(uri: Uri, default_sort: &str) -> Uri {
     if uri
         .query()
@@ -399,29 +379,13 @@ pub(super) fn decode_query_component(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        author_query_to_author_match, decode_query_component, ensure_sort_query, query_search_regex,
-    };
+    use super::{author_query_to_author_match, decode_query_component, ensure_sort_query};
     use axum::http::Uri;
 
     #[test]
     fn decode_query_component_decodes_plus_and_percent_encoding() {
         let decoded = decode_query_component("John+Doe%2Cwriter%20team");
         assert_eq!(decoded, "John Doe,writer team");
-    }
-
-    #[test]
-    fn query_search_regex_parses_supported_fields() {
-        let parsed = query_search_regex("search_regex=%5Eabc%24,title_sort")
-            .expect("search_regex with title_sort should parse");
-        assert_eq!(parsed.0, "^abc$");
-        assert_eq!(parsed.1, "TITLE_SORT");
-    }
-
-    #[test]
-    fn query_search_regex_rejects_unsupported_field() {
-        let parsed = query_search_regex("search_regex=abc,unknown");
-        assert!(parsed.is_none());
     }
 
     #[test]

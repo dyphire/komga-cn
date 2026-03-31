@@ -149,6 +149,40 @@ pub fn load_epub_archive_positions(media: &BookMediaRecord) -> Option<Vec<Value>
     )
 }
 
+pub fn load_epub_cover_bytes(media: &BookMediaRecord) -> Option<(Vec<u8>, String)> {
+    if !book_media_is_epub(media) {
+        return None;
+    }
+
+    let file = fs::File::open(&media.file_path).ok()?;
+    let mut archive = ZipArchive::new(file).ok()?;
+    let container_xml = read_zip_entry_bytes_normalized(&mut archive, "META-INF/container.xml")?;
+    let rootfile_path = parse_epub_rootfile_path(&container_xml)?;
+    let package_document = read_zip_entry_bytes_normalized(&mut archive, &rootfile_path)?;
+    let manifest = parse_epub_manifest_items(&package_document, &rootfile_path);
+    let cover_item = manifest
+        .values()
+        .find(|item| {
+            item.properties
+                .split_ascii_whitespace()
+                .any(|property| property.eq_ignore_ascii_case("cover-image"))
+        })
+        .cloned()
+        .or_else(|| {
+            parse_epub_metadata_cover_id(&package_document)
+                .and_then(|cover_id| manifest.get(&cover_id).cloned())
+        })
+        .or_else(|| {
+            manifest
+                .values()
+                .find(|item| item.id == "cover-image")
+                .cloned()
+        })?;
+
+    let bytes = read_zip_entry_bytes_normalized(&mut archive, &cover_item.href)?;
+    Some((bytes, cover_item.media_type))
+}
+
 fn read_zip_entry_bytes<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     entry_name: &str,
@@ -178,6 +212,121 @@ fn read_zip_entry_bytes_normalized<R: Read + Seek>(
 struct EpubSpineEntry {
     href: String,
     media_type: String,
+}
+
+#[derive(Clone)]
+struct EpubManifestItem {
+    id: String,
+    href: String,
+    media_type: String,
+    properties: String,
+}
+
+fn parse_epub_manifest_items(
+    package_document: &[u8],
+    rootfile_path: &str,
+) -> HashMap<String, EpubManifestItem> {
+    let mut reader = XmlReader::from_reader(package_document);
+    reader.config_mut().trim_text(true);
+    let mut buffer = Vec::new();
+    let mut manifest = HashMap::<String, EpubManifestItem>::new();
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(XmlEvent::Start(event)) | Ok(XmlEvent::Empty(event)) => {
+                if !xml_name_matches(event.name().as_ref(), b"item") {
+                    buffer.clear();
+                    continue;
+                }
+                let mut id = None::<String>;
+                let mut href = None::<String>;
+                let mut media_type = None::<String>;
+                let mut properties = String::new();
+                for attribute in event.attributes().flatten() {
+                    if xml_name_matches(attribute.key.as_ref(), b"id") {
+                        id = attribute
+                            .unescape_value()
+                            .ok()
+                            .map(|value| value.into_owned());
+                    } else if xml_name_matches(attribute.key.as_ref(), b"href") {
+                        href = attribute
+                            .unescape_value()
+                            .ok()
+                            .map(|value| value.into_owned());
+                    } else if xml_name_matches(attribute.key.as_ref(), b"media-type") {
+                        media_type = attribute
+                            .unescape_value()
+                            .ok()
+                            .map(|value| value.into_owned());
+                    } else if xml_name_matches(attribute.key.as_ref(), b"properties") {
+                        properties = attribute
+                            .unescape_value()
+                            .ok()
+                            .map(|value| value.into_owned())
+                            .unwrap_or_default();
+                    }
+                }
+                if let (Some(id), Some(href)) = (id, href) {
+                    manifest.insert(
+                        id.clone(),
+                        EpubManifestItem {
+                            id,
+                            href: normalize_epub_resource_href(rootfile_path, &href),
+                            media_type: media_type
+                                .unwrap_or_else(|| "application/octet-stream".to_string()),
+                            properties,
+                        },
+                    );
+                }
+            }
+            Ok(XmlEvent::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buffer.clear();
+    }
+    manifest
+}
+
+fn parse_epub_metadata_cover_id(package_document: &[u8]) -> Option<String> {
+    let mut reader = XmlReader::from_reader(package_document);
+    reader.config_mut().trim_text(true);
+    let mut buffer = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(XmlEvent::Start(event)) | Ok(XmlEvent::Empty(event)) => {
+                if !xml_name_matches(event.name().as_ref(), b"meta") {
+                    buffer.clear();
+                    continue;
+                }
+                let mut name = None::<String>;
+                let mut content = None::<String>;
+                for attribute in event.attributes().flatten() {
+                    if xml_name_matches(attribute.key.as_ref(), b"name") {
+                        name = attribute
+                            .unescape_value()
+                            .ok()
+                            .map(|value| value.into_owned());
+                    } else if xml_name_matches(attribute.key.as_ref(), b"content") {
+                        content = attribute
+                            .unescape_value()
+                            .ok()
+                            .map(|value| value.into_owned());
+                    }
+                }
+                if name
+                    .as_deref()
+                    .is_some_and(|value| value.eq_ignore_ascii_case("cover"))
+                {
+                    return content.filter(|value| !value.trim().is_empty());
+                }
+            }
+            Ok(XmlEvent::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buffer.clear();
+    }
+    None
 }
 
 fn load_kepub_converted_spans(
