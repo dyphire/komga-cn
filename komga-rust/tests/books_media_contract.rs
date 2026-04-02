@@ -4226,6 +4226,31 @@ async fn router_discovery_books_list_locks_main_search_parity_for_retained_input
 }
 
 #[tokio::test]
+async fn router_discovery_books_list_retains_accent_folded_and_cjk_recall() {
+    let paths = new_router_fixture("router-discovery-books-list-accent-cjk-recall").await;
+    seed_router_contract_data(&paths).await;
+    update_book_search_fixture_title(&paths, "book-1", "Café 東京 Book 1").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let admin_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let accent_cjk_ids = books_list_ids(
+        &app,
+        &admin_token,
+        Some("relevance,desc"),
+        Some("cafe 東京"),
+    )
+    .await;
+    assert_eq!(
+        accent_cjk_ids,
+        vec!["book-1"],
+        "books/list should retain accent-folded mixed CJK recall at the route boundary",
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_discovery_books_list_rejects_legacy_regex_search_body_input() {
     let paths = new_router_fixture("router-discovery-books-list-legacy-regex-search").await;
     seed_router_contract_data(&paths).await;

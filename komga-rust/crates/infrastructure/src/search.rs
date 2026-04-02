@@ -1,6 +1,8 @@
+mod analyzer_profiles;
 mod index_lifecycle;
 mod runtime_tasks;
 
+pub use analyzer_profiles::search_analyzer_version;
 pub use index_lifecycle::{
     SearchDocument, SearchEntityType, SearchError, SearchEvent, SearchFieldEntry,
     SearchIndexLifecycle, SearchStartupLifecycle, decide_startup_lifecycle, prepare_for_rebuild,

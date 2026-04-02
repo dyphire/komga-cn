@@ -3,17 +3,21 @@ use axum::http::{Request, StatusCode, header};
 use komga_contract_testkit::contract_matrix::assert_required_target_declared;
 use komga_rust::application::task_processing::TaskRuntimeContext;
 use komga_rust::config::{RuntimeMode, WriterOwnershipPolicy};
+use komga_rust::infrastructure::search::search_analyzer_version;
 use komga_rust::infrastructure::sqlite::connect_pool;
 use komga_rust::{SearchEntityType, SearchIndexLifecycle, TaskQueueRecord, TaskQueueScheduler};
 use komga_server::app::build_router_with_config;
 use serde_json::{Value, json};
 use sqlx::Row;
+use std::fs;
 use tower::util::ServiceExt;
 
 #[path = "support/runtime_router_contract_support.rs"]
 mod runtime_router_contract_support;
 
 use runtime_router_contract_support::*;
+
+const ANALYZER_VERSION_MARKER_FILE: &str = ".komga-search-analyzer-version";
 
 fn runtime_task_context(paths: &RuntimeDbPaths) -> TaskRuntimeContext {
     TaskRuntimeContext {
@@ -26,6 +30,14 @@ fn runtime_task_context(paths: &RuntimeDbPaths) -> TaskRuntimeContext {
         owns_sidecar_output: true,
         owns_search_index: true,
     }
+}
+
+fn write_stale_analyzer_version_marker(index_dir: &std::path::Path) {
+    fs::write(
+        index_dir.join(ANALYZER_VERSION_MARKER_FILE),
+        search_analyzer_version().saturating_add(1).to_string(),
+    )
+    .expect("stale analyzer version marker should be written");
 }
 
 #[test]
@@ -483,6 +495,8 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
         .process_available(&config)
         .expect("rebuild index task should succeed for incremental sync contract");
 
+    write_stale_analyzer_version_marker(config.lucene_data_directory.as_path());
+
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for series metadata update fixture");
@@ -491,7 +505,7 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
          SET PUBLISHER = ? \
          WHERE SERIES_ID = ?",
     )
-    .bind("Oneshot Publisher Updated")
+    .bind("Café 東京 Updated")
     .bind("series-oneshot")
     .execute(&pool)
     .await
@@ -521,6 +535,26 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
         search_hits("publisher:Updated", SearchEntityType::Book),
         vec!["book-oneshot".to_string()],
         "series metadata refresh task should update oneshot-derived book fields",
+    );
+    assert_eq!(
+        search_hits("publisher:cafe", SearchEntityType::Book),
+        vec!["book-oneshot".to_string()],
+        "runtime-owned incremental sync should rebuild analyzer-drifted indexes before refreshing accent-folded inherited metadata",
+    );
+    assert_eq!(
+        search_hits("publisher:東京", SearchEntityType::Book),
+        vec!["book-oneshot".to_string()],
+        "runtime-owned incremental sync should preserve CJK recall after analyzer-rollout rebuilds",
+    );
+    assert_eq!(
+        fs::read_to_string(
+            config
+                .lucene_data_directory
+                .join(ANALYZER_VERSION_MARKER_FILE)
+        )
+        .expect("incremental sync contract should leave a readable analyzer version marker"),
+        search_analyzer_version().to_string(),
+        "runtime-owned incremental sync should restore the current analyzer version marker after rebuilding a drifted index",
     );
 
     let create_collection_response = app
@@ -679,6 +713,88 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
     assert!(
         search_hits("Task6 ReadList Updated", SearchEntityType::ReadList).is_empty(),
         "readlist delete should remove search document",
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn runtime_delete_sync_recovers_from_analyzer_drift_before_removing_search_document() {
+    let paths = new_router_fixture("runtime-delete-sync-analyzer-drift").await;
+    seed_router_contract_data(&paths).await;
+
+    let config = runtime_config_for_paths(&paths);
+    let app = build_router_with_config(&config);
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let create_collection_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/collections")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "Delete Drift Collection",
+                        "ordered": true,
+                        "seriesIds": ["series-1"]
+                    })
+                    .to_string(),
+                ))
+                .expect("collection create request should build"),
+        )
+        .await
+        .expect("collection create request should complete");
+    assert_eq!(create_collection_response.status(), StatusCode::OK);
+    let collection_payload = response_json(create_collection_response).await;
+    let collection_id = collection_payload
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("collection create payload should include id")
+        .to_string();
+
+    let search_hits = |query: &str, entity_type: SearchEntityType| -> Vec<String> {
+        SearchIndexLifecycle::bootstrap(config.lucene_data_directory.as_path())
+            .expect("search index should bootstrap for delete sync contract")
+            .search_ids(query, entity_type, 10)
+            .expect("search lookup should succeed for delete sync contract")
+    };
+
+    assert_eq!(
+        search_hits("Delete Drift Collection", SearchEntityType::Collection),
+        vec![collection_id.clone()],
+        "collection create should seed the search document before delete recovery is exercised",
+    );
+
+    write_stale_analyzer_version_marker(config.lucene_data_directory.as_path());
+
+    let delete_collection_response = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/v1/collections/{collection_id}"))
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("collection delete request should build"),
+        )
+        .await
+        .expect("collection delete request should complete");
+    assert_eq!(delete_collection_response.status(), StatusCode::NO_CONTENT);
+    assert!(
+        search_hits("Delete Drift Collection", SearchEntityType::Collection).is_empty(),
+        "runtime-owned delete sync should rebuild analyzer-drifted indexes before removing the stale search document",
+    );
+    assert_eq!(
+        fs::read_to_string(
+            config
+                .lucene_data_directory
+                .join(ANALYZER_VERSION_MARKER_FILE)
+        )
+        .expect("delete sync contract should leave a readable analyzer version marker"),
+        search_analyzer_version().to_string(),
+        "runtime-owned delete sync should restore the current analyzer version marker after rebuilding a drifted index",
     );
 
     cleanup_router_fixture(paths);

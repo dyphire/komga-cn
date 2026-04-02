@@ -1,9 +1,12 @@
+use komga_rust::infrastructure::search::search_analyzer_version;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tantivy::Index;
 use tantivy::schema::{STORED, STRING, Schema};
+
+const ANALYZER_VERSION_MARKER_FILE: &str = ".komga-search-analyzer-version";
 
 fn unique_temp_dir(prefix: &str) -> PathBuf {
     let millis = SystemTime::now()
@@ -23,6 +26,20 @@ fn create_stale_schema_search_index(index_dir: &std::path::Path) {
 
     Index::create_in_dir(index_dir, stale_schema)
         .expect("stale schema runtime index should be created");
+}
+
+fn create_runtime_index_with_stale_analyzer_version(index_dir: &std::path::Path) {
+    komga_rust::SearchIndexLifecycle::bootstrap(index_dir)
+        .expect("runtime index fixture should bootstrap");
+    fs::write(
+        index_dir.join(ANALYZER_VERSION_MARKER_FILE),
+        stale_analyzer_version().to_string(),
+    )
+    .expect("stale analyzer version marker should be written");
+}
+
+fn stale_analyzer_version() -> u32 {
+    search_analyzer_version().saturating_add(1)
 }
 
 #[test]
@@ -584,6 +601,35 @@ fn startup_search_lifecycle_stale_schema_forces_rebuild_contract() {
 }
 
 #[test]
+fn startup_search_lifecycle_stale_analyzer_version_forces_rebuild_contract() {
+    let lucene_dir = unique_temp_dir("komga-runtime-startup-search-stale-analyzer-version");
+    fs::create_dir_all(&lucene_dir).expect("lucene directory should be created");
+    create_runtime_index_with_stale_analyzer_version(lucene_dir.as_path());
+
+    let stale_meta_before = fs::read_to_string(lucene_dir.join("meta.json"))
+        .expect("stale analyzer version fixture should expose meta.json");
+
+    let mut config = komga_rust::config::RuntimeConfig::for_runtime_profile(
+        komga_rust::config::RuntimeProfile::SnapshotAligned,
+    );
+    config.lucene_data_directory = lucene_dir.clone();
+
+    let startup_task = komga_server::app::prepare_startup_search_task_for_contract(&config)
+        .expect("stale analyzer version startup should recover through explicit rebuild");
+
+    assert_eq!(startup_task, Some("REBUILD_INDEX"));
+    assert_eq!(
+        fs::read_to_string(lucene_dir.join("meta.json")).ok(),
+        None,
+        "startup lifecycle must clear stale analyzer-version state without recreating the index before rebuild",
+    );
+    assert!(
+        !stale_meta_before.is_empty(),
+        "fixture sanity: stale analyzer version test should start from a real runtime meta.json",
+    );
+}
+
+#[test]
 fn startup_search_lifecycle_corrupt_index_forces_rebuild_contract() {
     let lucene_dir = unique_temp_dir("komga-runtime-startup-search-corrupt-index");
     fs::create_dir_all(&lucene_dir).expect("lucene directory should be created");
@@ -633,5 +679,34 @@ fn startup_search_lifecycle_external_owned_index_skips_recovery_contract() {
             .expect("external-owned meta should remain readable"),
         "not-valid-json",
         "startup must not rewrite external-owned search index",
+    );
+}
+
+#[test]
+fn startup_search_lifecycle_external_owned_stale_analyzer_version_skips_recovery_contract() {
+    let config_root = unique_temp_dir("komga-runtime-startup-search-external-owned-analyzer");
+    let lucene_dir = config_root.join("lucene");
+    fs::create_dir_all(&lucene_dir).expect("lucene directory should be created");
+    create_runtime_index_with_stale_analyzer_version(lucene_dir.as_path());
+
+    let mut config = komga_rust::config::RuntimeConfig::for_runtime_profile(
+        komga_rust::config::RuntimeProfile::SnapshotAligned,
+    );
+    config.mode = komga_rust::config::RuntimeMode::Isolated;
+    config.writer_ownership_policy = komga_rust::config::WriterOwnershipPolicy {
+        isolation_root: Some(config_root.clone()),
+        allow_isolated_writes: true,
+    };
+    config.lucene_data_directory = lucene_dir.clone();
+
+    let startup_task = komga_server::app::prepare_startup_search_task_for_contract(&config)
+        .expect("external-owned stale analyzer version startup should skip recovery");
+
+    assert_eq!(startup_task, None);
+    assert_eq!(
+        fs::read_to_string(lucene_dir.join(ANALYZER_VERSION_MARKER_FILE))
+            .expect("external-owned analyzer marker should remain readable"),
+        stale_analyzer_version().to_string(),
+        "startup must not rewrite external-owned stale analyzer version markers",
     );
 }

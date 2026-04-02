@@ -639,6 +639,56 @@ async fn router_opds_v2_search_hides_unauthorized_library_results() {
     cleanup_router_fixture(paths);
 }
 
+#[tokio::test]
+async fn router_opds_search_supports_accent_folded_and_cjk_series_queries() {
+    let paths = new_router_fixture("router-opds-search-accent-cjk-recall").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_custom_series(&paths, "series-cafe", "Café 東京 Series", "library-1").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let v1_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v1.2/series?search=Cafe%20東京")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v1 accent+cjk search request should build"),
+        )
+        .await
+        .expect("opds v1 accent+cjk search request should complete");
+    assert_eq!(v1_response.status(), StatusCode::OK);
+    let v1_body = response_text(v1_response).await;
+    assert!(
+        v1_body.contains("/opds/v1.2/series/series-cafe"),
+        "OPDS v1 search should retain accent-folded mixed CJK recall: {v1_body}",
+    );
+
+    let v2_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/search?query=Cafe%20東京")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v2 accent+cjk search request should build"),
+        )
+        .await
+        .expect("opds v2 accent+cjk search request should complete");
+    assert_eq!(v2_response.status(), StatusCode::OK);
+    let v2_payload = response_json(v2_response).await;
+    let rendered = v2_payload.to_string();
+    assert!(
+        rendered.contains("/opds/v2/series/series-cafe"),
+        "OPDS v2 search should retain accent-folded mixed CJK recall: {v2_payload}",
+    );
+
+    cleanup_router_fixture(paths);
+}
+
 async fn response_text(response: axum::response::Response) -> String {
     let body = to_bytes(response.into_body(), usize::MAX)
         .await

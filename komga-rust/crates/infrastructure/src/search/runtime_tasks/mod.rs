@@ -1,6 +1,11 @@
+use std::collections::HashMap;
 use std::path::Path;
+use std::path::PathBuf;
+use std::sync::{OnceLock, RwLock};
 
-use super::{SearchEntityType, SearchEvent, SearchIndexLifecycle};
+use super::{
+    SearchEntityType, SearchError, SearchEvent, SearchIndexLifecycle, prepare_for_rebuild,
+};
 
 mod db;
 mod loaders;
@@ -30,8 +35,48 @@ pub struct AnalyzedBookMedia {
     pub pages: Vec<AnalyzedBookPage>,
 }
 
+fn runtime_index_database_mappings() -> &'static RwLock<HashMap<PathBuf, PathBuf>> {
+    static RUNTIME_INDEX_DATABASE_MAPPINGS: OnceLock<RwLock<HashMap<PathBuf, PathBuf>>> =
+        OnceLock::new();
+    RUNTIME_INDEX_DATABASE_MAPPINGS.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+fn register_runtime_owned_index_database(database_file: &Path, index_dir: &Path) {
+    let mappings = runtime_index_database_mappings();
+    let mut guard = mappings
+        .write()
+        .expect("runtime index/database mapping write lock should not be poisoned");
+    guard.insert(index_dir.to_path_buf(), database_file.to_path_buf());
+}
+
+fn resolve_runtime_owned_index_database(index_dir: &Path) -> Option<PathBuf> {
+    let mappings = runtime_index_database_mappings();
+    let guard = mappings
+        .read()
+        .expect("runtime index/database mapping read lock should not be poisoned");
+    guard.get(index_dir).cloned()
+}
+
 pub fn rebuild_index_from_database(database_file: &Path, index_dir: &Path) -> Result<(), String> {
+    register_runtime_owned_index_database(database_file, index_dir);
     rebuild::rebuild_index_from_database(database_file, index_dir)
+}
+
+fn bootstrap_runtime_owned_index_for_sync(
+    database_file: &Path,
+    index_dir: &Path,
+) -> Result<SearchIndexLifecycle, String> {
+    match SearchIndexLifecycle::bootstrap(index_dir) {
+        Ok(index) => Ok(index),
+        Err(SearchError::CorruptedIndexRequiresExplicitRebuild(_, _)) => {
+            prepare_for_rebuild(index_dir)
+                .map_err(|error| format!("failed to prepare search index rebuild: {error}"))?;
+            rebuild::rebuild_index_from_database(database_file, index_dir)?;
+            SearchIndexLifecycle::bootstrap(index_dir)
+                .map_err(|error| format!("failed to bootstrap search index after rebuild: {error}"))
+        }
+        Err(error) => Err(format!("failed to bootstrap search index: {error}")),
+    }
 }
 
 pub fn analyze_book_input(
@@ -76,7 +121,9 @@ pub fn persist_book_analysis(
     analysis: &AnalyzedBookMedia,
     update_search_index: bool,
 ) -> Result<(), String> {
+    register_runtime_owned_index_database(database_file, index_dir);
     let database_file = database_file.to_path_buf();
+    let database_file_for_sync = database_file.clone();
     let index_dir = index_dir.to_path_buf();
     let book_id = book_id.to_string();
     let analysis = analysis.clone();
@@ -135,8 +182,10 @@ pub fn persist_book_analysis(
 
             if update_search_index {
                 let document = loaders::load_book_search_document(pool.clone(), &book_id).await?;
-                let index = SearchIndexLifecycle::bootstrap(index_dir.as_path())
-                    .map_err(|error| format!("failed to bootstrap search index: {error}"))?;
+                let index = bootstrap_runtime_owned_index_for_sync(
+                    database_file_for_sync.as_path(),
+                    index_dir.as_path(),
+                )?;
                 if let Some(document) = document {
                     index
                         .apply_event(SearchEvent::Upsert(document))
@@ -155,7 +204,9 @@ pub fn sync_entity_upsert_from_database(
     entity_type: SearchEntityType,
     entity_id: &str,
 ) -> Result<bool, String> {
+    register_runtime_owned_index_database(database_file, index_dir);
     let database_file = database_file.to_path_buf();
+    let database_file_for_sync = database_file.clone();
     let index_dir = index_dir.to_path_buf();
     let entity_id = entity_id.to_string();
     db::run_database_query_with_max_connections(database_file, 2, move |pool| {
@@ -181,8 +232,10 @@ pub fn sync_entity_upsert_from_database(
                 return Ok(false);
             };
 
-            let index = SearchIndexLifecycle::bootstrap(index_dir.as_path())
-                .map_err(|error| format!("failed to bootstrap search index: {error}"))?;
+            let index = bootstrap_runtime_owned_index_for_sync(
+                database_file_for_sync.as_path(),
+                index_dir.as_path(),
+            )?;
             index
                 .apply_event(SearchEvent::Upsert(document))
                 .map_err(|error| format!("failed to upsert search document: {error}"))?;
@@ -196,7 +249,9 @@ pub fn sync_series_and_oneshot_books_after_metadata_update(
     index_dir: &Path,
     series_id: &str,
 ) -> Result<(), String> {
+    register_runtime_owned_index_database(database_file, index_dir);
     let database_file = database_file.to_path_buf();
+    let database_file_for_sync = database_file.clone();
     let index_dir = index_dir.to_path_buf();
     let series_id = series_id.to_string();
     db::run_database_query_with_max_connections(database_file, 2, move |pool| {
@@ -208,8 +263,10 @@ pub fn sync_series_and_oneshot_books_after_metadata_update(
             let oneshot_documents =
                 loaders::load_oneshot_book_search_documents(pool.clone(), &series_id).await?;
 
-            let index = SearchIndexLifecycle::bootstrap(index_dir.as_path())
-                .map_err(|error| format!("failed to bootstrap search index: {error}"))?;
+            let index = bootstrap_runtime_owned_index_for_sync(
+                database_file_for_sync.as_path(),
+                index_dir.as_path(),
+            )?;
 
             if let Some(document) = series_document {
                 index
@@ -235,8 +292,19 @@ pub fn sync_entity_delete_from_index(
     entity_type: SearchEntityType,
     entity_id: &str,
 ) -> Result<(), String> {
-    let index = SearchIndexLifecycle::bootstrap(index_dir)
-        .map_err(|error| format!("failed to bootstrap search index: {error}"))?;
+    let index = match SearchIndexLifecycle::bootstrap(index_dir) {
+        Ok(index) => index,
+        Err(SearchError::CorruptedIndexRequiresExplicitRebuild(_, _)) => {
+            let Some(database_file) = resolve_runtime_owned_index_database(index_dir) else {
+                return Err(
+                    "failed to bootstrap search index: runtime-owned delete sync has no registered database file for rebuild recovery"
+                        .to_string(),
+                );
+            };
+            bootstrap_runtime_owned_index_for_sync(database_file.as_path(), index_dir)?
+        }
+        Err(error) => return Err(format!("failed to bootstrap search index: {error}")),
+    };
     index
         .apply_event(SearchEvent::Delete {
             entity_type,
