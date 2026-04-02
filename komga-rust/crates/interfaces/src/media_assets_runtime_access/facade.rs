@@ -159,6 +159,19 @@ pub(crate) async fn refresh_series_read_progress_row(
     .await
 }
 
+pub(crate) async fn delete_series_read_progress_row(
+    database_file: &Path,
+    series_id: &str,
+    user_id: &str,
+) -> Result<(), String> {
+    (backend().delete_series_read_progress_row)(
+        database_file.to_path_buf(),
+        series_id.to_string(),
+        user_id.to_string(),
+    )
+    .await
+}
+
 pub(crate) async fn load_series_tachiyomi_progress(
     database_file: &Path,
     series_id: &str,
@@ -523,14 +536,6 @@ pub(crate) async fn load_book_restrictions(
     book_id: &str,
 ) -> Result<Option<(Option<u16>, Vec<String>)>, String> {
     (backend().load_book_restrictions)(database_file.to_path_buf(), book_id.to_string()).await
-}
-
-pub(crate) async fn load_readlist_archive_entries(
-    database_file: &Path,
-    readlist_id: &str,
-) -> Result<Vec<(String, PathBuf)>, String> {
-    (backend().load_readlist_archive_entries)(database_file.to_path_buf(), readlist_id.to_string())
-        .await
 }
 
 pub(crate) async fn load_series_archive_entries(

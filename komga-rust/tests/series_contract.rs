@@ -1,4 +1,4 @@
-use axum::body::Body;
+use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use komga_contract_testkit::contract_matrix::assert_required_target_declared;
 use komga_rust::infrastructure::sqlite::connect_pool;
@@ -290,8 +290,176 @@ async fn router_series_thumbnail_upload_parses_multipart_image_and_selected_flag
             .headers()
             .get(header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok()),
-        Some("image/png")
+        Some("image/jpeg")
     );
+    let stored_body = to_bytes(stored.into_body(), usize::MAX)
+        .await
+        .expect("series thumbnail fetch body should be readable");
+    assert_ne!(stored_body.as_ref(), image_bytes.as_slice());
+    assert_eq!(&stored_body[..3], &[0xFF, 0xD8, 0xFF]);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_series_thumbnail_selected_upload_reencodes_route_output_as_jpeg() {
+    let paths = new_router_fixture("router-series-thumbnail-selected-jpeg").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let image_bytes = fixture_png_bytes();
+    let (content_type, body) =
+        multipart_image_upload_body("file", "series.png", "image/png", true, &image_bytes);
+
+    let upload = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/series/series-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(body))
+                .expect("selected series thumbnail upload request should build"),
+        )
+        .await
+        .expect("selected series thumbnail upload request should complete");
+
+    assert_eq!(upload.status(), StatusCode::OK);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/series/series-1/thumbnail")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("selected series thumbnail route request should build"),
+        )
+        .await
+        .expect("selected series thumbnail route request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("image/jpeg")
+    );
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("selected series thumbnail body should be readable");
+    assert_ne!(body.as_ref(), image_bytes.as_slice());
+    assert_eq!(&body[..3], &[0xFF, 0xD8, 0xFF]);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_series_thumbnail_fallback_reencodes_source_image_as_jpeg() {
+    let paths = new_router_fixture("router-series-thumbnail-fallback-jpeg").await;
+    seed_router_contract_data(&paths).await;
+
+    let png_bytes = fixture_png_bytes();
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("router contract db should open");
+
+    sqlx::query(
+        "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID) \
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("series-image")
+    .bind(0_i64)
+    .bind("Series Image")
+    .bind("series/series-image")
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("image series row should be inserted");
+
+    sqlx::query(
+        "INSERT INTO SERIES_METADATA (STATUS, TITLE, TITLE_SORT, PUBLISHER, LANGUAGE, AGE_RATING, \
+           SERIES_ID) \
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("ONGOING")
+    .bind("Series Image")
+    .bind("Series Image")
+    .bind("PubHouse")
+    .bind("EN")
+    .bind(0_i64)
+    .bind("series-image")
+    .execute(&pool)
+    .await
+    .expect("image series metadata row should be inserted");
+
+    sqlx::query(
+        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, \
+           LIBRARY_ID) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("book-image")
+    .bind(0_i64)
+    .bind("cover.png")
+    .bind("books/cover.png")
+    .bind("series-image")
+    .bind(png_bytes.len() as i64)
+    .bind(0_i64)
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("image book row should be inserted");
+
+    sqlx::query(
+        "INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) \
+         VALUES (?, ?, ?, ?)",
+    )
+    .bind("image/png")
+    .bind("READY")
+    .bind("book-image")
+    .bind(1_i64)
+    .execute(&pool)
+    .await
+    .expect("image media row should be inserted");
+
+    pool.close().await;
+
+    let cover_path = paths.config_dir.join("books/cover.png");
+    if let Some(parent) = cover_path.parent() {
+        std::fs::create_dir_all(parent).expect("image book parent directory should be created");
+    }
+    std::fs::write(&cover_path, &png_bytes).expect("image book file should be written");
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/series/series-image/thumbnail")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("series thumbnail fallback request should build"),
+        )
+        .await
+        .expect("series thumbnail fallback request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("image/jpeg")
+    );
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("series thumbnail fallback body should be readable");
+    assert_ne!(body.as_ref(), png_bytes.as_slice());
+    assert_eq!(&body[..3], &[0xFF, 0xD8, 0xFF]);
 
     cleanup_router_fixture(paths);
 }
@@ -2930,6 +3098,8 @@ async fn router_discovery_series_list_locks_main_search_parity_for_retained_inpu
     seed_router_contract_data(&paths).await;
     seed_router_authors_scope_variants(&paths).await;
     update_series_search_fixture_title(&paths, "series-2", "Series Series 2").await;
+    seed_router_series_title_sort(&paths, "series-3", "Zeta Filing Title").await;
+    seed_router_series_alternate_title(&paths, "series-1", "alt-1", "Hidden Alias").await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
@@ -2953,6 +3123,19 @@ async fn router_discovery_series_list_locks_main_search_parity_for_retained_inpu
     )
     .await;
     assert_eq!(fielded_ids, vec!["series-2", "series-1", "series-3"]);
+
+    let title_sort_ids =
+        series_list_ids(&app, &admin_token, Some("relevance,desc"), Some("title:Zeta")).await;
+    assert_eq!(title_sort_ids, vec!["series-3"]);
+
+    let alternate_title_ids = series_list_ids(
+        &app,
+        &admin_token,
+        Some("relevance,desc"),
+        Some("title:Hidden"),
+    )
+    .await;
+    assert_eq!(alternate_title_ids, vec!["series-1"]);
 
     let invalid_query_ids =
         series_list_ids(&app, &admin_token, Some("relevance,desc"), Some("title:(")).await;

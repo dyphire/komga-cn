@@ -40,12 +40,13 @@ async fn rebuild_indexes_oneshot_inherited_series_metadata_and_book_isbn_fields(
              BOOK_ID TEXT NOT NULL PRIMARY KEY)",
         "CREATE TABLE IF NOT EXISTS MEDIA (BOOK_ID TEXT PRIMARY KEY, STATUS TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS BOOK_METADATA_TAG (BOOK_ID TEXT NOT NULL, TAG TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS BOOK_METADATA_AUTHOR (BOOK_ID TEXT NOT NULL, NAME TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS BOOK_METADATA_AUTHOR (BOOK_ID TEXT NOT NULL, NAME TEXT NOT NULL, ROLE TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS SERIES_METADATA_GENRE (SERIES_ID TEXT NOT NULL, GENRE TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS SERIES_METADATA_SHARING (SERIES_ID TEXT NOT NULL, LABEL TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS BOOK_METADATA_AGGREGATION (SERIES_ID TEXT NOT NULL PRIMARY KEY, RELEASE_DATE TEXT NULL)",
         "CREATE TABLE IF NOT EXISTS BOOK_METADATA_AGGREGATION_TAG (SERIES_ID TEXT NOT NULL, TAG TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS BOOK_METADATA_AGGREGATION_AUTHOR (SERIES_ID TEXT NOT NULL, NAME TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS BOOK_METADATA_AGGREGATION_AUTHOR (SERIES_ID TEXT NOT NULL, NAME TEXT NOT NULL, ROLE TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS SERIES_METADATA_ALTERNATE_TITLE (SERIES_ID TEXT NOT NULL, LABEL TEXT NOT NULL, TITLE TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS SERIES_METADATA_TAG (SERIES_ID TEXT NOT NULL, TAG TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS COLLECTION (ID TEXT PRIMARY KEY, NAME TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS READLIST (ID TEXT PRIMARY KEY, NAME TEXT NOT NULL)",
@@ -84,7 +85,7 @@ async fn rebuild_indexes_oneshot_inherited_series_metadata_and_book_isbn_fields(
     )
     .bind("ONGOING")
     .bind("Series One")
-    .bind("Series One")
+    .bind("Series One Sort")
     .bind("InheritedPub")
     .bind("EN")
     .bind(13_i64)
@@ -92,6 +93,26 @@ async fn rebuild_indexes_oneshot_inherited_series_metadata_and_book_isbn_fields(
     .execute(&pool)
     .await
     .expect("series metadata should be inserted");
+
+    sqlx::query(
+        "INSERT INTO SERIES_METADATA_ALTERNATE_TITLE (SERIES_ID, LABEL, TITLE) VALUES (?, ?, ?)",
+    )
+    .bind("series-1")
+    .bind("alt-1")
+    .bind("Series Uno")
+    .execute(&pool)
+    .await
+    .expect("series alternate title should be inserted");
+
+    sqlx::query(
+        "INSERT INTO BOOK_METADATA_AUTHOR (BOOK_ID, NAME, ROLE) VALUES (?, ?, ?)",
+    )
+    .bind("book-1")
+    .bind("Jane Writer")
+    .bind("writer")
+    .execute(&pool)
+    .await
+    .expect("book metadata author should be inserted");
 
     sqlx::query(
         "INSERT INTO BOOK (\
@@ -149,6 +170,33 @@ async fn rebuild_indexes_oneshot_inherited_series_metadata_and_book_isbn_fields(
         "book isbn should remain searchable through retained fielded queries",
     );
 
+    let title_sort_hits = index
+        .search_ids("title:Sort", SearchEntityType::Series, 10)
+        .expect("title query should execute for series titleSort values");
+    assert_eq!(
+        title_sort_hits,
+        vec!["series-1".to_string()],
+        "series titleSort should remain searchable through retained title queries",
+    );
+
+    let alternate_title_hits = index
+        .search_ids("title:Uno", SearchEntityType::Series, 10)
+        .expect("title query should execute for series alternate title values");
+    assert_eq!(
+        alternate_title_hits,
+        vec!["series-1".to_string()],
+        "series alternateTitles should remain searchable through retained title queries",
+    );
+
+    let writer_hits = index
+        .search_ids("writer:Jane", SearchEntityType::Book, 10)
+        .expect("writer field query should execute for book entity");
+    assert_eq!(
+        writer_hits,
+        vec!["book-1".to_string()],
+        "author role fields such as writer should remain searchable through retained fielded queries",
+    );
+
     if database_file.exists() {
         let _ = std::fs::remove_file(&database_file);
     }
@@ -186,12 +234,13 @@ async fn incremental_sync_updates_all_entity_documents_for_lifecycle_events() {
              BOOK_ID TEXT NOT NULL PRIMARY KEY)",
         "CREATE TABLE IF NOT EXISTS MEDIA (BOOK_ID TEXT PRIMARY KEY, STATUS TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS BOOK_METADATA_TAG (BOOK_ID TEXT NOT NULL, TAG TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS BOOK_METADATA_AUTHOR (BOOK_ID TEXT NOT NULL, NAME TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS BOOK_METADATA_AUTHOR (BOOK_ID TEXT NOT NULL, NAME TEXT NOT NULL, ROLE TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS SERIES_METADATA_GENRE (SERIES_ID TEXT NOT NULL, GENRE TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS SERIES_METADATA_SHARING (SERIES_ID TEXT NOT NULL, LABEL TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS BOOK_METADATA_AGGREGATION (SERIES_ID TEXT NOT NULL PRIMARY KEY, RELEASE_DATE TEXT NULL)",
         "CREATE TABLE IF NOT EXISTS BOOK_METADATA_AGGREGATION_TAG (SERIES_ID TEXT NOT NULL, TAG TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS BOOK_METADATA_AGGREGATION_AUTHOR (SERIES_ID TEXT NOT NULL, NAME TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS BOOK_METADATA_AGGREGATION_AUTHOR (SERIES_ID TEXT NOT NULL, NAME TEXT NOT NULL, ROLE TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS SERIES_METADATA_ALTERNATE_TITLE (SERIES_ID TEXT NOT NULL, LABEL TEXT NOT NULL, TITLE TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS SERIES_METADATA_TAG (SERIES_ID TEXT NOT NULL, TAG TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS COLLECTION (ID TEXT PRIMARY KEY, NAME TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS READLIST (ID TEXT PRIMARY KEY, NAME TEXT NOT NULL)",

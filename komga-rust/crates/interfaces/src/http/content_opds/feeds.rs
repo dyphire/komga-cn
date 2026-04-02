@@ -7,17 +7,24 @@ use serde_json::{Value, json};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use crate::http::identity_access::auth::require_auth;
 use crate::http::request_urls::app_absolute_url;
 
 use super::types::{PersistedBookFeedItem, PersistedSeries};
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct OpdsV1NavigationEntry {
+    pub id: String,
+    pub title: String,
+    pub href_path: String,
+    pub updated: Option<String>,
+}
 
 pub(super) fn opds_v1_navigation_feed_response(
     headers: &HeaderMap,
     feed_id: &str,
     title: &str,
     self_path: &str,
-    entries: Vec<(String, String, String)>,
+    entries: Vec<OpdsV1NavigationEntry>,
     pagination: Option<(usize, bool)>,
 ) -> Response {
     let self_href = app_absolute_url(headers, self_path);
@@ -45,14 +52,19 @@ pub(super) fn opds_v1_navigation_feed_response(
             body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"next\" href=\"{}\"/>", xml_escape(next_href.as_str())).as_str());
         }
     }
-    for (entry_id, entry_title, href_path) in entries {
-        let href = app_absolute_url(headers, href_path.as_str());
+    for entry in entries {
+        let entry_updated = entry
+            .updated
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .unwrap_or(now.as_str());
+        let href = app_absolute_url(headers, entry.href_path.as_str());
         body.push_str(
             format!(
                 "<entry><title>{}</title><updated>{}</updated><id>{}</id><content></content><link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"subsection\" href=\"{}\"/></entry>",
-                xml_escape(&entry_title),
-                xml_escape(&now),
-                xml_escape(&entry_id),
+                xml_escape(&entry.title),
+                xml_escape(entry_updated),
+                xml_escape(&entry.id),
                 xml_escape(&href),
             )
             .as_str(),
@@ -294,7 +306,7 @@ pub(super) fn parse_page_size(query: &str) -> (usize, usize) {
     let size = query_value(query, "size")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(20)
-        .clamp(1, 100);
+        .max(1);
     (page, size)
 }
 
@@ -342,21 +354,41 @@ pub(super) fn opds_now_timestamp() -> String {
         .unwrap_or_else(|_| "2000-01-01T00:00:00Z".to_string())
 }
 
-pub(super) fn redirect_to_opds_v2(headers: HeaderMap, target_path: &str) -> Response {
-    if let Some(response) = require_auth(&headers) {
-        return response;
+#[cfg(test)]
+mod tests {
+    use axum::body::to_bytes;
+    use axum::http::HeaderMap;
+
+    use super::{OpdsV1NavigationEntry, opds_v1_navigation_feed_response};
+
+    #[tokio::test]
+    async fn navigation_feed_uses_entry_specific_updated_timestamp() {
+        let response = opds_v1_navigation_feed_response(
+            &HeaderMap::new(),
+            "feed",
+            "Feed",
+            "/opds/v1.2/feed",
+            vec![OpdsV1NavigationEntry {
+                id: "entry-1".to_string(),
+                title: "Entry".to_string(),
+                href_path: "/opds/v1.2/entry-1".to_string(),
+                updated: Some("2024-01-02T03:04:05Z".to_string()),
+            }],
+            None,
+        );
+
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body should be readable");
+        let body = String::from_utf8(bytes.to_vec()).expect("feed body should be utf-8");
+
+        assert!(body.contains("<updated>2024-01-02T03:04:05Z</updated>"));
     }
 
-    let location = app_absolute_url(&headers, target_path);
-    (
-        StatusCode::FOUND,
-        [(
-            header::LOCATION,
-            HeaderValue::from_str(&location)
-                .unwrap_or_else(|_| HeaderValue::from_static("/opds/v2/catalog")),
-        )],
-    )
-        .into_response()
+    #[test]
+    fn parse_page_size_does_not_cap_large_requested_size() {
+        assert_eq!(super::parse_page_size("page=2&size=250"), (2, 250));
+    }
 }
 
 pub(super) fn opds_subsection_navigation_link(
@@ -483,7 +515,7 @@ pub(super) fn opds_publication_for_book(
             },
             {
                 "rel": "http://opds-spec.org/image/thumbnail",
-                "href": app_absolute_url(headers, format!("/opds/v2/books/{book_id}/thumbnail/small").as_str()),
+                "href": app_absolute_url(headers, format!("/opds/v2/books/{book_id}/thumbnail").as_str()),
                 "type": "image/jpeg",
             }
         ],

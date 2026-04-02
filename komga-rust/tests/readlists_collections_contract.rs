@@ -690,6 +690,140 @@ async fn router_collection_series_supports_kotlin_style_query_filters() {
 }
 
 #[tokio::test]
+async fn router_series_collections_filter_series_ids_for_partially_visible_user() {
+    let paths = new_router_fixture("router-series-collections-partially-visible").await;
+    seed_router_contract_data(&paths).await;
+    seed_collection_series_variants(&paths).await;
+    seed_router_library_restricted_user(
+        &paths,
+        "library-1-user",
+        "library1@example.org",
+        "router-contract-library1-123",
+        &["library-1"],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "library1@example.org",
+        "router-contract-library1-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/series/series-1/collections")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("series collections partially visible request should build"),
+        )
+        .await
+        .expect("series collections partially visible request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let collections = payload
+        .as_array()
+        .expect("series collections payload should be an array");
+    assert_eq!(collections.len(), 1);
+    assert_eq!(
+        collections[0].get("id").and_then(Value::as_str),
+        Some("collection-1")
+    );
+    assert_eq!(collections[0].get("filtered"), Some(&Value::Bool(true)));
+    assert_eq!(collections[0].get("seriesIds"), Some(&json!(["series-1"])));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_series_collections_does_not_accept_sorted_position_series_alias() {
+    let paths = new_router_fixture("router-series-collections-no-id-bridge").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("router contract db should open for series alias test");
+
+    sqlx::query(
+        "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID) \
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("series-real")
+    .bind(0_i64)
+    .bind("Series Real")
+    .bind("series/series-real")
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("alias target series row should be inserted");
+
+    sqlx::query(
+        "INSERT INTO SERIES_METADATA (STATUS, TITLE, TITLE_SORT, PUBLISHER, LANGUAGE, AGE_RATING, SERIES_ID) \
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("ONGOING")
+    .bind("Series Real")
+    .bind("ZZZ Series Real")
+    .bind("PubHouse")
+    .bind("EN")
+    .bind(0_i64)
+    .bind("series-real")
+    .execute(&pool)
+    .await
+    .expect("alias target series metadata row should be inserted");
+
+    sqlx::query(
+        "INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) \
+         VALUES (?, ?, ?, ?)",
+    )
+    .bind("collection-alias")
+    .bind("Collection Alias")
+    .bind(false)
+    .bind(1_i64)
+    .execute(&pool)
+    .await
+    .expect("alias collection row should be inserted");
+
+    sqlx::query(
+        "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) \
+         VALUES (?, ?, ?)",
+    )
+    .bind("collection-alias")
+    .bind("series-real")
+    .bind(0_i64)
+    .execute(&pool)
+    .await
+    .expect("alias collection membership row should be inserted");
+
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/series/series-2/collections")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("series collections alias request should build"),
+        )
+        .await
+        .expect("series collections alias request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(payload, json!([]));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_readlist_thumbnail_upload_parses_multipart_image_and_selected_flag() {
     let paths = new_router_fixture("router-readlist-thumbnail-upload-multipart").await;
     seed_router_contract_data(&paths).await;
@@ -775,6 +909,39 @@ async fn router_readlist_thumbnail_upload_parses_multipart_image_and_selected_fl
     assert_eq!(rows[0].get("width"), Some(&json!(1)));
     assert_eq!(rows[0].get("height"), Some(&json!(1)));
 
+    let route_thumbnail = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/readlists/readlist-1/thumbnail")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("readlist thumbnail route request should build"),
+        )
+        .await
+        .expect("readlist thumbnail route request should complete");
+
+    assert_eq!(route_thumbnail.status(), StatusCode::OK);
+    assert_eq!(
+        route_thumbnail
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("image/jpeg")
+    );
+    assert_eq!(
+        route_thumbnail
+            .headers()
+            .get(header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("max-age=3600, private")
+    );
+    let route_thumbnail_body = to_bytes(route_thumbnail.into_body(), usize::MAX)
+        .await
+        .expect("readlist thumbnail route body should be readable");
+    assert_ne!(route_thumbnail_body.as_ref(), image_bytes.as_slice());
+    assert_eq!(&route_thumbnail_body[..3], &[0xFF, 0xD8, 0xFF]);
+
     cleanup_router_fixture(paths);
 }
 
@@ -853,6 +1020,39 @@ async fn router_collection_thumbnail_upload_parses_multipart_image_and_selected_
         Some("image/png")
     );
 
+    let route_thumbnail = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/collections/collection-1/thumbnail")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("collection thumbnail route request should build"),
+        )
+        .await
+        .expect("collection thumbnail route request should complete");
+
+    assert_eq!(route_thumbnail.status(), StatusCode::OK);
+    assert_eq!(
+        route_thumbnail
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("image/jpeg")
+    );
+    assert_eq!(
+        route_thumbnail
+            .headers()
+            .get(header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("max-age=3600, private")
+    );
+    let route_thumbnail_body = to_bytes(route_thumbnail.into_body(), usize::MAX)
+        .await
+        .expect("collection thumbnail route body should be readable");
+    assert_ne!(route_thumbnail_body.as_ref(), image_bytes.as_slice());
+    assert_eq!(&route_thumbnail_body[..3], &[0xFF, 0xD8, 0xFF]);
+
     cleanup_router_fixture(paths);
 }
 
@@ -904,12 +1104,83 @@ async fn router_readlist_thumbnail_falls_back_to_dynamic_mosaic_when_no_persiste
             .and_then(|value| value.to_str().ok()),
         Some("image/jpeg")
     );
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("max-age=3600, private")
+    );
     let body = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("readlist thumbnail body should be readable");
     assert!(
         !body.is_empty(),
         "readlist mosaic thumbnail should not be empty"
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collection_thumbnails_allow_partially_visible_collection() {
+    let paths = new_router_fixture("router-collection-thumbnails-partially-visible").await;
+    seed_router_contract_data(&paths).await;
+    seed_collection_series_variants(&paths).await;
+    seed_router_library_restricted_user(
+        &paths,
+        "library-1-user",
+        "library1@example.org",
+        "router-contract-library1-123",
+        &["library-1"],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let admin_token = login_with_basic_and_get_token(app.clone()).await;
+    let restricted_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "library1@example.org",
+        "router-contract-library1-123",
+    )
+    .await;
+    let image_bytes = fixture_png_bytes();
+    let (content_type, body) =
+        multipart_image_upload_body("file", "collection.png", "image/png", true, &image_bytes);
+
+    let upload = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/collections/collection-1/thumbnails")
+                .header("x-auth-token", &admin_token)
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(body))
+                .expect("partially visible collection thumbnail upload request should build"),
+        )
+        .await
+        .expect("partially visible collection thumbnail upload request should complete");
+    assert_eq!(upload.status(), StatusCode::OK);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/collections/collection-1/thumbnails")
+                .header("x-auth-token", &restricted_token)
+                .body(Body::empty())
+                .expect("partially visible collection thumbnails request should build"),
+        )
+        .await
+        .expect("partially visible collection thumbnails request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(payload.as_array().map(Vec::len), Some(1));
+    assert_eq!(
+        payload[0].get("collectionId").and_then(Value::as_str),
+        Some("collection-1")
     );
 
     cleanup_router_fixture(paths);
@@ -962,6 +1233,13 @@ async fn router_collection_thumbnail_falls_back_to_dynamic_mosaic_when_no_persis
             .get(header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok()),
         Some("image/jpeg")
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("max-age=3600, private")
     );
     let body = to_bytes(response.into_body(), usize::MAX)
         .await
@@ -1091,6 +1369,130 @@ async fn router_readlist_and_collection_media_assets_hide_age_restricted_content
 
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "route: {}", route);
     }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_readlist_detail_filters_books_for_partially_restricted_user() {
+    let paths = new_router_fixture("router-readlist-detail-partially-restricted").await;
+    seed_router_contract_data(&paths).await;
+    seed_readlist_endpoint_variants(&paths).await;
+    seed_router_age_exclude_user_with_roles(
+        &paths,
+        "partially-restricted-user",
+        "partial@example.org",
+        "router-contract-partial-123",
+        15,
+        &["USER", "FILE_DOWNLOAD"],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let restricted_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "partial@example.org",
+        "router-contract-partial-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/readlists/readlist-1")
+                .header("x-auth-token", &restricted_token)
+                .body(Body::empty())
+                .expect("partially restricted readlist detail request should build"),
+        )
+        .await
+        .expect("partially restricted readlist detail request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(payload.get("filtered"), Some(&Value::Bool(true)));
+    assert_eq!(payload.get("bookIds"), Some(&json!(["book-3"])));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_readlist_media_assets_allow_partially_visible_restricted_readlist() {
+    let paths = new_router_fixture("router-readlist-media-assets-partially-restricted").await;
+    seed_router_contract_data(&paths).await;
+    seed_readlist_endpoint_variants(&paths).await;
+    seed_router_age_exclude_user_with_roles(
+        &paths,
+        "partially-restricted-user",
+        "partial@example.org",
+        "router-contract-partial-123",
+        15,
+        &["USER", "FILE_DOWNLOAD"],
+    )
+    .await;
+    for (relative_path, chapter) in [
+        ("books/book-1.epub", "book-1"),
+        ("books/book-2.epub", "book-2"),
+        ("library-2/books/book-3.epub", "book-3"),
+    ] {
+        write_router_epub_resource(
+            &paths,
+            relative_path,
+            "OEBPS/chapter.xhtml",
+            format!(
+                "<html xmlns='http://www.w3.org/1999/xhtml'><body>{chapter}</body></html>"
+            )
+            .as_bytes(),
+        );
+    }
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let admin_token = login_with_basic_and_get_token(app.clone()).await;
+    let restricted_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "partial@example.org",
+        "router-contract-partial-123",
+    )
+    .await;
+    let image_bytes = fixture_png_bytes();
+    let (content_type, body) =
+        multipart_image_upload_body("file", "readlist.png", "image/png", true, &image_bytes);
+
+    let upload = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/readlists/readlist-1/thumbnails")
+                .header("x-auth-token", &admin_token)
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(body))
+                .expect("partially restricted readlist thumbnail upload request should build"),
+        )
+        .await
+        .expect("partially restricted readlist thumbnail upload request should complete");
+    assert_eq!(upload.status(), StatusCode::OK);
+
+    let thumbnails = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/readlists/readlist-1/thumbnails")
+                .header("x-auth-token", &restricted_token)
+                .body(Body::empty())
+                .expect("partially restricted readlist thumbnails request should build"),
+        )
+        .await
+        .expect("partially restricted readlist thumbnails request should complete");
+
+    assert_eq!(thumbnails.status(), StatusCode::OK);
+    let thumbnails_payload = response_json(thumbnails).await;
+    assert_eq!(
+        thumbnails_payload.as_array().map(Vec::len),
+        Some(1),
+        "partially visible readlist should still expose its thumbnail list"
+    );
 
     cleanup_router_fixture(paths);
 }

@@ -5,6 +5,17 @@ use sqlx::Row;
 
 use crate::sqlite::connect_pool;
 
+fn empty_series_tachiyomi_progress_payload() -> Value {
+    json!({
+        "booksCount": 0,
+        "booksReadCount": 0,
+        "booksUnreadCount": 0,
+        "booksInProgressCount": 0,
+        "lastReadContinuousNumberSort": 0.0,
+        "maxNumberSort": 0.0,
+    })
+}
+
 pub async fn refresh_series_read_progress_row(
     database_file: &Path,
     series_id: &str,
@@ -46,6 +57,26 @@ pub async fn refresh_series_read_progress_row(
     Ok(())
 }
 
+pub async fn delete_series_read_progress_row(
+    database_file: &Path,
+    series_id: &str,
+    user_id_value: &str,
+) -> Result<(), String> {
+    if !database_file.exists() {
+        return Ok(());
+    }
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("open series read progress delete db: {error}"))?;
+    sqlx::query("DELETE FROM READ_PROGRESS_SERIES WHERE SERIES_ID = ? AND USER_ID = ?")
+        .bind(series_id)
+        .bind(user_id_value)
+        .execute(&pool)
+        .await
+        .map_err(|error| format!("delete series read progress row: {error}"))?;
+    Ok(())
+}
+
 pub async fn load_series_tachiyomi_progress(
     database_file: &Path,
     series_id: &str,
@@ -70,7 +101,7 @@ pub async fn load_series_tachiyomi_progress(
     .await
     .map_err(|error| format!("query series tachiyomi rows: {error}"))?;
     if rows.is_empty() {
-        return Ok(None);
+        return Ok(Some(empty_series_tachiyomi_progress_payload()));
     }
     let mut books_count = 0usize;
     let mut books_read_count = 0usize;
@@ -109,4 +140,21 @@ pub async fn load_series_tachiyomi_progress(
         "lastReadContinuousNumberSort": last_read_continuous_number_sort,
         "maxNumberSort": max_number_sort,
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::empty_series_tachiyomi_progress_payload;
+
+    #[test]
+    fn empty_series_tachiyomi_progress_payload_returns_zeroed_counts() {
+        let payload = empty_series_tachiyomi_progress_payload();
+
+        assert_eq!(payload["booksCount"], 0);
+        assert_eq!(payload["booksReadCount"], 0);
+        assert_eq!(payload["booksUnreadCount"], 0);
+        assert_eq!(payload["booksInProgressCount"], 0);
+        assert_eq!(payload["lastReadContinuousNumberSort"], 0.0);
+        assert_eq!(payload["maxNumberSort"], 0.0);
+    }
 }

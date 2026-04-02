@@ -180,14 +180,12 @@ fn parse_client_settings_global_payload(
         let Some(item) = item.as_object() else {
             return Err(StatusCode::BAD_REQUEST.into_response());
         };
-        let Some(value) = item
-            .get("value")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        else {
+        let Some(value) = item.get("value").and_then(Value::as_str) else {
             return Err(StatusCode::BAD_REQUEST.into_response());
         };
+        if value.trim().is_empty() {
+            return Err(StatusCode::BAD_REQUEST.into_response());
+        }
         let Some(allow_unauthorized) = item.get("allowUnauthorized").and_then(Value::as_bool)
         else {
             return Err(StatusCode::BAD_REQUEST.into_response());
@@ -214,14 +212,12 @@ fn parse_client_settings_user_payload(body: &[u8]) -> Result<Vec<(String, String
         let Some(item) = item.as_object() else {
             return Err(StatusCode::BAD_REQUEST.into_response());
         };
-        let Some(value) = item
-            .get("value")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        else {
+        let Some(value) = item.get("value").and_then(Value::as_str) else {
             return Err(StatusCode::BAD_REQUEST.into_response());
         };
+        if value.trim().is_empty() {
+            return Err(StatusCode::BAD_REQUEST.into_response());
+        }
         settings.push((key.to_string(), value.to_string()));
     }
 
@@ -259,13 +255,13 @@ fn is_valid_client_settings_key(key: &str) -> bool {
     let Some(first) = segments.next() else {
         return false;
     };
-    if !is_valid_client_settings_segment(first) {
+    if !is_valid_client_settings_first_segment(first) {
         return false;
     }
-    segments.all(is_valid_client_settings_segment)
+    segments.all(is_valid_client_settings_following_segment)
 }
 
-fn is_valid_client_settings_segment(segment: &str) -> bool {
+fn is_valid_client_settings_first_segment(segment: &str) -> bool {
     if segment.is_empty() {
         return false;
     }
@@ -286,4 +282,61 @@ fn is_valid_client_settings_segment(segment: &str) -> bool {
     segment
         .chars()
         .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_' || ch == '-')
+}
+
+fn is_valid_client_settings_following_segment(segment: &str) -> bool {
+    if segment.is_empty() {
+        return false;
+    }
+    let Some(last) = segment.chars().last() else {
+        return false;
+    };
+    if !last.is_ascii_lowercase() && !last.is_ascii_digit() {
+        return false;
+    }
+
+    segment
+        .chars()
+        .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_' || ch == '-')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_client_settings_global_payload, parse_client_settings_user_payload};
+
+    #[test]
+    fn global_payload_preserves_non_blank_whitespace() {
+        let payload = br#"{"appearance.mode":{"value":"  dark  ","allowUnauthorized":true}}"#;
+
+        let settings = parse_client_settings_global_payload(payload)
+            .expect("payload with surrounding whitespace should remain valid");
+
+        assert_eq!(
+            settings,
+            vec![("appearance.mode".to_string(), "  dark  ".to_string(), true)]
+        );
+    }
+
+    #[test]
+    fn user_payload_rejects_blank_only_values() {
+        let payload = br#"{"reader.zoom":{"value":"   "}}"#;
+
+        let response = parse_client_settings_user_payload(payload)
+            .expect_err("blank-only values should be rejected");
+
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn payload_accepts_numeric_following_segments_in_keys() {
+        let payload = br#"{"reader.1panel":{"value":"spread","allowUnauthorized":false}}"#;
+
+        let settings = parse_client_settings_global_payload(payload)
+            .expect("keys matching Kotlin regex should be accepted");
+
+        assert_eq!(
+            settings,
+            vec![("reader.1panel".to_string(), "spread".to_string(), false,)]
+        );
+    }
 }

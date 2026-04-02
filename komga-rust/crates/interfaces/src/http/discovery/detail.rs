@@ -137,6 +137,12 @@ struct BookMetadataAuthorReadModel {
 }
 
 #[derive(Clone)]
+struct BookMetadataLinkReadModel {
+    label: String,
+    url: String,
+}
+
+#[derive(Clone)]
 pub(super) struct BookDetailReadModel {
     id: String,
     series_id: String,
@@ -158,11 +164,23 @@ pub(super) struct BookDetailReadModel {
     metadata_number: String,
     metadata_number_sort: f64,
     metadata_release_date: Option<String>,
+    metadata_title_lock: bool,
+    metadata_summary_lock: bool,
+    metadata_number_lock: bool,
+    metadata_number_sort_lock: bool,
+    metadata_release_date_lock: bool,
     metadata_authors: Vec<BookMetadataAuthorReadModel>,
+    metadata_authors_lock: bool,
     metadata_tags: Vec<String>,
+    metadata_tags_lock: bool,
     metadata_isbn: String,
+    metadata_isbn_lock: bool,
+    metadata_links: Vec<BookMetadataLinkReadModel>,
+    metadata_links_lock: bool,
     metadata_created: String,
     metadata_last_modified: String,
+    media_epub_divina_compatible: bool,
+    media_epub_is_kepub: bool,
     read_progress: Option<PersistedReadProgress>,
     deleted: bool,
     file_hash: String,
@@ -235,6 +253,7 @@ pub(super) struct SeriesDetailReadModel {
     metadata_created: String,
     metadata_last_modified: String,
     books_metadata_tags: Vec<String>,
+    books_metadata_authors: Vec<BookMetadataAuthorReadModel>,
     books_metadata_release_date: Option<String>,
     books_metadata_summary: String,
     books_metadata_summary_number: String,
@@ -266,29 +285,29 @@ fn book_detail_payload(book: &BookDetailReadModel, is_admin: bool) -> Value {
             "mediaType": book.media_type,
             "pagesCount": book.media_pages_count,
             "comment": book.media_comment,
-            "epubDivinaCompatible": false,
-            "epubIsKepub": false,
+            "epubDivinaCompatible": book.media_epub_divina_compatible,
+            "epubIsKepub": book.media_epub_is_kepub,
             "mediaProfile": media_profile
         },
         "metadata": {
             "title": book.metadata_title,
-            "titleLock": false,
+            "titleLock": book.metadata_title_lock,
             "summary": book.metadata_summary,
-            "summaryLock": false,
+            "summaryLock": book.metadata_summary_lock,
             "number": book.metadata_number,
-            "numberLock": false,
+            "numberLock": book.metadata_number_lock,
             "numberSort": book.metadata_number_sort,
-            "numberSortLock": false,
+            "numberSortLock": book.metadata_number_sort_lock,
             "releaseDate": book.metadata_release_date,
-            "releaseDateLock": false,
+            "releaseDateLock": book.metadata_release_date_lock,
             "authors": book.metadata_authors.iter().map(|author| json!({ "name": author.name, "role": author.role })).collect::<Vec<_>>(),
-            "authorsLock": false,
+            "authorsLock": book.metadata_authors_lock,
             "tags": book.metadata_tags,
-            "tagsLock": false,
+            "tagsLock": book.metadata_tags_lock,
             "isbn": book.metadata_isbn,
-            "isbnLock": false,
-            "links": [],
-            "linksLock": false,
+            "isbnLock": book.metadata_isbn_lock,
+            "links": book.metadata_links.iter().map(|link| json!({ "label": link.label, "url": link.url })).collect::<Vec<_>>(),
+            "linksLock": book.metadata_links_lock,
             "created": book.metadata_created,
             "lastModified": book.metadata_last_modified
         },
@@ -433,7 +452,16 @@ fn series_detail_payload(series: &SeriesDetailReadModel, is_admin: bool) -> Valu
     );
 
     let mut books_metadata = Map::new();
-    books_metadata.insert("authors".to_string(), Value::Array(vec![]));
+    books_metadata.insert(
+        "authors".to_string(),
+        Value::Array(
+            series
+                .books_metadata_authors
+                .iter()
+                .map(|author| json!({ "name": author.name, "role": author.role }))
+                .collect(),
+        ),
+    );
     books_metadata.insert(
         "tags".to_string(),
         Value::Array(
@@ -508,6 +536,90 @@ fn series_detail_payload(series: &SeriesDetailReadModel, is_admin: bool) -> Valu
     payload.insert("oneshot".to_string(), Value::Bool(series.oneshot));
 
     Value::Object(payload)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn book_detail_payload_uses_persisted_lock_link_and_media_flags() {
+        let payload = book_detail_payload(
+            &BookDetailReadModel {
+                id: "book-1".to_string(),
+                series_id: "series-1".to_string(),
+                series_title: "Series".to_string(),
+                library_id: "lib-1".to_string(),
+                name: "Book".to_string(),
+                url: "/data/books/book.cbz".to_string(),
+                number: 1,
+                created: "2024-01-01T00:00:00Z".to_string(),
+                last_modified: "2024-01-02T00:00:00Z".to_string(),
+                file_last_modified: "2024-01-03T00:00:00Z".to_string(),
+                size_bytes: 123,
+                media_status: "READY".to_string(),
+                media_type: "application/epub+zip".to_string(),
+                media_pages_count: 5,
+                media_comment: "ok".to_string(),
+                metadata_title: "Meta".to_string(),
+                metadata_summary: "Summary".to_string(),
+                metadata_number: "1".to_string(),
+                metadata_number_sort: 1.0,
+                metadata_release_date: Some("2024-01-04".to_string()),
+                metadata_title_lock: true,
+                metadata_summary_lock: true,
+                metadata_number_lock: true,
+                metadata_number_sort_lock: true,
+                metadata_release_date_lock: true,
+                metadata_authors: vec![BookMetadataAuthorReadModel {
+                    name: "Author".to_string(),
+                    role: "Writer".to_string(),
+                }],
+                metadata_authors_lock: true,
+                metadata_tags: vec!["tag".to_string()],
+                metadata_tags_lock: true,
+                metadata_isbn: "isbn".to_string(),
+                metadata_isbn_lock: true,
+                metadata_links: vec![BookMetadataLinkReadModel {
+                    label: "Wiki".to_string(),
+                    url: "https://example.com".to_string(),
+                }],
+                metadata_links_lock: true,
+                metadata_created: "2024-01-01T00:00:00Z".to_string(),
+                metadata_last_modified: "2024-01-02T00:00:00Z".to_string(),
+                media_epub_divina_compatible: true,
+                media_epub_is_kepub: true,
+                read_progress: None,
+                deleted: false,
+                file_hash: "hash".to_string(),
+                oneshot: false,
+            },
+            true,
+        );
+
+        assert_eq!(
+            payload
+                .get("media")
+                .and_then(|value| value.get("epubDivinaCompatible"))
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            payload
+                .get("metadata")
+                .and_then(|value| value.get("linksLock"))
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            payload
+                .get("metadata")
+                .and_then(|value| value.get("links"))
+                .and_then(Value::as_array)
+                .map(|links| links.len()),
+            Some(1)
+        );
+    }
 }
 
 fn series_collections_payload(collections: &[CollectionReadModel]) -> Value {

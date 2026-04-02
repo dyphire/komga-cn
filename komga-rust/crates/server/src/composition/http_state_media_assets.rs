@@ -188,6 +188,16 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
                 .await
             })
         }),
+        delete_series_read_progress_row: Arc::new(|database_file, series_id, user_id| {
+            Box::pin(async move {
+                infrastructure_filesystem::delete_series_read_progress_row(
+                    database_file.as_path(),
+                    &series_id,
+                    &user_id,
+                )
+                .await
+            })
+        }),
         load_series_tachiyomi_progress: Arc::new(|database_file, series_id, user_id| {
             Box::pin(async move {
                 infrastructure_filesystem::load_series_tachiyomi_progress(

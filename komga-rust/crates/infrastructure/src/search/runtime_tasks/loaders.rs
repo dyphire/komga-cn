@@ -1,7 +1,9 @@
 use sqlx::Row;
 
-use super::super::{SearchDocument, SearchEntityType};
+use super::super::{SearchDocument, SearchEntityType, SearchFieldEntry};
 use super::db::{search_field, search_fields};
+
+const AUTHOR_ROLE_DELIMITER: &str = "::";
 
 pub(super) async fn load_rebuild_search_documents(
     pool: sqlx::SqlitePool,
@@ -32,6 +34,7 @@ pub(super) async fn load_book_search_document(
              CASE WHEN b.oneshot = 1 THEN COALESCE((SELECT GROUP_CONCAT(sh.LABEL, '|') FROM SERIES_METADATA_SHARING sh WHERE sh.SERIES_ID = s.ID), '') ELSE '' END AS ONESHOT_SHARING_LABELS,
              COALESCE((SELECT GROUP_CONCAT(bt.TAG, '|') FROM BOOK_METADATA_TAG bt WHERE bt.BOOK_ID = b.ID), '') AS BOOK_TAGS,
              COALESCE((SELECT GROUP_CONCAT(ba.NAME, '|') FROM BOOK_METADATA_AUTHOR ba WHERE ba.BOOK_ID = b.ID), '') AS AUTHORS,
+             COALESCE((SELECT GROUP_CONCAT(COALESCE(ba.ROLE, '') || '::' || ba.NAME, '|') FROM BOOK_METADATA_AUTHOR ba WHERE ba.BOOK_ID = b.ID), '') AS AUTHOR_ROLES,
              COALESCE(STRFTIME('%Y', bm.RELEASE_DATE), '') AS RELEASE_YEAR,
              CASE WHEN b.DELETED_DATE IS NULL THEN 'false' ELSE 'true' END AS DELETED,
              CASE WHEN b.oneshot = 1 THEN 'true' ELSE 'false' END AS ONESHOT
@@ -71,6 +74,7 @@ pub(super) async fn load_oneshot_book_search_documents(
              CASE WHEN b.oneshot = 1 THEN COALESCE((SELECT GROUP_CONCAT(sh.LABEL, '|') FROM SERIES_METADATA_SHARING sh WHERE sh.SERIES_ID = s.ID), '') ELSE '' END AS ONESHOT_SHARING_LABELS,
              COALESCE((SELECT GROUP_CONCAT(bt.TAG, '|') FROM BOOK_METADATA_TAG bt WHERE bt.BOOK_ID = b.ID), '') AS BOOK_TAGS,
              COALESCE((SELECT GROUP_CONCAT(ba.NAME, '|') FROM BOOK_METADATA_AUTHOR ba WHERE ba.BOOK_ID = b.ID), '') AS AUTHORS,
+             COALESCE((SELECT GROUP_CONCAT(COALESCE(ba.ROLE, '') || '::' || ba.NAME, '|') FROM BOOK_METADATA_AUTHOR ba WHERE ba.BOOK_ID = b.ID), '') AS AUTHOR_ROLES,
              COALESCE(STRFTIME('%Y', bm.RELEASE_DATE), '') AS RELEASE_YEAR,
              CASE WHEN b.DELETED_DATE IS NULL THEN 'false' ELSE 'true' END AS DELETED,
              CASE WHEN b.oneshot = 1 THEN 'true' ELSE 'false' END AS ONESHOT
@@ -118,7 +122,10 @@ pub(super) async fn load_series_search_document(
              COALESCE((SELECT GROUP_CONCAT(bmat.TAG, '|') FROM BOOK_METADATA_AGGREGATION_TAG bmat WHERE bmat.SERIES_ID = s.ID), '') AS BOOK_TAGS,
              COALESCE((SELECT GROUP_CONCAT(sg.GENRE, '|') FROM SERIES_METADATA_GENRE sg WHERE sg.SERIES_ID = s.ID), '') AS GENRES,
              COALESCE((SELECT GROUP_CONCAT(ss.LABEL, '|') FROM SERIES_METADATA_SHARING ss WHERE ss.SERIES_ID = s.ID), '') AS SHARING_LABELS,
-             COALESCE((SELECT GROUP_CONCAT(baa.NAME, '|') FROM BOOK_METADATA_AGGREGATION_AUTHOR baa WHERE baa.SERIES_ID = s.ID), '') AS AUTHORS
+             COALESCE((SELECT GROUP_CONCAT(baa.NAME, '|') FROM BOOK_METADATA_AGGREGATION_AUTHOR baa WHERE baa.SERIES_ID = s.ID), '') AS AUTHORS,
+             COALESCE((SELECT GROUP_CONCAT(COALESCE(baa.ROLE, '') || '::' || baa.NAME, '|') FROM BOOK_METADATA_AGGREGATION_AUTHOR baa WHERE baa.SERIES_ID = s.ID), '') AS AUTHOR_ROLES,
+             COALESCE(sm.TITLE_SORT, '') AS TITLE_SORT,
+             COALESCE((SELECT GROUP_CONCAT(sat.TITLE, '|') FROM SERIES_METADATA_ALTERNATE_TITLE sat WHERE sat.SERIES_ID = s.ID), '') AS ALTERNATE_TITLES
           FROM SERIES s
           LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
           LEFT JOIN BOOK_METADATA_AGGREGATION bma ON bma.SERIES_ID = s.ID
@@ -178,6 +185,7 @@ async fn load_all_book_search_documents(
              CASE WHEN b.oneshot = 1 THEN COALESCE((SELECT GROUP_CONCAT(sh.LABEL, '|') FROM SERIES_METADATA_SHARING sh WHERE sh.SERIES_ID = s.ID), '') ELSE '' END AS ONESHOT_SHARING_LABELS,
              COALESCE((SELECT GROUP_CONCAT(bt.TAG, '|') FROM BOOK_METADATA_TAG bt WHERE bt.BOOK_ID = b.ID), '') AS BOOK_TAGS,
              COALESCE((SELECT GROUP_CONCAT(ba.NAME, '|') FROM BOOK_METADATA_AUTHOR ba WHERE ba.BOOK_ID = b.ID), '') AS AUTHORS,
+             COALESCE((SELECT GROUP_CONCAT(COALESCE(ba.ROLE, '') || '::' || ba.NAME, '|') FROM BOOK_METADATA_AUTHOR ba WHERE ba.BOOK_ID = b.ID), '') AS AUTHOR_ROLES,
              COALESCE(STRFTIME('%Y', bm.RELEASE_DATE), '') AS RELEASE_YEAR,
              CASE WHEN b.DELETED_DATE IS NULL THEN 'false' ELSE 'true' END AS DELETED,
              CASE WHEN b.oneshot = 1 THEN 'true' ELSE 'false' END AS ONESHOT
@@ -222,7 +230,10 @@ async fn load_all_series_search_documents(
              COALESCE((SELECT GROUP_CONCAT(bmat.TAG, '|') FROM BOOK_METADATA_AGGREGATION_TAG bmat WHERE bmat.SERIES_ID = s.ID), '') AS BOOK_TAGS,
              COALESCE((SELECT GROUP_CONCAT(sg.GENRE, '|') FROM SERIES_METADATA_GENRE sg WHERE sg.SERIES_ID = s.ID), '') AS GENRES,
              COALESCE((SELECT GROUP_CONCAT(ss.LABEL, '|') FROM SERIES_METADATA_SHARING ss WHERE ss.SERIES_ID = s.ID), '') AS SHARING_LABELS,
-             COALESCE((SELECT GROUP_CONCAT(baa.NAME, '|') FROM BOOK_METADATA_AGGREGATION_AUTHOR baa WHERE baa.SERIES_ID = s.ID), '') AS AUTHORS
+             COALESCE((SELECT GROUP_CONCAT(baa.NAME, '|') FROM BOOK_METADATA_AGGREGATION_AUTHOR baa WHERE baa.SERIES_ID = s.ID), '') AS AUTHORS,
+             COALESCE((SELECT GROUP_CONCAT(COALESCE(baa.ROLE, '') || '::' || baa.NAME, '|') FROM BOOK_METADATA_AGGREGATION_AUTHOR baa WHERE baa.SERIES_ID = s.ID), '') AS AUTHOR_ROLES,
+             COALESCE(sm.TITLE_SORT, '') AS TITLE_SORT,
+             COALESCE((SELECT GROUP_CONCAT(sat.TITLE, '|') FROM SERIES_METADATA_ALTERNATE_TITLE sat WHERE sat.SERIES_ID = s.ID), '') AS ALTERNATE_TITLES
           FROM SERIES s
           LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
           LEFT JOIN BOOK_METADATA_AGGREGATION bma ON bma.SERIES_ID = s.ID
@@ -282,6 +293,9 @@ fn build_book_document(row: sqlx::sqlite::SqliteRow) -> SearchDocument {
     fields.extend(search_fields("book_tag", row.get::<String, _>("BOOK_TAGS")));
     fields.extend(search_fields("tag", row.get::<String, _>("BOOK_TAGS")));
     fields.extend(search_fields("author", row.get::<String, _>("AUTHORS")));
+    fields.extend(search_role_author_fields(
+        row.get::<String, _>("AUTHOR_ROLES"),
+    ));
     fields.extend(search_fields(
         "genre",
         row.get::<String, _>("ONESHOT_GENRES"),
@@ -301,6 +315,7 @@ fn build_book_document(row: sqlx::sqlite::SqliteRow) -> SearchDocument {
 
 fn build_series_document(row: sqlx::sqlite::SqliteRow) -> SearchDocument {
     let mut fields = vec![
+        search_field("title", row.get::<String, _>("TITLE_SORT")),
         search_field("publisher", row.get::<String, _>("PUBLISHER")),
         search_field("status", row.get::<String, _>("STATUS")),
         search_field(
@@ -329,6 +344,13 @@ fn build_series_document(row: sqlx::sqlite::SqliteRow) -> SearchDocument {
         row.get::<String, _>("SHARING_LABELS"),
     ));
     fields.extend(search_fields("author", row.get::<String, _>("AUTHORS")));
+    fields.extend(search_fields(
+        "title",
+        row.get::<String, _>("ALTERNATE_TITLES"),
+    ));
+    fields.extend(search_role_author_fields(
+        row.get::<String, _>("AUTHOR_ROLES"),
+    ));
 
     SearchDocument {
         entity_type: SearchEntityType::Series,
@@ -347,5 +369,37 @@ fn build_named_document(
         id: row.get::<String, _>("ID"),
         title: row.get::<String, _>("NAME"),
         fields: vec![search_field("name", row.get::<String, _>("NAME"))],
+    }
+}
+
+fn search_role_author_fields(values: String) -> Vec<SearchFieldEntry> {
+    let mut fields = Vec::new();
+    for value in values.split('|').map(str::trim).filter(|value| !value.is_empty()) {
+        let Some((role, name)) = value.split_once(AUTHOR_ROLE_DELIMITER) else {
+            continue;
+        };
+        let name = name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        for role_field in normalize_author_role_fields(role) {
+            fields.push(search_field(role_field, name.to_string()));
+        }
+    }
+    fields
+}
+
+fn normalize_author_role_fields(role: &str) -> &'static [&'static str] {
+    match role.trim().to_ascii_lowercase().as_str() {
+        "writer" => &["writer"],
+        "penciller" => &["penciller", "penciler"],
+        "penciler" => &["penciler", "penciller"],
+        "inker" => &["inker"],
+        "colorist" => &["colorist"],
+        "letterer" => &["letterer"],
+        "cover" => &["cover"],
+        "editor" => &["editor"],
+        "translator" => &["translator"],
+        _ => &[],
     }
 }

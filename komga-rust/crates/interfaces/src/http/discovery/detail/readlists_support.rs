@@ -588,13 +588,7 @@ pub fn sort_visible_persisted_readlist_books(
         return;
     }
 
-    books.sort_by(|left, right| {
-        left.metadata_release_date
-            .cmp(&right.metadata_release_date)
-            .then_with(|| left.series_title.cmp(&right.series_title))
-            .then_with(|| left.number.cmp(&right.number))
-            .then_with(|| left.id.cmp(&right.id))
-    });
+    books.sort_by(|left, right| left.metadata_release_date.cmp(&right.metadata_release_date));
 }
 
 fn matches_persisted_readlist_book_filters(
@@ -816,7 +810,10 @@ pub fn readlist_payload(readlist: &ReadListReadModel) -> Value {
 mod tests {
     use super::{
         ComicRackReadListRequest, ComicRackReadListRequestBook, comicrack_payload,
-        decode_query_component, parse_comicrack_readlist,
+        decode_query_component, parse_comicrack_readlist, sort_visible_persisted_readlist_books,
+    };
+    use crate::http::discovery::detail::{
+        BookDetailReadModel, BookMetadataAuthorReadModel, BookMetadataLinkReadModel,
     };
     use serde_json::json;
 
@@ -913,5 +910,77 @@ mod tests {
                 .map(Vec::len),
             Some(1),
         );
+    }
+
+    #[test]
+    fn unordered_readlist_book_sort_uses_release_date_only() {
+        let mut books = vec![
+            sample_readlist_book("book-b", Some("2024-01-01"), "Zeta", 2),
+            sample_readlist_book("book-a", Some("2024-01-01"), "Alpha", 1),
+            sample_readlist_book("book-c", Some("2024-01-02"), "Gamma", 3),
+        ];
+
+        sort_visible_persisted_readlist_books(&mut books, false);
+
+        assert_eq!(books[0].id, "book-b");
+        assert_eq!(books[1].id, "book-a");
+        assert_eq!(books[2].id, "book-c");
+    }
+
+    fn sample_readlist_book(
+        id: &str,
+        release_date: Option<&str>,
+        series_title: &str,
+        number: i32,
+    ) -> BookDetailReadModel {
+        BookDetailReadModel {
+            id: id.to_string(),
+            series_id: "series-1".to_string(),
+            series_title: series_title.to_string(),
+            library_id: "lib-1".to_string(),
+            name: format!("Book {id}"),
+            url: format!("/books/{id}.cbz"),
+            number,
+            created: "2024-01-01T00:00:00Z".to_string(),
+            last_modified: "2024-01-01T00:00:00Z".to_string(),
+            file_last_modified: "2024-01-01T00:00:00Z".to_string(),
+            size_bytes: 1,
+            media_status: "READY".to_string(),
+            media_type: "application/vnd.comicbook+zip".to_string(),
+            media_pages_count: 1,
+            media_comment: String::new(),
+            metadata_title: format!("Meta {id}"),
+            metadata_summary: String::new(),
+            metadata_number: number.to_string(),
+            metadata_number_sort: f64::from(number),
+            metadata_release_date: release_date.map(str::to_string),
+            metadata_title_lock: false,
+            metadata_summary_lock: false,
+            metadata_number_lock: false,
+            metadata_number_sort_lock: false,
+            metadata_release_date_lock: false,
+            metadata_authors: vec![BookMetadataAuthorReadModel {
+                name: "Author".to_string(),
+                role: "Writer".to_string(),
+            }],
+            metadata_authors_lock: false,
+            metadata_tags: vec![],
+            metadata_tags_lock: false,
+            metadata_isbn: String::new(),
+            metadata_isbn_lock: false,
+            metadata_links: vec![BookMetadataLinkReadModel {
+                label: "Site".to_string(),
+                url: "https://example.com".to_string(),
+            }],
+            metadata_links_lock: false,
+            metadata_created: "2024-01-01T00:00:00Z".to_string(),
+            metadata_last_modified: "2024-01-01T00:00:00Z".to_string(),
+            media_epub_divina_compatible: false,
+            media_epub_is_kepub: false,
+            read_progress: None,
+            deleted: false,
+            file_hash: String::new(),
+            oneshot: false,
+        }
     }
 }

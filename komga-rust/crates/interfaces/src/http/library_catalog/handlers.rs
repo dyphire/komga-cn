@@ -7,9 +7,12 @@ use komga_domain::discovery::DiscoveryError;
 use serde_json::{Value, json};
 
 use super::OperationalState;
-use crate::http::discovery_auth::{DiscoveryAuthState, DiscoveryQueryContext};
-use crate::http::helpers::mark_runtime_owned;
-use crate::http::helpers::to_domain_query_context;
+use crate::http::discovery_auth::{
+    DetailAccessDenial, DetailResourceContext, DiscoveryAuthState, DiscoveryQueryContext,
+};
+use crate::http::helpers::{
+    detail_access_denial_response, mark_runtime_owned, to_domain_query_context,
+};
 use crate::http::identity_access::auth::{require_admin, require_auth};
 use crate::http::library_catalog::request_mapping::{
     is_deep_scan_query, parse_create_library_change_set, parse_update_library_change_set,
@@ -46,11 +49,18 @@ pub async fn library_detail(
         return response;
     }
 
-    let context =
-        match auth_state.resolve_query_context(&headers, Some(std::slice::from_ref(&library_id))) {
-            Some(context) => context,
-            None => return StatusCode::UNAUTHORIZED.into_response(),
-        };
+    let detail_context = DetailResourceContext {
+        library_id: Some(library_id.clone()),
+        content: None,
+    };
+
+    let context = match auth_state.resolve_detail_query_context(&headers, &detail_context) {
+        Ok(context) => context,
+        Err(DetailAccessDenial::Forbidden) => {
+            return forbidden_library_detail_response(&state, &library_id).await;
+        }
+        Err(denial) => return detail_access_denial_response(denial),
+    };
 
     runtime_owned_library_detail_response(context, &state, &library_id).await
 }
@@ -204,6 +214,18 @@ fn mutation_error_response(error: LibraryCatalogMutationError) -> Response {
     }
 }
 
+async fn forbidden_library_detail_response(state: &OperationalState, library_id: &str) -> Response {
+    match library_exists(state, library_id).await {
+        Ok(true) => StatusCode::FORBIDDEN.into_response(),
+        Ok(false) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": discovery_error_message(&error) })),
+        )
+            .into_response(),
+    }
+}
+
 fn discovery_error_message(error: &DiscoveryError) -> String {
     match error {
         DiscoveryError::UnsupportedSemantics(details) => format!("{details:?}"),
@@ -260,4 +282,40 @@ async fn runtime_owned_libraries(
     let domain_context = to_domain_query_context(context);
     let list_libraries = state.library_catalog.list_libraries.clone();
     list_libraries(domain_context).await
+}
+
+async fn library_exists(
+    state: &OperationalState,
+    library_id: &str,
+) -> Result<bool, DiscoveryError> {
+    Ok(
+        runtime_owned_libraries(admin_discovery_query_context(), state)
+            .await?
+            .into_iter()
+            .any(|library| library.id == library_id),
+    )
+}
+
+fn admin_discovery_query_context() -> DiscoveryQueryContext {
+    DiscoveryQueryContext {
+        user_id: None,
+        is_admin: true,
+        authorized_library_ids: None,
+        restrictions: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::admin_discovery_query_context;
+
+    #[test]
+    fn admin_discovery_query_context_has_no_filters() {
+        let context = admin_discovery_query_context();
+
+        assert!(context.is_admin);
+        assert!(context.user_id.is_none());
+        assert!(context.authorized_library_ids.is_none());
+        assert!(context.restrictions.is_none());
+    }
 }

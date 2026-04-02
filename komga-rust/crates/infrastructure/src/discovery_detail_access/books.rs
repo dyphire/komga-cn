@@ -32,11 +32,23 @@ pub struct PersistedBookDetailRecord {
     pub metadata_number: String,
     pub metadata_number_sort: f64,
     pub metadata_release_date: Option<String>,
+    pub metadata_title_lock: bool,
+    pub metadata_summary_lock: bool,
+    pub metadata_number_lock: bool,
+    pub metadata_number_sort_lock: bool,
+    pub metadata_release_date_lock: bool,
     pub metadata_authors: String,
+    pub metadata_authors_lock: bool,
     pub metadata_tags: String,
+    pub metadata_tags_lock: bool,
     pub metadata_isbn: String,
+    pub metadata_isbn_lock: bool,
+    pub metadata_links: String,
+    pub metadata_links_lock: bool,
     pub metadata_created: String,
     pub metadata_last_modified: String,
+    pub media_epub_divina_compatible: bool,
+    pub media_epub_is_kepub: bool,
     pub read_progress: Option<PersistedReadProgressRecord>,
     pub deleted: bool,
     pub file_hash: String,
@@ -138,17 +150,30 @@ pub async fn load_persisted_book_detail(
                 b.DELETED_DATE AS DELETED_DATE, bm.TITLE AS METADATA_TITLE, \
                 bm.SUMMARY AS METADATA_SUMMARY, bm.NUMBER AS METADATA_NUMBER, \
                 bm.NUMBER_SORT AS METADATA_NUMBER_SORT, bm.RELEASE_DATE AS METADATA_RELEASE_DATE, \
+                bm.TITLE_LOCK AS METADATA_TITLE_LOCK, bm.SUMMARY_LOCK AS METADATA_SUMMARY_LOCK, \
+                bm.NUMBER_LOCK AS METADATA_NUMBER_LOCK, \
+                bm.NUMBER_SORT_LOCK AS METADATA_NUMBER_SORT_LOCK, \
+                bm.RELEASE_DATE_LOCK AS METADATA_RELEASE_DATE_LOCK, \
                 COALESCE((SELECT GROUP_CONCAT(ba.NAME || X'1E' || COALESCE(ba.ROLE, ''), X'1F') \
                           FROM BOOK_METADATA_AUTHOR ba \
                           WHERE ba.BOOK_ID = b.ID), '') AS METADATA_AUTHORS, \
+                bm.AUTHORS_LOCK AS METADATA_AUTHORS_LOCK, \
                 COALESCE((SELECT GROUP_CONCAT(bt.TAG) \
                           FROM BOOK_METADATA_TAG bt \
                           WHERE bt.BOOK_ID = b.ID), '') AS METADATA_TAGS, \
+                bm.TAGS_LOCK AS METADATA_TAGS_LOCK, \
                 bm.ISBN AS METADATA_ISBN, bm.CREATED_DATE AS METADATA_CREATED, \
                 bm.LAST_MODIFIED_DATE AS METADATA_LAST_MODIFIED, \
+                bm.ISBN_LOCK AS METADATA_ISBN_LOCK, \
+                COALESCE((SELECT GROUP_CONCAT(bl.LABEL || X'1E' || bl.URL, X'1F') \
+                          FROM BOOK_METADATA_LINK bl \
+                          WHERE bl.BOOK_ID = b.ID), '') AS METADATA_LINKS, \
+                bm.LINKS_LOCK AS METADATA_LINKS_LOCK, \
                 COALESCE(m.STATUS, 'UNKNOWN') AS MEDIA_STATUS, \
                 COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE, \
                 COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT, COALESCE(m.COMMENT, '') AS MEDIA_COMMENT, \
+                COALESCE(m.EPUB_DIVINA_COMPATIBLE, 0) AS EPUB_DIVINA_COMPATIBLE, \
+                COALESCE(m.EPUB_IS_KEPUB, 0) AS EPUB_IS_KEPUB, \
                 rp.PAGE AS READ_PROGRESS_PAGE, rp.COMPLETED AS READ_PROGRESS_COMPLETED, \
                 rp.READ_DATE AS READ_PROGRESS_READ_DATE, rp.CREATED_DATE AS READ_PROGRESS_CREATED, \
                 rp.LAST_MODIFIED_DATE AS READ_PROGRESS_LAST_MODIFIED, \
@@ -192,11 +217,23 @@ pub async fn load_persisted_book_detail(
         metadata_number: row.get::<String, _>("METADATA_NUMBER"),
         metadata_number_sort: row.get::<f64, _>("METADATA_NUMBER_SORT"),
         metadata_release_date: row.get::<Option<String>, _>("METADATA_RELEASE_DATE"),
+        metadata_title_lock: row.get::<bool, _>("METADATA_TITLE_LOCK"),
+        metadata_summary_lock: row.get::<bool, _>("METADATA_SUMMARY_LOCK"),
+        metadata_number_lock: row.get::<bool, _>("METADATA_NUMBER_LOCK"),
+        metadata_number_sort_lock: row.get::<bool, _>("METADATA_NUMBER_SORT_LOCK"),
+        metadata_release_date_lock: row.get::<bool, _>("METADATA_RELEASE_DATE_LOCK"),
         metadata_authors: row.get::<String, _>("METADATA_AUTHORS"),
+        metadata_authors_lock: row.get::<bool, _>("METADATA_AUTHORS_LOCK"),
         metadata_tags: row.get::<String, _>("METADATA_TAGS"),
+        metadata_tags_lock: row.get::<bool, _>("METADATA_TAGS_LOCK"),
         metadata_isbn: row.get::<String, _>("METADATA_ISBN"),
+        metadata_isbn_lock: row.get::<bool, _>("METADATA_ISBN_LOCK"),
+        metadata_links: row.get::<String, _>("METADATA_LINKS"),
+        metadata_links_lock: row.get::<bool, _>("METADATA_LINKS_LOCK"),
         metadata_created: row.get::<String, _>("METADATA_CREATED"),
         metadata_last_modified: row.get::<String, _>("METADATA_LAST_MODIFIED"),
+        media_epub_divina_compatible: row.get::<bool, _>("EPUB_DIVINA_COMPATIBLE"),
+        media_epub_is_kepub: row.get::<bool, _>("EPUB_IS_KEPUB"),
         read_progress: row.get::<Option<i64>, _>("READ_PROGRESS_PAGE").map(|page| {
             PersistedReadProgressRecord {
                 page: page as i32,

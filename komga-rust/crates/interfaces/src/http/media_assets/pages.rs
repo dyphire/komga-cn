@@ -527,9 +527,22 @@ pub async fn book_pages(
         };
 
     if let Some(user) = resolved_auth_user(&headers)
-        && !user_can_access_library(&user, &media.library_id)
+        && !user_can_access_book_media(
+            auth_db.database_file.as_path(),
+            &resolved_book_id,
+            &user,
+            &media,
+        )
+        .await
     {
         return StatusCode::FORBIDDEN.into_response();
+    }
+
+    if !book_media_is_ready_status(auth_db.database_file.as_path(), &resolved_book_id)
+        .await
+        .unwrap_or(false)
+    {
+        return StatusCode::NOT_FOUND.into_response();
     }
 
     if !book_media_supports_page_api(&media) {

@@ -365,6 +365,17 @@ pub async fn readlist_detail(
         Some(context) => context,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
+    let detail_query = PersistedReadlistBooksQuery {
+        page: 0,
+        size: 20,
+        unpaged: true,
+        library_ids: None,
+        deleted: None,
+        tags: Vec::new(),
+        read_statuses: Vec::new(),
+        media_statuses: Vec::new(),
+        authors: Vec::new(),
+    };
 
     if auth_db.database_file.exists() {
         match load_persisted_readlist_detail(
@@ -374,7 +385,34 @@ pub async fn readlist_detail(
         )
         .await
         {
-            Ok(Some(readlist)) => return Json(readlist_payload(&readlist)).into_response(),
+            Ok(Some(mut readlist)) => {
+                let Some(visible_books) = (match load_visible_persisted_readlist_books(
+                    auth_db.database_file.as_path(),
+                    &auth_state,
+                    &headers,
+                    &readlist_id,
+                    &detail_query,
+                )
+                .await
+                {
+                    Ok(books) => books,
+                    Err(error) => return internal_error_response(error),
+                }) else {
+                    return StatusCode::NOT_FOUND.into_response();
+                };
+
+                let visible_book_ids = visible_books
+                    .into_iter()
+                    .map(|book| book.id)
+                    .collect::<Vec<_>>();
+                if visible_book_ids.is_empty() {
+                    return StatusCode::NOT_FOUND.into_response();
+                }
+
+                readlist.filtered = readlist.book_ids != visible_book_ids;
+                readlist.book_ids = visible_book_ids;
+                return Json(readlist_payload(&readlist)).into_response();
+            }
             Ok(None) => {}
             Err(error) => return internal_error_response(error),
         }

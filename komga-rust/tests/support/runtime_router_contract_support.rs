@@ -858,6 +858,31 @@ pub async fn seed_router_series_title_sort(
 }
 
 #[allow(dead_code)]
+pub async fn seed_router_series_alternate_title(
+    paths: &persistence_contract_fixture::RuntimeDbPaths,
+    series_id: &str,
+    label: &str,
+    title: &str,
+) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("router contract series alternate-title db should open");
+
+    sqlx::query(
+        "INSERT INTO SERIES_METADATA_ALTERNATE_TITLE (SERIES_ID, LABEL, TITLE) \
+         VALUES (?, ?, ?)",
+    )
+    .bind(series_id)
+    .bind(label)
+    .bind(title)
+    .execute(&pool)
+    .await
+    .expect("series metadata alternate title should be inserted for contract test");
+
+    pool.close().await;
+}
+
+#[allow(dead_code)]
 pub async fn seed_router_series_aggregated_tag(
     paths: &persistence_contract_fixture::RuntimeDbPaths,
     series_id: &str,

@@ -140,6 +140,15 @@ pub struct MediaAssetsRuntimeAccessBackend {
             + Send
             + Sync,
     >,
+    pub delete_series_read_progress_row: Arc<
+        dyn Fn(
+                PathBuf,
+                String,
+                String,
+            ) -> futures_util::future::BoxFuture<'static, Result<(), String>>
+            + Send
+            + Sync,
+    >,
     pub load_series_tachiyomi_progress: Arc<
         dyn Fn(
                 PathBuf,

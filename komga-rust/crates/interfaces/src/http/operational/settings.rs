@@ -37,8 +37,7 @@ pub(crate) use page_hashes::{
 };
 pub(crate) use server_settings::{get_server_settings, update_server_settings};
 pub(crate) use transient_books::{
-    get_transient_book_media, get_transient_book_page, get_transient_book_status,
-    post_transient_book_analyze, post_transient_books,
+    get_transient_book_page, post_transient_book_analyze, post_transient_books,
 };
 
 fn query_value<'a>(query: &'a str, key: &str) -> Option<&'a str> {

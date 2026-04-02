@@ -345,13 +345,6 @@ pub(crate) async fn opds_v2_collection_route(
     opds_v2_collection(headers, auth_db.database_file.as_path(), &collection_id).await
 }
 
-pub(crate) async fn opds_v2_book_thumbnail_small_route(
-    headers: HeaderMap,
-    AxumPath(book_id): AxumPath<String>,
-) -> Response {
-    opds_v2_book_thumbnail_small(headers, &book_id).await
-}
-
 pub(crate) async fn opds_v2_series_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,

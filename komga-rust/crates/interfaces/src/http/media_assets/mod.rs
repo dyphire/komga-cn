@@ -30,7 +30,7 @@ use komga_application::task_processing::TaskQueueRecord;
 use super::super::{OperationalState, ReadProgressState};
 use super::helpers::{
     invalid_progression_payload, invalid_read_progress_payload, mark_runtime_owned,
-    method_not_allowed_json_response, set_read_progress,
+    set_read_progress,
 };
 
 #[path = "access_control.rs"]

@@ -1,6 +1,9 @@
-use axum::Json;
-use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
+use crate::http::discovery_auth::{
+    AgeRestrictionKind, DetailAccessDenial, DiscoveryQueryContext, QueryRestrictions,
+};
+use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::Json;
 use komga_application::discovery::BookReadModel;
 use komga_domain::common_ids::{LibraryId, UserId};
 use komga_domain::discovery::{
@@ -8,16 +11,10 @@ use komga_domain::discovery::{
     DiscoveryQueryContext as DomainDiscoveryQueryContext, PageEnvelope,
     QueryRestrictions as DomainQueryRestrictions,
 };
-use serde_json::{Value, json};
-use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
-
-use crate::http::discovery_auth::{
-    AgeRestrictionKind, DetailAccessDenial, DiscoveryQueryContext, QueryRestrictions,
-};
+use serde_json::{json, Value};
 
 use super::super::{
-    PERSISTED_OWNERSHIP_MARKER, ReadProgress, ReadProgressState, SEARCH_OWNERSHIP_HEADER,
+    ReadProgress, ReadProgressState, PERSISTED_OWNERSHIP_MARKER, SEARCH_OWNERSHIP_HEADER,
 };
 
 pub(crate) fn books_page_payload(
@@ -270,25 +267,6 @@ pub(crate) fn invalid_progression_payload() -> Response {
         [(header::CONTENT_TYPE, "application/json")],
         Json(json!({
             "error": "invalid progression payload",
-        })),
-    )
-        .into_response()
-}
-
-pub(crate) fn method_not_allowed_json_response(path: &str) -> Response {
-    let timestamp = OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .unwrap_or_else(|_| "2000-01-01T00:00:00Z".to_string());
-    (
-        StatusCode::METHOD_NOT_ALLOWED,
-        [(header::CONTENT_TYPE, "application/json")],
-        Json(json!({
-            "error": "Method Not Allowed",
-            "message": "Request method is not supported.",
-            "path": path,
-            "status": 405,
-            "timestamp": timestamp,
-            "trace": "org.springframework.web.HttpRequestMethodNotSupportedException: Request method is not supported",
         })),
     )
         .into_response()

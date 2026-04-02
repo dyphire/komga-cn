@@ -178,6 +178,10 @@ pub async fn load_persisted_series_detail(
             .as_ref()
             .map(|entry| entry.books_metadata_tags.clone())
             .unwrap_or_default(),
+        books_metadata_authors: persisted_summary
+            .as_ref()
+            .map(|entry| parse_aggregated_series_authors(&entry.books_metadata_authors))
+            .unwrap_or_default(),
         books_metadata_release_date: persisted_summary
             .as_ref()
             .and_then(|entry| entry.books_metadata_release_date.clone()),
@@ -202,6 +206,38 @@ pub async fn load_persisted_series_detail(
     });
 
     Ok(model)
+}
+
+fn parse_aggregated_series_authors(raw: &[String]) -> Vec<BookMetadataAuthorReadModel> {
+    raw.iter()
+        .map(|entry| match entry.split_once("::") {
+            Some((name, role)) => BookMetadataAuthorReadModel {
+                name: name.to_string(),
+                role: role.to_string(),
+            },
+            None => BookMetadataAuthorReadModel {
+                name: entry.to_string(),
+                role: String::new(),
+            },
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_aggregated_series_authors;
+
+    #[test]
+    fn parse_aggregated_series_authors_preserves_optional_roles() {
+        let authors =
+            parse_aggregated_series_authors(&["Alice::Writer".to_string(), "Bob".to_string()]);
+
+        assert_eq!(authors.len(), 2);
+        assert_eq!(authors[0].name, "Alice");
+        assert_eq!(authors[0].role, "Writer");
+        assert_eq!(authors[1].name, "Bob");
+        assert_eq!(authors[1].role, "");
+    }
 }
 
 pub async fn load_persisted_series_collections(

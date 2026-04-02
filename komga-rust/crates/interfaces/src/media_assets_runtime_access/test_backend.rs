@@ -103,6 +103,7 @@ pub(super) fn default_test_backend() -> MediaAssetsRuntimeAccessBackend {
         load_persisted_epub_extension_blob: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         load_series_book_ids: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),
         refresh_series_read_progress_row: Arc::new(|_, _, _| Box::pin(async { Ok(()) })),
+        delete_series_read_progress_row: Arc::new(|_, _, _| Box::pin(async { Ok(()) })),
         load_series_tachiyomi_progress: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),
         load_book_progression: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),
         persist_read_progress: Arc::new(|_, _, _, _, _| Box::pin(async { Ok(()) })),

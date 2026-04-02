@@ -1,6 +1,6 @@
-use axum::Router;
 use axum::middleware;
 use axum::routing::{delete, get, patch, post, put};
+use axum::Router;
 
 use crate::http::cache;
 use crate::http::discovery_auth::DiscoveryAuthState;
@@ -75,14 +75,6 @@ pub fn build_router(
         .route(
             "/api/v1/transient-books/{transient_book_id}/analyze",
             post(operational::post_transient_book_analyze),
-        )
-        .route(
-            "/api/v1/transient-books/{transient_book_id}/status",
-            get(operational::get_transient_book_status),
-        )
-        .route(
-            "/api/v1/transient-books/{transient_book_id}/media",
-            get(operational::get_transient_book_media),
         )
         .route(
             "/api/v1/transient-books/{transient_book_id}/pages/{page_number}",
@@ -270,8 +262,7 @@ pub fn build_router(
         )
         .route(
             "/api/v1/series/{series_id}/read-progress",
-            get(media_assets::series_read_progress_get)
-                .post(media_assets::series_read_progress_post)
+            post(media_assets::series_read_progress_post)
                 .delete(media_assets::series_read_progress_delete),
         )
         .route(
@@ -470,14 +461,12 @@ pub fn build_router(
         .route("/api/v1/books/import", post(media_assets::books_import))
         .route(
             "/api/v1/books/{book_id}/read-progress",
-            get(media_assets::book_read_progress_get)
-                .patch(media_assets::book_read_progress)
+            patch(media_assets::book_read_progress)
                 .delete(media_assets::book_read_progress_delete),
         )
         .route(
             "/api/v1/books/{book_id}/progression",
             get(media_assets::book_progression_get)
-                .patch(media_assets::book_progression)
                 .put(media_assets::book_progression),
         )
         .route(
@@ -646,10 +635,6 @@ pub fn build_router(
             get(media_assets::book_thumbnail),
         )
         .route(
-            "/opds/v2/books/{book_id}/thumbnail/small",
-            get(opds::opds_v2_book_thumbnail_small_route),
-        )
-        .route(
             "/opds/v2/books/{book_id}/pages/{page_number}",
             get(media_assets::book_page),
         )
@@ -660,7 +645,6 @@ pub fn build_router(
         .route(
             "/opds/v2/books/{book_id}/progression",
             get(media_assets::book_progression_get)
-                .patch(media_assets::book_progression)
                 .put(media_assets::book_progression),
         )
         .route(

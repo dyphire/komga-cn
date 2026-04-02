@@ -146,10 +146,6 @@ pub(crate) async fn opds_v2_libraries_readlists(
     )
 }
 
-pub(crate) async fn opds_v2_book_thumbnail_small(headers: HeaderMap, book_id: &str) -> Response {
-    redirect_to_opds_v2(headers, &format!("/opds/v2/books/{book_id}/thumbnail"))
-}
-
 pub(crate) async fn opds_v2_library_readlists(
     headers: HeaderMap,
     database_file: &Path,

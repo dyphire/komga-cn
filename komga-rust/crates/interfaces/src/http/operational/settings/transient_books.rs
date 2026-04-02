@@ -21,8 +21,7 @@ use discovery::{infer_transient_series_and_number, list_transient_book_entries};
 use payload::{transient_book_id, transient_book_payload};
 use transient_books_access::{
     InfrastructureTransientBookPage, analyze_transient_book, load_transient_book_file_metadata,
-    load_transient_book_media, transient_book_content_type, transient_book_exists,
-    transient_book_media_type, transient_book_page_content,
+    transient_book_exists, transient_book_media_type, transient_book_page_content,
 };
 
 pub(crate) async fn post_transient_books(
@@ -205,58 +204,6 @@ pub(crate) async fn post_transient_book_analyze(
     let _ = (state.persist_transient_books_records)(&records);
 
     Json(payload).into_response()
-}
-
-pub(crate) async fn get_transient_book_status(
-    Extension(state): Extension<OperationalState>,
-    headers: HeaderMap,
-    AxumPath(transient_book_id): AxumPath<String>,
-) -> Response {
-    if let Some(response) = require_admin(&headers) {
-        return response;
-    }
-
-    let maybe_record = {
-        let store = state
-            .transient_books
-            .lock()
-            .expect("transient books state lock should not be poisoned");
-        store.records.get(&transient_book_id).cloned()
-    };
-    let Some(record) = maybe_record else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    Json(transient_book_payload(&record)).into_response()
-}
-
-pub(crate) async fn get_transient_book_media(
-    Extension(state): Extension<OperationalState>,
-    headers: HeaderMap,
-    AxumPath(transient_book_id): AxumPath<String>,
-) -> Response {
-    if let Some(response) = require_admin(&headers) {
-        return response;
-    }
-
-    let store = state
-        .transient_books
-        .lock()
-        .expect("transient books state lock should not be poisoned");
-    let Some(record) = store.records.get(&transient_book_id) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    if !record.status.eq_ignore_ascii_case("READY") {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    let Some(bytes) = load_transient_book_media(record.path.as_str()) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    let content_type =
-        transient_book_content_type(record.path.as_str(), record.media_type.as_str());
-
-    ([(header::CONTENT_TYPE, content_type)], bytes).into_response()
 }
 
 pub(crate) async fn get_transient_book_page(

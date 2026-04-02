@@ -227,7 +227,8 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
                 tb.SELECTED AS SELECTED, \
                 COALESCE(tb.LAST_MODIFIED_DATE, tb.CREATED_DATE, '') AS LAST_MODIFIED \
          FROM THUMBNAIL_BOOK tb \
-         LEFT JOIN BOOK b ON b.ID = tb.BOOK_ID",
+         LEFT JOIN BOOK b ON b.ID = tb.BOOK_ID \
+         ORDER BY tb.BOOK_ID ASC, tb.SELECTED ASC, COALESCE(tb.LAST_MODIFIED_DATE, tb.CREATED_DATE, '') ASC, tb.ID ASC",
     )
     .fetch_all(&pool)
     .await
@@ -249,7 +250,8 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
     let thumbnail_series_rows = sqlx::query(
         "SELECT SERIES_ID AS ID, SELECTED, \
                 COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED \
-         FROM THUMBNAIL_SERIES",
+         FROM THUMBNAIL_SERIES \
+         ORDER BY SERIES_ID ASC, SELECTED ASC, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') ASC, ID ASC",
     )
     .fetch_all(&pool)
     .await
@@ -270,7 +272,8 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
     let thumbnail_collection_rows = sqlx::query(
         "SELECT COLLECTION_ID AS ID, SELECTED, \
                 COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED \
-         FROM THUMBNAIL_COLLECTION",
+         FROM THUMBNAIL_COLLECTION \
+         ORDER BY COLLECTION_ID ASC, SELECTED ASC, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') ASC, ID ASC",
     )
     .fetch_all(&pool)
     .await
@@ -291,7 +294,8 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
     let thumbnail_readlist_rows = sqlx::query(
         "SELECT READLIST_ID AS ID, SELECTED, \
                 COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED \
-         FROM THUMBNAIL_READLIST",
+         FROM THUMBNAIL_READLIST \
+         ORDER BY READLIST_ID ASC, SELECTED ASC, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') ASC, ID ASC",
     )
     .fetch_all(&pool)
     .await

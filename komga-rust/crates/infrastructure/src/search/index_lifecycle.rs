@@ -8,7 +8,7 @@ use tantivy::collector::TopDocs;
 use tantivy::doc;
 use tantivy::query::{BooleanQuery, Occur, QueryParser, TermQuery};
 use tantivy::schema::{
-    Field, IndexRecordOption, STORED, STRING, Schema, TEXT, TantivyDocument, Value,
+    Field, IndexRecordOption, Schema, TantivyDocument, Value, STORED, STRING, TEXT,
 };
 use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, Term};
 
@@ -28,6 +28,15 @@ const SUPPORTED_QUERY_FIELDS: &[&str] = &[
     "series_tag",
     "book_tag",
     "author",
+    "writer",
+    "penciller",
+    "penciler",
+    "inker",
+    "colorist",
+    "letterer",
+    "cover",
+    "editor",
+    "translator",
     "release_date",
     "deleted",
     "oneshot",
@@ -352,6 +361,10 @@ fn add_doc(
 
     for extra in &document.fields {
         let field_name = translate_public_field_name(&extra.field);
+        if field_name == "title" {
+            tantivy_document.add_text(fields.title, extra.value.clone());
+            continue;
+        }
         if let Some(field) = fields.query_fields.get(field_name) {
             tantivy_document.add_text(*field, extra.value.clone());
         }
@@ -427,8 +440,8 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
-        SearchDocument, SearchEntityType, SearchError, SearchFieldEntry, SearchIndexLifecycle,
-        SearchStartupLifecycle, decide_startup_lifecycle,
+        decide_startup_lifecycle, SearchDocument, SearchEntityType, SearchError, SearchFieldEntry,
+        SearchIndexLifecycle, SearchStartupLifecycle,
     };
 
     #[test]

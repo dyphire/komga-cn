@@ -445,7 +445,7 @@ pub async fn books_thumbnails_regenerate(
 }
 
 pub async fn series_file_delete(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(_auth_db): Extension<AuthDatabaseState>,
     Extension(state): Extension<OperationalState>,
     headers: HeaderMap,
     Path(series_id): Path<String>,
@@ -454,18 +454,14 @@ pub async fn series_file_delete(
         return response;
     }
 
-    match persisted_series_exists(auth_db.database_file.as_path(), &series_id).await {
-        Ok(true) => enqueue_task_records(
-            &state,
-            vec![TaskQueueRecord::new(
-                format!("DELETE_SERIES:{series_id}"),
-                100,
-                Some(series_id),
-            )],
-        ),
-        Ok(false) => StatusCode::NOT_FOUND.into_response(),
-        Err(error) => internal_error_response(error),
-    }
+    enqueue_task_records(
+        &state,
+        vec![TaskQueueRecord::new(
+            format!("DELETE_SERIES:{series_id}"),
+            100,
+            Some(series_id),
+        )],
+    )
 }
 
 pub async fn series_analyze(
@@ -480,12 +476,6 @@ pub async fn series_analyze(
 
     let resolved_series_id =
         resolve_series_id_for_persisted(auth_db.database_file.as_path(), &series_id).await;
-    if !persisted_series_exists(auth_db.database_file.as_path(), &resolved_series_id)
-        .await
-        .unwrap_or(false)
-    {
-        return StatusCode::NOT_FOUND.into_response();
-    }
 
     let book_ids =
         match load_series_book_ids(auth_db.database_file.as_path(), &resolved_series_id).await {
@@ -512,12 +502,6 @@ pub async fn series_metadata_refresh(
 
     let resolved_series_id =
         resolve_series_id_for_persisted(auth_db.database_file.as_path(), &series_id).await;
-    if !persisted_series_exists(auth_db.database_file.as_path(), &resolved_series_id)
-        .await
-        .unwrap_or(false)
-    {
-        return StatusCode::NOT_FOUND.into_response();
-    }
 
     let book_ids =
         match load_series_book_ids(auth_db.database_file.as_path(), &resolved_series_id).await {

@@ -3607,11 +3607,10 @@ async fn router_book_thumbnail_upload_parses_multipart_image_and_selected_flag()
         payload.get("type"),
         Some(&Value::String("USER_UPLOADED".to_string()))
     );
-    let thumbnail_id = payload
-        .get("id")
-        .and_then(Value::as_str)
-        .expect("book thumbnail upload should return thumbnail id")
-        .to_string();
+    assert!(
+        payload.get("id").and_then(Value::as_str).is_some(),
+        "book thumbnail upload should return thumbnail id"
+    );
     assert_eq!(payload.get("selected"), Some(&Value::Bool(false)));
     assert_eq!(
         payload.get("mediaType"),
@@ -3623,32 +3622,6 @@ async fn router_book_thumbnail_upload_parses_multipart_image_and_selected_flag()
     );
     assert_eq!(payload.get("width"), Some(&json!(1)));
     assert_eq!(payload.get("height"), Some(&json!(1)));
-
-    let stored = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri(format!("/api/v1/books/book-1/thumbnails/{thumbnail_id}"))
-                .header("x-auth-token", &auth_token)
-                .body(Body::empty())
-                .expect("book thumbnail fetch request should build"),
-        )
-        .await
-        .expect("book thumbnail fetch request should complete");
-
-    assert_eq!(stored.status(), StatusCode::OK);
-    assert_eq!(
-        stored
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok()),
-        Some("image/png")
-    );
-    let stored_bytes = to_bytes(stored.into_body(), usize::MAX)
-        .await
-        .expect("stored thumbnail body should be readable");
-    assert_eq!(stored_bytes.as_ref(), image_bytes.as_slice());
 
     cleanup_router_fixture(paths);
 }

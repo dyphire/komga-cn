@@ -655,14 +655,6 @@ pub(crate) mod transient_books {
         (backend().load_transient_book_file_metadata)(path.to_string())
     }
 
-    pub(crate) fn load_transient_book_media(path: &str) -> Option<Vec<u8>> {
-        (backend().load_transient_book_media)(path.to_string())
-    }
-
-    pub(crate) fn transient_book_content_type(path: &str, media_type: &str) -> &'static str {
-        (backend().transient_book_content_type)(path.to_string(), media_type.to_string())
-    }
-
     pub(crate) fn transient_book_exists(path: &str) -> bool {
         (backend().transient_book_exists)(path.to_string())
     }

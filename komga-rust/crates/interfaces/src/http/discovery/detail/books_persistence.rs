@@ -85,11 +85,23 @@ pub async fn load_persisted_book_detail(
             metadata_number: row.metadata_number,
             metadata_number_sort: row.metadata_number_sort,
             metadata_release_date: row.metadata_release_date,
+            metadata_title_lock: row.metadata_title_lock,
+            metadata_summary_lock: row.metadata_summary_lock,
+            metadata_number_lock: row.metadata_number_lock,
+            metadata_number_sort_lock: row.metadata_number_sort_lock,
+            metadata_release_date_lock: row.metadata_release_date_lock,
             metadata_authors: parse_metadata_authors(&row.metadata_authors),
+            metadata_authors_lock: row.metadata_authors_lock,
             metadata_tags: parse_csv_values(&row.metadata_tags),
+            metadata_tags_lock: row.metadata_tags_lock,
             metadata_isbn: row.metadata_isbn,
+            metadata_isbn_lock: row.metadata_isbn_lock,
+            metadata_links: parse_metadata_links(&row.metadata_links),
+            metadata_links_lock: row.metadata_links_lock,
             metadata_created: row.metadata_created,
             metadata_last_modified: row.metadata_last_modified,
+            media_epub_divina_compatible: row.media_epub_divina_compatible,
+            media_epub_is_kepub: row.media_epub_is_kepub,
             read_progress: row.read_progress.map(|progress| PersistedReadProgress {
                 page: progress.page,
                 completed: progress.completed,
@@ -120,6 +132,38 @@ fn parse_metadata_authors(raw: &str) -> Vec<BookMetadataAuthorReadModel> {
             },
         })
         .collect()
+}
+
+fn parse_metadata_links(raw: &str) -> Vec<BookMetadataLinkReadModel> {
+    raw.split('\u{001F}')
+        .filter(|entry| !entry.is_empty())
+        .filter_map(|entry| {
+            entry
+                .split_once('\u{001E}')
+                .map(|(label, url)| BookMetadataLinkReadModel {
+                    label: label.to_string(),
+                    url: url.to_string(),
+                })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_metadata_links;
+
+    #[test]
+    fn parse_metadata_links_decodes_separator_encoded_rows() {
+        let links = parse_metadata_links(
+            "Wiki\u{001E}https://example.com\u{001F}Store\u{001E}https://shop.example.com",
+        );
+
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].label, "Wiki");
+        assert_eq!(links[0].url, "https://example.com");
+        assert_eq!(links[1].label, "Store");
+        assert_eq!(links[1].url, "https://shop.example.com");
+    }
 }
 
 pub async fn load_persisted_book_sibling_detail(

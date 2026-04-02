@@ -213,6 +213,7 @@ pub struct SeriesSummaryRecord {
     pub genres: Vec<String>,
     pub tags: Vec<String>,
     pub alternate_titles: Vec<String>,
+    pub books_metadata_authors: Vec<String>,
     pub books_metadata_tags: Vec<String>,
     pub books_metadata_release_date: Option<String>,
     pub books_metadata_summary: String,

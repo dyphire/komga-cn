@@ -10,51 +10,19 @@ pub(crate) async fn opds_v1_catalog(headers: HeaderMap) -> Response {
         "Komga OPDS catalog",
         "/opds/v1.2/catalog",
         vec![
-            (
-                "keepReading".to_string(),
-                "Keep Reading".to_string(),
-                "/opds/v1.2/keep-reading".to_string(),
+            nav_entry("keepReading", "Keep Reading", "/opds/v1.2/keep-reading"),
+            nav_entry("ondeck", "On Deck", "/opds/v1.2/ondeck"),
+            nav_entry("allSeries", "All series", "/opds/v1.2/series"),
+            nav_entry("latestSeries", "Latest series", "/opds/v1.2/series/latest"),
+            nav_entry("latestBooks", "Latest books", "/opds/v1.2/books/latest"),
+            nav_entry("allLibraries", "All libraries", "/opds/v1.2/libraries"),
+            nav_entry(
+                "allCollections",
+                "All collections",
+                "/opds/v1.2/collections",
             ),
-            (
-                "ondeck".to_string(),
-                "On Deck".to_string(),
-                "/opds/v1.2/ondeck".to_string(),
-            ),
-            (
-                "allSeries".to_string(),
-                "All series".to_string(),
-                "/opds/v1.2/series".to_string(),
-            ),
-            (
-                "latestSeries".to_string(),
-                "Latest series".to_string(),
-                "/opds/v1.2/series/latest".to_string(),
-            ),
-            (
-                "latestBooks".to_string(),
-                "Latest books".to_string(),
-                "/opds/v1.2/books/latest".to_string(),
-            ),
-            (
-                "allLibraries".to_string(),
-                "All libraries".to_string(),
-                "/opds/v1.2/libraries".to_string(),
-            ),
-            (
-                "allCollections".to_string(),
-                "All collections".to_string(),
-                "/opds/v1.2/collections".to_string(),
-            ),
-            (
-                "allReadLists".to_string(),
-                "All read lists".to_string(),
-                "/opds/v1.2/readlists".to_string(),
-            ),
-            (
-                "allPublishers".to_string(),
-                "All publishers".to_string(),
-                "/opds/v1.2/publishers".to_string(),
-            ),
+            nav_entry("allReadLists", "All read lists", "/opds/v1.2/readlists"),
+            nav_entry("allPublishers", "All publishers", "/opds/v1.2/publishers"),
         ],
         None,
     )
@@ -204,11 +172,12 @@ pub(crate) async fn opds_v1_series_latest(
         rows.into_iter()
             .map(|series| {
                 let series_id = series.id.clone();
-                (
-                    series_id.clone(),
-                    series.title,
-                    format!("/opds/v1.2/series/{series_id}"),
-                )
+                OpdsV1NavigationEntry {
+                    id: series_id.clone(),
+                    title: series.title,
+                    href_path: format!("/opds/v1.2/series/{series_id}"),
+                    updated: Some(series.last_modified),
+                }
             })
             .collect(),
         Some((page, has_next)),
@@ -272,17 +241,20 @@ pub(crate) async fn opds_v1_libraries(headers: HeaderMap, database_file: &Path) 
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    let rows = load_libraries(database_file)
+    let mut rows = load_libraries(database_file)
         .await
         .unwrap_or_default()
         .into_iter()
         .filter(|library| library_visible(&allowed_library_ids, &library.id))
-        .map(|library| {
-            (
-                library.id.clone(),
-                library.name,
-                format!("/opds/v1.2/libraries/{}", library.id),
-            )
+        .collect::<Vec<_>>();
+    rows.sort_by_cached_key(|library| library.name.to_ascii_lowercase());
+    let rows = rows
+        .into_iter()
+        .map(|library| OpdsV1NavigationEntry {
+            id: library.id.clone(),
+            title: library.name,
+            href_path: format!("/opds/v1.2/libraries/{}", library.id),
+            updated: Some(library.last_modified),
         })
         .collect::<Vec<_>>();
 
@@ -321,11 +293,12 @@ pub(crate) async fn opds_v1_collections(
             .iter()
             .any(|book| library_visible(&allowed_library_ids, &book.library_id))
         {
-            rows.push((
-                collection.id.clone(),
-                collection.name,
-                format!("/opds/v1.2/collections/{}", collection.id),
-            ));
+            rows.push(OpdsV1NavigationEntry {
+                id: collection.id.clone(),
+                title: collection.name,
+                href_path: format!("/opds/v1.2/collections/{}", collection.id),
+                updated: None,
+            });
         }
     }
 
@@ -364,11 +337,12 @@ pub(crate) async fn opds_v1_readlists(
             .iter()
             .any(|book| library_visible(&allowed_library_ids, &book.library_id))
         {
-            rows.push((
-                readlist.id.clone(),
-                readlist.name,
-                format!("/opds/v1.2/readlists/{}", readlist.id),
-            ));
+            rows.push(OpdsV1NavigationEntry {
+                id: readlist.id.clone(),
+                title: readlist.name,
+                href_path: format!("/opds/v1.2/readlists/{}", readlist.id),
+                updated: None,
+            });
         }
     }
 
@@ -404,12 +378,11 @@ pub(crate) async fn opds_v1_publishers(
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
     let rows = publishers
         .into_iter()
-        .map(|publisher| {
-            (
-                publisher.clone(),
-                publisher.clone(),
-                format!("/opds/v1.2/series?publisher={}", query_escape(&publisher)),
-            )
+        .map(|publisher| OpdsV1NavigationEntry {
+            id: publisher_entry_id(&publisher),
+            title: publisher.clone(),
+            href_path: format!("/opds/v1.2/series?publisher={}", query_escape(&publisher)),
+            updated: None,
         })
         .collect::<Vec<_>>();
     let (rows, has_next) = paginate_vec(rows, page, size);
@@ -527,7 +500,7 @@ pub(crate) async fn opds_v1_library_detail(
         library.name.as_str(),
         format!("/opds/v1.2/libraries/{library_id}").as_str(),
         entries,
-        None,
+        Some(library.last_modified.as_str()),
         page,
         has_next,
     )
@@ -569,7 +542,12 @@ pub(crate) async fn opds_v1_collection_detail(
         .into_iter()
         .map(|series| {
             let id = series.id;
-            (id.clone(), series.title, format!("/opds/v1.2/series/{id}"))
+            OpdsV1NavigationEntry {
+                id: id.clone(),
+                title: series.title,
+                href_path: format!("/opds/v1.2/series/{id}"),
+                updated: None,
+            }
         })
         .collect::<Vec<_>>();
 
@@ -666,11 +644,12 @@ pub(crate) async fn opds_v1_series(headers: HeaderMap, uri: Uri, database_file: 
         .into_iter()
         .map(|series| {
             let series_id = series.id;
-            (
-                series_id.clone(),
-                series.title,
-                format!("/opds/v1.2/series/{series_id}"),
-            )
+            OpdsV1NavigationEntry {
+                id: series_id.clone(),
+                title: series.title,
+                href_path: format!("/opds/v1.2/series/{series_id}"),
+                updated: None,
+            }
         })
         .collect::<Vec<_>>()
     } else {
@@ -687,11 +666,12 @@ pub(crate) async fn opds_v1_series(headers: HeaderMap, uri: Uri, database_file: 
         .into_iter()
         .map(|series| {
             let series_id = series.id;
-            (
-                series_id.clone(),
-                series.title,
-                format!("/opds/v1.2/series/{series_id}"),
-            )
+            OpdsV1NavigationEntry {
+                id: series_id.clone(),
+                title: series.title,
+                href_path: format!("/opds/v1.2/series/{series_id}"),
+                updated: None,
+            }
         })
         .collect::<Vec<_>>()
     };
@@ -713,4 +693,27 @@ pub(crate) async fn opds_v1_series(headers: HeaderMap, uri: Uri, database_file: 
         entries,
         Some((page, has_next)),
     )
+}
+
+fn nav_entry(id: &str, title: &str, href_path: &str) -> OpdsV1NavigationEntry {
+    OpdsV1NavigationEntry {
+        id: id.to_string(),
+        title: title.to_string(),
+        href_path: href_path.to_string(),
+        updated: None,
+    }
+}
+
+fn publisher_entry_id(publisher: &str) -> String {
+    format!("publisher:{}", query_escape(publisher))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::publisher_entry_id;
+
+    #[test]
+    fn publisher_entry_id_matches_kotlin_prefix_and_encoding() {
+        assert_eq!(publisher_entry_id("ACME Press"), "publisher:ACME%20Press");
+    }
 }
