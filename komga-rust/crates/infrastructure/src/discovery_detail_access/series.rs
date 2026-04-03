@@ -14,6 +14,7 @@ pub struct PersistedSeriesResourceRecord {
 pub struct PersistedSeriesDetailRecord {
     pub id: String,
     pub library_id: String,
+    pub name: String,
     pub title: String,
     pub title_sort: String,
     pub url: String,
@@ -185,7 +186,7 @@ pub async fn load_persisted_series_detail(
         .map_err(|error| format!("open series detail db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT s.ID AS ID, s.LIBRARY_ID AS LIBRARY_ID, s.URL AS URL, \
+        "SELECT s.ID AS ID, s.LIBRARY_ID AS LIBRARY_ID, s.NAME AS NAME, s.URL AS URL, \
                 s.CREATED_DATE AS CREATED_DATE, s.LAST_MODIFIED_DATE AS LAST_MODIFIED_DATE, \
                 CAST(s.FILE_LAST_MODIFIED AS TEXT) AS FILE_LAST_MODIFIED, s.ONESHOT AS ONESHOT, \
                 s.DELETED_DATE AS DELETED_DATE, sm.STATUS AS STATUS, sm.TITLE AS TITLE, \
@@ -200,10 +201,10 @@ pub async fn load_persisted_series_detail(
          LEFT \
          JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
          WHERE s.ID = ? \
-         GROUP BY s.ID, s.LIBRARY_ID, s.URL, s.CREATED_DATE, s.LAST_MODIFIED_DATE, \
-                  s.FILE_LAST_MODIFIED, s.ONESHOT, s.DELETED_DATE, sm.STATUS, sm.TITLE, \
-                  sm.SUMMARY, sm.READING_DIRECTION, sm.PUBLISHER, sm.AGE_RATING, sm.LANGUAGE, \
-                  METADATA_CREATED, METADATA_LAST_MODIFIED",
+          GROUP BY s.ID, s.LIBRARY_ID, s.NAME, s.URL, s.CREATED_DATE, s.LAST_MODIFIED_DATE, \
+                   s.FILE_LAST_MODIFIED, s.ONESHOT, s.DELETED_DATE, sm.STATUS, sm.TITLE, \
+                   sm.SUMMARY, sm.READING_DIRECTION, sm.PUBLISHER, sm.AGE_RATING, sm.LANGUAGE, \
+                   METADATA_CREATED, METADATA_LAST_MODIFIED",
     )
     .bind(series_id)
     .fetch_optional(&pool)
@@ -227,6 +228,7 @@ pub async fn load_persisted_series_detail(
     Ok(Some(PersistedSeriesDetailRecord {
         id: row.get::<String, _>("ID"),
         library_id: row.get::<String, _>("LIBRARY_ID"),
+        name: row.get::<String, _>("NAME"),
         title: row.get::<String, _>("TITLE"),
         title_sort: row.get::<String, _>("TITLE_SORT"),
         url: row.get::<String, _>("URL"),

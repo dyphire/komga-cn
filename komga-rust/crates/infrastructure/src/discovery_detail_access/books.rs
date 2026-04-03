@@ -62,8 +62,8 @@ pub struct PersistedReadProgressRecord {
     pub read_date: Option<String>,
     pub created: String,
     pub last_modified: String,
-    pub device_id: Option<String>,
-    pub device_name: Option<String>,
+    pub device_id: String,
+    pub device_name: String,
 }
 
 #[derive(Clone, Copy)]
@@ -177,8 +177,8 @@ pub async fn load_persisted_book_detail(
                 rp.PAGE AS READ_PROGRESS_PAGE, rp.COMPLETED AS READ_PROGRESS_COMPLETED, \
                 rp.READ_DATE AS READ_PROGRESS_READ_DATE, rp.CREATED_DATE AS READ_PROGRESS_CREATED, \
                 rp.LAST_MODIFIED_DATE AS READ_PROGRESS_LAST_MODIFIED, \
-                NULLIF(rp.DEVICE_ID, '') AS READ_PROGRESS_DEVICE_ID, \
-                NULLIF(rp.DEVICE_NAME, '') AS READ_PROGRESS_DEVICE_NAME \
+                rp.DEVICE_ID AS READ_PROGRESS_DEVICE_ID, \
+                rp.DEVICE_NAME AS READ_PROGRESS_DEVICE_NAME \
          FROM BOOK b \
          JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
          JOIN SERIES s ON s.ID = b.SERIES_ID \
@@ -247,8 +247,12 @@ pub async fn load_persisted_book_detail(
                 last_modified: row
                     .get::<Option<String>, _>("READ_PROGRESS_LAST_MODIFIED")
                     .unwrap_or_default(),
-                device_id: row.get::<Option<String>, _>("READ_PROGRESS_DEVICE_ID"),
-                device_name: row.get::<Option<String>, _>("READ_PROGRESS_DEVICE_NAME"),
+                device_id: row
+                    .get::<Option<String>, _>("READ_PROGRESS_DEVICE_ID")
+                    .unwrap_or_default(),
+                device_name: row
+                    .get::<Option<String>, _>("READ_PROGRESS_DEVICE_NAME")
+                    .unwrap_or_default(),
             }
         }),
         deleted: row.get::<Option<String>, _>("DELETED_DATE").is_some(),

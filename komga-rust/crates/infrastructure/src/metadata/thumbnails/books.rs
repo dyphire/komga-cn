@@ -22,8 +22,7 @@ pub async fn load_persisted_book_thumbnails(
     let rows = sqlx::query(
         "SELECT ID, BOOK_ID, TYPE, SELECTED, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT \
          FROM THUMBNAIL_BOOK \
-         WHERE BOOK_ID = ? \
-         ORDER BY SELECTED DESC, LAST_MODIFIED_DATE DESC, ID ASC",
+         WHERE BOOK_ID = ?",
     )
     .bind(book_id)
     .fetch_all(&pool)
@@ -77,7 +76,6 @@ pub async fn load_selected_book_thumbnail(
 
 pub async fn load_book_thumbnail_by_id(
     database_file: &Path,
-    book_id: &str,
     thumbnail_id: &str,
 ) -> Result<Option<EntityThumbnailBinary>, String> {
     if !database_file.exists() {
@@ -91,11 +89,10 @@ pub async fn load_book_thumbnail_by_id(
     let row = sqlx::query(
         "SELECT MEDIA_TYPE, THUMBNAIL \
          FROM THUMBNAIL_BOOK \
-         WHERE ID = ? AND BOOK_ID = ? \
+         WHERE ID = ? \
          LIMIT 1",
     )
     .bind(thumbnail_id)
-    .bind(book_id)
     .fetch_optional(&pool)
     .await
     .map_err(|error| format!("query single book thumbnail: {error}"))?;
@@ -190,7 +187,6 @@ pub async fn insert_book_thumbnail(
 
 pub async fn select_book_thumbnail(
     database_file: &Path,
-    book_id: &str,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
     if !database_file.exists() {
@@ -205,49 +201,30 @@ pub async fn select_book_thumbnail(
         .await
         .map_err(|error| format!("begin book thumbnail select tx: {error}"))?;
 
-    let exists = sqlx::query(
-        "SELECT 1 AS FOUND \
-         FROM BOOK \
+    let target_book_id = sqlx::query(
+        "SELECT BOOK_ID \
+         FROM THUMBNAIL_BOOK \
          WHERE ID = ? \
          LIMIT 1",
     )
-    .bind(book_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|error| format!("query book existence for thumbnail select: {error}"))?
-    .is_some();
-    if !exists {
-        tx.rollback()
-            .await
-            .map_err(|error| format!("rollback book thumbnail select tx: {error}"))?;
-        return Ok(false);
-    }
-
-    let target_exists = sqlx::query(
-        "SELECT 1 AS FOUND \
-         FROM THUMBNAIL_BOOK \
-         WHERE ID = ? AND BOOK_ID = ? \
-         LIMIT 1",
-    )
     .bind(thumbnail_id)
-    .bind(book_id)
     .fetch_optional(&mut *tx)
     .await
     .map_err(|error| format!("query target book thumbnail for select: {error}"))?
-    .is_some();
-    if !target_exists {
+    .map(|row| row.get::<String, _>("BOOK_ID"));
+    let Some(target_book_id) = target_book_id else {
         tx.rollback()
             .await
             .map_err(|error| format!("rollback book thumbnail select tx: {error}"))?;
         return Ok(false);
-    }
+    };
 
     sqlx::query(
         "UPDATE THUMBNAIL_BOOK \
          SET SELECTED = 0 \
          WHERE BOOK_ID = ?",
     )
-    .bind(book_id)
+    .bind(&target_book_id)
     .execute(&mut *tx)
     .await
     .map_err(|error| format!("clear selected book thumbnails for select: {error}"))?;
@@ -257,7 +234,7 @@ pub async fn select_book_thumbnail(
          WHERE ID = ? AND BOOK_ID = ?",
     )
     .bind(thumbnail_id)
-    .bind(book_id)
+    .bind(target_book_id)
     .execute(&mut *tx)
     .await
     .map_err(|error| format!("mark selected book thumbnail: {error}"))?;

@@ -118,8 +118,8 @@ pub struct PersistedReadProgressRecord {
     pub read_date: Option<String>,
     pub created: String,
     pub last_modified: String,
-    pub device_id: Option<String>,
-    pub device_name: Option<String>,
+    pub device_id: String,
+    pub device_name: String,
 }
 
 #[derive(Clone, Copy)]

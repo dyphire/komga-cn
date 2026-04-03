@@ -77,14 +77,21 @@ pub fn load_generated_pdf_page_rows(media: &BookMediaRecord) -> Vec<BookPageReco
     if page_count == 0 {
         return vec![];
     }
+    let document = PdfDocument::load(&media.file_path).ok();
     (1..=page_count)
-        .map(|number| BookPageRecord {
-            number,
-            file_name: format!("page-{number}.pdf"),
-            media_type: "application/pdf".to_string(),
-            width: None,
-            height: None,
-            file_size: 0,
+        .map(|number| {
+            let dimensions = document
+                .as_ref()
+                .and_then(|document| pdf_page_dimensions(document, number as u32));
+
+            BookPageRecord {
+                number,
+                file_name: format!("page-{number}.pdf"),
+                media_type: "application/pdf".to_string(),
+                width: dimensions.map(|(width, _)| i64::from(width)),
+                height: dimensions.map(|(_, height)| i64::from(height)),
+                file_size: 0,
+            }
         })
         .collect()
 }
@@ -128,6 +135,35 @@ pub fn detect_pdf_page_count(media: &BookMediaRecord) -> Option<u64> {
         return None;
     }
     Some(PdfDocument::load(&media.file_path).ok()?.get_pages().len() as u64)
+}
+
+fn pdf_page_dimensions(document: &PdfDocument, page_number: u32) -> Option<(u32, u32)> {
+    let object_id = *document.get_pages().get(&page_number)?;
+    let page = document.get_dictionary(object_id).ok()?;
+    let media_box = page.get(b"MediaBox").ok()?.as_array().ok()?;
+    if media_box.len() != 4 {
+        return None;
+    }
+
+    let left = pdf_numeric_value(&media_box[0])?;
+    let bottom = pdf_numeric_value(&media_box[1])?;
+    let right = pdf_numeric_value(&media_box[2])?;
+    let top = pdf_numeric_value(&media_box[3])?;
+    let width = (right - left).abs().round();
+    let height = (top - bottom).abs().round();
+    if width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+
+    Some((width as u32, height as u32))
+}
+
+fn pdf_numeric_value(object: &lopdf::Object) -> Option<f64> {
+    match object {
+        lopdf::Object::Integer(value) => Some(*value as f64),
+        lopdf::Object::Real(value) => Some((*value).into()),
+        _ => None,
+    }
 }
 
 fn read_zip_archive_page_bytes(

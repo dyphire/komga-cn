@@ -100,9 +100,6 @@ pub async fn series_file(
                     read_media_file_bytes(&file_path).map(|bytes| (file_name, bytes))
                 })
                 .collect::<Vec<_>>();
-            if archive_entries.is_empty() {
-                return StatusCode::NOT_FOUND.into_response();
-            }
 
             let archive_payload = match build_stored_zip_archive(archive_entries) {
                 Ok(payload) => payload,

@@ -1,4 +1,5 @@
 use super::*;
+use crate::discovery_detail_access::books as detail_books_access;
 use komga_application::media_assets::{
     BookMetadataAuthor as ApplicationBookMetadataAuthor,
     BookMetadataLink as ApplicationBookMetadataLink,
@@ -11,15 +12,6 @@ pub struct BooksThumbnailsRegenerateQuery {
     pub for_bigger_result_only: bool,
 }
 
-fn thumbnail_max_edge(thumbnail_size: &str) -> i64 {
-    match thumbnail_size {
-        "MEDIUM" => 600,
-        "LARGE" => 900,
-        "XLARGE" => 1200,
-        _ => 300,
-    }
-}
-
 pub async fn book_analyze(
     Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(state): Extension<OperationalState>,
@@ -30,18 +22,28 @@ pub async fn book_analyze(
         return response;
     }
 
-    match persisted_book_exists(auth_db.database_file.as_path(), &book_id).await {
-        Ok(true) => enqueue_task_records(
-            &state,
-            vec![TaskQueueRecord::new(
-                format!("ANALYZE_BOOK:{book_id}"),
-                90,
-                Some(book_id),
-            )],
-        ),
-        Ok(false) => StatusCode::NOT_FOUND.into_response(),
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    }
+    let Some(book) = (match detail_books_access::load_persisted_book_detail(
+        auth_db.database_file.as_path(),
+        &book_id,
+        None,
+    )
+    .await
+    {
+        Ok(book) => book,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    enqueue_task_records(
+        &state,
+        vec![TaskQueueRecord::new(
+            format!("ANALYZE_BOOK_{book_id}"),
+            90,
+            Some(book.series_id),
+        )
+        .with_simple_type("ANALYZE_BOOK")],
+    )
 }
 
 pub async fn book_metadata_refresh(
@@ -54,25 +56,30 @@ pub async fn book_metadata_refresh(
         return response;
     }
 
-    match persisted_book_exists(auth_db.database_file.as_path(), &book_id).await {
-        Ok(true) => enqueue_task_records(
-            &state,
-            vec![
-                TaskQueueRecord::new(
-                    format!("REFRESH_BOOK_METADATA:{book_id}"),
-                    80,
-                    Some(book_id.clone()),
-                ),
-                TaskQueueRecord::new(
-                    format!("REFRESH_BOOK_LOCAL_ARTWORK:{book_id}"),
-                    80,
-                    Some(book_id),
-                ),
-            ],
-        ),
-        Ok(false) => StatusCode::NOT_FOUND.into_response(),
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    }
+    let Some(book) = (match detail_books_access::load_persisted_book_detail(
+        auth_db.database_file.as_path(),
+        &book_id,
+        None,
+    )
+    .await
+    {
+        Ok(book) => book,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    enqueue_task_records(
+        &state,
+        vec![
+            TaskQueueRecord::new(
+                format!("REFRESH_BOOK_METADATA:{book_id}"),
+                80,
+                Some(book.series_id.clone()),
+            ),
+            TaskQueueRecord::new(format!("REFRESH_BOOK_LOCAL_ARTWORK:{book_id}"), 80, None),
+        ],
+    )
 }
 
 pub async fn book_metadata_update(
@@ -382,7 +389,7 @@ fn optional_links(
 }
 
 pub async fn books_thumbnails_regenerate(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(_auth_db): Extension<AuthDatabaseState>,
     Extension(state): Extension<OperationalState>,
     headers: HeaderMap,
     Query(query): Query<BooksThumbnailsRegenerateQuery>,
@@ -391,56 +398,14 @@ pub async fn books_thumbnails_regenerate(
         return response;
     }
 
-    let book_ids = match persisted_book_ids(auth_db.database_file.as_path()).await {
-        Ok(book_ids) => book_ids,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    };
-
-    let book_ids = if query.for_bigger_result_only {
-        let settings =
-            match crate::operational_settings_access::server_settings::load_server_settings(
-                state.settings_store.as_ref(),
-            )
-            .await
-            {
-                Ok(settings) => settings,
-                Err(error) => return internal_error_response(error),
-            };
-        let max_edge = thumbnail_max_edge(settings.thumbnail_size);
-        let mut filtered = Vec::new();
-        for book_id in book_ids {
-            let thumbnails =
-                match load_persisted_book_thumbnails(auth_db.database_file.as_path(), &book_id)
-                    .await
-                {
-                    Ok(thumbnails) => thumbnails,
-                    Err(error) => return internal_error_response(error),
-                };
-            if thumbnails.iter().any(|thumbnail| {
-                thumbnail.thumbnail_type == "GENERATED"
-                    && thumbnail.width < max_edge
-                    && thumbnail.height < max_edge
-            }) {
-                filtered.push(book_id);
-            }
-        }
-        filtered
-    } else {
-        book_ids
-    };
-
     enqueue_task_records(
         &state,
-        book_ids
-            .into_iter()
-            .map(|book_id| {
-                TaskQueueRecord::new(
-                    format!("GENERATE_BOOK_THUMBNAIL:{book_id}"),
-                    10,
-                    Some(book_id),
-                )
+        vec![TaskQueueRecord::new("FIND_BOOK_THUMBNAILS_TO_REGENERATE", 0, None).with_payload(
+            json!({
+                "for_bigger_result_only": query.for_bigger_result_only,
             })
-            .collect(),
+            .to_string(),
+        )],
     )
 }
 
@@ -458,8 +423,8 @@ pub async fn series_file_delete(
         &state,
         vec![TaskQueueRecord::new(
             format!("DELETE_SERIES:{series_id}"),
-            100,
-            Some(series_id),
+            8,
+            None,
         )],
     )
 }
@@ -484,7 +449,13 @@ pub async fn series_analyze(
         };
     let task_records = book_ids
         .into_iter()
-        .map(|book_id| TaskQueueRecord::new(format!("ANALYZE_BOOK:{book_id}"), 90, Some(book_id)))
+        .map(|book_id| {
+            TaskQueueRecord::new(
+                format!("ANALYZE_BOOK:{book_id}"),
+                90,
+                Some(resolved_series_id.clone()),
+            )
+        })
         .collect::<Vec<_>>();
 
     enqueue_task_records(&state, task_records)
@@ -500,11 +471,8 @@ pub async fn series_metadata_refresh(
         return response;
     }
 
-    let resolved_series_id =
-        resolve_series_id_for_persisted(auth_db.database_file.as_path(), &series_id).await;
-
     let book_ids =
-        match load_series_book_ids(auth_db.database_file.as_path(), &resolved_series_id).await {
+        match load_series_book_ids(auth_db.database_file.as_path(), &series_id).await {
             Ok(book_ids) => book_ids,
             Err(error) => return internal_error_response(error),
         };
@@ -514,18 +482,18 @@ pub async fn series_metadata_refresh(
         task_records.push(TaskQueueRecord::new(
             format!("REFRESH_BOOK_METADATA:{book_id}"),
             80,
-            Some(book_id.clone()),
+            Some(series_id.clone()),
         ));
         task_records.push(TaskQueueRecord::new(
             format!("REFRESH_BOOK_LOCAL_ARTWORK:{book_id}"),
             80,
-            Some(book_id),
+            None,
         ));
     }
     task_records.push(TaskQueueRecord::new(
-        format!("REFRESH_SERIES_LOCAL_ARTWORK:{resolved_series_id}"),
+        format!("REFRESH_SERIES_LOCAL_ARTWORK:{series_id}"),
         80,
-        Some(resolved_series_id),
+        None,
     ));
 
     enqueue_task_records(&state, task_records)

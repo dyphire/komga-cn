@@ -72,6 +72,39 @@ async fn router_readlist_tachiyomi_progress_marks_books_completed_at_real_page_c
     cleanup_router_fixture(paths);
 }
 
+async fn seed_extra_readlist(paths: &RuntimeDbPaths, readlist_id: &str, name: &str) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("extra readlist db should open");
+
+    sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT) VALUES (?, ?, ?)")
+        .bind(readlist_id)
+        .bind(name)
+        .bind(0_i64)
+        .execute(&pool)
+        .await
+        .expect("extra readlist row should be inserted");
+
+    pool.close().await;
+}
+
+async fn load_selected_readlist_thumbnail_count(paths: &RuntimeDbPaths, readlist_id: &str) -> i64 {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("readlist thumbnail count db should open");
+
+    let count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM THUMBNAIL_READLIST WHERE READLIST_ID = ? AND SELECTED = 1",
+    )
+    .bind(readlist_id)
+    .fetch_one(&pool)
+    .await
+    .expect("selected readlist thumbnail count should load");
+
+    pool.close().await;
+    count
+}
+
 async fn seed_collection_listing_variants(paths: &RuntimeDbPaths) {
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await
@@ -941,6 +974,31 @@ async fn router_readlist_thumbnail_upload_parses_multipart_image_and_selected_fl
         .expect("readlist thumbnail route body should be readable");
     assert_ne!(route_thumbnail_body.as_ref(), image_bytes.as_slice());
     assert_eq!(&route_thumbnail_body[..3], &[0xFF, 0xD8, 0xFF]);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_readlist_thumbnail_select_returns_accepted_when_thumbnail_is_missing_but_readlist_exists() {
+    let paths = new_router_fixture("router-readlist-thumbnail-select-missing-thumbnail").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/readlists/readlist-1/thumbnails/missing-thumbnail/selected")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("readlist missing thumbnail select request should build"),
+        )
+        .await
+        .expect("readlist missing thumbnail select request should complete");
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
 
     cleanup_router_fixture(paths);
 }

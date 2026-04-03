@@ -247,6 +247,39 @@ pub fn load_books_without_selected_thumbnails(database_file: &Path) -> Result<Ve
     })
 }
 
+pub fn load_books_with_undersized_generated_thumbnails(
+    database_file: &Path,
+    max_edge: i64,
+) -> Result<Vec<String>, String> {
+    let database_file = database_file.to_path_buf();
+
+    run_database_query(database_file, move |pool| {
+        Box::pin(async move {
+            let rows = sqlx::query(
+                r#"
+                SELECT DISTINCT BOOK_ID
+                FROM THUMBNAIL_BOOK
+                WHERE TYPE = 'GENERATED'
+                AND WIDTH < ?
+                AND HEIGHT < ?
+                "#,
+            )
+            .bind(max_edge)
+            .bind(max_edge)
+            .fetch_all(&pool)
+            .await
+            .map_err(|error| {
+                format!("failed to query books with undersized generated thumbnails: {error}")
+            })?;
+
+            Ok(rows
+                .into_iter()
+                .map(|row| row.get::<String, _>("BOOK_ID"))
+                .collect())
+        })
+    })
+}
+
 pub fn load_books_with_missing_page_hash(
     database_file: &Path,
     library_id: Option<&str>,

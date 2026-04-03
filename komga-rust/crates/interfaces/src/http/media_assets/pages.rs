@@ -114,12 +114,15 @@ pub async fn book_page(
         {
             Ok(Some(row)) => row,
             Ok(None) if book_media_is_single_image(&media) && requested_page_number == 1 => {
+                let (width, height) = read_media_image_dimensions(media.file_path.as_path())
+                    .map(|(width, height)| (Some(width), Some(height)))
+                    .unwrap_or((None, None));
                 PersistedBookPageRow {
                     number: requested_page_number as u64,
                     file_name: media.file_name.clone(),
                     media_type: content_type_from_filename(&media.file_name, &media.media_type),
-                    width: None,
-                    height: None,
+                    width,
+                    height,
                     file_size: read_media_file_size(&media.file_path).unwrap_or(0),
                 }
             }
@@ -129,7 +132,7 @@ pub async fn book_page(
                 } else if let Some(row) = load_pdf_page_row(&media, requested_page_number as u64) {
                     row
                 } else {
-                    return StatusCode::NOT_FOUND.into_response();
+                    return StatusCode::BAD_REQUEST.into_response();
                 }
             }
             Err(error) => return internal_error_response(error),
@@ -417,6 +420,12 @@ fn convert_page_image_bytes(
     Some(output.into_inner())
 }
 
+fn read_media_image_dimensions(path: &FsPath) -> Option<(i64, i64)> {
+    let bytes = read_media_file_bytes(path)?;
+    let image = image::load_from_memory(&bytes).ok()?;
+    Some((i64::from(image.width()), i64::from(image.height())))
+}
+
 pub async fn book_page_thumbnail(
     Extension(_profile): Extension<RuntimeProfile>,
     Extension(auth_db): Extension<AuthDatabaseState>,
@@ -458,12 +467,15 @@ pub async fn book_page_thumbnail(
         {
             Ok(Some(row)) => row,
             Ok(None) if book_media_is_single_image(&media) && page_number == 1 => {
+                let (width, height) = read_media_image_dimensions(media.file_path.as_path())
+                    .map(|(width, height)| (Some(width), Some(height)))
+                    .unwrap_or((None, None));
                 PersistedBookPageRow {
                     number: page_number as u64,
                     file_name: media.file_name.clone(),
                     media_type: content_type_from_filename(&media.file_name, &media.media_type),
-                    width: None,
-                    height: None,
+                    width,
+                    height,
                     file_size: read_media_file_size(&media.file_path).unwrap_or(0),
                 }
             }
@@ -623,13 +635,16 @@ pub async fn book_pages(
     }
 
     let size_bytes = read_media_file_size(&media.file_path).unwrap_or(0).max(0) as u64;
+    let (width, height) = read_media_image_dimensions(media.file_path.as_path())
+        .map(|(width, height)| (json!(width), json!(height)))
+        .unwrap_or((Value::Null, Value::Null));
 
     Json(vec![json!({
         "number": 1,
         "fileName": media.file_name,
         "mediaType": content_type_from_filename(&media.file_name, &media.media_type),
-        "width": Value::Null,
-        "height": Value::Null,
+        "width": width,
+        "height": height,
         "sizeBytes": size_bytes,
         "size": format_size_bytes(size_bytes),
     })])

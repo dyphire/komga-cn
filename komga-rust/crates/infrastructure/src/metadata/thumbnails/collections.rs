@@ -154,7 +154,6 @@ pub async fn insert_collection_thumbnail(
 
 pub async fn select_collection_thumbnail(
     database_file: &Path,
-    collection_id: &str,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
     if !database_file.exists() {
@@ -169,49 +168,30 @@ pub async fn select_collection_thumbnail(
         .await
         .map_err(|error| format!("begin collection thumbnail select tx: {error}"))?;
 
-    let exists = sqlx::query(
-        "SELECT 1 AS FOUND \
-         FROM COLLECTION \
+    let target_collection_id = sqlx::query(
+        "SELECT COLLECTION_ID \
+         FROM THUMBNAIL_COLLECTION \
          WHERE ID = ? \
          LIMIT 1",
     )
-    .bind(collection_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|error| format!("query collection existence for thumbnail select: {error}"))?
-    .is_some();
-    if !exists {
-        tx.rollback()
-            .await
-            .map_err(|error| format!("rollback collection thumbnail select tx: {error}"))?;
-        return Ok(false);
-    }
-
-    let target_exists = sqlx::query(
-        "SELECT 1 AS FOUND \
-         FROM THUMBNAIL_COLLECTION \
-         WHERE ID = ? AND COLLECTION_ID = ? \
-         LIMIT 1",
-    )
     .bind(thumbnail_id)
-    .bind(collection_id)
     .fetch_optional(&mut *tx)
     .await
     .map_err(|error| format!("query target collection thumbnail for select: {error}"))?
-    .is_some();
-    if !target_exists {
+    .map(|row| row.get::<String, _>("COLLECTION_ID"));
+    let Some(target_collection_id) = target_collection_id else {
         tx.rollback()
             .await
             .map_err(|error| format!("rollback collection thumbnail select tx: {error}"))?;
         return Ok(false);
-    }
+    };
 
     sqlx::query(
         "UPDATE THUMBNAIL_COLLECTION \
          SET SELECTED = 0 \
          WHERE COLLECTION_ID = ?",
     )
-    .bind(collection_id)
+    .bind(&target_collection_id)
     .execute(&mut *tx)
     .await
     .map_err(|error| format!("clear selected collection thumbnails for select: {error}"))?;
@@ -221,7 +201,7 @@ pub async fn select_collection_thumbnail(
          WHERE ID = ? AND COLLECTION_ID = ?",
     )
     .bind(thumbnail_id)
-    .bind(collection_id)
+    .bind(target_collection_id)
     .execute(&mut *tx)
     .await
     .map_err(|error| format!("mark selected collection thumbnail: {error}"))?;

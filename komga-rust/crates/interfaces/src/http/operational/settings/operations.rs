@@ -92,9 +92,8 @@ pub(crate) async fn delete_syncpoints_me(
 fn syncpoint_delete_scope(query: &str) -> SyncpointDeleteScope {
     let key_ids = query_values(query, "key_id")
         .into_iter()
-        .map(str::trim)
+        .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-        .map(str::to_string)
         .collect::<Vec<_>>();
 
     if key_ids.is_empty() {

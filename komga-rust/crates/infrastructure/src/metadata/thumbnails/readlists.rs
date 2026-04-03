@@ -163,41 +163,39 @@ pub async fn select_readlist_thumbnail(
         return Ok(false);
     }
 
-    let target_exists = sqlx::query(
-        "SELECT 1 AS FOUND \
+    let target_readlist_id = sqlx::query(
+        "SELECT READLIST_ID \
          FROM THUMBNAIL_READLIST \
-         WHERE ID = ? AND READLIST_ID = ? \
+         WHERE ID = ? \
          LIMIT 1",
     )
     .bind(thumbnail_id)
-    .bind(readlist_id)
     .fetch_optional(&mut *tx)
     .await
     .map_err(|error| format!("query readlist thumbnail select target: {error}"))?
-    .is_some();
-    if !target_exists {
+    .map(|row| row.get::<String, _>("READLIST_ID"));
+    let Some(target_readlist_id) = target_readlist_id else {
         tx.rollback()
             .await
             .map_err(|error| format!("rollback readlist thumbnail select tx: {error}"))?;
-        return Ok(false);
-    }
+        return Ok(true);
+    };
 
     sqlx::query(
         "UPDATE THUMBNAIL_READLIST \
          SET SELECTED = 0 \
          WHERE READLIST_ID = ?",
     )
-    .bind(readlist_id)
+    .bind(&target_readlist_id)
     .execute(&mut *tx)
     .await
     .map_err(|error| format!("clear selected readlist thumbnails for select: {error}"))?;
     sqlx::query(
         "UPDATE THUMBNAIL_READLIST \
          SET SELECTED = 1 \
-         WHERE ID = ? AND READLIST_ID = ?",
+         WHERE ID = ?",
     )
     .bind(thumbnail_id)
-    .bind(readlist_id)
     .execute(&mut *tx)
     .await
     .map_err(|error| format!("mark selected readlist thumbnail: {error}"))?;

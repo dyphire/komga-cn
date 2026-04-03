@@ -10,7 +10,7 @@ use crate::http::identity_access::auth::require_admin;
 use crate::operational_settings_access::page_hashes as page_hashes_access;
 
 use super::super::super::OperationalState;
-use super::query_value;
+use super::{query_value, query_values};
 
 pub(crate) async fn get_page_hashes(
     Extension(state): Extension<OperationalState>,
@@ -61,11 +61,13 @@ pub(crate) async fn get_page_hashes_unknown(
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(20);
+    let sorts = query_values(query, "sort");
 
     let page_data = match page_hashes_access::load_page_hashes_unknown_page(
         state.runtime.database_file.as_path(),
         page,
         size,
+        sorts,
     )
     .await
     {
@@ -94,12 +96,14 @@ pub(crate) async fn get_page_hash_matches(
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(20);
+    let sorts = query_values(query, "sort");
 
     let page_data = match page_hashes_access::load_page_hash_matches_page(
         state.runtime.database_file.as_path(),
         &page_hash,
         page,
         size,
+        sorts,
     )
     .await
     {
@@ -175,16 +179,20 @@ pub(crate) async fn put_page_hash(
     let Some(hash) = payload
         .get("hash")
         .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|value| !value.trim().is_empty())
     else {
         return StatusCode::BAD_REQUEST.into_response();
     };
-    let size = payload.get("size").and_then(Value::as_i64);
+    let size = match payload.get("size") {
+        None | Some(Value::Null) => None,
+        Some(value) => match value.as_i64() {
+            Some(size) => Some(size),
+            None => return StatusCode::BAD_REQUEST.into_response(),
+        },
+    };
     let Some(action) = payload
         .get("action")
         .and_then(Value::as_str)
-        .map(str::trim)
         .filter(|value| matches!(*value, "DELETE_MANUAL" | "DELETE_AUTO" | "IGNORE"))
     else {
         return StatusCode::BAD_REQUEST.into_response();

@@ -78,6 +78,7 @@ serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 zip.workspace = true
+sha2.workspace = true
 lopdf.workspace = true
 tantivy.workspace = true
 tempfile = "3.23.0"

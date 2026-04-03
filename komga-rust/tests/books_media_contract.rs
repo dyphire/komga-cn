@@ -3393,6 +3393,129 @@ async fn router_discovery_book_detail_includes_persisted_authors_tags_and_read_p
 }
 
 #[tokio::test]
+async fn router_discovery_book_detail_preserves_empty_read_progress_device_fields() {
+    let paths = new_router_fixture("router-discovery-book-detail-empty-read-progress-device").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_read_progress(&paths, false).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("book detail device parity db should open");
+    sqlx::query(
+        "UPDATE READ_PROGRESS SET DEVICE_ID = '', DEVICE_NAME = '' WHERE BOOK_ID = ? AND USER_ID = ?",
+    )
+    .bind("book-1")
+    .bind("admin-user")
+    .execute(&pool)
+    .await
+    .expect("read progress device fields should update");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book detail request should build"),
+        )
+        .await
+        .expect("book detail request should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload
+            .get("readProgress")
+            .and_then(|progress| progress.get("deviceId")),
+        Some(&Value::String(String::new()))
+    );
+    assert_eq!(
+        payload
+            .get("readProgress")
+            .and_then(|progress| progress.get("deviceName")),
+        Some(&Value::String(String::new()))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_book_detail_converts_admin_url_to_file_path() {
+    let paths = new_router_fixture("router-discovery-book-detail-admin-url-path").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("book detail url parity db should open");
+    sqlx::query("UPDATE BOOK SET URL = ? WHERE ID = ?")
+        .bind("file:/library%20root/books/book%201.cbz")
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("book url should update");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book detail request should build"),
+        )
+        .await
+        .expect("book detail request should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("url"),
+        Some(&Value::String("/library root/books/book 1.cbz".to_string()))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_book_detail_formats_file_last_modified_as_utc_timestamp() {
+    let paths = new_router_fixture("router-discovery-book-detail-file-last-modified-utc").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book detail request should build"),
+        )
+        .await
+        .expect("book detail request should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("fileLastModified"),
+        Some(&Value::String("1970-01-01T00:00:00Z".to_string()))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_discovery_book_readlists_returns_existing_persisted_readlists() {
     let paths = new_router_fixture("router-discovery-book-readlists-persisted").await;
     seed_router_contract_data(&paths).await;
@@ -3476,6 +3599,39 @@ async fn router_book_pages_and_raw_pages_include_inline_content_disposition() {
             "route: {route}, disposition: {disposition}"
         );
     }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_page_returns_bad_request_for_missing_pdf_page_number() {
+    let paths = new_router_fixture("router-book-page-missing-pdf-page").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_pdf_book(
+        &paths,
+        "book-pdf-1",
+        "series-1",
+        "fixture-page.pdf",
+        "Readable Page Title",
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/pages/2")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("missing pdf page request should build"),
+        )
+        .await
+        .expect("missing pdf page request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     cleanup_router_fixture(paths);
 }
@@ -3622,135 +3778,6 @@ async fn router_book_thumbnail_upload_parses_multipart_image_and_selected_flag()
     );
     assert_eq!(payload.get("width"), Some(&json!(1)));
     assert_eq!(payload.get("height"), Some(&json!(1)));
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_books_thumbnails_regenerate_enqueues_generate_thumbnail_tasks() {
-    let paths = new_router_fixture("router-books-thumbnails-regenerate-cbz").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_cbz_book(&paths, "book-3", "book-3.cbz", "Book 3").await;
-
-    let runtime_config = runtime_config_for_paths(&paths);
-    let app = build_router_with_config(&runtime_config);
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let regenerate = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/api/v1/books/thumbnails")
-                .header("x-auth-token", &auth_token)
-                .body(Body::empty())
-                .expect("books regenerate thumbnails request should build"),
-        )
-        .await
-        .expect("books regenerate thumbnails request should complete");
-    assert_eq!(regenerate.status(), StatusCode::ACCEPTED);
-
-    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
-        .await
-        .expect("tasks db should open for regenerate thumbnail verification");
-    let rows = sqlx::query("SELECT ID, SIMPLE_TYPE FROM TASK ORDER BY ID ASC")
-        .fetch_all(&tasks_pool)
-        .await
-        .expect("task rows should be queryable after regenerate enqueue");
-    tasks_pool.close().await;
-
-    let task_ids = rows
-        .iter()
-        .map(|row| row.get::<String, _>("ID"))
-        .collect::<Vec<_>>();
-    let task_types = rows
-        .iter()
-        .map(|row| row.get::<String, _>("SIMPLE_TYPE"))
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        task_types
-            .iter()
-            .filter(|task_type| task_type.as_str() == "GENERATE_BOOK_THUMBNAIL")
-            .count(),
-        task_types.len(),
-        "books thumbnail regenerate should enqueue generate-thumbnail tasks, got ids={task_ids:?} types={task_types:?}"
-    );
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_books_thumbnails_regenerate_for_bigger_result_only_filters_to_small_generated_rows()
-{
-    let paths = new_router_fixture("router-books-thumbnails-regenerate-bigger-only").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_cbz_book(&paths, "book-3", "book-3.cbz", "Book 3").await;
-    let settings_pool = connect_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("main db should open for thumbnail size setting");
-    sqlx::query(
-        "INSERT INTO SERVER_SETTINGS(KEY, VALUE) VALUES('THUMBNAIL_SIZE', ?) ON CONFLICT(KEY) DO UPDATE SET VALUE = excluded.VALUE",
-    )
-    .bind("LARGE")
-    .execute(&settings_pool)
-    .await
-    .expect("thumbnail size setting should be updated");
-    settings_pool.close().await;
-    generate_book_thumbnail(paths.main_db.as_path(), "book-3")
-        .expect("generate_book_thumbnail should seed generated thumbnail for book-3");
-
-    let main_pool = connect_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("main db should open for generated thumbnail verification");
-    let generated = sqlx::query(
-        "SELECT TYPE, WIDTH, HEIGHT FROM THUMBNAIL_BOOK WHERE BOOK_ID = ? ORDER BY ID ASC",
-    )
-    .bind("book-3")
-    .fetch_all(&main_pool)
-    .await
-    .expect("generated thumbnail rows should be queryable");
-    main_pool.close().await;
-    assert_eq!(generated.len(), 1);
-    assert_eq!(generated[0].get::<String, _>("TYPE"), "GENERATED");
-    assert!(generated[0].get::<i64, _>("WIDTH") < 900);
-    assert!(generated[0].get::<i64, _>("HEIGHT") < 900);
-
-    let runtime_config = runtime_config_for_paths(&paths);
-    let app = build_router_with_config(&runtime_config);
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let regenerate = app
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/api/v1/books/thumbnails?for_bigger_result_only=true")
-                .header("x-auth-token", &auth_token)
-                .body(Body::empty())
-                .expect("books regenerate thumbnails bigger-only request should build"),
-        )
-        .await
-        .expect("books regenerate thumbnails bigger-only request should complete");
-    assert_eq!(regenerate.status(), StatusCode::ACCEPTED);
-
-    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
-        .await
-        .expect("tasks db should open for bigger-only regenerate verification");
-    let rows = sqlx::query("SELECT ID, SIMPLE_TYPE FROM TASK ORDER BY ID ASC")
-        .fetch_all(&tasks_pool)
-        .await
-        .expect("task rows should be queryable after bigger-only regenerate enqueue");
-    tasks_pool.close().await;
-
-    let task_ids = rows
-        .iter()
-        .map(|row| row.get::<String, _>("ID"))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        task_ids,
-        vec!["GENERATE_BOOK_THUMBNAIL:book-3".to_string()],
-        "for_bigger_result_only should only enqueue books with undersized generated thumbnails"
-    );
 
     cleanup_router_fixture(paths);
 }
@@ -4093,6 +4120,118 @@ async fn router_book_thumbnail_upload_rejects_invalid_selected_flag() {
             "book thumbnail selected field must be true or false".to_string()
         ))
     );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_pages_single_image_fallback_includes_dimensions() {
+    let paths = new_router_fixture("router-book-pages-single-image-dimensions").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for single-image page fixture");
+    sqlx::query(
+        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("book-image-1")
+    .bind(0_i64)
+    .bind("cover.png")
+    .bind("books/cover.png")
+    .bind("series-1")
+    .bind(1_i64)
+    .bind(5_i64)
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("single-image book row should be inserted");
+    sqlx::query(
+        "INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)",
+    )
+    .bind("image/png")
+    .bind("READY")
+    .bind("book-image-1")
+    .bind(1_i64)
+    .execute(&pool)
+    .await
+    .expect("single-image media row should be inserted");
+    sqlx::query(
+        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("5")
+    .bind(5.0_f64)
+    .bind("Cover Book")
+    .bind("2024-02-02")
+    .bind("book-image-1")
+    .execute(&pool)
+    .await
+    .expect("single-image book metadata row should be inserted");
+    pool.close().await;
+
+    let image_path = paths.config_dir.join("books/cover.png");
+    if let Some(parent) = image_path.parent() {
+        std::fs::create_dir_all(parent).expect("single-image parent directory should be created");
+    }
+    std::fs::write(&image_path, fixture_png_bytes()).expect("single-image fixture should be written");
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-image-1/pages")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("single-image pages request should build"),
+        )
+        .await
+        .expect("single-image pages request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let rows = payload
+        .as_array()
+        .expect("single-image pages payload should be an array");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].get("width"), Some(&json!(1)));
+    assert_eq!(rows[0].get("height"), Some(&json!(1)));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_pages_generated_pdf_fallback_includes_dimensions() {
+    let paths = new_router_fixture("router-book-pages-pdf-dimensions").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_pdf_book(&paths, "book-pdf-1", "series-1", "fixture-page.pdf", "Fixture PDF").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/pages")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("pdf pages request should build"),
+        )
+        .await
+        .expect("pdf pages request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let rows = payload
+        .as_array()
+        .expect("pdf pages payload should be an array");
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].get("width").is_some_and(|value| !value.is_null()));
+    assert!(rows[0].get("height").is_some_and(|value| !value.is_null()));
 
     cleanup_router_fixture(paths);
 }

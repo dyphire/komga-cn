@@ -391,17 +391,6 @@ pub(super) fn compose_operational_settings_access_backend() -> OperationalSettin
                 .await
             })
         }),
-        load_page_hash_matches_page: Arc::new(|database_file, page_hash, page, size| {
-            Box::pin(async move {
-                infrastructure_page_hashes::load_page_hash_matches_page(
-                    database_file.as_path(),
-                    &page_hash,
-                    page,
-                    size,
-                )
-                .await
-            })
-        }),
         load_page_hash_thumbnail: Arc::new(|database_file, page_hash| {
             Box::pin(async move {
                 infrastructure_page_hashes::load_page_hash_thumbnail(
@@ -427,12 +416,25 @@ pub(super) fn compose_operational_settings_access_backend() -> OperationalSettin
                 .await
             })
         }),
-        load_page_hashes_unknown_page: Arc::new(|database_file, page, size| {
+        load_page_hashes_unknown_page: Arc::new(|database_file, page, size, sorts| {
             Box::pin(async move {
                 infrastructure_page_hashes::load_page_hashes_unknown_page(
                     database_file.as_path(),
                     page,
                     size,
+                    &sorts,
+                )
+                .await
+            })
+        }),
+        load_page_hash_matches_page: Arc::new(|database_file, page_hash, page, size, sorts| {
+            Box::pin(async move {
+                infrastructure_page_hashes::load_page_hash_matches_page(
+                    database_file.as_path(),
+                    &page_hash,
+                    page,
+                    size,
+                    &sorts,
                 )
                 .await
             })

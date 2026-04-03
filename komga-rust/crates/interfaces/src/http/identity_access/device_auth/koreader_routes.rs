@@ -1,6 +1,14 @@
 use super::*;
 
-pub async fn koreader_user_create() -> Response {
+fn has_koreader_user_create_auth_headers(headers: &HeaderMap) -> bool {
+    headers.contains_key("X-Auth-User") || headers.contains_key("x-auth-user")
+}
+
+pub async fn koreader_user_create(headers: HeaderMap) -> Response {
+    if has_koreader_user_create_auth_headers(&headers) && !koreader_authorized(&headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+
     (StatusCode::FORBIDDEN, "User creation is disabled").into_response()
 }
 

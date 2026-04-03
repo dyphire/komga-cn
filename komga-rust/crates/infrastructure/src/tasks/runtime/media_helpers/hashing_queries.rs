@@ -3,6 +3,7 @@ use super::*;
 use crate::tasks::{
     load_book_file_path, load_books_requiring_analysis as load_persisted_books_requiring_analysis,
     load_books_with_missing_page_hash as load_persisted_books_with_missing_page_hash,
+    load_books_with_undersized_generated_thumbnails,
     load_books_without_selected_thumbnails as load_persisted_books_without_selected_thumbnails,
     load_duplicate_pages_to_delete as load_persisted_duplicate_pages_to_delete, persist_book_hash,
 };
@@ -78,6 +79,15 @@ pub(in crate::task_queue) fn find_books_without_selected_thumbnails(
 ) -> Result<Vec<String>, TaskExecutionError> {
     let runtime = runtime.task_runtime_context();
     load_persisted_books_without_selected_thumbnails(runtime.database_file.as_path())
+        .map_err(TaskExecutionError::runtime)
+}
+
+pub(in crate::task_queue) fn find_books_with_undersized_generated_thumbnails(
+    runtime: &RuntimeConfig,
+    max_edge: i64,
+) -> Result<Vec<String>, TaskExecutionError> {
+    let runtime = runtime.task_runtime_context();
+    load_books_with_undersized_generated_thumbnails(runtime.database_file.as_path(), max_edge)
         .map_err(TaskExecutionError::runtime)
 }
 

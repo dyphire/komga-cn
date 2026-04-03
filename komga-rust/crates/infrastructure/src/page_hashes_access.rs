@@ -3,9 +3,11 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
+use std::io::Cursor;
 use zip::ZipArchive;
 
 use crate::rar_support::read_rar_entry_bytes;
+use crate::sqlite::connect_pool;
 use crate::sqlite::read_models::{
     load_page_hash_matches_page as load_page_hash_matches_page_model,
     load_page_hash_thumbnail as load_page_hash_thumbnail_model,
@@ -37,8 +39,9 @@ pub async fn load_page_hashes_unknown_page(
     database_file: &Path,
     page: u64,
     size: u64,
+    sorts: &[String],
 ) -> Result<Value, sqlx::Error> {
-    load_page_hashes_unknown_page_model(database_file, page, size).await
+    load_page_hashes_unknown_page_model(database_file, page, size, sorts).await
 }
 
 pub async fn load_page_hash_matches_page(
@@ -46,8 +49,9 @@ pub async fn load_page_hash_matches_page(
     page_hash: &str,
     page: u64,
     size: u64,
+    sorts: &[String],
 ) -> Result<Value, sqlx::Error> {
-    load_page_hash_matches_page_model(database_file, page_hash, page, size).await
+    load_page_hash_matches_page_model(database_file, page_hash, page, size, sorts).await
 }
 
 pub async fn load_page_hash_thumbnail(
@@ -85,7 +89,17 @@ pub async fn upsert_page_hash(
     size: Option<i64>,
     action: &str,
 ) -> Result<(), sqlx::Error> {
+    let existed = page_hash_exists(database_file, page_hash).await?;
     upsert_page_hash_model(database_file, page_hash, size, action).await
+        ?;
+
+    if !existed
+        && let Some(thumbnail) = build_known_page_hash_thumbnail(database_file, page_hash).await?
+    {
+        insert_page_hash_thumbnail(database_file, page_hash, &thumbnail).await?;
+    }
+
+    Ok(())
 }
 
 pub async fn delete_all_page_hash_matches(
@@ -132,6 +146,59 @@ fn read_unknown_thumbnail_bytes(source_path: &Path, file_name: &str) -> Option<V
     }
 
     None
+}
+
+async fn page_hash_exists(database_file: &Path, page_hash: &str) -> Result<bool, sqlx::Error> {
+    let pool = connect_pool(database_file, 1).await?;
+    let exists = sqlx::query_scalar::<_, i64>("SELECT 1 FROM PAGE_HASH WHERE HASH = ? LIMIT 1")
+        .bind(page_hash)
+        .fetch_optional(&pool)
+        .await?
+        .is_some();
+    Ok(exists)
+}
+
+async fn build_known_page_hash_thumbnail(
+    database_file: &Path,
+    page_hash: &str,
+) -> Result<Option<Vec<u8>>, sqlx::Error> {
+    let Some(source) = load_unknown_page_hash_source(database_file, page_hash).await? else {
+        return Ok(None);
+    };
+    if !source.media_type.starts_with("image/") {
+        return Ok(None);
+    }
+
+    let source_path = PathBuf::from(source.library_root).join(source.book_url);
+    let Some(bytes) = read_unknown_thumbnail_bytes(&source_path, &source.file_name) else {
+        return Ok(None);
+    };
+
+    Ok(encode_image_bytes_as_thumbnail_jpeg(&bytes, 500))
+}
+
+async fn insert_page_hash_thumbnail(
+    database_file: &Path,
+    page_hash: &str,
+    thumbnail: &[u8],
+) -> Result<(), sqlx::Error> {
+    let pool = connect_pool(database_file, 1).await?;
+    sqlx::query(
+        "INSERT INTO PAGE_HASH_THUMBNAIL (HASH, THUMBNAIL) VALUES (?, ?)",
+    )
+    .bind(page_hash)
+    .bind(thumbnail)
+    .execute(&pool)
+    .await?;
+    Ok(())
+}
+
+fn encode_image_bytes_as_thumbnail_jpeg(bytes: &[u8], max_edge: u32) -> Option<Vec<u8>> {
+    let image = image::load_from_memory(bytes).ok()?;
+    let resized = image.thumbnail(max_edge.max(1), max_edge.max(1));
+    let mut output = Cursor::new(Vec::new());
+    resized.write_to(&mut output, image::ImageFormat::Jpeg).ok()?;
+    Some(output.into_inner())
 }
 
 #[cfg(test)]

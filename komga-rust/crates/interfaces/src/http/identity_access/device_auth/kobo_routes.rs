@@ -755,7 +755,7 @@ pub async fn kobo_book_file_epub(
 
 pub async fn kobo_book_thumbnail(
     Extension(state): Extension<OperationalState>,
-    Path((auth_token, thumbnail_id, _width, _height, _is_greyscale)): Path<(
+    Path((auth_token, thumbnail_id, _, _, _)): Path<(
         String,
         String,
         String,
@@ -793,7 +793,7 @@ pub async fn kobo_book_thumbnail(
 
 pub async fn kobo_book_thumbnail_with_quality(
     Extension(state): Extension<OperationalState>,
-    Path((auth_token, thumbnail_id, _width, _height, _quality, _is_greyscale)): Path<(
+    Path((auth_token, thumbnail_id, _, _, _, _)): Path<(
         String,
         String,
         String,
@@ -855,7 +855,7 @@ pub async fn kobo_catch_all(
 
     match proxy_kobo_catch_all_request(&method, &path, uri.query(), &headers, &body).await {
         Ok(response) => response,
-        Err(()) => StatusCode::BAD_GATEWAY.into_response(),
+        Err(status) => status.into_response(),
     }
 }
 
@@ -865,15 +865,20 @@ async fn proxy_kobo_catch_all_request(
     query: Option<&str>,
     headers: &HeaderMap,
     body: &Bytes,
-) -> Result<Response, ()> {
-    let mut target = format!("https://storeapi.kobo.com/{}", path.trim_start_matches('/'));
+) -> Result<Response, StatusCode> {
+    let base_url = std::env::var("KOMGA_RUST_KOBO_PROXY_URL")
+        .unwrap_or_else(|_| "https://storeapi.kobo.com".to_string());
+    let mut target = format!("{}/{}", base_url.trim_end_matches('/'), path.trim_start_matches('/'));
     if let Some(query) = query.map(str::trim).filter(|query| !query.is_empty()) {
         target.push('?');
         target.push_str(query);
     }
 
-    let client = Client::builder().build().map_err(|_| ())?;
-    let request_method = reqwest::Method::from_bytes(method.as_str().as_bytes()).map_err(|_| ())?;
+    let client = Client::builder()
+        .build()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let request_method = reqwest::Method::from_bytes(method.as_str().as_bytes())
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let mut request = client.request(request_method, target);
 
     for (name, value) in headers {
@@ -896,17 +901,45 @@ async fn proxy_kobo_catch_all_request(
         request = request.body(body.clone());
     }
 
-    let response = request.send().await.map_err(|_| ())?;
+    let response = request
+        .send()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let status =
-        StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+        StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
     let response_headers = response.headers().clone();
-    let response_body = response.json::<Value>().await.unwrap_or_else(|_| json!({}));
+    let response_bytes = response
+        .bytes()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let mut proxied = Json(response_body).into_response();
-    *proxied.status_mut() = status;
-    for (name, value) in &response_headers {
-        if name.as_str().to_ascii_lowercase().starts_with("x-kobo-") {
-            proxied.headers_mut().append(name.clone(), value.clone());
+    if status.is_client_error() || status.is_server_error() {
+        return Ok(status.into_response());
+    }
+    if response_bytes.is_empty() {
+        let mut proxied = status.into_response();
+        for (name, value) in &response_headers {
+            if name.as_str().to_ascii_lowercase().starts_with("x-kobo-") {
+                proxied.headers_mut().append(name.clone(), value.clone());
+            }
+        }
+        return Ok(proxied);
+    }
+
+    let (mut proxied, include_kobo_headers) = match serde_json::from_slice::<Value>(&response_bytes) {
+        Ok(response_body) => {
+            let mut response = Json(response_body).into_response();
+            *response.status_mut() = status;
+            (response, true)
+        }
+        Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
+    };
+
+    if include_kobo_headers {
+        for (name, value) in &response_headers {
+            if name.as_str().to_ascii_lowercase().starts_with("x-kobo-") {
+                proxied.headers_mut().append(name.clone(), value.clone());
+            }
         }
     }
     Ok(proxied)

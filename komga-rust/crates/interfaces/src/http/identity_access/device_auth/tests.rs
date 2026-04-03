@@ -515,7 +515,7 @@ async fn koreader_user_auth_rejects_requests_without_auth() {
 
 #[tokio::test]
 async fn koreader_user_create_returns_forbidden() {
-    let response = koreader_user_create().await;
+    let response = koreader_user_create(HeaderMap::new()).await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 

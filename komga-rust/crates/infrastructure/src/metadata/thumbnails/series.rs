@@ -77,7 +77,6 @@ pub async fn load_selected_series_thumbnail(
 
 pub async fn load_series_thumbnail_by_id(
     database_file: &Path,
-    series_id: &str,
     thumbnail_id: &str,
 ) -> Result<Option<EntityThumbnailBinary>, String> {
     if !database_file.exists() {
@@ -90,11 +89,10 @@ pub async fn load_series_thumbnail_by_id(
     let row = sqlx::query(
         "SELECT MEDIA_TYPE, THUMBNAIL \
          FROM THUMBNAIL_SERIES \
-         WHERE ID = ? AND SERIES_ID = ? \
+         WHERE ID = ? \
          LIMIT 1",
     )
     .bind(thumbnail_id)
-    .bind(series_id)
     .fetch_optional(&pool)
     .await
     .map_err(|error| format!("query single series thumbnail: {error}"))?;
@@ -224,41 +222,39 @@ pub async fn select_series_thumbnail(
         return Ok(false);
     }
 
-    let target_exists = sqlx::query(
-        "SELECT 1 AS FOUND \
+    let target_series_id = sqlx::query(
+        "SELECT SERIES_ID \
          FROM THUMBNAIL_SERIES \
-         WHERE ID = ? AND SERIES_ID = ? \
+         WHERE ID = ? \
          LIMIT 1",
     )
     .bind(thumbnail_id)
-    .bind(series_id)
     .fetch_optional(&mut *tx)
     .await
     .map_err(|error| format!("query target series thumbnail for select: {error}"))?
-    .is_some();
-    if !target_exists {
+    .map(|row| row.get::<String, _>("SERIES_ID"));
+    let Some(target_series_id) = target_series_id else {
         tx.rollback()
             .await
             .map_err(|error| format!("rollback series thumbnail select tx: {error}"))?;
         return Ok(false);
-    }
+    };
 
     sqlx::query(
         "UPDATE THUMBNAIL_SERIES \
          SET SELECTED = 0 \
          WHERE SERIES_ID = ?",
     )
-    .bind(series_id)
+    .bind(&target_series_id)
     .execute(&mut *tx)
     .await
     .map_err(|error| format!("clear selected series thumbnails for select: {error}"))?;
     sqlx::query(
         "UPDATE THUMBNAIL_SERIES \
          SET SELECTED = 1 \
-         WHERE ID = ? AND SERIES_ID = ?",
+         WHERE ID = ?",
     )
     .bind(thumbnail_id)
-    .bind(series_id)
     .execute(&mut *tx)
     .await
     .map_err(|error| format!("mark selected series thumbnail: {error}"))?;

@@ -40,18 +40,18 @@ pub(crate) use transient_books::{
     get_transient_book_page, post_transient_book_analyze, post_transient_books,
 };
 
-fn query_value<'a>(query: &'a str, key: &str) -> Option<&'a str> {
+fn query_value(query: &str, key: &str) -> Option<String> {
     query.split('&').find_map(|pair| {
         let mut parts = pair.splitn(2, '=');
         let name = parts.next().unwrap_or_default();
         if name != key {
             return None;
         }
-        Some(parts.next().unwrap_or_default())
+        Some(decode_query_component(parts.next().unwrap_or_default()))
     })
 }
 
-fn query_values<'a>(query: &'a str, key: &str) -> Vec<&'a str> {
+fn query_values(query: &str, key: &str) -> Vec<String> {
     query
         .split('&')
         .filter_map(|pair| {
@@ -60,9 +60,59 @@ fn query_values<'a>(query: &'a str, key: &str) -> Vec<&'a str> {
             if name != key {
                 return None;
             }
-            Some(parts.next().unwrap_or_default())
+            Some(decode_query_component(parts.next().unwrap_or_default()))
         })
         .collect()
+}
+
+fn decode_query_component(value: &str) -> String {
+    let mut decoded = String::with_capacity(value.len());
+    let mut bytes = value.as_bytes().iter().copied();
+    while let Some(byte) = bytes.next() {
+        if byte == b'%' {
+            let high = bytes.next();
+            let low = bytes.next();
+            if let (Some(high), Some(low)) = (high, low) {
+                let hex = [high, low];
+                if let Ok(hex) = std::str::from_utf8(&hex)
+                    && let Ok(parsed) = u8::from_str_radix(hex, 16)
+                {
+                    decoded.push(parsed as char);
+                    continue;
+                }
+            }
+            decoded.push('%');
+            if let Some(high) = high {
+                decoded.push(high as char);
+            }
+            if let Some(low) = low {
+                decoded.push(low as char);
+            }
+            continue;
+        }
+        if byte == b'+' {
+            decoded.push(' ');
+        } else {
+            decoded.push(byte as char);
+        }
+    }
+    decoded
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_query_component, query_value, query_values};
+
+    #[test]
+    fn query_helpers_decode_percent_encoded_values() {
+        assert_eq!(query_value("sort=pageNumber%2Cdesc", "sort"), Some("pageNumber,desc".to_string()));
+        assert_eq!(query_values("sort=bookId%2Casc&sort=pageNumber%2Cdesc", "sort"), vec!["bookId,asc".to_string(), "pageNumber,desc".to_string()]);
+    }
+
+    #[test]
+    fn decode_query_component_decodes_plus_and_percent_sequences() {
+        assert_eq!(decode_query_component("hello+world%2Cteam"), "hello world,team");
+    }
 }
 
 fn normalize_requested_path(requested_path: &str, runtime_config_dir: Option<&PathBuf>) -> PathBuf {

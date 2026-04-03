@@ -42,15 +42,6 @@ pub async fn load_client_settings_global(
             }),
         );
     }
-    if !map.contains_key("webui.oauth2.hide_login") {
-        map.insert(
-            "webui.oauth2.hide_login".to_string(),
-            json!({
-                "value": "false",
-                "allowUnauthorized": true,
-            }),
-        );
-    }
     Ok(Value::Object(map))
 }
 

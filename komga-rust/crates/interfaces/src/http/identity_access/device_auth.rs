@@ -9,8 +9,7 @@ use komga_application::identity_access::{
     AuthOutcome, AuthUser, KOBO_SYNC_ITEM_LIMIT, KoboSyncPointState, build_kobo_sync_events,
     build_komga_sync_token_payload, configured_api_key_identity, decode_or_passthrough_sync_token,
     generated_kobo_api_token, generated_kobo_token_triplet, is_kobo_store_sync_token_candidate,
-    now_sync_marker, parse_komga_sync_token_payload, resolve_kobo_user, resolve_koreader_user_id,
-    user_id,
+    now_sync_marker, parse_komga_sync_token_payload, resolve_koreader_user_id, user_id,
 };
 use oauth2::{
     AuthUrl, ClientId, ClientSecret, CsrfToken, RedirectUrl, Scope, TokenUrl, basic::BasicClient,

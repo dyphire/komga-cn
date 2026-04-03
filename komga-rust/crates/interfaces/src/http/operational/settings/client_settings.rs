@@ -234,11 +234,7 @@ fn parse_client_settings_delete_keys(body: &[u8]) -> Result<Vec<String>, Respons
 
     let mut keys = Vec::new();
     for item in items {
-        let Some(key) = item
-            .as_str()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        else {
+        let Some(key) = item.as_str().filter(|value| !value.is_empty()) else {
             return Err(StatusCode::BAD_REQUEST.into_response());
         };
         if !is_valid_client_settings_key(key) {
@@ -288,6 +284,12 @@ fn is_valid_client_settings_following_segment(segment: &str) -> bool {
     if segment.is_empty() {
         return false;
     }
+    let Some(first) = segment.chars().next() else {
+        return false;
+    };
+    if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
+        return false;
+    }
     let Some(last) = segment.chars().last() else {
         return false;
     };
@@ -302,7 +304,10 @@ fn is_valid_client_settings_following_segment(segment: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_client_settings_global_payload, parse_client_settings_user_payload};
+    use super::{
+        parse_client_settings_delete_keys, parse_client_settings_global_payload,
+        parse_client_settings_user_payload,
+    };
 
     #[test]
     fn global_payload_preserves_non_blank_whitespace() {
@@ -338,5 +343,23 @@ mod tests {
             settings,
             vec![("reader.1panel".to_string(), "spread".to_string(), false,)]
         );
+    }
+
+    #[test]
+    fn delete_keys_reject_whitespace_padded_values() {
+        let response = parse_client_settings_delete_keys(br#"[" reader.zoom "]"#)
+            .expect_err("whitespace-padded keys should fail raw validation");
+
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn delete_keys_reject_following_segments_starting_with_underscore_or_dash() {
+        for invalid_payload in [br#"["reader._zoom"]"#.as_slice(), br#"["reader.-zoom"]"#.as_slice()] {
+            let response = parse_client_settings_delete_keys(invalid_payload)
+                .expect_err("following segments must start with lowercase letter or digit");
+
+            assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        }
     }
 }

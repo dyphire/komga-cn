@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use reqwest::Url;
 use serde_json::{Value, json};
 use sqlx::Row;
 
@@ -68,13 +69,14 @@ pub async fn load_page_hashes_page(
     })
     .collect::<Vec<_>>();
 
-    Ok(page_payload(page, size, offset, total_elements, content))
+    Ok(page_payload(page, size, offset, total_elements, content, true))
 }
 
 pub async fn load_page_hashes_unknown_page(
     database_file: &Path,
     page: u64,
     size: u64,
+    sorts: &[String],
 ) -> Result<Value, sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
 
@@ -95,18 +97,24 @@ pub async fn load_page_hashes_unknown_page(
 
     let size = size.max(1);
     let offset = page.saturating_mul(size);
+    let order_by = unknown_page_hash_order_by(sorts);
 
-    let content = sqlx::query(
-        "SELECT mp.FILE_HASH AS HASH, mp.FILE_SIZE AS SIZE, COUNT(mp.BOOK_ID) AS MATCH_COUNT \
+    let mut sql = String::from(
+        "SELECT mp.FILE_HASH AS HASH, mp.FILE_SIZE AS SIZE, COUNT(mp.BOOK_ID) AS MATCH_COUNT, \
+         (COUNT(mp.BOOK_ID) * mp.FILE_SIZE) AS TOTAL_SIZE \
          FROM MEDIA_PAGE mp \
          WHERE mp.FILE_HASH <> '' \
          AND NOT EXISTS (SELECT 1 FROM PAGE_HASH ph WHERE ph.HASH = mp.FILE_HASH) \
          GROUP BY mp.FILE_HASH, mp.FILE_SIZE \
-         HAVING COUNT(mp.BOOK_ID) > 1 \
-         ORDER BY MATCH_COUNT DESC, HASH ASC \
-         LIMIT ? \
-         OFFSET ?",
-    )
+         HAVING COUNT(mp.BOOK_ID) > 1",
+    );
+    if !order_by.is_empty() {
+        sql.push_str(" ORDER BY ");
+        sql.push_str(&order_by.join(", "));
+    }
+    sql.push_str(" LIMIT ? OFFSET ?");
+
+    let content = sqlx::query(&sql)
     .bind((size.min(i64::MAX as u64)) as i64)
     .bind((offset.min(i64::MAX as u64)) as i64)
     .fetch_all(&pool)
@@ -121,7 +129,14 @@ pub async fn load_page_hashes_unknown_page(
     })
     .collect::<Vec<_>>();
 
-    Ok(page_payload(page, size, offset, total_elements, content))
+    Ok(page_payload(
+        page,
+        size,
+        offset,
+        total_elements,
+        content,
+        !order_by.is_empty(),
+    ))
 }
 
 pub async fn load_page_hash_matches_page(
@@ -129,6 +144,7 @@ pub async fn load_page_hash_matches_page(
     page_hash: &str,
     page: u64,
     size: u64,
+    sorts: &[String],
 ) -> Result<Value, sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
 
@@ -140,35 +156,57 @@ pub async fn load_page_hash_matches_page(
 
     let size = size.max(1);
     let offset = page.saturating_mul(size);
+    let order_by = page_hash_match_order_by(sorts);
 
-    let content = sqlx::query(
-        "SELECT mp.BOOK_ID, b.URL, mp.NUMBER, mp.FILE_NAME, mp.FILE_SIZE, mp.MEDIA_TYPE \
+    let mut sql = String::from(
+        "SELECT mp.BOOK_ID, b.URL, mp.NUMBER, mp.FILE_NAME, mp.FILE_SIZE, mp.MEDIA_TYPE, \
+         (SELECT COUNT(*) FROM MEDIA_PAGE mp_count WHERE mp_count.FILE_HASH = ?) AS MATCH_COUNT, \
+         ((SELECT COUNT(*) FROM MEDIA_PAGE mp_total WHERE mp_total.FILE_HASH = ?) * COALESCE(mp.FILE_SIZE, 0)) AS TOTAL_SIZE \
          FROM MEDIA_PAGE mp \
          LEFT JOIN BOOK b ON b.ID = mp.BOOK_ID \
-         WHERE mp.FILE_HASH = ? \
-         ORDER BY mp.BOOK_ID ASC, mp.NUMBER ASC \
-         LIMIT ? \
-         OFFSET ?",
-    )
+         WHERE mp.FILE_HASH = ?",
+    );
+    if !order_by.is_empty() {
+        sql.push_str(" ORDER BY ");
+        sql.push_str(&order_by.join(", "));
+    }
+    sql.push_str(" LIMIT ? OFFSET ?");
+
+    let content = sqlx::query(&sql)
+    .bind(page_hash)
+    .bind(page_hash)
     .bind(page_hash)
     .bind((size.min(i64::MAX as u64)) as i64)
     .bind((offset.min(i64::MAX as u64)) as i64)
     .fetch_all(&pool)
-    .await?
-    .into_iter()
-    .map(|row| {
-        json!({
-            "bookId": row.get::<String, _>("BOOK_ID"),
-            "url": row.get::<String, _>("URL"),
-            "pageNumber": row.get::<i64, _>("NUMBER") + 1,
-            "fileName": row.get::<String, _>("FILE_NAME"),
-            "fileSize": row.get::<Option<i64>, _>("FILE_SIZE").unwrap_or_default(),
-            "mediaType": row.get::<String, _>("MEDIA_TYPE"),
+        .await?
+        .into_iter()
+        .map(|row| -> Result<Value, sqlx::Error> {
+            let raw_url = row.get::<String, _>("URL");
+            let Some(file_size) = row.get::<Option<i64>, _>("FILE_SIZE") else {
+                return Err(sqlx::Error::Protocol(
+                    "page hash match FILE_SIZE must not be null".to_string(),
+                ));
+            };
+            Ok(json!({
+                "bookId": row.get::<String, _>("BOOK_ID"),
+                "url": url_to_file_path(raw_url.as_str())?,
+                "pageNumber": row.get::<i64, _>("NUMBER") + 1,
+                "fileName": row.get::<String, _>("FILE_NAME"),
+                "fileSize": file_size,
+                "mediaType": row.get::<String, _>("MEDIA_TYPE"),
+            }))
         })
-    })
-    .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(page_payload(page, size, offset, total_elements, content))
+    Ok(page_payload(
+        page,
+        size,
+        offset,
+        total_elements,
+        content,
+        !order_by.is_empty(),
+    ))
 }
 
 pub async fn load_page_hash_thumbnail(
@@ -222,6 +260,7 @@ fn page_payload(
     offset: u64,
     total_elements: u64,
     content: Vec<Value>,
+    sorted: bool,
 ) -> Value {
     let total_pages = if total_elements == 0 {
         0
@@ -238,9 +277,9 @@ fn page_payload(
             "pageNumber": page,
             "pageSize": size,
             "sort": {
-                "empty": false,
-                "sorted": true,
-                "unsorted": false,
+                "empty": !sorted,
+                "sorted": sorted,
+                "unsorted": !sorted,
             },
             "offset": offset,
             "paged": true,
@@ -253,13 +292,77 @@ fn page_payload(
         "size": size,
         "number": page,
         "sort": {
-            "empty": false,
-            "sorted": true,
-            "unsorted": false,
+            "empty": !sorted,
+            "sorted": sorted,
+            "unsorted": !sorted,
         },
         "numberOfElements": number_of_elements,
         "empty": number_of_elements == 0,
     })
+}
+
+fn unknown_page_hash_order_by(sorts: &[String]) -> Vec<String> {
+    sorts
+        .iter()
+        .filter_map(|sort| {
+            let mut parts = sort.split(',');
+            let property = parts.next()?.trim();
+            let direction = parts.next().unwrap_or("asc").trim();
+            let column = match property {
+                "hash" => "HASH",
+                "fileSize" => "SIZE",
+                "matchCount" => "MATCH_COUNT",
+                "totalSize" => "TOTAL_SIZE",
+                _ => return None,
+            };
+            let direction = if direction.eq_ignore_ascii_case("desc") {
+                "DESC"
+            } else {
+                "ASC"
+            };
+            Some(format!("{column} {direction}"))
+        })
+        .collect()
+}
+
+fn page_hash_match_order_by(sorts: &[String]) -> Vec<String> {
+    sorts
+        .iter()
+        .filter_map(|sort| {
+            let mut parts = sort.split(',');
+            let property = parts.next()?.trim();
+            let direction = parts.next().unwrap_or("asc").trim();
+            let column = match property {
+                "hash" => "mp.FILE_HASH",
+                "fileSize" => "mp.FILE_SIZE",
+                "matchCount" => "MATCH_COUNT",
+                "totalSize" => "TOTAL_SIZE",
+                "url" => "b.URL",
+                "bookId" => "mp.BOOK_ID",
+                "pageNumber" => "mp.NUMBER",
+                _ => return None,
+            };
+            let direction = if direction.eq_ignore_ascii_case("desc") {
+                "DESC"
+            } else {
+                "ASC"
+            };
+            Some(format!("{column} {direction}"))
+        })
+        .collect()
+}
+
+fn url_to_file_path(value: &str) -> Result<String, sqlx::Error> {
+    let url = Url::parse(value).map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
+    if url.scheme() != "file" {
+        return Err(sqlx::Error::Protocol(format!(
+            "page hash match URL must use file scheme: {value}",
+        )));
+    }
+
+    url.to_file_path()
+        .map(|path| path.to_string_lossy().into_owned())
+        .map_err(|()| sqlx::Error::Protocol(format!("invalid file url: {value}")))
 }
 
 fn sqlite_datetime_to_utc(value: &str) -> String {

@@ -4,8 +4,11 @@ use axum::extract::Extension;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::time::{SystemTime, UNIX_EPOCH};
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 use crate::http::identity_access::auth::{require_admin, resolved_auth_user, user_id};
 use crate::operational_settings_access::announcements as announcements_access;
@@ -27,7 +30,7 @@ pub(crate) async fn get_announcements(
     let feed = match load_cached_announcements_feed(&state).await {
         Ok(Some(feed)) => feed,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
     let read_ids = match announcements_access::load_announcement_read_ids(
@@ -56,20 +59,9 @@ pub(crate) async fn put_announcements(
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    let Ok(payload) = serde_json::from_slice::<Value>(&body) else {
+    let Ok(ids) = parse_announcement_ids(&body) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
-    let Some(announcement_ids) = payload.as_array() else {
-        return StatusCode::BAD_REQUEST.into_response();
-    };
-
-    let mut ids = Vec::with_capacity(announcement_ids.len());
-    for id in announcement_ids {
-        let Some(id) = id.as_str().map(str::trim).filter(|value| !value.is_empty()) else {
-            return StatusCode::BAD_REQUEST.into_response();
-        };
-        ids.push(id.to_string());
-    }
 
     if announcements_access::save_announcements_read(
         state.runtime.database_file.as_path(),
@@ -85,6 +77,25 @@ pub(crate) async fn put_announcements(
     StatusCode::NO_CONTENT.into_response()
 }
 
+fn parse_announcement_ids(body: &[u8]) -> Result<Vec<String>, ()> {
+    let payload = serde_json::from_slice::<Value>(body).map_err(|_| ())?;
+    let announcement_ids = payload.as_array().ok_or(())?;
+
+    let mut ids = Vec::with_capacity(announcement_ids.len());
+    let mut seen = std::collections::BTreeSet::new();
+    for id in announcement_ids {
+        let Some(id) = id.as_str() else {
+            return Err(());
+        };
+        let id = id.to_string();
+        if seen.insert(id.clone()) {
+            ids.push(id);
+        }
+    }
+
+    Ok(ids)
+}
+
 pub(crate) async fn get_releases(
     Extension(state): Extension<OperationalState>,
     headers: HeaderMap,
@@ -96,7 +107,7 @@ pub(crate) async fn get_releases(
     let releases = match load_cached_releases(&state).await {
         Ok(Some(releases)) => releases,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
     Json(releases).into_response()
@@ -104,24 +115,38 @@ pub(crate) async fn get_releases(
 
 async fn load_cached_announcements_feed(
     state: &OperationalState,
-) -> Result<Option<Value>, reqwest::Error> {
+) -> Result<Option<Value>, String> {
     const CACHE_TTL_SECONDS: u64 = 60 * 60;
     let now = now_epoch_seconds();
     {
-        let cache = state
+        let mut cache = state
             .announcements_cache
             .lock()
             .expect("announcements cache lock should not be poisoned");
-        if let Some(cached) = cache.as_ref()
-            && now.saturating_sub(cached.fetched_at_epoch_seconds) < CACHE_TTL_SECONDS
-        {
-            return Ok(Some(cached.payload.clone()));
+        if let Some(payload) = load_remote_cache_entry_on_access(&mut cache, now, CACHE_TTL_SECONDS) {
+            return Ok(Some(payload));
         }
     }
 
     let url = std::env::var("KOMGA_RUST_ANNOUNCEMENTS_URL")
         .unwrap_or_else(|_| "https://komga.org/blog/feed.json".to_string());
-    let payload = Client::new().get(url).send().await?.json::<Value>().await?;
+    let response = Client::new()
+        .get(url)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?
+        .error_for_status()
+        .map_err(|error| error.to_string())?;
+    let bytes = response.bytes().await.map_err(|error| error.to_string())?;
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+    let payload = serde_json::from_slice::<Value>(&bytes).map_err(|error| error.to_string())?;
+    if payload.is_null() {
+        return Ok(None);
+    }
+    let dto = serde_json::from_value::<AnnouncementsFeedDto>(payload).map_err(|error| error.to_string())?;
+    let payload = serde_json::to_value(dto).map_err(|error| error.to_string())?;
 
     {
         let mut cache = state
@@ -137,18 +162,98 @@ async fn load_cached_announcements_feed(
     Ok(Some(payload))
 }
 
+fn load_remote_cache_entry_on_access(
+    cache: &mut Option<super::super::super::RemoteCacheEntry>,
+    now_epoch_seconds: u64,
+    ttl_seconds: u64,
+) -> Option<Value> {
+    let cached = cache.as_mut()?;
+    if now_epoch_seconds.saturating_sub(cached.fetched_at_epoch_seconds) >= ttl_seconds {
+        return None;
+    }
+    cached.fetched_at_epoch_seconds = now_epoch_seconds;
+    Some(cached.payload.clone())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AnnouncementsFeedDto {
+    version: String,
+    title: String,
+    #[serde(rename = "home_page_url")]
+    home_page_url: Option<String>,
+    description: Option<String>,
+    #[serde(default)]
+    items: Vec<AnnouncementItemDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AnnouncementItemDto {
+    id: String,
+    url: Option<String>,
+    title: Option<String>,
+    summary: Option<String>,
+    #[serde(rename = "content_html")]
+    content_html: Option<String>,
+    #[serde(with = "optional_rfc3339")]
+    #[serde(rename = "date_modified")]
+    date_modified: Option<OffsetDateTime>,
+    author: Option<AnnouncementAuthorDto>,
+    #[serde(default)]
+    tags: std::collections::BTreeSet<String>,
+    #[serde(rename = "_komga")]
+    komga_extension: Option<AnnouncementKomgaExtensionDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AnnouncementAuthorDto {
+    name: Option<String>,
+    url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AnnouncementKomgaExtensionDto {
+    read: bool,
+}
+
+mod optional_rfc3339 {
+    use super::{OffsetDateTime, Rfc3339};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(value: &Option<OffsetDateTime>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match value {
+            Some(value) => serializer.serialize_some(
+                &value
+                    .format(&Rfc3339)
+                    .map_err(serde::ser::Error::custom)?,
+            ),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<OffsetDateTime>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Option::<String>::deserialize(deserializer)?;
+        value
+            .map(|value| OffsetDateTime::parse(&value, &Rfc3339).map_err(serde::de::Error::custom))
+            .transpose()
+    }
+}
+
 async fn load_cached_releases(state: &OperationalState) -> Result<Option<Value>, reqwest::Error> {
     const CACHE_TTL_SECONDS: u64 = 60 * 60;
     let now = now_epoch_seconds();
     {
-        let cache = state
+        let mut cache = state
             .releases_cache
             .lock()
             .expect("releases cache lock should not be poisoned");
-        if let Some(cached) = cache.as_ref()
-            && now.saturating_sub(cached.fetched_at_epoch_seconds) < CACHE_TTL_SECONDS
-        {
-            return Ok(Some(cached.payload.clone()));
+        if let Some(payload) = load_remote_cache_entry_on_access(&mut cache, now, CACHE_TTL_SECONDS) {
+            return Ok(Some(payload));
         }
     }
 
@@ -160,7 +265,8 @@ async fn load_cached_releases(state: &OperationalState) -> Result<Option<Value>,
         .header("User-Agent", "komga-rust-runtime")
         .send()
         .await?
-        .json::<Value>()
+        .error_for_status()?
+        .json::<Vec<GithubReleaseUpstreamDto>>()
         .await?;
 
     let payload = map_github_releases(upstream);
@@ -178,27 +284,61 @@ async fn load_cached_releases(state: &OperationalState) -> Result<Option<Value>,
     Ok(Some(payload))
 }
 
-fn map_github_releases(upstream: Value) -> Value {
-    let Some(items) = upstream.as_array() else {
-        return Value::Array(Vec::new());
-    };
-
+fn map_github_releases(upstream: Vec<GithubReleaseUpstreamDto>) -> Value {
     Value::Array(
-        items
+        upstream
             .iter()
             .enumerate()
             .map(|(index, release)| {
+                let release_date = release
+                    .published_at
+                    .format(&Rfc3339)
+                    .expect("release published_at should format as rfc3339");
                 json!({
-                    "version": release.get("tag_name").cloned().unwrap_or(Value::Null),
-                    "releaseDate": release.get("published_at").cloned().unwrap_or(Value::Null),
-                    "url": release.get("html_url").cloned().unwrap_or(Value::Null),
+                    "version": release.tag_name,
+                    "releaseDate": release_date,
+                    "url": release.html_url,
                     "latest": index == 0,
-                    "preRelease": release.get("prerelease").cloned().unwrap_or(Value::Bool(false)),
-                    "description": release.get("body").cloned().unwrap_or(Value::Null),
+                    "preRelease": release.prerelease,
+                    "description": release.body,
                 })
             })
             .collect(),
     )
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct GithubReleaseUpstreamDto {
+    html_url: String,
+    tag_name: String,
+    #[serde(with = "required_rfc3339")]
+    published_at: OffsetDateTime,
+    body: String,
+    prerelease: bool,
+}
+
+mod required_rfc3339 {
+    use super::{OffsetDateTime, Rfc3339};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(value: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(
+            &value
+                .format(&Rfc3339)
+                .map_err(serde::ser::Error::custom)?,
+        )
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<OffsetDateTime, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        OffsetDateTime::parse(&value, &Rfc3339).map_err(serde::de::Error::custom)
+    }
 }
 
 fn apply_announcement_read_projection(feed: Value, read_ids: &[String]) -> Value {
@@ -225,6 +365,42 @@ fn apply_announcement_read_projection(feed: Value, read_ids: &[String]) -> Value
     }
 
     projected
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{load_remote_cache_entry_on_access, parse_announcement_ids};
+    use crate::http::RemoteCacheEntry;
+    use serde_json::json;
+
+    #[test]
+    fn parse_announcement_ids_deduplicates_duplicate_strings() {
+        let ids = parse_announcement_ids(br#"["announcement-1","announcement-1","announcement-2"]"#)
+            .expect("announcement ids should parse");
+
+        assert_eq!(ids, vec!["announcement-1".to_string(), "announcement-2".to_string()]);
+    }
+
+    #[test]
+    fn load_remote_cache_entry_on_access_refreshes_timestamp_for_fresh_hit() {
+        let mut cache = Some(RemoteCacheEntry {
+            fetched_at_epoch_seconds: 100,
+            payload: json!({"title": "Komga News"}),
+        });
+
+        let payload = load_remote_cache_entry_on_access(&mut cache, 150, 3600)
+            .expect("fresh cache hit should return payload");
+
+        assert_eq!(payload["title"], "Komga News");
+        assert_eq!(
+            cache
+                .as_ref()
+                .expect("cache entry should remain present")
+                .fetched_at_epoch_seconds,
+            150
+        );
+    }
+
 }
 
 fn now_epoch_seconds() -> u64 {

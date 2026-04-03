@@ -111,7 +111,7 @@ pub(super) fn default_test_backend() -> MediaAssetsRuntimeAccessBackend {
         readlist_tachiyomi_counters: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),
         persist_readlist_tachiyomi_progress: Arc::new(|_, _, _, _| Box::pin(async { Ok(None) })),
         load_selected_book_thumbnail: Arc::new(|_, _| Box::pin(async { Ok(None) })),
-        load_book_thumbnail_by_id: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),
+    load_book_thumbnail_by_id: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         load_persisted_book_thumbnails: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),
         insert_book_thumbnail: Arc::new(|_, _, _, _, _, _, _| {
             Box::pin(async {
@@ -121,7 +121,7 @@ pub(super) fn default_test_backend() -> MediaAssetsRuntimeAccessBackend {
                 )
             })
         }),
-        select_book_thumbnail: Arc::new(|_, _, _| Box::pin(async { Ok(false) })),
+    select_book_thumbnail: Arc::new(|_, _| Box::pin(async { Ok(false) })),
         delete_book_thumbnail: Arc::new(|_, _, _| Box::pin(async { Ok(false) })),
         load_persisted_readlist_thumbnails: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),
         insert_readlist_thumbnail: Arc::new(|_, _, _, _, _, _, _| {
@@ -143,10 +143,10 @@ pub(super) fn default_test_backend() -> MediaAssetsRuntimeAccessBackend {
                 )
             })
         }),
-        select_collection_thumbnail: Arc::new(|_, _, _| Box::pin(async { Ok(false) })),
+    select_collection_thumbnail: Arc::new(|_, _| Box::pin(async { Ok(false) })),
         delete_collection_thumbnail: Arc::new(|_, _, _| Box::pin(async { Ok(false) })),
         load_selected_series_thumbnail: Arc::new(|_, _| Box::pin(async { Ok(None) })),
-        load_series_thumbnail_by_id: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),
+    load_series_thumbnail_by_id: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         load_persisted_series_thumbnails: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),
         insert_series_thumbnail: Arc::new(|_, _, _, _, _, _, _| {
             Box::pin(async {
@@ -351,13 +351,20 @@ fn load_generated_pdf_page_rows_for_tests(media: &BookMediaRecord) -> Vec<BookPa
     if page_count == 0 {
         return vec![];
     }
+    let document = PdfDocument::load(&media.file_path).ok();
     (1..=page_count)
         .map(|number| BookPageRecord {
             number,
             file_name: format!("page-{number}.pdf"),
             media_type: "application/pdf".to_string(),
-            width: None,
-            height: None,
+            width: document
+                .as_ref()
+                .and_then(|document| pdf_page_dimensions_for_tests(document, number as u32))
+                .map(|(width, _)| i64::from(width)),
+            height: document
+                .as_ref()
+                .and_then(|document| pdf_page_dimensions_for_tests(document, number as u32))
+                .map(|(_, height)| i64::from(height)),
             file_size: 0,
         })
         .collect()
@@ -385,6 +392,35 @@ fn read_pdf_page_as_single_page_pdf_for_tests(
     let mut bytes = Vec::new();
     document.save_to(&mut bytes).ok()?;
     Some(bytes)
+}
+
+fn pdf_page_dimensions_for_tests(document: &PdfDocument, page_number: u32) -> Option<(u32, u32)> {
+    let object_id = *document.get_pages().get(&page_number)?;
+    let page = document.get_dictionary(object_id).ok()?;
+    let media_box = page.get(b"MediaBox").ok()?.as_array().ok()?;
+    if media_box.len() != 4 {
+        return None;
+    }
+
+    let left = pdf_numeric_value_for_tests(&media_box[0])?;
+    let bottom = pdf_numeric_value_for_tests(&media_box[1])?;
+    let right = pdf_numeric_value_for_tests(&media_box[2])?;
+    let top = pdf_numeric_value_for_tests(&media_box[3])?;
+    let width = (right - left).abs().round();
+    let height = (top - bottom).abs().round();
+    if width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+
+    Some((width as u32, height as u32))
+}
+
+fn pdf_numeric_value_for_tests(object: &lopdf::Object) -> Option<f64> {
+    match object {
+        lopdf::Object::Integer(value) => Some(*value as f64),
+        lopdf::Object::Real(value) => Some((*value).into()),
+        _ => None,
+    }
 }
 
 fn detect_pdf_page_count_for_tests(media: &BookMediaRecord) -> Option<u64> {

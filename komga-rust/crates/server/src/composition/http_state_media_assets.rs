@@ -272,11 +272,10 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
                 .await
             })
         }),
-        load_book_thumbnail_by_id: Arc::new(|database_file, book_id, thumbnail_id| {
+        load_book_thumbnail_by_id: Arc::new(|database_file, thumbnail_id| {
             Box::pin(async move {
                 infrastructure_metadata::load_book_thumbnail_by_id(
                     database_file.as_path(),
-                    &book_id,
                     &thumbnail_id,
                 )
                 .await
@@ -307,11 +306,10 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
                 })
             },
         ),
-        select_book_thumbnail: Arc::new(|database_file, book_id, thumbnail_id| {
+        select_book_thumbnail: Arc::new(|database_file, thumbnail_id| {
             Box::pin(async move {
                 infrastructure_metadata::select_book_thumbnail(
                     database_file.as_path(),
-                    &book_id,
                     &thumbnail_id,
                 )
                 .await
@@ -397,11 +395,10 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
                 })
             },
         ),
-        select_collection_thumbnail: Arc::new(|database_file, collection_id, thumbnail_id| {
+        select_collection_thumbnail: Arc::new(|database_file, thumbnail_id| {
             Box::pin(async move {
                 infrastructure_metadata::select_collection_thumbnail(
                     database_file.as_path(),
-                    &collection_id,
                     &thumbnail_id,
                 )
                 .await
@@ -435,11 +432,10 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
                 .await
             })
         }),
-        load_series_thumbnail_by_id: Arc::new(|database_file, series_id, thumbnail_id| {
+        load_series_thumbnail_by_id: Arc::new(|database_file, thumbnail_id| {
             Box::pin(async move {
                 infrastructure_metadata::load_series_thumbnail_by_id(
                     database_file.as_path(),
-                    &series_id,
                     &thumbnail_id,
                 )
                 .await

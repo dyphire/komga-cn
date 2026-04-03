@@ -223,7 +223,6 @@ pub struct MediaAssetsRuntimeAccessBackend {
         dyn Fn(
                 PathBuf,
                 String,
-                String,
             ) -> futures_util::future::BoxFuture<
                 'static,
                 Result<Option<EntityThumbnailBinary>, String>,
@@ -255,11 +254,7 @@ pub struct MediaAssetsRuntimeAccessBackend {
             + Sync,
     >,
     pub select_book_thumbnail: Arc<
-        dyn Fn(
-                PathBuf,
-                String,
-                String,
-            ) -> futures_util::future::BoxFuture<'static, Result<bool, String>>
+        dyn Fn(PathBuf, String) -> futures_util::future::BoxFuture<'static, Result<bool, String>>
             + Send
             + Sync,
     >,
@@ -340,11 +335,7 @@ pub struct MediaAssetsRuntimeAccessBackend {
             + Sync,
     >,
     pub select_collection_thumbnail: Arc<
-        dyn Fn(
-                PathBuf,
-                String,
-                String,
-            ) -> futures_util::future::BoxFuture<'static, Result<bool, String>>
+        dyn Fn(PathBuf, String) -> futures_util::future::BoxFuture<'static, Result<bool, String>>
             + Send
             + Sync,
     >,
@@ -380,7 +371,6 @@ pub struct MediaAssetsRuntimeAccessBackend {
     pub load_series_thumbnail_by_id: Arc<
         dyn Fn(
                 PathBuf,
-                String,
                 String,
             ) -> futures_util::future::BoxFuture<
                 'static,

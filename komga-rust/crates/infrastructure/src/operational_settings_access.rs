@@ -434,7 +434,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn load_client_settings_global_filters_unauthorized_only_and_keeps_default() {
+    async fn load_client_settings_global_filters_unauthorized_only_without_injecting_defaults() {
         let (db_path, pool) = create_test_db("load-global").await;
 
         sqlx::query(
@@ -464,7 +464,7 @@ mod tests {
             .expect("global settings should be an object");
         assert_eq!(all["public.setting"]["value"], "public-value");
         assert_eq!(all["private.setting"]["value"], "private-value");
-        assert_eq!(all["webui.oauth2.hide_login"]["value"], "false");
+        assert!(all.get("webui.oauth2.hide_login").is_none());
 
         let unauthorized_only = load_client_settings_global(db_path.as_path(), true)
             .await
@@ -474,10 +474,7 @@ mod tests {
             .expect("filtered global settings should be an object");
         assert_eq!(unauthorized_only["public.setting"]["value"], "public-value");
         assert!(unauthorized_only.get("private.setting").is_none());
-        assert_eq!(
-            unauthorized_only["webui.oauth2.hide_login"]["value"],
-            "false"
-        );
+        assert!(unauthorized_only.get("webui.oauth2.hide_login").is_none());
     }
 
     #[tokio::test]

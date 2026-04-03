@@ -3,22 +3,15 @@ use super::*;
 pub async fn kobo_ping(
     Extension(auth_db): Extension<super::AuthDatabaseState>,
     Path(auth_token): Path<String>,
-    headers: HeaderMap,
+    _: HeaderMap,
 ) -> Response {
-    if resolved_kobo_user(
-        auth_token.as_str(),
-        &headers,
-        auth_db.database_file.as_path(),
-    )
-    .await
-    .is_none()
-    {
-        return StatusCode::UNAUTHORIZED.into_response();
+    match kobo_path_user_status(auth_token.as_str(), auth_db.database_file.as_path()).await {
+        Ok(_) => {}
+        Err(status) => return status.into_response(),
     }
 
     "pong".into_response()
 }
-
 pub async fn kobo_initialization(
     Extension(auth_db): Extension<super::AuthDatabaseState>,
     Path(auth_token): Path<String>,
@@ -88,4 +81,21 @@ pub async fn kobo_auth_device(
         user_key: payload.user_key,
     })
     .into_response()
+}
+
+async fn kobo_path_user_status(auth_token: &str, database_file: &FsPath) -> Result<AuthUser, StatusCode> {
+    if !valid_kobo_path_token(auth_token) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    match persisted_api_key_user_by_token(auth_token, database_file).await {
+        Some(AuthOutcome::Valid(user)) => {
+            if user.roles.iter().any(|role| role == "KOBO_SYNC") {
+                Ok(*user)
+            } else {
+                Err(StatusCode::FORBIDDEN)
+            }
+        }
+        _ => Err(StatusCode::UNAUTHORIZED),
+    }
 }

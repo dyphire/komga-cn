@@ -255,14 +255,11 @@ pub async fn book_thumbnail_by_id(
 
         return match load_book_thumbnail_by_id(
             auth_db.database_file.as_path(),
-            &book_id,
             &thumbnail_id,
         )
         .await
         {
-            Ok(Some(thumbnail)) => {
-                asset_ok_response(thumbnail.media_type.as_str(), thumbnail.thumbnail, None, None)
-            }
+            Ok(Some(thumbnail)) => response_from_thumbnail_jpeg_bytes(&headers, thumbnail.thumbnail),
             Ok(None) => StatusCode::NOT_FOUND.into_response(),
             Err(error) => internal_error_response(error),
         };
@@ -381,13 +378,13 @@ pub async fn book_thumbnail_upload(
 pub async fn book_thumbnail_select(
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
-    Path((book_id, thumbnail_id)): Path<(String, String)>,
+    Path((_book_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
         return response;
     }
 
-    match select_book_thumbnail(auth_db.database_file.as_path(), &book_id, &thumbnail_id).await {
+    match select_book_thumbnail(auth_db.database_file.as_path(), &thumbnail_id).await {
         Ok(true) => {
             let mut response = StatusCode::ACCEPTED.into_response();
             mark_runtime_owned(&mut response);
@@ -864,18 +861,13 @@ pub async fn collection_thumbnail_upload(
 pub async fn collection_thumbnail_select(
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
-    Path((collection_id, thumbnail_id)): Path<(String, String)>,
+    Path((_collection_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
         return response;
     }
 
-    match select_collection_thumbnail(
-        auth_db.database_file.as_path(),
-        &collection_id,
-        &thumbnail_id,
-    )
-    .await
+    match select_collection_thumbnail(auth_db.database_file.as_path(), &thumbnail_id).await
     {
         Ok(true) => StatusCode::ACCEPTED.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
@@ -939,7 +931,7 @@ pub async fn series_thumbnail(
     match load_selected_series_thumbnail(auth_db.database_file.as_path(), &resolved_series_id).await
     {
         Ok(Some(thumbnail)) => {
-            return response_from_thumbnail_jpeg_bytes(&headers, thumbnail.thumbnail);
+            return response_from_thumbnail_bytes(&headers, thumbnail.thumbnail, "image/jpeg");
         }
         Ok(None) => {}
         Err(error) => return internal_error_response(error),
@@ -1050,14 +1042,11 @@ pub async fn series_thumbnail_by_id(
         Err(error) => return internal_error_response(error),
     }
 
-    match load_series_thumbnail_by_id(
-        auth_db.database_file.as_path(),
-        &resolved_series_id,
-        &thumbnail_id,
-    )
-    .await
+    match load_series_thumbnail_by_id(auth_db.database_file.as_path(), &thumbnail_id).await
     {
-        Ok(Some(thumbnail)) => response_from_thumbnail_jpeg_bytes(&headers, thumbnail.thumbnail),
+        Ok(Some(thumbnail)) => {
+            response_from_thumbnail_bytes(&headers, thumbnail.thumbnail, "image/jpeg")
+        }
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }

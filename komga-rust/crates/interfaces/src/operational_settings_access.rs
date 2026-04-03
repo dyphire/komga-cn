@@ -115,7 +115,9 @@ pub struct OperationalSettingsAccessBackend {
     pub load_history_page:
         Arc<dyn Fn(PathBuf, u64, u64) -> BoxFuture<Result<Value, sqlx::Error>> + Send + Sync>,
     pub load_page_hash_matches_page: Arc<
-        dyn Fn(PathBuf, String, u64, u64) -> BoxFuture<Result<Value, sqlx::Error>> + Send + Sync,
+        dyn Fn(PathBuf, String, u64, u64, Vec<String>) -> BoxFuture<Result<Value, sqlx::Error>>
+            + Send
+            + Sync,
     >,
     pub load_page_hash_thumbnail: Arc<
         dyn Fn(PathBuf, String) -> BoxFuture<Result<Option<PageHashThumbnail>, sqlx::Error>>
@@ -124,8 +126,11 @@ pub struct OperationalSettingsAccessBackend {
     >,
     pub load_page_hashes_page:
         Arc<dyn Fn(PathBuf, u64, u64) -> BoxFuture<Result<Value, sqlx::Error>> + Send + Sync>,
-    pub load_page_hashes_unknown_page:
-        Arc<dyn Fn(PathBuf, u64, u64) -> BoxFuture<Result<Value, sqlx::Error>> + Send + Sync>,
+    pub load_page_hashes_unknown_page: Arc<
+        dyn Fn(PathBuf, u64, u64, Vec<String>) -> BoxFuture<Result<Value, sqlx::Error>>
+            + Send
+            + Sync,
+    >,
     pub upsert_page_hash: Arc<
         dyn Fn(PathBuf, String, Option<i64>, String) -> BoxFuture<Result<(), sqlx::Error>>
             + Send
@@ -231,14 +236,14 @@ fn default_test_backend() -> OperationalSettingsAccessBackend {
         load_history_page: Arc::new(|_, _, _| {
             Box::pin(async { Ok(Value::Object(Default::default())) })
         }),
-        load_page_hash_matches_page: Arc::new(|_, _, _, _| {
+        load_page_hash_matches_page: Arc::new(|_, _, _, _, _| {
             Box::pin(async { Ok(Value::Object(Default::default())) })
         }),
         load_page_hash_thumbnail: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         load_page_hashes_page: Arc::new(|_, _, _| {
             Box::pin(async { Ok(Value::Object(Default::default())) })
         }),
-        load_page_hashes_unknown_page: Arc::new(|_, _, _| {
+        load_page_hashes_unknown_page: Arc::new(|_, _, _, _| {
             Box::pin(async { Ok(Value::Object(Default::default())) })
         }),
         upsert_page_hash: Arc::new(|_, _, _, _| Box::pin(async { Ok(()) })),
@@ -519,12 +524,14 @@ pub(crate) mod page_hashes {
         page_hash: &str,
         page: u64,
         size: u64,
+        sorts: Vec<String>,
     ) -> Result<Value, sqlx::Error> {
         (backend().load_page_hash_matches_page)(
             database_file.to_path_buf(),
             page_hash.to_string(),
             page,
             size,
+            sorts,
         )
         .await
     }
@@ -549,8 +556,10 @@ pub(crate) mod page_hashes {
         database_file: &std::path::Path,
         page: u64,
         size: u64,
+        sorts: Vec<String>,
     ) -> Result<Value, sqlx::Error> {
-        (backend().load_page_hashes_unknown_page)(database_file.to_path_buf(), page, size).await
+        (backend().load_page_hashes_unknown_page)(database_file.to_path_buf(), page, size, sorts)
+            .await
     }
 
     pub(crate) async fn upsert_page_hash(

@@ -130,6 +130,7 @@ pub async fn load_persisted_series_detail(
     let model = Some(SeriesDetailReadModel {
         id: row.id,
         library_id: row.library_id,
+        name: row.name,
         title: row.title,
         title_sort: row.title_sort,
         url: row.url,

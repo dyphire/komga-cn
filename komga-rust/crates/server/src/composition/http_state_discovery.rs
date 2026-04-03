@@ -487,6 +487,7 @@ pub(super) fn compose_discovery_detail_access_backends() -> DiscoveryDetailAcces
                         value.map(|row| PersistedSeriesDetailRecord {
                             id: row.id,
                             library_id: row.library_id,
+                            name: row.name,
                             title: row.title,
                             title_sort: row.title_sort,
                             url: row.url,

@@ -7,7 +7,10 @@ use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use komga_application::discovery::normalize_readlists_search;
 use komga_domain::discovery::PageEnvelope;
+use reqwest::Url;
 use serde_json::{Map, Value, json};
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 use crate::discovery_detail_access::{
     books as detail_access_books, collections as detail_access_collections,
@@ -126,8 +129,8 @@ struct PersistedReadProgress {
     read_date: Option<String>,
     created: String,
     last_modified: String,
-    device_id: Option<String>,
-    device_name: Option<String>,
+    device_id: String,
+    device_name: String,
 }
 
 #[derive(Clone)]
@@ -214,6 +217,7 @@ pub(super) struct CollectionReadModel {
 pub(super) struct SeriesDetailReadModel {
     id: String,
     library_id: String,
+    name: String,
     title: String,
     title_sort: String,
     url: String,
@@ -264,7 +268,12 @@ pub(super) struct SeriesDetailReadModel {
 }
 
 fn book_detail_payload(book: &BookDetailReadModel, is_admin: bool) -> Value {
-    let url = restricted_book_url(&book.url, is_admin);
+    let admin_url = admin_book_url(&book.url);
+    let url = if is_admin {
+        admin_url
+    } else {
+        restricted_book_url(&admin_url, false)
+    };
     let media_profile = media_profile_for_media_type(&book.media_type);
 
     json!({
@@ -277,7 +286,7 @@ fn book_detail_payload(book: &BookDetailReadModel, is_admin: bool) -> Value {
         "number": book.number,
         "created": book.created,
         "lastModified": book.last_modified,
-        "fileLastModified": book.file_last_modified,
+        "fileLastModified": normalized_file_last_modified(&book.file_last_modified),
         "sizeBytes": book.size_bytes,
         "size": format_size_bytes(book.size_bytes),
         "media": {
@@ -324,6 +333,33 @@ fn book_detail_payload(book: &BookDetailReadModel, is_admin: bool) -> Value {
         "fileHash": book.file_hash,
         "oneshot": book.oneshot
     })
+}
+
+fn admin_book_url(url: &str) -> String {
+    match Url::parse(url) {
+        Ok(parsed) if parsed.scheme() == "file" => parsed
+            .to_file_path()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| url.to_string()),
+        _ => url.to_string(),
+    }
+}
+
+fn normalized_file_last_modified(value: &str) -> String {
+    if let Ok(epoch_seconds) = value.parse::<i64>()
+        && let Ok(datetime) = OffsetDateTime::from_unix_timestamp(epoch_seconds)
+        && let Ok(formatted) = datetime.format(&Rfc3339)
+    {
+        return formatted;
+    }
+
+    if let Ok(datetime) = OffsetDateTime::parse(value, &Rfc3339)
+        && let Ok(formatted) = datetime.format(&Rfc3339)
+    {
+        return formatted;
+    }
+
+    value.to_string()
 }
 
 fn series_detail_payload(series: &SeriesDetailReadModel, is_admin: bool) -> Value {
@@ -503,7 +539,7 @@ fn series_detail_payload(series: &SeriesDetailReadModel, is_admin: bool) -> Valu
         "libraryId".to_string(),
         Value::String(series.library_id.clone()),
     );
-    payload.insert("name".to_string(), Value::String(series.title.clone()));
+    payload.insert("name".to_string(), Value::String(series.name.clone()));
     payload.insert("url".to_string(), Value::String(url));
     payload.insert("created".to_string(), Value::String(series.created.clone()));
     payload.insert(

@@ -19,6 +19,8 @@ pub async fn series_detail(
     }
 
     let requested_series_id = series_id.clone();
+    let series_id = resolve_series_id_for_persisted(database_file, &series_id).await;
+
     let Some(resource) = (match load_persisted_series_resource(database_file, &series_id).await {
         Ok(resource) => resource,
         Err(error) => return internal_error_response(error),
