@@ -179,7 +179,10 @@ mod tests {
         assert_eq!(result.task_records.len(), 1);
         assert_eq!(result.task_records[0].id, "SCAN_LIBRARY:missing-library");
         assert_eq!(result.task_records[0].simple_type, "SCAN_LIBRARY");
-        assert_eq!(result.task_records[0].payload.as_deref(), Some(r#"{"deep":true}"#));
+        assert_eq!(
+            result.task_records[0].payload.as_deref(),
+            Some(r#"{"deep":true}"#)
+        );
     }
 
     #[test]

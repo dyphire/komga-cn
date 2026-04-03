@@ -18,10 +18,10 @@ pub async fn series_detail(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let requested_series_id = series_id.clone();
-    let series_id = resolve_series_id_for_persisted(database_file, &series_id).await;
+    let resolved_series_id = resolve_series_id_for_persisted(database_file, &series_id).await;
 
-    let Some(resource) = (match load_persisted_series_resource(database_file, &series_id).await {
+    let Some(resource) =
+        (match load_persisted_series_resource(database_file, &resolved_series_id).await {
         Ok(resource) => resource,
         Err(error) => return internal_error_response(error),
     }) else {
@@ -44,7 +44,7 @@ pub async fn series_detail(
     let is_admin = detail_query_context.is_admin;
     let Some(series) = (match load_persisted_series_detail(
         database_file,
-        &series_id,
+        &resolved_series_id,
         detail_query_context.user_id.as_deref(),
     )
     .await
@@ -55,12 +55,7 @@ pub async fn series_detail(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    let mut payload = series_detail_payload(&series, is_admin);
-    if uses_id_bridge(&requested_series_id, &series_id) {
-        coerce_library_id_for_id_bridge(&mut payload);
-    }
-
-    Json(payload).into_response()
+    Json(series_detail_payload(&series, is_admin)).into_response()
 }
 
 pub async fn series_collections(
@@ -80,7 +75,8 @@ pub async fn series_collections(
     let Some(context) = auth_state.resolve_query_context(&headers, None) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let has_unrestricted_access = context.authorized_library_ids.is_none() && context.restrictions.is_none();
+    let has_unrestricted_access =
+        context.authorized_library_ids.is_none() && context.restrictions.is_none();
 
     let Some(resource) = (match load_persisted_series_resource(database_file, &series_id).await {
         Ok(resource) => resource,

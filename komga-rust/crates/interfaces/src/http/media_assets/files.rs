@@ -1,4 +1,5 @@
 use super::*;
+use crate::opds_persisted_access::load_readlist_books;
 
 pub async fn readlist_file(
     Extension(auth_db): Extension<AuthDatabaseState>,
@@ -13,17 +14,21 @@ pub async fn readlist_file(
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    let visible_books = match visible_readlist_books_for_user(
-        auth_db.database_file.as_path(),
-        &readlist_id,
-        &user,
-    )
-    .await
-    {
-        Ok(books) if !books.is_empty() => books,
-        Ok(_) => return StatusCode::NOT_FOUND.into_response(),
+    match user_can_access_readlist_media(auth_db.database_file.as_path(), &readlist_id, &user).await {
+        Ok(true) => {}
+        Ok(false) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
-    };
+    }
+
+    let readlist_books =
+        match load_readlist_books(auth_db.database_file.as_path(), &readlist_id).await {
+            Ok(books) => books,
+            Err(error) => return internal_error_response(error),
+        };
+    let visible_books = readlist_books
+        .into_iter()
+        .filter(|book| user_can_access_library(&user, &book.library_id))
+        .collect::<Vec<_>>();
 
     match load_persisted_readlist_name(auth_db.database_file.as_path(), &readlist_id).await {
         Ok(Some(name)) => {
@@ -32,15 +37,14 @@ pub async fn readlist_file(
 
             let mut archive_entries = Vec::new();
             for (index, book) in visible_books.into_iter().enumerate() {
-                let Some(media) = (match load_persisted_book_media(
-                    auth_db.database_file.as_path(),
-                    &book.id,
-                )
-                .await
-                {
-                    Ok(media) => media,
-                    Err(error) => return internal_error_response(error),
-                }) else {
+                let Some(media) =
+                    (match load_persisted_book_media(auth_db.database_file.as_path(), &book.id)
+                        .await
+                    {
+                        Ok(media) => media,
+                        Err(error) => return internal_error_response(error),
+                    })
+                else {
                     continue;
                 };
                 let Some(bytes) = read_media_file_bytes(&media.file_path) else {

@@ -374,7 +374,11 @@ fn build_named_document(
 
 fn search_role_author_fields(values: String) -> Vec<SearchFieldEntry> {
     let mut fields = Vec::new();
-    for value in values.split('|').map(str::trim).filter(|value| !value.is_empty()) {
+    for value in values
+        .split('|')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         let Some((role, name)) = value.split_once(AUTHOR_ROLE_DELIMITER) else {
             continue;
         };

@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use komga_application::media_assets::{EntityThumbnailBinary, SeriesThumbnailRecord};
+use reqwest::Url;
 use sqlx::Row;
 
 use crate::sqlite::connect_pool;
@@ -87,7 +88,7 @@ pub async fn load_series_thumbnail_by_id(
         .await
         .map_err(|error| format!("open single series thumbnail db: {error}"))?;
     let row = sqlx::query(
-        "SELECT MEDIA_TYPE, THUMBNAIL \
+        "SELECT MEDIA_TYPE, THUMBNAIL, URL \
          FROM THUMBNAIL_SERIES \
          WHERE ID = ? \
          LIMIT 1",
@@ -97,11 +98,18 @@ pub async fn load_series_thumbnail_by_id(
     .await
     .map_err(|error| format!("query single series thumbnail: {error}"))?;
 
-    Ok(row.map(|row| EntityThumbnailBinary {
-        media_type: row.get::<String, _>("MEDIA_TYPE"),
-        thumbnail: row
-            .get::<Option<Vec<u8>>, _>("THUMBNAIL")
-            .unwrap_or_default(),
+    let Some(row) = row else {
+        return Ok(None);
+    };
+
+    let media_type = row.get::<String, _>("MEDIA_TYPE");
+    let thumbnail = row.get::<Option<Vec<u8>>, _>("THUMBNAIL");
+    let url = row.get::<Option<String>, _>("URL");
+    let maybe_thumbnail = load_thumbnail_bytes_or_sidecar(thumbnail, url)?;
+
+    Ok(maybe_thumbnail.map(|thumbnail| EntityThumbnailBinary {
+        media_type,
+        thumbnail,
     }))
 }
 
@@ -185,6 +193,28 @@ pub async fn insert_series_thumbnail(
         width,
         height,
     })
+}
+
+fn load_thumbnail_bytes_or_sidecar(
+    thumbnail: Option<Vec<u8>>,
+    url: Option<String>,
+) -> Result<Option<Vec<u8>>, String> {
+    if let Some(thumbnail) = thumbnail {
+        return Ok(Some(thumbnail));
+    }
+
+    let Some(url) = url else {
+        return Ok(None);
+    };
+
+    let parsed =
+        Url::parse(&url).map_err(|error| format!("parse series thumbnail sidecar url: {error}"))?;
+    let path = parsed
+        .to_file_path()
+        .map_err(|_| format!("series thumbnail sidecar url is not a file path: {url}"))?;
+    let bytes = std::fs::read(&path)
+        .map_err(|error| format!("read series thumbnail sidecar {}: {error}", path.display()))?;
+    Ok(Some(bytes))
 }
 
 pub async fn select_series_thumbnail(

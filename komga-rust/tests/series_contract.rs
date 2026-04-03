@@ -297,6 +297,78 @@ async fn router_series_thumbnail_upload_parses_multipart_image_and_selected_flag
 }
 
 #[tokio::test]
+async fn router_series_thumbnail_select_marks_uploaded_thumbnail_selected() {
+    let paths = new_router_fixture("router-series-thumbnail-select-success").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let image_bytes = fixture_png_bytes();
+    let (content_type, body) =
+        multipart_image_upload_body("file", "series.png", "image/png", false, &image_bytes);
+
+    let upload = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/series/series-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(body))
+                .expect("series thumbnail upload request should build"),
+        )
+        .await
+        .expect("series thumbnail upload request should complete");
+
+    assert_eq!(upload.status(), StatusCode::OK);
+    let thumbnail_id = response_json(upload)
+        .await
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("series thumbnail upload should return thumbnail id")
+        .to_string();
+
+    let select = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!(
+                    "/api/v1/series/series-1/thumbnails/{thumbnail_id}/selected"
+                ))
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("series thumbnail select request should build"),
+        )
+        .await
+        .expect("series thumbnail select request should complete");
+    assert_eq!(select.status(), StatusCode::ACCEPTED);
+
+    let list = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/series/series-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("series thumbnail list request should build"),
+        )
+        .await
+        .expect("series thumbnail list request should complete");
+    assert_eq!(list.status(), StatusCode::OK);
+    let rows = response_json(list).await;
+    let rows = rows
+        .as_array()
+        .expect("series thumbnail list response should be an array");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].get("id"), Some(&Value::String(thumbnail_id)));
+    assert_eq!(rows[0].get("selected"), Some(&Value::Bool(true)));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_series_thumbnail_fallback_reencodes_source_image_as_jpeg() {
     let paths = new_router_fixture("router-series-thumbnail-fallback-jpeg").await;
     seed_router_contract_data(&paths).await;
@@ -399,6 +471,164 @@ async fn router_series_thumbnail_fallback_reencodes_source_image_as_jpeg() {
         .expect("series thumbnail fallback body should be readable");
     assert_ne!(body.as_ref(), png_bytes.as_slice());
     assert_eq!(&body[..3], &[0xFF, 0xD8, 0xFF]);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_series_thumbnail_by_id_reads_sidecar_thumbnail_file() {
+    let paths = new_router_fixture("router-series-thumbnail-by-id-sidecar-file").await;
+    seed_router_contract_data(&paths).await;
+
+    let sidecar_bytes = fixture_png_bytes();
+    let sidecar_path = paths.config_dir.join("series-sidecar.png");
+    std::fs::write(&sidecar_path, &sidecar_bytes).expect("series sidecar image should be written");
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("series sidecar db should open");
+    sqlx::query(
+        "INSERT INTO THUMBNAIL_SERIES (ID, SERIES_ID, URL, THUMBNAIL, TYPE, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT, SELECTED) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("thumb-sidecar-1")
+    .bind("series-1")
+    .bind(format!("file:{}", sidecar_path.display()))
+    .bind(Option::<Vec<u8>>::None)
+    .bind("USER_UPLOADED")
+    .bind("image/png")
+    .bind(i64::try_from(sidecar_bytes.len()).expect("sidecar length should fit i64"))
+    .bind(1_i64)
+    .bind(1_i64)
+    .bind(false)
+    .execute(&pool)
+    .await
+    .expect("series sidecar thumbnail row should insert");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/series/series-1/thumbnails/thumb-sidecar-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("series sidecar thumbnail by-id request should build"),
+        )
+        .await
+        .expect("series sidecar thumbnail by-id request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("series sidecar thumbnail by-id body should be readable");
+    assert_eq!(body.as_ref(), sidecar_bytes.as_slice());
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_series_thumbnail_by_id_returns_internal_server_error_when_sidecar_file_is_missing()
+{
+    let paths = new_router_fixture("router-series-thumbnail-by-id-missing-sidecar-file").await;
+    seed_router_contract_data(&paths).await;
+
+    let missing_sidecar_path = paths.config_dir.join("series-missing-sidecar.png");
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("series missing-sidecar db should open");
+    sqlx::query(
+        "INSERT INTO THUMBNAIL_SERIES (ID, SERIES_ID, URL, THUMBNAIL, TYPE, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT, SELECTED) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("thumb-missing-sidecar-1")
+    .bind("series-1")
+    .bind(format!("file:{}", missing_sidecar_path.display()))
+    .bind(Option::<Vec<u8>>::None)
+    .bind("USER_UPLOADED")
+    .bind("image/png")
+    .bind(1_i64)
+    .bind(1_i64)
+    .bind(1_i64)
+    .bind(false)
+    .execute(&pool)
+    .await
+    .expect("series missing-sidecar thumbnail row should insert");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/series/series-1/thumbnails/thumb-missing-sidecar-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("series missing-sidecar thumbnail by-id request should build"),
+        )
+        .await
+        .expect("series missing-sidecar thumbnail by-id request should complete");
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_series_thumbnail_by_id_allows_missing_path_series_for_unrestricted_user() {
+    let paths = new_router_fixture("router-series-thumbnail-by-id-missing-path-series").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let image_bytes = fixture_png_bytes();
+    let (content_type, body) =
+        multipart_image_upload_body("file", "series.png", "image/png", false, &image_bytes);
+
+    let upload = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/series/series-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(body))
+                .expect("series thumbnail upload request should build"),
+        )
+        .await
+        .expect("series thumbnail upload request should complete");
+
+    let thumbnail_id = response_json(upload)
+        .await
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("series thumbnail upload should return thumbnail id")
+        .to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/api/v1/series/missing-series/thumbnails/{thumbnail_id}"
+                ))
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("series thumbnail missing path series request should build"),
+        )
+        .await
+        .expect("series thumbnail missing path series request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("series thumbnail missing path series body should be readable");
+    assert_eq!(body.as_ref(), image_bytes.as_slice());
 
     cleanup_router_fixture(paths);
 }
@@ -527,6 +757,141 @@ async fn router_series_media_assets_forbid_age_restricted_user() {
         .await
         .expect("restricted series tachiyomi put request should complete");
     assert_eq!(tachiyomi_put.status(), StatusCode::FORBIDDEN);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_series_tachiyomi_progress_returns_zero_dto_for_missing_series() {
+    let paths = new_router_fixture("router-series-tachiyomi-progress-missing-series").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v2/series/missing-series/read-progress/tachiyomi")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("missing series tachiyomi progress request should build"),
+        )
+        .await
+        .expect("missing series tachiyomi progress request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload,
+        json!({
+            "booksCount": 0,
+            "booksReadCount": 0,
+            "booksUnreadCount": 0,
+            "booksInProgressCount": 0,
+            "lastReadContinuousNumberSort": 0.0,
+            "maxNumberSort": 0.0,
+        })
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_series_tachiyomi_progress_counts_deleted_books_like_kotlin() {
+    let paths = new_router_fixture("router-series-tachiyomi-progress-counts-deleted-books").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("series tachiyomi deleted-book db should open");
+    sqlx::query("UPDATE BOOK SET DELETED_DATE = ? WHERE ID = ?")
+        .bind("2024-03-01T00:00:00")
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("series tachiyomi deleted-book row should update");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v2/series/series-1/read-progress/tachiyomi")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("series tachiyomi deleted-book request should build"),
+        )
+        .await
+        .expect("series tachiyomi deleted-book request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await,
+        json!({
+            "booksCount": 1,
+            "booksReadCount": 0,
+            "booksUnreadCount": 1,
+            "booksInProgressCount": 0,
+            "lastReadContinuousNumberSort": 0.0,
+            "maxNumberSort": 1.0,
+        })
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_series_tachiyomi_progress_counts_completed_false_page_zero_as_in_progress() {
+    let paths = new_router_fixture("router-series-tachiyomi-progress-page-zero-in-progress").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("series tachiyomi page-zero db should open");
+    sqlx::query(
+        "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED) VALUES (?, ?, ?, ?)",
+    )
+    .bind("book-1")
+    .bind("admin-user")
+    .bind(0_i64)
+    .bind(false)
+    .execute(&pool)
+    .await
+    .expect("series tachiyomi page-zero read progress row should insert");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v2/series/series-1/read-progress/tachiyomi")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("series tachiyomi page-zero request should build"),
+        )
+        .await
+        .expect("series tachiyomi page-zero request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await,
+        json!({
+            "booksCount": 1,
+            "booksReadCount": 0,
+            "booksUnreadCount": 0,
+            "booksInProgressCount": 1,
+            "lastReadContinuousNumberSort": 0.0,
+            "maxNumberSort": 1.0,
+        })
+    );
 
     cleanup_router_fixture(paths);
 }
@@ -679,8 +1044,14 @@ async fn router_series_metadata_refresh_enqueues_kotlin_style_task_groups() {
     tasks_pool.close().await;
 
     assert_eq!(rows.len(), 3);
-    assert_eq!(rows[0].get::<String, _>("SIMPLE_TYPE"), "REFRESH_BOOK_LOCAL_ARTWORK");
-    assert_eq!(rows[1].get::<String, _>("SIMPLE_TYPE"), "REFRESH_BOOK_METADATA");
+    assert_eq!(
+        rows[0].get::<String, _>("SIMPLE_TYPE"),
+        "REFRESH_BOOK_LOCAL_ARTWORK"
+    );
+    assert_eq!(
+        rows[1].get::<String, _>("SIMPLE_TYPE"),
+        "REFRESH_BOOK_METADATA"
+    );
     assert_eq!(
         rows[1].get::<Option<String>, _>("GROUP_ID"),
         Some("series-1".to_string())
@@ -2699,7 +3070,10 @@ async fn router_discovery_series_detail_uses_persisted_series_name_for_top_level
     assert_eq!(response.status(), StatusCode::OK);
 
     let payload = response_json(response).await;
-    assert_eq!(payload.get("name"), Some(&Value::String("Series Shelf Name".to_string())));
+    assert_eq!(
+        payload.get("name"),
+        Some(&Value::String("Series Shelf Name".to_string()))
+    );
     assert_eq!(
         payload
             .get("metadata")
@@ -3238,23 +3612,6 @@ async fn update_series_search_fixture_title(paths: &RuntimeDbPaths, series_id: &
     .expect("series search parity title should update");
 
     pool.close().await;
-}
-
-async fn load_selected_series_thumbnail_count(paths: &RuntimeDbPaths, series_id: &str) -> i64 {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("series thumbnail count db should open");
-
-    let count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM THUMBNAIL_SERIES WHERE SERIES_ID = ? AND SELECTED = 1",
-    )
-    .bind(series_id)
-    .fetch_one(&pool)
-    .await
-    .expect("selected series thumbnail count should load");
-
-    pool.close().await;
-    count
 }
 
 async fn series_list_ids(

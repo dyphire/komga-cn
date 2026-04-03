@@ -66,9 +66,11 @@ pub(super) async fn user_can_access_readlist_media(
     readlist_id: &str,
     user: &AuthUser,
 ) -> Result<bool, String> {
-    Ok(!visible_readlist_books_for_user(database_file, readlist_id, user)
-        .await?
-        .is_empty())
+    Ok(
+        !visible_readlist_books_for_user(database_file, readlist_id, user)
+            .await?
+            .is_empty(),
+    )
 }
 
 pub(super) async fn visible_readlist_books_for_user(
@@ -91,9 +93,11 @@ pub(super) async fn user_can_access_collection_media(
     collection_id: &str,
     user: &AuthUser,
 ) -> Result<bool, String> {
-    Ok(!visible_collection_series_ids_for_user(database_file, collection_id, user)
-        .await?
-        .is_empty())
+    Ok(
+        !visible_collection_series_ids_for_user(database_file, collection_id, user)
+            .await?
+            .is_empty(),
+    )
 }
 
 pub(super) async fn visible_collection_series_ids_for_user(

@@ -23,16 +23,6 @@ pub fn internal_error_response(error: String) -> Response {
         .into_response()
 }
 
-pub fn uses_id_bridge(requested_id: &str, resolved_id: &str) -> bool {
-    requested_id != resolved_id
-        && ((requested_id.starts_with("series-")
-            && requested_id[7..].chars().all(|ch| ch.is_ascii_digit()))
-            || (requested_id.starts_with("book-")
-                && requested_id[5..].chars().all(|ch| ch.is_ascii_digit())))
-}
-
-pub fn coerce_library_id_for_id_bridge(_payload: &mut Value) {}
-
 pub fn random_hex_token(byte_len: usize) -> String {
     let mut bytes = vec![0u8; byte_len];
     if let Ok(mut file) = std::fs::File::open("/dev/urandom") {

@@ -355,7 +355,10 @@ mod tests {
 
     #[test]
     fn delete_keys_reject_following_segments_starting_with_underscore_or_dash() {
-        for invalid_payload in [br#"["reader._zoom"]"#.as_slice(), br#"["reader.-zoom"]"#.as_slice()] {
+        for invalid_payload in [
+            br#"["reader._zoom"]"#.as_slice(),
+            br#"["reader.-zoom"]"#.as_slice(),
+        ] {
             let response = parse_client_settings_delete_keys(invalid_payload)
                 .expect_err("following segments must start with lowercase letter or digit");
 

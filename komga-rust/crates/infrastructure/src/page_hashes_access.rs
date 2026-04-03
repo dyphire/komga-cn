@@ -90,8 +90,7 @@ pub async fn upsert_page_hash(
     action: &str,
 ) -> Result<(), sqlx::Error> {
     let existed = page_hash_exists(database_file, page_hash).await?;
-    upsert_page_hash_model(database_file, page_hash, size, action).await
-        ?;
+    upsert_page_hash_model(database_file, page_hash, size, action).await?;
 
     if !existed
         && let Some(thumbnail) = build_known_page_hash_thumbnail(database_file, page_hash).await?
@@ -183,13 +182,11 @@ async fn insert_page_hash_thumbnail(
     thumbnail: &[u8],
 ) -> Result<(), sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
-    sqlx::query(
-        "INSERT INTO PAGE_HASH_THUMBNAIL (HASH, THUMBNAIL) VALUES (?, ?)",
-    )
-    .bind(page_hash)
-    .bind(thumbnail)
-    .execute(&pool)
-    .await?;
+    sqlx::query("INSERT INTO PAGE_HASH_THUMBNAIL (HASH, THUMBNAIL) VALUES (?, ?)")
+        .bind(page_hash)
+        .bind(thumbnail)
+        .execute(&pool)
+        .await?;
     Ok(())
 }
 
@@ -197,7 +194,9 @@ fn encode_image_bytes_as_thumbnail_jpeg(bytes: &[u8], max_edge: u32) -> Option<V
     let image = image::load_from_memory(bytes).ok()?;
     let resized = image.thumbnail(max_edge.max(1), max_edge.max(1));
     let mut output = Cursor::new(Vec::new());
-    resized.write_to(&mut output, image::ImageFormat::Jpeg).ok()?;
+    resized
+        .write_to(&mut output, image::ImageFormat::Jpeg)
+        .ok()?;
     Some(output.into_inner())
 }
 

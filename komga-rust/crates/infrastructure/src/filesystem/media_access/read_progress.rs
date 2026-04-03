@@ -89,10 +89,10 @@ pub async fn load_series_tachiyomi_progress(
         .await
         .map_err(|error| format!("open series tachiyomi db: {error}"))?;
     let rows = sqlx::query(
-        "SELECT COALESCE(bm.NUMBER_SORT, 0) AS NUMBER_SORT, COALESCE(rp.COMPLETED, 0) AS COMPLETED, COALESCE(rp.PAGE, 0) AS PAGE \
+        "SELECT COALESCE(bm.NUMBER_SORT, 0) AS NUMBER_SORT, rp.COMPLETED AS COMPLETED \
          FROM BOOK b LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
-         LEFT JOIN READ_PROGRESS rp ON rp.BOOK_ID = b.ID AND rp.USER_ID = ? \
-         WHERE b.SERIES_ID = ? AND b.DELETED_DATE IS NULL \
+         LEFT JOIN READ_PROGRESS rp ON rp.BOOK_ID = b.ID AND (rp.USER_ID = ? OR rp.USER_ID IS NULL) \
+         WHERE b.SERIES_ID = ? \
          ORDER BY COALESCE(bm.NUMBER_SORT, 0) ASC, b.ID ASC",
     )
     .bind(user_id_value)
@@ -112,21 +112,24 @@ pub async fn load_series_tachiyomi_progress(
     for row in rows {
         books_count += 1;
         let number_sort = row.get::<f64, _>("NUMBER_SORT");
-        let completed = row.get::<i64, _>("COMPLETED") != 0;
-        let page = row.get::<i64, _>("PAGE");
+        let completed = row.get::<Option<i64>, _>("COMPLETED");
         if number_sort > max_number_sort {
             max_number_sort = number_sort;
         }
-        if completed {
-            books_read_count += 1;
-            if all_previous_completed {
-                last_read_continuous_number_sort = number_sort;
+        match completed {
+            Some(value) if value != 0 => {
+                books_read_count += 1;
+                if all_previous_completed {
+                    last_read_continuous_number_sort = number_sort;
+                }
             }
-        } else if page > 0 {
-            books_in_progress_count += 1;
-            all_previous_completed = false;
-        } else {
-            all_previous_completed = false;
+            Some(_) => {
+                books_in_progress_count += 1;
+                all_previous_completed = false;
+            }
+            None => {
+                all_previous_completed = false;
+            }
         }
     }
     let books_unread_count = books_count

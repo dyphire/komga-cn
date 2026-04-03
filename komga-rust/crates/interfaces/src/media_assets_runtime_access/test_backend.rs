@@ -111,7 +111,7 @@ pub(super) fn default_test_backend() -> MediaAssetsRuntimeAccessBackend {
         readlist_tachiyomi_counters: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),
         persist_readlist_tachiyomi_progress: Arc::new(|_, _, _, _| Box::pin(async { Ok(None) })),
         load_selected_book_thumbnail: Arc::new(|_, _| Box::pin(async { Ok(None) })),
-    load_book_thumbnail_by_id: Arc::new(|_, _| Box::pin(async { Ok(None) })),
+        load_book_thumbnail_by_id: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         load_persisted_book_thumbnails: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),
         insert_book_thumbnail: Arc::new(|_, _, _, _, _, _, _| {
             Box::pin(async {
@@ -121,7 +121,7 @@ pub(super) fn default_test_backend() -> MediaAssetsRuntimeAccessBackend {
                 )
             })
         }),
-    select_book_thumbnail: Arc::new(|_, _| Box::pin(async { Ok(false) })),
+        select_book_thumbnail: Arc::new(|_, _| Box::pin(async { Ok(false) })),
         delete_book_thumbnail: Arc::new(|_, _, _| Box::pin(async { Ok(false) })),
         load_persisted_readlist_thumbnails: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),
         insert_readlist_thumbnail: Arc::new(|_, _, _, _, _, _, _| {
@@ -143,10 +143,10 @@ pub(super) fn default_test_backend() -> MediaAssetsRuntimeAccessBackend {
                 )
             })
         }),
-    select_collection_thumbnail: Arc::new(|_, _| Box::pin(async { Ok(false) })),
+        select_collection_thumbnail: Arc::new(|_, _| Box::pin(async { Ok(false) })),
         delete_collection_thumbnail: Arc::new(|_, _, _| Box::pin(async { Ok(false) })),
         load_selected_series_thumbnail: Arc::new(|_, _| Box::pin(async { Ok(None) })),
-    load_series_thumbnail_by_id: Arc::new(|_, _| Box::pin(async { Ok(None) })),
+        load_series_thumbnail_by_id: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         load_persisted_series_thumbnails: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),
         insert_series_thumbnail: Arc::new(|_, _, _, _, _, _, _| {
             Box::pin(async {

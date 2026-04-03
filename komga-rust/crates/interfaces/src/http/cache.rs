@@ -173,6 +173,7 @@ fn is_etag_excluded_path(path: &str) -> bool {
     matches!(
         path,
         "/api/v1/series/{series_id}/file"
+            | "/api/v1/series/{series_id}/thumbnails/{thumbnail_id}"
             | "/api/v1/readlists/{readlist_id}/file"
             | "/api/v1/books/{book_id}/file"
             | "/api/v1/books/{book_id}/file/{*file_name}"

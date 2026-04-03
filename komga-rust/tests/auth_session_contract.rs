@@ -3,7 +3,7 @@ use axum::http::{Request, StatusCode, header};
 use komga_contract_testkit::contract_matrix::assert_required_target_declared;
 use komga_rust::infrastructure::sqlite::connect_pool;
 use komga_server::app::build_router_with_config;
-use serde_json::Value;
+use serde_json::{Value, json};
 use sha2::{Digest, Sha512};
 use sqlx::Row;
 use std::sync::{Mutex, OnceLock};
@@ -187,7 +187,10 @@ async fn router_kobo_catch_all_returns_internal_error_for_non_json_upstream_body
 
     cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_KOBO_PROXY_URL", previous);
-    server.join.await.expect("kobo proxy mock server should finish");
+    server
+        .join
+        .await
+        .expect("kobo proxy mock server should finish");
 }
 
 #[tokio::test]
@@ -233,7 +236,10 @@ async fn router_kobo_catch_all_preserves_non_success_status_for_non_json_upstrea
 
     cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_KOBO_PROXY_URL", previous);
-    server.join.await.expect("kobo proxy non-success mock server should finish");
+    server
+        .join
+        .await
+        .expect("kobo proxy non-success mock server should finish");
 }
 
 #[tokio::test]
@@ -290,7 +296,10 @@ async fn router_kobo_catch_all_does_not_passthrough_error_body_or_kobo_headers()
 
     cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_KOBO_PROXY_URL", previous);
-    server.join.await.expect("kobo proxy no-passthrough mock server should finish");
+    server
+        .join
+        .await
+        .expect("kobo proxy no-passthrough mock server should finish");
 }
 
 #[tokio::test]
@@ -347,7 +356,10 @@ async fn router_kobo_catch_all_does_not_passthrough_json_error_body_or_kobo_head
 
     cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_KOBO_PROXY_URL", previous);
-    server.join.await.expect("kobo proxy json-error mock server should finish");
+    server
+        .join
+        .await
+        .expect("kobo proxy json-error mock server should finish");
 }
 
 #[tokio::test]
@@ -436,7 +448,202 @@ async fn router_kobo_catch_all_preserves_success_status_for_empty_body() {
 
     cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_KOBO_PROXY_URL", previous);
-    server.join.await.expect("kobo proxy empty-success mock server should finish");
+    server
+        .join
+        .await
+        .expect("kobo proxy empty-success mock server should finish");
+}
+
+#[tokio::test]
+async fn router_kobo_catch_all_put_returns_bad_request_for_invalid_json_body() {
+    let _guard = kobo_proxy_env_lock()
+        .lock()
+        .expect("kobo proxy env lock should not be poisoned");
+    let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
+    unsafe {
+        std::env::set_var("KOMGA_RUST_KOBO_PROXY_URL", "http://127.0.0.1:1");
+    }
+
+    let paths = new_router_fixture("router-kobo-catch-all-put-invalid-json-body").await;
+    seed_router_contract_data(&paths).await;
+    upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
+    seed_router_age_exclude_user_with_roles(
+        &paths,
+        "kobo-proxy-user",
+        "kobo-proxy@example.org",
+        "router-contract-kobo-proxy-123",
+        0,
+        &["USER", "KOBO_SYNC"],
+    )
+    .await;
+    seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-proxy-user").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/kobo/validkobotoken/v1/test")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"broken": }"#))
+                .expect("kobo catch-all invalid json put request should build"),
+        )
+        .await
+        .expect("kobo catch-all invalid json put request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    cleanup_router_fixture(paths);
+    restore_env_var("KOMGA_RUST_KOBO_PROXY_URL", previous);
+}
+
+#[tokio::test]
+async fn router_kobo_catch_all_put_returns_unsupported_media_type_for_text_plain_body() {
+    let _guard = kobo_proxy_env_lock()
+        .lock()
+        .expect("kobo proxy env lock should not be poisoned");
+    let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
+    unsafe {
+        std::env::set_var("KOMGA_RUST_KOBO_PROXY_URL", "http://127.0.0.1:1");
+    }
+
+    let paths = new_router_fixture("router-kobo-catch-all-put-text-plain-body").await;
+    seed_router_contract_data(&paths).await;
+    upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
+    seed_router_age_exclude_user_with_roles(
+        &paths,
+        "kobo-proxy-user",
+        "kobo-proxy@example.org",
+        "router-contract-kobo-proxy-123",
+        0,
+        &["USER", "KOBO_SYNC"],
+    )
+    .await;
+    seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-proxy-user").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/kobo/validkobotoken/v1/test")
+                .header(header::CONTENT_TYPE, "text/plain")
+                .body(Body::from("plain-text-body"))
+                .expect("kobo catch-all text/plain put request should build"),
+        )
+        .await
+        .expect("kobo catch-all text/plain put request should complete");
+
+    assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+
+    cleanup_router_fixture(paths);
+    restore_env_var("KOMGA_RUST_KOBO_PROXY_URL", previous);
+}
+
+#[tokio::test]
+async fn router_kobo_catch_all_put_returns_bad_request_for_malformed_xml_body() {
+    let _guard = kobo_proxy_env_lock()
+        .lock()
+        .expect("kobo proxy env lock should not be poisoned");
+    let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
+    unsafe {
+        std::env::set_var("KOMGA_RUST_KOBO_PROXY_URL", "http://127.0.0.1:1");
+    }
+
+    let paths = new_router_fixture("router-kobo-catch-all-put-malformed-xml-body").await;
+    seed_router_contract_data(&paths).await;
+    upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
+    seed_router_age_exclude_user_with_roles(
+        &paths,
+        "kobo-proxy-user",
+        "kobo-proxy@example.org",
+        "router-contract-kobo-proxy-123",
+        0,
+        &["USER", "KOBO_SYNC"],
+    )
+    .await;
+    seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-proxy-user").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/kobo/validkobotoken/v1/test")
+                .header(header::CONTENT_TYPE, "application/xml")
+                .body(Body::from("<root><broken></root>"))
+                .expect("kobo catch-all malformed xml put request should build"),
+        )
+        .await
+        .expect("kobo catch-all malformed xml put request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    cleanup_router_fixture(paths);
+    restore_env_var("KOMGA_RUST_KOBO_PROXY_URL", previous);
+}
+
+#[tokio::test]
+async fn router_kobo_catch_all_put_reserializes_json_request_body_before_proxying() {
+    let _guard = kobo_proxy_env_lock()
+        .lock()
+        .expect("kobo proxy env lock should not be poisoned");
+    let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
+
+    let server = spawn_request_body_echo_server().await;
+    unsafe {
+        std::env::set_var("KOMGA_RUST_KOBO_PROXY_URL", server.url.clone());
+    }
+
+    let paths = new_router_fixture("router-kobo-catch-all-put-json-reserialize").await;
+    seed_router_contract_data(&paths).await;
+    upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
+    seed_router_age_exclude_user_with_roles(
+        &paths,
+        "kobo-proxy-user",
+        "kobo-proxy@example.org",
+        "router-contract-kobo-proxy-123",
+        0,
+        &["USER", "KOBO_SYNC"],
+    )
+    .await;
+    seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-proxy-user").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/kobo/validkobotoken/v1/test")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{\n  \"key\" : 1,\n  \"items\" : [ 2, 3 ]\n}"))
+                .expect("kobo catch-all json reserialize put request should build"),
+        )
+        .await
+        .expect("kobo catch-all json reserialize put request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let received = payload
+        .get("received")
+        .and_then(Value::as_str)
+        .expect("kobo catch-all echo response should include received body");
+    assert!(!received.contains(' '));
+    assert!(!received.contains('\n'));
+    let reparsed: Value = serde_json::from_str(received)
+        .expect("kobo catch-all echoed request body should remain valid json");
+    assert_eq!(reparsed, json!({"key":1,"items":[2,3]}));
+
+    cleanup_router_fixture(paths);
+    restore_env_var("KOMGA_RUST_KOBO_PROXY_URL", previous);
+    server
+        .join
+        .await
+        .expect("kobo proxy request-body echo server should finish");
 }
 
 #[tokio::test]
@@ -642,7 +849,9 @@ async fn router_put_announcements_deduplicates_duplicate_ids() {
                 .uri("/api/v1/announcements")
                 .header("x-auth-token", &auth_token)
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"["announcement-1","announcement-1","announcement-2"]"#))
+                .body(Body::from(
+                    r#"["announcement-1","announcement-1","announcement-2"]"#,
+                ))
                 .expect("put announcements duplicate ids request should build"),
         )
         .await
@@ -659,7 +868,9 @@ async fn router_put_announcements_deduplicates_duplicate_ids() {
 
 #[tokio::test]
 async fn router_get_releases_returns_internal_error_when_upstream_fetch_fails() {
-    let _guard = releases_env_lock().lock().expect("releases env lock should not be poisoned");
+    let _guard = releases_env_lock()
+        .lock()
+        .expect("releases env lock should not be poisoned");
     let previous = std::env::var("KOMGA_RUST_RELEASES_URL").ok();
     unsafe {
         std::env::set_var("KOMGA_RUST_RELEASES_URL", "http://127.0.0.1:1/releases");
@@ -691,15 +902,13 @@ async fn router_get_releases_returns_internal_error_when_upstream_fetch_fails() 
 
 #[tokio::test]
 async fn router_get_releases_returns_internal_error_for_non_array_payload() {
-    let _guard = releases_env_lock().lock().expect("releases env lock should not be poisoned");
+    let _guard = releases_env_lock()
+        .lock()
+        .expect("releases env lock should not be poisoned");
     let previous = std::env::var("KOMGA_RUST_RELEASES_URL").ok();
 
-    let server = spawn_single_response_server(
-        200,
-        "application/json",
-        r#"{"tag_name":"v1.0.0"}"#,
-    )
-    .await;
+    let server =
+        spawn_single_response_server(200, "application/json", r#"{"tag_name":"v1.0.0"}"#).await;
     unsafe {
         std::env::set_var("KOMGA_RUST_RELEASES_URL", server.url.clone());
     }
@@ -726,12 +935,17 @@ async fn router_get_releases_returns_internal_error_for_non_array_payload() {
 
     cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_RELEASES_URL", previous);
-    server.join.await.expect("releases non-array mock server should finish");
+    server
+        .join
+        .await
+        .expect("releases non-array mock server should finish");
 }
 
 #[tokio::test]
 async fn router_get_releases_returns_internal_error_for_non_success_status_with_valid_array_body() {
-    let _guard = releases_env_lock().lock().expect("releases env lock should not be poisoned");
+    let _guard = releases_env_lock()
+        .lock()
+        .expect("releases env lock should not be poisoned");
     let previous = std::env::var("KOMGA_RUST_RELEASES_URL").ok();
 
     let server = spawn_single_response_server(
@@ -766,7 +980,10 @@ async fn router_get_releases_returns_internal_error_for_non_success_status_with_
 
     cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_RELEASES_URL", previous);
-    server.join.await.expect("releases non-success valid-array mock server should finish");
+    server
+        .join
+        .await
+        .expect("releases non-success valid-array mock server should finish");
 }
 
 #[tokio::test]
@@ -776,7 +993,10 @@ async fn router_get_announcements_returns_internal_error_when_upstream_fetch_fai
         .expect("announcements env lock should not be poisoned");
     let previous = std::env::var("KOMGA_RUST_ANNOUNCEMENTS_URL").ok();
     unsafe {
-        std::env::set_var("KOMGA_RUST_ANNOUNCEMENTS_URL", "http://127.0.0.1:1/feed.json");
+        std::env::set_var(
+            "KOMGA_RUST_ANNOUNCEMENTS_URL",
+            "http://127.0.0.1:1/feed.json",
+        );
     }
 
     let paths = new_router_fixture("router-get-announcements-upstream-failure").await;
@@ -851,7 +1071,10 @@ async fn router_get_announcements_does_not_passthrough_unknown_feed_fields() {
 
     cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_ANNOUNCEMENTS_URL", previous);
-    server.join.await.expect("announcement mock server should finish");
+    server
+        .join
+        .await
+        .expect("announcement mock server should finish");
 }
 
 #[tokio::test]
@@ -888,7 +1111,10 @@ async fn router_get_announcements_returns_not_found_for_null_body_payload() {
 
     cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_ANNOUNCEMENTS_URL", previous);
-    server.join.await.expect("announcement null-body mock server should finish");
+    server
+        .join
+        .await
+        .expect("announcement null-body mock server should finish");
 }
 
 #[tokio::test]
@@ -930,7 +1156,10 @@ async fn router_get_announcements_returns_internal_error_for_invalid_date_modifi
 
     cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_ANNOUNCEMENTS_URL", previous);
-    server.join.await.expect("announcement invalid-date mock server should finish");
+    server
+        .join
+        .await
+        .expect("announcement invalid-date mock server should finish");
 }
 
 #[tokio::test]
@@ -972,7 +1201,10 @@ async fn router_get_announcements_returns_internal_error_for_non_success_upstrea
 
     cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_ANNOUNCEMENTS_URL", previous);
-    server.join.await.expect("announcement non-success mock server should finish");
+    server
+        .join
+        .await
+        .expect("announcement non-success mock server should finish");
 }
 
 #[tokio::test]
@@ -1029,7 +1261,10 @@ async fn router_put_page_hash_normalizes_negative_size_to_null() {
         .expect("page hash put request should complete");
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
-    assert_eq!(load_page_hash_size(&paths, "negative-size-hash").await, None);
+    assert_eq!(
+        load_page_hash_size(&paths, "negative-size-hash").await,
+        None
+    );
 
     cleanup_router_fixture(paths);
 }
@@ -1058,7 +1293,10 @@ async fn router_put_page_hash_preserves_whitespace_padded_hash() {
         .expect("page hash put request with padded hash should complete");
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
-    assert_eq!(load_page_hash_size(&paths, " negative-size-hash ").await, Some(1));
+    assert_eq!(
+        load_page_hash_size(&paths, " negative-size-hash ").await,
+        Some(1)
+    );
 
     cleanup_router_fixture(paths);
 }
@@ -1141,7 +1379,11 @@ async fn router_put_page_hash_rejects_non_integer_size_values() {
         .expect("page hash put request with non-integer size should complete");
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    assert!(load_page_hash_record(&paths, "typed-size-hash").await.is_none());
+    assert!(
+        load_page_hash_record(&paths, "typed-size-hash")
+            .await
+            .is_none()
+    );
 
     cleanup_router_fixture(paths);
 }
@@ -1494,7 +1736,10 @@ async fn router_get_page_hash_matches_returns_internal_error_for_null_file_size(
     seed_router_contract_data(&paths).await;
     seed_page_hash_match_samples(&paths, "match-sort-hash").await;
     update_media_page_file_size_to_null(&paths, "book-match-1", 0).await;
-    assert_eq!(load_media_page_file_size(&paths, "book-match-1", 0).await, None);
+    assert_eq!(
+        load_media_page_file_size(&paths, "book-match-1", 0).await,
+        None
+    );
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
@@ -1521,7 +1766,12 @@ async fn router_get_page_hash_matches_returns_internal_error_for_non_file_url() 
     let paths = new_router_fixture("router-page-hash-matches-http-url").await;
     seed_router_contract_data(&paths).await;
     seed_page_hash_match_samples(&paths, "match-sort-hash").await;
-    update_book_url(&paths, "book-match-1", "https://example.com/books/book-match-1.cbz").await;
+    update_book_url(
+        &paths,
+        "book-match-1",
+        "https://example.com/books/book-match-1.cbz",
+    )
+    .await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
@@ -1698,6 +1948,91 @@ async fn spawn_single_response_server_with_headers(
     }
 }
 
+async fn spawn_request_body_echo_server() -> SingleResponseServer {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("mock request echo server should bind");
+    let address = listener
+        .local_addr()
+        .expect("mock request echo server should have local addr");
+    let join = tokio::spawn(async move {
+        let (mut stream, _) = listener
+            .accept()
+            .await
+            .expect("mock request echo server should accept one connection");
+        let mut request = Vec::new();
+        let mut chunk = [0_u8; 1024];
+
+        loop {
+            let read = stream
+                .read(&mut chunk)
+                .await
+                .expect("mock request echo server should read request bytes");
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&chunk[..read]);
+
+            let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n")
+            else {
+                continue;
+            };
+            let headers = String::from_utf8_lossy(&request[..header_end]);
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    line.split_once(':').and_then(|(name, value)| {
+                        name.trim()
+                            .eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())
+                            .flatten()
+                    })
+                })
+                .unwrap_or(0);
+            let body_start = header_end + 4;
+            if request.len() >= body_start + content_length {
+                break;
+            }
+        }
+
+        let header_end = request
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .expect("mock request echo server should receive complete headers");
+        let headers = String::from_utf8_lossy(&request[..header_end]);
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                line.split_once(':').and_then(|(name, value)| {
+                    name.trim()
+                        .eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())
+                        .flatten()
+                })
+            })
+            .unwrap_or(0);
+        let body_start = header_end + 4;
+        let body_end = body_start + content_length;
+        let body = String::from_utf8_lossy(&request[body_start..body_end]).to_string();
+        let response_body = serde_json::to_string(&json!({ "received": body }))
+            .expect("mock request echo payload should serialize");
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            response_body.len(),
+            response_body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .await
+            .expect("mock request echo server should write response");
+    });
+
+    SingleResponseServer {
+        url: format!("http://{address}/echo.json"),
+        join,
+    }
+}
+
 async fn seed_announcement_read_ids(paths: &RuntimeDbPaths, user_id: &str, ids: &[&str]) {
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await
@@ -1745,7 +2080,10 @@ async fn load_page_hash_size(paths: &RuntimeDbPaths, hash: &str) -> Option<i64> 
     row.get::<Option<i64>, _>("SIZE")
 }
 
-async fn load_page_hash_record(paths: &RuntimeDbPaths, hash: &str) -> Option<(Option<i64>, String)> {
+async fn load_page_hash_record(
+    paths: &RuntimeDbPaths,
+    hash: &str,
+) -> Option<(Option<i64>, String)> {
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await
         .expect("page hash record query db should open");
@@ -1838,10 +2176,30 @@ async fn seed_unknown_page_hash_samples(paths: &RuntimeDbPaths) {
         .expect("unknown page hash sample db should open");
 
     for (book_id, name, url, number) in [
-        ("book-unknown-1", "book-unknown-1.epub", "books/book-unknown-1.epub", 10_i64),
-        ("book-unknown-2", "book-unknown-2.epub", "books/book-unknown-2.epub", 11_i64),
-        ("book-unknown-3", "book-unknown-3.epub", "books/book-unknown-3.epub", 12_i64),
-        ("book-unknown-4", "book-unknown-4.epub", "books/book-unknown-4.epub", 13_i64),
+        (
+            "book-unknown-1",
+            "book-unknown-1.epub",
+            "books/book-unknown-1.epub",
+            10_i64,
+        ),
+        (
+            "book-unknown-2",
+            "book-unknown-2.epub",
+            "books/book-unknown-2.epub",
+            11_i64,
+        ),
+        (
+            "book-unknown-3",
+            "book-unknown-3.epub",
+            "books/book-unknown-3.epub",
+            12_i64,
+        ),
+        (
+            "book-unknown-4",
+            "book-unknown-4.epub",
+            "books/book-unknown-4.epub",
+            13_i64,
+        ),
     ] {
         sqlx::query(
             "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -1923,7 +2281,11 @@ async fn seed_page_hash_match_samples(paths: &RuntimeDbPaths, hash: &str) {
         .expect("page hash match sample book row should be inserted");
     }
 
-    for (book_id, page_number) in [("book-match-1", 0_i64), ("book-match-2", 2_i64), ("book-match-3", 4_i64)] {
+    for (book_id, page_number) in [
+        ("book-match-1", 0_i64),
+        ("book-match-2", 2_i64),
+        ("book-match-3", 4_i64),
+    ] {
         sqlx::query(
             "INSERT INTO MEDIA_PAGE (BOOK_ID, NUMBER, FILE_HASH, FILE_NAME, MEDIA_TYPE, FILE_SIZE) VALUES (?, ?, ?, ?, ?, ?)",
         )
@@ -1971,7 +2333,11 @@ async fn update_media_page_file_size_to_null(paths: &RuntimeDbPaths, book_id: &s
     pool.close().await;
 }
 
-async fn load_media_page_file_size(paths: &RuntimeDbPaths, book_id: &str, number: i64) -> Option<i64> {
+async fn load_media_page_file_size(
+    paths: &RuntimeDbPaths,
+    book_id: &str,
+    number: i64,
+) -> Option<i64> {
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await
         .expect("media page query db should open");

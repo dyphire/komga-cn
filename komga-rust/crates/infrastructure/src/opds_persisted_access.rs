@@ -15,6 +15,8 @@ pub struct PersistedSeriesRecord {
     pub id: String,
     pub library_id: String,
     pub title: String,
+    pub age_rating: Option<u16>,
+    pub sharing_labels: Vec<String>,
     pub last_modified: String,
 }
 
@@ -69,6 +71,21 @@ pub struct PersistedBookFeedRecord {
     pub age_rating: Option<u16>,
     pub sharing_labels: Vec<String>,
     pub last_modified: String,
+}
+
+fn parsed_age_rating(row: &sqlx::sqlite::SqliteRow) -> Option<u16> {
+    row.try_get::<i64, _>("AGE_RATING")
+        .ok()
+        .and_then(|value| u16::try_from(value).ok())
+}
+
+fn parsed_sharing_labels(row: &sqlx::sqlite::SqliteRow) -> Vec<String> {
+    row.get::<String, _>("SHARING_LABELS")
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 fn placeholder_list(count: usize) -> String {
@@ -172,12 +189,17 @@ pub async fn load_series(
     let pool = connect_pool(database_file, 1).await?;
     let row = sqlx::query(
         "SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE, \
+                COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING, \
+                COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS, \
                 COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED \
          FROM SERIES s \
          LEFT \
          JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+         LEFT \
+         JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
          WHERE s.ID = ? \
          AND s.DELETED_DATE IS NULL \
+         GROUP BY s.ID, s.LIBRARY_ID, TITLE, AGE_RATING, LAST_MODIFIED \
          LIMIT 1",
     )
     .bind(series_id)
@@ -188,6 +210,8 @@ pub async fn load_series(
         id: row.get::<String, _>("ID"),
         library_id: row.get::<String, _>("LIBRARY_ID"),
         title: row.get::<String, _>("TITLE"),
+        age_rating: parsed_age_rating(&row),
+        sharing_labels: parsed_sharing_labels(&row),
         last_modified: row.get::<String, _>("LAST_MODIFIED"),
     }))
 }
@@ -309,17 +333,8 @@ pub async fn load_readlist_books(
             file_name: row.get::<String, _>("FILE_NAME"),
             media_type: row.get::<String, _>("MEDIA_TYPE"),
             library_id: row.get::<String, _>("LIBRARY_ID"),
-            age_rating: row
-                .try_get::<i64, _>("AGE_RATING")
-                .ok()
-                .and_then(|value| u16::try_from(value).ok()),
-            sharing_labels: row
-                .get::<String, _>("SHARING_LABELS")
-                .split(',')
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-                .collect(),
+            age_rating: parsed_age_rating(&row),
+            sharing_labels: parsed_sharing_labels(&row),
             last_modified: row.get::<String, _>("LAST_MODIFIED"),
         })
         .collect())
@@ -776,17 +791,8 @@ pub async fn load_collection_books(
             file_name: row.get::<String, _>("FILE_NAME"),
             media_type: row.get::<String, _>("MEDIA_TYPE"),
             library_id: row.get::<String, _>("LIBRARY_ID"),
-            age_rating: row
-                .try_get::<i64, _>("AGE_RATING")
-                .ok()
-                .and_then(|value| u16::try_from(value).ok()),
-            sharing_labels: row
-                .get::<String, _>("SHARING_LABELS")
-                .split(',')
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-                .collect(),
+            age_rating: parsed_age_rating(&row),
+            sharing_labels: parsed_sharing_labels(&row),
             last_modified: row.get::<String, _>("LAST_MODIFIED"),
         })
         .collect())
@@ -803,13 +809,18 @@ pub async fn load_collection_series(
     let pool = connect_pool(database_file, 1).await?;
     let rows = sqlx::query(
         "SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE, \
+                COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING, \
+                COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS, \
                 COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED \
          FROM COLLECTION_SERIES cs \
          JOIN SERIES s ON s.ID = cs.SERIES_ID \
          LEFT \
          JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+         LEFT \
+         JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
          WHERE cs.COLLECTION_ID = ? \
          AND s.DELETED_DATE IS NULL \
+         GROUP BY s.ID, s.LIBRARY_ID, TITLE, AGE_RATING, LAST_MODIFIED \
          ORDER BY cs.NUMBER ASC, COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC, \
                   s.ID ASC",
     )
@@ -823,6 +834,17 @@ pub async fn load_collection_series(
             id: row.get::<String, _>("ID"),
             library_id: row.get::<String, _>("LIBRARY_ID"),
             title: row.get::<String, _>("TITLE"),
+            age_rating: row
+                .try_get::<i64, _>("AGE_RATING")
+                .ok()
+                .and_then(|value| u16::try_from(value).ok()),
+            sharing_labels: row
+                .get::<String, _>("SHARING_LABELS")
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .collect(),
             last_modified: row.get::<String, _>("LAST_MODIFIED"),
         })
         .collect())

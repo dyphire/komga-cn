@@ -72,39 +72,6 @@ async fn router_readlist_tachiyomi_progress_marks_books_completed_at_real_page_c
     cleanup_router_fixture(paths);
 }
 
-async fn seed_extra_readlist(paths: &RuntimeDbPaths, readlist_id: &str, name: &str) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("extra readlist db should open");
-
-    sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT) VALUES (?, ?, ?)")
-        .bind(readlist_id)
-        .bind(name)
-        .bind(0_i64)
-        .execute(&pool)
-        .await
-        .expect("extra readlist row should be inserted");
-
-    pool.close().await;
-}
-
-async fn load_selected_readlist_thumbnail_count(paths: &RuntimeDbPaths, readlist_id: &str) -> i64 {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("readlist thumbnail count db should open");
-
-    let count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM THUMBNAIL_READLIST WHERE READLIST_ID = ? AND SELECTED = 1",
-    )
-    .bind(readlist_id)
-    .fetch_one(&pool)
-    .await
-    .expect("selected readlist thumbnail count should load");
-
-    pool.close().await;
-    count
-}
-
 async fn seed_collection_listing_variants(paths: &RuntimeDbPaths) {
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await
@@ -979,7 +946,144 @@ async fn router_readlist_thumbnail_upload_parses_multipart_image_and_selected_fl
 }
 
 #[tokio::test]
-async fn router_readlist_thumbnail_select_returns_accepted_when_thumbnail_is_missing_but_readlist_exists() {
+async fn router_readlist_thumbnail_delete_removes_uploaded_thumbnail() {
+    let paths = new_router_fixture("router-readlist-thumbnail-delete-success").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let image_bytes = fixture_png_bytes();
+    let (content_type, body) =
+        multipart_image_upload_body("file", "readlist.png", "image/png", false, &image_bytes);
+
+    let upload = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/readlists/readlist-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(body))
+                .expect("readlist thumbnail upload request should build"),
+        )
+        .await
+        .expect("readlist thumbnail upload request should complete");
+    assert_eq!(upload.status(), StatusCode::OK);
+    let thumbnail_id = response_json(upload)
+        .await
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("uploaded readlist thumbnail should expose id")
+        .to_string();
+
+    let delete = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!(
+                    "/api/v1/readlists/readlist-1/thumbnails/{thumbnail_id}"
+                ))
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("readlist thumbnail delete request should build"),
+        )
+        .await
+        .expect("readlist thumbnail delete request should complete");
+    assert_eq!(delete.status(), StatusCode::ACCEPTED);
+
+    let list = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/readlists/readlist-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("readlist thumbnail list request should build"),
+        )
+        .await
+        .expect("readlist thumbnail list request should complete");
+    assert_eq!(list.status(), StatusCode::OK);
+    assert_eq!(response_json(list).await, json!([]));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_readlist_thumbnail_select_marks_uploaded_thumbnail_selected() {
+    let paths = new_router_fixture("router-readlist-thumbnail-select-success").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let image_bytes = fixture_png_bytes();
+    let (content_type, body) =
+        multipart_image_upload_body("file", "readlist.png", "image/png", false, &image_bytes);
+
+    let upload = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/readlists/readlist-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(body))
+                .expect("readlist thumbnail upload request should build"),
+        )
+        .await
+        .expect("readlist thumbnail upload request should complete");
+    assert_eq!(upload.status(), StatusCode::OK);
+    let thumbnail_id = response_json(upload)
+        .await
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("uploaded readlist thumbnail should expose id")
+        .to_string();
+
+    let select = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!(
+                    "/api/v1/readlists/readlist-1/thumbnails/{thumbnail_id}/selected"
+                ))
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("readlist thumbnail select request should build"),
+        )
+        .await
+        .expect("readlist thumbnail select request should complete");
+    assert_eq!(select.status(), StatusCode::ACCEPTED);
+
+    let list = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/readlists/readlist-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("readlist thumbnail list request should build"),
+        )
+        .await
+        .expect("readlist thumbnail list request should complete");
+    assert_eq!(list.status(), StatusCode::OK);
+    let rows = response_json(list).await;
+    let rows = rows
+        .as_array()
+        .expect("readlist thumbnail list response should be an array");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].get("id"), Some(&Value::String(thumbnail_id)));
+    assert_eq!(rows[0].get("selected"), Some(&Value::Bool(true)));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_readlist_thumbnail_select_returns_accepted_when_thumbnail_is_missing_but_readlist_exists()
+ {
     let paths = new_router_fixture("router-readlist-thumbnail-select-missing-thumbnail").await;
     seed_router_contract_data(&paths).await;
 
@@ -1497,10 +1601,8 @@ async fn router_readlist_media_assets_allow_partially_visible_restricted_readlis
             &paths,
             relative_path,
             "OEBPS/chapter.xhtml",
-            format!(
-                "<html xmlns='http://www.w3.org/1999/xhtml'><body>{chapter}</body></html>"
-            )
-            .as_bytes(),
+            format!("<html xmlns='http://www.w3.org/1999/xhtml'><body>{chapter}</body></html>")
+                .as_bytes(),
         );
     }
 
@@ -1550,6 +1652,43 @@ async fn router_readlist_media_assets_allow_partially_visible_restricted_readlis
         thumbnails_payload.as_array().map(Vec::len),
         Some(1),
         "partially visible readlist should still expose its thumbnail list"
+    );
+
+    let archive = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/readlists/readlist-1/file")
+                .header("x-auth-token", &restricted_token)
+                .body(Body::empty())
+                .expect("partially restricted readlist file request should build"),
+        )
+        .await
+        .expect("partially restricted readlist file request should complete");
+
+    assert_eq!(archive.status(), StatusCode::OK);
+    let body = to_bytes(archive.into_body(), usize::MAX)
+        .await
+        .expect("partially restricted readlist archive body should be readable");
+    let cursor = std::io::Cursor::new(body.to_vec());
+    let mut zip = zip::ZipArchive::new(cursor)
+        .expect("partially restricted readlist archive should parse as zip");
+    let names = (0..zip.len())
+        .map(|index| {
+            zip.by_index(index)
+                .expect("zip entry should open")
+                .name()
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        vec![
+            "1 - book-1.epub".to_string(),
+            "2 - book-2.epub".to_string(),
+            "3 - book-3.epub".to_string(),
+        ]
     );
 
     cleanup_router_fixture(paths);

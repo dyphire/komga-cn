@@ -434,6 +434,8 @@ fn map_opds_series_entry(
         id: row.id,
         library_id: row.library_id,
         title: row.title,
+        age_rating: row.age_rating,
+        sharing_labels: row.sharing_labels,
         last_modified: row.last_modified,
     }
 }
@@ -455,6 +457,8 @@ fn map_persisted_series_record(
         id: row.id,
         library_id: row.library_id,
         title: row.title,
+        age_rating: row.age_rating,
+        sharing_labels: row.sharing_labels,
         last_modified: row.last_modified,
     }
 }

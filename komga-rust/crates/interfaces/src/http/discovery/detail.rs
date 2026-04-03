@@ -98,8 +98,8 @@ pub use collections_support::{
     series_visible_to_context, upsert_collection_search_document,
 };
 pub use detail_utils::{
-    coerce_library_id_for_id_bridge, format_size_bytes, internal_error_response,
-    media_profile_for_media_type, parse_csv_values, random_hex_token, uses_id_bridge,
+    format_size_bytes, internal_error_response, media_profile_for_media_type, parse_csv_values,
+    random_hex_token,
 };
 pub use readlists::{
     readlist_book_sibling_next, readlist_book_sibling_previous, readlist_books, readlist_create,
@@ -268,7 +268,7 @@ pub(super) struct SeriesDetailReadModel {
 }
 
 fn book_detail_payload(book: &BookDetailReadModel, is_admin: bool) -> Value {
-    let admin_url = admin_book_url(&book.url);
+    let admin_url = admin_file_url(&book.url);
     let url = if is_admin {
         admin_url
     } else {
@@ -335,7 +335,7 @@ fn book_detail_payload(book: &BookDetailReadModel, is_admin: bool) -> Value {
     })
 }
 
-fn admin_book_url(url: &str) -> String {
+fn admin_file_url(url: &str) -> String {
     match Url::parse(url) {
         Ok(parsed) if parsed.scheme() == "file" => parsed
             .to_file_path()
@@ -364,7 +364,7 @@ fn normalized_file_last_modified(value: &str) -> String {
 
 fn series_detail_payload(series: &SeriesDetailReadModel, is_admin: bool) -> Value {
     let url = if is_admin {
-        series.url.clone()
+        admin_file_url(&series.url)
     } else {
         String::new()
     };

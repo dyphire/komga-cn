@@ -252,20 +252,13 @@ pub async fn book_thumbnail_by_id(
         {
             return StatusCode::FORBIDDEN.into_response();
         }
-
-        return match load_book_thumbnail_by_id(
-            auth_db.database_file.as_path(),
-            &thumbnail_id,
-        )
-        .await
-        {
-            Ok(Some(thumbnail)) => response_from_thumbnail_jpeg_bytes(&headers, thumbnail.thumbnail),
-            Ok(None) => StatusCode::NOT_FOUND.into_response(),
-            Err(error) => internal_error_response(error),
-        };
     }
 
-    StatusCode::NOT_FOUND.into_response()
+    match load_book_thumbnail_by_id(auth_db.database_file.as_path(), &thumbnail_id).await {
+        Ok(Some(thumbnail)) => response_from_thumbnail_jpeg_bytes(&headers, thumbnail.thumbnail),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => internal_error_response(error),
+    }
 }
 
 pub async fn book_thumbnails(
@@ -437,10 +430,8 @@ pub async fn readlist_thumbnail(
     match load_persisted_readlist_thumbnails(auth_db.database_file.as_path(), &readlist_id).await {
         Ok(rows) => {
             if let Some(thumbnail) = rows.first() {
-                let mut response = response_from_thumbnail_jpeg_bytes(
-                    &headers,
-                    thumbnail.thumbnail.clone(),
-                );
+                let mut response =
+                    response_from_thumbnail_jpeg_bytes(&headers, thumbnail.thumbnail.clone());
                 set_one_hour_private_cache_control(&mut response);
                 return response;
             }
@@ -685,10 +676,8 @@ pub async fn collection_thumbnail(
     {
         Ok(rows) => {
             if let Some(thumbnail) = rows.first() {
-                let mut response = response_from_thumbnail_jpeg_bytes(
-                    &headers,
-                    thumbnail.thumbnail.clone(),
-                );
+                let mut response =
+                    response_from_thumbnail_jpeg_bytes(&headers, thumbnail.thumbnail.clone());
                 set_one_hour_private_cache_control(&mut response);
                 return response;
             }
@@ -867,8 +856,7 @@ pub async fn collection_thumbnail_select(
         return response;
     }
 
-    match select_collection_thumbnail(auth_db.database_file.as_path(), &thumbnail_id).await
-    {
+    match select_collection_thumbnail(auth_db.database_file.as_path(), &thumbnail_id).await {
         Ok(true) => StatusCode::ACCEPTED.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
@@ -1028,25 +1016,32 @@ pub async fn series_thumbnail_by_id(
 
     let resolved_series_id =
         resolve_series_id_for_persisted(auth_db.database_file.as_path(), &series_id).await;
-    if !persisted_series_exists(auth_db.database_file.as_path(), &resolved_series_id)
+    let unrestricted_all_libraries = user_shared_all_libraries(&user)
+        && principal_from_user_payload(&user_payload_json(&user))
+            .is_none_or(|principal| !principal.restrictions.is_restricted());
+    if !unrestricted_all_libraries {
+        if !persisted_series_exists(auth_db.database_file.as_path(), &resolved_series_id)
+            .await
+            .unwrap_or(false)
+        {
+            return StatusCode::NOT_FOUND.into_response();
+        }
+
+        match user_can_access_series_media(
+            auth_db.database_file.as_path(),
+            &resolved_series_id,
+            &user,
+        )
         .await
-        .unwrap_or(false)
-    {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-    match user_can_access_series_media(auth_db.database_file.as_path(), &resolved_series_id, &user)
-        .await
-    {
-        Ok(true) => {}
-        Ok(false) => return StatusCode::FORBIDDEN.into_response(),
-        Err(error) => return internal_error_response(error),
+        {
+            Ok(true) => {}
+            Ok(false) => return StatusCode::FORBIDDEN.into_response(),
+            Err(error) => return internal_error_response(error),
+        }
     }
 
-    match load_series_thumbnail_by_id(auth_db.database_file.as_path(), &thumbnail_id).await
-    {
-        Ok(Some(thumbnail)) => {
-            response_from_thumbnail_bytes(&headers, thumbnail.thumbnail, "image/jpeg")
-        }
+    match load_series_thumbnail_by_id(auth_db.database_file.as_path(), &thumbnail_id).await {
+        Ok(Some(thumbnail)) => asset_ok_response("image/jpeg", thumbnail.thumbnail, None, None),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }

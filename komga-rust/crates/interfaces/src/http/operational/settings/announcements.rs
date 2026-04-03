@@ -113,9 +113,7 @@ pub(crate) async fn get_releases(
     Json(releases).into_response()
 }
 
-async fn load_cached_announcements_feed(
-    state: &OperationalState,
-) -> Result<Option<Value>, String> {
+async fn load_cached_announcements_feed(state: &OperationalState) -> Result<Option<Value>, String> {
     const CACHE_TTL_SECONDS: u64 = 60 * 60;
     let now = now_epoch_seconds();
     {
@@ -123,7 +121,8 @@ async fn load_cached_announcements_feed(
             .announcements_cache
             .lock()
             .expect("announcements cache lock should not be poisoned");
-        if let Some(payload) = load_remote_cache_entry_on_access(&mut cache, now, CACHE_TTL_SECONDS) {
+        if let Some(payload) = load_remote_cache_entry_on_access(&mut cache, now, CACHE_TTL_SECONDS)
+        {
             return Ok(Some(payload));
         }
     }
@@ -145,7 +144,8 @@ async fn load_cached_announcements_feed(
     if payload.is_null() {
         return Ok(None);
     }
-    let dto = serde_json::from_value::<AnnouncementsFeedDto>(payload).map_err(|error| error.to_string())?;
+    let dto = serde_json::from_value::<AnnouncementsFeedDto>(payload)
+        .map_err(|error| error.to_string())?;
     let payload = serde_json::to_value(dto).map_err(|error| error.to_string())?;
 
     {
@@ -224,11 +224,8 @@ mod optional_rfc3339 {
         S: Serializer,
     {
         match value {
-            Some(value) => serializer.serialize_some(
-                &value
-                    .format(&Rfc3339)
-                    .map_err(serde::ser::Error::custom)?,
-            ),
+            Some(value) => serializer
+                .serialize_some(&value.format(&Rfc3339).map_err(serde::ser::Error::custom)?),
             None => serializer.serialize_none(),
         }
     }
@@ -252,7 +249,8 @@ async fn load_cached_releases(state: &OperationalState) -> Result<Option<Value>,
             .releases_cache
             .lock()
             .expect("releases cache lock should not be poisoned");
-        if let Some(payload) = load_remote_cache_entry_on_access(&mut cache, now, CACHE_TTL_SECONDS) {
+        if let Some(payload) = load_remote_cache_entry_on_access(&mut cache, now, CACHE_TTL_SECONDS)
+        {
             return Ok(Some(payload));
         }
     }
@@ -325,11 +323,7 @@ mod required_rfc3339 {
     where
         S: Serializer,
     {
-        serializer.serialize_str(
-            &value
-                .format(&Rfc3339)
-                .map_err(serde::ser::Error::custom)?,
-        )
+        serializer.serialize_str(&value.format(&Rfc3339).map_err(serde::ser::Error::custom)?)
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<OffsetDateTime, D::Error>
@@ -375,10 +369,14 @@ mod tests {
 
     #[test]
     fn parse_announcement_ids_deduplicates_duplicate_strings() {
-        let ids = parse_announcement_ids(br#"["announcement-1","announcement-1","announcement-2"]"#)
-            .expect("announcement ids should parse");
+        let ids =
+            parse_announcement_ids(br#"["announcement-1","announcement-1","announcement-2"]"#)
+                .expect("announcement ids should parse");
 
-        assert_eq!(ids, vec!["announcement-1".to_string(), "announcement-2".to_string()]);
+        assert_eq!(
+            ids,
+            vec!["announcement-1".to_string(), "announcement-2".to_string()]
+        );
     }
 
     #[test]
@@ -400,7 +398,6 @@ mod tests {
             150
         );
     }
-
 }
 
 fn now_epoch_seconds() -> u64 {

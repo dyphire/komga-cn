@@ -24,8 +24,8 @@ pub(super) use settings::{
     get_font_family_css, get_font_file, get_fonts_families, get_history, get_oauth2_providers,
     get_page_hash_matches, get_page_hash_thumbnail, get_page_hash_unknown_thumbnail,
     get_page_hashes, get_page_hashes_unknown, get_releases, get_server_settings,
-    get_transient_book_page, patch_client_settings_global, patch_client_settings_user,
-    post_claim, post_filesystem, post_page_hash_delete_all, post_page_hash_delete_match,
+    get_transient_book_page, patch_client_settings_global, patch_client_settings_user, post_claim,
+    post_filesystem, post_page_hash_delete_all, post_page_hash_delete_match,
     post_transient_book_analyze, post_transient_books, put_announcements, put_page_hash,
     update_server_settings,
 };

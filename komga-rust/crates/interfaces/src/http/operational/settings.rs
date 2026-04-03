@@ -105,13 +105,22 @@ mod tests {
 
     #[test]
     fn query_helpers_decode_percent_encoded_values() {
-        assert_eq!(query_value("sort=pageNumber%2Cdesc", "sort"), Some("pageNumber,desc".to_string()));
-        assert_eq!(query_values("sort=bookId%2Casc&sort=pageNumber%2Cdesc", "sort"), vec!["bookId,asc".to_string(), "pageNumber,desc".to_string()]);
+        assert_eq!(
+            query_value("sort=pageNumber%2Cdesc", "sort"),
+            Some("pageNumber,desc".to_string())
+        );
+        assert_eq!(
+            query_values("sort=bookId%2Casc&sort=pageNumber%2Cdesc", "sort"),
+            vec!["bookId,asc".to_string(), "pageNumber,desc".to_string()]
+        );
     }
 
     #[test]
     fn decode_query_component_decodes_plus_and_percent_sequences() {
-        assert_eq!(decode_query_component("hello+world%2Cteam"), "hello world,team");
+        assert_eq!(
+            decode_query_component("hello+world%2Cteam"),
+            "hello world,team"
+        );
     }
 }
 

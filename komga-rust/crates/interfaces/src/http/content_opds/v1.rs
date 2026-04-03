@@ -151,18 +151,55 @@ pub(crate) async fn opds_v1_series_latest(
     let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
+    let restrictions = opds_restrictions(&headers);
 
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
-    let rows = load_latest_series_paged(
-        database_file,
-        &allowed_library_ids,
-        None,
-        page.saturating_mul(size) as i64,
-        (size + 1) as i64,
-    )
-    .await
-    .unwrap_or_default();
-    let (rows, has_next) = paginate_vec(rows, 0, size);
+    let visible_offset = page.saturating_mul(size);
+    let mut raw_offset = 0_i64;
+    let batch_limit = (size + 1).max(20) as i64;
+    let mut visible_seen = 0usize;
+    let mut rows = Vec::with_capacity(size + 1);
+    let has_next = loop {
+        let batch = load_latest_series_paged(
+            database_file,
+            &allowed_library_ids,
+            None,
+            raw_offset,
+            batch_limit,
+        )
+        .await
+        .unwrap_or_default();
+        if batch.is_empty() {
+            break false;
+        }
+        raw_offset += batch.len() as i64;
+
+        for series in batch.iter().filter(|series| {
+            library_visible(&allowed_library_ids, &series.library_id)
+                && content_allowed_by_restrictions(
+                    restrictions.as_ref(),
+                    series.age_rating,
+                    &series.sharing_labels,
+                )
+        }) {
+            if visible_seen < visible_offset {
+                visible_seen += 1;
+                continue;
+            }
+            rows.push(series.clone());
+            if rows.len() > size {
+                break;
+            }
+        }
+
+        if rows.len() > size {
+            break true;
+        }
+        if batch.len() < batch_limit as usize {
+            break false;
+        }
+    };
+    let rows = rows.into_iter().take(size).collect::<Vec<_>>();
 
     opds_v1_navigation_feed_response(
         &headers,

@@ -35,19 +35,24 @@ pub async fn book_page(
     if let Ok(Some(media)) =
         load_persisted_book_media(auth_db.database_file.as_path(), &resolved_book_id).await
     {
-        let book_display_name =
-            load_persisted_manifest_book(auth_db.database_file.as_path(), &resolved_book_id)
-                .await
-                .ok()
-                .flatten()
-                .map(|(_, title, _)| title)
-                .unwrap_or_else(|| media.file_name.clone());
+        let last_modified = file_last_modified_header_value(media.file_path.as_path());
+        if let Some(last_modified) = last_modified.as_deref()
+            && if_modified_since_matches(&headers, last_modified)
+        {
+            return asset_not_modified_response(None, Some(last_modified));
+        }
+
+        let book_display_name = media.file_name.clone();
 
         if !book_media_is_ready_status(auth_db.database_file.as_path(), &resolved_book_id)
             .await
             .unwrap_or(false)
         {
-            return StatusCode::NOT_FOUND.into_response();
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Book analysis failed" })),
+            )
+                .into_response();
         }
 
         if let Some(user) = resolved_auth_user(&headers) {
@@ -201,11 +206,19 @@ pub async fn book_page_raw(
     Extension(_profile): Extension<RuntimeProfile>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
-    Path((book_id, page_number)): Path<(String, u32)>,
+    Path((book_id, page_number_signed)): Path<(String, i32)>,
 ) -> Response {
     if let Some(response) = require_auth(&headers) {
         return response;
     }
+    if page_number_signed <= 0 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Page number does not exist" })),
+        )
+            .into_response();
+    }
+    let page_number = page_number_signed as u32;
 
     let resolved_book_id =
         resolve_book_id_for_persisted(auth_db.database_file.as_path(), &book_id).await;
@@ -213,33 +226,27 @@ pub async fn book_page_raw(
     if let Ok(Some(media)) =
         load_persisted_book_media(auth_db.database_file.as_path(), &resolved_book_id).await
     {
-        let book_display_name =
-            load_persisted_manifest_book(auth_db.database_file.as_path(), &resolved_book_id)
-                .await
-                .ok()
-                .flatten()
-                .map(|(_, title, _)| title)
-                .unwrap_or_else(|| media.file_name.clone());
-
-        if !book_media_is_ready_status(auth_db.database_file.as_path(), &resolved_book_id)
-            .await
-            .unwrap_or(false)
+        let auth_user = resolved_auth_user(&headers);
+        if let Some(user) = auth_user.as_ref()
+            && !user_has_role(user, "PAGE_STREAMING")
         {
-            return StatusCode::NOT_FOUND.into_response();
+            return StatusCode::FORBIDDEN.into_response();
         }
 
-        if !book_media_is_pdf(&media) {
-            return StatusCode::BAD_REQUEST.into_response();
+        let last_modified = file_last_modified_header_value(media.file_path.as_path());
+        if let Some(last_modified) = last_modified.as_deref()
+            && if_modified_since_matches(&headers, last_modified)
+        {
+            return asset_not_modified_response(None, Some(last_modified));
         }
 
-        if let Some(user) = resolved_auth_user(&headers) {
-            if !user_is_admin(&user) && !user_has_role(&user, "PAGE_STREAMING") {
-                return StatusCode::FORBIDDEN.into_response();
-            }
+        let book_display_name = media.file_name.clone();
+
+        if let Some(user) = auth_user.as_ref() {
             if !user_can_access_book_media(
                 auth_db.database_file.as_path(),
                 &resolved_book_id,
-                &user,
+                user,
                 &media,
             )
             .await
@@ -248,19 +255,30 @@ pub async fn book_page_raw(
             }
         }
 
+        if !book_media_is_ready_status(auth_db.database_file.as_path(), &resolved_book_id)
+            .await
+            .unwrap_or(false)
+        {
+            return json_error_response(StatusCode::NOT_FOUND, "Book analysis failed");
+        }
+
+        if !media.file_path.exists() {
+            return json_error_response(StatusCode::NOT_FOUND, "File not found, it may have moved");
+        }
+
+        if !book_media_is_pdf(&media) {
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                "Extractor does not support raw extraction of pages",
+            );
+        }
+
         let page_count = detect_pdf_page_count(&media).unwrap_or(media.page_count);
         if page_number == 0 || page_number as u64 > page_count {
-            return StatusCode::BAD_REQUEST.into_response();
+            return json_error_response(StatusCode::BAD_REQUEST, "Page number does not exist");
         }
 
         if let Some(bytes) = read_pdf_page_as_single_page_pdf(&media, page_number as u64) {
-            let last_modified = file_last_modified_header_value(media.file_path.as_path());
-            if let Some(last_modified) = last_modified.as_deref()
-                && if_modified_since_matches(&headers, last_modified)
-            {
-                return asset_not_modified_response(None, Some(last_modified));
-            }
-
             let mut response =
                 asset_ok_response("application/pdf", bytes, None, last_modified.as_deref());
             let file_name =
@@ -299,6 +317,10 @@ fn page_response_file_name(book_display_name: &str, page_number: u32, media_type
         .and_then(|extensions| extensions.first().copied())
         .unwrap_or("bin");
     format!("{book_display_name}-{page_number}.{extension}")
+}
+
+fn json_error_response(status: StatusCode, error: &str) -> Response {
+    (status, Json(json!({ "error": error }))).into_response()
 }
 
 fn accept_header_prefers_pdf(headers: &HeaderMap) -> bool {
@@ -615,14 +637,24 @@ pub async fn book_pages(
             generated_pdf_rows
                 .into_iter()
                 .map(|page| {
+                    let size_bytes = if page.file_size < 0 {
+                        Value::Null
+                    } else {
+                        json!(page.file_size)
+                    };
+                    let size = if page.file_size < 0 {
+                        Value::String(String::new())
+                    } else {
+                        Value::String(format_size_bytes(page.file_size as u64))
+                    };
                     json!({
                         "number": page.number,
                         "fileName": page.file_name,
                         "mediaType": page.media_type,
                         "width": page.width,
                         "height": page.height,
-                        "sizeBytes": page.file_size,
-                        "size": format_size_bytes(page.file_size as u64),
+                        "sizeBytes": size_bytes,
+                        "size": size,
                     })
                 })
                 .collect::<Vec<_>>(),

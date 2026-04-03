@@ -116,11 +116,14 @@ pub(super) fn try_execute(
                 Err(error) => return Some(Err(error)),
             };
             if regenerate_thumbnail {
-                scheduler.enqueue(TaskQueueRecord::new(
-                    format!("GENERATE_BOOK_THUMBNAIL:{book_id}"),
-                    task.priority.saturating_sub(1),
-                    Some(book_id.to_string()),
-                ));
+                scheduler.enqueue(
+                    TaskQueueRecord::new(
+                        format!("GENERATE_BOOK_THUMBNAIL_{book_id}"),
+                        task.priority.saturating_sub(1),
+                        Some(book_id.to_string()),
+                    )
+                    .with_simple_type("GENERATE_BOOK_THUMBNAIL"),
+                );
             }
             Ok(())
         }

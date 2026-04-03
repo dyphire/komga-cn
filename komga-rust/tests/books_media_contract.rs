@@ -3516,6 +3516,32 @@ async fn router_discovery_book_detail_formats_file_last_modified_as_utc_timestam
 }
 
 #[tokio::test]
+async fn router_discovery_book_detail_does_not_bridge_missing_book_n_ids() {
+    let paths = new_router_fixture("router-discovery-book-detail-no-bridge-id").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_cbz_book(&paths, "book-z-2", "book-z-2.cbz", "Second Real Book").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-2")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book detail bridge-id request should build"),
+        )
+        .await
+        .expect("book detail bridge-id request should complete");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_discovery_book_readlists_returns_existing_persisted_readlists() {
     let paths = new_router_fixture("router-discovery-book-readlists-persisted").await;
     seed_router_contract_data(&paths).await;
@@ -3604,7 +3630,173 @@ async fn router_book_pages_and_raw_pages_include_inline_content_disposition() {
 }
 
 #[tokio::test]
-async fn router_book_page_returns_bad_request_for_missing_pdf_page_number() {
+async fn router_book_raw_page_does_not_return_not_modified_before_page_streaming_check() {
+    let paths = new_router_fixture("router-book-raw-page-no-304-before-role-check").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_pdf_book(
+        &paths,
+        "book-pdf-1",
+        "series-1",
+        "fixture-page.pdf",
+        "Readable Page Title",
+    )
+    .await;
+    seed_router_age_exclude_user_with_roles(
+        &paths,
+        "admin-access-no-page-streaming",
+        "admin-access-no-page-streaming@example.org",
+        "router-contract-admin-access-123",
+        0,
+        &["USER", "ADMIN"],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "admin-access-no-page-streaming@example.org",
+        "router-contract-admin-access-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/pages/1/raw")
+                .header("x-auth-token", &auth_token)
+                .header(header::IF_MODIFIED_SINCE, "Wed, 01 Jan 2099 00:00:00 +0000")
+                .body(Body::empty())
+                .expect("book raw page role-order request should build"),
+        )
+        .await
+        .expect("book raw page role-order request should complete");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_raw_page_returns_bad_request_for_negative_page_number() {
+    let paths = new_router_fixture("router-book-raw-page-negative-page-number").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_pdf_book(
+        &paths,
+        "book-pdf-1",
+        "series-1",
+        "fixture-page.pdf",
+        "Readable Page Title",
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/pages/-1/raw")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("negative raw page request should build"),
+        )
+        .await
+        .expect("negative raw page request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("error"),
+        Some(&Value::String("Page number does not exist".to_string()))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_raw_page_returns_bad_request_for_non_integer_page_number() {
+    let paths = new_router_fixture("router-book-raw-page-non-integer-page-number").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_pdf_book(
+        &paths,
+        "book-pdf-1",
+        "series-1",
+        "fixture-page.pdf",
+        "Readable Page Title",
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/pages/abc/raw")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("non-integer raw page request should build"),
+        )
+        .await
+        .expect("non-integer raw page request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_raw_page_content_disposition_uses_book_name_not_metadata_title() {
+    let paths = new_router_fixture("router-book-raw-page-uses-book-name").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_pdf_book(
+        &paths,
+        "book-pdf-1",
+        "series-1",
+        "fixture-page.pdf",
+        "Metadata Title",
+    )
+    .await;
+    update_router_book_name(&paths, "book-pdf-1", "Filesystem Shelf Name").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/pages/1/raw")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book raw page request should build"),
+        )
+        .await
+        .expect("book raw page request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let disposition = response
+        .headers()
+        .get(header::CONTENT_DISPOSITION)
+        .and_then(|value| value.to_str().ok())
+        .expect("raw page response should expose content-disposition");
+    assert!(
+        disposition.contains("Filesystem Shelf Name-1"),
+        "disposition was: {disposition}"
+    );
+    assert!(
+        !disposition.contains("Metadata Title-1"),
+        "disposition was: {disposition}"
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_raw_page_returns_bad_request_for_missing_pdf_page_number() {
     let paths = new_router_fixture("router-book-page-missing-pdf-page").await;
     seed_router_contract_data(&paths).await;
     seed_router_pdf_book(
@@ -3623,15 +3815,221 @@ async fn router_book_page_returns_bad_request_for_missing_pdf_page_number() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/api/v1/books/book-pdf-1/pages/2")
+                .uri("/api/v1/books/book-pdf-1/pages/2/raw")
                 .header("x-auth-token", &auth_token)
                 .body(Body::empty())
-                .expect("missing pdf page request should build"),
+                .expect("missing raw pdf page request should build"),
         )
         .await
-        .expect("missing pdf page request should complete");
+        .expect("missing raw pdf page request should complete");
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("error"),
+        Some(&Value::String("Page number does not exist".to_string()))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_raw_page_returns_not_found_with_message_when_media_not_ready() {
+    let paths = new_router_fixture("router-book-raw-page-media-not-ready").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_pdf_book(
+        &paths,
+        "book-pdf-1",
+        "series-1",
+        "fixture-page.pdf",
+        "Readable Page Title",
+    )
+    .await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("book raw page not-ready db should open");
+    sqlx::query("UPDATE MEDIA SET STATUS = ? WHERE BOOK_ID = ?")
+        .bind("OUTDATED")
+        .bind("book-pdf-1")
+        .execute(&pool)
+        .await
+        .expect("media status should update");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/pages/1/raw")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("not-ready raw pdf page request should build"),
+        )
+        .await
+        .expect("not-ready raw pdf page request should complete");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("error"),
+        Some(&Value::String("Book analysis failed".to_string()))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_raw_page_forbidden_before_not_ready_for_restricted_user() {
+    let paths = new_router_fixture("router-book-raw-page-restricted-before-not-ready").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_pdf_book(
+        &paths,
+        "book-pdf-1",
+        "series-1",
+        "fixture-page.pdf",
+        "Readable Page Title",
+    )
+    .await;
+    seed_router_age_exclude_user_with_roles(
+        &paths,
+        "restricted-page-user",
+        "restricted-page-user@example.org",
+        "router-contract-restricted-page-123",
+        16,
+        &["USER", "PAGE_STREAMING"],
+    )
+    .await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("book raw page restricted db should open");
+    sqlx::query("UPDATE MEDIA SET STATUS = ? WHERE BOOK_ID = ?")
+        .bind("OUTDATED")
+        .bind("book-pdf-1")
+        .execute(&pool)
+        .await
+        .expect("media status should update");
+    sqlx::query("UPDATE SERIES_METADATA SET AGE_RATING = ? WHERE SERIES_ID = ?")
+        .bind(18_i64)
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("series age rating should update");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "restricted-page-user@example.org",
+        "router-contract-restricted-page-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/pages/1/raw")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("restricted raw pdf page request should build"),
+        )
+        .await
+        .expect("restricted raw pdf page request should complete");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_raw_page_returns_not_found_with_message_when_file_is_missing() {
+    let paths = new_router_fixture("router-book-raw-page-file-missing").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_pdf_book(
+        &paths,
+        "book-pdf-1",
+        "series-1",
+        "fixture-page.pdf",
+        "Readable Page Title",
+    )
+    .await;
+
+    let pdf_path = paths.config_dir.join("books/fixture-page.pdf");
+    std::fs::remove_file(&pdf_path).expect("pdf fixture should be removable");
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/pages/1/raw")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("file-missing raw pdf page request should build"),
+        )
+        .await
+        .expect("file-missing raw pdf page request should complete");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("error"),
+        Some(&Value::String(
+            "File not found, it may have moved".to_string()
+        ))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_raw_page_returns_not_modified_before_not_ready_checks() {
+    let paths = new_router_fixture("router-book-raw-page-not-modified-before-not-ready").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_pdf_book(
+        &paths,
+        "book-pdf-1",
+        "series-1",
+        "fixture-page.pdf",
+        "Readable Page Title",
+    )
+    .await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("book raw page not-ready db should open");
+    sqlx::query("UPDATE MEDIA SET STATUS = ? WHERE BOOK_ID = ?")
+        .bind("OUTDATED")
+        .bind("book-pdf-1")
+        .execute(&pool)
+        .await
+        .expect("media status should update");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/pages/1/raw")
+                .header("x-auth-token", &auth_token)
+                .header(header::IF_MODIFIED_SINCE, "Wed, 01 Jan 2099 00:00:00 +0000")
+                .body(Body::empty())
+                .expect("not-modified raw pdf page request should build"),
+        )
+        .await
+        .expect("not-modified raw pdf page request should complete");
+
+    assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
 
     cleanup_router_fixture(paths);
 }
@@ -3778,6 +4176,57 @@ async fn router_book_thumbnail_upload_parses_multipart_image_and_selected_flag()
     );
     assert_eq!(payload.get("width"), Some(&json!(1)));
     assert_eq!(payload.get("height"), Some(&json!(1)));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_thumbnail_by_id_allows_missing_path_book_when_thumbnail_exists() {
+    let paths = new_router_fixture("router-book-thumbnail-by-id-missing-path-book").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let image_bytes = fixture_png_bytes();
+    let (content_type, body) =
+        multipart_image_upload_body("file", "cover.png", "image/png", false, &image_bytes);
+
+    let upload = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/books/book-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(body))
+                .expect("book thumbnail upload request should build"),
+        )
+        .await
+        .expect("book thumbnail upload request should complete");
+
+    let thumbnail_id = response_json(upload)
+        .await
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("book thumbnail upload should return thumbnail id")
+        .to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/api/v1/books/missing-book/thumbnails/{thumbnail_id}"
+                ))
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book thumbnail missing path request should build"),
+        )
+        .await
+        .expect("book thumbnail missing path request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
 
     cleanup_router_fixture(paths);
 }
@@ -4074,6 +4523,48 @@ async fn router_book_media_asset_routes_forbid_age_restricted_user() {
 }
 
 #[tokio::test]
+async fn router_book_file_delete_enqueues_delete_book_even_when_book_is_missing() {
+    let paths = new_router_fixture("router-book-file-delete-missing-book").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/api/v1/books/missing-book/file")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("missing book file delete request should build"),
+        )
+        .await
+        .expect("missing book file delete request should complete");
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+        .await
+        .expect("tasks db should open for missing book file delete verification");
+    let rows = sqlx::query("SELECT ID, SIMPLE_TYPE, GROUP_ID FROM TASK ORDER BY ID ASC")
+        .fetch_all(&tasks_pool)
+        .await
+        .expect("missing book delete task rows should be queryable");
+    tasks_pool.close().await;
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].get::<String, _>("ID"), "DELETE_BOOK:missing-book");
+    assert_eq!(rows[0].get::<String, _>("SIMPLE_TYPE"), "DELETE_BOOK");
+    assert_eq!(
+        rows[0].get::<Option<String>, _>("GROUP_ID"),
+        Some("missing-book".to_string())
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_book_thumbnail_upload_rejects_invalid_selected_flag() {
     let paths = new_router_fixture("router-book-thumbnail-upload-invalid-selected").await;
     seed_router_contract_data(&paths).await;
@@ -4147,16 +4638,14 @@ async fn router_book_pages_single_image_fallback_includes_dimensions() {
     .execute(&pool)
     .await
     .expect("single-image book row should be inserted");
-    sqlx::query(
-        "INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)",
-    )
-    .bind("image/png")
-    .bind("READY")
-    .bind("book-image-1")
-    .bind(1_i64)
-    .execute(&pool)
-    .await
-    .expect("single-image media row should be inserted");
+    sqlx::query("INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("image/png")
+        .bind("READY")
+        .bind("book-image-1")
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("single-image media row should be inserted");
     sqlx::query(
         "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
     )
@@ -4174,7 +4663,8 @@ async fn router_book_pages_single_image_fallback_includes_dimensions() {
     if let Some(parent) = image_path.parent() {
         std::fs::create_dir_all(parent).expect("single-image parent directory should be created");
     }
-    std::fs::write(&image_path, fixture_png_bytes()).expect("single-image fixture should be written");
+    std::fs::write(&image_path, fixture_png_bytes())
+        .expect("single-image fixture should be written");
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
@@ -4204,10 +4694,96 @@ async fn router_book_pages_single_image_fallback_includes_dimensions() {
 }
 
 #[tokio::test]
-async fn router_book_pages_generated_pdf_fallback_includes_dimensions() {
+async fn router_book_raw_page_returns_bad_request_with_message_for_non_pdf_media() {
+    let paths = new_router_fixture("router-book-raw-page-single-image").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for single-image raw fixture");
+    sqlx::query(
+        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("book-image-raw-1")
+    .bind(0_i64)
+    .bind("cover.png")
+    .bind("books/cover-raw.png")
+    .bind("series-1")
+    .bind(1_i64)
+    .bind(6_i64)
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("single-image raw book row should be inserted");
+    sqlx::query("INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("image/png")
+        .bind("READY")
+        .bind("book-image-raw-1")
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("single-image raw media row should be inserted");
+    sqlx::query(
+        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("6")
+    .bind(6.0_f64)
+    .bind("Cover Raw Book")
+    .bind("2024-02-03")
+    .bind("book-image-raw-1")
+    .execute(&pool)
+    .await
+    .expect("single-image raw metadata row should be inserted");
+    pool.close().await;
+
+    let image_path = paths.config_dir.join("books/cover-raw.png");
+    if let Some(parent) = image_path.parent() {
+        std::fs::create_dir_all(parent)
+            .expect("single-image raw parent directory should be created");
+    }
+    let image_bytes = fixture_png_bytes();
+    std::fs::write(&image_path, &image_bytes).expect("single-image raw fixture should be written");
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-image-raw-1/pages/1/raw")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("single-image raw page request should build"),
+        )
+        .await
+        .expect("single-image raw page request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("error"),
+        Some(&Value::String(
+            "Extractor does not support raw extraction of pages".to_string()
+        ))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_pages_generated_pdf_fallback_matches_kotlin_page_shape() {
     let paths = new_router_fixture("router-book-pages-pdf-dimensions").await;
     seed_router_contract_data(&paths).await;
-    seed_router_pdf_book(&paths, "book-pdf-1", "series-1", "fixture-page.pdf", "Fixture PDF").await;
+    seed_router_pdf_book(
+        &paths,
+        "book-pdf-1",
+        "series-1",
+        "fixture-page.pdf",
+        "Fixture PDF",
+    )
+    .await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
@@ -4230,8 +4806,18 @@ async fn router_book_pages_generated_pdf_fallback_includes_dimensions() {
         .as_array()
         .expect("pdf pages payload should be an array");
     assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].get("fileName"),
+        Some(&Value::String("1".to_string()))
+    );
+    assert_eq!(
+        rows[0].get("mediaType"),
+        Some(&Value::String("image/jpeg".to_string()))
+    );
     assert!(rows[0].get("width").is_some_and(|value| !value.is_null()));
     assert!(rows[0].get("height").is_some_and(|value| !value.is_null()));
+    assert!(rows[0].get("sizeBytes").is_some_and(Value::is_null));
+    assert_eq!(rows[0].get("size"), Some(&Value::String(String::new())));
 
     cleanup_router_fixture(paths);
 }

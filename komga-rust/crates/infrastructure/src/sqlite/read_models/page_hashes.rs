@@ -69,7 +69,14 @@ pub async fn load_page_hashes_page(
     })
     .collect::<Vec<_>>();
 
-    Ok(page_payload(page, size, offset, total_elements, content, true))
+    Ok(page_payload(
+        page,
+        size,
+        offset,
+        total_elements,
+        content,
+        true,
+    ))
 }
 
 pub async fn load_page_hashes_unknown_page(
@@ -115,19 +122,19 @@ pub async fn load_page_hashes_unknown_page(
     sql.push_str(" LIMIT ? OFFSET ?");
 
     let content = sqlx::query(&sql)
-    .bind((size.min(i64::MAX as u64)) as i64)
-    .bind((offset.min(i64::MAX as u64)) as i64)
-    .fetch_all(&pool)
-    .await?
-    .into_iter()
-    .map(|row| {
-        json!({
-            "hash": row.get::<String, _>("HASH"),
-            "size": row.get::<Option<i64>, _>("SIZE"),
-            "matchCount": row.get::<i64, _>("MATCH_COUNT"),
+        .bind((size.min(i64::MAX as u64)) as i64)
+        .bind((offset.min(i64::MAX as u64)) as i64)
+        .fetch_all(&pool)
+        .await?
+        .into_iter()
+        .map(|row| {
+            json!({
+                "hash": row.get::<String, _>("HASH"),
+                "size": row.get::<Option<i64>, _>("SIZE"),
+                "matchCount": row.get::<i64, _>("MATCH_COUNT"),
+            })
         })
-    })
-    .collect::<Vec<_>>();
+        .collect::<Vec<_>>();
 
     Ok(page_payload(
         page,
@@ -173,12 +180,12 @@ pub async fn load_page_hash_matches_page(
     sql.push_str(" LIMIT ? OFFSET ?");
 
     let content = sqlx::query(&sql)
-    .bind(page_hash)
-    .bind(page_hash)
-    .bind(page_hash)
-    .bind((size.min(i64::MAX as u64)) as i64)
-    .bind((offset.min(i64::MAX as u64)) as i64)
-    .fetch_all(&pool)
+        .bind(page_hash)
+        .bind(page_hash)
+        .bind(page_hash)
+        .bind((size.min(i64::MAX as u64)) as i64)
+        .bind((offset.min(i64::MAX as u64)) as i64)
+        .fetch_all(&pool)
         .await?
         .into_iter()
         .map(|row| -> Result<Value, sqlx::Error> {

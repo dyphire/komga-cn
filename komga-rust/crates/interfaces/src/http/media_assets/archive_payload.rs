@@ -1,8 +1,8 @@
 use std::io::{Cursor, Write};
 
-use zip::write::SimpleFileOptions;
 use zip::CompressionMethod;
 use zip::ZipWriter;
+use zip::write::SimpleFileOptions;
 
 pub(super) fn build_stored_zip_archive(entries: Vec<(String, Vec<u8>)>) -> Result<Vec<u8>, String> {
     let cursor = Cursor::new(Vec::new());
@@ -27,7 +27,12 @@ pub(super) fn build_stored_zip_archive(entries: Vec<(String, Vec<u8>)>) -> Resul
 }
 
 pub(super) fn readlist_archive_entry_name(index: usize, file_name: &str) -> String {
-    format!("{} - {}", index + 1, file_name)
+    let visible_name = file_name
+        .rsplit(['/', '\\'])
+        .next()
+        .filter(|name| !name.is_empty())
+        .unwrap_or(file_name);
+    format!("{} - {}", index + 1, visible_name)
 }
 
 #[cfg(test)]
@@ -40,6 +45,10 @@ mod tests {
         assert_eq!(
             readlist_archive_entry_name(4, "issue-5.cbz"),
             "5 - issue-5.cbz"
+        );
+        assert_eq!(
+            readlist_archive_entry_name(1, "books/issue-2.cbz"),
+            "2 - issue-2.cbz"
         );
     }
 }

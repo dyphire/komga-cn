@@ -104,15 +104,13 @@ async fn rebuild_indexes_oneshot_inherited_series_metadata_and_book_isbn_fields(
     .await
     .expect("series alternate title should be inserted");
 
-    sqlx::query(
-        "INSERT INTO BOOK_METADATA_AUTHOR (BOOK_ID, NAME, ROLE) VALUES (?, ?, ?)",
-    )
-    .bind("book-1")
-    .bind("Jane Writer")
-    .bind("writer")
-    .execute(&pool)
-    .await
-    .expect("book metadata author should be inserted");
+    sqlx::query("INSERT INTO BOOK_METADATA_AUTHOR (BOOK_ID, NAME, ROLE) VALUES (?, ?, ?)")
+        .bind("book-1")
+        .bind("Jane Writer")
+        .bind("writer")
+        .execute(&pool)
+        .await
+        .expect("book metadata author should be inserted");
 
     sqlx::query(
         "INSERT INTO BOOK (\

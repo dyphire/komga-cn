@@ -1,9 +1,9 @@
 use crate::http::discovery_auth::{
     AgeRestrictionKind, DetailAccessDenial, DiscoveryQueryContext, QueryRestrictions,
 };
-use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
-use axum::response::{IntoResponse, Response};
 use axum::Json;
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use komga_application::discovery::BookReadModel;
 use komga_domain::common_ids::{LibraryId, UserId};
 use komga_domain::discovery::{
@@ -11,10 +11,10 @@ use komga_domain::discovery::{
     DiscoveryQueryContext as DomainDiscoveryQueryContext, PageEnvelope,
     QueryRestrictions as DomainQueryRestrictions,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::super::{
-    ReadProgress, ReadProgressState, PERSISTED_OWNERSHIP_MARKER, SEARCH_OWNERSHIP_HEADER,
+    PERSISTED_OWNERSHIP_MARKER, ReadProgress, ReadProgressState, SEARCH_OWNERSHIP_HEADER,
 };
 
 pub(crate) fn books_page_payload(

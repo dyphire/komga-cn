@@ -4,8 +4,8 @@ use axum::Json;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde_json::{Value, json};
-use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use time::{OffsetDateTime, UtcOffset};
 
 use crate::http::request_urls::app_absolute_url;
 
@@ -57,13 +57,14 @@ pub(super) fn opds_v1_navigation_feed_response(
             .updated
             .as_deref()
             .filter(|value| !value.is_empty())
-            .unwrap_or(now.as_str());
+            .map(normalize_opds_updated)
+            .unwrap_or_else(|| now.clone());
         let href = app_absolute_url(headers, entry.href_path.as_str());
         body.push_str(
             format!(
                 "<entry><title>{}</title><updated>{}</updated><id>{}</id><content></content><link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"subsection\" href=\"{}\"/></entry>",
                 xml_escape(&entry.title),
-                xml_escape(entry_updated),
+                xml_escape(&entry_updated),
                 xml_escape(&entry.id),
                 xml_escape(&href),
             )
@@ -349,7 +350,31 @@ pub(super) fn percent_decode(value: &str) -> String {
 }
 
 pub(super) fn opds_now_timestamp() -> String {
-    OffsetDateTime::now_utc()
+    let now_utc = OffsetDateTime::now_utc();
+    let offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
+    format_opds_timestamp(now_utc, offset)
+}
+
+fn normalize_opds_updated(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return opds_now_timestamp();
+    }
+    if trimmed.ends_with('Z') || trimmed.contains('+') {
+        return trimmed.to_string();
+    }
+    if let Some((date, time)) = trimmed.split_once(' ') {
+        return format!("{date}T{time}Z");
+    }
+    if trimmed.contains('T') {
+        return format!("{trimmed}Z");
+    }
+    trimmed.to_string()
+}
+
+fn format_opds_timestamp(now_utc: OffsetDateTime, offset: UtcOffset) -> String {
+    now_utc
+        .to_offset(offset)
         .format(&Rfc3339)
         .unwrap_or_else(|_| "2000-01-01T00:00:00Z".to_string())
 }
@@ -358,8 +383,9 @@ pub(super) fn opds_now_timestamp() -> String {
 mod tests {
     use axum::body::to_bytes;
     use axum::http::HeaderMap;
+    use time::{Month, OffsetDateTime, UtcOffset};
 
-    use super::{OpdsV1NavigationEntry, opds_v1_navigation_feed_response};
+    use super::{OpdsV1NavigationEntry, format_opds_timestamp, opds_v1_navigation_feed_response};
 
     #[tokio::test]
     async fn navigation_feed_uses_entry_specific_updated_timestamp() {
@@ -388,6 +414,17 @@ mod tests {
     #[test]
     fn parse_page_size_does_not_cap_large_requested_size() {
         assert_eq!(super::parse_page_size("page=2&size=250"), (2, 250));
+    }
+
+    #[test]
+    fn opds_now_timestamp_uses_local_offset_format() {
+        let base = OffsetDateTime::from_unix_timestamp(0)
+            .expect("unix epoch should be valid")
+            .replace_date(time::Date::from_calendar_date(2024, Month::March, 3).expect("date"))
+            .replace_time(time::Time::from_hms(0, 0, 0).expect("time"));
+        let utc = base.to_offset(UtcOffset::UTC);
+        let formatted = format_opds_timestamp(utc, UtcOffset::from_hms(9, 0, 0).expect("offset"));
+        assert_eq!(formatted, "2024-03-03T09:00:00+09:00");
     }
 }
 

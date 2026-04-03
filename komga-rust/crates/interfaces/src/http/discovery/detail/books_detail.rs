@@ -11,10 +11,6 @@ pub async fn book_detail(
     }
 
     if auth_db.database_file.exists() {
-        let requested_book_id = book_id.clone();
-        let book_id =
-            resolve_book_id_for_persisted(auth_db.database_file.as_path(), &book_id).await;
-
         let Some(resource) =
             (match load_persisted_book_resource(auth_db.database_file.as_path(), &book_id).await {
                 Ok(resource) => resource,
@@ -46,13 +42,7 @@ pub async fn book_detail(
         )
         .await
         {
-            Ok(Some(book)) => {
-                let mut payload = book_detail_payload(&book, is_admin);
-                if uses_id_bridge(&requested_book_id, &book_id) {
-                    coerce_library_id_for_id_bridge(&mut payload);
-                }
-                Json(payload).into_response()
-            }
+            Ok(Some(book)) => Json(book_detail_payload(&book, is_admin)).into_response(),
             Ok(None) => StatusCode::NOT_FOUND.into_response(),
             Err(error) => internal_error_response(error),
         };

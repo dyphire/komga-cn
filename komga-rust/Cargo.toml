@@ -38,7 +38,7 @@ zip = "8.4.0"
 flate2 = "1.1.9"
 lopdf = "0.40.0"
 quick-xml = "0.39.2"
-time = { version = "0.3.44", features = ["formatting", "parsing"] }
+time = { version = "0.3.44", features = ["formatting", "parsing", "local-offset"] }
 futures-util = "0.3.31"
 image = "0.25.8"
 mime_guess = "2.0.5"

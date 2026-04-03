@@ -37,12 +37,10 @@ pub async fn book_analyze(
 
     enqueue_task_records(
         &state,
-        vec![TaskQueueRecord::new(
-            format!("ANALYZE_BOOK_{book_id}"),
-            90,
-            Some(book.series_id),
-        )
-        .with_simple_type("ANALYZE_BOOK")],
+        vec![
+            TaskQueueRecord::new(format!("ANALYZE_BOOK_{book_id}"), 90, Some(book.series_id))
+                .with_simple_type("ANALYZE_BOOK"),
+        ],
     )
 }
 
@@ -400,12 +398,14 @@ pub async fn books_thumbnails_regenerate(
 
     enqueue_task_records(
         &state,
-        vec![TaskQueueRecord::new("FIND_BOOK_THUMBNAILS_TO_REGENERATE", 0, None).with_payload(
-            json!({
-                "for_bigger_result_only": query.for_bigger_result_only,
-            })
-            .to_string(),
-        )],
+        vec![
+            TaskQueueRecord::new("FIND_BOOK_THUMBNAILS_TO_REGENERATE", 0, None).with_payload(
+                json!({
+                    "for_bigger_result_only": query.for_bigger_result_only,
+                })
+                .to_string(),
+            ),
+        ],
     )
 }
 
@@ -471,11 +471,10 @@ pub async fn series_metadata_refresh(
         return response;
     }
 
-    let book_ids =
-        match load_series_book_ids(auth_db.database_file.as_path(), &series_id).await {
-            Ok(book_ids) => book_ids,
-            Err(error) => return internal_error_response(error),
-        };
+    let book_ids = match load_series_book_ids(auth_db.database_file.as_path(), &series_id).await {
+        Ok(book_ids) => book_ids,
+        Err(error) => return internal_error_response(error),
+    };
 
     let mut task_records = vec![];
     for book_id in book_ids {
@@ -500,7 +499,6 @@ pub async fn series_metadata_refresh(
 }
 
 pub async fn book_file_delete(
-    Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(state): Extension<OperationalState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
@@ -509,16 +507,12 @@ pub async fn book_file_delete(
         return response;
     }
 
-    match persisted_book_exists(auth_db.database_file.as_path(), &book_id).await {
-        Ok(true) => enqueue_task_records(
-            &state,
-            vec![TaskQueueRecord::new(
-                format!("DELETE_BOOK:{book_id}"),
-                100,
-                Some(book_id),
-            )],
-        ),
-        Ok(false) => StatusCode::NOT_FOUND.into_response(),
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    }
+    enqueue_task_records(
+        &state,
+        vec![TaskQueueRecord::new(
+            format!("DELETE_BOOK:{book_id}"),
+            100,
+            Some(book_id),
+        )],
+    )
 }

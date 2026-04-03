@@ -83,14 +83,15 @@ pub fn load_generated_pdf_page_rows(media: &BookMediaRecord) -> Vec<BookPageReco
             let dimensions = document
                 .as_ref()
                 .and_then(|document| pdf_page_dimensions(document, number as u32));
+            let scaled_dimensions = dimensions.map(scale_pdf_page_dimensions);
 
             BookPageRecord {
                 number,
-                file_name: format!("page-{number}.pdf"),
-                media_type: "application/pdf".to_string(),
-                width: dimensions.map(|(width, _)| i64::from(width)),
-                height: dimensions.map(|(_, height)| i64::from(height)),
-                file_size: 0,
+                file_name: number.to_string(),
+                media_type: "image/jpeg".to_string(),
+                width: scaled_dimensions.map(|(width, _)| i64::from(width)),
+                height: scaled_dimensions.map(|(_, height)| i64::from(height)),
+                file_size: -1,
             }
         })
         .collect()
@@ -156,6 +157,20 @@ fn pdf_page_dimensions(document: &PdfDocument, page_number: u32) -> Option<(u32,
     }
 
     Some((width as u32, height as u32))
+}
+
+fn scale_pdf_page_dimensions((width, height): (u32, u32)) -> (u32, u32) {
+    const PDF_RESOLUTION: f64 = 3200.0;
+
+    let min_edge = f64::from(width.min(height));
+    if min_edge <= 0.0 {
+        return (width, height);
+    }
+
+    let scale = PDF_RESOLUTION / min_edge;
+    let scaled_width = (f64::from(width) * scale).round().max(1.0) as u32;
+    let scaled_height = (f64::from(height) * scale).round().max(1.0) as u32;
+    (scaled_width, scaled_height)
 }
 
 fn pdf_numeric_value(object: &lopdf::Object) -> Option<f64> {

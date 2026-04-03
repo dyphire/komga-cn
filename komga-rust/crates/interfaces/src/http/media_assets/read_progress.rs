@@ -97,12 +97,6 @@ pub async fn series_read_progress_post(
 
     let resolved_series_id =
         resolve_series_id_for_persisted(auth_db.database_file.as_path(), &series_id).await;
-    if !persisted_series_exists(auth_db.database_file.as_path(), &resolved_series_id)
-        .await
-        .unwrap_or(false)
-    {
-        return StatusCode::NOT_FOUND.into_response();
-    }
     match user_can_access_series_media(auth_db.database_file.as_path(), &resolved_series_id, &user)
         .await
     {
@@ -118,22 +112,20 @@ pub async fn series_read_progress_post(
         };
 
     for book_id in book_ids {
-        let already_completed = match load_read_progress(
-            auth_db.database_file.as_path(),
-            &book_id,
-            user_id(&user),
-        )
-        .await
-        {
-            Ok(Some(progress)) => progress.completed,
-            Ok(None) => false,
-            Err(error) => return internal_error_response(error),
-        };
+        let already_completed =
+            match load_read_progress(auth_db.database_file.as_path(), &book_id, user_id(&user))
+                .await
+            {
+                Ok(Some(progress)) => progress.completed,
+                Ok(None) => false,
+                Err(error) => return internal_error_response(error),
+            };
         if already_completed {
             continue;
         }
 
-        let page_count = match load_book_page_count(auth_db.database_file.as_path(), &book_id).await {
+        let page_count = match load_book_page_count(auth_db.database_file.as_path(), &book_id).await
+        {
             Ok(Some(value)) => value,
             Ok(None) => 1,
             Err(error) => return internal_error_response(error),
@@ -235,18 +227,27 @@ pub async fn series_tachiyomi_read_progress_get(
 
     let resolved_series_id =
         resolve_series_id_for_persisted(auth_db.database_file.as_path(), &series_id).await;
-    if !persisted_series_exists(auth_db.database_file.as_path(), &resolved_series_id)
+    let unrestricted_all_libraries = user_shared_all_libraries(&user)
+        && principal_from_user_payload(&user_payload_json(&user))
+            .is_none_or(|principal| !principal.restrictions.is_restricted());
+    if !unrestricted_all_libraries {
+        if !persisted_series_exists(auth_db.database_file.as_path(), &resolved_series_id)
+            .await
+            .unwrap_or(false)
+        {
+            return StatusCode::NOT_FOUND.into_response();
+        }
+        match user_can_access_series_media(
+            auth_db.database_file.as_path(),
+            &resolved_series_id,
+            &user,
+        )
         .await
-        .unwrap_or(false)
-    {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-    match user_can_access_series_media(auth_db.database_file.as_path(), &resolved_series_id, &user)
-        .await
-    {
-        Ok(true) => {}
-        Ok(false) => return StatusCode::FORBIDDEN.into_response(),
-        Err(error) => return internal_error_response(error),
+        {
+            Ok(true) => {}
+            Ok(false) => return StatusCode::FORBIDDEN.into_response(),
+            Err(error) => return internal_error_response(error),
+        }
     }
 
     match load_series_tachiyomi_progress(

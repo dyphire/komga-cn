@@ -1,6 +1,7 @@
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use komga_contract_testkit::contract_matrix::assert_required_target_declared;
+use komga_infrastructure::sqlite::connect_pool;
 use komga_server::app::build_router_with_config;
 use serde_json::Value;
 use tower::util::ServiceExt;
@@ -428,6 +429,163 @@ async fn router_opds_v1_series_search_hides_unauthorized_library_series() {
     assert!(
         !body.contains("/opds/v1.2/series/series-3"),
         "OPDS v1 search must hide series from unauthorized libraries, body={body}",
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v1_latest_series_feed_hides_series_for_age_exclude_restricted_user() {
+    let paths = new_router_fixture("router-opds-v1-latest-series-age-restricted").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_age_exclude_user(
+        &paths,
+        "restricted-user",
+        "restricted@example.org",
+        "router-contract-restricted-123",
+        12,
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "restricted@example.org",
+        "router-contract-restricted-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v1.2/series/latest")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v1 latest-series request should build"),
+        )
+        .await
+        .expect("opds v1 latest-series request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(
+        !body.contains("/opds/v1.2/series/series-1"),
+        "OPDS v1 latest-series feed must hide restricted series, body={body}",
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v1_latest_series_feed_paginates_after_restriction_filtering() {
+    let paths = new_router_fixture("router-opds-v1-latest-series-restricted-pagination").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_custom_series(&paths, "series-2", "Series 2", "library-1").await;
+    seed_router_custom_series(&paths, "series-0", "Series 0", "library-1").await;
+    seed_router_age_exclude_user(
+        &paths,
+        "restricted-user",
+        "restricted@example.org",
+        "router-contract-restricted-123",
+        12,
+    )
+    .await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("opds latest-series pagination db should open");
+    sqlx::query("UPDATE SERIES_METADATA SET AGE_RATING = ? WHERE SERIES_ID = ?")
+        .bind(0_i64)
+        .bind("series-0")
+        .execute(&pool)
+        .await
+        .expect("visible latest series age rating should update");
+    for (series_id, last_modified) in [
+        ("series-2", "2024-03-03T00:00:00"),
+        ("series-1", "2024-03-02T00:00:00"),
+        ("series-0", "2024-03-01T00:00:00"),
+    ] {
+        sqlx::query("UPDATE SERIES SET LAST_MODIFIED_DATE = ?, CREATED_DATE = ? WHERE ID = ?")
+            .bind(last_modified)
+            .bind(last_modified)
+            .bind(series_id)
+            .execute(&pool)
+            .await
+            .expect("series latest ordering should update");
+    }
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "restricted@example.org",
+        "router-contract-restricted-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v1.2/series/latest?page=0&size=1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v1 latest-series paged request should build"),
+        )
+        .await
+        .expect("opds v1 latest-series paged request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("/opds/v1.2/series/series-0"));
+    assert!(!body.contains("/opds/v1.2/series/series-2"));
+    assert!(!body.contains("/opds/v1.2/series/series-1"));
+    assert!(
+        !body.contains("rel=\"next\""),
+        "OPDS v1 latest-series must compute pagination after restrictions filtering, body={body}",
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v1_latest_series_feed_normalizes_entry_updated_to_utc_z() {
+    let paths = new_router_fixture("router-opds-v1-latest-series-updated-format").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("opds latest-series updated db should open");
+    sqlx::query("UPDATE SERIES SET LAST_MODIFIED_DATE = ?, CREATED_DATE = ? WHERE ID = ?")
+        .bind("2024-03-03 00:00:00")
+        .bind("2024-03-03 00:00:00")
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("latest series updated timestamp should update");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v1.2/series/latest")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v1 latest-series updated request should build"),
+        )
+        .await
+        .expect("opds v1 latest-series updated request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(
+        body.contains("<updated>2024-03-03T00:00:00Z</updated>"),
+        "OPDS v1 latest-series entry updated must be normalized to UTC/Z, body={body}",
     );
 
     cleanup_router_fixture(paths);

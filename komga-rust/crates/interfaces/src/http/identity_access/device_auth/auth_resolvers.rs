@@ -24,7 +24,6 @@ pub(super) fn valid_kobo_path_token(token: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
 }
 
-
 pub(super) fn resolved_koreader_user_id(headers: &HeaderMap) -> Option<String> {
     let auth_user = auth_token_user(headers);
     let header_user = headers

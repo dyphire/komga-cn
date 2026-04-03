@@ -7,10 +7,13 @@ pub(super) struct PersistedLibrary {
     pub(super) last_modified: String,
 }
 
+#[derive(Clone)]
 pub(super) struct PersistedSeries {
     pub(super) id: String,
     pub(super) library_id: String,
     pub(super) title: String,
+    pub(super) age_rating: Option<u16>,
+    pub(super) sharing_labels: Vec<String>,
     pub(super) last_modified: String,
 }
 

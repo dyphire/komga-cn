@@ -83,7 +83,10 @@ pub async fn kobo_auth_device(
     .into_response()
 }
 
-async fn kobo_path_user_status(auth_token: &str, database_file: &FsPath) -> Result<AuthUser, StatusCode> {
+async fn kobo_path_user_status(
+    auth_token: &str,
+    database_file: &FsPath,
+) -> Result<AuthUser, StatusCode> {
     if !valid_kobo_path_token(auth_token) {
         return Err(StatusCode::UNAUTHORIZED);
     }

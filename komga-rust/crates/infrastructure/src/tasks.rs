@@ -22,8 +22,8 @@ pub use media_queries::{
     load_books_for_extension_repair, load_books_requiring_analysis, load_books_to_convert,
     load_books_with_missing_file_hash, load_books_with_missing_page_hash,
     load_books_with_undersized_generated_thumbnails, load_books_without_selected_thumbnails,
-    load_duplicate_pages_to_delete,
-    load_library_hashing_flags, load_library_maintenance_flags, load_sidecar_url_for_parent,
+    load_duplicate_pages_to_delete, load_library_hashing_flags, load_library_maintenance_flags,
+    load_sidecar_url_for_parent,
 };
 pub use media_updates::{
     persist_book_conversion, persist_book_extension_repair, persist_book_hash,

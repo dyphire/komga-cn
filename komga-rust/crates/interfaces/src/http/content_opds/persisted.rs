@@ -560,6 +560,8 @@ fn map_series_record(row: opds_persisted_access::PersistedSeriesRecord) -> Persi
         id: row.id,
         library_id: row.library_id,
         title: row.title,
+        age_rating: row.age_rating,
+        sharing_labels: row.sharing_labels,
         last_modified: row.last_modified,
     }
 }

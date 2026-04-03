@@ -755,13 +755,7 @@ pub async fn kobo_book_file_epub(
 
 pub async fn kobo_book_thumbnail(
     Extension(state): Extension<OperationalState>,
-    Path((auth_token, thumbnail_id, _, _, _)): Path<(
-        String,
-        String,
-        String,
-        String,
-        String,
-    )>,
+    Path((auth_token, thumbnail_id, _, _, _)): Path<(String, String, String, String, String)>,
     headers: HeaderMap,
 ) -> Response {
     if resolved_kobo_user(
@@ -868,7 +862,11 @@ async fn proxy_kobo_catch_all_request(
 ) -> Result<Response, StatusCode> {
     let base_url = std::env::var("KOMGA_RUST_KOBO_PROXY_URL")
         .unwrap_or_else(|_| "https://storeapi.kobo.com".to_string());
-    let mut target = format!("{}/{}", base_url.trim_end_matches('/'), path.trim_start_matches('/'));
+    let mut target = format!(
+        "{}/{}",
+        base_url.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    );
     if let Some(query) = query.map(str::trim).filter(|query| !query.is_empty()) {
         target.push('?');
         target.push_str(query);
@@ -897,16 +895,16 @@ async fn proxy_kobo_catch_all_request(
         request = request.header(header_name, value);
     }
 
-    if !body.is_empty() {
-        request = request.body(body.clone());
+    if let Some(prepared_body) = prepare_kobo_proxy_request_body(headers, body)? {
+        request = request.body(prepared_body);
     }
 
     let response = request
         .send()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let status =
-        StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    let status = StatusCode::from_u16(response.status().as_u16())
+        .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
     let response_headers = response.headers().clone();
     let response_bytes = response
         .bytes()
@@ -926,7 +924,8 @@ async fn proxy_kobo_catch_all_request(
         return Ok(proxied);
     }
 
-    let (mut proxied, include_kobo_headers) = match serde_json::from_slice::<Value>(&response_bytes) {
+    let (mut proxied, include_kobo_headers) = match serde_json::from_slice::<Value>(&response_bytes)
+    {
         Ok(response_body) => {
             let mut response = Json(response_body).into_response();
             *response.status_mut() = status;
@@ -943,6 +942,53 @@ async fn proxy_kobo_catch_all_request(
         }
     }
     Ok(proxied)
+}
+
+fn prepare_kobo_proxy_request_body(
+    headers: &HeaderMap,
+    body: &Bytes,
+) -> Result<Option<Vec<u8>>, StatusCode> {
+    if body.is_empty() {
+        return Ok(None);
+    }
+
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_ascii_lowercase());
+    let is_json = content_type
+        .as_deref()
+        .is_some_and(|value| value.starts_with("application/json") || value.contains("+json"));
+    let is_xml = content_type.as_deref().is_some_and(|value| {
+        value.starts_with("application/xml")
+            || value.starts_with("text/xml")
+            || value.contains("+xml")
+    });
+
+    if is_xml {
+        validate_kobo_xml_request_body(body)?;
+        return Ok(Some(body.to_vec()));
+    }
+
+    if !is_json {
+        return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    }
+
+    let value = serde_json::from_slice::<Value>(body).map_err(|_| StatusCode::BAD_REQUEST)?;
+    Ok(Some(value.to_string().into_bytes()))
+}
+
+fn validate_kobo_xml_request_body(body: &Bytes) -> Result<(), StatusCode> {
+    let mut reader = quick_xml::Reader::from_reader(body.as_ref());
+    let mut buffer = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(quick_xml::events::Event::Eof) => return Ok(()),
+            Ok(_) => buffer.clear(),
+            Err(_) => return Err(StatusCode::BAD_REQUEST),
+        }
+    }
 }
 
 fn random_uuid_like() -> String {

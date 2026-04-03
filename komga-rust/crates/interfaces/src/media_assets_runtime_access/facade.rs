@@ -267,7 +267,8 @@ pub(crate) async fn load_book_thumbnail_by_id(
     database_file: &Path,
     thumbnail_id: &str,
 ) -> Result<Option<EntityThumbnailBinary>, String> {
-    (backend().load_book_thumbnail_by_id)(database_file.to_path_buf(), thumbnail_id.to_string()).await
+    (backend().load_book_thumbnail_by_id)(database_file.to_path_buf(), thumbnail_id.to_string())
+        .await
 }
 
 pub(crate) async fn load_persisted_book_thumbnails(
@@ -413,7 +414,8 @@ pub(crate) async fn select_collection_thumbnail(
     database_file: &Path,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
-    (backend().select_collection_thumbnail)(database_file.to_path_buf(), thumbnail_id.to_string()).await
+    (backend().select_collection_thumbnail)(database_file.to_path_buf(), thumbnail_id.to_string())
+        .await
 }
 
 pub(crate) async fn delete_collection_thumbnail(
@@ -449,7 +451,8 @@ pub(crate) async fn load_series_thumbnail_by_id(
     database_file: &Path,
     thumbnail_id: &str,
 ) -> Result<Option<EntityThumbnailBinary>, String> {
-    (backend().load_series_thumbnail_by_id)(database_file.to_path_buf(), thumbnail_id.to_string()).await
+    (backend().load_series_thumbnail_by_id)(database_file.to_path_buf(), thumbnail_id.to_string())
+        .await
 }
 
 pub(crate) async fn insert_series_thumbnail(

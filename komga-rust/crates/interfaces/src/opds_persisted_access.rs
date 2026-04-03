@@ -19,6 +19,8 @@ pub struct PersistedSeriesRecord {
     pub id: String,
     pub library_id: String,
     pub title: String,
+    pub age_rating: Option<u16>,
+    pub sharing_labels: Vec<String>,
     pub last_modified: String,
 }
 
