@@ -651,7 +651,7 @@ pub fn build_router(
             "/api/v1/login/set-cookie",
             get(identity_access::login_set_cookie_route),
         )
-        .route("/api/logout", post(identity_access::logout_route))
+        .route("/api/logout", get(identity_access::logout_route).post(identity_access::logout_route))
         .route("/sse/v1/events", get(operational::sse_events))
         .route("/", get(operational::webui_entrypoint))
         .route("/{*webui_path}", get(operational::webui_asset));

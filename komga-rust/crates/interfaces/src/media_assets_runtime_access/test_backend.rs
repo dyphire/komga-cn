@@ -106,7 +106,7 @@ pub(super) fn default_test_backend() -> MediaAssetsRuntimeAccessBackend {
         delete_series_read_progress_row: Arc::new(|_, _, _| Box::pin(async { Ok(()) })),
         load_series_tachiyomi_progress: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),
         load_book_progression: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),
-        persist_read_progress: Arc::new(|_, _, _, _, _| Box::pin(async { Ok(()) })),
+        persist_read_progress: Arc::new(|_, _, _, _, _, _| Box::pin(async { Ok(()) })),
         delete_persisted_read_progress: Arc::new(|_, _, _| Box::pin(async { Ok(()) })),
         readlist_tachiyomi_counters: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),
         persist_readlist_tachiyomi_progress: Arc::new(|_, _, _, _| Box::pin(async { Ok(None) })),
@@ -172,7 +172,7 @@ pub(super) fn default_test_backend() -> MediaAssetsRuntimeAccessBackend {
         persisted_collection_exists: Arc::new(|_, _| Box::pin(async { Ok(false) })),
         load_series_book_number_sorts: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),
         load_book_page_count: Arc::new(|_, _| Box::pin(async { Ok(None) })),
-        persist_book_progression: Arc::new(|_, _, _, _| Box::pin(async { Ok(()) })),
+        persist_book_progression: Arc::new(|_, _, _, _, _, _, _, _| Box::pin(async { Ok(()) })),
     }
 }
 

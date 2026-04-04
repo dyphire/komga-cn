@@ -218,18 +218,21 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
                 .await
             })
         }),
-        persist_read_progress: Arc::new(|database_file, book_id, user_id, page, completed| {
-            Box::pin(async move {
-                infrastructure_metadata::persist_read_progress(
-                    database_file.as_path(),
-                    &book_id,
-                    &user_id,
-                    page,
-                    completed,
-                )
-                .await
-            })
-        }),
+        persist_read_progress: Arc::new(
+            |database_file, book_id, user_id, page, completed, locator| {
+                Box::pin(async move {
+                    infrastructure_metadata::persist_read_progress(
+                        database_file.as_path(),
+                        &book_id,
+                        &user_id,
+                        page,
+                        completed,
+                        locator,
+                    )
+                    .await
+                })
+            },
+        ),
         delete_persisted_read_progress: Arc::new(|database_file, book_id, user_id| {
             Box::pin(async move {
                 infrastructure_metadata::delete_persisted_read_progress(
@@ -578,16 +581,22 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
                     .await
             })
         }),
-        persist_book_progression: Arc::new(|database_file, book_id, user_id, page| {
-            Box::pin(async move {
-                infrastructure_metadata::persist_book_progression(
-                    database_file.as_path(),
-                    &book_id,
-                    &user_id,
-                    page,
-                )
-                .await
-            })
-        }),
+        persist_book_progression: Arc::new(
+            |database_file, book_id, user_id, page, modified, device_id, device_name, locator| {
+                Box::pin(async move {
+                    infrastructure_metadata::persist_book_progression(
+                        database_file.as_path(),
+                        &book_id,
+                        &user_id,
+                        page,
+                        modified,
+                        device_id,
+                        device_name,
+                        locator,
+                    )
+                    .await
+                })
+            },
+        ),
     }
 }

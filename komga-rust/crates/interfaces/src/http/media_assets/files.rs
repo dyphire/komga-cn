@@ -14,7 +14,8 @@ pub async fn readlist_file(
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    match user_can_access_readlist_media(auth_db.database_file.as_path(), &readlist_id, &user).await {
+    match user_can_access_readlist_media(auth_db.database_file.as_path(), &readlist_id, &user).await
+    {
         Ok(true) => {}
         Ok(false) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
@@ -165,7 +166,9 @@ pub async fn book_resource(
         let Some(user) = resolved_auth_user(&headers) else {
             return StatusCode::UNAUTHORIZED.into_response();
         };
-        if !user_can_access_library(&user, &media.library_id) {
+        if !user_can_access_book_media(auth_db.database_file.as_path(), &book_id, &user, &media)
+            .await
+        {
             return StatusCode::FORBIDDEN.into_response();
         }
     }
@@ -240,8 +243,15 @@ async fn book_file_response(
 
     if let Ok(Some(media)) =
         load_persisted_book_media(auth_db.database_file.as_path(), book_id).await
-        && let Some(body) = read_media_file_bytes(&media.file_path)
     {
+        let Some(body) = read_media_file_bytes(&media.file_path) else {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "File not found, it may have moved" })),
+            )
+                .into_response();
+        };
+
         if let Some(user) = resolved_auth_user(headers)
             && !user_can_access_book_media(auth_db.database_file.as_path(), book_id, &user, &media)
                 .await

@@ -42,15 +42,11 @@ pub(super) fn parse_books_import_payload(body: &Value) -> Result<BooksImportPayl
             let destination_name = entry
                 .get("destinationName")
                 .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
                 .map(ToString::to_string);
 
             let upgrade_book_id = entry
                 .get("upgradeBookId")
                 .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
                 .map(ToString::to_string);
 
             Ok(BooksImportEntry {

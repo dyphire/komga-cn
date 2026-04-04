@@ -23,6 +23,9 @@ pub async fn book_manifest(
             Json(payload),
         )
             .into_response(),
+        Ok(ManifestBuildOutcome::BadRequest(message)) => {
+            (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response()
+        }
         Ok(ManifestBuildOutcome::NotFound) => StatusCode::NOT_FOUND.into_response(),
         Ok(ManifestBuildOutcome::Forbidden) => StatusCode::FORBIDDEN.into_response(),
         Err(error) => internal_error_response(error),
@@ -52,6 +55,9 @@ pub async fn book_manifest_epub(
             Json(payload),
         )
             .into_response(),
+        Ok(ManifestBuildOutcome::BadRequest(message)) => {
+            (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response()
+        }
         Ok(ManifestBuildOutcome::NotFound) => StatusCode::NOT_FOUND.into_response(),
         Ok(ManifestBuildOutcome::Forbidden) => StatusCode::FORBIDDEN.into_response(),
         Err(error) => internal_error_response(error),
@@ -81,6 +87,9 @@ pub async fn book_manifest_pdf(
             Json(payload),
         )
             .into_response(),
+        Ok(ManifestBuildOutcome::BadRequest(message)) => {
+            (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response()
+        }
         Ok(ManifestBuildOutcome::NotFound) => StatusCode::NOT_FOUND.into_response(),
         Ok(ManifestBuildOutcome::Forbidden) => StatusCode::FORBIDDEN.into_response(),
         Err(error) => internal_error_response(error),
@@ -110,6 +119,9 @@ pub async fn book_manifest_divina(
             Json(payload),
         )
             .into_response(),
+        Ok(ManifestBuildOutcome::BadRequest(message)) => {
+            (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response()
+        }
         Ok(ManifestBuildOutcome::NotFound) => StatusCode::NOT_FOUND.into_response(),
         Ok(ManifestBuildOutcome::Forbidden) => StatusCode::FORBIDDEN.into_response(),
         Err(error) => internal_error_response(error),

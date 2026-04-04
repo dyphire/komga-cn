@@ -31,12 +31,6 @@ pub(crate) fn decode_epub_positions(blob: &[u8]) -> Result<Vec<serde_json::Value
     (backend().decode_epub_positions)(blob.to_vec())
 }
 
-pub(crate) fn load_epub_archive_positions(
-    media: &komga_application::media_assets::BookMediaRecord,
-) -> Option<Vec<serde_json::Value>> {
-    (backend().load_epub_archive_positions)(media.clone())
-}
-
 pub(crate) fn read_media_file_bytes(path: &Path) -> Option<Vec<u8>> {
     (backend().read_media_file_bytes)(path.to_path_buf())
 }
@@ -189,7 +183,7 @@ pub(crate) async fn load_book_progression(
     database_file: &Path,
     book_id: &str,
     user_id: &str,
-) -> Result<Option<f64>, String> {
+) -> Result<Option<Value>, String> {
     (backend().load_book_progression)(
         database_file.to_path_buf(),
         book_id.to_string(),
@@ -204,6 +198,7 @@ pub(crate) async fn persist_read_progress(
     user_id: &str,
     page: u64,
     completed: bool,
+    locator: Option<serde_json::Value>,
 ) -> Result<(), String> {
     (backend().persist_read_progress)(
         database_file.to_path_buf(),
@@ -211,6 +206,7 @@ pub(crate) async fn persist_read_progress(
         user_id.to_string(),
         page,
         completed,
+        locator,
     )
     .await
 }
@@ -590,12 +586,20 @@ pub(crate) async fn persist_book_progression(
     book_id: &str,
     user_id: &str,
     page: f64,
+    modified: Option<String>,
+    device_id: Option<String>,
+    device_name: Option<String>,
+    locator: Option<serde_json::Value>,
 ) -> Result<(), String> {
     (backend().persist_book_progression)(
         database_file.to_path_buf(),
         book_id.to_string(),
         user_id.to_string(),
         page,
+        modified,
+        device_id,
+        device_name,
+        locator,
     )
     .await
 }

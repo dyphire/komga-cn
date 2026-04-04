@@ -6,6 +6,7 @@ use komga_server::app::build_router_with_config;
 use serde_json::{Value, json};
 use sqlx::Row;
 use tower::util::ServiceExt;
+use zip::CompressionMethod;
 
 #[path = "support/runtime_router_contract_support.rs"]
 mod runtime_router_contract_support;
@@ -1083,7 +1084,7 @@ async fn router_readlist_thumbnail_select_marks_uploaded_thumbnail_selected() {
 
 #[tokio::test]
 async fn router_readlist_thumbnail_select_returns_accepted_when_thumbnail_is_missing_but_readlist_exists()
- {
+{
     let paths = new_router_fixture("router-readlist-thumbnail-select-missing-thumbnail").await;
     seed_router_contract_data(&paths).await;
 
@@ -1097,10 +1098,10 @@ async fn router_readlist_thumbnail_select_returns_accepted_when_thumbnail_is_mis
                 .uri("/api/v1/readlists/readlist-1/thumbnails/missing-thumbnail/selected")
                 .header("x-auth-token", &auth_token)
                 .body(Body::empty())
-                .expect("readlist missing thumbnail select request should build"),
+                .expect("readlist thumbnail select missing-thumbnail request should build"),
         )
         .await
-        .expect("readlist missing thumbnail select request should complete");
+        .expect("readlist thumbnail select missing-thumbnail request should complete");
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
@@ -1214,6 +1215,158 @@ async fn router_collection_thumbnail_upload_parses_multipart_image_and_selected_
         .expect("collection thumbnail route body should be readable");
     assert_ne!(route_thumbnail_body.as_ref(), image_bytes.as_slice());
     assert_eq!(&route_thumbnail_body[..3], &[0xFF, 0xD8, 0xFF]);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collection_thumbnail_select_returns_not_found_when_path_collection_missing() {
+    let paths =
+        new_router_fixture("router-collection-thumbnail-select-missing-path-collection").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let image_bytes = fixture_png_bytes();
+    let (content_type, body) =
+        multipart_image_upload_body("file", "collection.png", "image/png", false, &image_bytes);
+
+    let upload = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/collections/collection-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(body))
+                .expect("collection thumbnail upload request should build"),
+        )
+        .await
+        .expect("collection thumbnail upload request should complete");
+    assert_eq!(upload.status(), StatusCode::OK);
+    let thumbnail_id = response_json(upload)
+        .await
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("uploaded collection thumbnail should expose id")
+        .to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!(
+                    "/api/v1/collections/collection-missing/thumbnails/{thumbnail_id}/selected"
+                ))
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("collection thumbnail select missing-path request should build"),
+        )
+        .await
+        .expect("collection thumbnail select missing-path request should complete");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collection_delete_removes_persisted_thumbnails() {
+    let paths = new_router_fixture("router-collection-delete-removes-thumbnails").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let image_bytes = fixture_png_bytes();
+    let (content_type, body) =
+        multipart_image_upload_body("file", "collection.png", "image/png", false, &image_bytes);
+
+    let upload = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/collections/collection-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(body))
+                .expect("collection thumbnail upload request should build"),
+        )
+        .await
+        .expect("collection thumbnail upload request should complete");
+    assert_eq!(upload.status(), StatusCode::OK);
+
+    let delete = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/api/v1/collections/collection-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("collection delete request should build"),
+        )
+        .await
+        .expect("collection delete request should complete");
+    assert_eq!(delete.status(), StatusCode::NO_CONTENT);
+
+    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for collection thumbnail verification");
+    let remaining =
+        sqlx::query("SELECT COUNT(*) AS COUNT FROM THUMBNAIL_COLLECTION WHERE COLLECTION_ID = ?")
+            .bind("collection-1")
+            .fetch_one(&verify_pool)
+            .await
+            .expect("collection thumbnails should be queryable")
+            .get::<i64, _>("COUNT");
+    verify_pool.close().await;
+
+    assert_eq!(remaining, 0);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_readlist_patch_preserves_unspecified_fields() {
+    let paths = new_router_fixture("router-readlist-patch-preserves-unspecified-fields").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let patch = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/readlists/readlist-1")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"name":"Renamed ReadList"}"#))
+                .expect("readlist patch request should build"),
+        )
+        .await
+        .expect("readlist patch request should complete");
+    assert_eq!(patch.status(), StatusCode::NO_CONTENT);
+
+    let detail = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/readlists/readlist-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("readlist detail request should build"),
+        )
+        .await
+        .expect("readlist detail request should complete");
+    assert_eq!(detail.status(), StatusCode::OK);
+    let payload = response_json(detail).await;
+    assert_eq!(payload.get("name"), Some(&json!("Renamed ReadList")));
+    assert_eq!(payload.get("summary"), Some(&json!("")));
+    assert_eq!(payload.get("ordered"), Some(&json!(true)));
+    assert_eq!(payload.get("bookIds"), Some(&json!(["book-1"])));
 
     cleanup_router_fixture(paths);
 }
@@ -1689,6 +1842,104 @@ async fn router_readlist_media_assets_allow_partially_visible_restricted_readlis
             "2 - book-2.epub".to_string(),
             "3 - book-3.epub".to_string(),
         ]
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_readlist_file_uses_deflated_zip_entries() {
+    let paths = new_router_fixture("router-readlist-file-deflated-zip").await;
+    seed_router_contract_data(&paths).await;
+    seed_readlist_endpoint_variants(&paths).await;
+    for (relative_path, chapter) in [
+        ("books/book-1.epub", "book-1"),
+        ("books/book-2.epub", "book-2"),
+        ("library-2/books/book-3.epub", "book-3"),
+    ] {
+        write_router_epub_resource(
+            &paths,
+            relative_path,
+            "OEBPS/chapter.xhtml",
+            format!("<html xmlns='http://www.w3.org/1999/xhtml'><body>{chapter}</body></html>")
+                .as_bytes(),
+        );
+    }
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let archive = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/readlists/readlist-1/file")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("readlist file request should build"),
+        )
+        .await
+        .expect("readlist file request should complete");
+
+    assert_eq!(archive.status(), StatusCode::OK);
+    let body = to_bytes(archive.into_body(), usize::MAX)
+        .await
+        .expect("readlist archive body should be readable");
+    let cursor = std::io::Cursor::new(body.to_vec());
+    let mut zip = zip::ZipArchive::new(cursor).expect("readlist archive should parse as zip");
+    let entry = zip.by_index(0).expect("zip entry should open");
+    assert_eq!(entry.compression(), CompressionMethod::Deflated);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_readlist_file_emits_zip64_records() {
+    let paths = new_router_fixture("router-readlist-file-zip64-records").await;
+    seed_router_contract_data(&paths).await;
+    seed_readlist_endpoint_variants(&paths).await;
+    for (relative_path, chapter) in [
+        ("books/book-1.epub", "book-1"),
+        ("books/book-2.epub", "book-2"),
+        ("library-2/books/book-3.epub", "book-3"),
+    ] {
+        write_router_epub_resource(
+            &paths,
+            relative_path,
+            "OEBPS/chapter.xhtml",
+            format!("<html xmlns='http://www.w3.org/1999/xhtml'><body>{chapter}</body></html>")
+                .as_bytes(),
+        );
+    }
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let archive = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/readlists/readlist-1/file")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("readlist file request should build"),
+        )
+        .await
+        .expect("readlist file request should complete");
+
+    assert_eq!(archive.status(), StatusCode::OK);
+    let body = to_bytes(archive.into_body(), usize::MAX)
+        .await
+        .expect("readlist archive body should be readable");
+    assert!(
+        body.windows(4)
+            .any(|window| window == [0x50, 0x4b, 0x06, 0x06]),
+        "readlist file should include zip64 EOCD signature"
+    );
+    assert!(
+        body.windows(4)
+            .any(|window| window == [0x50, 0x4b, 0x06, 0x07]),
+        "readlist file should include zip64 locator signature"
     );
 
     cleanup_router_fixture(paths);

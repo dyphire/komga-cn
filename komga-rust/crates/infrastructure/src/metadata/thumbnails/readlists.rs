@@ -192,7 +192,7 @@ pub async fn select_readlist_thumbnail(
     .map_err(|error| format!("clear selected readlist thumbnails for select: {error}"))?;
     sqlx::query(
         "UPDATE THUMBNAIL_READLIST \
-         SET SELECTED = 1 \
+         SET SELECTED = 1, LAST_MODIFIED_DATE = STRFTIME('%Y-%m-%d %H:%M:%f', 'now') \
          WHERE ID = ?",
     )
     .bind(thumbnail_id)
@@ -241,28 +241,92 @@ pub async fn delete_readlist_thumbnail(
         return Ok(false);
     }
 
-    let deleted = sqlx::query(
-        "DELETE FROM THUMBNAIL_READLIST \
-         WHERE ID = ? AND READLIST_ID = ?",
+    let target = sqlx::query(
+        "SELECT READLIST_ID, SELECTED \
+         FROM THUMBNAIL_READLIST \
+         WHERE ID = ? \
+         LIMIT 1",
     )
     .bind(thumbnail_id)
-    .bind(readlist_id)
-    .execute(&mut *tx)
+    .fetch_optional(&mut *tx)
     .await
-    .map_err(|error| format!("delete readlist thumbnail: {error}"))?
-    .rows_affected()
-        > 0;
-    if !deleted {
+    .map_err(|error| format!("query readlist thumbnail delete target: {error}"))?;
+    let Some(target) = target else {
         tx.rollback()
             .await
             .map_err(|error| format!("rollback readlist thumbnail delete tx: {error}"))?;
         return Ok(false);
-    }
+    };
+    let target_readlist_id = target.get::<String, _>("READLIST_ID");
+    let deleted_selected = target.get::<bool, _>("SELECTED");
+
+    sqlx::query(
+        "DELETE FROM THUMBNAIL_READLIST \
+         WHERE ID = ?",
+    )
+    .bind(thumbnail_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| format!("delete readlist thumbnail: {error}"))?;
+
+    normalize_readlist_thumbnail_selection(&mut tx, &target_readlist_id, deleted_selected).await?;
 
     tx.commit()
         .await
         .map_err(|error| format!("commit readlist thumbnail delete tx: {error}"))?;
     Ok(true)
+}
+
+async fn normalize_readlist_thumbnail_selection(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    readlist_id: &str,
+    deleted_selected: bool,
+) -> Result<(), String> {
+    let remaining_rows = sqlx::query(
+        "SELECT ID, SELECTED \
+         FROM THUMBNAIL_READLIST \
+         WHERE READLIST_ID = ? \
+         ORDER BY ID ASC",
+    )
+    .bind(readlist_id)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|error| {
+        format!("query remaining readlist thumbnails for delete housekeeping: {error}")
+    })?;
+
+    let selected_ids = remaining_rows
+        .iter()
+        .filter(|row| row.get::<bool, _>("SELECTED"))
+        .map(|row| row.get::<String, _>("ID"))
+        .collect::<Vec<_>>();
+
+    let target_selected_id = if selected_ids.len() > 1 {
+        selected_ids.first().cloned()
+    } else if selected_ids.is_empty() && deleted_selected {
+        remaining_rows.first().map(|row| row.get::<String, _>("ID"))
+    } else {
+        None
+    };
+
+    let Some(target_selected_id) = target_selected_id else {
+        return Ok(());
+    };
+
+    sqlx::query(
+        "UPDATE THUMBNAIL_READLIST \
+         SET SELECTED = CASE WHEN ID = ? THEN 1 ELSE 0 END, \
+             LAST_MODIFIED_DATE = CASE WHEN ID = ? THEN STRFTIME('%Y-%m-%d %H:%M:%f', 'now') ELSE LAST_MODIFIED_DATE END \
+         WHERE READLIST_ID = ?",
+    )
+    .bind(&target_selected_id)
+    .bind(&target_selected_id)
+    .bind(readlist_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| format!("normalize readlist thumbnail selection after delete: {error}"))?;
+
+    Ok(())
 }
 
 pub async fn load_persisted_readlist_name(

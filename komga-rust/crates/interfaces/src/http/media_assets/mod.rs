@@ -108,9 +108,13 @@ mod tests {
     use flate2::Compression;
     use flate2::write::GzEncoder;
     use lopdf::{Document as PdfDocument, Object, Stream, dictionary};
+    use quick_xml::Reader as XmlReader;
+    use quick_xml::events::Event as XmlEvent;
+    use std::collections::HashMap;
     use std::fs;
-    use std::io::Write;
+    use std::io::{Read, Seek, Write};
     use std::time::{SystemTime, UNIX_EPOCH};
+    use zip::ZipArchive;
 
     fn unique_temp_path(prefix: &str) -> PathBuf {
         let millis = SystemTime::now()
@@ -125,6 +129,249 @@ mod tests {
             (actual - expected).abs() < 1e-6,
             "expected {expected}, got {actual}"
         );
+    }
+
+    fn load_epub_archive_positions_from_file(media: &PersistedBookMedia) -> Option<Vec<Value>> {
+        if !book_media_is_epub(media) {
+            return None;
+        }
+
+        let file = fs::File::open(&media.file_path).ok()?;
+        let mut archive = ZipArchive::new(file).ok()?;
+        let container_xml =
+            read_zip_entry_bytes_normalized(&mut archive, "META-INF/container.xml")?;
+        let rootfile_path = parse_epub_rootfile_path(&container_xml)?;
+        let package_document = read_zip_entry_bytes_normalized(&mut archive, &rootfile_path)?;
+        let spine_entries = parse_epub_spine_entries(&package_document, &rootfile_path);
+        if spine_entries.is_empty() {
+            return None;
+        }
+
+        let fixed_layout = parse_epub_fixed_layout(&package_document);
+        let resources = spine_entries
+            .into_iter()
+            .map(|entry| {
+                let bytes =
+                    read_zip_entry_bytes_normalized(&mut archive, &entry.href).unwrap_or_default();
+                let kobo_spans = if fixed_layout {
+                    vec![]
+                } else {
+                    parse_epub_kobo_spans(&bytes)
+                };
+                (entry, bytes, kobo_spans)
+            })
+            .collect::<Vec<_>>();
+
+        let mut raw_positions = Vec::new();
+        for (entry, bytes, spans) in resources {
+            let position_count = if fixed_layout {
+                1usize
+            } else {
+                ((bytes.len() as f64 / 1024.0).ceil() as usize).max(1)
+            };
+
+            for segment_index in 0..position_count {
+                let progression = if fixed_layout {
+                    0.0
+                } else {
+                    segment_index as f64 / position_count as f64
+                };
+                let kobo_span = if fixed_layout || position_count == 1 || segment_index == 0 {
+                    Some("kobo.1.1".to_string())
+                } else {
+                    closest_kobo_span(&spans, progression)
+                };
+                raw_positions.push((
+                    entry.href.clone(),
+                    entry.media_type.clone(),
+                    progression,
+                    kobo_span,
+                ));
+            }
+        }
+
+        if raw_positions.is_empty() {
+            return None;
+        }
+
+        let total_positions = raw_positions.len() as f64;
+        Some(
+            raw_positions
+                .into_iter()
+                .enumerate()
+                .map(|(index, (href, media_type, progression, kobo_span))| {
+                    let position = index + 1;
+                    let mut locator = json!({
+                        "href": href,
+                        "type": media_type,
+                        "locations": {
+                            "position": position,
+                            "progression": progression,
+                            "totalProgression": position as f64 / total_positions,
+                        },
+                    });
+                    if let Some(kobo_span) = kobo_span
+                        && let Some(object) = locator.as_object_mut()
+                    {
+                        object.insert("koboSpan".to_string(), Value::String(kobo_span));
+                    }
+                    locator
+                })
+                .collect(),
+        )
+    }
+
+    fn read_zip_entry_bytes<R: Read + Seek>(
+        archive: &mut ZipArchive<R>,
+        entry_name: &str,
+    ) -> Option<Vec<u8>> {
+        let mut entry = archive.by_name(entry_name).ok()?;
+        let mut bytes = Vec::new();
+        entry.read_to_end(&mut bytes).ok()?;
+        Some(bytes)
+    }
+
+    fn read_zip_entry_bytes_normalized<R: Read + Seek>(
+        archive: &mut ZipArchive<R>,
+        path: &str,
+    ) -> Option<Vec<u8>> {
+        if let Some(bytes) = read_zip_entry_bytes(archive, path) {
+            return Some(bytes);
+        }
+
+        let normalized = path.trim_start_matches('/');
+        if normalized != path {
+            return read_zip_entry_bytes(archive, normalized);
+        }
+        None
+    }
+
+    fn parse_epub_rootfile_path(container_xml: &[u8]) -> Option<String> {
+        let mut reader = XmlReader::from_reader(container_xml);
+        reader.config_mut().trim_text(true);
+        let mut buffer = Vec::new();
+
+        loop {
+            match reader.read_event_into(&mut buffer).ok()? {
+                XmlEvent::Start(event) | XmlEvent::Empty(event) => {
+                    if !xml_name_matches(event.name().as_ref(), b"rootfile") {
+                        buffer.clear();
+                        continue;
+                    }
+                    for attribute in event.attributes().flatten() {
+                        if xml_name_matches(attribute.key.as_ref(), b"full-path") {
+                            return attribute
+                                .unescape_value()
+                                .ok()
+                                .map(|value| normalize_epub_resource_href("/", value.as_ref()));
+                        }
+                    }
+                }
+                XmlEvent::Eof => break,
+                _ => {}
+            }
+            buffer.clear();
+        }
+
+        None
+    }
+
+    #[derive(Clone)]
+    struct EpubSpineEntry {
+        href: String,
+        media_type: String,
+    }
+
+    fn parse_epub_spine_entries(
+        package_document: &[u8],
+        rootfile_path: &str,
+    ) -> Vec<EpubSpineEntry> {
+        let mut reader = XmlReader::from_reader(package_document);
+        reader.config_mut().trim_text(true);
+        let mut buffer = Vec::new();
+        let mut manifest = HashMap::<String, EpubSpineEntry>::new();
+        let mut spine = Vec::<String>::new();
+
+        loop {
+            match reader.read_event_into(&mut buffer) {
+                Ok(XmlEvent::Start(event)) | Ok(XmlEvent::Empty(event)) => {
+                    if xml_name_matches(event.name().as_ref(), b"item") {
+                        let mut id = None::<String>;
+                        let mut href = None::<String>;
+                        let mut media_type = None::<String>;
+                        for attribute in event.attributes().flatten() {
+                            if xml_name_matches(attribute.key.as_ref(), b"id") {
+                                id = attribute
+                                    .unescape_value()
+                                    .ok()
+                                    .map(|value| value.into_owned());
+                            } else if xml_name_matches(attribute.key.as_ref(), b"href") {
+                                href = attribute
+                                    .unescape_value()
+                                    .ok()
+                                    .map(|value| value.into_owned());
+                            } else if xml_name_matches(attribute.key.as_ref(), b"media-type") {
+                                media_type = attribute
+                                    .unescape_value()
+                                    .ok()
+                                    .map(|value| value.into_owned());
+                            }
+                        }
+                        if let (Some(id), Some(href)) = (id, href) {
+                            manifest.insert(
+                                id,
+                                EpubSpineEntry {
+                                    href: normalize_epub_resource_href(rootfile_path, &href),
+                                    media_type: media_type
+                                        .unwrap_or_else(|| "application/xhtml+xml".to_string()),
+                                },
+                            );
+                        }
+                    } else if xml_name_matches(event.name().as_ref(), b"itemref") {
+                        for attribute in event.attributes().flatten() {
+                            if xml_name_matches(attribute.key.as_ref(), b"idref")
+                                && let Some(idref) = attribute
+                                    .unescape_value()
+                                    .ok()
+                                    .map(|value| value.into_owned())
+                            {
+                                spine.push(idref);
+                            }
+                        }
+                    }
+                }
+                Ok(XmlEvent::Eof) => break,
+                Err(_) => break,
+                _ => {}
+            }
+            buffer.clear();
+        }
+
+        if spine.is_empty() {
+            return vec![];
+        }
+
+        spine
+            .into_iter()
+            .filter_map(|idref| manifest.get(&idref).cloned())
+            .collect()
+    }
+
+    fn closest_kobo_span(spans: &[(String, f64)], progression: f64) -> Option<String> {
+        spans
+            .iter()
+            .min_by(|left, right| {
+                let left_distance = (left.1 - progression).abs();
+                let right_distance = (right.1 - progression).abs();
+                left_distance
+                    .partial_cmp(&right_distance)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(id, _)| id.clone())
+    }
+
+    fn xml_name_matches(actual: &[u8], expected: &[u8]) -> bool {
+        actual == expected || actual.ends_with(expected)
     }
 
     fn write_single_page_pdf(path: &std::path::Path) {

@@ -164,7 +164,8 @@ pub struct MediaAssetsRuntimeAccessBackend {
                 PathBuf,
                 String,
                 String,
-            ) -> futures_util::future::BoxFuture<'static, Result<Option<f64>, String>>
+            )
+                -> futures_util::future::BoxFuture<'static, Result<Option<Value>, String>>
             + Send
             + Sync,
     >,
@@ -175,6 +176,7 @@ pub struct MediaAssetsRuntimeAccessBackend {
                 String,
                 u64,
                 bool,
+                Option<Value>,
             ) -> futures_util::future::BoxFuture<'static, Result<(), String>>
             + Send
             + Sync,
@@ -508,6 +510,10 @@ pub struct MediaAssetsRuntimeAccessBackend {
                 String,
                 String,
                 f64,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<Value>,
             ) -> futures_util::future::BoxFuture<'static, Result<(), String>>
             + Send
             + Sync,

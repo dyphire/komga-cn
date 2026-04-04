@@ -28,9 +28,3 @@ pub(super) async fn load_persisted_epub_positions(
 pub(super) fn decode_epub_positions_blob(blob: &[u8]) -> Result<Vec<Value>, String> {
     decode_epub_positions(blob)
 }
-
-pub(super) fn load_epub_archive_positions_from_file(
-    media: &PersistedBookMedia,
-) -> Option<Vec<Value>> {
-    load_epub_archive_positions(media)
-}

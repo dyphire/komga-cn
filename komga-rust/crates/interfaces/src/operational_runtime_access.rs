@@ -50,8 +50,8 @@ pub struct SseSnapshot {
     pub collections: HashMap<String, CollectionSnapshot>,
     pub thumbnails_book: HashMap<String, ThumbnailBookSnapshot>,
     pub thumbnails_series: HashMap<String, ThumbnailSnapshot>,
-    pub thumbnails_collection: HashMap<String, ThumbnailSnapshot>,
-    pub thumbnails_readlist: HashMap<String, ThumbnailSnapshot>,
+    pub thumbnails_collection: HashMap<String, ThumbnailCollectionSnapshot>,
+    pub thumbnails_readlist: HashMap<String, ThumbnailReadListSnapshot>,
     pub read_progress: HashMap<String, String>,
     pub read_progress_series: HashMap<String, String>,
 }
@@ -88,6 +88,7 @@ pub struct CollectionSnapshot {
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct ThumbnailBookSnapshot {
+    pub book_id: String,
     pub series_id: String,
     pub selected: bool,
     pub last_modified: String,
@@ -95,6 +96,20 @@ pub struct ThumbnailBookSnapshot {
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct ThumbnailSnapshot {
+    pub selected: bool,
+    pub last_modified: String,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct ThumbnailReadListSnapshot {
+    pub readlist_id: String,
+    pub selected: bool,
+    pub last_modified: String,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct ThumbnailCollectionSnapshot {
+    pub collection_id: String,
     pub selected: bool,
     pub last_modified: String,
 }
@@ -185,7 +200,8 @@ pub(crate) mod metrics {
 pub(crate) mod sse_snapshot {
     pub(crate) use super::{
         BookSnapshot, CollectionSnapshot, LibrarySnapshot, ReadListSnapshot, SeriesSnapshot,
-        SseSnapshot, ThumbnailBookSnapshot, ThumbnailSnapshot,
+        SseSnapshot, ThumbnailBookSnapshot, ThumbnailCollectionSnapshot, ThumbnailReadListSnapshot,
+        ThumbnailSnapshot,
     };
 
     pub(crate) async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapshot {

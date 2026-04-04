@@ -2031,6 +2031,7 @@ dependencies = [
  "tantivy",
  "tar",
  "tokio",
+ "unicode-normalization",
  "unrar",
  "zip",
 ]

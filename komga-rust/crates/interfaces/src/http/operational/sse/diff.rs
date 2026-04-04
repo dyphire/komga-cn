@@ -1,10 +1,11 @@
 use axum::response::sse::Event;
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::snapshot::{
     BookSnapshot, CollectionSnapshot, LibrarySnapshot, ReadListSnapshot, SeriesSnapshot,
-    SseSnapshot, ThumbnailBookSnapshot, ThumbnailSnapshot,
+    SseSnapshot, ThumbnailBookSnapshot, ThumbnailCollectionSnapshot, ThumbnailReadListSnapshot,
+    ThumbnailSnapshot,
 };
 
 pub(super) fn sse_event(name: &str, payload: serde_json::Value) -> Event {
@@ -45,21 +46,15 @@ pub(super) fn append_snapshot_events(
         "ThumbnailSeriesDeleted",
         "seriesId",
     );
-    append_thumbnail_events(
+    append_thumbnail_collection_events(
         events,
         &previous.thumbnails_collection,
         &current.thumbnails_collection,
-        "ThumbnailSeriesCollectionAdded",
-        "ThumbnailSeriesCollectionDeleted",
-        "collectionId",
     );
-    append_thumbnail_events(
+    append_thumbnail_readlist_events(
         events,
         &previous.thumbnails_readlist,
         &current.thumbnails_readlist,
-        "ThumbnailReadListAdded",
-        "ThumbnailReadListDeleted",
-        "readListId",
     );
 }
 
@@ -314,24 +309,45 @@ fn append_thumbnail_book_events(
     previous: &HashMap<String, ThumbnailBookSnapshot>,
     current: &HashMap<String, ThumbnailBookSnapshot>,
 ) {
-    for (book_id, current_snapshot) in current {
-        if previous.get(book_id) != Some(current_snapshot) {
-            events.push(sse_event(
+    for (thumbnail_id, current_snapshot) in current {
+        match previous.get(thumbnail_id) {
+            None => events.push(sse_event(
                 "ThumbnailBookAdded",
                 json!({
-                    "bookId": book_id,
+                    "bookId": current_snapshot.book_id,
                     "seriesId": current_snapshot.series_id,
                     "selected": current_snapshot.selected,
                 }),
-            ));
+            )),
+            Some(previous_snapshot) if previous_snapshot != current_snapshot => {
+                if previous_snapshot.selected && !current_snapshot.selected {
+                    events.push(sse_event(
+                        "ThumbnailBookDeleted",
+                        json!({
+                            "bookId": previous_snapshot.book_id,
+                            "seriesId": previous_snapshot.series_id,
+                            "selected": previous_snapshot.selected,
+                        }),
+                    ));
+                }
+                events.push(sse_event(
+                    "ThumbnailBookAdded",
+                    json!({
+                        "bookId": current_snapshot.book_id,
+                        "seriesId": current_snapshot.series_id,
+                        "selected": current_snapshot.selected,
+                    }),
+                ));
+            }
+            _ => {}
         }
     }
-    for (book_id, previous_snapshot) in previous {
-        if !current.contains_key(book_id) {
+    for (thumbnail_id, previous_snapshot) in previous {
+        if !current.contains_key(thumbnail_id) {
             events.push(sse_event(
                 "ThumbnailBookDeleted",
                 json!({
-                    "bookId": book_id,
+                    "bookId": previous_snapshot.book_id,
                     "seriesId": previous_snapshot.series_id,
                     "selected": previous_snapshot.selected,
                 }),
@@ -369,5 +385,414 @@ fn append_thumbnail_events(
                 }),
             ));
         }
+    }
+}
+
+fn append_thumbnail_readlist_events(
+    events: &mut Vec<Event>,
+    previous: &HashMap<String, ThumbnailReadListSnapshot>,
+    current: &HashMap<String, ThumbnailReadListSnapshot>,
+) {
+    let deleted_readlist_ids = previous
+        .iter()
+        .filter(|(thumbnail_id, _)| !current.contains_key(*thumbnail_id))
+        .map(|(_, snapshot)| snapshot.readlist_id.clone())
+        .collect::<HashSet<_>>();
+
+    for (thumbnail_id, current_snapshot) in current {
+        match previous.get(thumbnail_id) {
+            None => events.push(sse_event(
+                "ThumbnailReadListAdded",
+                json!({
+                    "readListId": current_snapshot.readlist_id,
+                    "selected": current_snapshot.selected,
+                }),
+            )),
+            Some(previous_snapshot) if previous_snapshot != current_snapshot => {
+                if previous_snapshot.selected && !current_snapshot.selected {
+                    events.push(sse_event(
+                        "ThumbnailReadListDeleted",
+                        json!({
+                            "readListId": previous_snapshot.readlist_id,
+                            "selected": previous_snapshot.selected,
+                        }),
+                    ));
+                }
+                if current_snapshot.selected
+                    && !deleted_readlist_ids.contains(&current_snapshot.readlist_id)
+                {
+                    events.push(sse_event(
+                        "ThumbnailReadListAdded",
+                        json!({
+                            "readListId": current_snapshot.readlist_id,
+                            "selected": current_snapshot.selected,
+                        }),
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    for (thumbnail_id, previous_snapshot) in previous {
+        if !current.contains_key(thumbnail_id) {
+            events.push(sse_event(
+                "ThumbnailReadListDeleted",
+                json!({
+                    "readListId": previous_snapshot.readlist_id,
+                    "selected": previous_snapshot.selected,
+                }),
+            ));
+        }
+    }
+}
+
+fn append_thumbnail_collection_events(
+    events: &mut Vec<Event>,
+    previous: &HashMap<String, ThumbnailCollectionSnapshot>,
+    current: &HashMap<String, ThumbnailCollectionSnapshot>,
+) {
+    for (thumbnail_id, current_snapshot) in current {
+        match previous.get(thumbnail_id) {
+            None => events.push(sse_event(
+                "ThumbnailSeriesCollectionAdded",
+                json!({
+                    "collectionId": current_snapshot.collection_id,
+                    "selected": current_snapshot.selected,
+                }),
+            )),
+            Some(previous_snapshot) if previous_snapshot != current_snapshot => {
+                if previous_snapshot.selected && !current_snapshot.selected {
+                    events.push(sse_event(
+                        "ThumbnailSeriesCollectionDeleted",
+                        json!({
+                            "collectionId": previous_snapshot.collection_id,
+                            "selected": previous_snapshot.selected,
+                        }),
+                    ));
+                }
+                events.push(sse_event(
+                    "ThumbnailSeriesCollectionAdded",
+                    json!({
+                        "collectionId": current_snapshot.collection_id,
+                        "selected": current_snapshot.selected,
+                    }),
+                ));
+            }
+            _ => {}
+        }
+    }
+    for (thumbnail_id, previous_snapshot) in previous {
+        if !current.contains_key(thumbnail_id) {
+            events.push(sse_event(
+                "ThumbnailSeriesCollectionDeleted",
+                json!({
+                    "collectionId": previous_snapshot.collection_id,
+                    "selected": previous_snapshot.selected,
+                }),
+            ));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+    use axum::response::IntoResponse;
+    use axum::response::sse::Sse;
+    use futures_util::stream;
+    use std::convert::Infallible;
+
+    async fn event_frame(event: Event) -> String {
+        let response = Sse::new(stream::iter(vec![Ok::<_, Infallible>(event)])).into_response();
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("sse body should be readable");
+        String::from_utf8(body.to_vec()).expect("event frame should be utf-8")
+    }
+
+    async fn assert_single_event_contains(mut events: Vec<Event>, expected_parts: &[&str]) {
+        assert_eq!(events.len(), 1);
+        let frame = event_frame(events.pop().expect("single event should exist")).await;
+        for expected_part in expected_parts {
+            assert!(
+                frame.contains(expected_part),
+                "missing {expected_part} in frame: {frame}"
+            );
+        }
+    }
+
+    async fn event_frames(events: Vec<Event>) -> Vec<String> {
+        let mut frames = Vec::with_capacity(events.len());
+        for event in events {
+            frames.push(event_frame(event).await);
+        }
+        frames
+    }
+
+    #[tokio::test]
+    async fn append_thumbnail_readlist_events_suppresses_added_when_delete_housekeeping_reselects_sibling()
+     {
+        let previous = HashMap::from([
+            (
+                "deleted-thumb".to_string(),
+                ThumbnailReadListSnapshot {
+                    readlist_id: "readlist-1".to_string(),
+                    selected: true,
+                    last_modified: "2024-01-01 00:00:00.000".to_string(),
+                },
+            ),
+            (
+                "remaining-thumb".to_string(),
+                ThumbnailReadListSnapshot {
+                    readlist_id: "readlist-1".to_string(),
+                    selected: false,
+                    last_modified: "2024-01-01 00:00:00.000".to_string(),
+                },
+            ),
+        ]);
+        let current = HashMap::from([(
+            "remaining-thumb".to_string(),
+            ThumbnailReadListSnapshot {
+                readlist_id: "readlist-1".to_string(),
+                selected: true,
+                last_modified: "2024-01-01 00:00:01.000".to_string(),
+            },
+        )]);
+        let mut events = Vec::new();
+
+        append_thumbnail_readlist_events(&mut events, &previous, &current);
+
+        assert_single_event_contains(
+            events,
+            &[
+                "ThumbnailReadListDeleted",
+                "readListId",
+                "readlist-1",
+                "selected",
+                "true",
+            ],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn append_thumbnail_readlist_events_still_emits_added_for_plain_reselect_without_delete()
+    {
+        let previous = HashMap::from([(
+            "thumb-1".to_string(),
+            ThumbnailReadListSnapshot {
+                readlist_id: "readlist-1".to_string(),
+                selected: false,
+                last_modified: "2024-01-01 00:00:00.000".to_string(),
+            },
+        )]);
+        let current = HashMap::from([(
+            "thumb-1".to_string(),
+            ThumbnailReadListSnapshot {
+                readlist_id: "readlist-1".to_string(),
+                selected: true,
+                last_modified: "2024-01-01 00:00:01.000".to_string(),
+            },
+        )]);
+        let mut events = Vec::new();
+
+        append_thumbnail_readlist_events(&mut events, &previous, &current);
+
+        assert_single_event_contains(
+            events,
+            &[
+                "ThumbnailReadListAdded",
+                "readListId",
+                "readlist-1",
+                "selected",
+                "true",
+            ],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn append_thumbnail_readlist_events_emit_deleted_and_added_when_selection_moves_between_existing_thumbnails()
+    {
+        let previous = HashMap::from([
+            (
+                "thumb-old".to_string(),
+                ThumbnailReadListSnapshot {
+                    readlist_id: "readlist-1".to_string(),
+                    selected: true,
+                    last_modified: "2024-01-01 00:00:00.000".to_string(),
+                },
+            ),
+            (
+                "thumb-new".to_string(),
+                ThumbnailReadListSnapshot {
+                    readlist_id: "readlist-1".to_string(),
+                    selected: false,
+                    last_modified: "2024-01-01 00:00:00.000".to_string(),
+                },
+            ),
+        ]);
+        let current = HashMap::from([
+            (
+                "thumb-old".to_string(),
+                ThumbnailReadListSnapshot {
+                    readlist_id: "readlist-1".to_string(),
+                    selected: false,
+                    last_modified: "2024-01-01 00:00:01.000".to_string(),
+                },
+            ),
+            (
+                "thumb-new".to_string(),
+                ThumbnailReadListSnapshot {
+                    readlist_id: "readlist-1".to_string(),
+                    selected: true,
+                    last_modified: "2024-01-01 00:00:01.000".to_string(),
+                },
+            ),
+        ]);
+        let mut events = Vec::new();
+
+        append_thumbnail_readlist_events(&mut events, &previous, &current);
+
+        let frames = event_frames(events).await;
+        assert_eq!(frames.len(), 2);
+        assert!(frames.iter().any(|frame| {
+            frame.contains("ThumbnailReadListDeleted")
+                && frame.contains("readlist-1")
+                && frame.contains("selected")
+                && frame.contains("true")
+        }));
+        assert!(frames.iter().any(|frame| {
+            frame.contains("ThumbnailReadListAdded")
+                && frame.contains("readlist-1")
+                && frame.contains("selected")
+                && frame.contains("true")
+        }));
+    }
+
+    #[tokio::test]
+    async fn append_thumbnail_book_events_emits_added_for_selected_false_sibling_upload() {
+        let previous = HashMap::from([(
+            "thumb-selected".to_string(),
+            ThumbnailBookSnapshot {
+                book_id: "book-1".to_string(),
+                series_id: "series-1".to_string(),
+                selected: true,
+                last_modified: "2024-01-01 00:00:00.000".to_string(),
+            },
+        )]);
+        let current = HashMap::from([
+            (
+                "thumb-selected".to_string(),
+                ThumbnailBookSnapshot {
+                    book_id: "book-1".to_string(),
+                    series_id: "series-1".to_string(),
+                    selected: true,
+                    last_modified: "2024-01-01 00:00:00.000".to_string(),
+                },
+            ),
+            (
+                "thumb-new".to_string(),
+                ThumbnailBookSnapshot {
+                    book_id: "book-1".to_string(),
+                    series_id: "series-1".to_string(),
+                    selected: false,
+                    last_modified: "2024-01-01 00:00:01.000".to_string(),
+                },
+            ),
+        ]);
+        let mut events = Vec::new();
+
+        append_thumbnail_book_events(&mut events, &previous, &current);
+
+        assert_single_event_contains(
+            events,
+            &[
+                "ThumbnailBookAdded",
+                "bookId",
+                "book-1",
+                "seriesId",
+                "series-1",
+                "selected",
+                "false",
+            ],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn append_thumbnail_book_events_emits_added_when_existing_thumbnail_becomes_selected() {
+        let previous = HashMap::from([(
+            "thumb-1".to_string(),
+            ThumbnailBookSnapshot {
+                book_id: "book-1".to_string(),
+                series_id: "series-1".to_string(),
+                selected: false,
+                last_modified: "2024-01-01 00:00:00.000".to_string(),
+            },
+        )]);
+        let current = HashMap::from([(
+            "thumb-1".to_string(),
+            ThumbnailBookSnapshot {
+                book_id: "book-1".to_string(),
+                series_id: "series-1".to_string(),
+                selected: true,
+                last_modified: "2024-01-01 00:00:01.000".to_string(),
+            },
+        )]);
+        let mut events = Vec::new();
+
+        append_thumbnail_book_events(&mut events, &previous, &current);
+
+        assert_single_event_contains(
+            events,
+            &[
+                "ThumbnailBookAdded",
+                "bookId",
+                "book-1",
+                "seriesId",
+                "series-1",
+                "selected",
+                "true",
+            ],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn append_thumbnail_collection_events_emits_added_when_existing_thumbnail_becomes_selected(
+    ) {
+        let previous = HashMap::from([(
+            "thumb-1".to_string(),
+            ThumbnailCollectionSnapshot {
+                collection_id: "collection-1".to_string(),
+                selected: false,
+                last_modified: "2024-01-01 00:00:00.000".to_string(),
+            },
+        )]);
+        let current = HashMap::from([(
+            "thumb-1".to_string(),
+            ThumbnailCollectionSnapshot {
+                collection_id: "collection-1".to_string(),
+                selected: true,
+                last_modified: "2024-01-01 00:00:01.000".to_string(),
+            },
+        )]);
+        let mut events = Vec::new();
+
+        append_thumbnail_collection_events(&mut events, &previous, &current);
+
+        assert_single_event_contains(
+            events,
+            &[
+                "ThumbnailSeriesCollectionAdded",
+                "collectionId",
+                "collection-1",
+                "selected",
+                "true",
+            ],
+        )
+        .await;
     }
 }

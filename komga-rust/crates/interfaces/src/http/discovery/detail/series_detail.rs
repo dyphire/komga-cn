@@ -22,9 +22,10 @@ pub async fn series_detail(
 
     let Some(resource) =
         (match load_persisted_series_resource(database_file, &resolved_series_id).await {
-        Ok(resource) => resource,
-        Err(error) => return internal_error_response(error),
-    }) else {
+            Ok(resource) => resource,
+            Err(error) => return internal_error_response(error),
+        })
+    else {
         return StatusCode::NOT_FOUND.into_response();
     };
 

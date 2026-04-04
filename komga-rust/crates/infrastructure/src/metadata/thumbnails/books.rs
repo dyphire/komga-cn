@@ -150,6 +150,22 @@ pub async fn insert_book_thumbnail(
         .map_err(|error| format!("clear selected book thumbnails: {error}"))?;
     }
 
+    let selected = if selected {
+        true
+    } else {
+        !sqlx::query(
+            "SELECT 1 AS FOUND \
+             FROM THUMBNAIL_BOOK \
+             WHERE BOOK_ID = ? AND SELECTED = 1 \
+             LIMIT 1",
+        )
+        .bind(book_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|error| format!("query selected book thumbnails for housekeeping: {error}"))?
+        .is_some()
+    };
+
     let id = generated_thumbnail_id("thumbnail-book");
     sqlx::query(
         "INSERT INTO THUMBNAIL_BOOK \
@@ -230,7 +246,7 @@ pub async fn select_book_thumbnail(
     .map_err(|error| format!("clear selected book thumbnails for select: {error}"))?;
     sqlx::query(
         "UPDATE THUMBNAIL_BOOK \
-         SET SELECTED = 1 \
+         SET SELECTED = 1, LAST_MODIFIED_DATE = STRFTIME('%Y-%m-%d %H:%M:%f', 'now') \
          WHERE ID = ? AND BOOK_ID = ?",
     )
     .bind(thumbnail_id)
@@ -254,6 +270,8 @@ pub async fn delete_book_thumbnail(
         return Ok(false);
     }
 
+    let _ = book_id;
+
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(|error| format!("open book thumbnail delete db: {error}"))?;
@@ -262,44 +280,95 @@ pub async fn delete_book_thumbnail(
         .await
         .map_err(|error| format!("begin book thumbnail delete tx: {error}"))?;
 
-    let exists = sqlx::query(
-        "SELECT 1 AS FOUND \
-         FROM BOOK \
+    let target = sqlx::query(
+        "SELECT BOOK_ID, TYPE, SELECTED \
+         FROM THUMBNAIL_BOOK \
          WHERE ID = ? \
          LIMIT 1",
     )
-    .bind(book_id)
+    .bind(thumbnail_id)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(|error| format!("query book existence for thumbnail delete: {error}"))?
-    .is_some();
-    if !exists {
+    .map_err(|error| format!("query book thumbnail delete target: {error}"))?;
+    let Some(target) = target else {
         tx.rollback()
             .await
             .map_err(|error| format!("rollback book thumbnail delete tx: {error}"))?;
         return Ok(false);
+    };
+    let target_book_id = target.get::<String, _>("BOOK_ID");
+    let target_type = target.get::<String, _>("TYPE");
+    let deleted_selected = target.get::<bool, _>("SELECTED");
+    if target_type != "USER_UPLOADED" {
+        tx.rollback()
+            .await
+            .map_err(|error| format!("rollback generated book thumbnail delete tx: {error}"))?;
+        return Err("only uploaded thumbnails can be deleted".to_string());
     }
 
-    let deleted = sqlx::query(
+    sqlx::query(
         "DELETE FROM THUMBNAIL_BOOK \
-         WHERE ID = ? AND BOOK_ID = ?",
+         WHERE ID = ?",
     )
     .bind(thumbnail_id)
-    .bind(book_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("delete book thumbnail: {error}"))?
-    .rows_affected()
-        > 0;
-    if !deleted {
-        tx.rollback()
-            .await
-            .map_err(|error| format!("rollback book thumbnail delete tx: {error}"))?;
-        return Ok(false);
-    }
+    .map_err(|error| format!("delete book thumbnail: {error}"))?;
+
+    normalize_book_thumbnail_selection(&mut tx, &target_book_id, deleted_selected).await?;
 
     tx.commit()
         .await
         .map_err(|error| format!("commit book thumbnail delete tx: {error}"))?;
     Ok(true)
+}
+
+async fn normalize_book_thumbnail_selection(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    book_id: &str,
+    deleted_selected: bool,
+) -> Result<(), String> {
+    let remaining_rows = sqlx::query(
+        "SELECT ID, SELECTED \
+         FROM THUMBNAIL_BOOK \
+         WHERE BOOK_ID = ? \
+         ORDER BY ID ASC",
+    )
+    .bind(book_id)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|error| format!("query remaining book thumbnails for delete housekeeping: {error}"))?;
+
+    let selected_ids = remaining_rows
+        .iter()
+        .filter(|row| row.get::<bool, _>("SELECTED"))
+        .map(|row| row.get::<String, _>("ID"))
+        .collect::<Vec<_>>();
+
+    let target_selected_id = if selected_ids.len() > 1 {
+        selected_ids.first().cloned()
+    } else if selected_ids.is_empty() && deleted_selected {
+        remaining_rows.first().map(|row| row.get::<String, _>("ID"))
+    } else {
+        None
+    };
+
+    let Some(target_selected_id) = target_selected_id else {
+        return Ok(());
+    };
+
+    sqlx::query(
+        "UPDATE THUMBNAIL_BOOK \
+         SET SELECTED = CASE WHEN ID = ? THEN 1 ELSE 0 END, \
+             LAST_MODIFIED_DATE = CASE WHEN ID = ? THEN STRFTIME('%Y-%m-%d %H:%M:%f', 'now') ELSE LAST_MODIFIED_DATE END \
+         WHERE BOOK_ID = ?",
+    )
+    .bind(&target_selected_id)
+    .bind(&target_selected_id)
+    .bind(book_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| format!("normalize book thumbnail selection after delete: {error}"))?;
+
+    Ok(())
 }

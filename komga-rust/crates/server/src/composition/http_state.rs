@@ -72,6 +72,8 @@ use komga_interfaces::{
     SeriesSnapshot as InterfacesSeriesSnapshot,
     ServerSettingsStore as InterfacesServerSettingsStore, SseSnapshot as InterfacesSseSnapshot,
     ThumbnailBookSnapshot as InterfacesThumbnailBookSnapshot,
+    ThumbnailCollectionSnapshot as InterfacesThumbnailCollectionSnapshot,
+    ThumbnailReadListSnapshot as InterfacesThumbnailReadListSnapshot,
     ThumbnailSnapshot as InterfacesThumbnailSnapshot,
     TransientBookAnalysis as InterfacesTransientBookAnalysis,
     TransientBookFileMetadata as InterfacesTransientBookFileMetadata,

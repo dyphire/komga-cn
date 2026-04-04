@@ -1,3 +1,4 @@
+use super::readlists_support::merge_readlist_write_input;
 use super::*;
 pub async fn readlists(
     Extension(auth_db): Extension<AuthDatabaseState>,
@@ -250,7 +251,17 @@ pub async fn readlist_update(
     }
 
     let payload = serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}));
-    let input = readlist_write_input(&payload);
+    let Some(existing) =
+        (match load_persisted_readlist_detail(auth_db.database_file.as_path(), &readlist_id, None)
+            .await
+        {
+            Ok(readlist) => readlist,
+            Err(error) => return internal_error_response(error),
+        })
+    else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let input = merge_readlist_write_input(&existing, &payload);
 
     match persist_readlist_update(auth_db.database_file.as_path(), &readlist_id, &input).await {
         Ok(true) => {

@@ -90,16 +90,23 @@ pub(crate) async fn delete_syncpoints_me(
 }
 
 fn syncpoint_delete_scope(query: &str) -> SyncpointDeleteScope {
-    let key_ids = query_values(query, "key_id")
-        .into_iter()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>();
-
-    if key_ids.is_empty() {
-        SyncpointDeleteScope::All
-    } else {
-        SyncpointDeleteScope::ApiKeys(key_ids)
+    let key_ids = query_values(query, "key_id");
+    match key_ids.as_slice() {
+        [] => SyncpointDeleteScope::All,
+        [single] => {
+            let split_values = single
+                .split(',')
+                .map(|value| value.trim().to_string())
+                .collect::<Vec<_>>();
+            if split_values.is_empty() {
+                SyncpointDeleteScope::All
+            } else if split_values.len() == 1 && single.is_empty() {
+                SyncpointDeleteScope::All
+            } else {
+                SyncpointDeleteScope::ApiKeys(split_values)
+            }
+        }
+        _ => SyncpointDeleteScope::ApiKeys(key_ids),
     }
 }
 
@@ -142,17 +149,49 @@ mod tests {
         assert_eq!(syncpoint_delete_scope(""), SyncpointDeleteScope::All);
         assert_eq!(syncpoint_delete_scope("foo=bar"), SyncpointDeleteScope::All);
         assert_eq!(syncpoint_delete_scope("key_id="), SyncpointDeleteScope::All);
+    }
+
+    #[test]
+    fn syncpoint_delete_scope_keeps_repeated_key_ids_without_filtering_empty_values() {
         assert_eq!(
-            syncpoint_delete_scope("key_id=&key_id=   "),
-            SyncpointDeleteScope::All
+            syncpoint_delete_scope("key_id=key-1&key_id=key-2&key_id="),
+            SyncpointDeleteScope::ApiKeys(vec![
+                "key-1".to_string(),
+                "key-2".to_string(),
+                String::new(),
+            ]),
         );
     }
 
     #[test]
-    fn syncpoint_delete_scope_keeps_all_non_empty_key_ids() {
+    fn syncpoint_delete_scope_splits_single_comma_delimited_key_id_like_spring() {
         assert_eq!(
-            syncpoint_delete_scope("key_id=key-1&key_id=key-2&key_id="),
+            syncpoint_delete_scope("key_id=key-1,key-2"),
             SyncpointDeleteScope::ApiKeys(vec!["key-1".to_string(), "key-2".to_string()]),
+        );
+        assert_eq!(
+            syncpoint_delete_scope("key_id=key-1,+key-2"),
+            SyncpointDeleteScope::ApiKeys(vec!["key-1".to_string(), "key-2".to_string()]),
+        );
+    }
+
+    #[test]
+    fn syncpoint_delete_scope_keeps_single_whitespace_only_key_id_as_empty_string() {
+        assert_eq!(
+            syncpoint_delete_scope("key_id=++"),
+            SyncpointDeleteScope::ApiKeys(vec![String::new()]),
+        );
+    }
+
+    #[test]
+    fn syncpoint_delete_scope_keeps_repeated_key_ids_without_spring_single_value_splitting() {
+        assert_eq!(
+            syncpoint_delete_scope("key_id=&key_id=++"),
+            SyncpointDeleteScope::ApiKeys(vec![String::new(), "  ".to_string()]),
+        );
+        assert_eq!(
+            syncpoint_delete_scope("key_id=key-1,key-2&key_id=key-3"),
+            SyncpointDeleteScope::ApiKeys(vec!["key-1,key-2".to_string(), "key-3".to_string()]),
         );
     }
 }

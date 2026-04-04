@@ -186,6 +186,44 @@ pub fn readlist_write_input(payload: &Value) -> PersistedReadlistWriteInput {
     }
 }
 
+pub fn merge_readlist_write_input(
+    existing: &ReadListReadModel,
+    payload: &Value,
+) -> PersistedReadlistWriteInput {
+    let name = payload
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or(existing.name.as_str())
+        .to_string();
+    let summary = payload
+        .get("summary")
+        .and_then(Value::as_str)
+        .unwrap_or(existing.summary.as_str())
+        .to_string();
+    let ordered = payload
+        .get("ordered")
+        .and_then(Value::as_bool)
+        .unwrap_or(existing.ordered);
+    let book_ids = payload
+        .get("bookIds")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| existing.book_ids.clone());
+
+    PersistedReadlistWriteInput {
+        name,
+        summary,
+        ordered,
+        book_ids,
+    }
+}
+
 pub async fn persist_readlist_create(
     database_file: &FsPath,
     input: &PersistedReadlistWriteInput,

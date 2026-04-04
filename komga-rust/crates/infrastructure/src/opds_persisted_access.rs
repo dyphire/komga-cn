@@ -3,6 +3,7 @@ use std::path::Path;
 
 use crate::sqlite::connect_pool;
 use sqlx::Row;
+use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
 #[derive(Clone)]
 pub struct PersistedLibraryRecord {
@@ -104,8 +105,7 @@ pub async fn load_libraries(
     let pool = connect_pool(database_file, 1).await?;
     let rows = sqlx::query(
         "SELECT ID, NAME, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED \
-         FROM LIBRARY \
-         ORDER BY NAME COLLATE NOCASE ASC, ID ASC",
+         FROM LIBRARY",
     )
     .fetch_all(&pool)
     .await?;
@@ -677,7 +677,17 @@ pub async fn load_publishers(
         }
     }
 
+    values.sort_by_cached_key(|value| unicode_collation_sort_key(value));
+
     Ok(values)
+}
+
+fn unicode_collation_sort_key(value: &str) -> String {
+    value
+        .nfd()
+        .filter(|ch| !is_combining_mark(*ch))
+        .flat_map(|ch| ch.to_lowercase())
+        .collect()
 }
 
 pub async fn load_collections(

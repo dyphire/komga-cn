@@ -1,5 +1,16 @@
 use super::*;
 
+fn opds_v1_basic_unauthorized_response() -> Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        [(
+            header::WWW_AUTHENTICATE,
+            HeaderValue::from_static("Basic realm=\"Realm\""),
+        )],
+    )
+        .into_response()
+}
+
 pub(crate) async fn opds_v1_catalog(headers: HeaderMap) -> Response {
     if let Some(response) = require_auth(&headers) {
         return response;
@@ -172,7 +183,8 @@ pub(crate) async fn opds_v1_series_latest(
         if batch.is_empty() {
             break false;
         }
-        raw_offset += batch.len() as i64;
+        let batch_len = batch.len();
+        raw_offset += batch_len as i64;
 
         for series in batch.iter().filter(|series| {
             library_visible(&allowed_library_ids, &series.library_id)
@@ -195,7 +207,7 @@ pub(crate) async fn opds_v1_series_latest(
         if rows.len() > size {
             break true;
         }
-        if batch.len() < batch_limit as usize {
+        if batch_len < batch_limit as usize {
             break false;
         }
     };
@@ -271,20 +283,20 @@ pub(crate) async fn opds_v1_books_latest(
 
 pub(crate) async fn opds_v1_libraries(headers: HeaderMap, database_file: &Path) -> Response {
     if let Some(response) = require_auth(&headers) {
-        return response;
+        let _ = response;
+        return opds_v1_basic_unauthorized_response();
     }
 
     let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    let mut rows = load_libraries(database_file)
+    let rows = load_libraries(database_file)
         .await
         .unwrap_or_default()
         .into_iter()
         .filter(|library| library_visible(&allowed_library_ids, &library.id))
         .collect::<Vec<_>>();
-    rows.sort_by_cached_key(|library| library.name.to_ascii_lowercase());
     let rows = rows
         .into_iter()
         .map(|library| OpdsV1NavigationEntry {
@@ -402,7 +414,8 @@ pub(crate) async fn opds_v1_publishers(
     database_file: &Path,
 ) -> Response {
     if let Some(response) = require_auth(&headers) {
-        return response;
+        let _ = response;
+        return opds_v1_basic_unauthorized_response();
     }
 
     let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
@@ -517,19 +530,48 @@ pub(crate) async fn opds_v1_library_detail(
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(20)
         .clamp(1, 100);
-    let offset = page.saturating_mul(size);
+    let visible_offset = page.saturating_mul(size);
+    let restrictions = opds_restrictions(&headers);
+    let mut raw_offset = 0_i64;
+    let batch_limit = (size + 1).max(20) as i64;
+    let mut visible_seen = 0usize;
+    let mut entries = Vec::with_capacity(size + 1);
+    let has_next = loop {
+        let batch = load_library_series(database_file, library_id, raw_offset, batch_limit)
+            .await
+            .unwrap_or_default();
+        if batch.is_empty() {
+            break false;
+        }
+        let batch_len = batch.len();
+        raw_offset += batch_len as i64;
 
-    let series = load_library_series(database_file, library_id, offset as i64, (size + 1) as i64)
-        .await
-        .unwrap_or_default();
-    let mut entries = series
-        .into_iter()
-        .filter(|item| library_visible(&allowed_library_ids, &item.library_id))
-        .collect::<Vec<_>>();
-    let has_next = entries.len() > size;
-    if has_next {
-        entries.truncate(size);
-    }
+        for item in batch.into_iter().filter(|item| {
+            library_visible(&allowed_library_ids, &item.library_id)
+                && content_allowed_by_restrictions(
+                    restrictions.as_ref(),
+                    item.age_rating,
+                    &item.sharing_labels,
+                )
+        }) {
+            if visible_seen < visible_offset {
+                visible_seen += 1;
+                continue;
+            }
+            entries.push(item);
+            if entries.len() > size {
+                break;
+            }
+        }
+
+        if entries.len() > size {
+            break true;
+        }
+        if batch_len < batch_limit as usize {
+            break false;
+        }
+    };
+    let entries = entries.into_iter().take(size).collect::<Vec<_>>();
 
     opds_v1_library_series_feed_response(
         &headers,

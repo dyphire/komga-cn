@@ -509,8 +509,12 @@ async fn kobo_ping_rejects_requests_without_valid_auth() {
 
 #[tokio::test]
 async fn koreader_user_auth_rejects_requests_without_auth() {
-    let response = koreader_user_auth(HeaderMap::new()).await;
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let auth_db = crate::http::state::AuthDatabaseState {
+        database_file: unique_temp_path("komga-device-auth-koreader-auth"),
+        remember_me_namespace: "test".to_string(),
+    };
+    let response = koreader_user_auth(Extension(auth_db), HeaderMap::new()).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

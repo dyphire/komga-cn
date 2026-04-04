@@ -150,21 +150,32 @@ pub(crate) async fn users_by_id_authentication_activity_latest(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    let api_key_id = query_value(uri.query().unwrap_or_default(), "apikey_id")
-        .and_then(|value| (!value.is_empty()).then_some(value));
-
-    let activity = if let Some(api_key_id) = api_key_id {
-        persisted_latest_authentication_activity_by_user_and_api_key(
-            &auth_db.database_file,
-            &target_user_id,
-            api_key_id,
-        )
+    let Some(target_user) = persisted_users(auth_db.database_file.as_path())
         .await
-    } else {
-        persisted_list_authentication_activity(&auth_db.database_file, Some(&target_user_id))
-            .await
-            .and_then(|rows| rows.into_iter().next())
+        .and_then(|users| {
+            users
+                .into_iter()
+                .find(|user| user_id(user) == target_user_id)
+        })
+    else {
+        return StatusCode::NOT_FOUND.into_response();
     };
+
+    let api_key_id = query_value(uri.query().unwrap_or_default(), "apikey_id");
+
+    let activity = persisted_list_authentication_activity(&auth_db.database_file, None)
+        .await
+        .and_then(|rows| {
+            rows.into_iter().find(|activity| {
+                let user_matches = activity.user_id.as_deref() == Some(target_user_id.as_str())
+                    || activity.email.as_deref() == Some(target_user.email.as_str());
+                let api_key_matches = match api_key_id {
+                    Some(api_key_id) => activity.api_key_id.as_deref() == Some(api_key_id),
+                    None => true,
+                };
+                user_matches && api_key_matches
+            })
+        });
 
     let Some(activity) = activity else {
         return StatusCode::NOT_FOUND.into_response();

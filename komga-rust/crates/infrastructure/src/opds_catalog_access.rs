@@ -457,6 +457,7 @@ pub async fn load_latest_series_paged(
     let where_clause = clauses.join(" AND ");
     let sql = format!(
         "SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE, \
+                COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) AS TITLE_SORT, \
                 COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING, \
                 COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS, \
                 COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED \
@@ -512,8 +513,8 @@ pub async fn load_library_series(
          LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
          WHERE s.DELETED_DATE IS NULL \
          AND s.LIBRARY_ID = ? \
-         GROUP BY s.ID, s.LIBRARY_ID, TITLE, AGE_RATING, LAST_MODIFIED \
-         ORDER BY TITLE COLLATE NOCASE ASC, s.ID ASC \
+         GROUP BY s.ID, s.LIBRARY_ID, TITLE, TITLE_SORT, AGE_RATING, LAST_MODIFIED \
+         ORDER BY TITLE_SORT COLLATE NOCASE ASC, s.ID ASC \
          LIMIT ? \
          OFFSET ?",
     )

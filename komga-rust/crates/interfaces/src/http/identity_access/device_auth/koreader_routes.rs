@@ -12,8 +12,27 @@ pub async fn koreader_user_create(headers: HeaderMap) -> Response {
     (StatusCode::FORBIDDEN, "User creation is disabled").into_response()
 }
 
-pub async fn koreader_user_auth(headers: HeaderMap) -> Response {
-    if !koreader_authorized(&headers) {
+pub async fn koreader_user_auth(
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+) -> Response {
+    let header_user = headers
+        .get("X-Auth-User")
+        .or_else(|| headers.get("x-auth-user"))
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    let Some(header_user) = header_user else {
+        return StatusCode::FORBIDDEN.into_response();
+    };
+
+    let authorized =
+        match persisted_api_key_user_by_token(header_user, auth_db.database_file.as_path()).await {
+            Some(AuthOutcome::Valid(_)) => true,
+            _ => false,
+        };
+    if !authorized {
         return StatusCode::UNAUTHORIZED.into_response();
     }
 

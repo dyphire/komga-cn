@@ -2,6 +2,7 @@ use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use komga_contract_testkit::contract_matrix::assert_required_target_declared;
 use komga_rust::application::media_assets::BookMediaRecord;
+use komga_rust::config::RuntimeMode;
 use komga_rust::infrastructure::filesystem::load_epub_cover_bytes;
 use komga_rust::infrastructure::metadata::generate_book_thumbnail;
 use komga_rust::infrastructure::sqlite::connect_pool;
@@ -70,6 +71,56 @@ fn write_router_epub_with_cover(paths: &RuntimeDbPaths, relative_book_path: &str
 
     zip.finish()
         .expect("epub cover fixture should finish successfully");
+}
+
+fn fixture_epub_positions_extension_blob() -> Vec<u8> {
+    vec![
+        31, 139, 8, 0, 189, 49, 208, 105, 2, 255, 171, 86, 42, 200, 47, 206, 44, 201, 204, 207, 43,
+        86, 178, 138, 174, 86, 202, 40, 74, 77, 83, 178, 82, 210, 79, 202, 207, 207, 214, 53, 212,
+        171, 200, 40, 201, 205, 81, 206, 206, 79, 202, 215, 51, 212, 51, 84, 210, 81, 42, 169, 44,
+        72, 5, 202, 39, 22, 20, 228, 100, 38, 39, 130, 244, 233, 131, 213, 104, 87, 228, 230, 0,
+        165, 115, 242, 33, 130, 64, 195, 170, 225, 38, 43, 89, 25, 234, 40, 21, 20, 229, 167, 23,
+        165, 22, 23, 131, 249, 6, 122, 6, 64, 163, 242, 75, 18, 115, 2, 80, 133, 13, 107, 107, 117,
+        240, 57, 194, 136, 2, 71, 24, 97, 56, 194, 20, 187, 35, 140, 106, 107, 99, 107, 1, 206, 33,
+        248, 112, 25, 1, 0, 0,
+    ]
+}
+
+fn fixture_epub_positions_extension_blob_total_progression_021() -> Vec<u8> {
+    vec![
+        31, 139, 8, 0, 62, 131, 208, 105, 2, 255, 171, 86, 42, 200, 47, 206, 44, 201, 204, 207, 43,
+        86, 178, 138, 174, 86, 202, 40, 74, 77, 83, 178, 82, 210, 79, 202, 207, 207, 214, 53, 212,
+        171, 200, 40, 201, 205, 81, 78, 43, 74, 76, 87, 210, 81, 42, 169, 44, 72, 5, 202, 37, 22,
+        20, 228, 100, 38, 39, 130, 244, 232, 131, 229, 181, 43, 114, 115, 128, 210, 57, 249, 16,
+        65, 160, 65, 213, 74, 5, 69, 249, 233, 69, 169, 197, 197, 64, 190, 146, 149, 129, 158, 41,
+        80, 119, 126, 73, 98, 78, 0, 170, 176, 145, 97, 109, 109, 108, 45, 0, 103, 188, 212, 29,
+        132, 0, 0, 0,
+    ]
+}
+
+fn fixture_epub_positions_extension_blob_total_progression_0995() -> Vec<u8> {
+    vec![
+        31, 139, 8, 0, 62, 131, 208, 105, 2, 255, 171, 86, 42, 200, 47, 206, 44, 201, 204, 207, 43,
+        86, 178, 138, 174, 86, 202, 40, 74, 77, 83, 178, 82, 210, 79, 202, 207, 207, 214, 53, 212,
+        171, 200, 40, 201, 205, 81, 78, 43, 74, 76, 87, 210, 81, 42, 169, 44, 72, 5, 202, 37, 22,
+        20, 228, 100, 38, 39, 130, 244, 232, 131, 229, 181, 43, 114, 115, 128, 210, 57, 249, 16,
+        65, 160, 65, 213, 74, 5, 69, 249, 233, 69, 169, 197, 197, 64, 190, 146, 149, 129, 158, 41,
+        80, 119, 126, 73, 98, 78, 0, 170, 176, 165, 165, 105, 109, 109, 108, 45, 0, 22, 101, 99, 4,
+        133, 0, 0, 0,
+    ]
+}
+
+fn fixture_epub_positions_extension_blob_fixed_layout_single_position() -> Vec<u8> {
+    vec![
+        31, 139, 8, 0, 75, 133, 208, 105, 2, 255, 85, 141, 189, 14, 194, 32, 20, 133, 223, 229, 58,
+        74, 91, 53, 113, 225, 1, 156, 28, 76, 28, 141, 3, 85, 104, 73, 105, 239, 13, 220, 38, 52,
+        132, 119, 23, 116, 114, 60, 231, 59, 63, 9, 8, 131, 101, 139, 75, 0, 249, 72, 48, 122, 109,
+        64, 66, 215, 35, 78, 205, 177, 141, 35, 207, 110, 103, 188, 26, 64, 0, 111, 164, 11, 83,
+        68, 206, 190, 84, 237, 116, 95, 190, 143, 179, 43, 120, 194, 30, 239, 164, 150, 18, 49, 54,
+        234, 119, 19, 170, 16, 224, 240, 23, 46, 7, 9, 200, 227, 224, 117, 8, 69, 131, 60, 180,
+        231, 178, 138, 172, 220, 237, 223, 62, 229, 252, 20, 96, 195, 165, 238, 92, 213, 134, 43,
+        131, 100, 191, 234, 252, 1, 224, 110, 213, 153, 176, 0, 0, 0,
+    ]
 }
 
 async fn seed_router_cbz_book(paths: &RuntimeDbPaths, book_id: &str, file_name: &str, title: &str) {
@@ -143,7 +194,9 @@ async fn router_opds_v2_divina_manifest_uses_page_media_type_in_reading_order() 
     seed_router_contract_data(&paths).await;
     seed_router_cbz_book(&paths, "book-3", "book-3.cbz", "Book 3").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let mut config = runtime_config_for_paths(&paths);
+    config.mode = RuntimeMode::Isolated;
+    let app = build_router_with_config(&config);
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -175,68 +228,1089 @@ async fn router_opds_v2_divina_manifest_uses_page_media_type_in_reading_order() 
 }
 
 #[tokio::test]
-async fn router_book_progression_put_matches_existing_write_handler_on_v1_and_opds_v2_routes() {
-    let paths = new_router_fixture("router-book-progression-put-parity").await;
+async fn router_book_manifest_divina_uses_page_media_type_in_reading_order() {
+    let paths = new_router_fixture("router-book-manifest-divina-page-media-type").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_cbz_book(&paths, "book-3", "book-3.cbz", "Book 3").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-3/manifest/divina")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("v1 divina manifest request should build"),
+        )
+        .await
+        .expect("v1 divina manifest request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload
+            .get("readingOrder")
+            .and_then(Value::as_array)
+            .and_then(|entries| entries.first())
+            .and_then(|entry| entry.get("href"))
+            .and_then(Value::as_str),
+        Some("http://localhost/api/v1/books/book-3/pages/1?contentNegotiation=false")
+    );
+    assert_eq!(
+        payload
+            .get("readingOrder")
+            .and_then(Value::as_array)
+            .and_then(|entries| entries.first())
+            .and_then(|entry| entry.get("type"))
+            .and_then(Value::as_str),
+        Some("image/png")
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_manifest_pdf_uses_raw_pdf_pages_in_reading_order() {
+    let paths = new_router_fixture("router-book-manifest-pdf-reading-order").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_pdf_book(
+        &paths,
+        "book-pdf-1",
+        "series-1",
+        "fixture-page.pdf",
+        "Readable Page Title",
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/manifest/pdf")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("pdf manifest request should build"),
+        )
+        .await
+        .expect("pdf manifest request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let reading_order = payload
+        .get("readingOrder")
+        .and_then(Value::as_array)
+        .expect("pdf manifest should expose readingOrder array");
+    assert_eq!(reading_order.len(), 1);
+    assert_eq!(
+        reading_order[0].get("href").and_then(Value::as_str),
+        Some("http://localhost/api/v1/books/book-pdf-1/pages/1/raw")
+    );
+    assert_eq!(
+        reading_order[0].get("type").and_then(Value::as_str),
+        Some("application/pdf")
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_manifest_pdf_returns_bad_request_with_message_for_non_pdf_media() {
+    let paths = new_router_fixture("router-book-manifest-pdf-profile-mismatch").await;
     seed_router_contract_data(&paths).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
-    for route in [
-        "/api/v1/books/book-1/progression",
-        "/opds/v2/books/book-1/progression",
-    ] {
-        let put_response = app
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/manifest/pdf")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("pdf manifest profile mismatch request should build"),
+        )
+        .await
+        .expect("pdf manifest profile mismatch request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("error"),
+        Some(&Value::String(
+            "Book media type 'application/epub+zip' not compatible with requested profile"
+                .to_string()
+        ))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_manifest_divina_accepts_pdf_books() {
+    let paths = new_router_fixture("router-book-manifest-divina-pdf-book").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_pdf_book(
+        &paths,
+        "book-pdf-1",
+        "series-1",
+        "fixture-page.pdf",
+        "Readable Page Title",
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/manifest/divina")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("divina manifest pdf request should build"),
+        )
+        .await
+        .expect("divina manifest pdf request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/divina+json")
+    );
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload
+            .get("readingOrder")
+            .and_then(Value::as_array)
+            .map(|v| v.len()),
+        Some(1)
+    );
+    assert_eq!(
+        payload
+            .get("readingOrder")
+            .and_then(Value::as_array)
+            .and_then(|entries| entries.first())
+            .and_then(|entry| entry.get("href"))
+            .and_then(Value::as_str),
+        Some("http://localhost/api/v1/books/book-pdf-1/pages/1?contentNegotiation=false")
+    );
+    assert_eq!(
+        payload
+            .get("readingOrder")
+            .and_then(Value::as_array)
+            .and_then(|entries| entries.first())
+            .and_then(|entry| entry.get("type"))
+            .and_then(Value::as_str),
+        Some("image/jpeg")
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_progression_put_returns_conflict_for_older_progression() {
+    let paths = new_router_fixture("router-book-progression-put-conflict").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for progression conflict seed");
+    sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
+        .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
+        .bind(fixture_epub_positions_extension_blob())
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("epub extension positions should be seeded for progression conflict test");
+    sqlx::query(
+        "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, READ_DATE, DEVICE_ID, DEVICE_NAME, LOCATOR) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("book-1")
+    .bind("admin-user")
+    .bind(5_i64)
+    .bind(false)
+    .bind("2024-01-03 00:00:00")
+    .bind("reader-1")
+    .bind("KOReader")
+    .bind(serde_json::to_vec(&json!({
+        "href": "/book-1.xhtml#kobo.5.1",
+        "type": "application/xhtml+xml",
+        "locations": {
+            "progression": 0.5,
+            "position": 5,
+            "totalProgression": 0.5
+        }
+    }))
+    .expect("progression conflict locator should serialize"))
+    .execute(&pool)
+    .await
+    .expect("existing read progress row for progression conflict should insert");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/books/book-1/progression")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "modified": "2024-01-02T00:00:00Z",
+                        "device": {
+                            "id": "reader-2",
+                            "name": "Another device"
+                        },
+                        "locator": {
+                            "href": "/book-1.xhtml#kobo.4.1",
+                            "type": "application/xhtml+xml",
+                            "locations": {
+                                "progression": 0.4,
+                                "position": 4,
+                                "totalProgression": 0.4
+                            }
+                        }
+                    })
+                    .to_string(),
+                ))
+                .expect("older progression put request should build"),
+        )
+        .await
+        .expect("older progression put request should complete");
+
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("error"),
+        Some(&Value::String(
+            "Progression is older than existing".to_string()
+        ))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_progression_put_allows_same_modified_retry() {
+    let paths = new_router_fixture("router-book-progression-put-same-modified-retry").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for same-modified retry seed");
+    sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
+        .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
+        .bind(fixture_epub_positions_extension_blob())
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("epub extension positions should be seeded for same-modified retry test");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let progression = json!({
+        "modified": "2024-01-04T05:06:07Z",
+        "device": {
+            "id": "reader-9",
+            "name": "Kobo Libra"
+        },
+        "locator": {
+            "href": "/book-1.xhtml#kobo.2.1",
+            "type": "application/xhtml+xml",
+            "locations": {
+                "position": 2,
+                "progression": 0.5,
+                "totalProgression": 0.2
+            },
+            "koboSpan": "kobo-span-2"
+        }
+    });
+
+    for attempt in 0..2 {
+        let response = app
             .clone()
             .oneshot(
                 Request::builder()
                     .method("PUT")
-                    .uri(route)
+                    .uri("/api/v1/books/book-1/progression")
                     .header("x-auth-token", &auth_token)
                     .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        json!({
-                            "locator": {
-                                "locations": {
-                                    "progression": 0.5
-                                }
-                            }
-                        })
-                        .to_string(),
-                    ))
-                    .expect("book progression put request should build"),
+                    .body(Body::from(progression.to_string()))
+                    .expect("same-modified retry request should build"),
             )
             .await
-            .expect("book progression put request should complete");
-        assert_eq!(
-            put_response.status(),
-            StatusCode::NO_CONTENT,
-            "route: {route}"
-        );
+            .expect("same-modified retry request should complete");
 
-        let get_response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri(route)
-                    .header("x-auth-token", &auth_token)
-                    .body(Body::empty())
-                    .expect("book progression get request should build"),
-            )
-            .await
-            .expect("book progression get request should complete");
-        assert_eq!(get_response.status(), StatusCode::OK, "route: {route}");
-        let payload = response_json(get_response).await;
         assert_eq!(
-            payload
-                .get("locator")
-                .and_then(|value| value.get("locations"))
-                .and_then(|value| value.get("progression")),
-            Some(&json!(0.5)),
-            "route: {route}",
+            response.status(),
+            StatusCode::NO_CONTENT,
+            "retry attempt {attempt} should stay idempotent"
         );
     }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_progression_put_persists_modified_device_and_locator() {
+    let paths = new_router_fixture("router-book-progression-put-persists-full-payload").await;
+    seed_router_contract_data(&paths).await;
+
+    let extension_blob = fixture_epub_positions_extension_blob();
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for progression full-payload seed");
+    sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
+        .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
+        .bind(extension_blob)
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("epub extension positions should be seeded for progression full-payload test");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let progression = json!({
+        "modified": "2024-01-04T05:06:07Z",
+        "device": {
+            "id": "reader-9",
+            "name": "Kobo Libra"
+        },
+        "locator": {
+            "href": "/book-1.xhtml#kobo.2.1",
+            "type": "application/xhtml+xml",
+            "locations": {
+                "position": 2,
+                "progression": 0.5,
+                "totalProgression": 0.2
+            },
+            "koboSpan": "kobo-span-2"
+        }
+    });
+
+    let put_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/books/book-1/progression")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(progression.to_string()))
+                .expect("book progression full-payload put request should build"),
+        )
+        .await
+        .expect("book progression full-payload put request should complete");
+    assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
+
+    let get_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/progression")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book progression full-payload get request should build"),
+        )
+        .await
+        .expect("book progression full-payload get request should complete");
+    assert_eq!(get_response.status(), StatusCode::OK);
+    let payload = response_json(get_response).await;
+    assert_eq!(payload.get("modified"), progression.get("modified"));
+    assert_eq!(payload.get("device"), progression.get("device"));
+    assert_eq!(payload.get("locator"), progression.get("locator"));
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_progression_put_roundtrips_on_opds_v2_route() {
+    let paths = new_router_fixture("router-book-progression-opds-v2-roundtrip").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for opds progression seed");
+    sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
+        .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
+        .bind(fixture_epub_positions_extension_blob())
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("epub extension positions should be seeded for opds progression test");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let progression = json!({
+        "modified": "2024-01-04T05:06:07Z",
+        "device": {
+            "id": "reader-9",
+            "name": "Kobo Libra"
+        },
+        "locator": {
+            "href": "/book-1.xhtml#kobo.2.1",
+            "type": "application/xhtml+xml",
+            "locations": {
+                "position": 2,
+                "progression": 0.5,
+                "totalProgression": 0.2
+            },
+            "koboSpan": "kobo-span-2"
+        }
+    });
+
+    let put_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/opds/v2/books/book-1/progression")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(progression.to_string()))
+                .expect("opds progression put request should build"),
+        )
+        .await
+        .expect("opds progression put request should complete");
+    assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
+
+    let get_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/books/book-1/progression")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds progression get request should build"),
+        )
+        .await
+        .expect("opds progression get request should complete");
+    assert_eq!(get_response.status(), StatusCode::OK);
+    let payload = response_json(get_response).await;
+    assert_eq!(payload.get("modified"), progression.get("modified"));
+    assert_eq!(payload.get("device"), progression.get("device"));
+    assert_eq!(payload.get("locator"), progression.get("locator"));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_progression_put_rejects_epub_locator_without_progression() {
+    let paths = new_router_fixture("router-book-progression-put-epub-missing-progression").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/books/book-1/progression")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "modified": "2024-01-04T05:06:07Z",
+                        "device": { "id": "reader-1", "name": "KOReader" },
+                        "locator": {
+                            "href": "chapter.xhtml#frag",
+                            "type": "application/xhtml+xml",
+                            "locations": { "position": 15 }
+                        }
+                    })
+                    .to_string(),
+                ))
+                .expect("epub progression without locator progression request should build"),
+        )
+        .await
+        .expect("epub progression without locator progression request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("error"),
+        Some(&Value::String(
+            "location.progression is required".to_string()
+        ))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_progression_put_rejects_epub_locator_when_extension_is_missing() {
+    let paths = new_router_fixture("router-book-progression-put-epub-missing-extension").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/books/book-1/progression")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "modified": "2024-01-04T05:06:07Z",
+                        "device": { "id": "reader-1", "name": "KOReader" },
+                        "locator": {
+                            "href": "chapter.xhtml#frag",
+                            "type": "application/xhtml+xml",
+                            "locations": { "progression": 0.3 }
+                        }
+                    })
+                    .to_string(),
+                ))
+                .expect("epub progression without extension request should build"),
+        )
+        .await
+        .expect("epub progression without extension request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("error"),
+        Some(&Value::String("Epub extension not found".to_string()))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_progression_put_rejects_epub_locator_with_non_existing_href() {
+    let paths = new_router_fixture("router-book-progression-put-epub-bad-href").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for progression bad-href seed");
+    sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
+        .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
+        .bind(fixture_epub_positions_extension_blob())
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("epub extension positions should be seeded for progression bad-href test");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/books/book-1/progression")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "modified": "2024-01-04T05:06:07Z",
+                        "device": { "id": "reader-1", "name": "KOReader" },
+                        "locator": {
+                            "href": "ch5.xhtml#frag",
+                            "type": "application/xhtml+xml",
+                            "locations": { "progression": 0.3 }
+                        }
+                    })
+                    .to_string(),
+                ))
+                .expect("epub progression bad href request should build"),
+        )
+        .await
+        .expect("epub progression bad href request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("error"),
+        Some(&Value::String(
+            "Resource does not exist in book: ch5.xhtml".to_string()
+        ))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_progression_put_accepts_pdf_position_payload() {
+    let paths = new_router_fixture("router-book-progression-put-pdf-position").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_pdf_book(
+        &paths,
+        "book-pdf-1",
+        "series-1",
+        "fixture-page.pdf",
+        "Readable Page Title",
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let progression = json!({
+        "modified": "2024-01-04T05:06:07Z",
+        "device": { "id": "reader-9", "name": "Kobo Libra" },
+        "locator": {
+            "href": "",
+            "type": "",
+            "locations": { "position": 1 }
+        }
+    });
+
+    let put_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/books/book-pdf-1/progression")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(progression.to_string()))
+                .expect("pdf progression put request should build"),
+        )
+        .await
+        .expect("pdf progression put request should complete");
+    assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
+
+    let get_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/progression")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("pdf progression get request should build"),
+        )
+        .await
+        .expect("pdf progression get request should complete");
+    assert_eq!(get_response.status(), StatusCode::OK);
+    let payload = response_json(get_response).await;
+    assert_eq!(payload.get("modified"), progression.get("modified"));
+    assert_eq!(payload.get("device"), progression.get("device"));
+    assert_eq!(payload.get("locator"), progression.get("locator"));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_progression_put_rejects_pdf_position_beyond_page_count() {
+    let paths = new_router_fixture("router-book-progression-put-pdf-out-of-range").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_pdf_book(
+        &paths,
+        "book-pdf-1",
+        "series-1",
+        "fixture-page.pdf",
+        "Readable Page Title",
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/books/book-pdf-1/progression")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "modified": "2024-01-04T05:06:07Z",
+                        "device": { "id": "reader-9", "name": "Kobo Libra" },
+                        "locator": {
+                            "href": "",
+                            "type": "",
+                            "locations": { "position": 2 }
+                        }
+                    })
+                    .to_string(),
+                ))
+                .expect("pdf progression out-of-range request should build"),
+        )
+        .await
+        .expect("pdf progression out-of-range request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("error"),
+        Some(&Value::String(
+            "Page argument (2) must be within 1 and book page count (1)".to_string()
+        ))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_progression_put_normalizes_epub_locator_from_matching_position() {
+    let paths = new_router_fixture("router-book-progression-put-epub-normalizes-locator").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for epub progression normalization seed");
+    sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
+        .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
+        .bind(fixture_epub_positions_extension_blob())
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("epub extension positions should be seeded for progression normalization test");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let progression = json!({
+        "modified": "2024-01-04T05:06:07Z",
+        "device": { "id": "reader-9", "name": "Kobo Libra" },
+        "locator": {
+            "href": "/book-1.xhtml#custom-fragment",
+            "type": "",
+            "locations": {
+                "progression": 0.5,
+                "totalProgression": 0.9
+            }
+        }
+    });
+
+    let put_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/books/book-1/progression")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(progression.to_string()))
+                .expect("epub progression normalization put request should build"),
+        )
+        .await
+        .expect("epub progression normalization put request should complete");
+    assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
+
+    let get_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/progression")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("epub progression normalization get request should build"),
+        )
+        .await
+        .expect("epub progression normalization get request should complete");
+    assert_eq!(get_response.status(), StatusCode::OK);
+    let payload = response_json(get_response).await;
+    assert_eq!(payload.get("device"), progression.get("device"));
+    assert_eq!(
+        payload.get("locator"),
+        Some(&json!({
+            "href": "/book-1.xhtml#custom-fragment",
+            "type": "application/xhtml+xml",
+            "locations": {
+                "progression": 0.5,
+                "totalProgression": 0.2
+            }
+        }))
+    );
+
+    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for normalized progression verification");
+    let progression_row = sqlx::query(
+        "SELECT PAGE, COMPLETED FROM READ_PROGRESS WHERE BOOK_ID = ? AND USER_ID = ? LIMIT 1",
+    )
+    .bind("book-1")
+    .bind("admin-user")
+    .fetch_one(&verify_pool)
+    .await
+    .expect("normalized progression row should be queryable");
+    verify_pool.close().await;
+    assert_eq!(progression_row.get::<i64, _>("PAGE"), 2);
+    assert!(!progression_row.get::<bool, _>("COMPLETED"));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_progression_put_rejects_invalid_epub_progression_between_positions() {
+    let paths = new_router_fixture("router-book-progression-put-epub-invalid-progression").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for invalid epub progression seed");
+    sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
+        .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
+        .bind(fixture_epub_positions_extension_blob())
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("epub extension positions should be seeded for invalid progression test");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/books/book-1/progression")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "modified": "2024-01-04T05:06:07Z",
+                        "device": { "id": "reader-9", "name": "Kobo Libra" },
+                        "locator": {
+                            "href": "/book-1.xhtml#custom-fragment",
+                            "type": "application/xhtml+xml",
+                            "locations": {
+                                "progression": 0.9
+                            }
+                        }
+                    })
+                    .to_string(),
+                ))
+                .expect("invalid epub progression request should build"),
+        )
+        .await
+        .expect("invalid epub progression request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("error"),
+        Some(&Value::String("Invalid progression".to_string()))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_progression_put_accepts_fixed_layout_epub_single_position() {
+    let paths =
+        new_router_fixture("router-book-progression-put-epub-fixed-layout-single-position").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for fixed-layout progression seed");
+    sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
+        .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
+        .bind(fixture_epub_positions_extension_blob_fixed_layout_single_position())
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("fixed-layout epub extension should be seeded");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let progression = json!({
+        "modified": "2024-01-04T05:06:07Z",
+        "device": { "id": "reader-9", "name": "Kobo Libra" },
+        "locator": {
+            "href": "/book-1.xhtml#other-fragment",
+            "type": "",
+            "locations": { "progression": 0.9 }
+        }
+    });
+
+    let put_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/books/book-1/progression")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(progression.to_string()))
+                .expect("fixed-layout progression put request should build"),
+        )
+        .await
+        .expect("fixed-layout progression put request should complete");
+    assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
+
+    let get_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/progression")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("fixed-layout progression get request should build"),
+        )
+        .await
+        .expect("fixed-layout progression get request should complete");
+    assert_eq!(get_response.status(), StatusCode::OK);
+    let payload = response_json(get_response).await;
+    assert_eq!(
+        payload.get("locator"),
+        Some(&json!({
+            "href": "/book-1.xhtml#other-fragment",
+            "type": "application/xhtml+xml",
+            "locations": {
+                "progression": 0.9,
+                "totalProgression": 0.2
+            },
+            "koboSpan": "fixed-span"
+        }))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_progression_put_uses_total_progression_to_round_epub_page() {
+    let paths =
+        new_router_fixture("router-book-progression-put-epub-rounds-total-progression").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for epub page-rounding seed");
+    sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
+        .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
+        .bind(fixture_epub_positions_extension_blob_total_progression_021())
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("epub extension positions should be seeded for page-rounding test");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let progression = json!({
+        "modified": "2024-01-04T05:06:07Z",
+        "device": { "id": "reader-9", "name": "Kobo Libra" },
+        "locator": {
+            "href": "/book-1.xhtml#frag",
+            "type": "",
+            "locations": { "progression": 0.5 }
+        }
+    });
+
+    let put_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/books/book-1/progression")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(progression.to_string()))
+                .expect("epub page-rounding put request should build"),
+        )
+        .await
+        .expect("epub page-rounding put request should complete");
+    assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
+
+    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for page-rounding verification");
+    let progression_row = sqlx::query(
+        "SELECT PAGE, COMPLETED FROM READ_PROGRESS WHERE BOOK_ID = ? AND USER_ID = ? LIMIT 1",
+    )
+    .bind("book-1")
+    .bind("admin-user")
+    .fetch_one(&verify_pool)
+    .await
+    .expect("page-rounding progression row should be queryable");
+    verify_pool.close().await;
+    assert_eq!(progression_row.get::<i64, _>("PAGE"), 2);
+    assert!(!progression_row.get::<bool, _>("COMPLETED"));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_progression_put_marks_completed_when_total_progression_is_above_threshold() {
+    let paths = new_router_fixture("router-book-progression-put-epub-completed-threshold").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for epub completion-threshold seed");
+    sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
+        .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
+        .bind(fixture_epub_positions_extension_blob_total_progression_0995())
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("epub extension positions should be seeded for completion-threshold test");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let progression = json!({
+        "modified": "2024-01-04T05:06:07Z",
+        "device": { "id": "reader-9", "name": "Kobo Libra" },
+        "locator": {
+            "href": "/book-1.xhtml#frag",
+            "type": "",
+            "locations": { "progression": 0.5 }
+        }
+    });
+
+    let put_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/books/book-1/progression")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(progression.to_string()))
+                .expect("epub completion-threshold put request should build"),
+        )
+        .await
+        .expect("epub completion-threshold put request should complete");
+    assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
+
+    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for completion-threshold verification");
+    let progression_row = sqlx::query(
+        "SELECT PAGE, COMPLETED FROM READ_PROGRESS WHERE BOOK_ID = ? AND USER_ID = ? LIMIT 1",
+    )
+    .bind("book-1")
+    .bind("admin-user")
+    .fetch_one(&verify_pool)
+    .await
+    .expect("completion-threshold progression row should be queryable");
+    verify_pool.close().await;
+    assert_eq!(progression_row.get::<i64, _>("PAGE"), 10);
+    assert!(progression_row.get::<bool, _>("COMPLETED"));
 
     cleanup_router_fixture(paths);
 }
@@ -3235,6 +4309,38 @@ async fn router_book_file_wildcard_routes_match_api_v1_and_opds_v2() {
 }
 
 #[tokio::test]
+async fn router_book_file_wildcard_returns_not_found_with_message_when_file_is_missing() {
+    let paths = new_router_fixture("router-book-file-wildcard-missing-file").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/file/book-1.epub")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("missing wildcard book file request should build"),
+        )
+        .await
+        .expect("missing wildcard book file request should complete");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("error"),
+        Some(&Value::String(
+            "File not found, it may have moved".to_string()
+        ))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_koreader_progress_put_then_get_roundtrip() {
     let paths = new_router_fixture("router-koreader-progress-roundtrip").await;
     seed_router_contract_data(&paths).await;
@@ -3537,6 +4643,187 @@ async fn router_discovery_book_detail_does_not_bridge_missing_book_n_ids() {
         .expect("book detail bridge-id request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_metadata_batch_update_persists_title_and_updates_book_snapshot() {
+    let paths =
+        new_router_fixture("router-book-metadata-batch-update-persists-and-touches-book").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool_before = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open before metadata batch update");
+    let last_modified_before = sqlx::query(
+        "SELECT COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED FROM BOOK WHERE ID = ? LIMIT 1",
+    )
+    .bind("book-1")
+    .fetch_one(&pool_before)
+    .await
+    .expect("book last modified should be queryable before metadata batch update")
+    .get::<String, _>("LAST_MODIFIED");
+    pool_before.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let patch = json!({
+        "book-1": {
+            "title": "Updated Batch Title"
+        }
+    });
+
+    let update = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/books/metadata")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(patch.to_string()))
+                .expect("book metadata batch update request should build"),
+        )
+        .await
+        .expect("book metadata batch update request should complete");
+
+    assert_eq!(update.status(), StatusCode::NO_CONTENT);
+
+    let detail = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book detail after metadata batch update request should build"),
+        )
+        .await
+        .expect("book detail after metadata batch update request should complete");
+
+    assert_eq!(detail.status(), StatusCode::OK);
+    let payload = response_json(detail).await;
+    assert_eq!(
+        payload.get("metadata").and_then(|value| value.get("title")),
+        Some(&Value::String("Updated Batch Title".to_string()))
+    );
+
+    let pool_after = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open after metadata batch update");
+    let last_modified_after = sqlx::query(
+        "SELECT COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED FROM BOOK WHERE ID = ? LIMIT 1",
+    )
+    .bind("book-1")
+    .fetch_one(&pool_after)
+    .await
+    .expect("book last modified should be queryable after metadata batch update")
+    .get::<String, _>("LAST_MODIFIED");
+    pool_after.close().await;
+    assert_ne!(last_modified_after, last_modified_before);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_metadata_batch_update_refreshes_book_search_results() {
+    let paths = new_router_fixture("router-book-metadata-batch-update-refreshes-search").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let initial_search = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/books/list?page=0&size=20")
+                .header("x-auth-token", &auth_token)
+                .header("x-komga-runtime-search-ownership", "runtime-rust-owned")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "condition": {
+                            "type": "Title",
+                            "operator": "is",
+                            "value": "Book 1"
+                        }
+                    })
+                    .to_string(),
+                ))
+                .expect("initial books/list title search request should build"),
+        )
+        .await
+        .expect("initial books/list title search request should complete");
+    assert_eq!(initial_search.status(), StatusCode::OK);
+    let initial_payload = response_json(initial_search).await;
+    let initial_content = initial_payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("initial books/list title search should expose content array");
+    assert_eq!(initial_content.len(), 1);
+    assert_eq!(
+        initial_content[0].get("id"),
+        Some(&Value::String("book-1".to_string()))
+    );
+
+    let patch = json!({
+        "book-1": {
+            "title": "Updated Batch Title"
+        }
+    });
+    let update = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/books/metadata")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(patch.to_string()))
+                .expect("book metadata batch update request should build"),
+        )
+        .await
+        .expect("book metadata batch update request should complete");
+    assert_eq!(update.status(), StatusCode::NO_CONTENT);
+
+    let updated_search = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/books/list?page=0&size=20")
+                .header("x-auth-token", &auth_token)
+                .header("x-komga-runtime-search-ownership", "runtime-rust-owned")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "condition": {
+                            "type": "Title",
+                            "operator": "is",
+                            "value": "Updated Batch Title"
+                        }
+                    })
+                    .to_string(),
+                ))
+                .expect("updated books/list title search request should build"),
+        )
+        .await
+        .expect("updated books/list title search request should complete");
+    assert_eq!(updated_search.status(), StatusCode::OK);
+    let updated_payload = response_json(updated_search).await;
+    let updated_content = updated_payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("updated books/list title search should expose content array");
+    assert_eq!(updated_content.len(), 1);
+    assert_eq!(
+        updated_content[0].get("id"),
+        Some(&Value::String("book-1".to_string()))
+    );
 
     cleanup_router_fixture(paths);
 }
@@ -4181,6 +5468,61 @@ async fn router_book_thumbnail_upload_parses_multipart_image_and_selected_flag()
 }
 
 #[tokio::test]
+async fn router_book_thumbnail_upload_selects_thumbnail_when_none_was_selected() {
+    let paths = new_router_fixture("router-book-thumbnail-upload-auto-selects-first").await;
+    seed_router_contract_data(&paths).await;
+
+    let cleanup_pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for book thumbnail cleanup");
+    sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ?")
+        .bind("book-1")
+        .execute(&cleanup_pool)
+        .await
+        .expect("existing book-1 thumbnails should be deleted before upload test");
+    cleanup_pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let image_bytes = fixture_png_bytes();
+    let (content_type, body) =
+        multipart_image_upload_body("file", "cover.png", "image/png", false, &image_bytes);
+
+    let upload = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/books/book-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(body))
+                .expect("book thumbnail upload request should build"),
+        )
+        .await
+        .expect("book thumbnail upload request should complete");
+
+    assert_eq!(upload.status(), StatusCode::OK);
+
+    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for selected thumbnail verification");
+    let selected_count = sqlx::query(
+        "SELECT COUNT(*) AS COUNT FROM THUMBNAIL_BOOK WHERE BOOK_ID = ? AND SELECTED = 1",
+    )
+    .bind("book-1")
+    .fetch_one(&verify_pool)
+    .await
+    .expect("selected book thumbnails should be queryable")
+    .get::<i64, _>("COUNT");
+    verify_pool.close().await;
+
+    assert_eq!(selected_count, 1);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_book_thumbnail_by_id_allows_missing_path_book_when_thumbnail_exists() {
     let paths = new_router_fixture("router-book-thumbnail-by-id-missing-path-book").await;
     seed_router_contract_data(&paths).await;
@@ -4227,6 +5569,208 @@ async fn router_book_thumbnail_by_id_allows_missing_path_book_when_thumbnail_exi
         .expect("book thumbnail missing path request should complete");
 
     assert_eq!(response.status(), StatusCode::OK);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_thumbnail_delete_allows_missing_path_book_when_thumbnail_exists() {
+    let paths = new_router_fixture("router-book-thumbnail-delete-missing-path-book").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let image_bytes = fixture_png_bytes();
+    let (content_type, body) =
+        multipart_image_upload_body("file", "cover.png", "image/png", false, &image_bytes);
+
+    let upload = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/books/book-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(body))
+                .expect("book thumbnail upload request should build"),
+        )
+        .await
+        .expect("book thumbnail upload request should complete");
+    assert_eq!(upload.status(), StatusCode::OK);
+    let thumbnail_id = response_json(upload)
+        .await
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("book thumbnail upload should return thumbnail id")
+        .to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!(
+                    "/api/v1/books/missing-book/thumbnails/{thumbnail_id}"
+                ))
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book thumbnail missing path delete request should build"),
+        )
+        .await
+        .expect("book thumbnail missing path delete request should complete");
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for missing path delete verification");
+    let remaining = sqlx::query("SELECT COUNT(*) AS COUNT FROM THUMBNAIL_BOOK WHERE ID = ?")
+        .bind(&thumbnail_id)
+        .fetch_one(&verify_pool)
+        .await
+        .expect("book thumbnail delete should be queryable")
+        .get::<i64, _>("COUNT");
+    verify_pool.close().await;
+    assert_eq!(remaining, 0);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_thumbnail_delete_rejects_generated_thumbnail() {
+    let paths = new_router_fixture("router-book-thumbnail-delete-generated").await;
+    seed_router_contract_data(&paths).await;
+    write_router_epub_with_cover(&paths, "books/book-1.epub");
+
+    let cleanup_pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for generated thumbnail cleanup");
+    sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ?")
+        .bind("book-1")
+        .execute(&cleanup_pool)
+        .await
+        .expect("existing thumbnails should be deleted before generated delete test");
+    cleanup_pool.close().await;
+
+    generate_book_thumbnail(paths.main_db.as_path(), "book-1")
+        .expect("generate_book_thumbnail should succeed before delete test");
+
+    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for generated thumbnail lookup");
+    let generated_thumbnail_id = sqlx::query(
+        "SELECT ID FROM THUMBNAIL_BOOK WHERE BOOK_ID = ? AND TYPE = 'GENERATED' LIMIT 1",
+    )
+    .bind("book-1")
+    .fetch_one(&verify_pool)
+    .await
+    .expect("generated thumbnail row should be queryable")
+    .get::<String, _>("ID");
+    verify_pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!(
+                    "/api/v1/books/book-1/thumbnails/{generated_thumbnail_id}"
+                ))
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("generated book thumbnail delete request should build"),
+        )
+        .await
+        .expect("generated book thumbnail delete request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_thumbnail_delete_reselects_remaining_thumbnail_when_selected_one_is_removed() {
+    let paths = new_router_fixture("router-book-thumbnail-delete-reselects-remaining").await;
+    seed_router_contract_data(&paths).await;
+
+    let cleanup_pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for book thumbnail delete cleanup");
+    sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ?")
+        .bind("book-1")
+        .execute(&cleanup_pool)
+        .await
+        .expect("existing book-1 thumbnails should be deleted before delete reselect test");
+    cleanup_pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let image_bytes = fixture_png_bytes();
+
+    let mut selected_thumbnail_id = String::new();
+    for (selected, name) in [(true, "selected.png"), (false, "other.png")] {
+        let (content_type, body) =
+            multipart_image_upload_body("file", name, "image/png", selected, &image_bytes);
+        let upload = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/books/book-1/thumbnails")
+                    .header("x-auth-token", &auth_token)
+                    .header(header::CONTENT_TYPE, content_type)
+                    .body(Body::from(body))
+                    .expect("book thumbnail upload request should build"),
+            )
+            .await
+            .expect("book thumbnail upload request should complete");
+        assert_eq!(upload.status(), StatusCode::OK);
+        let thumbnail_id = response_json(upload)
+            .await
+            .get("id")
+            .and_then(Value::as_str)
+            .expect("uploaded book thumbnail should expose id")
+            .to_string();
+        if selected {
+            selected_thumbnail_id = thumbnail_id;
+        }
+    }
+
+    let delete = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!(
+                    "/api/v1/books/book-1/thumbnails/{selected_thumbnail_id}"
+                ))
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book selected thumbnail delete request should build"),
+        )
+        .await
+        .expect("book selected thumbnail delete request should complete");
+    assert_eq!(delete.status(), StatusCode::ACCEPTED);
+
+    let list = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book thumbnail list request should build"),
+        )
+        .await
+        .expect("book thumbnail list request should complete");
+    assert_eq!(list.status(), StatusCode::OK);
+    let rows = response_json(list).await;
+    let rows = rows
+        .as_array()
+        .expect("book thumbnail list response should be an array");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].get("selected"), Some(&Value::Bool(true)));
 
     cleanup_router_fixture(paths);
 }
@@ -4474,6 +6018,7 @@ async fn router_book_media_asset_routes_forbid_age_restricted_user() {
         "/api/v1/books/book-1/file",
         "/api/v1/books/book-1/thumbnails",
         "/api/v1/books/book-1/manifest",
+        "/api/v1/books/book-1/resource/OEBPS/chapter.xhtml",
         "/api/v1/books/book-1/progression",
     ] {
         let response = app
@@ -4822,6 +6367,891 @@ async fn router_book_pages_generated_pdf_fallback_matches_kotlin_page_shape() {
     cleanup_router_fixture(paths);
 }
 
+#[tokio::test]
+async fn router_book_page_returns_bad_request_with_message_for_missing_pdf_page_number() {
+    let paths = new_router_fixture("router-book-page-missing-pdf-page-nonraw").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_pdf_book(
+        &paths,
+        "book-pdf-1",
+        "series-1",
+        "fixture-page.pdf",
+        "Readable Page Title",
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/pages/2")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("missing nonraw pdf page request should build"),
+        )
+        .await
+        .expect("missing nonraw pdf page request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("error"),
+        Some(&Value::String("Page number does not exist".to_string()))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_page_pdf_negotiation_returns_bad_request_with_message_for_missing_pdf_page_number()
+ {
+    let paths =
+        new_router_fixture("router-book-page-missing-pdf-page-nonraw-pdf-negotiation").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_pdf_book(
+        &paths,
+        "book-pdf-1",
+        "series-1",
+        "fixture-page.pdf",
+        "Readable Page Title",
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/pages/2")
+                .header("x-auth-token", &auth_token)
+                .header(header::ACCEPT, "application/pdf")
+                .body(Body::empty())
+                .expect("missing negotiated nonraw pdf page request should build"),
+        )
+        .await
+        .expect("missing negotiated nonraw pdf page request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("error"),
+        Some(&Value::String("Page number does not exist".to_string()))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_read_progress_requires_page_when_completed_is_false_or_missing() {
+    let paths = new_router_fixture("router-book-read-progress-requires-page").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    for body in [json!({}), json!({ "completed": false })] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/api/v1/books/book-1/read-progress")
+                    .header("x-auth-token", &auth_token)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body.to_string()))
+                    .expect("book read-progress missing-page request should build"),
+            )
+            .await
+            .expect("book read-progress missing-page request should complete");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let payload = response_json(response).await;
+        assert_eq!(payload.get("violations"), Some(&json!([])));
+    }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_read_progress_treats_null_page_like_missing_page() {
+    let paths = new_router_fixture("router-book-read-progress-null-page").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    for body in [
+        json!({ "page": Value::Null }),
+        json!({ "page": Value::Null, "completed": false }),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/api/v1/books/book-1/read-progress")
+                    .header("x-auth-token", &auth_token)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body.to_string()))
+                    .expect("book read-progress null-page request should build"),
+            )
+            .await
+            .expect("book read-progress null-page request should complete");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let payload = response_json(response).await;
+        assert_eq!(payload.get("violations"), Some(&json!([])));
+    }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_read_progress_rejects_non_positive_page_with_validation_payload() {
+    let paths = new_router_fixture("router-book-read-progress-non-positive-page").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    for body in [json!({ "page": 0 }), json!({ "page": -1 })] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/api/v1/books/book-1/read-progress")
+                    .header("x-auth-token", &auth_token)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body.to_string()))
+                    .expect("book read-progress non-positive page request should build"),
+            )
+            .await
+            .expect("book read-progress non-positive page request should complete");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let payload = response_json(response).await;
+        assert_eq!(
+            payload.get("violations"),
+            Some(&json!([
+                {
+                    "fieldName": "page",
+                    "message": "must be greater than 0"
+                }
+            ]))
+        );
+    }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_read_progress_completed_true_still_rejects_non_positive_page() {
+    let paths =
+        new_router_fixture("router-book-read-progress-completed-true-non-positive-page").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/books/book-1/read-progress")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "page": 0, "completed": true }).to_string(),
+                ))
+                .expect("book read-progress completed-true non-positive page request should build"),
+        )
+        .await
+        .expect("book read-progress completed-true non-positive page request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("violations"),
+        Some(&json!([
+            {
+                "fieldName": "page",
+                "message": "must be greater than 0"
+            }
+        ]))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_read_progress_completed_true_ignores_positive_page_and_marks_completed() {
+    let paths = new_router_fixture("router-book-read-progress-completed-true-ignores-page").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let update = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/books/book-1/read-progress")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "page": 5, "completed": true }).to_string(),
+                ))
+                .expect("book read-progress completed-true with page request should build"),
+        )
+        .await
+        .expect("book read-progress completed-true with page request should complete");
+
+    assert_eq!(update.status(), StatusCode::NO_CONTENT);
+
+    let detail = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book detail after completed-true with page request should build"),
+        )
+        .await
+        .expect("book detail after completed-true with page request should complete");
+
+    assert_eq!(detail.status(), StatusCode::OK);
+    let payload = response_json(detail).await;
+    assert_eq!(
+        payload
+            .get("readProgress")
+            .and_then(|value| value.get("page")),
+        Some(&Value::from(10))
+    );
+    assert_eq!(
+        payload
+            .get("readProgress")
+            .and_then(|value| value.get("completed")),
+        Some(&Value::Bool(true))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_read_progress_completed_true_ignores_out_of_range_positive_page() {
+    let paths =
+        new_router_fixture("router-book-read-progress-completed-true-ignores-out-of-range").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let update = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/books/book-1/read-progress")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "page": 999, "completed": true }).to_string(),
+                ))
+                .expect(
+                    "book read-progress completed-true with out-of-range page request should build",
+                ),
+        )
+        .await
+        .expect("book read-progress completed-true with out-of-range page request should complete");
+
+    assert_eq!(update.status(), StatusCode::NO_CONTENT);
+
+    let detail = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect(
+                    "book detail after completed-true with out-of-range page request should build",
+                ),
+        )
+        .await
+        .expect("book detail after completed-true with out-of-range page request should complete");
+
+    assert_eq!(detail.status(), StatusCode::OK);
+    let payload = response_json(detail).await;
+    assert_eq!(
+        payload
+            .get("readProgress")
+            .and_then(|value| value.get("page")),
+        Some(&Value::from(10))
+    );
+    assert_eq!(
+        payload
+            .get("readProgress")
+            .and_then(|value| value.get("completed")),
+        Some(&Value::Bool(true))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_read_progress_rejects_page_beyond_page_count_with_specific_error() {
+    let paths = new_router_fixture("router-book-read-progress-page-out-of-range").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/books/book-1/read-progress")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "page": 999 }).to_string()))
+                .expect("book read-progress out-of-range request should build"),
+        )
+        .await
+        .expect("book read-progress out-of-range request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("error"),
+        Some(&Value::String(
+            "Page argument (999) must be within 1 and book page count (10)".to_string()
+        ))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_read_progress_marks_completed_when_page_equals_last_page() {
+    let paths = new_router_fixture("router-book-read-progress-last-page-completes").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let update = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/books/book-1/read-progress")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "page": 10 }).to_string()))
+                .expect("book read-progress last-page request should build"),
+        )
+        .await
+        .expect("book read-progress last-page request should complete");
+
+    assert_eq!(update.status(), StatusCode::NO_CONTENT);
+
+    let detail = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book detail after last-page read-progress request should build"),
+        )
+        .await
+        .expect("book detail after last-page read-progress request should complete");
+
+    assert_eq!(detail.status(), StatusCode::OK);
+    let payload = response_json(detail).await;
+    assert_eq!(
+        payload
+            .get("readProgress")
+            .and_then(|value| value.get("page")),
+        Some(&Value::from(10))
+    );
+    assert_eq!(
+        payload
+            .get("readProgress")
+            .and_then(|value| value.get("completed")),
+        Some(&Value::Bool(true))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_read_progress_persists_epub_locator_for_page_updates() {
+    let paths = new_router_fixture("router-book-read-progress-persists-epub-locator").await;
+    seed_router_contract_data(&paths).await;
+
+    let positions = json!([
+        {
+            "href": "/book-1.xhtml#kobo.1.1",
+            "type": "application/xhtml+xml",
+            "locations": {
+                "position": 1,
+                "progression": 0.0,
+                "totalProgression": 0.1
+            }
+        },
+        {
+            "href": "/book-1.xhtml#kobo.2.1",
+            "type": "application/xhtml+xml",
+            "locations": {
+                "position": 2,
+                "progression": 0.5,
+                "totalProgression": 0.2
+            }
+        }
+    ]);
+
+    let extension_blob = fixture_epub_positions_extension_blob();
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for epub locator seed");
+    sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
+        .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
+        .bind(extension_blob)
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("epub extension positions should be seeded for read-progress locator test");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let update = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/books/book-1/read-progress")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "page": 2 }).to_string()))
+                .expect("book read-progress epub locator request should build"),
+        )
+        .await
+        .expect("book read-progress epub locator request should complete");
+
+    assert_eq!(update.status(), StatusCode::NO_CONTENT);
+
+    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for epub locator verification");
+    let locator_row =
+        sqlx::query("SELECT LOCATOR FROM READ_PROGRESS WHERE BOOK_ID = ? AND USER_ID = ? LIMIT 1")
+            .bind("book-1")
+            .bind("admin-user")
+            .fetch_one(&verify_pool)
+            .await
+            .expect("read progress locator should be queryable");
+    let locator_blob = locator_row
+        .try_get::<Option<Vec<u8>>, _>("LOCATOR")
+        .or_else(|_| locator_row.try_get::<Option<Vec<u8>>, _>("locator"))
+        .expect("read progress locator column should be readable");
+    verify_pool.close().await;
+
+    let locator = locator_blob.as_deref().map(|blob| {
+        serde_json::from_slice::<Value>(blob).expect("locator blob should be valid JSON")
+    });
+    assert_eq!(
+        locator,
+        positions.as_array().and_then(|items| items.get(1)).cloned()
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_read_progress_delete_clears_persisted_progress_and_koreader_view() {
+    let paths = new_router_fixture("router-book-read-progress-delete-clears-progress").await;
+    seed_router_contract_data(&paths).await;
+    let extension_blob = fixture_epub_positions_extension_blob();
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for read-progress delete locator seed");
+    sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
+        .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
+        .bind(extension_blob)
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("epub extension positions should be seeded for read-progress delete test");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let update = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/books/book-1/read-progress")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "page": 2 }).to_string()))
+                .expect("book read-progress setup request should build"),
+        )
+        .await
+        .expect("book read-progress setup request should complete");
+    assert_eq!(update.status(), StatusCode::NO_CONTENT);
+
+    let delete = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/api/v1/books/book-1/read-progress")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book read-progress delete request should build"),
+        )
+        .await
+        .expect("book read-progress delete request should complete");
+    assert_eq!(delete.status(), StatusCode::NO_CONTENT);
+
+    let detail = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book detail after read-progress delete request should build"),
+        )
+        .await
+        .expect("book detail after read-progress delete request should complete");
+    assert_eq!(detail.status(), StatusCode::OK);
+    let detail_payload = response_json(detail).await;
+    assert_eq!(detail_payload.get("readProgress"), Some(&Value::Null));
+
+    let koreader = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/koreader/syncs/progress/hash-book-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("koreader progress after delete request should build"),
+        )
+        .await
+        .expect("koreader progress after delete request should complete");
+    assert_eq!(koreader.status(), StatusCode::NOT_FOUND);
+
+    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for read-progress delete verification");
+    let remaining = sqlx::query(
+        "SELECT COUNT(*) AS COUNT FROM READ_PROGRESS WHERE BOOK_ID = ? AND USER_ID = ?",
+    )
+    .bind("book-1")
+    .bind("admin-user")
+    .fetch_one(&verify_pool)
+    .await
+    .expect("read-progress delete verification query should succeed")
+    .get::<i64, _>("COUNT");
+    verify_pool.close().await;
+    assert_eq!(remaining, 0);
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_positions_returns_not_found_without_epub_extension_positions() {
+    let paths = new_router_fixture("router-book-positions-no-extension").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/positions")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book positions request should build"),
+        )
+        .await
+        .expect("book positions request should complete");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_positions_does_not_return_not_modified_when_positions_are_missing() {
+    let paths = new_router_fixture("router-book-positions-no-extension-not-modified").await;
+    seed_router_contract_data(&paths).await;
+    write_router_epub_with_cover(&paths, "books/book-1.epub");
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/positions")
+                .header("x-auth-token", &auth_token)
+                .header(header::IF_MODIFIED_SINCE, "Wed, 31 Dec 2099 23:59:59 GMT")
+                .body(Body::empty())
+                .expect("book positions conditional missing request should build"),
+        )
+        .await
+        .expect("book positions conditional missing request should complete");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_progression_get_returns_full_r2_progression_shape() {
+    let paths = new_router_fixture("router-book-progression-get-full-shape").await;
+    seed_router_contract_data(&paths).await;
+
+    let locator = json!({
+        "href": "/book-1.xhtml#kobo.2.1",
+        "type": "application/xhtml+xml",
+        "title": "Chapter 2",
+        "locations": {
+            "position": 2,
+            "progression": 0.5,
+            "totalProgression": 0.2
+        },
+        "text": {
+            "highlight": "Some text"
+        },
+        "koboSpan": "kobo-span-2"
+    });
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for progression shape seed");
+    sqlx::query(
+        "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, READ_DATE, DEVICE_ID, DEVICE_NAME, LOCATOR) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("book-1")
+    .bind("admin-user")
+    .bind(2_i64)
+    .bind(false)
+    .bind("2024-01-02 03:04:05")
+    .bind("reader-1")
+    .bind("KOReader")
+    .bind(serde_json::to_vec(&locator).expect("locator should serialize"))
+    .execute(&pool)
+    .await
+    .expect("read progress row for progression shape should insert");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/progression")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book progression request should build"),
+        )
+        .await
+        .expect("book progression request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("modified"),
+        Some(&Value::String("2024-01-02T03:04:05Z".to_string()))
+    );
+    assert_eq!(
+        payload.get("device"),
+        Some(&json!({
+            "id": "reader-1",
+            "name": "KOReader"
+        }))
+    );
+    assert_eq!(payload.get("locator"), Some(&locator));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_positions_returns_epub_extension_positions_and_supports_not_modified() {
+    let paths = new_router_fixture("router-book-positions-epub-extension").await;
+    seed_router_contract_data(&paths).await;
+    write_router_epub_with_cover(&paths, "books/book-1.epub");
+
+    let positions = json!([
+        {
+            "href": "/book-1.xhtml#kobo.1.1",
+            "type": "application/xhtml+xml",
+            "locations": {
+                "position": 1,
+                "progression": 0.0,
+                "totalProgression": 0.1
+            }
+        },
+        {
+            "href": "/book-1.xhtml#kobo.2.1",
+            "type": "application/xhtml+xml",
+            "locations": {
+                "position": 2,
+                "progression": 0.5,
+                "totalProgression": 0.2
+            }
+        }
+    ]);
+    let extension_blob = fixture_epub_positions_extension_blob();
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for epub extension positions seed");
+    sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
+        .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
+        .bind(extension_blob)
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("epub extension positions should be seeded");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let initial = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/positions")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book positions initial request should build"),
+        )
+        .await
+        .expect("book positions initial request should complete");
+
+    assert_eq!(initial.status(), StatusCode::OK);
+    assert_eq!(
+        initial
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/vnd.readium.position-list+json")
+    );
+    let last_modified = initial
+        .headers()
+        .get(header::LAST_MODIFIED)
+        .and_then(|value| value.to_str().ok())
+        .expect("book positions response should expose last-modified")
+        .to_string();
+    let payload = response_json(initial).await;
+    assert_eq!(payload.get("total"), Some(&Value::from(2)));
+    assert_eq!(payload.get("positions"), Some(&positions));
+
+    let not_modified = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/positions")
+                .header("x-auth-token", &auth_token)
+                .header(header::IF_MODIFIED_SINCE, &last_modified)
+                .body(Body::empty())
+                .expect("book positions conditional request should build"),
+        )
+        .await
+        .expect("book positions conditional request should complete");
+
+    assert_eq!(not_modified.status(), StatusCode::NOT_MODIFIED);
+    assert_eq!(
+        not_modified
+            .headers()
+            .get(header::LAST_MODIFIED)
+            .and_then(|value| value.to_str().ok()),
+        Some(last_modified.as_str())
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_pages_persisted_pdf_rows_match_kotlin_dynamic_page_shape() {
+    let paths = new_router_fixture("router-book-pages-persisted-pdf-dynamic-shape").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_pdf_book(
+        &paths,
+        "book-pdf-1",
+        "series-1",
+        "fixture-page.pdf",
+        "Fixture PDF",
+    )
+    .await;
+    seed_router_persisted_pdf_page(&paths, "book-pdf-1", 1, "page-1.pdf", 612, 866, None).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/pages")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("persisted pdf pages request should build"),
+        )
+        .await
+        .expect("persisted pdf pages request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let rows = payload
+        .as_array()
+        .expect("persisted pdf pages payload should be an array");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].get("fileName"),
+        Some(&Value::String("page-1.pdf".to_string()))
+    );
+    assert_eq!(
+        rows[0].get("mediaType"),
+        Some(&Value::String("image/jpeg".to_string()))
+    );
+    assert_eq!(rows[0].get("width"), Some(&json!(3200)));
+    assert_eq!(rows[0].get("height"), Some(&json!(4528)));
+    assert!(rows[0].get("sizeBytes").is_some_and(Value::is_null));
+    assert_eq!(rows[0].get("size"), Some(&Value::String(String::new())));
+
+    cleanup_router_fixture(paths);
+}
+
 async fn update_book_search_fixture_title(paths: &RuntimeDbPaths, book_id: &str, title: &str) {
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await
@@ -4837,6 +7267,38 @@ async fn update_book_search_fixture_title(paths: &RuntimeDbPaths, book_id: &str,
     .execute(&pool)
     .await
     .expect("books search parity title should update");
+
+    pool.close().await;
+}
+
+async fn seed_router_persisted_pdf_page(
+    paths: &RuntimeDbPaths,
+    book_id: &str,
+    number: i64,
+    file_name: &str,
+    width: i64,
+    height: i64,
+    file_size: Option<i64>,
+) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("persisted pdf page db should open");
+
+    sqlx::query(
+        "INSERT INTO MEDIA_PAGE (BOOK_ID, NUMBER, FILE_HASH, FILE_NAME, MEDIA_TYPE, WIDTH, HEIGHT, FILE_SIZE) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(book_id)
+    .bind(number)
+    .bind("")
+    .bind(file_name)
+    .bind("application/pdf")
+    .bind(width)
+    .bind(height)
+    .bind(file_size)
+    .execute(&pool)
+    .await
+    .expect("persisted pdf page row should be inserted");
 
     pool.close().await;
 }

@@ -289,6 +289,16 @@ pub async fn delete_persisted_collection(
 
     sqlx::query(
         "DELETE \
+         FROM THUMBNAIL_COLLECTION \
+         WHERE COLLECTION_ID = ?",
+    )
+    .bind(collection_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| format!("delete persisted collection thumbnails: {error}"))?;
+
+    sqlx::query(
+        "DELETE \
          FROM COLLECTION_SERIES \
          WHERE COLLECTION_ID = ?",
     )

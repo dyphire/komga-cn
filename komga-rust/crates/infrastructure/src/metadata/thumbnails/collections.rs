@@ -197,7 +197,7 @@ pub async fn select_collection_thumbnail(
     .map_err(|error| format!("clear selected collection thumbnails for select: {error}"))?;
     sqlx::query(
         "UPDATE THUMBNAIL_COLLECTION \
-         SET SELECTED = 1 \
+         SET SELECTED = 1, LAST_MODIFIED_DATE = STRFTIME('%Y-%m-%d %H:%M:%f', 'now') \
          WHERE ID = ? AND COLLECTION_ID = ?",
     )
     .bind(thumbnail_id)
@@ -247,27 +247,91 @@ pub async fn delete_collection_thumbnail(
         return Ok(false);
     }
 
-    let deleted = sqlx::query(
-        "DELETE FROM THUMBNAIL_COLLECTION \
-         WHERE ID = ? AND COLLECTION_ID = ?",
+    let target = sqlx::query(
+        "SELECT COLLECTION_ID, SELECTED \
+         FROM THUMBNAIL_COLLECTION \
+         WHERE ID = ? \
+         LIMIT 1",
     )
     .bind(thumbnail_id)
-    .bind(collection_id)
-    .execute(&mut *tx)
+    .fetch_optional(&mut *tx)
     .await
-    .map_err(|error| format!("delete collection thumbnail: {error}"))?
-    .rows_affected()
-        > 0;
-
-    if !deleted {
+    .map_err(|error| format!("query collection thumbnail delete target: {error}"))?;
+    let Some(target) = target else {
         tx.rollback()
             .await
             .map_err(|error| format!("rollback collection thumbnail delete tx: {error}"))?;
         return Ok(false);
-    }
+    };
+    let target_collection_id = target.get::<String, _>("COLLECTION_ID");
+    let deleted_selected = target.get::<bool, _>("SELECTED");
+
+    sqlx::query(
+        "DELETE FROM THUMBNAIL_COLLECTION \
+         WHERE ID = ?",
+    )
+    .bind(thumbnail_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| format!("delete collection thumbnail: {error}"))?;
+
+    normalize_collection_thumbnail_selection(&mut tx, &target_collection_id, deleted_selected)
+        .await?;
 
     tx.commit()
         .await
         .map_err(|error| format!("commit collection thumbnail delete tx: {error}"))?;
     Ok(true)
+}
+
+async fn normalize_collection_thumbnail_selection(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    collection_id: &str,
+    deleted_selected: bool,
+) -> Result<(), String> {
+    let remaining_rows = sqlx::query(
+        "SELECT ID, SELECTED \
+         FROM THUMBNAIL_COLLECTION \
+         WHERE COLLECTION_ID = ? \
+         ORDER BY ID ASC",
+    )
+    .bind(collection_id)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|error| {
+        format!("query remaining collection thumbnails for delete housekeeping: {error}")
+    })?;
+
+    let selected_ids = remaining_rows
+        .iter()
+        .filter(|row| row.get::<bool, _>("SELECTED"))
+        .map(|row| row.get::<String, _>("ID"))
+        .collect::<Vec<_>>();
+
+    let target_selected_id = if selected_ids.len() > 1 {
+        selected_ids.first().cloned()
+    } else if selected_ids.is_empty() && deleted_selected {
+        remaining_rows.first().map(|row| row.get::<String, _>("ID"))
+    } else {
+        None
+    };
+
+    let Some(target_selected_id) = target_selected_id else {
+        return Ok(());
+    };
+
+    sqlx::query(
+        "UPDATE THUMBNAIL_COLLECTION \
+         SET SELECTED = CASE WHEN ID = ? THEN 1 ELSE 0 END, \
+             LAST_MODIFIED_DATE = CASE WHEN ID = ? THEN STRFTIME('%Y-%m-%d %H:%M:%f', 'now') ELSE LAST_MODIFIED_DATE END \
+         WHERE COLLECTION_ID = ?",
+    )
+    .bind(&target_selected_id)
+    .bind(&target_selected_id)
+    .bind(collection_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| format!("normalize collection thumbnail selection after delete: {error}"))?;
+
+    Ok(())
 }

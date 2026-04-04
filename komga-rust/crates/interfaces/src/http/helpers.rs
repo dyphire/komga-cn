@@ -261,6 +261,17 @@ pub(crate) fn invalid_read_progress_payload() -> Response {
         .into_response()
 }
 
+pub(crate) fn read_progress_validation_error_response(violations: Vec<Value>) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        [(header::CONTENT_TYPE, "application/json")],
+        Json(json!({
+            "violations": violations,
+        })),
+    )
+        .into_response()
+}
+
 pub(crate) fn invalid_progression_payload() -> Response {
     (
         StatusCode::BAD_REQUEST,

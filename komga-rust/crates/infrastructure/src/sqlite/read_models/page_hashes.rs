@@ -110,9 +110,10 @@ pub async fn load_page_hashes_unknown_page(
         "SELECT mp.FILE_HASH AS HASH, mp.FILE_SIZE AS SIZE, COUNT(mp.BOOK_ID) AS MATCH_COUNT, \
          (COUNT(mp.BOOK_ID) * mp.FILE_SIZE) AS TOTAL_SIZE \
          FROM MEDIA_PAGE mp \
+         LEFT JOIN BOOK b ON b.ID = mp.BOOK_ID \
          WHERE mp.FILE_HASH <> '' \
          AND NOT EXISTS (SELECT 1 FROM PAGE_HASH ph WHERE ph.HASH = mp.FILE_HASH) \
-         GROUP BY mp.FILE_HASH, mp.FILE_SIZE \
+         GROUP BY mp.FILE_HASH \
          HAVING COUNT(mp.BOOK_ID) > 1",
     );
     if !order_by.is_empty() {
@@ -163,7 +164,7 @@ pub async fn load_page_hash_matches_page(
 
     let size = size.max(1);
     let offset = page.saturating_mul(size);
-    let order_by = page_hash_match_order_by(sorts);
+    let order_by = page_hash_match_order_by(sorts)?;
 
     let mut sql = String::from(
         "SELECT mp.BOOK_ID, b.URL, mp.NUMBER, mp.FILE_NAME, mp.FILE_SIZE, mp.MEDIA_TYPE, \
@@ -320,30 +321,6 @@ fn unknown_page_hash_order_by(sorts: &[String]) -> Vec<String> {
                 "fileSize" => "SIZE",
                 "matchCount" => "MATCH_COUNT",
                 "totalSize" => "TOTAL_SIZE",
-                _ => return None,
-            };
-            let direction = if direction.eq_ignore_ascii_case("desc") {
-                "DESC"
-            } else {
-                "ASC"
-            };
-            Some(format!("{column} {direction}"))
-        })
-        .collect()
-}
-
-fn page_hash_match_order_by(sorts: &[String]) -> Vec<String> {
-    sorts
-        .iter()
-        .filter_map(|sort| {
-            let mut parts = sort.split(',');
-            let property = parts.next()?.trim();
-            let direction = parts.next().unwrap_or("asc").trim();
-            let column = match property {
-                "hash" => "mp.FILE_HASH",
-                "fileSize" => "mp.FILE_SIZE",
-                "matchCount" => "MATCH_COUNT",
-                "totalSize" => "TOTAL_SIZE",
                 "url" => "b.URL",
                 "bookId" => "mp.BOOK_ID",
                 "pageNumber" => "mp.NUMBER",
@@ -357,6 +334,37 @@ fn page_hash_match_order_by(sorts: &[String]) -> Vec<String> {
             Some(format!("{column} {direction}"))
         })
         .collect()
+}
+
+fn page_hash_match_order_by(sorts: &[String]) -> Result<Vec<String>, sqlx::Error> {
+    let mut order_by = Vec::new();
+    for sort in sorts {
+        let mut parts = sort.split(',');
+        let Some(property) = parts.next().map(str::trim) else {
+            continue;
+        };
+        if matches!(property, "matchCount" | "totalSize") {
+            return Err(sqlx::Error::Protocol(format!(
+                "page hash match sort key is unsupported by Kotlin baseline: {property}",
+            )));
+        }
+        let direction = parts.next().unwrap_or("asc").trim();
+        let column = match property {
+            "hash" => "mp.FILE_HASH",
+            "fileSize" => "mp.FILE_SIZE",
+            "url" => "b.URL",
+            "bookId" => "mp.BOOK_ID",
+            "pageNumber" => "mp.NUMBER",
+            _ => continue,
+        };
+        let direction = if direction.eq_ignore_ascii_case("desc") {
+            "DESC"
+        } else {
+            "ASC"
+        };
+        order_by.push(format!("{column} {direction}"));
+    }
+    Ok(order_by)
 }
 
 fn url_to_file_path(value: &str) -> Result<String, sqlx::Error> {

@@ -111,7 +111,7 @@ pub async fn load_persisted_book_pages(
         .await
         .map_err(|error| format!("open book pages db: {error}"))?;
     let rows = sqlx::query(
-        "SELECT NUMBER, FILE_NAME, MEDIA_TYPE, WIDTH, HEIGHT, COALESCE(FILE_SIZE, 0) AS FILE_SIZE \
+        "SELECT NUMBER, FILE_NAME, MEDIA_TYPE, WIDTH, HEIGHT, CASE WHEN FILE_SIZE IS NULL THEN -1 ELSE FILE_SIZE END AS FILE_SIZE \
          FROM MEDIA_PAGE WHERE BOOK_ID = ? ORDER BY NUMBER ASC",
     )
     .bind(book_id)
@@ -143,7 +143,7 @@ pub async fn load_persisted_book_page_row(
         .await
         .map_err(|error| format!("open single book page db: {error}"))?;
     let row = sqlx::query(
-        "SELECT NUMBER, FILE_NAME, MEDIA_TYPE, WIDTH, HEIGHT, COALESCE(FILE_SIZE, 0) AS FILE_SIZE \
+        "SELECT NUMBER, FILE_NAME, MEDIA_TYPE, WIDTH, HEIGHT, CASE WHEN FILE_SIZE IS NULL THEN -1 ELSE FILE_SIZE END AS FILE_SIZE \
          FROM MEDIA_PAGE WHERE BOOK_ID = ? AND NUMBER = ? LIMIT 1",
     )
     .bind(book_id)

@@ -28,7 +28,8 @@ pub use opds_persisted_access::{
 pub use operational_runtime_access::{
     BookSnapshot, CollectionSnapshot, LibrarySnapshot, OperationalRuntimeAccessBackend,
     ReadListSnapshot, SeriesSnapshot, ServerSettingsStore, SseSnapshot, ThumbnailBookSnapshot,
-    ThumbnailSnapshot, install_operational_runtime_access,
+    ThumbnailCollectionSnapshot, ThumbnailReadListSnapshot, ThumbnailSnapshot,
+    install_operational_runtime_access,
 };
 pub use operational_settings_access::{
     ClaimInitialAdminUserResult, OperationalSettingsAccessBackend, PageHashThumbnail,

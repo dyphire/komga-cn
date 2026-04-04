@@ -14,8 +14,8 @@ pub struct SseSnapshot {
     pub collections: HashMap<String, CollectionSnapshot>,
     pub thumbnails_book: HashMap<String, ThumbnailBookSnapshot>,
     pub thumbnails_series: HashMap<String, ThumbnailSnapshot>,
-    pub thumbnails_collection: HashMap<String, ThumbnailSnapshot>,
-    pub thumbnails_readlist: HashMap<String, ThumbnailSnapshot>,
+    pub thumbnails_collection: HashMap<String, ThumbnailCollectionSnapshot>,
+    pub thumbnails_readlist: HashMap<String, ThumbnailReadListSnapshot>,
     pub read_progress: HashMap<String, String>,
     pub read_progress_series: HashMap<String, String>,
 }
@@ -52,6 +52,7 @@ pub struct CollectionSnapshot {
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct ThumbnailBookSnapshot {
+    pub book_id: String,
     pub series_id: String,
     pub selected: bool,
     pub last_modified: String,
@@ -59,6 +60,20 @@ pub struct ThumbnailBookSnapshot {
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct ThumbnailSnapshot {
+    pub selected: bool,
+    pub last_modified: String,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct ThumbnailReadListSnapshot {
+    pub readlist_id: String,
+    pub selected: bool,
+    pub last_modified: String,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct ThumbnailCollectionSnapshot {
+    pub collection_id: String,
     pub selected: bool,
     pub last_modified: String,
 }
@@ -222,7 +237,8 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
         .collect::<HashMap<_, _>>();
 
     let thumbnail_book_rows = sqlx::query(
-        "SELECT tb.BOOK_ID AS ID, \
+        "SELECT tb.ID, \
+                tb.BOOK_ID AS BOOK_ID, \
                 COALESCE(b.SERIES_ID, '') AS SERIES_ID, \
                 tb.SELECTED AS SELECTED, \
                 COALESCE(tb.LAST_MODIFIED_DATE, tb.CREATED_DATE, '') AS LAST_MODIFIED \
@@ -239,6 +255,7 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
             (
                 row.get::<String, _>("ID"),
                 ThumbnailBookSnapshot {
+                    book_id: row.get::<String, _>("BOOK_ID"),
                     series_id: row.get::<String, _>("SERIES_ID"),
                     selected: row.get::<bool, _>("SELECTED"),
                     last_modified: row.get::<String, _>("LAST_MODIFIED"),
@@ -270,7 +287,7 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
         .collect::<HashMap<_, _>>();
 
     let thumbnail_collection_rows = sqlx::query(
-        "SELECT COLLECTION_ID AS ID, SELECTED, \
+        "SELECT ID, COLLECTION_ID, SELECTED, \
                 COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED \
          FROM THUMBNAIL_COLLECTION \
          ORDER BY COLLECTION_ID ASC, SELECTED ASC, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') ASC, ID ASC",
@@ -283,7 +300,8 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
         .map(|row| {
             (
                 row.get::<String, _>("ID"),
-                ThumbnailSnapshot {
+                ThumbnailCollectionSnapshot {
+                    collection_id: row.get::<String, _>("COLLECTION_ID"),
                     selected: row.get::<bool, _>("SELECTED"),
                     last_modified: row.get::<String, _>("LAST_MODIFIED"),
                 },
@@ -292,7 +310,7 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
         .collect::<HashMap<_, _>>();
 
     let thumbnail_readlist_rows = sqlx::query(
-        "SELECT READLIST_ID AS ID, SELECTED, \
+        "SELECT ID, READLIST_ID, SELECTED, \
                 COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED \
          FROM THUMBNAIL_READLIST \
          ORDER BY READLIST_ID ASC, SELECTED ASC, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') ASC, ID ASC",
@@ -305,7 +323,8 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
         .map(|row| {
             (
                 row.get::<String, _>("ID"),
-                ThumbnailSnapshot {
+                ThumbnailReadListSnapshot {
+                    readlist_id: row.get::<String, _>("READLIST_ID"),
                     selected: row.get::<bool, _>("SELECTED"),
                     last_modified: row.get::<String, _>("LAST_MODIFIED"),
                 },

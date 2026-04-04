@@ -404,6 +404,9 @@ pub async fn book_thumbnail_delete(
             response
         }
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) if error == "only uploaded thumbnails can be deleted" => {
+            StatusCode::BAD_REQUEST.into_response()
+        }
         Err(error) => internal_error_response(error),
     }
 }
@@ -850,10 +853,17 @@ pub async fn collection_thumbnail_upload(
 pub async fn collection_thumbnail_select(
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
-    Path((_collection_id, thumbnail_id)): Path<(String, String)>,
+    Path((collection_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
         return response;
+    }
+
+    if !persisted_collection_exists(auth_db.database_file.as_path(), &collection_id)
+        .await
+        .unwrap_or(false)
+    {
+        return StatusCode::NOT_FOUND.into_response();
     }
 
     match select_collection_thumbnail(auth_db.database_file.as_path(), &thumbnail_id).await {

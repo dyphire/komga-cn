@@ -15,5 +15,6 @@ pub use page_hashes::{
 };
 pub use sse_snapshot::{
     BookSnapshot, CollectionSnapshot, LibrarySnapshot, ReadListSnapshot, SeriesSnapshot,
-    SseSnapshot, ThumbnailBookSnapshot, ThumbnailSnapshot, load_sse_snapshot,
+    SseSnapshot, ThumbnailBookSnapshot, ThumbnailCollectionSnapshot, ThumbnailReadListSnapshot,
+    ThumbnailSnapshot, load_sse_snapshot,
 };

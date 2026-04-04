@@ -112,6 +112,74 @@ async fn router_kobo_ping_rejects_path_tokens_with_characters_outside_kotlin_reg
 }
 
 #[tokio::test]
+async fn router_login_set_cookie_returns_session_cookie_for_header_session() {
+    let paths = new_router_fixture("router-login-set-cookie-session-header").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/login/set-cookie")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("login/set-cookie request should build"),
+        )
+        .await
+        .expect("login/set-cookie request should complete");
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let set_cookie = response
+        .headers()
+        .get(header::SET_COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .expect("login/set-cookie should return set-cookie header");
+    assert!(set_cookie.starts_with(&format!("KOMGA-SESSION={auth_token}")));
+    assert!(set_cookie.contains("Path=/"));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_logout_get_clears_session_cookie() {
+    let paths = new_router_fixture("router-logout-get-clears-session-cookie").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/logout")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("logout get request should build"),
+        )
+        .await
+        .expect("logout get request should complete");
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let cookies = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .collect::<Vec<_>>();
+    assert!(
+        cookies
+            .iter()
+            .any(|cookie| cookie.contains("KOMGA-SESSION=;"))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_kobo_ping_returns_forbidden_for_valid_token_without_kobo_sync_role() {
     let paths = new_router_fixture("router-kobo-ping-forbidden-without-kobo-role").await;
     seed_router_contract_data(&paths).await;
@@ -695,6 +763,247 @@ async fn router_koreader_user_create_ignores_invalid_x_api_key_for_koreader_auth
 }
 
 #[tokio::test]
+async fn router_koreader_user_auth_returns_forbidden_without_x_auth_user() {
+    let paths = new_router_fixture("router-koreader-user-auth-missing-header").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/koreader/users/auth")
+                .body(Body::empty())
+                .expect("koreader users auth missing-header request should build"),
+        )
+        .await
+        .expect("koreader users auth missing-header request should complete");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_koreader_user_auth_accepts_valid_x_auth_user_api_key() {
+    let paths = new_router_fixture("router-koreader-user-auth-valid-api-key").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v2/users/me/api-keys")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "comment": "KOReader auth" }).to_string(),
+                ))
+                .expect("api key create request should build"),
+        )
+        .await
+        .expect("api key create request should complete");
+    assert_eq!(create_response.status(), StatusCode::OK);
+    let api_key = response_json(create_response)
+        .await
+        .get("key")
+        .and_then(Value::as_str)
+        .expect("api key create response should expose key")
+        .to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/koreader/users/auth")
+                .header("x-auth-user", &api_key)
+                .body(Body::empty())
+                .expect("koreader users auth valid-api-key request should build"),
+        )
+        .await
+        .expect("koreader users auth valid-api-key request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/vnd.koreader.v1+json")
+    );
+    assert_eq!(response_json(response).await, json!({ "authorized": "OK" }));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_users_by_id_authentication_activity_latest_treats_blank_apikey_id_as_filter() {
+    let paths = new_router_fixture("router-user-latest-auth-activity-blank-apikey-id").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for latest auth activity seed");
+    sqlx::query(
+        "INSERT INTO AUTHENTICATION_ACTIVITY (USER_ID, EMAIL, IP, USER_AGENT, SUCCESS, ERROR, DATE_TIME, SOURCE, API_KEY_ID, API_KEY_COMMENT) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("admin-user")
+    .bind("admin@example.org")
+    .bind("127.0.0.1")
+    .bind("router-contract")
+    .bind(true)
+    .bind(Option::<String>::None)
+    .bind("2024-01-02 03:04:05")
+    .bind("BASIC")
+    .bind(Option::<String>::None)
+    .bind(Option::<String>::None)
+    .execute(&pool)
+    .await
+    .expect("authentication activity row should be inserted");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v2/users/admin-user/authentication-activity/latest?apikey_id=")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("latest auth activity blank-apikey request should build"),
+        )
+        .await
+        .expect("latest auth activity blank-apikey request should complete");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_users_by_id_authentication_activity_latest_matches_email_only_activity_rows() {
+    let paths = new_router_fixture("router-user-latest-auth-activity-email-fallback").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for email-only latest auth activity seed");
+    sqlx::query(
+        "INSERT INTO AUTHENTICATION_ACTIVITY (USER_ID, EMAIL, IP, USER_AGENT, SUCCESS, ERROR, DATE_TIME, SOURCE, API_KEY_ID, API_KEY_COMMENT) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(Option::<String>::None)
+    .bind("admin@example.org")
+    .bind("127.0.0.1")
+    .bind("router-contract")
+    .bind(true)
+    .bind(Option::<String>::None)
+    .bind("2030-01-03 04:05:06")
+    .bind("BASIC")
+    .bind(Option::<String>::None)
+    .bind(Option::<String>::None)
+    .execute(&pool)
+    .await
+    .expect("email-only authentication activity row should be inserted");
+    pool.close().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v2/users/admin-user/authentication-activity/latest")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("latest auth activity email-only request should build"),
+        )
+        .await
+        .expect("latest auth activity email-only request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("email"),
+        Some(&Value::String("admin@example.org".to_string()))
+    );
+    assert_eq!(
+        payload.get("dateTime"),
+        Some(&Value::String("2030-01-03T04:05:06Z".to_string()))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_users_me_api_keys_delete_is_scoped_to_current_user() {
+    let paths = new_router_fixture("router-users-me-api-keys-delete-scope").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v2/users/me/api-keys")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "comment": "Delete me" }).to_string()))
+                .expect("api key create for delete-scope request should build"),
+        )
+        .await
+        .expect("api key create for delete-scope request should complete");
+    assert_eq!(create_response.status(), StatusCode::OK);
+    let owned_key_id = response_json(create_response)
+        .await
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("created api key should expose id")
+        .to_string();
+
+    let stranger_delete = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/api/v2/users/me/api-keys/not-my-key")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("api key delete unknown request should build"),
+        )
+        .await
+        .expect("api key delete unknown request should complete");
+    assert_eq!(stranger_delete.status(), StatusCode::NOT_FOUND);
+
+    let owned_delete = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/v2/users/me/api-keys/{owned_key_id}"))
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("api key delete owned request should build"),
+        )
+        .await
+        .expect("api key delete owned request should complete");
+    assert_eq!(owned_delete.status(), StatusCode::NO_CONTENT);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_actuator_root_exposed_by_default_without_beans_link() {
     let paths = new_router_fixture("router-actuator-root-omits-beans-link").await;
     seed_router_contract_data(&paths).await;
@@ -829,6 +1138,192 @@ async fn router_delete_syncpoints_me_with_repeated_key_id_deletes_only_matching_
     assert_eq!(
         load_syncpoint_ids(&paths).await,
         vec!["sp-2".to_string(), "sp-4".to_string()],
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_delete_syncpoints_me_with_comma_delimited_single_key_id_deletes_matching_keys() {
+    let paths = new_router_fixture("router-delete-syncpoints-me-comma-key-id").await;
+    seed_router_contract_data(&paths).await;
+    seed_syncpoint_user(&paths, "other-user", "other@example.org").await;
+    seed_syncpoints(
+        &paths,
+        &[
+            ("sp-1", "admin-user", Some("key-1")),
+            ("sp-2", "admin-user", Some("key-2")),
+            ("sp-3", "admin-user", Some("key-3")),
+            ("sp-4", "other-user", Some("key-1")),
+        ],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/api/v1/syncpoints/me?key_id=key-1,key-3")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("syncpoints delete comma-delimited request should build"),
+        )
+        .await
+        .expect("syncpoints delete comma-delimited request should complete");
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        load_syncpoint_ids(&paths).await,
+        vec!["sp-2".to_string(), "sp-4".to_string()],
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_delete_syncpoints_me_with_whitespace_only_single_key_id_does_not_delete_anything() {
+    let paths = new_router_fixture("router-delete-syncpoints-me-whitespace-key-id").await;
+    seed_router_contract_data(&paths).await;
+    seed_syncpoint_user(&paths, "other-user", "other@example.org").await;
+    seed_syncpoints(
+        &paths,
+        &[
+            ("sp-1", "admin-user", Some("key-1")),
+            ("sp-2", "admin-user", Some("key-2")),
+            ("sp-3", "admin-user", None),
+            ("sp-4", "other-user", Some("key-1")),
+        ],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/api/v1/syncpoints/me?key_id=++")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("syncpoints delete whitespace key request should build"),
+        )
+        .await
+        .expect("syncpoints delete whitespace key request should complete");
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        load_syncpoint_ids(&paths).await,
+        vec![
+            "sp-1".to_string(),
+            "sp-2".to_string(),
+            "sp-3".to_string(),
+            "sp-4".to_string()
+        ],
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_delete_syncpoints_me_without_key_id_deletes_syncpoint_child_rows_for_current_user()
+{
+    let paths = new_router_fixture("router-delete-syncpoints-me-all-subentities").await;
+    seed_router_contract_data(&paths).await;
+    seed_syncpoint_user(&paths, "other-user", "other@example.org").await;
+    seed_syncpoints(
+        &paths,
+        &[
+            ("sp-1", "admin-user", Some("key-1")),
+            ("sp-2", "other-user", Some("key-2")),
+        ],
+    )
+    .await;
+    seed_syncpoint_children(&paths, "sp-1").await;
+    seed_syncpoint_children(&paths, "sp-2").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/api/v1/syncpoints/me")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("syncpoints delete-all with subentities request should build"),
+        )
+        .await
+        .expect("syncpoints delete-all with subentities request should complete");
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(load_syncpoint_ids(&paths).await, vec!["sp-2".to_string()]);
+    assert_eq!(
+        load_syncpoint_child_counts(&paths, "sp-1").await,
+        [0, 0, 0, 0, 0]
+    );
+    assert_eq!(
+        load_syncpoint_child_counts(&paths, "sp-2").await,
+        [1, 1, 1, 1, 1]
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_delete_syncpoints_me_with_key_id_deletes_syncpoint_child_rows_only_for_matching_keys()
+ {
+    let paths = new_router_fixture("router-delete-syncpoints-me-key-subentities").await;
+    seed_router_contract_data(&paths).await;
+    seed_syncpoint_user(&paths, "other-user", "other@example.org").await;
+    seed_syncpoints(
+        &paths,
+        &[
+            ("sp-1", "admin-user", Some("key-1")),
+            ("sp-2", "admin-user", Some("key-2")),
+            ("sp-3", "other-user", Some("key-1")),
+        ],
+    )
+    .await;
+    seed_syncpoint_children(&paths, "sp-1").await;
+    seed_syncpoint_children(&paths, "sp-2").await;
+    seed_syncpoint_children(&paths, "sp-3").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/api/v1/syncpoints/me?key_id=key-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("syncpoints delete key-scoped with subentities request should build"),
+        )
+        .await
+        .expect("syncpoints delete key-scoped with subentities request should complete");
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        load_syncpoint_ids(&paths).await,
+        vec!["sp-2".to_string(), "sp-3".to_string()],
+    );
+    assert_eq!(
+        load_syncpoint_child_counts(&paths, "sp-1").await,
+        [0, 0, 0, 0, 0]
+    );
+    assert_eq!(
+        load_syncpoint_child_counts(&paths, "sp-2").await,
+        [1, 1, 1, 1, 1]
+    );
+    assert_eq!(
+        load_syncpoint_child_counts(&paths, "sp-3").await,
+        [1, 1, 1, 1, 1]
     );
 
     cleanup_router_fixture(paths);
@@ -1558,6 +2053,89 @@ async fn router_get_page_hashes_unknown_honors_hash_desc_sort_query() {
 }
 
 #[tokio::test]
+async fn router_get_page_hashes_unknown_honors_kotlin_legacy_sort_keys() {
+    let paths = new_router_fixture("router-page-hashes-unknown-legacy-sort-keys").await;
+    seed_router_contract_data(&paths).await;
+    seed_unknown_page_hash_samples(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    for sort in ["url,desc", "bookId,desc", "pageNumber,desc"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/api/v1/page-hashes/unknown?sort={sort}"))
+                    .header("x-auth-token", &auth_token)
+                    .body(Body::empty())
+                    .expect("legacy-sorted unknown page hashes request should build"),
+            )
+            .await
+            .expect("legacy-sorted unknown page hashes request should complete");
+
+        assert_eq!(response.status(), StatusCode::OK, "sort={sort}");
+        let payload = response_json(response).await;
+        let content = payload["content"]
+            .as_array()
+            .expect("unknown page hashes content should be an array");
+        let hashes = content
+            .iter()
+            .map(|entry| {
+                entry["hash"]
+                    .as_str()
+                    .expect("page hash unknown entry should contain hash")
+                    .to_string()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            hashes,
+            vec!["z-hash".to_string(), "a-hash".to_string()],
+            "sort={sort}"
+        );
+        assert_eq!(payload["sort"]["sorted"], true, "sort={sort}");
+        assert_eq!(payload["sort"]["unsorted"], false, "sort={sort}");
+    }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_get_page_hashes_unknown_groups_same_hash_even_when_file_sizes_differ() {
+    let paths = new_router_fixture("router-page-hashes-unknown-groups-by-hash-only").await;
+    seed_router_contract_data(&paths).await;
+    seed_unknown_page_hash_samples_with_mixed_sizes(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/page-hashes/unknown")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("mixed-size unknown page hashes request should build"),
+        )
+        .await
+        .expect("mixed-size unknown page hashes request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let content = payload["content"]
+        .as_array()
+        .expect("unknown page hashes content should be an array");
+    assert_eq!(payload["totalElements"], json!(1));
+    assert_eq!(content.len(), 1);
+    assert_eq!(content[0]["hash"], json!("mixed-size-hash"));
+    assert_eq!(content[0]["matchCount"], json!(2));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_get_page_hash_matches_marks_unsorted_when_no_sort_query_is_present() {
     let paths = new_router_fixture("router-page-hash-matches-unsorted-flag").await;
     seed_router_contract_data(&paths).await;
@@ -1625,6 +2203,39 @@ async fn router_get_page_hash_matches_honors_page_number_desc_sort_query() {
     assert_eq!(page_numbers, vec![5, 3, 1]);
     assert_eq!(payload["sort"]["sorted"], true);
     assert_eq!(payload["sort"]["unsorted"], false);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_get_page_hash_matches_rejects_match_count_and_total_size_sort_keys() {
+    let paths = new_router_fixture("router-page-hash-matches-unsupported-aggregate-sort").await;
+    seed_router_contract_data(&paths).await;
+    seed_page_hash_match_samples(&paths, "match-sort-hash").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    for sort in ["matchCount,desc", "totalSize,desc"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/api/v1/page-hashes/match-sort-hash?sort={sort}"))
+                    .header("x-auth-token", &auth_token)
+                    .body(Body::empty())
+                    .expect("page hash matches aggregate sort request should build"),
+            )
+            .await
+            .expect("page hash matches aggregate sort request should complete");
+
+        assert_eq!(
+            response.status(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "sort={sort}"
+        );
+    }
 
     cleanup_router_fixture(paths);
 }
@@ -2240,6 +2851,59 @@ async fn seed_unknown_page_hash_samples(paths: &RuntimeDbPaths) {
     pool.close().await;
 }
 
+async fn seed_unknown_page_hash_samples_with_mixed_sizes(paths: &RuntimeDbPaths) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("mixed-size unknown page hash sample db should open");
+
+    for (book_id, name, url, number) in [
+        (
+            "book-mixed-1",
+            "book-mixed-1.epub",
+            "books/book-mixed-1.epub",
+            30_i64,
+        ),
+        (
+            "book-mixed-2",
+            "book-mixed-2.epub",
+            "books/book-mixed-2.epub",
+            31_i64,
+        ),
+    ] {
+        sqlx::query(
+            "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(book_id)
+        .bind(0_i64)
+        .bind(name)
+        .bind(url)
+        .bind("series-1")
+        .bind(2_048_i64)
+        .bind(number)
+        .bind("library-1")
+        .execute(&pool)
+        .await
+        .expect("mixed-size unknown page hash sample book row should be inserted");
+    }
+
+    for (book_id, file_size) in [("book-mixed-1", 111_i64), ("book-mixed-2", 222_i64)] {
+        sqlx::query(
+            "INSERT INTO MEDIA_PAGE (BOOK_ID, NUMBER, FILE_HASH, FILE_NAME, MEDIA_TYPE, FILE_SIZE) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(book_id)
+        .bind(0_i64)
+        .bind("mixed-size-hash")
+        .bind(format!("{book_id}.png"))
+        .bind("image/png")
+        .bind(file_size)
+        .execute(&pool)
+        .await
+        .expect("mixed-size unknown page hash sample media page row should be inserted");
+    }
+
+    pool.close().await;
+}
+
 async fn seed_page_hash_match_samples(paths: &RuntimeDbPaths, hash: &str) {
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await
@@ -2396,6 +3060,96 @@ async fn seed_syncpoints(paths: &RuntimeDbPaths, rows: &[(&str, &str, Option<&st
     }
 
     pool.close().await;
+}
+
+async fn seed_syncpoint_children(paths: &RuntimeDbPaths, sync_point_id: &str) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("syncpoint child db should open");
+
+    sqlx::query(
+        "INSERT INTO SYNC_POINT_BOOK (SYNC_POINT_ID, BOOK_ID, BOOK_CREATED_DATE, BOOK_LAST_MODIFIED_DATE, BOOK_FILE_LAST_MODIFIED, BOOK_FILE_SIZE, BOOK_FILE_HASH, BOOK_METADATA_LAST_MODIFIED_DATE, SYNCED) \
+         VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1, ?, CURRENT_TIMESTAMP, 0)",
+    )
+    .bind(sync_point_id)
+    .bind(format!("book-{sync_point_id}"))
+    .bind(format!("hash-{sync_point_id}"))
+    .execute(&pool)
+    .await
+    .expect("syncpoint book row should be inserted");
+
+    sqlx::query(
+        "INSERT INTO SYNC_POINT_BOOK_REMOVED_SYNCED (SYNC_POINT_ID, BOOK_ID) VALUES (?, ?)",
+    )
+    .bind(sync_point_id)
+    .bind(format!("removed-book-{sync_point_id}"))
+    .execute(&pool)
+    .await
+    .expect("syncpoint removed-book row should be inserted");
+
+    sqlx::query(
+        "INSERT INTO SYNC_POINT_READLIST (SYNC_POINT_ID, READLIST_ID, READLIST_NAME, READLIST_CREATED_DATE, READLIST_LAST_MODIFIED_DATE, SYNCED) \
+         VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0)",
+    )
+    .bind(sync_point_id)
+    .bind(format!("readlist-{sync_point_id}"))
+    .bind(format!("Readlist {sync_point_id}"))
+    .execute(&pool)
+    .await
+    .expect("syncpoint readlist row should be inserted");
+
+    sqlx::query(
+        "INSERT INTO SYNC_POINT_READLIST_BOOK (SYNC_POINT_ID, READLIST_ID, BOOK_ID) VALUES (?, ?, ?)",
+    )
+    .bind(sync_point_id)
+    .bind(format!("readlist-{sync_point_id}"))
+    .bind(format!("book-{sync_point_id}"))
+    .execute(&pool)
+    .await
+    .expect("syncpoint readlist book row should be inserted");
+
+    sqlx::query(
+        "INSERT INTO SYNC_POINT_READLIST_REMOVED_SYNCED (SYNC_POINT_ID, READLIST_ID) VALUES (?, ?)",
+    )
+    .bind(sync_point_id)
+    .bind(format!("removed-readlist-{sync_point_id}"))
+    .execute(&pool)
+    .await
+    .expect("syncpoint removed-readlist row should be inserted");
+
+    pool.close().await;
+}
+
+async fn load_syncpoint_child_counts(paths: &RuntimeDbPaths, sync_point_id: &str) -> [i64; 5] {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("syncpoint child count db should open");
+
+    let counts = [
+        load_syncpoint_child_count(&pool, "SYNC_POINT_BOOK", sync_point_id).await,
+        load_syncpoint_child_count(&pool, "SYNC_POINT_BOOK_REMOVED_SYNCED", sync_point_id).await,
+        load_syncpoint_child_count(&pool, "SYNC_POINT_READLIST", sync_point_id).await,
+        load_syncpoint_child_count(&pool, "SYNC_POINT_READLIST_BOOK", sync_point_id).await,
+        load_syncpoint_child_count(&pool, "SYNC_POINT_READLIST_REMOVED_SYNCED", sync_point_id)
+            .await,
+    ];
+
+    pool.close().await;
+    counts
+}
+
+async fn load_syncpoint_child_count(
+    pool: &sqlx::SqlitePool,
+    table: &str,
+    sync_point_id: &str,
+) -> i64 {
+    let sql = format!("SELECT COUNT(*) AS COUNT FROM {table} WHERE SYNC_POINT_ID = ?");
+    sqlx::query(&sql)
+        .bind(sync_point_id)
+        .fetch_one(pool)
+        .await
+        .expect("syncpoint child count should load")
+        .get::<i64, _>("COUNT")
 }
 
 async fn load_syncpoint_ids(paths: &RuntimeDbPaths) -> Vec<String> {

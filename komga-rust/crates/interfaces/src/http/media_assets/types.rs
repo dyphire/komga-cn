@@ -42,6 +42,7 @@ pub(super) enum ManifestVariant {
 
 pub(super) enum ManifestBuildOutcome {
     Found(&'static str, Value),
+    BadRequest(String),
     NotFound,
     Forbidden,
 }

@@ -1,5 +1,271 @@
 use super::*;
+use crate::http::helpers::read_progress_validation_error_response;
 use crate::runtime_identity_access::load_read_progress;
+use flate2::read::GzDecoder;
+use std::io::Read;
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
+
+fn decode_epub_extension_positions_and_layout(blob: &[u8]) -> Result<(Vec<Value>, bool), String> {
+    let mut decoder = GzDecoder::new(blob);
+    let mut json = String::new();
+    decoder
+        .read_to_string(&mut json)
+        .map_err(|error| format!("decode epub extension blob: {error}"))?;
+    let payload = serde_json::from_str::<Value>(&json)
+        .map_err(|error| format!("parse epub extension blob json: {error}"))?;
+    let positions = payload
+        .get("positions")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let is_fixed_layout = payload
+        .get("isFixedLayout")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    Ok((positions, is_fixed_layout))
+}
+
+fn progression_bad_request(message: impl Into<String>) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(json!({ "error": message.into() })),
+    )
+        .into_response()
+}
+
+fn progression_locator(payload: &Value) -> Option<&Value> {
+    payload.get("locator")
+}
+
+fn locator_progression(locator: &Value) -> Option<f64> {
+    locator
+        .get("locations")
+        .and_then(|value| value.get("progression"))
+        .and_then(Value::as_f64)
+}
+
+fn locator_position(locator: &Value) -> Option<u64> {
+    locator
+        .get("locations")
+        .and_then(|value| value.get("position"))
+        .and_then(Value::as_u64)
+}
+
+fn normalized_href_base(href: &str) -> &str {
+    href.split('#')
+        .next()
+        .unwrap_or(href)
+        .trim_start_matches('/')
+}
+
+fn position_progression(position: &Value) -> Option<f64> {
+    position
+        .get("locations")
+        .and_then(|value| value.get("progression"))
+        .and_then(Value::as_f64)
+}
+
+fn position_number(position: &Value) -> Option<i64> {
+    position
+        .get("locations")
+        .and_then(|value| value.get("position"))
+        .and_then(Value::as_i64)
+}
+
+fn position_matches_href(position: &Value, href_base: &str) -> bool {
+    position
+        .get("href")
+        .and_then(Value::as_str)
+        .map(normalized_href_base)
+        == Some(href_base)
+}
+
+fn matched_epub_position(
+    positions: &[Value],
+    href_base: &str,
+    locator_progression: f64,
+    is_fixed_layout: bool,
+) -> Option<Value> {
+    let matching_positions = positions
+        .iter()
+        .filter(|position| position_matches_href(position, href_base))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    matching_positions
+        .iter()
+        .find(|position| position_progression(position) == Some(locator_progression))
+        .cloned()
+        .or_else(|| {
+            if is_fixed_layout && matching_positions.len() == 1 {
+                return matching_positions.first().cloned();
+            }
+
+            let before = matching_positions
+                .iter()
+                .filter(|position| {
+                    position_progression(position).is_some_and(|value| value < locator_progression)
+                })
+                .max_by_key(|position| position_number(position))
+                .cloned();
+            let after = matching_positions
+                .iter()
+                .filter(|position| {
+                    position_progression(position).is_some_and(|value| value > locator_progression)
+                })
+                .min_by_key(|position| position_number(position))
+                .cloned();
+
+            match (before, after) {
+                (Some(before), Some(_)) => Some(before),
+                _ => None,
+            }
+        })
+}
+
+fn normalized_epub_locator(locator: &Value, matched_position: &Value) -> Value {
+    let mut locator = locator.clone();
+    let Some(locator_map) = locator.as_object_mut() else {
+        return locator;
+    };
+
+    locator_map.insert(
+        "type".to_string(),
+        matched_position
+            .get("type")
+            .cloned()
+            .unwrap_or_else(|| Value::String(String::new())),
+    );
+
+    let current_kobo_span_missing = locator_map.get("koboSpan").is_none_or(Value::is_null);
+    if current_kobo_span_missing && let Some(kobo_span) = matched_position.get("koboSpan").cloned()
+    {
+        locator_map.insert("koboSpan".to_string(), kobo_span);
+    }
+
+    if let Some(locations) = locator_map
+        .get_mut("locations")
+        .and_then(Value::as_object_mut)
+        && let Some(total_progression) = matched_position
+            .get("locations")
+            .and_then(|value| value.get("totalProgression"))
+            .cloned()
+    {
+        locations.insert("totalProgression".to_string(), total_progression);
+    }
+
+    locator
+}
+
+async fn normalize_book_epub_locator(
+    database_file: &FsPath,
+    book_id: &str,
+    locator: &Value,
+) -> Result<Value, Response> {
+    let href_base = normalized_href_base(
+        locator
+            .get("href")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    );
+    if href_base.is_empty() {
+        return Err(progression_bad_request("Resource does not exist in book: "));
+    }
+
+    let Some(locator_progression) = locator_progression(locator) else {
+        return Err(progression_bad_request("location.progression is required"));
+    };
+
+    let extension = match load_persisted_epub_extension_blob(database_file, book_id).await {
+        Ok(extension) => extension,
+        Err(error) => return Err(internal_error_response(error)),
+    };
+    let Some((_class, blob)) = extension else {
+        return Err(progression_bad_request("Epub extension not found"));
+    };
+    let (positions, is_fixed_layout) = match decode_epub_extension_positions_and_layout(&blob) {
+        Ok(decoded) => decoded,
+        Err(error) => return Err(internal_error_response(error)),
+    };
+
+    if !positions
+        .iter()
+        .any(|position| position_matches_href(position, href_base))
+    {
+        return Err(progression_bad_request(format!(
+            "Resource does not exist in book: {href_base}"
+        )));
+    }
+
+    let Some(matched_position) =
+        matched_epub_position(&positions, href_base, locator_progression, is_fixed_layout)
+    else {
+        return Err(progression_bad_request("Invalid progression"));
+    };
+
+    Ok(normalized_epub_locator(locator, &matched_position))
+}
+
+async fn progression_is_older_than_existing(
+    database_file: &FsPath,
+    book_id: &str,
+    user_id: &str,
+    modified: &str,
+) -> Result<bool, String> {
+    let Ok(new_modified) = OffsetDateTime::parse(modified, &Rfc3339) else {
+        return Ok(false);
+    };
+    let Some(existing_progression) = load_book_progression(database_file, book_id, user_id).await?
+    else {
+        return Ok(false);
+    };
+    let Some(existing_modified) = existing_progression.get("modified").and_then(Value::as_str)
+    else {
+        return Ok(false);
+    };
+    let Ok(existing_modified) = OffsetDateTime::parse(existing_modified, &Rfc3339) else {
+        return Ok(false);
+    };
+
+    Ok(new_modified < existing_modified)
+}
+
+async fn load_epub_locator_for_page(
+    database_file: &FsPath,
+    book_id: &str,
+    page: u64,
+) -> Result<Option<Value>, String> {
+    match load_persisted_epub_extension_blob(database_file, book_id).await {
+        Ok(Some((_class, blob))) => Ok(decode_epub_positions(&blob)
+            .ok()
+            .and_then(|positions| positions.get(page.saturating_sub(1) as usize).cloned())),
+        Ok(None) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+async fn persist_and_record_read_progress(
+    database_file: &FsPath,
+    state: &ReadProgressState,
+    token: &str,
+    book_id: &str,
+    persisted_user_id: Option<&str>,
+    page: u64,
+    completed: bool,
+    locator: Option<Value>,
+) -> Response {
+    if let Some(user_id) = persisted_user_id
+        && persist_read_progress(database_file, book_id, user_id, page, completed, locator)
+            .await
+            .is_err()
+    {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+
+    set_read_progress(state, token.to_string(), book_id.to_string());
+    StatusCode::NO_CONTENT.into_response()
+}
 
 pub async fn readlist_tachiyomi_read_progress_get(
     Extension(auth_db): Extension<AuthDatabaseState>,
@@ -136,13 +402,14 @@ pub async fn series_read_progress_post(
             user_id(&user),
             page_count,
             true,
+            None,
         )
         .await
         {
             return internal_error_response(error);
         }
     }
-    if let Err(error) = delete_series_read_progress_row(
+    if let Err(error) = refresh_series_read_progress_row(
         auth_db.database_file.as_path(),
         &resolved_series_id,
         user_id(&user),
@@ -200,7 +467,7 @@ pub async fn series_read_progress_delete(
             return internal_error_response(error);
         }
     }
-    if let Err(error) = refresh_series_read_progress_row(
+    if let Err(error) = delete_series_read_progress_row(
         auth_db.database_file.as_path(),
         &resolved_series_id,
         user_id(&user),
@@ -326,6 +593,7 @@ pub async fn series_tachiyomi_read_progress_put(
                 user_id(&user),
                 10,
                 true,
+                None,
             )
             .await
         {
@@ -378,45 +646,71 @@ pub async fn book_read_progress(
 
     let token = resolved_token(&headers);
 
-    if payload.get("completed").and_then(|value| value.as_bool()) == Some(true) {
-        if let Some(user_id) = persisted_user_id.as_deref()
-            && persist_read_progress(
-                auth_db.database_file.as_path(),
-                &book_id,
-                user_id,
-                page_count,
-                true,
-            )
-            .await
-            .is_err()
-        {
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-        set_read_progress(&state, token, book_id);
-        return StatusCode::NO_CONTENT.into_response();
+    let page_value = payload.get("page");
+    let completed_true = payload.get("completed").and_then(|value| value.as_bool()) == Some(true);
+
+    if matches!(page_value.and_then(Value::as_i64), Some(value) if value <= 0) {
+        return read_progress_validation_error_response(vec![json!({
+            "fieldName": "page",
+            "message": "must be greater than 0"
+        })]);
     }
 
-    if let Some(page) = payload.get("page").and_then(|value| value.as_u64())
-        && (1..=page_count).contains(&page)
-    {
-        if let Some(user_id) = persisted_user_id.as_deref()
-            && persist_read_progress(
-                auth_db.database_file.as_path(),
-                &book_id,
-                user_id,
-                page,
-                false,
-            )
-            .await
-            .is_err()
-        {
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-        set_read_progress(&state, token, book_id);
-        return StatusCode::NO_CONTENT.into_response();
+    if completed_true {
+        return persist_and_record_read_progress(
+            auth_db.database_file.as_path(),
+            &state,
+            &token,
+            &book_id,
+            persisted_user_id.as_deref(),
+            page_count,
+            true,
+            None,
+        )
+        .await;
     }
 
-    invalid_read_progress_payload()
+    if page_value.is_none_or(Value::is_null) {
+        return read_progress_validation_error_response(vec![]);
+    }
+
+    let Some(page) = payload.get("page").and_then(Value::as_u64) else {
+        return invalid_read_progress_payload();
+    };
+
+    if page > page_count {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": format!(
+                    "Page argument ({page}) must be within 1 and book page count ({page_count})"
+                )
+            })),
+        )
+            .into_response();
+    }
+
+    if !(1..=page_count).contains(&page) {
+        return invalid_read_progress_payload();
+    }
+
+    let locator =
+        match load_epub_locator_for_page(auth_db.database_file.as_path(), &book_id, page).await {
+            Ok(locator) => locator,
+            Err(error) => return internal_error_response(error),
+        };
+
+    persist_and_record_read_progress(
+        auth_db.database_file.as_path(),
+        &state,
+        &token,
+        &book_id,
+        persisted_user_id.as_deref(),
+        page,
+        page == page_count,
+        locator,
+    )
+    .await
 }
 
 pub async fn book_read_progress_delete(
@@ -497,17 +791,76 @@ pub async fn book_progression(
         return invalid_progression_payload();
     };
 
-    let progression = payload
-        .get("locator")
-        .and_then(|value| value.get("locations"))
-        .and_then(|value| value.get("progression"))
-        .and_then(|value| value.as_f64());
-
-    let Some(progression) = progression else {
+    let Some(modified) = payload.get("modified").and_then(Value::as_str) else {
         return invalid_progression_payload();
     };
-    if !(0.0..=1.0).contains(&progression) {
+    let Some(device_id) = payload
+        .get("device")
+        .and_then(|value| value.get("id"))
+        .and_then(Value::as_str)
+    else {
         return invalid_progression_payload();
+    };
+    let Some(device_name) = payload
+        .get("device")
+        .and_then(|value| value.get("name"))
+        .and_then(Value::as_str)
+    else {
+        return invalid_progression_payload();
+    };
+
+    let is_epub = book_media_is_epub(&media);
+    let page_count = media.page_count.max(1);
+    let locator = progression_locator(&payload);
+    let position = locator.and_then(locator_position);
+    let (progression, locator_to_persist) = if is_epub {
+        let Some(locator) = locator else {
+            return invalid_progression_payload();
+        };
+        let normalized_locator =
+            match normalize_book_epub_locator(auth_db.database_file.as_path(), &book_id, locator)
+                .await
+            {
+                Ok(locator) => locator,
+                Err(response) => return response,
+            };
+        let Some(progression) = locator_progression(&normalized_locator) else {
+            return invalid_progression_payload();
+        };
+        (progression, Some(normalized_locator))
+    } else {
+        let Some(position) = position else {
+            return invalid_progression_payload();
+        };
+        if !(1..=page_count).contains(&position) {
+            return progression_bad_request(format!(
+                "Page argument ({position}) must be within 1 and book page count ({page_count})"
+            ));
+        }
+        (position as f64 / page_count as f64, locator.cloned())
+    };
+
+    if is_epub && !(0.0..=1.0).contains(&progression) {
+        return invalid_progression_payload();
+    }
+
+    let stale_progression = match progression_is_older_than_existing(
+        auth_db.database_file.as_path(),
+        &book_id,
+        user_id(&user),
+        modified,
+    )
+    .await
+    {
+        Ok(stale) => stale,
+        Err(error) => return internal_error_response(error),
+    };
+    if stale_progression {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({ "error": "Progression is older than existing" })),
+        )
+            .into_response();
     }
 
     match persist_book_progression(
@@ -515,6 +868,10 @@ pub async fn book_progression(
         &book_id,
         user_id(&user),
         progression,
+        Some(modified.to_string()),
+        Some(device_id.to_string()),
+        Some(device_name.to_string()),
+        locator_to_persist,
     )
     .await
     {
@@ -556,14 +913,7 @@ pub async fn book_progression_get(
     }
 
     match load_book_progression(auth_db.database_file.as_path(), &book_id, user_id(&user)).await {
-        Ok(Some(progression)) => Json(json!({
-            "locator": {
-                "locations": {
-                    "progression": progression,
-                }
-            }
-        }))
-        .into_response(),
+        Ok(Some(progression)) => Json(progression).into_response(),
         Ok(None) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => internal_error_response(error),
     }

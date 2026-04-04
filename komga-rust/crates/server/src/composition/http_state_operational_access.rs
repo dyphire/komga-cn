@@ -185,6 +185,7 @@ fn map_sse_snapshot(
                 (
                     id,
                     InterfacesThumbnailBookSnapshot {
+                        book_id: row.book_id,
                         series_id: row.series_id,
                         selected: row.selected,
                         last_modified: row.last_modified,
@@ -211,7 +212,8 @@ fn map_sse_snapshot(
             .map(|(id, row)| {
                 (
                     id,
-                    InterfacesThumbnailSnapshot {
+                    InterfacesThumbnailCollectionSnapshot {
+                        collection_id: row.collection_id,
                         selected: row.selected,
                         last_modified: row.last_modified,
                     },
@@ -224,7 +226,8 @@ fn map_sse_snapshot(
             .map(|(id, row)| {
                 (
                     id,
-                    InterfacesThumbnailSnapshot {
+                    InterfacesThumbnailReadListSnapshot {
+                        readlist_id: row.readlist_id,
                         selected: row.selected,
                         last_modified: row.last_modified,
                     },

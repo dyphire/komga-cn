@@ -47,6 +47,7 @@ language-tags = "0.3.2"
 rusqlite = "0.32.1"
 pdfium-render = { version = "0.9.0", features = ["thread_safe"] }
 unrar = "0.5.8"
+unicode-normalization = "0.1.24"
 
 [package]
 name = "komga-rust"
