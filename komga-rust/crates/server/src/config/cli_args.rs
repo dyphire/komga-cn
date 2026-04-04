@@ -6,6 +6,7 @@ pub(crate) const MODE_ENV: &str = "KOMGA_RUST_MODE";
 pub(crate) const CONFIG_DIR_ENV: &str = "KOMGA_CONFIG_DIR";
 pub(crate) const RUNTIME_PROFILE_ENV: &str = "KOMGA_RUST_RUNTIME_PROFILE";
 pub(crate) const PLATFORM_PROFILE_ENV: &str = "KOMGA_RUST_PLATFORM_PROFILE";
+pub(crate) const SPRING_PROFILES_ACTIVE_ENV: &str = "SPRING_PROFILES_ACTIVE";
 pub(crate) const SERVER_PORT_ENV: &str = "SERVER_PORT";
 pub(crate) const SERVER_CONTEXT_PATH_ENV: &str = "SERVER_SERVLET_CONTEXT_PATH";
 pub(crate) const WRITER_ISOLATION_ROOT_ENV: &str = "KOMGA_RUST_SHADOW_ISOLATION_ROOT";

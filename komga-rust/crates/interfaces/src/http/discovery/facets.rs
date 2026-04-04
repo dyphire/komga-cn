@@ -1,4 +1,5 @@
 use super::*;
+use crate::http::discovery_auth::DiscoveryQueryContext;
 
 fn decoded_library_ids(query: &str) -> Vec<String> {
     query_values(query, "library_id")
@@ -15,7 +16,57 @@ fn decoded_collection_id(query: &str) -> Option<String> {
         .map(decode_query_component)
 }
 
-pub async fn authors(headers: HeaderMap, uri: Uri, database_file: &FsPath) -> Response {
+fn resolve_query_context_or_unauthorized(
+    auth_state: &DiscoveryAuthState,
+    headers: &HeaderMap,
+    requested_library_ids: Option<&[String]>,
+) -> Result<DiscoveryQueryContext, Response> {
+    auth_state
+        .resolve_query_context(headers, requested_library_ids)
+        .ok_or_else(|| StatusCode::UNAUTHORIZED.into_response())
+}
+
+struct CollectionFacetScope {
+    context: DiscoveryQueryContext,
+    collection_id: Option<String>,
+}
+
+impl CollectionFacetScope {
+    fn authorized_library_ids(&self) -> Option<&[String]> {
+        self.context.authorized_library_ids.as_deref()
+    }
+
+    fn collection_id(&self) -> Option<&str> {
+        self.collection_id.as_deref()
+    }
+}
+
+fn resolve_collection_facet_scope(
+    auth_state: &DiscoveryAuthState,
+    headers: &HeaderMap,
+    query: &str,
+) -> Result<CollectionFacetScope, Response> {
+    let library_ids = decoded_library_ids(query);
+    let requested_library_ids = (!library_ids.is_empty()).then_some(library_ids.as_slice());
+    let context =
+        resolve_query_context_or_unauthorized(auth_state, headers, requested_library_ids)?;
+
+    Ok(CollectionFacetScope {
+        context,
+        collection_id: if library_ids.is_empty() {
+            decoded_collection_id(query)
+        } else {
+            None
+        },
+    })
+}
+
+pub async fn authors(
+    headers: HeaderMap,
+    uri: Uri,
+    auth_state: DiscoveryAuthState,
+    database_file: &FsPath,
+) -> Response {
     if let Some(response) = require_auth(&headers) {
         return response;
     }
@@ -51,7 +102,23 @@ pub async fn authors(headers: HeaderMap, uri: Uri, database_file: &FsPath) -> Re
         PersistedAuthorsScope::All
     };
 
-    let mut authors = match load_persisted_authors_by_scope(database_file, &scope).await {
+    let requested_library_ids = match &scope {
+        PersistedAuthorsScope::Libraries(library_ids) => Some(library_ids.as_slice()),
+        _ => None,
+    };
+    let context =
+        match resolve_query_context_or_unauthorized(&auth_state, &headers, requested_library_ids) {
+            Ok(context) => context,
+            Err(response) => return response,
+        };
+
+    let mut authors = match load_persisted_authors_by_scope(
+        database_file,
+        &scope,
+        context.authorized_library_ids.as_deref(),
+    )
+    .await
+    {
         Ok(values) => values,
         Err(error) => return internal_error_response(error),
     };
@@ -64,7 +131,12 @@ pub async fn authors(headers: HeaderMap, uri: Uri, database_file: &FsPath) -> Re
     Json(json!(authors)).into_response()
 }
 
-pub async fn authors_names(headers: HeaderMap, uri: Uri, database_file: &FsPath) -> Response {
+pub async fn authors_names(
+    headers: HeaderMap,
+    uri: Uri,
+    auth_state: DiscoveryAuthState,
+    database_file: &FsPath,
+) -> Response {
     if let Some(response) = require_auth(&headers) {
         return response;
     }
@@ -76,14 +148,28 @@ pub async fn authors_names(headers: HeaderMap, uri: Uri, database_file: &FsPath)
     let search = query_value(uri.query().unwrap_or_default(), "search")
         .map(decode_query_component)
         .unwrap_or_default();
+    let context = match resolve_query_context_or_unauthorized(&auth_state, &headers, None) {
+        Ok(context) => context,
+        Err(response) => return response,
+    };
 
-    match load_persisted_author_names(database_file, &search).await {
+    match load_persisted_author_names(
+        database_file,
+        &search,
+        context.authorized_library_ids.as_deref(),
+    )
+    .await
+    {
         Ok(values) => Json(json!(values)).into_response(),
         Err(error) => internal_error_response(error),
     }
 }
 
-pub async fn authors_roles(headers: HeaderMap, database_file: &FsPath) -> Response {
+pub async fn authors_roles(
+    headers: HeaderMap,
+    auth_state: DiscoveryAuthState,
+    database_file: &FsPath,
+) -> Response {
     if let Some(response) = require_auth(&headers) {
         return response;
     }
@@ -92,13 +178,25 @@ pub async fn authors_roles(headers: HeaderMap, database_file: &FsPath) -> Respon
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    match load_persisted_author_roles(database_file).await {
+    let context = match resolve_query_context_or_unauthorized(&auth_state, &headers, None) {
+        Ok(context) => context,
+        Err(response) => return response,
+    };
+
+    match load_persisted_author_roles(database_file, context.authorized_library_ids.as_deref())
+        .await
+    {
         Ok(values) => Json(json!(values)).into_response(),
         Err(error) => internal_error_response(error),
     }
 }
 
-pub async fn authors_v2(headers: HeaderMap, uri: Uri, database_file: &FsPath) -> Response {
+pub async fn authors_v2(
+    headers: HeaderMap,
+    uri: Uri,
+    auth_state: DiscoveryAuthState,
+    database_file: &FsPath,
+) -> Response {
     if let Some(response) = require_auth(&headers) {
         return response;
     }
@@ -137,6 +235,14 @@ pub async fn authors_v2(headers: HeaderMap, uri: Uri, database_file: &FsPath) ->
         .unwrap_or(20)
         .max(1);
     let unpaged = query_bool(query, "unpaged");
+    let context = match resolve_query_context_or_unauthorized(
+        &auth_state,
+        &headers,
+        (!library_ids.is_empty()).then_some(library_ids.as_slice()),
+    ) {
+        Ok(context) => context,
+        Err(response) => return response,
+    };
 
     let scope = if !library_ids.is_empty() {
         PersistedAuthorsScope::Libraries(library_ids)
@@ -150,7 +256,13 @@ pub async fn authors_v2(headers: HeaderMap, uri: Uri, database_file: &FsPath) ->
         PersistedAuthorsScope::All
     };
 
-    let mut authors = match load_persisted_authors_by_scope(database_file, &scope).await {
+    let mut authors = match load_persisted_authors_by_scope(
+        database_file,
+        &scope,
+        context.authorized_library_ids.as_deref(),
+    )
+    .await
+    {
         Ok(values) => values,
         Err(error) => return internal_error_response(error),
     };
@@ -168,184 +280,10 @@ pub async fn authors_v2(headers: HeaderMap, uri: Uri, database_file: &FsPath) ->
     Json(authors_v2_page_payload(authors, page, size, unpaged)).into_response()
 }
 
-pub async fn genres(headers: HeaderMap, uri: Uri, database_file: &FsPath) -> Response {
-    if let Some(response) = require_auth(&headers) {
-        return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    let query = uri.query().unwrap_or_default();
-    let library_ids = decoded_library_ids(query);
-    let collection_id = decoded_collection_id(query);
-
-    match load_persisted_genres(
-        database_file,
-        (!library_ids.is_empty()).then_some(library_ids.as_slice()),
-        collection_id.as_deref(),
-    )
-    .await
-    {
-        Ok(values) => Json(json!(values)).into_response(),
-        Err(error) => internal_error_response(error),
-    }
-}
-
-pub async fn tags(headers: HeaderMap, uri: Uri, database_file: &FsPath) -> Response {
-    if let Some(response) = require_auth(&headers) {
-        return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    let query = uri.query().unwrap_or_default();
-    let library_ids = decoded_library_ids(query);
-    let collection_id = decoded_collection_id(query);
-
-    match load_persisted_tags(
-        database_file,
-        (!library_ids.is_empty()).then_some(library_ids.as_slice()),
-        collection_id.as_deref(),
-    )
-    .await
-    {
-        Ok(values) => Json(json!(values)).into_response(),
-        Err(error) => internal_error_response(error),
-    }
-}
-
-pub async fn series_tags(headers: HeaderMap, uri: Uri, database_file: &FsPath) -> Response {
-    if let Some(response) = require_auth(&headers) {
-        return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    let query = uri.query().unwrap_or_default();
-    let library_ids = decoded_library_ids(query);
-    let collection_id = decoded_collection_id(query);
-
-    match load_persisted_series_tags(
-        database_file,
-        (!library_ids.is_empty()).then_some(library_ids.as_slice()),
-        collection_id.as_deref(),
-    )
-    .await
-    {
-        Ok(values) => Json(json!(values)).into_response(),
-        Err(error) => internal_error_response(error),
-    }
-}
-
-pub async fn languages(headers: HeaderMap, uri: Uri, database_file: &FsPath) -> Response {
-    if let Some(response) = require_auth(&headers) {
-        return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    let query = uri.query().unwrap_or_default();
-    let library_ids = decoded_library_ids(query);
-    let collection_id = decoded_collection_id(query);
-
-    match load_persisted_languages(
-        database_file,
-        (!library_ids.is_empty()).then_some(library_ids.as_slice()),
-        collection_id.as_deref(),
-    )
-    .await
-    {
-        Ok(values) => Json(json!(values)).into_response(),
-        Err(error) => internal_error_response(error),
-    }
-}
-
-pub async fn publishers(headers: HeaderMap, uri: Uri, database_file: &FsPath) -> Response {
-    if let Some(response) = require_auth(&headers) {
-        return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    let query = uri.query().unwrap_or_default();
-    let library_ids = decoded_library_ids(query);
-    let collection_id = decoded_collection_id(query);
-
-    match load_persisted_publishers(
-        database_file,
-        (!library_ids.is_empty()).then_some(library_ids.as_slice()),
-        collection_id.as_deref(),
-    )
-    .await
-    {
-        Ok(values) => Json(json!(values)).into_response(),
-        Err(error) => internal_error_response(error),
-    }
-}
-
-pub async fn age_ratings(headers: HeaderMap, uri: Uri, database_file: &FsPath) -> Response {
-    if let Some(response) = require_auth(&headers) {
-        return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    let query = uri.query().unwrap_or_default();
-    let library_ids = decoded_library_ids(query);
-    let collection_id = decoded_collection_id(query);
-
-    match load_persisted_age_ratings(
-        database_file,
-        (!library_ids.is_empty()).then_some(library_ids.as_slice()),
-        collection_id.as_deref(),
-    )
-    .await
-    {
-        Ok(values) => Json(json!(values)).into_response(),
-        Err(error) => internal_error_response(error),
-    }
-}
-
-pub async fn sharing_labels(headers: HeaderMap, uri: Uri, database_file: &FsPath) -> Response {
-    if let Some(response) = require_auth(&headers) {
-        return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    let query = uri.query().unwrap_or_default();
-    let library_ids = decoded_library_ids(query);
-    let collection_id = decoded_collection_id(query);
-
-    match load_persisted_sharing_labels(
-        database_file,
-        (!library_ids.is_empty()).then_some(library_ids.as_slice()),
-        collection_id.as_deref(),
-    )
-    .await
-    {
-        Ok(values) => Json(json!(values)).into_response(),
-        Err(error) => internal_error_response(error),
-    }
-}
-
-pub async fn series_release_dates(
+pub async fn genres(
     headers: HeaderMap,
     uri: Uri,
+    auth_state: DiscoveryAuthState,
     database_file: &FsPath,
 ) -> Response {
     if let Some(response) = require_auth(&headers) {
@@ -357,13 +295,239 @@ pub async fn series_release_dates(
     }
 
     let query = uri.query().unwrap_or_default();
-    let library_ids = decoded_library_ids(query);
-    let collection_id = decoded_collection_id(query);
+    let scope = match resolve_collection_facet_scope(&auth_state, &headers, query) {
+        Ok(scope) => scope,
+        Err(response) => return response,
+    };
+
+    match load_persisted_genres(
+        database_file,
+        scope.authorized_library_ids(),
+        scope.collection_id(),
+    )
+    .await
+    {
+        Ok(values) => Json(json!(values)).into_response(),
+        Err(error) => internal_error_response(error),
+    }
+}
+
+pub async fn tags(
+    headers: HeaderMap,
+    uri: Uri,
+    auth_state: DiscoveryAuthState,
+    database_file: &FsPath,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if !database_file.exists() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let query = uri.query().unwrap_or_default();
+    let scope = match resolve_collection_facet_scope(&auth_state, &headers, query) {
+        Ok(scope) => scope,
+        Err(response) => return response,
+    };
+
+    match load_persisted_tags(
+        database_file,
+        scope.authorized_library_ids(),
+        scope.collection_id(),
+    )
+    .await
+    {
+        Ok(values) => Json(json!(values)).into_response(),
+        Err(error) => internal_error_response(error),
+    }
+}
+
+pub async fn series_tags(
+    headers: HeaderMap,
+    uri: Uri,
+    auth_state: DiscoveryAuthState,
+    database_file: &FsPath,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if !database_file.exists() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let query = uri.query().unwrap_or_default();
+    let scope = match resolve_collection_facet_scope(&auth_state, &headers, query) {
+        Ok(scope) => scope,
+        Err(response) => return response,
+    };
+
+    match load_persisted_series_tags(
+        database_file,
+        scope.authorized_library_ids(),
+        scope.collection_id(),
+    )
+    .await
+    {
+        Ok(values) => Json(json!(values)).into_response(),
+        Err(error) => internal_error_response(error),
+    }
+}
+
+pub async fn languages(
+    headers: HeaderMap,
+    uri: Uri,
+    auth_state: DiscoveryAuthState,
+    database_file: &FsPath,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if !database_file.exists() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let query = uri.query().unwrap_or_default();
+    let scope = match resolve_collection_facet_scope(&auth_state, &headers, query) {
+        Ok(scope) => scope,
+        Err(response) => return response,
+    };
+
+    match load_persisted_languages(
+        database_file,
+        scope.authorized_library_ids(),
+        scope.collection_id(),
+    )
+    .await
+    {
+        Ok(values) => Json(json!(values)).into_response(),
+        Err(error) => internal_error_response(error),
+    }
+}
+
+pub async fn publishers(
+    headers: HeaderMap,
+    uri: Uri,
+    auth_state: DiscoveryAuthState,
+    database_file: &FsPath,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if !database_file.exists() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let query = uri.query().unwrap_or_default();
+    let scope = match resolve_collection_facet_scope(&auth_state, &headers, query) {
+        Ok(scope) => scope,
+        Err(response) => return response,
+    };
+
+    match load_persisted_publishers(
+        database_file,
+        scope.authorized_library_ids(),
+        scope.collection_id(),
+    )
+    .await
+    {
+        Ok(values) => Json(json!(values)).into_response(),
+        Err(error) => internal_error_response(error),
+    }
+}
+
+pub async fn age_ratings(
+    headers: HeaderMap,
+    uri: Uri,
+    auth_state: DiscoveryAuthState,
+    database_file: &FsPath,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if !database_file.exists() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let query = uri.query().unwrap_or_default();
+    let scope = match resolve_collection_facet_scope(&auth_state, &headers, query) {
+        Ok(scope) => scope,
+        Err(response) => return response,
+    };
+
+    match load_persisted_age_ratings(
+        database_file,
+        scope.authorized_library_ids(),
+        scope.collection_id(),
+    )
+    .await
+    {
+        Ok(values) => Json(json!(values)).into_response(),
+        Err(error) => internal_error_response(error),
+    }
+}
+
+pub async fn sharing_labels(
+    headers: HeaderMap,
+    uri: Uri,
+    auth_state: DiscoveryAuthState,
+    database_file: &FsPath,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if !database_file.exists() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let query = uri.query().unwrap_or_default();
+    let scope = match resolve_collection_facet_scope(&auth_state, &headers, query) {
+        Ok(scope) => scope,
+        Err(response) => return response,
+    };
+
+    match load_persisted_sharing_labels(
+        database_file,
+        scope.authorized_library_ids(),
+        scope.collection_id(),
+    )
+    .await
+    {
+        Ok(values) => Json(json!(values)).into_response(),
+        Err(error) => internal_error_response(error),
+    }
+}
+
+pub async fn series_release_dates(
+    headers: HeaderMap,
+    uri: Uri,
+    auth_state: DiscoveryAuthState,
+    database_file: &FsPath,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if !database_file.exists() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let query = uri.query().unwrap_or_default();
+    let scope = match resolve_collection_facet_scope(&auth_state, &headers, query) {
+        Ok(scope) => scope,
+        Err(response) => return response,
+    };
 
     match load_persisted_series_release_dates(
         database_file,
-        (!library_ids.is_empty()).then_some(library_ids.as_slice()),
-        collection_id.as_deref(),
+        scope.authorized_library_ids(),
+        scope.collection_id(),
     )
     .await
     {

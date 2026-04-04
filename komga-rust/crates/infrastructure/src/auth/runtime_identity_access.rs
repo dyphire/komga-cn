@@ -206,11 +206,24 @@ pub async fn persisted_create_api_key(
 
     insert.ok()?;
 
+    let row = sqlx::query(
+        "SELECT CREATED_DATE, LAST_MODIFIED_DATE FROM USER_API_KEY WHERE ID = ? AND USER_ID = ? LIMIT 1",
+    )
+    .bind(&generated_id)
+    .bind(user_id)
+    .fetch_optional(&pool)
+    .await
+    .ok()?;
+
     Some(PersistedApiKey {
         id: generated_id,
         user_id: user_id.to_string(),
         key: generated_key,
         comment: normalized_comment.to_string(),
+        created_date: row.as_ref().map(|row| row.get::<String, _>("CREATED_DATE")),
+        last_modified_date: row
+            .as_ref()
+            .map(|row| row.get::<String, _>("LAST_MODIFIED_DATE")),
     })
 }
 
@@ -251,7 +264,7 @@ pub async fn persisted_list_api_keys(
 
     let pool = connect_pool(database_file, 1).await.ok()?;
     let rows = sqlx::query(
-        "SELECT ID, USER_ID, COMMENT FROM USER_API_KEY WHERE USER_ID = ? ORDER BY CREATED_DATE DESC, ID DESC",
+        "SELECT ID, USER_ID, COMMENT, CREATED_DATE, LAST_MODIFIED_DATE FROM USER_API_KEY WHERE USER_ID = ? ORDER BY CREATED_DATE DESC, ID DESC",
     )
     .bind(user_id)
     .fetch_all(&pool)
@@ -265,6 +278,8 @@ pub async fn persisted_list_api_keys(
                 user_id: row.get::<String, _>("USER_ID"),
                 key: "******".to_string(),
                 comment: row.get::<String, _>("COMMENT"),
+                created_date: Some(row.get::<String, _>("CREATED_DATE")),
+                last_modified_date: Some(row.get::<String, _>("LAST_MODIFIED_DATE")),
             })
             .collect(),
     )

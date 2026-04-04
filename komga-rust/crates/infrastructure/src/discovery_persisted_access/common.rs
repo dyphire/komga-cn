@@ -24,6 +24,12 @@ pub(super) async fn load_persisted_scoped_strings(
     extra_condition: Option<&str>,
     order_by: &str,
 ) -> Result<Vec<String>, String> {
+    if let Some(library_ids) = library_ids
+        && library_ids.is_empty()
+    {
+        return Ok(Vec::new());
+    }
+
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(|error| format!("open {label} db: {error}"))?;
@@ -36,8 +42,10 @@ pub(super) async fn load_persisted_scoped_strings(
         query.push(" WHERE cs.COLLECTION_ID = ");
         query.push_bind(collection_id);
         has_where = true;
-    } else if let Some(library_ids) = library_ids.filter(|ids| !ids.is_empty()) {
-        query.push(" WHERE ");
+    }
+
+    if let Some(library_ids) = library_ids.filter(|ids| !ids.is_empty()) {
+        query.push(if has_where { " AND " } else { " WHERE " });
         query.push(library_column);
         query.push(" IN (");
         let mut separated = query.separated(",");

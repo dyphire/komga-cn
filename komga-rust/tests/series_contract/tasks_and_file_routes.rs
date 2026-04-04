@@ -129,27 +129,28 @@ async fn router_series_media_assets_forbid_age_restricted_user() {
 }
 
 #[tokio::test]
-async fn router_series_tachiyomi_progress_returns_zero_dto_for_missing_series() {
-    let paths = new_router_fixture("router-series-tachiyomi-progress-missing-series").await;
+async fn router_series_tachiyomi_missing_series_gets_zero_dto_and_put_is_noop() {
+    let paths = new_router_fixture("router-series-tachiyomi-missing-series").await;
     seed_router_contract_data(&paths).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
-    let response = app
+    let get_response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
                 .uri("/api/v2/series/missing-series/read-progress/tachiyomi")
                 .header("x-auth-token", &auth_token)
                 .body(Body::empty())
-                .expect("missing series tachiyomi progress request should build"),
+                .expect("missing series tachiyomi get request should build"),
         )
         .await
-        .expect("missing series tachiyomi progress request should complete");
+        .expect("missing series tachiyomi get request should complete");
 
-    assert_eq!(response.status(), StatusCode::OK);
-    let payload = response_json(response).await;
+    assert_eq!(get_response.status(), StatusCode::OK);
+    let payload = response_json(get_response).await;
     assert_eq!(
         payload,
         json!({
@@ -161,6 +162,38 @@ async fn router_series_tachiyomi_progress_returns_zero_dto_for_missing_series() 
             "maxNumberSort": 0.0,
         })
     );
+
+    let put_response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v2/series/missing-series/read-progress/tachiyomi")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "lastBookNumberSortRead": 1.0 }).to_string(),
+                ))
+                .expect("missing series tachiyomi put request should build"),
+        )
+        .await
+        .expect("missing series tachiyomi put request should complete");
+
+    assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for missing-series noop verification");
+    let count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM READ_PROGRESS_SERIES WHERE SERIES_ID = ? AND USER_ID = ?",
+    )
+    .bind("missing-series")
+    .bind("admin-user")
+    .fetch_one(&pool)
+    .await
+    .expect("missing-series read progress row count should be queryable");
+    pool.close().await;
+
+    assert_eq!(count, 0);
 
     cleanup_router_fixture(paths);
 }
@@ -259,6 +292,249 @@ async fn router_series_tachiyomi_progress_counts_completed_false_page_zero_as_in
             "maxNumberSort": 1.0,
         })
     );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_series_tachiyomi_progress_refreshes_read_dates_when_marking_complete() {
+    let paths = new_router_fixture("router-series-tachiyomi-progress-refresh-read-date").await;
+    seed_router_contract_data(&paths).await;
+
+    let old_read_date = "2000-01-01 00:00:00";
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for series tachiyomi read-date seed");
+    sqlx::query(
+        "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, READ_DATE) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("book-1")
+    .bind("admin-user")
+    .bind(1_i64)
+    .bind(false)
+    .bind(old_read_date)
+    .execute(&pool)
+    .await
+    .expect("incomplete read progress row should insert");
+    sqlx::query(
+        "INSERT INTO READ_PROGRESS_SERIES (SERIES_ID, USER_ID, READ_COUNT, IN_PROGRESS_COUNT, MOST_RECENT_READ_DATE) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("series-1")
+    .bind("admin-user")
+    .bind(0_i64)
+    .bind(1_i64)
+    .bind(old_read_date)
+    .execute(&pool)
+    .await
+    .expect("series read progress aggregate row should insert");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v2/series/series-1/read-progress/tachiyomi")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "lastBookNumberSortRead": 1.0 }).to_string(),
+                ))
+                .expect("series tachiyomi read-date refresh request should build"),
+        )
+        .await
+        .expect("series tachiyomi read-date refresh request should complete");
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for read-date refresh verification");
+    let book_row = sqlx::query(
+        "SELECT PAGE, COMPLETED, READ_DATE FROM READ_PROGRESS WHERE BOOK_ID = ? AND USER_ID = ? LIMIT 1",
+    )
+    .bind("book-1")
+    .bind("admin-user")
+    .fetch_one(&verify_pool)
+    .await
+    .expect("updated book read progress row should be queryable");
+    let series_row = sqlx::query(
+        "SELECT READ_COUNT, IN_PROGRESS_COUNT, MOST_RECENT_READ_DATE FROM READ_PROGRESS_SERIES WHERE SERIES_ID = ? AND USER_ID = ? LIMIT 1",
+    )
+    .bind("series-1")
+    .bind("admin-user")
+    .fetch_one(&verify_pool)
+    .await
+    .expect("updated series read progress aggregate row should be queryable");
+    verify_pool.close().await;
+
+    let refreshed_book_read_date = book_row.get::<String, _>("READ_DATE");
+    let refreshed_series_read_date = series_row.get::<String, _>("MOST_RECENT_READ_DATE");
+
+    assert_eq!(book_row.get::<i64, _>("PAGE"), 10);
+    assert_eq!(book_row.get::<i64, _>("COMPLETED"), 1);
+    assert_ne!(refreshed_book_read_date, old_read_date);
+    assert_eq!(series_row.get::<i64, _>("READ_COUNT"), 1);
+    assert_eq!(series_row.get::<i64, _>("IN_PROGRESS_COUNT"), 0);
+    assert_eq!(refreshed_series_read_date, refreshed_book_read_date);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_series_tachiyomi_progress_refreshes_series_aggregate_for_page_zero_in_progress() {
+    let paths =
+        new_router_fixture("router-series-tachiyomi-progress-refresh-aggregate-page-zero").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for series aggregate seed");
+    sqlx::query(
+        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("book-2")
+    .bind(0_i64)
+    .bind("book-2.epub")
+    .bind("books/book-2.epub")
+    .bind("series-1")
+    .bind(2_048_i64)
+    .bind(2_i64)
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("second series book row should insert");
+    sqlx::query("INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("application/epub+zip")
+        .bind("READY")
+        .bind("book-2")
+        .bind(12_i64)
+        .execute(&pool)
+        .await
+        .expect("second series media row should insert");
+    sqlx::query(
+        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("2")
+    .bind(2.0_f64)
+    .bind("Book 2")
+    .bind("2024-01-16")
+    .bind("book-2")
+    .execute(&pool)
+    .await
+    .expect("second series book metadata row should insert");
+    sqlx::query(
+        "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, READ_DATE) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("book-2")
+    .bind("admin-user")
+    .bind(0_i64)
+    .bind(false)
+    .bind("2000-01-01 00:00:00")
+    .execute(&pool)
+    .await
+    .expect("page-zero in-progress row should insert");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v2/series/series-1/read-progress/tachiyomi")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "lastBookNumberSortRead": 1.0 }).to_string(),
+                ))
+                .expect("series tachiyomi aggregate refresh request should build"),
+        )
+        .await
+        .expect("series tachiyomi aggregate refresh request should complete");
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for series aggregate verification");
+    let series_row = sqlx::query(
+        "SELECT READ_COUNT, IN_PROGRESS_COUNT FROM READ_PROGRESS_SERIES WHERE SERIES_ID = ? AND USER_ID = ? LIMIT 1",
+    )
+    .bind("series-1")
+    .bind("admin-user")
+    .fetch_one(&verify_pool)
+    .await
+    .expect("series aggregate row should be queryable");
+    verify_pool.close().await;
+
+    assert_eq!(series_row.get::<i64, _>("READ_COUNT"), 1);
+    assert_eq!(series_row.get::<i64, _>("IN_PROGRESS_COUNT"), 1);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_series_tachiyomi_progress_does_not_rewrite_already_completed_books() {
+    let paths = new_router_fixture("router-series-tachiyomi-progress-skip-completed").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for series tachiyomi completed seed");
+    sqlx::query(
+        "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED) VALUES (?, ?, ?, ?)",
+    )
+    .bind("book-1")
+    .bind("admin-user")
+    .bind(3_i64)
+    .bind(true)
+    .execute(&pool)
+    .await
+    .expect("completed read progress row should insert");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v2/series/series-1/read-progress/tachiyomi")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "lastBookNumberSortRead": 1.0 }).to_string(),
+                ))
+                .expect("series tachiyomi completed-skip request should build"),
+        )
+        .await
+        .expect("series tachiyomi completed-skip request should complete");
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for completed-skip verification");
+    let row = sqlx::query(
+        "SELECT PAGE, COMPLETED FROM READ_PROGRESS WHERE BOOK_ID = ? AND USER_ID = ? LIMIT 1",
+    )
+    .bind("book-1")
+    .bind("admin-user")
+    .fetch_one(&verify_pool)
+    .await
+    .expect("completed read progress row should be queryable");
+    verify_pool.close().await;
+
+    assert_eq!(row.get::<i64, _>("PAGE"), 3);
+    assert_eq!(row.get::<i64, _>("COMPLETED"), 1);
 
     cleanup_router_fixture(paths);
 }

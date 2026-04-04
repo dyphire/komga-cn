@@ -29,7 +29,7 @@ pub async fn refresh_series_read_progress_row(
         .map_err(|error| format!("open series read progress db: {error}"))?;
     let row = sqlx::query(
         "SELECT COALESCE(SUM(CASE WHEN rp.COMPLETED = 1 THEN 1 ELSE 0 END), 0) AS READ_COUNT, \
-                COALESCE(SUM(CASE WHEN rp.COMPLETED = 0 AND rp.PAGE > 0 THEN 1 ELSE 0 END), 0) AS IN_PROGRESS_COUNT, \
+                COALESCE(SUM(CASE WHEN rp.COMPLETED = 0 THEN 1 ELSE 0 END), 0) AS IN_PROGRESS_COUNT, \
                 MAX(rp.READ_DATE) AS MOST_RECENT_READ_DATE \
          FROM BOOK b LEFT JOIN READ_PROGRESS rp ON rp.BOOK_ID = b.ID AND rp.USER_ID = ? \
          WHERE b.SERIES_ID = ? AND b.DELETED_DATE IS NULL",

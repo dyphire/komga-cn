@@ -56,6 +56,10 @@ pub async fn persist_read_progress(
          VALUES (?, ?, ?, ?, ?) \
          ON CONFLICT(BOOK_ID, USER_ID) DO UPDATE \
          SET PAGE = excluded.PAGE, COMPLETED = excluded.COMPLETED, LOCATOR = excluded.LOCATOR, \
+             READ_DATE = CASE \
+                 WHEN READ_PROGRESS.COMPLETED = 0 AND excluded.COMPLETED = 1 THEN CURRENT_TIMESTAMP \
+                 ELSE READ_PROGRESS.READ_DATE \
+             END, \
              LAST_MODIFIED_DATE = CURRENT_TIMESTAMP",
     )
     .bind(book_id)
@@ -75,6 +79,7 @@ pub async fn persist_book_progression(
     book_id: &str,
     user_id_value: &str,
     progression: f64,
+    use_locator_position_for_page: bool,
     modified: Option<String>,
     device_id: Option<String>,
     device_name: Option<String>,
@@ -90,17 +95,20 @@ pub async fn persist_book_progression(
         .and_then(|value| value.get("totalProgression"))
         .and_then(Value::as_f64);
     let effective_progression = total_progression.unwrap_or(progression);
-    let page = locator
-        .as_ref()
-        .and_then(|value| value.get("locations"))
-        .and_then(|value| value.get("position"))
-        .and_then(Value::as_u64)
-        .filter(|value| *value >= 1)
-        .unwrap_or_else(|| {
-            (effective_progression * page_count as f64)
-                .round()
-                .clamp(0.0, page_count as f64) as u64
-        });
+    let page_from_progression = (effective_progression * page_count as f64)
+        .round()
+        .clamp(0.0, page_count as f64) as u64;
+    let page = if use_locator_position_for_page {
+        locator
+            .as_ref()
+            .and_then(|value| value.get("locations"))
+            .and_then(|value| value.get("position"))
+            .and_then(Value::as_u64)
+            .filter(|value| *value >= 1)
+            .unwrap_or(page_from_progression)
+    } else {
+        page_from_progression
+    };
     let completed = effective_progression >= 0.99;
     let pool =
         open_pool_and_require_user(database_file, user_id_value, "progression", "progression")

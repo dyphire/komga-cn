@@ -61,6 +61,33 @@ pub fn runtime_config_for_paths(
         .expect("runtime config should resolve fixture paths")
 }
 
+#[allow(dead_code)]
+pub fn runtime_demo_config_for_paths(
+    paths: &persistence_contract_fixture::RuntimeDbPaths,
+) -> RuntimeConfig {
+    let mut env = BTreeMap::new();
+    env.insert(
+        "KOMGA_CONFIG_DIR".to_string(),
+        paths.config_dir.to_string_lossy().to_string(),
+    );
+    env.insert(
+        "KOMGA_DATABASE_FILE".to_string(),
+        paths.main_db.to_string_lossy().to_string(),
+    );
+    env.insert(
+        "KOMGA_TASKS_DB_FILE".to_string(),
+        paths.tasks_db.to_string_lossy().to_string(),
+    );
+    env.insert(
+        "KOMGA_RUST_RUNTIME_PROFILE".to_string(),
+        "snapshot-aligned".to_string(),
+    );
+    env.insert("SPRING_PROFILES_ACTIVE".to_string(), "demo".to_string());
+
+    RuntimeConfig::resolve_with_env(&RuntimeCli::default(), &env)
+        .expect("demo runtime config should resolve fixture paths")
+}
+
 pub async fn seed_router_contract_data(paths: &persistence_contract_fixture::RuntimeDbPaths) {
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await

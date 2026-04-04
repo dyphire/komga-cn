@@ -5,12 +5,17 @@ type BoxFutureResult<T> = Pin<Box<dyn Future<Output = Result<T, String>> + Send>
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
 pub struct PersistedDiscoveryAccessBackend {
-    pub load_persisted_author_names:
-        Arc<dyn Fn(PathBuf, String) -> BoxFutureResult<Vec<String>> + Send + Sync>,
+    pub load_persisted_author_names: Arc<
+        dyn Fn(PathBuf, String, Option<Vec<String>>) -> BoxFutureResult<Vec<String>> + Send + Sync,
+    >,
     pub load_persisted_author_roles:
-        Arc<dyn Fn(PathBuf) -> BoxFutureResult<Vec<String>> + Send + Sync>,
+        Arc<dyn Fn(PathBuf, Option<Vec<String>>) -> BoxFutureResult<Vec<String>> + Send + Sync>,
     pub load_persisted_authors_by_scope: Arc<
-        dyn Fn(PathBuf, PersistedAuthorsScope) -> BoxFutureResult<Vec<PersistedAuthorEntry>>
+        dyn Fn(
+                PathBuf,
+                PersistedAuthorsScope,
+                Option<Vec<String>>,
+            ) -> BoxFutureResult<Vec<PersistedAuthorEntry>>
             + Send
             + Sync,
     >,
@@ -50,7 +55,7 @@ pub struct PersistedDiscoveryAccessBackend {
             + Sync,
     >,
     pub load_persisted_age_ratings: Arc<
-        dyn Fn(PathBuf, Option<Vec<String>>, Option<String>) -> BoxFutureResult<Vec<u16>>
+        dyn Fn(PathBuf, Option<Vec<String>>, Option<String>) -> BoxFutureResult<Vec<String>>
             + Send
             + Sync,
     >,
@@ -81,7 +86,11 @@ pub struct PersistedDiscoveryAccessBackend {
     pub load_persisted_duplicate_books:
         Arc<dyn Fn(PathBuf) -> BoxFutureResult<Vec<PersistedBookBrowseEntry>> + Send + Sync>,
     pub load_persisted_book_tags: Arc<
-        dyn Fn(PathBuf, Option<PersistedBookTagsScope>) -> BoxFutureResult<Vec<String>>
+        dyn Fn(
+                PathBuf,
+                Option<PersistedBookTagsScope>,
+                Option<Vec<String>>,
+            ) -> BoxFutureResult<Vec<String>>
             + Send
             + Sync,
     >,
@@ -120,24 +129,41 @@ fn persisted_discovery_backend() -> Result<&'static PersistedDiscoveryAccessBack
 pub(super) async fn persisted_backend_load_persisted_author_names(
     database_file: &FsPath,
     search: &str,
+    authorized_library_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
     let backend = persisted_discovery_backend()?;
-    (backend.load_persisted_author_names)(database_file.to_path_buf(), search.to_string()).await
+    (backend.load_persisted_author_names)(
+        database_file.to_path_buf(),
+        search.to_string(),
+        authorized_library_ids.map(|ids| ids.to_vec()),
+    )
+    .await
 }
 
 pub(super) async fn persisted_backend_load_persisted_author_roles(
     database_file: &FsPath,
+    authorized_library_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
     let backend = persisted_discovery_backend()?;
-    (backend.load_persisted_author_roles)(database_file.to_path_buf()).await
+    (backend.load_persisted_author_roles)(
+        database_file.to_path_buf(),
+        authorized_library_ids.map(|ids| ids.to_vec()),
+    )
+    .await
 }
 
 pub(super) async fn persisted_backend_load_persisted_authors_by_scope(
     database_file: &FsPath,
     scope: &PersistedAuthorsScope,
+    authorized_library_ids: Option<&[String]>,
 ) -> Result<Vec<PersistedAuthorEntry>, String> {
     let backend = persisted_discovery_backend()?;
-    (backend.load_persisted_authors_by_scope)(database_file.to_path_buf(), scope.clone()).await
+    (backend.load_persisted_authors_by_scope)(
+        database_file.to_path_buf(),
+        scope.clone(),
+        authorized_library_ids.map(|ids| ids.to_vec()),
+    )
+    .await
 }
 
 pub(super) async fn persisted_backend_load_book_poster_summaries(
@@ -247,7 +273,7 @@ pub(super) async fn persisted_backend_load_persisted_age_ratings(
     database_file: &FsPath,
     library_ids: Option<&[String]>,
     collection_id: Option<&str>,
-) -> Result<Vec<u16>, String> {
+) -> Result<Vec<String>, String> {
     let backend = persisted_discovery_backend()?;
     (backend.load_persisted_age_ratings)(
         database_file.to_path_buf(),
@@ -338,9 +364,15 @@ pub(super) async fn persisted_backend_load_persisted_duplicate_books(
 pub(super) async fn persisted_backend_load_persisted_book_tags(
     database_file: &FsPath,
     scope: Option<&PersistedBookTagsScope>,
+    authorized_library_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
     let backend = persisted_discovery_backend()?;
-    (backend.load_persisted_book_tags)(database_file.to_path_buf(), scope.cloned()).await
+    (backend.load_persisted_book_tags)(
+        database_file.to_path_buf(),
+        scope.cloned(),
+        authorized_library_ids.map(|ids| ids.to_vec()),
+    )
+    .await
 }
 
 pub(super) async fn persisted_backend_persisted_utc_date_minus_days(

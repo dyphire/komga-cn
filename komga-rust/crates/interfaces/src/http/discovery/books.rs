@@ -261,6 +261,7 @@ pub async fn books_duplicates(
 
 pub async fn book_tags(
     Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(auth_state): Extension<DiscoveryAuthState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -279,19 +280,42 @@ pub async fn book_tags(
         .filter(|value| !value.is_empty())
         .map(decode_query_component)
         .collect::<Vec<_>>();
-    let scope = query_value(query, "series_id")
+    let series_scope = query_value(query, "series_id")
         .filter(|value| !value.is_empty())
-        .map(|value| PersistedBookTagsScope::Series(decode_query_component(value)))
+        .map(decode_query_component);
+    let readlist_scope = query_value(query, "readlist_id")
+        .filter(|value| !value.is_empty())
+        .map(decode_query_component);
+    let context = match auth_state.resolve_query_context(
+        &headers,
+        if series_scope.is_some() || readlist_scope.is_some() || library_ids.is_empty() {
+            None
+        } else {
+            Some(library_ids.as_slice())
+        },
+    ) {
+        Some(context) => context,
+        None => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+    let scope = series_scope
+        .map(PersistedBookTagsScope::Series)
+        .or_else(|| readlist_scope.map(PersistedBookTagsScope::ReadList))
         .or_else(|| {
-            query_value(query, "readlist_id")
-                .filter(|value| !value.is_empty())
-                .map(|value| PersistedBookTagsScope::ReadList(decode_query_component(value)))
+            context
+                .authorized_library_ids
+                .clone()
+                .filter(|ids| !ids.is_empty())
+                .map(PersistedBookTagsScope::Libraries)
         })
-        .or_else(|| {
-            (!library_ids.is_empty()).then_some(PersistedBookTagsScope::Libraries(library_ids))
-        });
+        .or(Some(PersistedBookTagsScope::All));
 
-    match load_persisted_book_tags(auth_db.database_file.as_path(), scope.as_ref()).await {
+    match load_persisted_book_tags(
+        auth_db.database_file.as_path(),
+        scope.as_ref(),
+        context.authorized_library_ids.as_deref(),
+    )
+    .await
+    {
         Ok(tags) => Json(json!(tags)).into_response(),
         Err(error) => internal_error_response(error),
     }

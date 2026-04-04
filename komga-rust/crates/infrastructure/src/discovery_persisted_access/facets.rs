@@ -10,7 +10,7 @@ pub async fn load_persisted_genres(
         library_ids,
         collection_id,
         "genres",
-        "SELECT g.GENRE AS VALUE FROM SERIES_METADATA_GENRE g JOIN SERIES s ON s.ID = g.SERIES_ID",
+        "SELECT DISTINCT g.GENRE AS VALUE FROM SERIES_METADATA_GENRE g JOIN SERIES s ON s.ID = g.SERIES_ID",
         " JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID",
         "s.LIBRARY_ID",
         None,
@@ -24,28 +24,52 @@ pub async fn load_persisted_tags(
     library_ids: Option<&[String]>,
     collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
+    if let Some(library_ids) = library_ids
+        && library_ids.is_empty()
+    {
+        return Ok(Vec::new());
+    }
+
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(|error| format!("open tags db: {error}"))?;
 
     let rows = if let Some(collection_id) = collection_id {
-        sqlx::query(
+        let mut query = QueryBuilder::<Sqlite>::new(
             "SELECT TAG \
               FROM ( SELECT st.TAG AS TAG \
               FROM SERIES_METADATA_TAG st \
               JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = st.SERIES_ID \
-              WHERE cs.COLLECTION_ID = ? \
-              UNION SELECT bt.TAG AS TAG \
+              JOIN SERIES s ON s.ID = st.SERIES_ID \
+              WHERE cs.COLLECTION_ID = ",
+        );
+        query.push_bind(collection_id);
+        if let Some(library_ids) = library_ids.filter(|ids| !ids.is_empty()) {
+            query.push(" AND s.LIBRARY_ID IN (");
+            let mut separated = query.separated(",");
+            for library_id in library_ids {
+                separated.push_bind(library_id);
+            }
+            separated.push_unseparated(")");
+        }
+        query.push(
+            " UNION SELECT bt.TAG AS TAG \
               FROM BOOK_METADATA_TAG bt \
               JOIN BOOK b ON b.ID = bt.BOOK_ID \
               JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = b.SERIES_ID \
-              WHERE cs.COLLECTION_ID = ? ) \
-              ORDER BY lower(TAG), TAG",
-        )
-        .bind(collection_id)
-        .bind(collection_id)
-        .fetch_all(&pool)
-        .await
+              WHERE cs.COLLECTION_ID = ",
+        );
+        query.push_bind(collection_id);
+        if let Some(library_ids) = library_ids.filter(|ids| !ids.is_empty()) {
+            query.push(" AND b.LIBRARY_ID IN (");
+            let mut separated = query.separated(",");
+            for library_id in library_ids {
+                separated.push_bind(library_id);
+            }
+            separated.push_unseparated(")");
+        }
+        query.push(" ) ORDER BY lower(TAG), TAG");
+        query.build().fetch_all(&pool).await
     } else if let Some(library_ids) = library_ids.filter(|ids| !ids.is_empty()) {
         let mut query = QueryBuilder::<Sqlite>::new(
             "SELECT TAG FROM ( \
@@ -106,7 +130,7 @@ pub async fn load_persisted_languages(
         "SELECT DISTINCT sm.LANGUAGE AS VALUE FROM SERIES_METADATA sm JOIN SERIES s ON s.ID = sm.SERIES_ID",
         " JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID",
         "s.LIBRARY_ID",
-        None,
+        Some("sm.LANGUAGE <> ''"),
         "lower(sm.LANGUAGE), sm.LANGUAGE",
     )
     .await
@@ -125,7 +149,7 @@ pub async fn load_persisted_publishers(
         "SELECT DISTINCT sm.PUBLISHER AS VALUE FROM SERIES_METADATA sm JOIN SERIES s ON s.ID = sm.SERIES_ID",
         " JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID",
         "s.LIBRARY_ID",
-        None,
+        Some("sm.PUBLISHER <> ''"),
         "lower(sm.PUBLISHER), sm.PUBLISHER",
     )
     .await
@@ -135,7 +159,13 @@ pub async fn load_persisted_age_ratings(
     database_file: &FsPath,
     library_ids: Option<&[String]>,
     collection_id: Option<&str>,
-) -> Result<Vec<u16>, String> {
+) -> Result<Vec<String>, String> {
+    if let Some(library_ids) = library_ids
+        && library_ids.is_empty()
+    {
+        return Ok(Vec::new());
+    }
+
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(|error| format!("open age-ratings db: {error}"))?;
@@ -148,17 +178,17 @@ pub async fn load_persisted_age_ratings(
         query.push(" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID WHERE cs.COLLECTION_ID = ");
         query.push_bind(collection_id);
         has_where = true;
-    } else if let Some(library_ids) = library_ids.filter(|ids| !ids.is_empty()) {
-        query.push(" WHERE s.LIBRARY_ID IN (");
+    }
+    if let Some(library_ids) = library_ids.filter(|ids| !ids.is_empty()) {
+        query.push(if has_where { " AND " } else { " WHERE " });
+        query.push("s.LIBRARY_ID IN (");
         let mut separated = query.separated(",");
         for library_id in library_ids {
             separated.push_bind(library_id);
         }
         separated.push_unseparated(")");
-        has_where = true;
     }
-    query.push(if has_where { " AND " } else { " WHERE " });
-    query.push("sm.AGE_RATING IS NOT NULL ORDER BY sm.AGE_RATING");
+    query.push(" ORDER BY sm.AGE_RATING");
 
     let rows = query
         .build()
@@ -168,8 +198,10 @@ pub async fn load_persisted_age_ratings(
 
     Ok(rows
         .into_iter()
-        .filter_map(|row| row.get::<Option<i64>, _>("VALUE"))
-        .map(|value| value.max(0) as u16)
+        .map(|row| match row.get::<Option<i64>, _>("VALUE") {
+            Some(value) => value.max(0).to_string(),
+            None => "None".to_string(),
+        })
         .collect())
 }
 
@@ -197,18 +229,32 @@ pub async fn load_persisted_series_release_dates(
     library_ids: Option<&[String]>,
     collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
-    common::load_persisted_scoped_strings(
+    let values = common::load_persisted_scoped_strings(
         database_file,
         library_ids,
         collection_id,
         "series-release-dates",
-        "SELECT DISTINCT bm.RELEASE_DATE AS VALUE FROM BOOK_METADATA bm JOIN BOOK b ON b.ID = bm.BOOK_ID",
-        " JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = b.SERIES_ID",
-        "b.LIBRARY_ID",
-        Some("bm.RELEASE_DATE IS NOT NULL AND bm.RELEASE_DATE <> ''"),
-        "bm.RELEASE_DATE",
+        "SELECT DISTINCT bma.RELEASE_DATE AS VALUE FROM BOOK_METADATA_AGGREGATION bma JOIN SERIES s ON s.ID = bma.SERIES_ID",
+        " JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID",
+        "s.LIBRARY_ID",
+        Some("bma.RELEASE_DATE IS NOT NULL AND bma.RELEASE_DATE <> ''"),
+        "bma.RELEASE_DATE DESC",
     )
-    .await
+    .await?;
+
+    let mut years = Vec::new();
+    for value in values {
+        let year = value
+            .split('-')
+            .next()
+            .unwrap_or(value.as_str())
+            .to_string();
+        if !years.contains(&year) {
+            years.push(year);
+        }
+    }
+
+    Ok(years)
 }
 
 pub async fn load_persisted_series_tags(

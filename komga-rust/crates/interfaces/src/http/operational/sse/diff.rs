@@ -614,7 +614,7 @@ mod tests {
 
     #[tokio::test]
     async fn append_thumbnail_readlist_events_emit_deleted_and_added_when_selection_moves_between_existing_thumbnails()
-    {
+     {
         let previous = HashMap::from([
             (
                 "thumb-old".to_string(),
@@ -761,8 +761,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn append_thumbnail_collection_events_emits_added_when_existing_thumbnail_becomes_selected(
-    ) {
+    async fn append_thumbnail_collection_events_emits_added_when_existing_thumbnail_becomes_selected()
+     {
         let previous = HashMap::from([(
             "thumb-1".to_string(),
             ThumbnailCollectionSnapshot {

@@ -71,6 +71,12 @@ pub struct UpdateAuthUserInput {
     pub age_restriction: Option<Option<AuthUserAgeRestrictionInput>>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpdateAuthUserResult {
+    pub updated: bool,
+    pub expire_sessions: bool,
+}
+
 #[derive(Clone)]
 pub struct KoreaderBookTarget {
     pub id: String,
@@ -246,7 +252,11 @@ pub struct RuntimeIdentityAccessBackend {
     pub delete_auth_user:
         Arc<dyn Fn(PathBuf, String) -> BoxFuture<Result<bool, sqlx::Error>> + Send + Sync>,
     pub update_auth_user: Arc<
-        dyn Fn(PathBuf, String, UpdateAuthUserInput) -> BoxFuture<Result<bool, sqlx::Error>>
+        dyn Fn(
+                PathBuf,
+                String,
+                UpdateAuthUserInput,
+            ) -> BoxFuture<Result<UpdateAuthUserResult, sqlx::Error>>
             + Send
             + Sync,
     >,
@@ -401,7 +411,14 @@ fn default_test_backend() -> RuntimeIdentityAccessBackend {
         save_sync_point: Arc::new(|_, _, _| Box::pin(async { Ok(()) })),
         create_auth_user: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         delete_auth_user: Arc::new(|_, _| Box::pin(async { Ok(false) })),
-        update_auth_user: Arc::new(|_, _, _| Box::pin(async { Ok(false) })),
+        update_auth_user: Arc::new(|_, _, _| {
+            Box::pin(async {
+                Ok(UpdateAuthUserResult {
+                    updated: false,
+                    expire_sessions: false,
+                })
+            })
+        }),
         open_auth_pool: Arc::new(|_| Box::pin(async { Err(sqlx::Error::PoolClosed) })),
     }
 }
@@ -775,7 +792,7 @@ pub async fn update_auth_user(
     database_file: &Path,
     target_user_id: &str,
     patch: UpdateAuthUserInput,
-) -> Result<bool, sqlx::Error> {
+) -> Result<UpdateAuthUserResult, sqlx::Error> {
     (backend().update_auth_user)(
         database_file.to_path_buf(),
         target_user_id.to_string(),

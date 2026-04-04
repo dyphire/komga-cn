@@ -88,8 +88,8 @@ async fn router_book_progression_put_returns_conflict_for_older_progression() {
 }
 
 #[tokio::test]
-async fn router_book_progression_put_allows_same_modified_retry() {
-    let paths = new_router_fixture("router-book-progression-put-same-modified-retry").await;
+async fn router_book_progression_put_returns_conflict_for_same_modified_retry() {
+    let paths = new_router_fixture("router-book-progression-put-same-modified-conflict").await;
     seed_router_contract_data(&paths).await;
 
     let pool = connect_pool(paths.main_db.as_path(), 1)
@@ -124,27 +124,43 @@ async fn router_book_progression_put_allows_same_modified_retry() {
         }
     });
 
-    for attempt in 0..2 {
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri("/api/v1/books/book-1/progression")
-                    .header("x-auth-token", &auth_token)
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(progression.to_string()))
-                    .expect("same-modified retry request should build"),
-            )
-            .await
-            .expect("same-modified retry request should complete");
+    let first_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/books/book-1/progression")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(progression.to_string()))
+                .expect("same-modified first request should build"),
+        )
+        .await
+        .expect("same-modified first request should complete");
+    assert_eq!(first_response.status(), StatusCode::NO_CONTENT);
 
-        assert_eq!(
-            response.status(),
-            StatusCode::NO_CONTENT,
-            "retry attempt {attempt} should stay idempotent"
-        );
-    }
+    let retry_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/books/book-1/progression")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(progression.to_string()))
+                .expect("same-modified retry request should build"),
+        )
+        .await
+        .expect("same-modified retry request should complete");
+
+    assert_eq!(retry_response.status(), StatusCode::CONFLICT);
+    let payload = response_json(retry_response).await;
+    assert_eq!(
+        payload.get("error"),
+        Some(&Value::String(
+            "Progression is older than existing".to_string()
+        ))
+    );
 
     cleanup_router_fixture(paths);
 }
@@ -549,6 +565,55 @@ async fn router_book_progression_put_rejects_pdf_position_beyond_page_count() {
 }
 
 #[tokio::test]
+async fn router_book_progression_put_accepts_url_encoded_epub_href() {
+    let paths = new_router_fixture("router-book-progression-put-epub-url-encoded-href").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for url-encoded href seed");
+    sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
+        .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
+        .bind(fixture_epub_positions_extension_blob())
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("epub extension positions should be seeded for url-encoded href test");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/books/book-1/progression")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "modified": "2024-01-04T05:06:07Z",
+                        "device": { "id": "reader-1", "name": "KOReader" },
+                        "locator": {
+                            "href": "/book%2D1.xhtml#frag",
+                            "type": "application/xhtml+xml",
+                            "locations": { "progression": 0.5 }
+                        }
+                    })
+                    .to_string(),
+                ))
+                .expect("url-encoded href progression request should build"),
+        )
+        .await
+        .expect("url-encoded href progression request should complete");
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_book_progression_put_normalizes_epub_locator_from_matching_position() {
     let paths = new_router_fixture("router-book-progression-put-epub-normalizes-locator").await;
     seed_router_contract_data(&paths).await;
@@ -824,6 +889,72 @@ async fn router_book_progression_put_uses_total_progression_to_round_epub_page()
     .fetch_one(&verify_pool)
     .await
     .expect("page-rounding progression row should be queryable");
+    verify_pool.close().await;
+    assert_eq!(progression_row.get::<i64, _>("PAGE"), 2);
+    assert!(!progression_row.get::<bool, _>("COMPLETED"));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_progression_put_ignores_epub_locator_position_when_persisting_page() {
+    let paths =
+        new_router_fixture("router-book-progression-put-epub-ignores-locator-position").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for epub conflicting-position seed");
+    sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
+        .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
+        .bind(fixture_epub_positions_extension_blob_total_progression_021())
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("epub extension positions should be seeded for conflicting-position test");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let progression = json!({
+        "modified": "2024-01-04T05:06:07Z",
+        "device": { "id": "reader-9", "name": "Kobo Libra" },
+        "locator": {
+            "href": "/book-1.xhtml#frag",
+            "type": "",
+            "locations": {
+                "position": 9,
+                "progression": 0.5
+            }
+        }
+    });
+
+    let put_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/books/book-1/progression")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(progression.to_string()))
+                .expect("epub conflicting-position put request should build"),
+        )
+        .await
+        .expect("epub conflicting-position put request should complete");
+    assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
+
+    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for conflicting-position verification");
+    let progression_row = sqlx::query(
+        "SELECT PAGE, COMPLETED FROM READ_PROGRESS WHERE BOOK_ID = ? AND USER_ID = ? LIMIT 1",
+    )
+    .bind("book-1")
+    .bind("admin-user")
+    .fetch_one(&verify_pool)
+    .await
+    .expect("conflicting-position progression row should be queryable");
     verify_pool.close().await;
     assert_eq!(progression_row.get::<i64, _>("PAGE"), 2);
     assert!(!progression_row.get::<bool, _>("COMPLETED"));

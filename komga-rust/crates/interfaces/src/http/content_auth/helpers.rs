@@ -1,5 +1,8 @@
 #![allow(clippy::result_large_err)]
 
+use std::cmp::Ordering;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use super::*;
 use komga_application::identity_access::random_uuid_like;
 
@@ -27,6 +30,39 @@ pub(super) struct AgeRestrictionPatch {
 
 pub(super) fn bad_request(message: &str) -> Response {
     (StatusCode::BAD_REQUEST, Json(json!({ "message": message }))).into_response()
+}
+
+pub(super) fn validation_error(field_name: &str, message: &str) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(json!({
+            "violations": [
+                {
+                    "fieldName": field_name,
+                    "message": message,
+                }
+            ]
+        })),
+    )
+        .into_response()
+}
+
+pub(super) fn spring_error(status: StatusCode, message: &str, path: &str) -> Response {
+    let reason = status.canonical_reason().unwrap_or("Error");
+    (
+        status,
+        Json(json!({
+            "error": reason,
+            "message": message,
+            "path": path,
+            "status": status.as_u16(),
+            "timestamp": SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis(),
+        })),
+    )
+        .into_response()
 }
 
 pub(super) fn generated_user_id() -> String {
@@ -248,44 +284,91 @@ pub(super) async fn authenticated_user(
     }
 }
 
+#[derive(Clone, Copy)]
+enum AuthenticationActivitySortDirection {
+    Asc,
+    Desc,
+}
+
+struct AuthenticationActivitySortOrder<'a> {
+    field: &'a str,
+    direction: AuthenticationActivitySortDirection,
+}
+
 pub(super) fn authentication_activity_page_payload(
-    rows: Vec<PersistedAuthenticationActivity>,
-    unpaged: bool,
+    mut rows: Vec<PersistedAuthenticationActivity>,
+    query: &str,
 ) -> Value {
-    let content = rows
+    let unpaged = query_bool(query, "unpaged");
+    let page = query_value(query, "page")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
+    let requested_size = query_value(query, "size")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(20)
+        .max(1);
+    let sort_orders = authentication_activity_sort_orders(query);
+
+    rows.sort_by(|left, right| compare_authentication_activity(left, right, &sort_orders));
+
+    let total_elements = rows.len();
+    let page_size = if unpaged {
+        total_elements.max(20)
+    } else {
+        requested_size
+    };
+    let offset = if unpaged {
+        0
+    } else {
+        page.saturating_mul(page_size)
+    };
+    let page_rows = if unpaged {
+        rows
+    } else if offset >= total_elements {
+        vec![]
+    } else {
+        rows.into_iter()
+            .skip(offset)
+            .take(page_size)
+            .collect::<Vec<_>>()
+    };
+
+    let content = page_rows
         .iter()
         .map(authentication_activity_payload)
         .collect::<Vec<_>>();
-    let number_of_elements = content.len() as u64;
-    let page_size = if unpaged { number_of_elements } else { 20 };
-    let total_pages = if unpaged {
-        1
-    } else if number_of_elements == 0 {
+    let number_of_elements = content.len();
+    let total_pages = if total_elements == 0 {
         0
+    } else if unpaged {
+        1
     } else {
-        number_of_elements.div_ceil(page_size)
+        total_elements.div_ceil(page_size)
     };
+    let page_number = if unpaged { 0 } else { page };
+    let first = page_number == 0;
+    let last = total_pages == 0 || page_number + 1 >= total_pages;
 
     json!({
         "content": content,
         "pageable": {
-            "pageNumber": 0,
+            "pageNumber": page_number,
             "pageSize": page_size,
             "sort": {
                 "empty": false,
                 "sorted": true,
                 "unsorted": false
             },
-            "offset": 0,
+            "offset": if unpaged { 0 } else { offset },
             "paged": !unpaged,
             "unpaged": unpaged
         },
-        "last": true,
-        "totalElements": number_of_elements,
+        "last": last,
+        "totalElements": total_elements,
         "totalPages": total_pages,
-        "first": true,
+        "first": first,
         "size": page_size,
-        "number": 0,
+        "number": page_number,
         "sort": {
             "empty": false,
             "sorted": true,
@@ -294,6 +377,65 @@ pub(super) fn authentication_activity_page_payload(
         "numberOfElements": number_of_elements,
         "empty": number_of_elements == 0
     })
+}
+
+fn authentication_activity_sort_orders(query: &str) -> Vec<AuthenticationActivitySortOrder<'_>> {
+    let sorts = crate::http::helpers::query_values(query, "sort");
+    let mut orders = sorts
+        .into_iter()
+        .filter_map(|value| {
+            let mut parts = value.split(',');
+            let field = parts.next()?.trim();
+            if field.is_empty() {
+                return None;
+            }
+            let direction = match parts.next().map(str::trim) {
+                Some(value) if value.eq_ignore_ascii_case("asc") => {
+                    AuthenticationActivitySortDirection::Asc
+                }
+                _ => AuthenticationActivitySortDirection::Desc,
+            };
+            Some(AuthenticationActivitySortOrder { field, direction })
+        })
+        .collect::<Vec<_>>();
+    if orders.is_empty() {
+        orders.push(AuthenticationActivitySortOrder {
+            field: "dateTime",
+            direction: AuthenticationActivitySortDirection::Desc,
+        });
+    }
+    orders
+}
+
+fn compare_authentication_activity(
+    left: &PersistedAuthenticationActivity,
+    right: &PersistedAuthenticationActivity,
+    sort_orders: &[AuthenticationActivitySortOrder<'_>],
+) -> Ordering {
+    for sort in sort_orders {
+        let ordering = match sort.field {
+            "dateTime" => left.date_time().cmp(right.date_time()),
+            "email" => left.email().cmp(&right.email()),
+            "userId" => left.user_id().cmp(&right.user_id()),
+            "ip" => left.ip().cmp(&right.ip()),
+            "userAgent" => left.user_agent().cmp(&right.user_agent()),
+            "success" => left.success().cmp(&right.success()),
+            "error" => left.error().cmp(&right.error()),
+            "source" => left.source().cmp(&right.source()),
+            "apiKeyId" => left.api_key_id().cmp(&right.api_key_id()),
+            "apiKeyComment" => left.api_key_comment().cmp(&right.api_key_comment()),
+            _ => Ordering::Equal,
+        };
+        let ordering = match sort.direction {
+            AuthenticationActivitySortDirection::Asc => ordering,
+            AuthenticationActivitySortDirection::Desc => ordering.reverse(),
+        };
+        if ordering != Ordering::Equal {
+            return ordering;
+        }
+    }
+
+    Ordering::Equal
 }
 
 pub(super) fn authentication_activity_payload(activity: &PersistedAuthenticationActivity) -> Value {
@@ -311,7 +453,7 @@ pub(super) fn authentication_activity_payload(activity: &PersistedAuthentication
     })
 }
 
-fn sqlite_datetime_to_utc(value: &str) -> String {
+pub(super) fn sqlite_datetime_to_utc(value: &str) -> String {
     if value.ends_with('Z') || value.contains('T') {
         value.to_string()
     } else if let Some((date, time)) = value.split_once(' ') {

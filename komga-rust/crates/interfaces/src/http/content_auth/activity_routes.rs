@@ -11,6 +11,9 @@ pub(crate) async fn users_me_api_keys_create(
     let Some(comment) = api_key_comment_from_request(&body) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
+    if auth_db.demo_mode && !user_is_admin(&current_user) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
 
     match persisted_api_key_comment_exists(&auth_db.database_file, user_id(&current_user), &comment)
         .await
@@ -40,6 +43,8 @@ pub(crate) async fn users_me_api_keys_create(
                 "userId": api_key.user_id(),
                 "key": api_key.key(),
                 "comment": api_key.comment(),
+                "createdDate": api_key.created_date().map(sqlite_datetime_to_utc),
+                "lastModifiedDate": api_key.last_modified_date().map(sqlite_datetime_to_utc),
             })),
         )
             .into_response(),
@@ -54,6 +59,9 @@ pub(crate) async fn users_me_api_keys_list(
     let Some(current_user) = authenticated_user(&headers, &auth_db).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
+    if auth_db.demo_mode && !user_is_admin(&current_user) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
 
     let api_keys = persisted_list_api_keys(&auth_db.database_file, user_id(&current_user))
         .await
@@ -68,6 +76,8 @@ pub(crate) async fn users_me_api_keys_list(
                     "userId": api_key.user_id(),
                     "key": api_key.key(),
                     "comment": api_key.comment(),
+                    "createdDate": api_key.created_date().map(sqlite_datetime_to_utc),
+                    "lastModifiedDate": api_key.last_modified_date().map(sqlite_datetime_to_utc),
                 })
             })
             .collect::<Vec<_>>(),
@@ -105,16 +115,20 @@ pub(crate) async fn users_me_authentication_activity(
     let Some(current_user) = authenticated_user(&headers, &auth_db).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
+    if auth_db.demo_mode && !user_is_admin(&current_user) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
 
-    let unpaged = query_bool(uri.query().unwrap_or_default(), "unpaged");
-    let rows = persisted_list_authentication_activity(
-        &auth_db.database_file,
-        Some(user_id(&current_user)),
-    )
-    .await
-    .unwrap_or_default();
+    let query = uri.query().unwrap_or_default();
+    let mut rows = persisted_list_authentication_activity(&auth_db.database_file, None)
+        .await
+        .unwrap_or_default();
+    rows.retain(|activity| {
+        activity.user_id.as_deref() == Some(user_id(&current_user))
+            || activity.email.as_deref() == Some(current_user.email.as_str())
+    });
 
-    Json(authentication_activity_page_payload(rows, unpaged)).into_response()
+    Json(authentication_activity_page_payload(rows, query)).into_response()
 }
 
 pub(crate) async fn users_authentication_activity(
@@ -129,12 +143,12 @@ pub(crate) async fn users_authentication_activity(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    let unpaged = query_bool(uri.query().unwrap_or_default(), "unpaged");
+    let query = uri.query().unwrap_or_default();
     let rows = persisted_list_authentication_activity(&auth_db.database_file, None)
         .await
         .unwrap_or_default();
 
-    Json(authentication_activity_page_payload(rows, unpaged)).into_response()
+    Json(authentication_activity_page_payload(rows, query)).into_response()
 }
 
 pub(crate) async fn users_by_id_authentication_activity_latest(

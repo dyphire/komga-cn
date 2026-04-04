@@ -145,6 +145,44 @@ async fn router_opds_v1_series_search_feed_uses_search_title_for_non_blank_searc
 }
 
 #[tokio::test]
+async fn router_opds_v1_search_uses_acquisition_type_and_utf8_encodings() {
+    let paths = new_router_fixture("router-opds-v1-search-opensearch-shape").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v1.2/search")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v1 search request should build"),
+        )
+        .await
+        .expect("opds v1 search request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(
+        body.contains("application/atom+xml;profile=opds-catalog;kind=acquisition"),
+        "OPDS v1 search must use acquisition kind in OpenSearch Url, body={body}"
+    );
+    assert!(
+        body.contains("<InputEncoding>UTF-8</InputEncoding>"),
+        "OPDS v1 search must include InputEncoding UTF-8, body={body}"
+    );
+    assert!(
+        body.contains("<OutputEncoding>UTF-8</OutputEncoding>"),
+        "OPDS v1 search must include OutputEncoding UTF-8, body={body}"
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_opds_v1_series_blank_search_behaves_as_unfiltered_series_feed() {
     let paths = new_router_fixture("router-opds-v1-series-blank-search").await;
     seed_router_contract_data(&paths).await;

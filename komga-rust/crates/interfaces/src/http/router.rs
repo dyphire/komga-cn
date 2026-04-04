@@ -1,6 +1,6 @@
-use axum::Router;
 use axum::middleware;
 use axum::routing::{delete, get, patch, post, put};
+use axum::Router;
 
 use crate::http::cache;
 use crate::http::discovery_auth::DiscoveryAuthState;
@@ -543,7 +543,10 @@ pub fn build_router(
         )
         .route("/opds/v1.2/books/{book_id}/thumbnail", get(media_assets::book_thumbnail))
         .route("/opds/v1.2/books/{book_id}/thumbnail/small", get(media_assets::book_thumbnail))
-        .route("/opds/v1.2/books/{book_id}/pages/{page_number}", get(media_assets::book_page))
+        .route(
+            "/opds/v1.2/books/{book_id}/pages/{page_number}",
+            get(media_assets::book_page_opds_v1),
+        )
         .route("/opds/v2/auth", get(opds::opds_auth_route))
         .route("/opds/v2/catalog", get(opds::opds_catalog_route))
         .route("/opds/v2/libraries", get(opds::opds_v2_libraries_route))

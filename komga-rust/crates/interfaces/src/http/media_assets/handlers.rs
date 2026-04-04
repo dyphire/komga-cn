@@ -14,7 +14,9 @@ pub use super::operations::{
     book_metadata_update, books_thumbnails_regenerate, series_analyze, series_file_delete,
     series_metadata_refresh,
 };
-pub use super::pages::{book_page, book_page_raw, book_page_thumbnail, book_pages, book_positions};
+pub use super::pages::{
+    book_page, book_page_opds_v1, book_page_raw, book_page_thumbnail, book_pages, book_positions,
+};
 pub use super::read_progress::{
     book_progression, book_progression_get, book_read_progress, book_read_progress_delete,
     readlist_tachiyomi_read_progress_get, readlist_tachiyomi_read_progress_put,

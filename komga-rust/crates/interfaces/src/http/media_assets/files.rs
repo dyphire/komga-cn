@@ -244,6 +244,13 @@ async fn book_file_response(
     if let Ok(Some(media)) =
         load_persisted_book_media(auth_db.database_file.as_path(), book_id).await
     {
+        if let Some(user) = resolved_auth_user(headers)
+            && !user_can_access_book_media(auth_db.database_file.as_path(), book_id, &user, &media)
+                .await
+        {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+
         let Some(body) = read_media_file_bytes(&media.file_path) else {
             return (
                 StatusCode::NOT_FOUND,
@@ -251,13 +258,6 @@ async fn book_file_response(
             )
                 .into_response();
         };
-
-        if let Some(user) = resolved_auth_user(headers)
-            && !user_can_access_book_media(auth_db.database_file.as_path(), book_id, &user, &media)
-                .await
-        {
-            return StatusCode::FORBIDDEN.into_response();
-        }
 
         let content_type = content_type_from_filename(&media.file_name, &media.media_type);
         let content_disposition = attachment_disposition(&media.file_name);

@@ -44,6 +44,30 @@ pub async fn load_persisted_book_media(
     }))
 }
 
+pub async fn load_persisted_book_media_files(
+    database_file: &Path,
+    book_id: &str,
+) -> Result<Vec<String>, String> {
+    if !database_file.exists() {
+        return Ok(Vec::new());
+    }
+
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("open book media files db: {error}"))?;
+
+    sqlx::query("SELECT FILE_NAME FROM MEDIA_FILE WHERE BOOK_ID = ? ORDER BY FILE_NAME ASC")
+        .bind(book_id)
+        .fetch_all(&pool)
+        .await
+        .map_err(|error| format!("query persisted book media files: {error}"))
+        .map(|rows| {
+            rows.into_iter()
+                .map(|row| row.get::<String, _>("FILE_NAME"))
+                .collect()
+        })
+}
+
 pub async fn book_media_is_ready_status(
     database_file: &Path,
     book_id: &str,

@@ -79,6 +79,7 @@ pub(super) fn default_test_backend() -> MediaAssetsRuntimeAccessBackend {
                 .map(|metadata| metadata.len().min(i64::MAX as u64) as i64)
         }),
         load_persisted_book_media: Arc::new(|_, _| Box::pin(async { Ok(None) })),
+        load_persisted_book_media_files: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),
         book_media_is_ready_status: Arc::new(|_, _| Box::pin(async { Ok(false) })),
         load_persisted_series_thumbnail_media: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         load_persisted_book_pages: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),
@@ -172,7 +173,7 @@ pub(super) fn default_test_backend() -> MediaAssetsRuntimeAccessBackend {
         persisted_collection_exists: Arc::new(|_, _| Box::pin(async { Ok(false) })),
         load_series_book_number_sorts: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),
         load_book_page_count: Arc::new(|_, _| Box::pin(async { Ok(None) })),
-        persist_book_progression: Arc::new(|_, _, _, _, _, _, _, _| Box::pin(async { Ok(()) })),
+        persist_book_progression: Arc::new(|_, _, _, _, _, _, _, _, _| Box::pin(async { Ok(()) })),
     }
 }
 

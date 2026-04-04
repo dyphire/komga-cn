@@ -64,6 +64,12 @@ pub struct UpdateAuthUserInput {
     pub age_restriction: Option<Option<AuthUserAgeRestrictionInput>>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpdateAuthUserResult {
+    pub updated: bool,
+    pub expire_sessions: bool,
+}
+
 #[derive(Clone)]
 pub struct KoreaderBookTarget {
     pub id: String,

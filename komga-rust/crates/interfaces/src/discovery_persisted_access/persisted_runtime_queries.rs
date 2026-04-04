@@ -16,8 +16,9 @@ pub async fn load_persisted_duplicate_books(
 pub async fn load_persisted_book_tags(
     database_file: &FsPath,
     scope: Option<&PersistedBookTagsScope>,
+    authorized_library_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
-    persisted_backend_load_persisted_book_tags(database_file, scope).await
+    persisted_backend_load_persisted_book_tags(database_file, scope, authorized_library_ids).await
 }
 
 pub async fn persisted_utc_date_minus_days(

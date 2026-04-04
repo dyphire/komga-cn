@@ -16,28 +16,39 @@ pub(crate) async fn load_persisted_duplicate_books(
 pub(crate) async fn load_persisted_book_tags(
     database_file: &FsPath,
     scope: Option<&PersistedBookTagsScope>,
+    authorized_library_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
-    persisted_runtime_queries::load_persisted_book_tags(database_file, scope).await
+    persisted_runtime_queries::load_persisted_book_tags(
+        database_file,
+        scope,
+        authorized_library_ids,
+    )
+    .await
 }
 
 pub(crate) async fn load_persisted_author_names(
     database_file: &FsPath,
     search: &str,
+    authorized_library_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
-    authors_queries::load_persisted_author_names(database_file, search).await
+    authors_queries::load_persisted_author_names(database_file, search, authorized_library_ids)
+        .await
 }
 
 pub(crate) async fn load_persisted_author_roles(
     database_file: &FsPath,
+    authorized_library_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
-    authors_queries::load_persisted_author_roles(database_file).await
+    authors_queries::load_persisted_author_roles(database_file, authorized_library_ids).await
 }
 
 pub(crate) async fn load_persisted_authors_by_scope(
     database_file: &FsPath,
     scope: &PersistedAuthorsScope,
+    authorized_library_ids: Option<&[String]>,
 ) -> Result<Vec<PersistedAuthorEntry>, String> {
-    authors_queries::load_persisted_authors_by_scope(database_file, scope).await
+    authors_queries::load_persisted_authors_by_scope(database_file, scope, authorized_library_ids)
+        .await
 }
 
 pub(crate) async fn load_persisted_series_tags(
@@ -93,7 +104,7 @@ pub(crate) async fn load_persisted_age_ratings(
     database_file: &FsPath,
     library_ids: Option<&[String]>,
     collection_id: Option<&str>,
-) -> Result<Vec<u16>, String> {
+) -> Result<Vec<String>, String> {
     facets_queries::load_persisted_age_ratings(database_file, library_ids, collection_id).await
 }
 

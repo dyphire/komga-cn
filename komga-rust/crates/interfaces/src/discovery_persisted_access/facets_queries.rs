@@ -36,7 +36,7 @@ pub async fn load_persisted_age_ratings(
     database_file: &FsPath,
     library_ids: Option<&[String]>,
     collection_id: Option<&str>,
-) -> Result<Vec<u16>, String> {
+) -> Result<Vec<String>, String> {
     persisted_backend_load_persisted_age_ratings(database_file, library_ids, collection_id).await
 }
 

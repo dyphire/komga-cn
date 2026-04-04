@@ -74,82 +74,92 @@ use filters::*;
 use persisted::*;
 
 pub(super) async fn authors_route(
+    Extension(auth_state): Extension<DiscoveryAuthState>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    authors(headers, uri, auth_db.database_file.as_path()).await
+    authors(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn authors_names_route(
+    Extension(auth_state): Extension<DiscoveryAuthState>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    authors_names(headers, uri, auth_db.database_file.as_path()).await
+    authors_names(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn authors_roles_route(
+    Extension(auth_state): Extension<DiscoveryAuthState>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
 ) -> Response {
-    authors_roles(headers, auth_db.database_file.as_path()).await
+    authors_roles(headers, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn genres_route(
+    Extension(auth_state): Extension<DiscoveryAuthState>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    genres(headers, uri, auth_db.database_file.as_path()).await
+    genres(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn tags_route(
+    Extension(auth_state): Extension<DiscoveryAuthState>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    tags(headers, uri, auth_db.database_file.as_path()).await
+    tags(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn series_tags_route(
+    Extension(auth_state): Extension<DiscoveryAuthState>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    series_tags(headers, uri, auth_db.database_file.as_path()).await
+    series_tags(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn languages_route(
+    Extension(auth_state): Extension<DiscoveryAuthState>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    languages(headers, uri, auth_db.database_file.as_path()).await
+    languages(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn publishers_route(
+    Extension(auth_state): Extension<DiscoveryAuthState>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    publishers(headers, uri, auth_db.database_file.as_path()).await
+    publishers(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn age_ratings_route(
+    Extension(auth_state): Extension<DiscoveryAuthState>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    age_ratings(headers, uri, auth_db.database_file.as_path()).await
+    age_ratings(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn sharing_labels_route(
+    Extension(auth_state): Extension<DiscoveryAuthState>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    sharing_labels(headers, uri, auth_db.database_file.as_path()).await
+    sharing_labels(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn series_route(
@@ -180,11 +190,12 @@ pub(super) async fn series_updated_route(
 }
 
 pub(super) async fn series_release_dates_route(
+    Extension(auth_state): Extension<DiscoveryAuthState>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    series_release_dates(headers, uri, auth_db.database_file.as_path()).await
+    series_release_dates(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn series_latest_route(
@@ -253,9 +264,10 @@ pub(super) async fn series_alphabetical_groups_route(
 }
 
 pub(super) async fn authors_v2_route(
+    Extension(auth_state): Extension<DiscoveryAuthState>,
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    authors_v2(headers, uri, auth_db.database_file.as_path()).await
+    authors_v2(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }

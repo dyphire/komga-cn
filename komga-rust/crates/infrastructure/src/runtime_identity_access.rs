@@ -22,7 +22,7 @@ pub use backend_contract::{
     AuthUserAgeRestrictionInput, BoxFuture, CreateAuthUserInput, KoboMetadataRecord,
     KoreaderBookLookupError, KoreaderBookTarget, PersistedBookMediaFile,
     PersistedReadProgressRecord, RuntimeIdentityAccessBackend, SharedLibrariesInput,
-    UpdateAuthUserInput,
+    UpdateAuthUserInput, UpdateAuthUserResult,
 };
 pub use backend_state::install_runtime_identity_access;
 pub use kobo_access::{

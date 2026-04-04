@@ -51,7 +51,7 @@ async fn fetch_persisted_series_summary_rows(
                   CAST(s.FILE_LAST_MODIFIED AS TEXT) AS FILE_LAST_MODIFIED,
                   s.BOOK_COUNT,
                   s.DELETED_DATE,
-                  s.ONESHOT,
+                  CAST(COALESCE(s.ONESHOT, 0) AS INTEGER) AS ONESHOT,
                   COALESCE(sm.TITLE, s.NAME) AS TITLE,
                   COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) AS TITLE_SORT,
                   COALESCE(sm.STATUS, 'ONGOING') AS STATUS,
@@ -181,15 +181,7 @@ fn map_series_summary(row: sqlx::sqlite::SqliteRow) -> SeriesSummary {
         books_metadata_created: row.get::<String, _>("BOOKS_METADATA_CREATED"),
         books_metadata_last_modified: row.get::<String, _>("BOOKS_METADATA_LAST_MODIFIED"),
         deleted: row.get::<Option<String>, _>("DELETED_DATE").is_some(),
-        oneshot: row
-            .try_get::<bool, _>("ONESHOT")
-            .ok()
-            .or_else(|| {
-                row.try_get::<i64, _>("ONESHOT")
-                    .ok()
-                    .map(|value| value != 0)
-            })
-            .unwrap_or(false),
+        oneshot: row.get::<i64, _>("ONESHOT") != 0,
     }
 }
 

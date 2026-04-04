@@ -5,7 +5,9 @@ use komga_application::identity_access::AuthUser;
 use sqlx::Row;
 
 use super::auth_access::persisted_users;
-use super::backend_contract::{CreateAuthUserInput, SharedLibrariesInput, UpdateAuthUserInput};
+use super::backend_contract::{
+    CreateAuthUserInput, SharedLibrariesInput, UpdateAuthUserInput, UpdateAuthUserResult,
+};
 use crate::sqlite::connect_pool;
 
 pub async fn create_auth_user(
@@ -29,6 +31,10 @@ pub async fn create_auth_user(
         resolve_shared_libraries(&mut tx, input.shared_libraries.clone()).await?;
     let age = input.age_restriction.as_ref().map(|value| value.age);
     let allow_only = input.age_restriction.as_ref().map(|value| value.allow_only);
+    let (labels_allow, labels_exclude) = normalize_content_restriction_labels((
+        input.labels_allow.clone(),
+        input.labels_exclude.clone(),
+    ));
 
     sqlx::query(
         "INSERT INTO USER (ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES, AGE_RESTRICTION, AGE_RESTRICTION_ALLOW_ONLY) \
@@ -63,7 +69,7 @@ pub async fn create_auth_user(
         }
     }
 
-    for label in &input.labels_allow {
+    for label in &labels_allow {
         sqlx::query("INSERT OR IGNORE INTO USER_SHARING (LABEL, ALLOW, USER_ID) VALUES (?, ?, ?)")
             .bind(label)
             .bind(true)
@@ -71,7 +77,7 @@ pub async fn create_auth_user(
             .execute(&mut *tx)
             .await?;
     }
-    for label in &input.labels_exclude {
+    for label in &labels_exclude {
         sqlx::query("INSERT OR IGNORE INTO USER_SHARING (LABEL, ALLOW, USER_ID) VALUES (?, ?, ?)")
             .bind(label)
             .bind(false)
@@ -164,7 +170,7 @@ pub async fn update_auth_user(
     database_file: &Path,
     target_user_id: &str,
     patch: UpdateAuthUserInput,
-) -> Result<bool, sqlx::Error> {
+) -> Result<UpdateAuthUserResult, sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
     let mut tx = pool.begin().await?;
 
@@ -177,8 +183,17 @@ pub async fn update_auth_user(
     .await?
     else {
         tx.rollback().await?;
-        return Ok(false);
+        return Ok(UpdateAuthUserResult {
+            updated: false,
+            expire_sessions: false,
+        });
     };
+
+    let current_roles = load_user_roles(&mut tx, target_user_id).await?;
+    let current_shared_library_ids = load_user_shared_library_ids(&mut tx, target_user_id).await?;
+    let (current_labels_allow, current_labels_exclude) = normalize_content_restriction_labels(
+        load_user_sharing_labels(&mut tx, target_user_id).await?,
+    );
 
     let shared_libraries_patch = if let Some(shared_libraries) = patch.shared_libraries.clone() {
         Some(resolve_shared_libraries(&mut tx, shared_libraries).await?)
@@ -194,10 +209,34 @@ pub async fn update_auth_user(
     let mut age_restriction = user_row.get::<Option<i64>, _>("AGE_RESTRICTION");
     let mut age_restriction_allow_only =
         user_row.get::<Option<bool>, _>("AGE_RESTRICTION_ALLOW_ONLY");
+    let current_age_restriction = age_restriction.zip(age_restriction_allow_only);
     if let Some(age_patch) = &patch.age_restriction {
         age_restriction = age_patch.as_ref().map(|value| value.age);
         age_restriction_allow_only = age_patch.as_ref().map(|value| value.allow_only);
     }
+
+    let new_roles = patch.roles.clone().unwrap_or_else(|| current_roles.clone());
+    let new_shared_library_ids = shared_libraries_patch
+        .as_ref()
+        .map(|shared_libraries| shared_libraries.library_ids.clone())
+        .unwrap_or_else(|| current_shared_library_ids.clone());
+    let (new_labels_allow, new_labels_exclude) = normalize_content_restriction_labels((
+        patch
+            .labels_allow
+            .clone()
+            .unwrap_or_else(|| current_labels_allow.clone()),
+        patch
+            .labels_exclude
+            .clone()
+            .unwrap_or_else(|| current_labels_exclude.clone()),
+    ));
+    let new_age_restriction = age_restriction.zip(age_restriction_allow_only);
+    let expire_sessions = current_roles != new_roles
+        || user_row.get::<bool, _>("SHARED_ALL_LIBRARIES") != shared_all_libraries
+        || current_shared_library_ids != new_shared_library_ids
+        || current_labels_allow != new_labels_allow
+        || current_labels_exclude != new_labels_exclude
+        || current_age_restriction != new_age_restriction;
 
     sqlx::query(
         "UPDATE USER \
@@ -243,17 +282,12 @@ pub async fn update_auth_user(
     }
 
     if patch.labels_allow.is_some() || patch.labels_exclude.is_some() {
-        let (existing_allow, existing_exclude) =
-            load_user_sharing_labels(&mut tx, target_user_id).await?;
-        let labels_allow = patch.labels_allow.unwrap_or(existing_allow);
-        let labels_exclude = patch.labels_exclude.unwrap_or(existing_exclude);
-
         sqlx::query("DELETE FROM USER_SHARING WHERE USER_ID = ?")
             .bind(target_user_id)
             .execute(&mut *tx)
             .await?;
 
-        for label in &labels_allow {
+        for label in &new_labels_allow {
             sqlx::query(
                 "INSERT OR IGNORE INTO USER_SHARING (LABEL, ALLOW, USER_ID) VALUES (?, ?, ?)",
             )
@@ -263,7 +297,7 @@ pub async fn update_auth_user(
             .execute(&mut *tx)
             .await?;
         }
-        for label in &labels_exclude {
+        for label in &new_labels_exclude {
             sqlx::query(
                 "INSERT OR IGNORE INTO USER_SHARING (LABEL, ALLOW, USER_ID) VALUES (?, ?, ?)",
             )
@@ -276,7 +310,60 @@ pub async fn update_auth_user(
     }
 
     tx.commit().await?;
-    Ok(true)
+    Ok(UpdateAuthUserResult {
+        updated: true,
+        expire_sessions,
+    })
+}
+
+fn normalize_content_restriction_labels(
+    (labels_allow, labels_exclude): (Vec<String>, Vec<String>),
+) -> (Vec<String>, Vec<String>) {
+    let labels_exclude = labels_exclude
+        .into_iter()
+        .map(|label| label.trim().to_lowercase())
+        .filter(|label| !label.is_empty())
+        .collect::<BTreeSet<_>>();
+    let labels_allow = labels_allow
+        .into_iter()
+        .map(|label| label.trim().to_lowercase())
+        .filter(|label| !label.is_empty())
+        .collect::<BTreeSet<_>>()
+        .difference(&labels_exclude)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    (labels_allow, labels_exclude.into_iter().collect())
+}
+
+async fn load_user_roles(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    user_id: &str,
+) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query("SELECT ROLE FROM USER_ROLE WHERE USER_ID = ? ORDER BY ROLE")
+        .bind(user_id)
+        .fetch_all(&mut **tx)
+        .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|row| row.get::<String, _>("ROLE"))
+                .collect()
+        })
+}
+
+async fn load_user_shared_library_ids(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    user_id: &str,
+) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query("SELECT LIBRARY_ID FROM USER_LIBRARY_SHARING WHERE USER_ID = ? ORDER BY LIBRARY_ID")
+        .bind(user_id)
+        .fetch_all(&mut **tx)
+        .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|row| row.get::<String, _>("LIBRARY_ID"))
+                .collect()
+        })
 }
 
 async fn resolve_shared_libraries(

@@ -3,19 +3,26 @@ use super::*;
 pub async fn load_persisted_author_names(
     database_file: &FsPath,
     search: &str,
+    authorized_library_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
-    persisted_backend_load_persisted_author_names(database_file, search).await
+    persisted_backend_load_persisted_author_names(database_file, search, authorized_library_ids)
+        .await
 }
 
-pub async fn load_persisted_author_roles(database_file: &FsPath) -> Result<Vec<String>, String> {
-    persisted_backend_load_persisted_author_roles(database_file).await
+pub async fn load_persisted_author_roles(
+    database_file: &FsPath,
+    authorized_library_ids: Option<&[String]>,
+) -> Result<Vec<String>, String> {
+    persisted_backend_load_persisted_author_roles(database_file, authorized_library_ids).await
 }
 
 pub async fn load_persisted_authors_by_scope(
     database_file: &FsPath,
     scope: &PersistedAuthorsScope,
+    authorized_library_ids: Option<&[String]>,
 ) -> Result<Vec<PersistedAuthorEntry>, String> {
-    persisted_backend_load_persisted_authors_by_scope(database_file, scope).await
+    persisted_backend_load_persisted_authors_by_scope(database_file, scope, authorized_library_ids)
+        .await
 }
 
 pub fn authors_v2_page_payload(
@@ -26,7 +33,7 @@ pub fn authors_v2_page_payload(
 ) -> Value {
     let total_elements = authors.len();
     let page_size = if unpaged {
-        total_elements.max(1)
+        total_elements.max(20)
     } else {
         size.max(1)
     };
@@ -67,21 +74,21 @@ pub fn authors_v2_page_payload(
         "totalElements": total_elements,
         "totalPages": total_pages,
         "sort": {
-            "empty": true,
-            "sorted": false,
-            "unsorted": true,
+            "empty": false,
+            "sorted": true,
+            "unsorted": false,
         },
         "pageable": {
             "pageNumber": number,
             "pageSize": page_size,
             "offset": if unpaged { 0 } else { offset },
             "sort": {
-                "empty": true,
-                "sorted": false,
-                "unsorted": true,
+                "empty": false,
+                "sorted": true,
+                "unsorted": false,
             },
-            "paged": !unpaged,
-            "unpaged": unpaged,
+            "paged": true,
+            "unpaged": false,
         },
     })
 }

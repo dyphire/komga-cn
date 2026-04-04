@@ -15,6 +15,7 @@ use super::types::{PersistedBookFeedItem, PersistedSeries};
 pub(super) struct OpdsV1NavigationEntry {
     pub id: String,
     pub title: String,
+    pub content: String,
     pub href_path: String,
     pub updated: Option<String>,
 }
@@ -27,6 +28,26 @@ pub(super) fn opds_v1_navigation_feed_response(
     entries: Vec<OpdsV1NavigationEntry>,
     pagination: Option<(usize, bool)>,
 ) -> Response {
+    opds_v1_navigation_feed_response_with_extra_links(
+        headers,
+        feed_id,
+        title,
+        self_path,
+        entries,
+        pagination,
+        &[],
+    )
+}
+
+pub(super) fn opds_v1_navigation_feed_response_with_extra_links(
+    headers: &HeaderMap,
+    feed_id: &str,
+    title: &str,
+    self_path: &str,
+    entries: Vec<OpdsV1NavigationEntry>,
+    pagination: Option<(usize, bool)>,
+    extra_links: &[String],
+) -> Response {
     let self_href = app_absolute_url(headers, self_path);
     let start_href = app_absolute_url(headers, "/opds/v1.2/catalog");
     let now = opds_now_timestamp();
@@ -38,6 +59,9 @@ pub(super) fn opds_v1_navigation_feed_response(
     body.push_str(format!("<updated>{}</updated><author><name>Komga</name><uri>https://github.com/gotson/komga</uri></author>", xml_escape(&now)).as_str());
     body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"self\" href=\"{}\"/>", xml_escape(&self_href)).as_str());
     body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"start\" href=\"{}\"/>", xml_escape(&start_href)).as_str());
+    for link in extra_links {
+        body.push_str(link.as_str());
+    }
     if let Some((page, has_next)) = pagination {
         if page > 0 {
             let previous_href = app_absolute_url(
@@ -62,10 +86,11 @@ pub(super) fn opds_v1_navigation_feed_response(
         let href = app_absolute_url(headers, entry.href_path.as_str());
         body.push_str(
             format!(
-                "<entry><title>{}</title><updated>{}</updated><id>{}</id><content></content><link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"subsection\" href=\"{}\"/></entry>",
+                "<entry><title>{}</title><updated>{}</updated><id>{}</id><content>{}</content><link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"subsection\" href=\"{}\"/></entry>",
                 xml_escape(&entry.title),
                 xml_escape(&entry_updated),
                 xml_escape(&entry.id),
+                xml_escape(&entry.content),
                 xml_escape(&href),
             )
             .as_str(),

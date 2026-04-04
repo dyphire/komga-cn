@@ -176,6 +176,45 @@ async fn router_book_file_wildcard_returns_not_found_with_message_when_file_is_m
 }
 
 #[tokio::test]
+async fn router_book_file_wildcard_returns_forbidden_for_restricted_user_even_when_file_is_missing()
+{
+    let paths = new_router_fixture("router-book-file-wildcard-restricted-missing-file").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_library_restricted_user(
+        &paths,
+        "member-user",
+        "member@example.org",
+        "router-contract-member-123",
+        &[],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let member_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "member@example.org",
+        "router-contract-member-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/file/book-1.epub")
+                .header("x-auth-token", &member_token)
+                .body(Body::empty())
+                .expect("restricted missing wildcard book file request should build"),
+        )
+        .await
+        .expect("restricted missing wildcard book file request should complete");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_koreader_progress_put_then_get_roundtrip() {
     let paths = new_router_fixture("router-koreader-progress-roundtrip").await;
     seed_router_contract_data(&paths).await;

@@ -21,6 +21,7 @@ pub struct BookBrowseEntry {
 }
 
 pub enum BookTagsScope {
+    All,
     Series(String),
     Libraries(Vec<String>),
     ReadList(String),

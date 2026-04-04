@@ -1,5 +1,17 @@
 use super::*;
 
+fn active_profiles_contain_demo(layered: &LayeredConfig, env: &BTreeMap<String, String>) -> bool {
+    env.get(SPRING_PROFILES_ACTIVE_ENV)
+        .cloned()
+        .or_else(|| read_string(layered, &["spring.profiles.active"]))
+        .is_some_and(|profiles| {
+            profiles
+                .split(',')
+                .map(str::trim)
+                .any(|profile| profile.eq_ignore_ascii_case("demo"))
+        })
+}
+
 pub(crate) fn resolve_with_env(
     cli: &RuntimeCli,
     env: &BTreeMap<String, String>,
@@ -69,10 +81,12 @@ pub(crate) fn resolve_with_env(
     let oauth2_clients = resolve_oauth2_clients_for_startup_slice(&layered, env);
 
     let writer_ownership_policy = resolve_writer_ownership_policy_for_startup_slice(cli, env)?;
+    let demo_mode = active_profiles_contain_demo(&layered, env);
 
     let config = RuntimeConfig {
         bind_address,
         mode,
+        demo_mode,
         runtime_profile,
         platform_profile,
         config_dir: Some(resolved_config_dir),

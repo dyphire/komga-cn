@@ -32,6 +32,42 @@ async fn router_opds_v1_catalog_route_returns_atom_feed() {
 }
 
 #[tokio::test]
+async fn router_opds_v1_catalog_includes_search_and_opds_v2_alternate_links() {
+    let paths = new_router_fixture("router-opds-v1-catalog-links").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v1.2/catalog")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v1 catalog links request should build"),
+        )
+        .await
+        .expect("opds v1 catalog links request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(
+        body.contains("rel=\"search\"") && body.contains("/opds/v1.2/search"),
+        "OPDS v1 catalog must include search link, body={body}"
+    );
+    assert!(
+        body.contains("rel=\"alternate\"")
+            && body.contains("type=\"application/opds+json\"")
+            && body.contains("/opds/v2/catalog"),
+        "OPDS v1 catalog must include OPDS v2 alternate link, body={body}"
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_opds_v1_libraries_unauthorized_includes_basic_challenge() {
     let paths = new_router_fixture("router-opds-v1-libraries-basic-challenge").await;
     seed_router_contract_data(&paths).await;

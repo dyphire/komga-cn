@@ -352,6 +352,10 @@ pub(super) fn compose_runtime_identity_access_backend() -> RuntimeIdentityAccess
                     },
                 )
                 .await
+                .map(|result| komga_interfaces::UpdateAuthUserResult {
+                    updated: result.updated,
+                    expire_sessions: result.expire_sessions,
+                })
             })
         }),
         open_auth_pool: Arc::new(|database_file| {

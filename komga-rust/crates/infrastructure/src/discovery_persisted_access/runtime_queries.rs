@@ -92,27 +92,58 @@ pub async fn load_persisted_duplicate_books(
 pub async fn load_persisted_book_tags(
     database_file: &FsPath,
     scope: Option<&BookTagsScope>,
+    authorized_library_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
     let Some(scope) = scope else {
         return Ok(vec![]);
     };
+
+    if let Some(authorized_library_ids) = authorized_library_ids
+        && authorized_library_ids.is_empty()
+    {
+        return Ok(vec![]);
+    }
 
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(|error| format!("open book tags db: {error}"))?;
 
     let rows = match scope {
+        BookTagsScope::All => {
+            let mut query = QueryBuilder::<Sqlite>::new(
+                "SELECT bt.TAG \
+                 FROM BOOK_METADATA_TAG bt \
+                 JOIN BOOK b ON b.ID = bt.BOOK_ID",
+            );
+            if let Some(authorized_library_ids) = authorized_library_ids.filter(|ids| !ids.is_empty()) {
+                query.push(" WHERE b.LIBRARY_ID IN (");
+                let mut separated = query.separated(",");
+                for library_id in authorized_library_ids {
+                    separated.push_bind(library_id);
+                }
+                separated.push_unseparated(")");
+            }
+            query.push(" ORDER BY lower(bt.TAG), bt.TAG, b.ID");
+            query.build().fetch_all(&pool).await
+        }
         BookTagsScope::Series(series_id) => {
-            sqlx::query(
+            let mut query = QueryBuilder::<Sqlite>::new(
                 "SELECT bt.TAG \
                  FROM BOOK_METADATA_TAG bt \
                  JOIN BOOK b ON b.ID = bt.BOOK_ID \
-                 WHERE b.SERIES_ID = ? \
-                 ORDER BY lower(bt.TAG), bt.TAG, b.ID",
-            )
-            .bind(series_id)
-            .fetch_all(&pool)
-            .await
+                 WHERE b.SERIES_ID = ",
+            );
+            query.push_bind(series_id);
+            if let Some(authorized_library_ids) = authorized_library_ids.filter(|ids| !ids.is_empty()) {
+                query.push(" AND b.LIBRARY_ID IN (");
+                let mut separated = query.separated(",");
+                for library_id in authorized_library_ids {
+                    separated.push_bind(library_id);
+                }
+                separated.push_unseparated(")");
+            }
+            query.push(" ORDER BY lower(bt.TAG), bt.TAG, b.ID");
+            query.build().fetch_all(&pool).await
         }
         BookTagsScope::Libraries(library_ids) => {
             let mut query = QueryBuilder::<Sqlite>::new(
@@ -125,21 +156,37 @@ pub async fn load_persisted_book_tags(
             for library_id in library_ids {
                 separated.push_bind(library_id);
             }
-            separated.push_unseparated(") ORDER BY lower(bt.TAG), bt.TAG, b.ID");
+            separated.push_unseparated(")");
+            if let Some(authorized_library_ids) = authorized_library_ids.filter(|ids| !ids.is_empty()) {
+                query.push(" AND b.LIBRARY_ID IN (");
+                let mut separated = query.separated(",");
+                for library_id in authorized_library_ids {
+                    separated.push_bind(library_id);
+                }
+                separated.push_unseparated(")");
+            }
+            query.push(" ORDER BY lower(bt.TAG), bt.TAG, b.ID");
             query.build().fetch_all(&pool).await
         }
         BookTagsScope::ReadList(readlist_id) => {
-            sqlx::query(
+            let mut query = QueryBuilder::<Sqlite>::new(
                 "SELECT bt.TAG \
                  FROM BOOK_METADATA_TAG bt \
                  JOIN BOOK b ON b.ID = bt.BOOK_ID \
                  JOIN READLIST_BOOK rb ON rb.BOOK_ID = b.ID \
-                 WHERE rb.READLIST_ID = ? \
-                 ORDER BY lower(bt.TAG), bt.TAG, b.ID",
-            )
-            .bind(readlist_id)
-            .fetch_all(&pool)
-            .await
+                 WHERE rb.READLIST_ID = ",
+            );
+            query.push_bind(readlist_id);
+            if let Some(authorized_library_ids) = authorized_library_ids.filter(|ids| !ids.is_empty()) {
+                query.push(" AND b.LIBRARY_ID IN (");
+                let mut separated = query.separated(",");
+                for library_id in authorized_library_ids {
+                    separated.push_bind(library_id);
+                }
+                separated.push_unseparated(")");
+            }
+            query.push(" ORDER BY lower(bt.TAG), bt.TAG, b.ID");
+            query.build().fetch_all(&pool).await
         }
     }
     .map_err(|error| format!("query persisted book tags: {error}"))?;

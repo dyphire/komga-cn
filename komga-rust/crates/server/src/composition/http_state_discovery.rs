@@ -725,51 +725,59 @@ pub(super) fn compose_persisted_discovery_access_backend(
 
     let lucene_data_directory = lucene_data_directory.to_path_buf();
     PersistedDiscoveryAccessBackend {
-        load_persisted_author_names: Arc::new(|database_file, search| {
+        load_persisted_author_names: Arc::new(|database_file, search, authorized_library_ids| {
             Box::pin(async move {
                 infrastructure_discovery::load_persisted_author_names(
                     database_file.as_path(),
                     &search,
+                    authorized_library_ids.as_deref(),
                 )
                 .await
             })
         }),
-        load_persisted_author_roles: Arc::new(|database_file| {
+        load_persisted_author_roles: Arc::new(|database_file, authorized_library_ids| {
             Box::pin(async move {
-                infrastructure_discovery::load_persisted_author_roles(database_file.as_path()).await
-            })
-        }),
-        load_persisted_authors_by_scope: Arc::new(|database_file, scope| {
-            Box::pin(async move {
-                let mapped_scope = match scope {
-                    PersistedAuthorsScope::All => infrastructure_discovery::AuthorsScope::All,
-                    PersistedAuthorsScope::Libraries(ids) => {
-                        infrastructure_discovery::AuthorsScope::Libraries(ids)
-                    }
-                    PersistedAuthorsScope::Collection(id) => {
-                        infrastructure_discovery::AuthorsScope::Collection(id)
-                    }
-                    PersistedAuthorsScope::Series(id) => {
-                        infrastructure_discovery::AuthorsScope::Series(id)
-                    }
-                    PersistedAuthorsScope::ReadList(id) => {
-                        infrastructure_discovery::AuthorsScope::ReadList(id)
-                    }
-                };
-                let rows = infrastructure_discovery::load_persisted_authors_by_scope(
+                infrastructure_discovery::load_persisted_author_roles(
                     database_file.as_path(),
-                    &mapped_scope,
+                    authorized_library_ids.as_deref(),
                 )
-                .await?;
-                Ok(rows
-                    .into_iter()
-                    .map(|row| PersistedAuthorEntry {
-                        name: row.name,
-                        role: row.role,
-                    })
-                    .collect())
+                .await
             })
         }),
+        load_persisted_authors_by_scope: Arc::new(
+            |database_file, scope, authorized_library_ids| {
+                Box::pin(async move {
+                    let mapped_scope = match scope {
+                        PersistedAuthorsScope::All => infrastructure_discovery::AuthorsScope::All,
+                        PersistedAuthorsScope::Libraries(ids) => {
+                            infrastructure_discovery::AuthorsScope::Libraries(ids)
+                        }
+                        PersistedAuthorsScope::Collection(id) => {
+                            infrastructure_discovery::AuthorsScope::Collection(id)
+                        }
+                        PersistedAuthorsScope::Series(id) => {
+                            infrastructure_discovery::AuthorsScope::Series(id)
+                        }
+                        PersistedAuthorsScope::ReadList(id) => {
+                            infrastructure_discovery::AuthorsScope::ReadList(id)
+                        }
+                    };
+                    let rows = infrastructure_discovery::load_persisted_authors_by_scope(
+                        database_file.as_path(),
+                        &mapped_scope,
+                        authorized_library_ids.as_deref(),
+                    )
+                    .await?;
+                    Ok(rows
+                        .into_iter()
+                        .map(|row| PersistedAuthorEntry {
+                            name: row.name,
+                            role: row.role,
+                        })
+                        .collect())
+                })
+            },
+        ),
         load_book_poster_summaries: Arc::new(|database_file| {
             Box::pin(async move {
                 let rows =
@@ -1001,9 +1009,10 @@ pub(super) fn compose_persisted_discovery_access_backend(
                     .collect())
             })
         }),
-        load_persisted_book_tags: Arc::new(|database_file, scope| {
+        load_persisted_book_tags: Arc::new(|database_file, scope, authorized_library_ids| {
             Box::pin(async move {
                 let mapped_scope = scope.map(|scope| match scope {
+                    PersistedBookTagsScope::All => infrastructure_discovery::BookTagsScope::All,
                     PersistedBookTagsScope::Series(series_id) => {
                         infrastructure_discovery::BookTagsScope::Series(series_id)
                     }
@@ -1017,6 +1026,7 @@ pub(super) fn compose_persisted_discovery_access_backend(
                 infrastructure_discovery::load_persisted_book_tags(
                     database_file.as_path(),
                     mapped_scope.as_ref(),
+                    authorized_library_ids.as_deref(),
                 )
                 .await
             })

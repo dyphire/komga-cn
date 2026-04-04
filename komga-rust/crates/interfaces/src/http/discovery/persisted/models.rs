@@ -11,6 +11,7 @@ pub struct PersistedBookBrowseEntry {
 
 #[derive(Clone)]
 pub enum PersistedBookTagsScope {
+    All,
     Series(String),
     Libraries(Vec<String>),
     ReadList(String),

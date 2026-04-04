@@ -26,6 +26,7 @@ pub struct OAuth2ClientConfig {
 pub struct RuntimeConfig {
     pub bind_address: SocketAddr,
     pub mode: RuntimeMode,
+    pub demo_mode: bool,
     pub runtime_profile: RuntimeProfile,
     pub platform_profile: PlatformProfile,
     pub config_dir: Option<PathBuf>,
@@ -65,6 +66,7 @@ impl RuntimeConfig {
                 RuntimeProfile::SnapshotAligned => RuntimeMode::Snapshot,
                 RuntimeProfile::LiveLocaldb => RuntimeMode::Localdb,
             },
+            demo_mode: false,
             runtime_profile,
             platform_profile: PlatformProfile::Default,
             config_dir: Some(config_dir.clone()),

@@ -25,6 +25,7 @@ pub enum RuntimeProfile {
 #[derive(Clone)]
 pub struct AuthDatabaseState {
     pub database_file: PathBuf,
+    pub demo_mode: bool,
     pub remember_me_namespace: String,
 }
 

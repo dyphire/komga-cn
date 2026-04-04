@@ -52,11 +52,36 @@ fn locator_position(locator: &Value) -> Option<u64> {
         .and_then(Value::as_u64)
 }
 
-fn normalized_href_base(href: &str) -> &str {
-    href.split('#')
-        .next()
-        .unwrap_or(href)
-        .trim_start_matches('/')
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            let hi = bytes[index + 1] as char;
+            let lo = bytes[index + 2] as char;
+            let parsed = hi
+                .to_digit(16)
+                .and_then(|hi| lo.to_digit(16).map(|lo| ((hi << 4) | lo) as u8));
+            if let Some(byte) = parsed {
+                decoded.push(byte);
+                index += 3;
+                continue;
+            }
+        }
+        if bytes[index] == b'+' {
+            decoded.push(b' ');
+        } else {
+            decoded.push(bytes[index]);
+        }
+        index += 1;
+    }
+    String::from_utf8(decoded).unwrap_or_else(|_| value.to_string())
+}
+
+fn normalized_href_base(href: &str) -> String {
+    let base = href.split('#').next().unwrap_or(href).trim_end_matches('#');
+    percent_decode(base).trim_start_matches('/').to_string()
 }
 
 fn position_progression(position: &Value) -> Option<f64> {
@@ -77,8 +102,8 @@ fn position_matches_href(position: &Value, href_base: &str) -> bool {
     position
         .get("href")
         .and_then(Value::as_str)
-        .map(normalized_href_base)
-        == Some(href_base)
+        .map(|value| normalized_href_base(value) == href_base)
+        .unwrap_or(false)
 }
 
 fn matched_epub_position(
@@ -177,6 +202,22 @@ async fn normalize_book_epub_locator(
         return Err(progression_bad_request("location.progression is required"));
     };
 
+    let persisted_media_files = match load_persisted_book_media_files(database_file, book_id).await
+    {
+        Ok(files) => files,
+        Err(error) => return Err(internal_error_response(error)),
+    };
+    let persisted_resource_exists = (!persisted_media_files.is_empty()).then(|| {
+        persisted_media_files
+            .iter()
+            .any(|file_name| normalized_href_base(file_name) == href_base)
+    });
+    if persisted_resource_exists == Some(false) {
+        return Err(progression_bad_request(format!(
+            "Resource does not exist in book: {href_base}"
+        )));
+    }
+
     let extension = match load_persisted_epub_extension_blob(database_file, book_id).await {
         Ok(extension) => extension,
         Err(error) => return Err(internal_error_response(error)),
@@ -189,18 +230,22 @@ async fn normalize_book_epub_locator(
         Err(error) => return Err(internal_error_response(error)),
     };
 
-    if !positions
-        .iter()
-        .any(|position| position_matches_href(position, href_base))
+    if persisted_resource_exists.is_none()
+        && !positions
+            .iter()
+            .any(|position| position_matches_href(position, href_base.as_str()))
     {
         return Err(progression_bad_request(format!(
             "Resource does not exist in book: {href_base}"
         )));
     }
 
-    let Some(matched_position) =
-        matched_epub_position(&positions, href_base, locator_progression, is_fixed_layout)
-    else {
+    let Some(matched_position) = matched_epub_position(
+        &positions,
+        href_base.as_str(),
+        locator_progression,
+        is_fixed_layout,
+    ) else {
         return Err(progression_bad_request("Invalid progression"));
     };
 
@@ -228,7 +273,7 @@ async fn progression_is_older_than_existing(
         return Ok(false);
     };
 
-    Ok(new_modified < existing_modified)
+    Ok(new_modified <= existing_modified)
 }
 
 async fn load_epub_locator_for_page(
@@ -436,18 +481,34 @@ pub async fn series_read_progress_delete(
 
     let resolved_series_id =
         resolve_series_id_for_persisted(auth_db.database_file.as_path(), &series_id).await;
-    if !persisted_series_exists(auth_db.database_file.as_path(), &resolved_series_id)
+    let unrestricted_all_libraries = user_shared_all_libraries(&user)
+        && principal_from_user_payload(&user_payload_json(&user))
+            .is_none_or(|principal| !principal.restrictions.is_restricted());
+    if unrestricted_all_libraries {
+        if !persisted_series_exists(auth_db.database_file.as_path(), &resolved_series_id)
+            .await
+            .unwrap_or(false)
+        {
+            return StatusCode::NO_CONTENT.into_response();
+        }
+    } else {
+        if !persisted_series_exists(auth_db.database_file.as_path(), &resolved_series_id)
+            .await
+            .unwrap_or(false)
+        {
+            return StatusCode::NOT_FOUND.into_response();
+        }
+        match user_can_access_series_media(
+            auth_db.database_file.as_path(),
+            &resolved_series_id,
+            &user,
+        )
         .await
-        .unwrap_or(false)
-    {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-    match user_can_access_series_media(auth_db.database_file.as_path(), &resolved_series_id, &user)
-        .await
-    {
-        Ok(true) => {}
-        Ok(false) => return StatusCode::FORBIDDEN.into_response(),
-        Err(error) => return internal_error_response(error),
+        {
+            Ok(true) => {}
+            Ok(false) => return StatusCode::FORBIDDEN.into_response(),
+            Err(error) => return internal_error_response(error),
+        }
     }
 
     let book_ids =
@@ -563,18 +624,34 @@ pub async fn series_tachiyomi_read_progress_put(
 
     let resolved_series_id =
         resolve_series_id_for_persisted(auth_db.database_file.as_path(), &series_id).await;
-    if !persisted_series_exists(auth_db.database_file.as_path(), &resolved_series_id)
+    let unrestricted_all_libraries = user_shared_all_libraries(&user)
+        && principal_from_user_payload(&user_payload_json(&user))
+            .is_none_or(|principal| !principal.restrictions.is_restricted());
+    if unrestricted_all_libraries {
+        if !persisted_series_exists(auth_db.database_file.as_path(), &resolved_series_id)
+            .await
+            .unwrap_or(false)
+        {
+            return StatusCode::NO_CONTENT.into_response();
+        }
+    } else {
+        if !persisted_series_exists(auth_db.database_file.as_path(), &resolved_series_id)
+            .await
+            .unwrap_or(false)
+        {
+            return StatusCode::NOT_FOUND.into_response();
+        }
+        match user_can_access_series_media(
+            auth_db.database_file.as_path(),
+            &resolved_series_id,
+            &user,
+        )
         .await
-        .unwrap_or(false)
-    {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-    match user_can_access_series_media(auth_db.database_file.as_path(), &resolved_series_id, &user)
-        .await
-    {
-        Ok(true) => {}
-        Ok(false) => return StatusCode::FORBIDDEN.into_response(),
-        Err(error) => return internal_error_response(error),
+        {
+            Ok(true) => {}
+            Ok(false) => return StatusCode::FORBIDDEN.into_response(),
+            Err(error) => return internal_error_response(error),
+        }
     }
 
     let book_numbers =
@@ -586,16 +663,37 @@ pub async fn series_tachiyomi_read_progress_put(
         };
 
     for (book_id, number_sort) in book_numbers {
-        if number_sort <= last_number_sort_read
-            && let Err(error) = persist_read_progress(
-                auth_db.database_file.as_path(),
-                &book_id,
-                user_id(&user),
-                10,
-                true,
-                None,
-            )
-            .await
+        if number_sort > last_number_sort_read {
+            continue;
+        }
+
+        let already_completed =
+            match load_read_progress(auth_db.database_file.as_path(), &book_id, user_id(&user))
+                .await
+            {
+                Ok(Some(progress)) => progress.completed,
+                Ok(None) => false,
+                Err(error) => return internal_error_response(error),
+            };
+        if already_completed {
+            continue;
+        }
+
+        let page_count = match load_book_page_count(auth_db.database_file.as_path(), &book_id).await
+        {
+            Ok(Some(value)) => value,
+            Ok(None) => 1,
+            Err(error) => return internal_error_response(error),
+        };
+        if let Err(error) = persist_read_progress(
+            auth_db.database_file.as_path(),
+            &book_id,
+            user_id(&user),
+            page_count,
+            true,
+            None,
+        )
+        .await
         {
             return internal_error_response(error);
         }
@@ -868,6 +966,7 @@ pub async fn book_progression(
         &book_id,
         user_id(&user),
         progression,
+        !is_epub,
         Some(modified.to_string()),
         Some(device_id.to_string()),
         Some(device_name.to_string()),

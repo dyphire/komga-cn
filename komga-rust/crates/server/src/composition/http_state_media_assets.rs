@@ -105,6 +105,15 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
                 .await
             })
         }),
+        load_persisted_book_media_files: Arc::new(|database_file, book_id| {
+            Box::pin(async move {
+                infrastructure_filesystem::load_persisted_book_media_files(
+                    database_file.as_path(),
+                    &book_id,
+                )
+                .await
+            })
+        }),
         book_media_is_ready_status: Arc::new(|database_file, book_id| {
             Box::pin(async move {
                 infrastructure_filesystem::book_media_is_ready_status(
@@ -582,13 +591,22 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
             })
         }),
         persist_book_progression: Arc::new(
-            |database_file, book_id, user_id, page, modified, device_id, device_name, locator| {
+            |database_file,
+             book_id,
+             user_id,
+             page,
+             use_locator_position_for_page,
+             modified,
+             device_id,
+             device_name,
+             locator| {
                 Box::pin(async move {
                     infrastructure_metadata::persist_book_progression(
                         database_file.as_path(),
                         &book_id,
                         &user_id,
                         page,
+                        use_locator_position_for_page,
                         modified,
                         device_id,
                         device_name,

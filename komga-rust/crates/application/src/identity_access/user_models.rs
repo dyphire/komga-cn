@@ -8,6 +8,8 @@ pub struct PersistedApiKey {
     pub user_id: String,
     pub key: String,
     pub comment: String,
+    pub created_date: Option<String>,
+    pub last_modified_date: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -89,6 +91,14 @@ impl PersistedApiKey {
 
     pub fn comment(&self) -> &str {
         self.comment.as_str()
+    }
+
+    pub fn created_date(&self) -> Option<&str> {
+        self.created_date.as_deref()
+    }
+
+    pub fn last_modified_date(&self) -> Option<&str> {
+        self.last_modified_date.as_deref()
     }
 }
 

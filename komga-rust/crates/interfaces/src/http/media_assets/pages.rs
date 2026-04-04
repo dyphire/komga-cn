@@ -8,12 +8,33 @@ pub async fn book_page(
     Query(query): Query<BookPageQuery>,
     Path((book_id, page_number)): Path<(String, u32)>,
 ) -> Response {
+    book_page_response(&auth_db, &headers, &book_id, page_number, query).await
+}
+
+pub async fn book_page_opds_v1(
+    Extension(_profile): Extension<RuntimeProfile>,
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    Query(mut query): Query<BookPageQuery>,
+    Path((book_id, page_number)): Path<(String, u32)>,
+) -> Response {
+    query.zero_based = true;
+    query.content_negotiation = false;
+    book_page_response(&auth_db, &headers, &book_id, page_number, query).await
+}
+
+async fn book_page_response(
+    auth_db: &AuthDatabaseState,
+    headers: &HeaderMap,
+    book_id: &str,
+    page_number: u32,
+    query: BookPageQuery,
+) -> Response {
     if let Some(response) = require_auth(&headers) {
         return response;
     }
 
-    let resolved_book_id =
-        resolve_book_id_for_persisted(auth_db.database_file.as_path(), &book_id).await;
+    let resolved_book_id = resolve_book_id_for_persisted(auth_db.database_file.as_path(), book_id).await;
 
     let requested_page_number = if query.zero_based {
         page_number.saturating_add(1)
@@ -56,7 +77,7 @@ pub async fn book_page(
                 .into_response();
         }
 
-        if let Some(user) = resolved_auth_user(&headers) {
+        if let Some(user) = resolved_auth_user(headers) {
             if !user_is_admin(&user) && !user_has_role(&user, "PAGE_STREAMING") {
                 return StatusCode::FORBIDDEN.into_response();
             }
@@ -76,7 +97,7 @@ pub async fn book_page(
             return StatusCode::NOT_FOUND.into_response();
         }
 
-        if book_media_is_pdf(&media) && content_negotiation && accept_header_prefers_pdf(&headers) {
+        if book_media_is_pdf(&media) && content_negotiation && accept_header_prefers_pdf(headers) {
             if requested_page_number == 0 {
                 return page_number_does_not_exist_response();
             }
@@ -89,7 +110,7 @@ pub async fn book_page(
             {
                 let last_modified = file_last_modified_header_value(media.file_path.as_path());
                 if let Some(last_modified) = last_modified.as_deref()
-                    && if_modified_since_matches(&headers, last_modified)
+                    && if_modified_since_matches(headers, last_modified)
                 {
                     return asset_not_modified_response(None, Some(last_modified));
                 }
@@ -147,7 +168,7 @@ pub async fn book_page(
 
             let last_modified = file_last_modified_header_value(media.file_path.as_path());
             if let Some(last_modified) = last_modified.as_deref()
-                && if_modified_since_matches(&headers, last_modified)
+                && if_modified_since_matches(headers, last_modified)
             {
                 return asset_not_modified_response(None, Some(last_modified));
             }

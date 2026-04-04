@@ -1,5 +1,14 @@
 use super::*;
 
+fn optional_query_bool(query: &str, key: &str) -> Result<Option<bool>, ()> {
+    match query_value(query, key) {
+        Some(value) if value.eq_ignore_ascii_case("true") => Ok(Some(true)),
+        Some(value) if value.eq_ignore_ascii_case("false") => Ok(Some(false)),
+        Some(_) => Err(()),
+        None => Ok(None),
+    }
+}
+
 fn should_use_strict_runtime_shape(payload: Option<&Value>) -> bool {
     payload
         .and_then(|value| value.get("condition"))
@@ -105,6 +114,14 @@ pub async fn series_latest(
         .unwrap_or(20)
         .max(1);
     let unpaged = query_bool(query, "unpaged");
+    let deleted = match optional_query_bool(query, "deleted") {
+        Ok(value) => value,
+        Err(()) => return StatusCode::BAD_REQUEST.into_response(),
+    };
+    let oneshot = match optional_query_bool(query, "oneshot") {
+        Ok(value) => value,
+        Err(()) => return StatusCode::BAD_REQUEST.into_response(),
+    };
 
     match load_persisted_series_page(
         database_file,
@@ -112,6 +129,8 @@ pub async fn series_latest(
         PersistedSeriesBrowseQuery::from_filters(
             SeriesFilterCriteria {
                 library_ids,
+                deleted,
+                oneshot,
                 ..SeriesFilterCriteria::default()
             },
             None,

@@ -216,10 +216,10 @@ pub(super) async fn users_create(
     };
 
     let Some(email) = payload.get("email").and_then(Value::as_str).map(str::trim) else {
-        return StatusCode::BAD_REQUEST.into_response();
+        return validation_error("email", "must be a well-formed email address");
     };
     if email.is_empty() || !looks_like_kotlin_user_email(email) {
-        return StatusCode::BAD_REQUEST.into_response();
+        return validation_error("email", "must be a well-formed email address");
     }
 
     let Some(password) = payload
@@ -227,7 +227,7 @@ pub(super) async fn users_create(
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
     else {
-        return StatusCode::BAD_REQUEST.into_response();
+        return validation_error("password", "must not be blank");
     };
 
     let roles = match parse_roles_array(payload.get("roles")) {
@@ -282,11 +282,11 @@ pub(super) async fn users_create(
     .await
     {
         Ok(Some(user)) => (StatusCode::CREATED, Json(user_payload_json(&user))).into_response(),
-        Ok(None) => (
+        Ok(None) => spring_error(
             StatusCode::BAD_REQUEST,
-            Json(json!({ "message": "A user with this email already exists" })),
-        )
-            .into_response(),
+            "A user with this email already exists",
+            "/api/v2/users",
+        ),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
@@ -307,10 +307,7 @@ pub(super) async fn users_delete(
     }
 
     match delete_auth_user(auth_db.database_file.as_path(), &target_user_id).await {
-        Ok(true) => {
-            invalidate_user_sessions(&target_user_id);
-            StatusCode::NO_CONTENT.into_response()
-        }
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
@@ -325,7 +322,7 @@ pub(super) async fn users_update(
     let Some(current_user) = authenticated_user(&headers, &auth_db).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    if !user_is_admin(&current_user) {
+    if !user_is_admin(&current_user) && user_id(&current_user) != target_user_id {
         return StatusCode::FORBIDDEN.into_response();
     }
     if user_id(&current_user) == target_user_id {
@@ -404,11 +401,13 @@ pub(super) async fn users_update(
     )
     .await
     {
-        Ok(true) => {
-            invalidate_user_sessions(&target_user_id);
+        Ok(result) if !result.updated => StatusCode::NOT_FOUND.into_response(),
+        Ok(result) => {
+            if result.expire_sessions {
+                invalidate_user_sessions(&target_user_id);
+            }
             StatusCode::NO_CONTENT.into_response()
         }
-        Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
@@ -444,6 +443,9 @@ pub(super) async fn users_me_password(
     let Some(password) = password_from_request(&body) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
+    if auth_db.demo_mode {
+        return StatusCode::FORBIDDEN.into_response();
+    }
 
     match persisted_update_password_by_user_id(
         auth_db.database_file.as_path(),
@@ -467,13 +469,16 @@ pub(super) async fn users_by_id_password(
     let Some(current_user) = authenticated_user(&headers, &auth_db).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    if !user_is_admin(&current_user) {
+    if !user_is_admin(&current_user) && user_id(&current_user) != target_user_id {
         return StatusCode::FORBIDDEN.into_response();
     }
 
     let Some(password) = password_from_request(&body) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
+    if auth_db.demo_mode {
+        return StatusCode::FORBIDDEN.into_response();
+    }
 
     match persisted_update_password_by_user_id(
         auth_db.database_file.as_path(),
@@ -483,7 +488,9 @@ pub(super) async fn users_by_id_password(
     .await
     {
         Some(true) => {
-            invalidate_user_sessions(&target_user_id);
+            if user_id(&current_user) != target_user_id {
+                invalidate_user_sessions(&target_user_id);
+            }
             StatusCode::NO_CONTENT.into_response()
         }
         Some(false) => StatusCode::NOT_FOUND.into_response(),

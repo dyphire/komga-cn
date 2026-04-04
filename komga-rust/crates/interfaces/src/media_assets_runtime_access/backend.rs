@@ -67,6 +67,14 @@ pub struct MediaAssetsRuntimeAccessBackend {
             + Send
             + Sync,
     >,
+    pub load_persisted_book_media_files: Arc<
+        dyn Fn(
+                PathBuf,
+                String,
+            ) -> futures_util::future::BoxFuture<'static, Result<Vec<String>, String>>
+            + Send
+            + Sync,
+    >,
     pub book_media_is_ready_status: Arc<
         dyn Fn(PathBuf, String) -> futures_util::future::BoxFuture<'static, Result<bool, String>>
             + Send
@@ -510,6 +518,7 @@ pub struct MediaAssetsRuntimeAccessBackend {
                 String,
                 String,
                 f64,
+                bool,
                 Option<String>,
                 Option<String>,
                 Option<String>,

@@ -46,6 +46,14 @@ pub(crate) async fn load_persisted_book_media(
     (backend().load_persisted_book_media)(database_file.to_path_buf(), book_id.to_string()).await
 }
 
+pub(crate) async fn load_persisted_book_media_files(
+    database_file: &Path,
+    book_id: &str,
+) -> Result<Vec<String>, String> {
+    (backend().load_persisted_book_media_files)(database_file.to_path_buf(), book_id.to_string())
+        .await
+}
+
 pub(crate) async fn book_media_is_ready_status(
     database_file: &Path,
     book_id: &str,
@@ -586,6 +594,7 @@ pub(crate) async fn persist_book_progression(
     book_id: &str,
     user_id: &str,
     page: f64,
+    use_locator_position_for_page: bool,
     modified: Option<String>,
     device_id: Option<String>,
     device_name: Option<String>,
@@ -596,6 +605,7 @@ pub(crate) async fn persist_book_progression(
         book_id.to_string(),
         user_id.to_string(),
         page,
+        use_locator_position_for_page,
         modified,
         device_id,
         device_name,

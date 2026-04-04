@@ -15,27 +15,80 @@ pub(crate) async fn opds_v1_catalog(headers: HeaderMap) -> Response {
     if let Some(response) = require_auth(&headers) {
         return response;
     }
-    opds_v1_navigation_feed_response(
+    let search_href = app_absolute_url(&headers, "/opds/v1.2/search");
+    let alternate_href = app_absolute_url(&headers, "/opds/v2/catalog");
+    opds_v1_navigation_feed_response_with_extra_links(
         &headers,
         "root",
         "Komga OPDS catalog",
         "/opds/v1.2/catalog",
         vec![
-            nav_entry("keepReading", "Keep Reading", "/opds/v1.2/keep-reading"),
-            nav_entry("ondeck", "On Deck", "/opds/v1.2/ondeck"),
-            nav_entry("allSeries", "All series", "/opds/v1.2/series"),
-            nav_entry("latestSeries", "Latest series", "/opds/v1.2/series/latest"),
-            nav_entry("latestBooks", "Latest books", "/opds/v1.2/books/latest"),
-            nav_entry("allLibraries", "All libraries", "/opds/v1.2/libraries"),
-            nav_entry(
+            nav_entry_with_content(
+                "keepReading",
+                "Keep Reading",
+                "Continue reading your in progress books",
+                "/opds/v1.2/keep-reading",
+            ),
+            nav_entry_with_content(
+                "ondeck",
+                "On Deck",
+                "Browse what to read next",
+                "/opds/v1.2/ondeck",
+            ),
+            nav_entry_with_content(
+                "allSeries",
+                "All series",
+                "Browse by series",
+                "/opds/v1.2/series",
+            ),
+            nav_entry_with_content(
+                "latestSeries",
+                "Latest series",
+                "Browse latest series",
+                "/opds/v1.2/series/latest",
+            ),
+            nav_entry_with_content(
+                "latestBooks",
+                "Latest books",
+                "Browse latest books",
+                "/opds/v1.2/books/latest",
+            ),
+            nav_entry_with_content(
+                "allLibraries",
+                "All libraries",
+                "Browse by library",
+                "/opds/v1.2/libraries",
+            ),
+            nav_entry_with_content(
                 "allCollections",
                 "All collections",
+                "Browse by collection",
                 "/opds/v1.2/collections",
             ),
-            nav_entry("allReadLists", "All read lists", "/opds/v1.2/readlists"),
-            nav_entry("allPublishers", "All publishers", "/opds/v1.2/publishers"),
+            nav_entry_with_content(
+                "allReadLists",
+                "All read lists",
+                "Browse by read lists",
+                "/opds/v1.2/readlists",
+            ),
+            nav_entry_with_content(
+                "allPublishers",
+                "All publishers",
+                "Browse by publishers",
+                "/opds/v1.2/publishers",
+            ),
         ],
         None,
+        &[
+            format!(
+                "<link type=\"application/opensearchdescription+xml\" rel=\"search\" href=\"{}\"/>",
+                xml_escape(&search_href)
+            ),
+            format!(
+                "<link type=\"application/opds+json\" rel=\"alternate\" href=\"{}\"/>",
+                xml_escape(&alternate_href)
+            ),
+        ],
     )
 }
 
@@ -46,7 +99,7 @@ pub(crate) async fn opds_v1_search(headers: HeaderMap) -> Response {
 
     let template_href = app_absolute_url(&headers, "/opds/v1.2/series?search={searchTerms}");
     let payload = format!(
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?><OpenSearchDescription xmlns=\"http://a9.com/-/spec/opensearch/1.1/\"><ShortName>Search</ShortName><Description>Search for series</Description><Url type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" template=\"{}\"/></OpenSearchDescription>",
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?><OpenSearchDescription xmlns=\"http://a9.com/-/spec/opensearch/1.1/\"><ShortName>Search</ShortName><Description>Search for series</Description><InputEncoding>UTF-8</InputEncoding><OutputEncoding>UTF-8</OutputEncoding><Url type=\"application/atom+xml;profile=opds-catalog;kind=acquisition\" template=\"{}\"/></OpenSearchDescription>",
         xml_escape(&template_href)
     );
 
@@ -224,6 +277,7 @@ pub(crate) async fn opds_v1_series_latest(
                 OpdsV1NavigationEntry {
                     id: series_id.clone(),
                     title: series.title,
+                    content: String::new(),
                     href_path: format!("/opds/v1.2/series/{series_id}"),
                     updated: Some(series.last_modified),
                 }
@@ -302,6 +356,7 @@ pub(crate) async fn opds_v1_libraries(headers: HeaderMap, database_file: &Path) 
         .map(|library| OpdsV1NavigationEntry {
             id: library.id.clone(),
             title: library.name,
+            content: String::new(),
             href_path: format!("/opds/v1.2/libraries/{}", library.id),
             updated: Some(library.last_modified),
         })
@@ -345,6 +400,7 @@ pub(crate) async fn opds_v1_collections(
             rows.push(OpdsV1NavigationEntry {
                 id: collection.id.clone(),
                 title: collection.name,
+                content: String::new(),
                 href_path: format!("/opds/v1.2/collections/{}", collection.id),
                 updated: None,
             });
@@ -389,6 +445,7 @@ pub(crate) async fn opds_v1_readlists(
             rows.push(OpdsV1NavigationEntry {
                 id: readlist.id.clone(),
                 title: readlist.name,
+                content: String::new(),
                 href_path: format!("/opds/v1.2/readlists/{}", readlist.id),
                 updated: None,
             });
@@ -431,6 +488,7 @@ pub(crate) async fn opds_v1_publishers(
         .map(|publisher| OpdsV1NavigationEntry {
             id: publisher_entry_id(&publisher),
             title: publisher.clone(),
+            content: String::new(),
             href_path: format!("/opds/v1.2/series?publisher={}", query_escape(&publisher)),
             updated: None,
         })
@@ -624,6 +682,7 @@ pub(crate) async fn opds_v1_collection_detail(
             OpdsV1NavigationEntry {
                 id: id.clone(),
                 title: series.title,
+                content: String::new(),
                 href_path: format!("/opds/v1.2/series/{id}"),
                 updated: None,
             }
@@ -726,6 +785,7 @@ pub(crate) async fn opds_v1_series(headers: HeaderMap, uri: Uri, database_file: 
             OpdsV1NavigationEntry {
                 id: series_id.clone(),
                 title: series.title,
+                content: String::new(),
                 href_path: format!("/opds/v1.2/series/{series_id}"),
                 updated: None,
             }
@@ -748,6 +808,7 @@ pub(crate) async fn opds_v1_series(headers: HeaderMap, uri: Uri, database_file: 
             OpdsV1NavigationEntry {
                 id: series_id.clone(),
                 title: series.title,
+                content: String::new(),
                 href_path: format!("/opds/v1.2/series/{series_id}"),
                 updated: None,
             }
@@ -774,10 +835,16 @@ pub(crate) async fn opds_v1_series(headers: HeaderMap, uri: Uri, database_file: 
     )
 }
 
-fn nav_entry(id: &str, title: &str, href_path: &str) -> OpdsV1NavigationEntry {
+fn nav_entry_with_content(
+    id: &str,
+    title: &str,
+    content: &str,
+    href_path: &str,
+) -> OpdsV1NavigationEntry {
     OpdsV1NavigationEntry {
         id: id.to_string(),
         title: title.to_string(),
+        content: content.to_string(),
         href_path: href_path.to_string(),
         updated: None,
     }

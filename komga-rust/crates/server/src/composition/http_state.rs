@@ -153,6 +153,7 @@ pub fn compose_http_runtime(
     let discovery_auth = DiscoveryAuthState::default();
     let auth_db = AuthDatabaseState {
         database_file: config.database_file.clone(),
+        demo_mode: config.demo_mode,
         remember_me_namespace,
     };
     let operational = http_state_operational_state::compose_operational_state(

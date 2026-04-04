@@ -1,44 +1,88 @@
 use super::*;
+use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
 pub async fn load_persisted_author_names(
     database_file: &FsPath,
     search: &str,
+    authorized_library_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(|error| format!("open author names db: {error}"))?;
 
-    let rows = sqlx::query(
+    if let Some(authorized_library_ids) = authorized_library_ids
+        && authorized_library_ids.is_empty()
+    {
+        return Ok(Vec::new());
+    }
+
+    let mut query = QueryBuilder::<Sqlite>::new(
         "SELECT DISTINCT a.NAME \
          FROM BOOK_METADATA_AUTHOR a \
-         JOIN BOOK b ON b.ID = a.BOOK_ID \
-         ORDER BY lower(a.NAME), a.NAME",
-    )
-    .fetch_all(&pool)
-    .await
-    .map_err(|error| format!("query persisted author names: {error}"))?;
+         JOIN BOOK b ON b.ID = a.BOOK_ID",
+    );
 
-    let search = search.to_ascii_lowercase();
+    if let Some(authorized_library_ids) = authorized_library_ids {
+        query.push(" WHERE b.LIBRARY_ID IN (");
+        let mut separated = query.separated(",");
+        for library_id in authorized_library_ids {
+            separated.push_bind(library_id);
+        }
+        separated.push_unseparated(")");
+    }
+
+    query.push(" ORDER BY lower(a.NAME), a.NAME");
+
+    let rows = query
+        .build()
+        .fetch_all(&pool)
+        .await
+        .map_err(|error| format!("query persisted author names: {error}"))?;
+
+    let search = author_search_key(search);
     Ok(rows
         .into_iter()
         .map(|row| row.get::<String, _>("NAME"))
-        .filter(|name| search.is_empty() || name.to_ascii_lowercase().contains(&search))
+        .filter(|name| search.is_empty() || author_search_key(name).contains(&search))
         .collect())
 }
 
-pub async fn load_persisted_author_roles(database_file: &FsPath) -> Result<Vec<String>, String> {
+pub async fn load_persisted_author_roles(
+    database_file: &FsPath,
+    authorized_library_ids: Option<&[String]>,
+) -> Result<Vec<String>, String> {
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(|error| format!("open author roles db: {error}"))?;
 
-    let rows = sqlx::query(
-        "SELECT DISTINCT ROLE \
-         FROM BOOK_METADATA_AUTHOR \
-         ORDER BY lower(ROLE), ROLE",
-    )
-    .fetch_all(&pool)
-    .await
-    .map_err(|error| format!("query persisted author roles: {error}"))?;
+    if let Some(authorized_library_ids) = authorized_library_ids
+        && authorized_library_ids.is_empty()
+    {
+        return Ok(Vec::new());
+    }
+
+    let mut query = QueryBuilder::<Sqlite>::new(
+        "SELECT DISTINCT a.ROLE \
+         FROM BOOK_METADATA_AUTHOR a \
+         JOIN BOOK b ON b.ID = a.BOOK_ID",
+    );
+
+    if let Some(authorized_library_ids) = authorized_library_ids {
+        query.push(" WHERE b.LIBRARY_ID IN (");
+        let mut separated = query.separated(",");
+        for library_id in authorized_library_ids {
+            separated.push_bind(library_id);
+        }
+        separated.push_unseparated(")");
+    }
+
+    query.push(" ORDER BY lower(a.ROLE), a.ROLE");
+
+    let rows = query
+        .build()
+        .fetch_all(&pool)
+        .await
+        .map_err(|error| format!("query persisted author roles: {error}"))?;
 
     Ok(rows
         .into_iter()
@@ -46,9 +90,18 @@ pub async fn load_persisted_author_roles(database_file: &FsPath) -> Result<Vec<S
         .collect())
 }
 
+fn author_search_key(value: &str) -> String {
+    value
+        .nfd()
+        .filter(|ch| !is_combining_mark(*ch))
+        .flat_map(|ch| ch.to_lowercase())
+        .collect()
+}
+
 pub async fn load_persisted_authors_by_scope(
     database_file: &FsPath,
     scope: &AuthorsScope,
+    authorized_library_ids: Option<&[String]>,
 ) -> Result<Vec<AuthorEntry>, String> {
     let pool = connect_pool(database_file, 1)
         .await
@@ -60,10 +113,24 @@ pub async fn load_persisted_authors_by_scope(
          JOIN BOOK b ON b.ID = a.BOOK_ID",
     );
 
+    let mut has_where = false;
+    let mut push_condition = |query: &mut QueryBuilder<Sqlite>| {
+        if has_where {
+            query.push(" AND ");
+        } else {
+            query.push(" WHERE ");
+            has_where = true;
+        }
+    };
+
     match scope {
         AuthorsScope::All => {}
         AuthorsScope::Libraries(library_ids) => {
-            query.push(" WHERE b.LIBRARY_ID IN (");
+            if library_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            push_condition(&mut query);
+            query.push("b.LIBRARY_ID IN (");
             let mut separated = query.separated(",");
             for library_id in library_ids {
                 separated.push_bind(library_id);
@@ -71,17 +138,35 @@ pub async fn load_persisted_authors_by_scope(
             separated.push_unseparated(")");
         }
         AuthorsScope::Collection(collection_id) => {
-            query.push(" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = b.SERIES_ID WHERE cs.COLLECTION_ID = ");
+            query.push(" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = b.SERIES_ID");
+            push_condition(&mut query);
+            query.push("cs.COLLECTION_ID = ");
             query.push_bind(collection_id);
         }
         AuthorsScope::Series(series_id) => {
-            query.push(" WHERE b.SERIES_ID = ");
+            push_condition(&mut query);
+            query.push("b.SERIES_ID = ");
             query.push_bind(series_id);
         }
         AuthorsScope::ReadList(readlist_id) => {
-            query.push(" JOIN READLIST_BOOK rb ON rb.BOOK_ID = b.ID WHERE rb.READLIST_ID = ");
+            query.push(" JOIN READLIST_BOOK rb ON rb.BOOK_ID = b.ID");
+            push_condition(&mut query);
+            query.push("rb.READLIST_ID = ");
             query.push_bind(readlist_id);
         }
+    }
+
+    if let Some(authorized_library_ids) = authorized_library_ids {
+        if authorized_library_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        push_condition(&mut query);
+        query.push("b.LIBRARY_ID IN (");
+        let mut separated = query.separated(",");
+        for library_id in authorized_library_ids {
+            separated.push_bind(library_id);
+        }
+        separated.push_unseparated(")");
     }
 
     query.push(" ORDER BY lower(a.NAME), lower(a.ROLE), a.NAME, a.ROLE, b.ID");

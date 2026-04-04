@@ -38,7 +38,8 @@ pub use operational_settings_access::{
 };
 pub use runtime_identity_access::{
     KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedBookMediaFile,
-    PersistedReadProgressRecord, RuntimeIdentityAccessBackend, install_runtime_identity_access,
+    PersistedReadProgressRecord, RuntimeIdentityAccessBackend, UpdateAuthUserResult,
+    install_runtime_identity_access,
 };
 
 pub use http::state::{AuthDatabaseState, OperationalState, ReadProgress, ReadProgressState};
