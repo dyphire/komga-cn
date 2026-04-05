@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use serde_json::Value;
-use sqlx::{Row, SqlitePool};
+use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 
 use crate::sqlite::connect_pool;
 
@@ -241,71 +242,84 @@ pub async fn delete_persisted_read_progress(
 
 pub async fn readlist_tachiyomi_counters(
     database_file: &Path,
-    readlist_id: &str,
+    ordered_book_ids: &[String],
     user_id_value: &str,
-) -> Result<Option<(u64, u64, u64, u64, u64)>, String> {
-    if !database_file.exists() {
-        return Ok(None);
+) -> Result<(u64, u64, u64, u64, u64), String> {
+    if !database_file.exists() || ordered_book_ids.is_empty() {
+        return Ok((0, 0, 0, 0, 0));
     }
 
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(|error| format!("open readlist tachiyomi db: {error}"))?;
-    let exists = sqlx::query("SELECT 1 AS FOUND FROM READLIST WHERE ID = ? LIMIT 1")
-        .bind(readlist_id)
-        .fetch_optional(&pool)
-        .await
-        .map_err(|error| format!("query readlist exists for tachiyomi counters: {error}"))?
-        .is_some();
-    if !exists {
-        return Ok(None);
+
+    let mut query = QueryBuilder::<Sqlite>::new(
+        "SELECT BOOK_ID, COMPLETED FROM READ_PROGRESS WHERE USER_ID = ",
+    );
+    query.push_bind(user_id_value);
+    query.push(" AND BOOK_ID IN (");
+    let mut separated = query.separated(",");
+    for book_id in ordered_book_ids {
+        separated.push_bind(book_id);
     }
+    separated.push_unseparated(")");
 
-    let rows = sqlx::query(
-        "SELECT rb.NUMBER AS ORDINAL, COALESCE(rp.PAGE, 0) AS PAGE, COALESCE(rp.COMPLETED, 0) AS COMPLETED \
-         FROM READLIST_BOOK rb \
-         LEFT JOIN READ_PROGRESS rp ON rp.BOOK_ID = rb.BOOK_ID AND rp.USER_ID = ? \
-         WHERE rb.READLIST_ID = ? \
-         ORDER BY rb.NUMBER ASC",
-    )
-    .bind(user_id_value)
-    .bind(readlist_id)
-    .fetch_all(&pool)
-    .await
-    .map_err(|error| format!("query readlist tachiyomi counters: {error}"))?;
+    let rows = query
+        .build()
+        .fetch_all(&pool)
+        .await
+        .map_err(|error| format!("query readlist tachiyomi counters: {error}"))?;
 
-    let books_count = rows.len() as u64;
-    let books_read_count = rows
+    let completed_by_book = rows
+        .into_iter()
+        .map(|row| {
+            (
+                row.get::<String, _>("BOOK_ID"),
+                row.get::<Option<i64>, _>("COMPLETED"),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+
+    let completed_states = ordered_book_ids
         .iter()
-        .filter(|row| row.get::<i64, _>("COMPLETED") != 0)
-        .count() as u64;
-    let books_in_progress_count = rows
+        .map(|book_id| completed_by_book.get(book_id).copied().flatten())
+        .collect::<Vec<_>>();
+
+    let books_count = ordered_book_ids.len() as u64;
+    let books_read_count = completed_states
         .iter()
-        .filter(|row| row.get::<i64, _>("COMPLETED") == 0 && row.get::<i64, _>("PAGE") > 0)
+        .filter(|completed| **completed == Some(1))
         .count() as u64;
-    let books_unread_count = books_count.saturating_sub(books_read_count + books_in_progress_count);
+    let books_in_progress_count = completed_states
+        .iter()
+        .filter(|completed| **completed == Some(0))
+        .count() as u64;
+    let books_unread_count = completed_states
+        .iter()
+        .filter(|completed| completed.is_none())
+        .count() as u64;
 
     let mut last_read_continuous_index = 0_u64;
-    for row in rows {
-        if row.get::<i64, _>("COMPLETED") != 0 {
+    for completed in completed_states {
+        if completed == Some(1) {
             last_read_continuous_index += 1;
         } else {
             break;
         }
     }
 
-    Ok(Some((
+    Ok((
         books_count,
         books_read_count,
         books_unread_count,
         books_in_progress_count,
         last_read_continuous_index,
-    )))
+    ))
 }
 
 pub async fn persist_readlist_tachiyomi_progress(
     database_file: &Path,
-    readlist_id: &str,
+    ordered_book_ids: &[String],
     user_id_value: &str,
     last_book_read: usize,
 ) -> Result<Option<()>, String> {
@@ -316,33 +330,24 @@ pub async fn persist_readlist_tachiyomi_progress(
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(|error| format!("open readlist tachiyomi write db: {error}"))?;
-    let exists = sqlx::query("SELECT 1 AS FOUND FROM READLIST WHERE ID = ? LIMIT 1")
-        .bind(readlist_id)
+    for book_id in ordered_book_ids.iter().take(last_book_read) {
+        let already_completed = sqlx::query(
+            "SELECT COMPLETED FROM READ_PROGRESS WHERE BOOK_ID = ? AND USER_ID = ? LIMIT 1",
+        )
+        .bind(book_id)
+        .bind(user_id_value)
         .fetch_optional(&pool)
         .await
-        .map_err(|error| format!("query readlist exists for tachiyomi write: {error}"))?
-        .is_some();
-    if !exists {
-        return Ok(None);
-    }
-
-    let rows =
-        sqlx::query("SELECT BOOK_ID FROM READLIST_BOOK WHERE READLIST_ID = ? ORDER BY NUMBER ASC")
-            .bind(readlist_id)
-            .fetch_all(&pool)
-            .await
-            .map_err(|error| format!("query readlist books for tachiyomi write: {error}"))?;
-
-    for (index, row) in rows.into_iter().enumerate() {
-        if index >= last_book_read {
-            break;
+        .map_err(|error| format!("query existing completion for tachiyomi write: {error}"))?
+        .is_some_and(|row| row.get::<i64, _>("COMPLETED") != 0);
+        if already_completed {
+            continue;
         }
 
-        let book_id = row.get::<String, _>("BOOK_ID");
         let page_count = sqlx::query(
             "SELECT COALESCE(PAGE_COUNT, 0) AS PAGE_COUNT FROM MEDIA WHERE BOOK_ID = ? LIMIT 1",
         )
-        .bind(&book_id)
+        .bind(book_id)
         .fetch_optional(&pool)
         .await
         .map_err(|error| format!("query page count for tachiyomi write: {error}"))?
@@ -352,7 +357,7 @@ pub async fn persist_readlist_tachiyomi_progress(
 
         persist_read_progress(
             database_file,
-            &book_id,
+            book_id,
             user_id_value,
             page_count,
             true,

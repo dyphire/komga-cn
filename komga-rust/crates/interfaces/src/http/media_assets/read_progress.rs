@@ -1,5 +1,6 @@
 use super::*;
 use crate::http::helpers::read_progress_validation_error_response;
+use crate::opds_persisted_access::load_readlist_books;
 use crate::runtime_identity_access::load_read_progress;
 use flate2::read::GzDecoder;
 use std::io::Read;
@@ -50,6 +51,33 @@ fn locator_position(locator: &Value) -> Option<u64> {
         .get("locations")
         .and_then(|value| value.get("position"))
         .and_then(Value::as_u64)
+}
+
+async fn load_tachiyomi_readlist_book_ids(
+    database_file: &FsPath,
+    readlist_id: &str,
+    user: &AuthUser,
+) -> Result<Option<Vec<String>>, String> {
+    let readlist_books = load_readlist_books(database_file, readlist_id).await?;
+    if readlist_books.is_empty() {
+        let readlist_exists = load_persisted_readlist_name(database_file, readlist_id)
+            .await?
+            .is_some();
+        return Ok(
+            (readlist_exists && (user_shared_all_libraries(user) || user_is_admin(user)))
+                .then_some(Vec::new()),
+        );
+    }
+    if !readlist_books
+        .iter()
+        .any(|book| user_can_access_library(user, &book.library_id))
+    {
+        return Ok(None);
+    }
+
+    Ok(Some(
+        readlist_books.into_iter().map(|book| book.id).collect(),
+    ))
 }
 
 fn percent_decode(value: &str) -> String {
@@ -325,15 +353,27 @@ pub async fn readlist_tachiyomi_read_progress_get(
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    let counters = match readlist_tachiyomi_counters(
+    let Some(ordered_book_ids) = (match load_tachiyomi_readlist_book_ids(
         auth_db.database_file.as_path(),
         &readlist_id,
+        &user,
+    )
+    .await
+    {
+        Ok(ordered_book_ids) => ordered_book_ids,
+        Err(error) => return internal_error_response(error),
+    }) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let counters = match readlist_tachiyomi_counters(
+        auth_db.database_file.as_path(),
+        ordered_book_ids,
         user_id(&user),
     )
     .await
     {
-        Ok(Some(counters)) => counters,
-        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Ok(counters) => counters,
         Err(error) => return internal_error_response(error),
     };
 
@@ -380,9 +420,42 @@ pub async fn readlist_tachiyomi_read_progress_put(
             .into_response();
     };
 
-    match persist_readlist_tachiyomi_progress(
+    let Some(ordered_book_ids) = (match load_tachiyomi_readlist_book_ids(
         auth_db.database_file.as_path(),
         &readlist_id,
+        &user,
+    )
+    .await
+    {
+        Ok(ordered_book_ids) => ordered_book_ids,
+        Err(error) => return internal_error_response(error),
+    }) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    if ordered_book_ids.is_empty() {
+        return StatusCode::NO_CONTENT.into_response();
+    }
+
+    let visible_books =
+        match visible_readlist_books_for_user(auth_db.database_file.as_path(), &readlist_id, &user)
+            .await
+        {
+            Ok(books) => books,
+            Err(error) => return internal_error_response(error),
+        };
+    if visible_books.is_empty() {
+        return StatusCode::NO_CONTENT.into_response();
+    }
+
+    let visible_book_ids = visible_books
+        .into_iter()
+        .map(|book| book.id)
+        .collect::<Vec<_>>();
+
+    match persist_readlist_tachiyomi_progress(
+        auth_db.database_file.as_path(),
+        visible_book_ids,
         user_id(&user),
         last_book_read as usize,
     )

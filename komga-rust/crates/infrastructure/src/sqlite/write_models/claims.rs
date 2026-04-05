@@ -48,11 +48,13 @@ pub async fn persist_initial_admin_user(
     .execute(&mut *tx)
     .await?;
 
-    sqlx::query("INSERT INTO USER_ROLE (USER_ID, ROLE) VALUES (?, ?)")
-        .bind(user_id)
-        .bind("ADMIN")
-        .execute(&mut *tx)
-        .await?;
+    for role in claim_user_roles() {
+        sqlx::query("INSERT INTO USER_ROLE (USER_ID, ROLE) VALUES (?, ?)")
+            .bind(user_id)
+            .bind(role)
+            .execute(&mut *tx)
+            .await?;
+    }
 
     tx.commit().await?;
 
@@ -60,4 +62,14 @@ pub async fn persist_initial_admin_user(
         id: user_id.to_string(),
         email: email.to_string(),
     })
+}
+
+fn claim_user_roles() -> &'static [&'static str] {
+    &[
+        "ADMIN",
+        "FILE_DOWNLOAD",
+        "PAGE_STREAMING",
+        "KOBO_SYNC",
+        "KOREADER_SYNC",
+    ]
 }

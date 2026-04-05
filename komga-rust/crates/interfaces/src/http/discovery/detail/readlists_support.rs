@@ -407,12 +407,6 @@ pub fn comicrack_payload(name: &str, error_code: &str, requests: Vec<Value>) -> 
     })
 }
 
-pub fn comicrack_error_payload(error_code: &str) -> Value {
-    json!({
-        "errorCode": error_code,
-    })
-}
-
 pub async fn match_comicrack_readlist(
     database_file: &FsPath,
     request: &ComicRackReadListRequest,

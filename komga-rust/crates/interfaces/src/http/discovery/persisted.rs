@@ -37,6 +37,7 @@ mod helpers;
 #[path = "persisted/models.rs"]
 mod models;
 
+pub(crate) use backend::persisted_backend_search_collection_ids;
 pub use backend::{PersistedDiscoveryAccessBackend, install_persisted_discovery_access};
 pub use models::{
     PersistedAuthorEntry, PersistedAuthorsScope, PersistedBookBrowseEntry,

@@ -25,7 +25,7 @@ pub(crate) async fn cache_workflow_middleware(request: Request, next: Next) -> R
 
     let mut response = next.run(request).await;
 
-    if is_private_cache_scope(&path) {
+    if is_private_cache_scope(&path) && !skip_private_cache_control(&path, &method) {
         set_private_cache_control_if_missing(response.headers_mut());
     }
 
@@ -163,6 +163,10 @@ pub(crate) fn asset_ok_response(
 
 fn is_private_cache_scope(path: &str) -> bool {
     path.starts_with("/api/") || path.starts_with("/opds/")
+}
+
+fn skip_private_cache_control(path: &str, method: &Method) -> bool {
+    path == "/api/v1/libraries" && matches!(*method, Method::GET | Method::HEAD)
 }
 
 fn is_conditional_scope(path: &str) -> bool {

@@ -203,18 +203,18 @@ pub struct MediaAssetsRuntimeAccessBackend {
     pub readlist_tachiyomi_counters: Arc<
         dyn Fn(
                 PathBuf,
-                String,
+                Vec<String>,
                 String,
             ) -> futures_util::future::BoxFuture<
                 'static,
-                Result<Option<(u64, u64, u64, u64, u64)>, String>,
+                Result<(u64, u64, u64, u64, u64), String>,
             > + Send
             + Sync,
     >,
     pub persist_readlist_tachiyomi_progress: Arc<
         dyn Fn(
                 PathBuf,
-                String,
+                Vec<String>,
                 String,
                 usize,
             ) -> futures_util::future::BoxFuture<'static, Result<Option<()>, String>>

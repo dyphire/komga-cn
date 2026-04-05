@@ -1,4 +1,155 @@
 use super::*;
+use komga_rust::infrastructure::{SearchEntityType, SearchIndexLifecycle};
+
+fn kotlin_collection_datetime(raw: &str) -> String {
+    raw.replace(' ', "T") + "Z"
+}
+
+#[tokio::test]
+async fn router_readlist_tachiyomi_progress_get_returns_kotlin_counter_fields() {
+    let paths = new_router_fixture("router-readlist-tachiyomi-progress-get-fields").await;
+    seed_router_contract_data(&paths).await;
+    seed_readlist_endpoint_variants(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/readlists/readlist-1/read-progress/tachiyomi")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("readlist tachiyomi get request should build"),
+        )
+        .await
+        .expect("readlist tachiyomi get request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await,
+        json!({
+            "booksCount": 3,
+            "booksReadCount": 0,
+            "booksUnreadCount": 3,
+            "booksInProgressCount": 0,
+            "lastReadContinuousIndex": 0,
+        })
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_readlist_tachiyomi_progress_get_counts_in_progress_and_continuous_prefix() {
+    let paths =
+        new_router_fixture("router-readlist-tachiyomi-progress-get-continuous-prefix").await;
+    seed_router_contract_data(&paths).await;
+    seed_readlist_endpoint_variants(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for readlist tachiyomi counter seed");
+    for (book_id, page, completed) in [
+        ("book-1", 10_i64, true),
+        ("book-2", 4_i64, false),
+        ("book-3", 12_i64, true),
+    ] {
+        sqlx::query(
+            "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED) VALUES (?, ?, ?, ?)",
+        )
+        .bind(book_id)
+        .bind("admin-user")
+        .bind(page)
+        .bind(completed)
+        .execute(&pool)
+        .await
+        .expect("readlist tachiyomi read progress row should insert");
+    }
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/readlists/readlist-1/read-progress/tachiyomi")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("readlist tachiyomi continuous-prefix request should build"),
+        )
+        .await
+        .expect("readlist tachiyomi continuous-prefix request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await,
+        json!({
+            "booksCount": 3,
+            "booksReadCount": 2,
+            "booksUnreadCount": 0,
+            "booksInProgressCount": 1,
+            "lastReadContinuousIndex": 1,
+        })
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_readlist_tachiyomi_progress_get_counts_page_zero_incomplete_as_in_progress() {
+    let paths =
+        new_router_fixture("router-readlist-tachiyomi-progress-page-zero-in-progress").await;
+    seed_router_contract_data(&paths).await;
+    seed_readlist_endpoint_variants(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for readlist tachiyomi page-zero seed");
+    sqlx::query(
+        "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED) VALUES (?, ?, ?, ?)",
+    )
+    .bind("book-1")
+    .bind("admin-user")
+    .bind(0_i64)
+    .bind(false)
+    .execute(&pool)
+    .await
+    .expect("page-zero incomplete read progress row should insert");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/readlists/readlist-1/read-progress/tachiyomi")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("readlist tachiyomi page-zero request should build"),
+        )
+        .await
+        .expect("readlist tachiyomi page-zero request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await,
+        json!({
+            "booksCount": 3,
+            "booksReadCount": 0,
+            "booksUnreadCount": 2,
+            "booksInProgressCount": 1,
+            "lastReadContinuousIndex": 0,
+        })
+    );
+
+    cleanup_router_fixture(paths);
+}
 
 #[tokio::test]
 async fn router_readlist_tachiyomi_progress_marks_books_completed_at_real_page_count() {
@@ -56,6 +207,76 @@ async fn router_readlist_tachiyomi_progress_marks_books_completed_at_real_page_c
 }
 
 #[tokio::test]
+async fn router_readlist_tachiyomi_progress_skips_books_already_completed() {
+    let paths = new_router_fixture("router-readlist-tachiyomi-progress-skip-completed").await;
+    seed_router_contract_data(&paths).await;
+    seed_readlist_endpoint_variants(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for tachiyomi skip-completed seed");
+    sqlx::query(
+        "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED) VALUES (?, ?, ?, ?)",
+    )
+    .bind("book-1")
+    .bind("admin-user")
+    .bind(3_i64)
+    .bind(true)
+    .execute(&pool)
+    .await
+    .expect("existing completed read-progress row should insert");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/readlists/readlist-1/read-progress/tachiyomi")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "lastBookRead": 2 }).to_string()))
+                .expect("readlist tachiyomi skip-completed request should build"),
+        )
+        .await
+        .expect("readlist tachiyomi skip-completed request should complete");
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should reopen for tachiyomi skip-completed verification");
+    let rows = sqlx::query(
+        "SELECT BOOK_ID, PAGE, COMPLETED FROM READ_PROGRESS WHERE USER_ID = ? ORDER BY BOOK_ID ASC",
+    )
+    .bind("admin-user")
+    .fetch_all(&pool)
+    .await
+    .expect("read progress rows should be queryable after skip-completed write");
+    pool.close().await;
+
+    let persisted = rows
+        .into_iter()
+        .map(|row| {
+            (
+                row.get::<String, _>("BOOK_ID"),
+                row.get::<i64, _>("PAGE"),
+                row.get::<i64, _>("COMPLETED"),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        persisted,
+        vec![("book-1".to_string(), 3, 1), ("book-2".to_string(), 11, 1),]
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_collections_supports_search_library_id_and_unpaged() {
     let paths = new_router_fixture("router-collections-search-library-unpaged").await;
     seed_router_contract_data(&paths).await;
@@ -100,6 +321,415 @@ async fn router_collections_supports_search_library_id_and_unpaged() {
 }
 
 #[tokio::test]
+async fn router_collections_search_uses_index_relevance_order_like_kotlin() {
+    let paths = new_router_fixture("router-collections-search-relevance-order").await;
+    seed_router_contract_data(&paths).await;
+    seed_collection_listing_variants(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for collections search relevance seed");
+    sqlx::query("UPDATE COLLECTION SET NAME = ? WHERE ID = ?")
+        .bind("Collection Collection 2")
+        .bind("collection-2")
+        .execute(&pool)
+        .await
+        .expect("collection-2 name should update for collections search relevance seed");
+    sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("collection-3")
+        .bind("Collection 3")
+        .bind(false)
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("collection-3 row should insert for collections search relevance seed");
+    sqlx::query(
+        "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
+    )
+    .bind("collection-3")
+    .bind("series-1")
+    .bind(0_i64)
+    .execute(&pool)
+    .await
+    .expect("collection-3 series membership should insert for collections search relevance seed");
+    pool.close().await;
+
+    let config = runtime_config_for_paths(&paths);
+    let app = build_router_with_config(&config);
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let expected_ids = SearchIndexLifecycle::bootstrap(config.lucene_data_directory.as_path())
+        .expect("collections search relevance index should bootstrap")
+        .search_ids("collection", SearchEntityType::Collection, 10)
+        .expect("collections search relevance query should succeed");
+    assert_eq!(expected_ids.len(), 3);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/collections?search=collection&unpaged=true")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("collections search relevance request should build"),
+        )
+        .await
+        .expect("collections search relevance request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let content = payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("collections search relevance payload should expose content array");
+    let ids = content
+        .iter()
+        .map(|entry| {
+            entry
+                .get("id")
+                .and_then(Value::as_str)
+                .expect("collections search relevance entry should expose id")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(ids, expected_ids);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collections_default_name_order_and_filtered_flags_match_kotlin() {
+    let paths = new_router_fixture("router-collections-default-order-filtered-flags").await;
+    seed_router_contract_data(&paths).await;
+    seed_collection_series_variants(&paths).await;
+    seed_router_library_restricted_user(
+        &paths,
+        "library-1-user",
+        "library1@example.org",
+        "router-contract-library1-123",
+        &["library-1"],
+    )
+    .await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for collections default-order filtered seed");
+    sqlx::query("UPDATE COLLECTION SET NAME = ?, SERIES_COUNT = ? WHERE ID = ?")
+        .bind("Gamma Collection")
+        .bind(2_i64)
+        .bind("collection-1")
+        .execute(&pool)
+        .await
+        .expect("collection-1 should update for collections default-order filtered seed");
+    sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("collection-3")
+        .bind("Alpha Collection")
+        .bind(false)
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("collection-3 row should insert for collections default-order filtered seed");
+    sqlx::query(
+        "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
+    )
+    .bind("collection-3")
+    .bind("series-1")
+    .bind(0_i64)
+    .execute(&pool)
+    .await
+    .expect(
+        "collection-3 series membership should insert for collections default-order filtered seed",
+    );
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "library1@example.org",
+        "router-contract-library1-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/collections?unpaged=true")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("collections default-order filtered request should build"),
+        )
+        .await
+        .expect("collections default-order filtered request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let content = payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("collections default-order filtered payload should expose content array");
+    assert_eq!(content.len(), 2);
+    assert_eq!(
+        content[0].get("id").and_then(Value::as_str),
+        Some("collection-3")
+    );
+    assert_eq!(
+        content[0].get("filtered").and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        content[1].get("id").and_then(Value::as_str),
+        Some("collection-1")
+    );
+    assert_eq!(
+        content[1].get("filtered").and_then(Value::as_bool),
+        Some(true)
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collections_default_name_order_uses_unicode_collation_like_kotlin() {
+    let paths = new_router_fixture("router-collections-default-unicode-order").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for collections unicode-order seed");
+    sqlx::query("UPDATE COLLECTION SET NAME = ? WHERE ID = ?")
+        .bind("Éclair Collection")
+        .bind("collection-1")
+        .execute(&pool)
+        .await
+        .expect("collection-1 name should update for collections unicode-order seed");
+    sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("collection-3")
+        .bind("Zulu Collection")
+        .bind(false)
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("collection-3 row should insert for collections unicode-order seed");
+    sqlx::query(
+        "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
+    )
+    .bind("collection-3")
+    .bind("series-1")
+    .bind(0_i64)
+    .execute(&pool)
+    .await
+    .expect("collection-3 membership should insert for collections unicode-order seed");
+    sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("collection-4")
+        .bind("Alpha Collection")
+        .bind(false)
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("collection-4 row should insert for collections unicode-order seed");
+    sqlx::query(
+        "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
+    )
+    .bind("collection-4")
+    .bind("series-1")
+    .bind(0_i64)
+    .execute(&pool)
+    .await
+    .expect("collection-4 membership should insert for collections unicode-order seed");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/collections?unpaged=true")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("collections unicode-order request should build"),
+        )
+        .await
+        .expect("collections unicode-order request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let content = payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("collections unicode-order payload should expose content array");
+    let ids = content
+        .iter()
+        .map(|entry| {
+            entry
+                .get("id")
+                .and_then(Value::as_str)
+                .expect("collections unicode-order entry should expose id")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        ids,
+        vec![
+            "collection-4".to_string(),
+            "collection-1".to_string(),
+            "collection-3".to_string(),
+        ]
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collections_library_id_does_not_filter_series_ids_for_all_library_user_like_kotlin()
+{
+    let paths = new_router_fixture("router-collections-library-id-all-library-user").await;
+    seed_router_contract_data(&paths).await;
+    seed_collection_series_variants(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/collections?library_id=library-1&unpaged=true")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("collections library-id all-library-user request should build"),
+        )
+        .await
+        .expect("collections library-id all-library-user request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let content = payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("collections library-id all-library-user payload should expose content array");
+    assert_eq!(content.len(), 1);
+    assert_eq!(
+        content[0].get("id").and_then(Value::as_str),
+        Some("collection-1")
+    );
+    assert_eq!(
+        content[0].get("seriesIds"),
+        Some(&json!(["series-1", "series-2"]))
+    );
+    assert_eq!(
+        content[0].get("filtered").and_then(Value::as_bool),
+        Some(false)
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collections_search_does_not_drop_visible_hits_after_hidden_ranked_hits_like_kotlin()
+{
+    let paths =
+        new_router_fixture("router-collections-search-visible-hits-after-hidden-ranked").await;
+    seed_router_contract_data(&paths).await;
+    seed_collection_listing_variants(&paths).await;
+    seed_router_library_restricted_user(
+        &paths,
+        "library-1-user",
+        "library1@example.org",
+        "router-contract-library1-123",
+        &["library-1"],
+    )
+    .await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for collections hidden-ranked search seed");
+    sqlx::query("UPDATE COLLECTION SET NAME = ? WHERE ID = ?")
+        .bind("Collection Collection 2")
+        .bind("collection-2")
+        .execute(&pool)
+        .await
+        .expect("collection-2 should update for collections hidden-ranked search seed");
+    sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("collection-3")
+        .bind("Collection 3")
+        .bind(false)
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("collection-3 row should insert for collections hidden-ranked search seed");
+    sqlx::query(
+        "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
+    )
+    .bind("collection-3")
+    .bind("series-1")
+    .bind(0_i64)
+    .execute(&pool)
+    .await
+    .expect(
+        "collection-3 series membership should insert for collections hidden-ranked search seed",
+    );
+    pool.close().await;
+
+    let config = runtime_config_for_paths(&paths);
+    let app = build_router_with_config(&config);
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "library1@example.org",
+        "router-contract-library1-123",
+    )
+    .await;
+
+    let ranked_ids = SearchIndexLifecycle::bootstrap(config.lucene_data_directory.as_path())
+        .expect("collections hidden-ranked search index should bootstrap")
+        .search_ids("collection", SearchEntityType::Collection, 10)
+        .expect("collections hidden-ranked search query should succeed");
+    assert_eq!(ranked_ids.first().map(String::as_str), Some("collection-2"));
+    let expected_visible_ids = ranked_ids
+        .into_iter()
+        .filter(|id| id != "collection-2")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        expected_visible_ids,
+        vec!["collection-1".to_string(), "collection-3".to_string()]
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/collections?search=collection&unpaged=true")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("collections hidden-ranked search request should build"),
+        )
+        .await
+        .expect("collections hidden-ranked search request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let content = payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("collections hidden-ranked search payload should expose content array");
+    let ids = content
+        .iter()
+        .map(|entry| {
+            entry
+                .get("id")
+                .and_then(Value::as_str)
+                .expect("collections hidden-ranked search entry should expose id")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(ids, expected_visible_ids);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_collection_series_supports_kotlin_style_query_filters() {
     let paths = new_router_fixture("router-collection-series-query-filters").await;
     seed_router_contract_data(&paths).await;
@@ -139,6 +769,781 @@ async fn router_collection_series_supports_kotlin_style_query_filters() {
             .and_then(Value::as_bool),
         Some(true)
     );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collection_series_ignores_search_query_like_kotlin() {
+    let paths = new_router_fixture("router-collection-series-ignore-search-query").await;
+    seed_router_contract_data(&paths).await;
+    seed_collection_series_variants(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/collections/collection-1/series?search=Series%202&unpaged=true")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("collection series search-ignore request should build"),
+        )
+        .await
+        .expect("collection series search-ignore request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let content = payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("collection series search-ignore payload should expose content array");
+    let ids = content
+        .iter()
+        .map(|entry| {
+            entry
+                .get("id")
+                .and_then(Value::as_str)
+                .expect("collection series search-ignore entry should expose id")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec!["series-1".to_string(), "series-2".to_string()]);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collection_series_uses_collection_order_for_ordered_collection_like_kotlin() {
+    let paths = new_router_fixture("router-collection-series-ordered-collection-order").await;
+    seed_router_contract_data(&paths).await;
+    seed_collection_series_variants(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for ordered collection series alignment");
+    sqlx::query("UPDATE COLLECTION SET ORDERED = ?, SERIES_COUNT = ? WHERE ID = ?")
+        .bind(true)
+        .bind(2_i64)
+        .bind("collection-1")
+        .execute(&pool)
+        .await
+        .expect("collection-1 should become ordered for collection series alignment");
+    sqlx::query("UPDATE SERIES_METADATA SET TITLE_SORT = ? WHERE SERIES_ID = ?")
+        .bind("Zeta Series")
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("series-1 titleSort should update for ordered collection series alignment");
+    sqlx::query("UPDATE SERIES_METADATA SET TITLE_SORT = ? WHERE SERIES_ID = ?")
+        .bind("Alpha Series")
+        .bind("series-2")
+        .execute(&pool)
+        .await
+        .expect("series-2 titleSort should update for ordered collection series alignment");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/collections/collection-1/series?sort=metadata.titleSort,asc&unpaged=true")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("ordered collection series request should build"),
+        )
+        .await
+        .expect("ordered collection series request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let content = payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("ordered collection series payload should expose content array");
+    let ids = content
+        .iter()
+        .map(|entry| {
+            entry
+                .get("id")
+                .and_then(Value::as_str)
+                .expect("ordered collection series entry should expose id")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec!["series-1".to_string(), "series-2".to_string()]);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collection_series_paginates_after_ordering_for_ordered_collection_like_kotlin() {
+    let paths = new_router_fixture("router-collection-series-ordered-pagination").await;
+    seed_router_contract_data(&paths).await;
+    seed_collection_series_variants(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for ordered collection pagination alignment");
+    sqlx::query("UPDATE COLLECTION SET ORDERED = ?, SERIES_COUNT = ? WHERE ID = ?")
+        .bind(true)
+        .bind(2_i64)
+        .bind("collection-1")
+        .execute(&pool)
+        .await
+        .expect("collection-1 should become ordered for ordered collection pagination");
+    sqlx::query("UPDATE SERIES_METADATA SET TITLE_SORT = ? WHERE SERIES_ID = ?")
+        .bind("Zeta Series")
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("series-1 titleSort should update for ordered collection pagination");
+    sqlx::query("UPDATE SERIES_METADATA SET TITLE_SORT = ? WHERE SERIES_ID = ?")
+        .bind("Alpha Series")
+        .bind("series-2")
+        .execute(&pool)
+        .await
+        .expect("series-2 titleSort should update for ordered collection pagination");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/collections/collection-1/series?page=1&size=1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("ordered collection series pagination request should build"),
+        )
+        .await
+        .expect("ordered collection series pagination request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let content = payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("ordered collection pagination payload should expose content array");
+    assert_eq!(content.len(), 1);
+    assert_eq!(
+        content[0].get("id").and_then(Value::as_str),
+        Some("series-2")
+    );
+    assert_eq!(payload.get("totalElements"), Some(&json!(2)));
+    assert_eq!(payload.get("totalPages"), Some(&json!(2)));
+    assert_eq!(payload.get("number"), Some(&json!(1)));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collection_series_filters_invisible_series_for_partially_visible_user() {
+    let paths = new_router_fixture("router-collection-series-partially-visible").await;
+    seed_router_contract_data(&paths).await;
+    seed_collection_series_variants(&paths).await;
+    seed_router_library_restricted_user(
+        &paths,
+        "library-1-user",
+        "library1@example.org",
+        "router-contract-library1-123",
+        &["library-1"],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "library1@example.org",
+        "router-contract-library1-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/collections/collection-1/series?unpaged=true")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("partially visible collection series request should build"),
+        )
+        .await
+        .expect("partially visible collection series request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let content = payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("partially visible collection series payload should expose content array");
+    assert_eq!(content.len(), 1);
+    assert_eq!(
+        content[0].get("id").and_then(Value::as_str),
+        Some("series-1")
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collection_series_returns_not_found_for_fully_hidden_collection_like_kotlin() {
+    let paths = new_router_fixture("router-collection-series-fully-hidden").await;
+    seed_router_contract_data(&paths).await;
+    seed_collection_listing_variants(&paths).await;
+    seed_router_library_restricted_user(
+        &paths,
+        "library-1-user",
+        "library1@example.org",
+        "router-contract-library1-123",
+        &["library-1"],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "library1@example.org",
+        "router-contract-library1-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/collections/collection-2/series")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("fully hidden collection series request should build"),
+        )
+        .await
+        .expect("fully hidden collection series request should complete");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collection_detail_returns_kotlin_collection_dto_fields() {
+    let paths = new_router_fixture("router-collection-detail-kotlin-dto-fields").await;
+    seed_router_contract_data(&paths).await;
+    seed_collection_series_variants(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for collection detail fixture alignment");
+    sqlx::query("UPDATE COLLECTION SET SERIES_COUNT = ? WHERE ID = ?")
+        .bind(2_i64)
+        .bind("collection-1")
+        .execute(&pool)
+        .await
+        .expect("collection-1 series count should align with attached series");
+    let timestamps =
+        sqlx::query("SELECT CREATED_DATE, LAST_MODIFIED_DATE FROM COLLECTION WHERE ID = ?")
+            .bind("collection-1")
+            .fetch_one(&pool)
+            .await
+            .expect("collection-1 timestamps should be queryable");
+    pool.close().await;
+
+    let created_date = kotlin_collection_datetime(&timestamps.get::<String, _>("CREATED_DATE"));
+    let last_modified_date =
+        kotlin_collection_datetime(&timestamps.get::<String, _>("LAST_MODIFIED_DATE"));
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/collections/collection-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("collection detail request should build"),
+        )
+        .await
+        .expect("collection detail request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await,
+        json!({
+            "id": "collection-1",
+            "name": "Collection 1",
+            "ordered": false,
+            "seriesIds": ["series-1", "series-2"],
+            "createdDate": created_date,
+            "lastModifiedDate": last_modified_date,
+            "filtered": false,
+        })
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collection_detail_marks_partially_visible_collection_as_filtered() {
+    let paths = new_router_fixture("router-collection-detail-partially-visible").await;
+    seed_router_contract_data(&paths).await;
+    seed_collection_series_variants(&paths).await;
+    seed_router_library_restricted_user(
+        &paths,
+        "library-1-user",
+        "library1@example.org",
+        "router-contract-library1-123",
+        &["library-1"],
+    )
+    .await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for filtered collection detail alignment");
+    sqlx::query("UPDATE COLLECTION SET SERIES_COUNT = ? WHERE ID = ?")
+        .bind(2_i64)
+        .bind("collection-1")
+        .execute(&pool)
+        .await
+        .expect("collection-1 series count should align for filtered detail");
+    let timestamps =
+        sqlx::query("SELECT CREATED_DATE, LAST_MODIFIED_DATE FROM COLLECTION WHERE ID = ?")
+            .bind("collection-1")
+            .fetch_one(&pool)
+            .await
+            .expect("filtered collection detail timestamps should be queryable");
+    pool.close().await;
+
+    let created_date = kotlin_collection_datetime(&timestamps.get::<String, _>("CREATED_DATE"));
+    let last_modified_date =
+        kotlin_collection_datetime(&timestamps.get::<String, _>("LAST_MODIFIED_DATE"));
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "library1@example.org",
+        "router-contract-library1-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/collections/collection-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("filtered collection detail request should build"),
+        )
+        .await
+        .expect("filtered collection detail request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await,
+        json!({
+            "id": "collection-1",
+            "name": "Collection 1",
+            "ordered": false,
+            "seriesIds": ["series-1"],
+            "createdDate": created_date,
+            "lastModifiedDate": last_modified_date,
+            "filtered": true,
+        })
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collection_create_rejects_missing_name_like_kotlin() {
+    let paths = new_router_fixture("router-collection-create-missing-name").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/collections")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "ordered": false,
+                        "seriesIds": ["series-1"]
+                    })
+                    .to_string(),
+                ))
+                .expect("collection create missing-name request should build"),
+        )
+        .await
+        .expect("collection create missing-name request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collection_create_rejects_missing_ordered_like_kotlin() {
+    let paths = new_router_fixture("router-collection-create-missing-ordered").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/collections")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "New Collection",
+                        "seriesIds": ["series-1"]
+                    })
+                    .to_string(),
+                ))
+                .expect("collection create missing-ordered request should build"),
+        )
+        .await
+        .expect("collection create missing-ordered request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collection_create_rejects_blank_name_like_kotlin() {
+    let paths = new_router_fixture("router-collection-create-blank-name").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/collections")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "   ",
+                        "ordered": false,
+                        "seriesIds": ["series-1"]
+                    })
+                    .to_string(),
+                ))
+                .expect("collection create blank-name request should build"),
+        )
+        .await
+        .expect("collection create blank-name request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collection_create_rejects_empty_series_ids_like_kotlin() {
+    let paths = new_router_fixture("router-collection-create-empty-series-ids").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/collections")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "Empty SeriesIds",
+                        "ordered": false,
+                        "seriesIds": []
+                    })
+                    .to_string(),
+                ))
+                .expect("collection create empty-series-ids request should build"),
+        )
+        .await
+        .expect("collection create empty-series-ids request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collection_create_rejects_duplicate_series_ids_like_kotlin() {
+    let paths = new_router_fixture("router-collection-create-duplicate-series-ids").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/collections")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "Duplicate SeriesIds",
+                        "ordered": false,
+                        "seriesIds": ["series-1", "series-1"]
+                    })
+                    .to_string(),
+                ))
+                .expect("collection create duplicate-series-ids request should build"),
+        )
+        .await
+        .expect("collection create duplicate-series-ids request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collection_create_rejects_duplicate_name_like_kotlin() {
+    let paths = new_router_fixture("router-collection-create-duplicate-name").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/collections")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "Collection 1",
+                        "ordered": false,
+                        "seriesIds": ["series-1"]
+                    })
+                    .to_string(),
+                ))
+                .expect("collection create duplicate-name request should build"),
+        )
+        .await
+        .expect("collection create duplicate-name request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collection_patch_preserves_unspecified_fields_like_kotlin() {
+    let paths = new_router_fixture("router-collection-patch-preserves-unspecified").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let patch_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/collections/collection-1")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "ordered": true }).to_string()))
+                .expect("collection patch partial request should build"),
+        )
+        .await
+        .expect("collection patch partial request should complete");
+
+    assert_eq!(patch_response.status(), StatusCode::NO_CONTENT);
+
+    let detail_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/collections/collection-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("collection detail after patch request should build"),
+        )
+        .await
+        .expect("collection detail after patch request should complete");
+
+    assert_eq!(detail_response.status(), StatusCode::OK);
+    let payload = response_json(detail_response).await;
+    assert_eq!(
+        payload.get("name"),
+        Some(&Value::String("Collection 1".to_string()))
+    );
+    assert_eq!(payload.get("ordered"), Some(&Value::Bool(true)));
+    assert_eq!(payload.get("seriesIds"), Some(&json!(["series-1"])));
+    assert_eq!(payload.get("filtered"), Some(&Value::Bool(false)));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collection_patch_rejects_duplicate_name_like_kotlin() {
+    let paths = new_router_fixture("router-collection-patch-duplicate-name").await;
+    seed_router_contract_data(&paths).await;
+    seed_collection_listing_variants(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let patch_response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/collections/collection-1")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "Beta Collection",
+                        "ordered": false,
+                        "seriesIds": ["series-1"]
+                    })
+                    .to_string(),
+                ))
+                .expect("collection patch duplicate-name request should build"),
+        )
+        .await
+        .expect("collection patch duplicate-name request should complete");
+
+    assert_eq!(patch_response.status(), StatusCode::BAD_REQUEST);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collection_patch_ignores_historical_duplicate_when_name_is_unchanged_like_kotlin() {
+    let paths =
+        new_router_fixture("router-collection-patch-unchanged-name-historical-duplicate").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for collection patch historical duplicate seed");
+    sqlx::query(
+        "INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT, CREATED_DATE, LAST_MODIFIED_DATE) \
+         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+    )
+    .bind("collection-duplicate")
+    .bind("Collection 1")
+    .bind(true)
+    .bind(1_i64)
+    .execute(&pool)
+    .await
+    .expect("historical duplicate collection row should insert");
+    sqlx::query(
+        "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
+    )
+    .bind("collection-duplicate")
+    .bind("series-1")
+    .bind(0_i64)
+    .execute(&pool)
+    .await
+    .expect("historical duplicate collection series row should insert");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let patch_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/collections/collection-1")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "ordered": true }).to_string()))
+                .expect(
+                    "collection patch unchanged-name historical-duplicate request should build",
+                ),
+        )
+        .await
+        .expect("collection patch unchanged-name historical-duplicate request should complete");
+
+    assert_eq!(patch_response.status(), StatusCode::NO_CONTENT);
+
+    let detail_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/collections/collection-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("collection detail after unchanged-name historical-duplicate patch should build"),
+        )
+        .await
+        .expect("collection detail after unchanged-name historical-duplicate patch should complete");
+
+    assert_eq!(detail_response.status(), StatusCode::OK);
+    let payload = response_json(detail_response).await;
+    assert_eq!(
+        payload.get("name"),
+        Some(&Value::String("Collection 1".to_string()))
+    );
+    assert_eq!(payload.get("ordered"), Some(&Value::Bool(true)));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collection_patch_rejects_duplicate_series_ids_like_kotlin() {
+    let paths = new_router_fixture("router-collection-patch-duplicate-series-ids").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let patch_response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/collections/collection-1")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "seriesIds": ["series-1", "series-1"]
+                    })
+                    .to_string(),
+                ))
+                .expect("collection patch duplicate-series-ids request should build"),
+        )
+        .await
+        .expect("collection patch duplicate-series-ids request should complete");
+
+    assert_eq!(patch_response.status(), StatusCode::BAD_REQUEST);
 
     cleanup_router_fixture(paths);
 }

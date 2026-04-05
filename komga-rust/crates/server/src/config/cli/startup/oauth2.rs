@@ -52,6 +52,7 @@ fn resolve_oauth2_clients_from_layered(layered: &LayeredConfig) -> Vec<OAuth2Cli
         let client_name =
             read_object_string(registration, &["client-name", "clientName", "client_name"])
                 .unwrap_or_else(|| registration_id.to_string());
+        let scopes = read_object_string_list(registration, &["scope"]);
 
         let provider_id = read_object_string(registration, &["provider"])
             .unwrap_or_else(|| registration_id.to_string());
@@ -82,6 +83,7 @@ fn resolve_oauth2_clients_from_layered(layered: &LayeredConfig) -> Vec<OAuth2Cli
             client_secret,
             authorization_uri,
             token_uri,
+            scopes,
         });
     }
 
@@ -124,6 +126,12 @@ fn resolve_oauth2_clients_from_env(env: &BTreeMap<String, String>) -> Vec<OAuth2
             ))
             .cloned()
             .unwrap_or_else(|| registration_id.clone());
+        let scopes = env
+            .get(&format!(
+                "SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_{registration_key}_SCOPE"
+            ))
+            .map(|value| parse_scope_value(value))
+            .unwrap_or_default();
 
         let provider_id = env
             .get(&format!(
@@ -158,6 +166,7 @@ fn resolve_oauth2_clients_from_env(env: &BTreeMap<String, String>) -> Vec<OAuth2
             client_secret,
             authorization_uri,
             token_uri,
+            scopes,
         });
     }
 
@@ -174,4 +183,35 @@ fn read_object_string(
             .and_then(serde_json::Value::as_str)
             .map(str::to_string)
     })
+}
+
+fn read_object_string_list(
+    object: &serde_json::Map<String, serde_json::Value>,
+    keys: &[&str],
+) -> Vec<String> {
+    keys.iter()
+        .find_map(|key| object.get(*key))
+        .map(parse_scope_json_value)
+        .unwrap_or_default()
+}
+
+fn parse_scope_json_value(value: &serde_json::Value) -> Vec<String> {
+    match value {
+        serde_json::Value::String(value) => parse_scope_value(value),
+        serde_json::Value::Array(values) => values
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .flat_map(parse_scope_value)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn parse_scope_value(value: &str) -> Vec<String> {
+    value
+        .split([',', ' '])
+        .map(str::trim)
+        .filter(|scope| !scope.is_empty())
+        .map(str::to_string)
+        .collect()
 }

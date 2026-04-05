@@ -12,6 +12,75 @@ fn active_profiles_contain_demo(layered: &LayeredConfig, env: &BTreeMap<String, 
         })
 }
 
+fn parse_bool(value: &str) -> Result<bool, ConfigError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        other => Err(ConfigError::InvalidBoolean(other.to_string())),
+    }
+}
+
+fn read_bool(layered: &LayeredConfig, keys: &[&str]) -> Option<bool> {
+    keys.iter().find_map(|key| {
+        layered.get_bool(key).ok().or_else(|| {
+            layered
+                .get_string(key)
+                .ok()
+                .and_then(|value| parse_bool(&value).ok())
+        })
+    })
+}
+
+fn resolve_config_bool(
+    layered: &LayeredConfig,
+    env: &BTreeMap<String, String>,
+    env_key: &str,
+    keys: &[&str],
+    default: bool,
+) -> Result<bool, ConfigError> {
+    Ok(env
+        .get(env_key)
+        .map(String::as_str)
+        .map(parse_bool)
+        .transpose()?
+        .or_else(|| read_bool(layered, keys))
+        .unwrap_or(default))
+}
+
+fn resolve_oidc_email_verification(
+    layered: &LayeredConfig,
+    env: &BTreeMap<String, String>,
+) -> Result<bool, ConfigError> {
+    resolve_config_bool(
+        layered,
+        env,
+        "KOMGA_OIDC_EMAIL_VERIFICATION",
+        &[
+            "komga.oidcEmailVerification",
+            "komga.oidc-email-verification",
+            "komga.oidc_email_verification",
+        ],
+        true,
+    )
+}
+
+fn resolve_oauth2_account_creation(
+    layered: &LayeredConfig,
+    env: &BTreeMap<String, String>,
+) -> Result<bool, ConfigError> {
+    resolve_config_bool(
+        layered,
+        env,
+        "KOMGA_OAUTH2_ACCOUNT_CREATION",
+        &[
+            "komga.oauth2AccountCreation",
+            "komga.oauth2-account-creation",
+            "komga.oauth2_account_creation",
+        ],
+        false,
+    )
+}
+
 pub(crate) fn resolve_with_env(
     cli: &RuntimeCli,
     env: &BTreeMap<String, String>,
@@ -79,6 +148,8 @@ pub(crate) fn resolve_with_env(
         resolve_derived_runtime_paths(cli, env, &layered, &resolved_config_dir, platform_profile);
 
     let oauth2_clients = resolve_oauth2_clients_for_startup_slice(&layered, env);
+    let oauth2_account_creation = resolve_oauth2_account_creation(&layered, env)?;
+    let oidc_email_verification = resolve_oidc_email_verification(&layered, env)?;
 
     let writer_ownership_policy = resolve_writer_ownership_policy_for_startup_slice(cli, env)?;
     let demo_mode = active_profiles_contain_demo(&layered, env);
@@ -87,6 +158,8 @@ pub(crate) fn resolve_with_env(
         bind_address,
         mode,
         demo_mode,
+        oauth2_account_creation,
+        oidc_email_verification,
         runtime_profile,
         platform_profile,
         config_dir: Some(resolved_config_dir),

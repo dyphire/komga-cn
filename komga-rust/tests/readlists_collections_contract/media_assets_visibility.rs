@@ -122,6 +122,55 @@ async fn router_readlist_and_collection_media_assets_hide_age_restricted_content
 }
 
 #[tokio::test]
+async fn router_readlist_tachiyomi_progress_ignores_content_restrictions_like_kotlin() {
+    let paths = new_router_fixture("router-readlist-tachiyomi-content-restrictions").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_age_exclude_user_with_roles(
+        &paths,
+        "restricted-user",
+        "restricted@example.org",
+        "router-contract-restricted-123",
+        12,
+        &["USER", "FILE_DOWNLOAD"],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let restricted_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "restricted@example.org",
+        "router-contract-restricted-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/readlists/readlist-1/read-progress/tachiyomi")
+                .header("x-auth-token", &restricted_token)
+                .body(Body::empty())
+                .expect("restricted readlist tachiyomi get request should build"),
+        )
+        .await
+        .expect("restricted readlist tachiyomi get request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await,
+        json!({
+            "booksCount": 1,
+            "booksReadCount": 0,
+            "booksUnreadCount": 1,
+            "booksInProgressCount": 0,
+            "lastReadContinuousIndex": 0,
+        })
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_readlist_detail_filters_books_for_partially_restricted_user() {
     let paths = new_router_fixture("router-readlist-detail-partially-restricted").await;
     seed_router_contract_data(&paths).await;
@@ -160,6 +209,311 @@ async fn router_readlist_detail_filters_books_for_partially_restricted_user() {
     let payload = response_json(response).await;
     assert_eq!(payload.get("filtered"), Some(&Value::Bool(true)));
     assert_eq!(payload.get("bookIds"), Some(&json!(["book-3"])));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_readlist_tachiyomi_progress_ignores_content_restriction_subsets_like_kotlin() {
+    let paths = new_router_fixture("router-readlist-tachiyomi-partially-restricted").await;
+    seed_router_contract_data(&paths).await;
+    seed_readlist_endpoint_variants(&paths).await;
+    seed_router_age_exclude_user_with_roles(
+        &paths,
+        "partially-restricted-user",
+        "partial@example.org",
+        "router-contract-partial-123",
+        15,
+        &["USER", "FILE_DOWNLOAD"],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let restricted_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "partial@example.org",
+        "router-contract-partial-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/readlists/readlist-1/read-progress/tachiyomi")
+                .header("x-auth-token", &restricted_token)
+                .body(Body::empty())
+                .expect("partially restricted readlist tachiyomi get request should build"),
+        )
+        .await
+        .expect("partially restricted readlist tachiyomi get request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await,
+        json!({
+            "booksCount": 3,
+            "booksReadCount": 0,
+            "booksUnreadCount": 3,
+            "booksInProgressCount": 0,
+            "lastReadContinuousIndex": 0,
+        })
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_readlist_tachiyomi_progress_counts_full_readlist_for_library_restricted_user() {
+    let paths = new_router_fixture("router-readlist-tachiyomi-library-restricted").await;
+    seed_router_contract_data(&paths).await;
+    seed_readlist_endpoint_variants(&paths).await;
+    seed_router_library_restricted_user(
+        &paths,
+        "library-1-user",
+        "library1@example.org",
+        "router-contract-library1-123",
+        &["library-1"],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let restricted_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "library1@example.org",
+        "router-contract-library1-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/readlists/readlist-1/read-progress/tachiyomi")
+                .header("x-auth-token", &restricted_token)
+                .body(Body::empty())
+                .expect("library-restricted readlist tachiyomi get request should build"),
+        )
+        .await
+        .expect("library-restricted readlist tachiyomi get request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await,
+        json!({
+            "booksCount": 3,
+            "booksReadCount": 0,
+            "booksUnreadCount": 3,
+            "booksInProgressCount": 0,
+            "lastReadContinuousIndex": 0,
+        })
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_readlist_tachiyomi_progress_returns_not_found_when_library_sharing_has_no_matches()
+{
+    let paths = new_router_fixture("router-readlist-tachiyomi-no-shared-libraries").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_library_restricted_user(
+        &paths,
+        "no-library-user",
+        "nolib@example.org",
+        "router-contract-nolib-123",
+        &[],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let restricted_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "nolib@example.org",
+        "router-contract-nolib-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/readlists/readlist-1/read-progress/tachiyomi")
+                .header("x-auth-token", &restricted_token)
+                .body(Body::empty())
+                .expect("hidden-library readlist tachiyomi get request should build"),
+        )
+        .await
+        .expect("hidden-library readlist tachiyomi get request should complete");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_readlist_tachiyomi_progress_put_returns_not_found_when_library_sharing_has_no_matches()
+ {
+    let paths = new_router_fixture("router-readlist-tachiyomi-put-no-shared-libraries").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_library_restricted_user(
+        &paths,
+        "no-library-user",
+        "nolib@example.org",
+        "router-contract-nolib-123",
+        &[],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let restricted_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "nolib@example.org",
+        "router-contract-nolib-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/readlists/readlist-1/read-progress/tachiyomi")
+                .header("x-auth-token", &restricted_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "lastBookRead": 1 }).to_string()))
+                .expect("hidden-library readlist tachiyomi put request should build"),
+        )
+        .await
+        .expect("hidden-library readlist tachiyomi put request should complete");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for no-shared-libraries verification");
+    let writes = sqlx::query("SELECT BOOK_ID FROM READ_PROGRESS WHERE USER_ID = ?")
+        .bind("no-library-user")
+        .fetch_all(&pool)
+        .await
+        .expect("no-shared-libraries read progress rows should be queryable");
+    pool.close().await;
+    assert!(writes.is_empty());
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_readlist_tachiyomi_progress_put_ignores_fully_hidden_content_like_kotlin() {
+    let paths = new_router_fixture("router-readlist-tachiyomi-put-content-restrictions").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_age_exclude_user_with_roles(
+        &paths,
+        "restricted-user",
+        "restricted@example.org",
+        "router-contract-restricted-123",
+        12,
+        &["USER", "FILE_DOWNLOAD"],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let restricted_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "restricted@example.org",
+        "router-contract-restricted-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/readlists/readlist-1/read-progress/tachiyomi")
+                .header("x-auth-token", &restricted_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "lastBookRead": 1 }).to_string()))
+                .expect("content-restricted readlist tachiyomi put request should build"),
+        )
+        .await
+        .expect("content-restricted readlist tachiyomi put request should complete");
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for content-restricted verification");
+    let writes = sqlx::query("SELECT BOOK_ID FROM READ_PROGRESS WHERE USER_ID = ?")
+        .bind("restricted-user")
+        .fetch_all(&pool)
+        .await
+        .expect("content-restricted read progress rows should be queryable");
+    pool.close().await;
+    assert!(writes.is_empty());
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_readlist_tachiyomi_progress_put_marks_only_visible_books_for_restricted_user() {
+    let paths = new_router_fixture("router-readlist-tachiyomi-put-partially-restricted").await;
+    seed_router_contract_data(&paths).await;
+    seed_readlist_endpoint_variants(&paths).await;
+    seed_router_age_exclude_user_with_roles(
+        &paths,
+        "partially-restricted-user",
+        "partial@example.org",
+        "router-contract-partial-123",
+        15,
+        &["USER", "FILE_DOWNLOAD"],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let restricted_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "partial@example.org",
+        "router-contract-partial-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/readlists/readlist-1/read-progress/tachiyomi")
+                .header("x-auth-token", &restricted_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "lastBookRead": 1 }).to_string()))
+                .expect("partially restricted readlist tachiyomi put request should build"),
+        )
+        .await
+        .expect("partially restricted readlist tachiyomi put request should complete");
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for partially restricted put verification");
+    let rows = sqlx::query(
+        "SELECT BOOK_ID, PAGE, COMPLETED FROM READ_PROGRESS WHERE USER_ID = ? ORDER BY BOOK_ID ASC",
+    )
+    .bind("partially-restricted-user")
+    .fetch_all(&pool)
+    .await
+    .expect("partially restricted read progress rows should be queryable");
+    pool.close().await;
+
+    let persisted = rows
+        .into_iter()
+        .map(|row| {
+            (
+                row.get::<String, _>("BOOK_ID"),
+                row.get::<i64, _>("PAGE"),
+                row.get::<i64, _>("COMPLETED"),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(persisted, vec![("book-3".to_string(), 12, 1)]);
 
     cleanup_router_fixture(paths);
 }

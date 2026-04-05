@@ -157,6 +157,11 @@ async fn router_users_me_api_keys_create_and_list_expose_expected_fields() {
         .get("id")
         .and_then(Value::as_str)
         .expect("api key create payload should expose id");
+    let created_created_date = created
+        .get("createdDate")
+        .and_then(Value::as_str)
+        .expect("api key create payload should expose createdDate")
+        .to_string();
     assert_eq!(
         created.get("userId"),
         Some(&Value::String("admin-user".to_string()))
@@ -183,6 +188,17 @@ async fn router_users_me_api_keys_create_and_list_expose_expected_fields() {
             .is_some(),
         "api key create payload should expose lastModifiedDate: {created:?}"
     );
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for api key timestamp override");
+    sqlx::query("UPDATE USER_API_KEY SET LAST_MODIFIED_DATE = ? WHERE ID = ?")
+        .bind("2030-02-03 04:05:06")
+        .bind(created_id)
+        .execute(&pool)
+        .await
+        .expect("api key last modified date should be overridden");
+    pool.close().await;
 
     let list_response = app
         .oneshot(
@@ -213,12 +229,14 @@ async fn router_users_me_api_keys_create_and_list_expose_expected_fields() {
         entry.get("createdDate").and_then(Value::as_str).is_some(),
         "api key list entry should expose createdDate: {entry:?}"
     );
-    assert!(
-        entry
-            .get("lastModifiedDate")
-            .and_then(Value::as_str)
-            .is_some(),
-        "api key list entry should expose lastModifiedDate: {entry:?}"
+    assert_eq!(
+        entry.get("createdDate").and_then(Value::as_str),
+        Some(created_created_date.as_str())
+    );
+    assert_eq!(
+        entry.get("lastModifiedDate").and_then(Value::as_str),
+        Some(created_created_date.as_str()),
+        "api key list entry should mirror Kotlin's createdDate-backed lastModifiedDate: {entry:?}"
     );
 
     cleanup_router_fixture(paths);

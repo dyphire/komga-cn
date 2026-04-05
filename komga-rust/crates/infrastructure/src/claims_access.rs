@@ -141,7 +141,7 @@ mod tests {
             .expect("role count should load");
 
         assert_eq!(user_count, 1);
-        assert_eq!(role_count, 1);
+        assert_eq!(role_count, 5);
     }
 
     #[tokio::test]

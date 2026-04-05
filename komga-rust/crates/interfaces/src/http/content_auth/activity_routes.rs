@@ -77,7 +77,7 @@ pub(crate) async fn users_me_api_keys_list(
                     "key": api_key.key(),
                     "comment": api_key.comment(),
                     "createdDate": api_key.created_date().map(sqlite_datetime_to_utc),
-                    "lastModifiedDate": api_key.last_modified_date().map(sqlite_datetime_to_utc),
+                    "lastModifiedDate": api_key.created_date().map(sqlite_datetime_to_utc),
                 })
             })
             .collect::<Vec<_>>(),

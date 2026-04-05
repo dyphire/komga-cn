@@ -105,6 +105,8 @@ where
         },
         settings_store,
         oauth2_clients: Arc::new(Vec::<OAuth2ClientConfig>::new()),
+        oauth2_account_creation: false,
+        oidc_email_verification: true,
         enqueue_task_records: Arc::new(|_, _| Ok(())),
         clear_unowned_tasks: Arc::new(|| 0),
         count_task_queue_by_type: Arc::new(BTreeMap::new),

@@ -1,5 +1,22 @@
 use super::*;
 
+fn assert_spring_bad_request(payload: &Value, message: &str, path: &str) {
+    assert_eq!(
+        payload.get("error"),
+        Some(&Value::String("Bad Request".to_string()))
+    );
+    assert_eq!(
+        payload.get("message"),
+        Some(&Value::String(message.to_string()))
+    );
+    assert_eq!(payload.get("status"), Some(&Value::from(400)));
+    assert_eq!(payload.get("path"), Some(&Value::String(path.to_string())));
+    assert!(
+        payload.get("timestamp").and_then(Value::as_u64).is_some(),
+        "expected numeric timestamp in spring-style error payload: {payload:?}"
+    );
+}
+
 #[tokio::test]
 async fn router_readlist_match_comicrack_rejects_invalid_xml_and_reports_matches() {
     let paths = new_router_fixture("router-readlist-match-comicrack").await;
@@ -9,8 +26,62 @@ async fn router_readlist_match_comicrack_rejects_invalid_xml_and_reports_matches
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
+    let missing_file_part_body = format!(
+        "--komga-rust-comicrack-boundary\r\nContent-Disposition: form-data; name=\"upload\"; filename=\"list.cbl\"\r\nContent-Type: application/xml\r\n\r\n<ReadingList />\r\n--komga-rust-comicrack-boundary--\r\n"
+    );
+    let missing_file_part = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/readlists/match/comicrack")
+                .header("x-auth-token", &auth_token)
+                .header(
+                    header::CONTENT_TYPE,
+                    "multipart/form-data; boundary=komga-rust-comicrack-boundary",
+                )
+                .body(Body::from(missing_file_part_body))
+                .expect("missing-file-part comicrack request should build"),
+        )
+        .await
+        .expect("missing-file-part comicrack request should complete");
+    assert_eq!(missing_file_part.status(), StatusCode::BAD_REQUEST);
+    let missing_file_part_payload = response_json(missing_file_part).await;
+    assert_spring_bad_request(
+        &missing_file_part_payload,
+        "Required request part 'file' is not present",
+        "/api/v1/readlists/match/comicrack",
+    );
+
+    let malformed_multipart = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/readlists/match/comicrack")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "multipart/form-data")
+                .body(Body::from("garbled multipart body"))
+                .expect("malformed comicrack request should build"),
+        )
+        .await
+        .expect("malformed comicrack request should complete");
+    assert_eq!(malformed_multipart.status(), StatusCode::BAD_REQUEST);
+    let malformed_multipart_payload = response_json(malformed_multipart).await;
+    assert_eq!(
+        malformed_multipart_payload.get("error"),
+        Some(&Value::String("Bad Request".to_string()))
+    );
+    assert!(
+        malformed_multipart_payload
+            .get("message")
+            .and_then(Value::as_str)
+            .is_some_and(|message| message.to_ascii_lowercase().contains("boundary")),
+        "malformed multipart should expose boundary-style binding failure, got: {malformed_multipart_payload:?}"
+    );
+
     let (invalid_content_type, invalid_body) = comicrack_multipart_body("<ReadingList>");
-    let invalid = app
+    let invalid_xml = app
         .clone()
         .oneshot(
             Request::builder()
@@ -23,11 +94,36 @@ async fn router_readlist_match_comicrack_rejects_invalid_xml_and_reports_matches
         )
         .await
         .expect("invalid comicrack request should complete");
-    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
-    let invalid_payload = response_json(invalid).await;
-    assert_eq!(
-        invalid_payload.get("errorCode").and_then(Value::as_str),
-        Some("ERR_1015")
+    assert_eq!(invalid_xml.status(), StatusCode::BAD_REQUEST);
+    let invalid_payload = response_json(invalid_xml).await;
+    assert_spring_bad_request(
+        &invalid_payload,
+        "ERR_1015",
+        "/api/v1/readlists/match/comicrack",
+    );
+
+    let (missing_books_content_type, missing_books_body) = comicrack_multipart_body(
+        r#"<?xml version="1.0"?><ReadingList><Name>RL</Name><Books></Books></ReadingList>"#,
+    );
+    let missing_books = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/readlists/match/comicrack")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, missing_books_content_type)
+                .body(Body::from(missing_books_body))
+                .expect("missing-books comicrack request should build"),
+        )
+        .await
+        .expect("missing-books comicrack request should complete");
+    assert_eq!(missing_books.status(), StatusCode::BAD_REQUEST);
+    let missing_books_payload = response_json(missing_books).await;
+    assert_spring_bad_request(
+        &missing_books_payload,
+        "ERR_1029",
+        "/api/v1/readlists/match/comicrack",
     );
 
     let xml = r#"<ReadingList><Name>ReadList 1</Name><Books><Book Series="Series 2" Number="002" /></Books></ReadingList>"#;

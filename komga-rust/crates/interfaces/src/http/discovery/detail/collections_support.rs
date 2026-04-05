@@ -1,6 +1,8 @@
 use super::*;
 
 use crate::discovery_detail_access::collections as collections_access;
+use time::PrimitiveDateTime;
+use time::macros::format_description;
 
 pub struct PersistedCollectionWriteInput {
     pub name: String,
@@ -170,32 +172,6 @@ fn restrictions_allow_content(
     !age_denied && !label_denied
 }
 
-pub fn collection_write_input(payload: &Value) -> PersistedCollectionWriteInput {
-    let name = payload
-        .get("name")
-        .and_then(Value::as_str)
-        .unwrap_or("collection")
-        .to_string();
-    let ordered = payload
-        .get("ordered")
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
-    let series_ids = payload
-        .get("seriesIds")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-
-    PersistedCollectionWriteInput {
-        name,
-        ordered,
-        series_ids,
-    }
-}
-
 pub async fn persist_collection_create(
     database_file: &FsPath,
     input: &PersistedCollectionWriteInput,
@@ -336,8 +312,23 @@ pub fn collection_payload(collection: &CollectionReadModel) -> Value {
         "name": collection.name,
         "ordered": collection.ordered,
         "seriesIds": collection.series_ids,
-        "createdDate": collection.created_date,
-        "lastModifiedDate": collection.last_modified_date,
+        "createdDate": kotlin_utc_datetime(&collection.created_date),
+        "lastModifiedDate": kotlin_utc_datetime(&collection.last_modified_date),
         "filtered": collection.filtered,
     })
+}
+
+fn kotlin_utc_datetime(raw: &str) -> String {
+    let sqlite_format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+    let kotlin_format = format_description!("[year]-[month]-[day]T[hour]:[minute]:[second]Z");
+
+    let parsed = PrimitiveDateTime::parse(raw, sqlite_format)
+        .or_else(|_| PrimitiveDateTime::parse(raw, kotlin_format));
+
+    match parsed {
+        Ok(value) => value
+            .format(kotlin_format)
+            .unwrap_or_else(|_| raw.to_string()),
+        Err(_) => raw.to_string(),
+    }
 }

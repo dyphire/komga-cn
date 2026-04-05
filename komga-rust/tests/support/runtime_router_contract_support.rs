@@ -1154,6 +1154,7 @@ pub async fn login_with_basic_credentials_and_get_token(
                 .method("GET")
                 .uri("/api/v2/users/me")
                 .header(header::AUTHORIZATION, format!("Basic {basic_token}"))
+                .header("x-auth-token", "")
                 .body(Body::empty())
                 .expect("users/me request should build"),
         )

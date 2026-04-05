@@ -243,12 +243,12 @@ pub(crate) async fn delete_persisted_read_progress(
 
 pub(crate) async fn readlist_tachiyomi_counters(
     database_file: &Path,
-    readlist_id: &str,
+    ordered_book_ids: Vec<String>,
     user_id: &str,
-) -> Result<Option<(u64, u64, u64, u64, u64)>, String> {
+) -> Result<(u64, u64, u64, u64, u64), String> {
     (backend().readlist_tachiyomi_counters)(
         database_file.to_path_buf(),
-        readlist_id.to_string(),
+        ordered_book_ids,
         user_id.to_string(),
     )
     .await
@@ -256,13 +256,13 @@ pub(crate) async fn readlist_tachiyomi_counters(
 
 pub(crate) async fn persist_readlist_tachiyomi_progress(
     database_file: &Path,
-    readlist_id: &str,
+    ordered_book_ids: Vec<String>,
     user_id: &str,
     last_book_read: usize,
 ) -> Result<Option<()>, String> {
     (backend().persist_readlist_tachiyomi_progress)(
         database_file.to_path_buf(),
-        readlist_id.to_string(),
+        ordered_book_ids,
         user_id.to_string(),
         last_book_read,
     )

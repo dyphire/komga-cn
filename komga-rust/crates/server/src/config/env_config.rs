@@ -20,6 +20,7 @@ pub struct OAuth2ClientConfig {
     pub client_secret: String,
     pub authorization_uri: String,
     pub token_uri: String,
+    pub scopes: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -27,6 +28,8 @@ pub struct RuntimeConfig {
     pub bind_address: SocketAddr,
     pub mode: RuntimeMode,
     pub demo_mode: bool,
+    pub oauth2_account_creation: bool,
+    pub oidc_email_verification: bool,
     pub runtime_profile: RuntimeProfile,
     pub platform_profile: PlatformProfile,
     pub config_dir: Option<PathBuf>,
@@ -67,6 +70,8 @@ impl RuntimeConfig {
                 RuntimeProfile::LiveLocaldb => RuntimeMode::Localdb,
             },
             demo_mode: false,
+            oauth2_account_creation: false,
+            oidc_email_verification: true,
             runtime_profile,
             platform_profile: PlatformProfile::Default,
             config_dir: Some(config_dir.clone()),

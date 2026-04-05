@@ -55,11 +55,22 @@ async fn resolved_kobo_user_returns_none_when_not_authenticated() {
 }
 
 #[test]
-fn parse_koreader_progress_page_supports_direct_fragment_and_ratio_modes() {
-    assert_eq!(parse_koreader_progress_page("7", 10, 0.0), 7);
-    assert_eq!(parse_koreader_progress_page("book[42].epub", 25, 0.0), 25);
-    assert_eq!(parse_koreader_progress_page("chapter_3", 10, 0.0), 3);
-    assert_eq!(parse_koreader_progress_page("unknown", 20, 0.21), 5);
+fn parse_koreader_progress_page_supports_numeric_and_ratio_modes_for_non_epub() {
+    assert_eq!(parse_koreader_progress_page("7", 10, 0.0), Some(7));
+    assert_eq!(parse_koreader_progress_page("chapter_3", 10, 0.0), None);
+}
+
+#[test]
+fn parse_koreader_epub_resource_index_accepts_only_kotlin_formats() {
+    assert_eq!(
+        parse_koreader_epub_resource_index("/body/DocFragment[10]/body/div/p[1]/text().0"),
+        Some(9)
+    );
+    assert_eq!(
+        parse_koreader_epub_resource_index("#_doc_fragment_44_ c37"),
+        Some(44)
+    );
+    assert_eq!(parse_koreader_epub_resource_index("7"), None);
 }
 
 #[test]

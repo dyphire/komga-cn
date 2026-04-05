@@ -96,6 +96,7 @@ mod tests {
 
     #[derive(Clone, Default)]
     struct TestPort {
+        library: Option<LibraryRecord>,
         library_book_ids: Option<Vec<String>>,
     }
 
@@ -104,7 +105,7 @@ mod tests {
             &self,
             _library_id: &str,
         ) -> impl std::future::Future<Output = Result<Option<LibraryRecord>, String>> {
-            ready(Ok(None))
+            ready(Ok(self.library.clone()))
         }
 
         fn validate_library(
@@ -193,6 +194,21 @@ mod tests {
             .expect("missing libraries should still return accepted empty metadata refresh tasks");
 
         assert!(result.task_records.is_empty());
+    }
+
+    #[test]
+    fn empty_trash_enqueues_only_empty_trash_task_for_existing_library() {
+        let service = LibraryTaskService::new(TestPort {
+            library: Some(LibraryRecord::default_record("library-1".to_string())),
+            ..TestPort::default()
+        });
+
+        let result = block_on(service.empty_trash("library-1"))
+            .expect("existing libraries should enqueue empty-trash tasks");
+
+        assert_eq!(result.task_records.len(), 1);
+        assert_eq!(result.task_records[0].id, "EMPTY_TRASH:library-1");
+        assert_eq!(result.task_records[0].simple_type, "EMPTY_TRASH");
     }
 
     fn block_on<F: Future>(future: F) -> F::Output {

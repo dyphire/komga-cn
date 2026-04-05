@@ -156,7 +156,11 @@ pub(super) async fn users_me(
                 &crate::http::identity_access::auth::user_payload_json(&user),
                 &token,
             );
-            bootstrap_user(*user, token)
+            if empty_auth_token_supplied(&headers) {
+                bootstrap_user(*user, token)
+            } else {
+                bootstrap_api_key_user(*user, token)
+            }
         }
         AuthOutcome::Invalid => StatusCode::UNAUTHORIZED.into_response(),
         AuthOutcome::Missing => StatusCode::UNAUTHORIZED.into_response(),

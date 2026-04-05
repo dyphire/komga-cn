@@ -6,6 +6,7 @@ use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
 use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::http::identity_access::auth::{AuthUser, user_payload_json};
 use crate::operational_settings_access::claims as claims_access;
 
 use super::super::super::OperationalState;
@@ -22,8 +23,8 @@ pub(crate) async fn post_claim(
     Extension(state): Extension<OperationalState>,
     headers: HeaderMap,
 ) -> Response {
-    let email = header_value(&headers, "x-komga-email");
-    let password = header_value(&headers, "x-komga-password");
+    let email = email_header_value(&headers, "x-komga-email");
+    let password = password_header_value(&headers, "x-komga-password");
     let (Some(email), Some(password)) = (email, password) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
@@ -32,7 +33,7 @@ pub(crate) async fn post_claim(
         .await
         .unwrap_or(false)
     {
-        return StatusCode::BAD_REQUEST.into_response();
+        return claim_already_claimed_response();
     }
 
     let hashed_password = match hash_bcrypt_password(password, DEFAULT_COST) {
@@ -51,26 +52,83 @@ pub(crate) async fn post_claim(
     {
         Ok(claims_access::ClaimInitialAdminUserResult::Created(created_user)) => created_user,
         Ok(claims_access::ClaimInitialAdminUserResult::AlreadyClaimed) => {
-            return StatusCode::BAD_REQUEST.into_response();
+            return claim_already_claimed_response();
         }
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    Json(json!({
-        "id": created_user.id,
-        "email": created_user.email,
-        "roles": ["ADMIN"],
-    }))
-    .into_response()
+    let created_user = AuthUser {
+        id: created_user.id,
+        email: created_user.email,
+        password: String::new(),
+        roles: claim_user_roles()
+            .iter()
+            .map(|role| (*role).to_string())
+            .collect(),
+        shared_all_libraries: true,
+        shared_library_ids: Vec::new(),
+        labels_allow: Vec::new(),
+        labels_exclude: Vec::new(),
+        age_restriction: None,
+    };
+
+    Json(user_payload_json(&created_user)).into_response()
 }
 
-fn header_value(headers: &HeaderMap, name: &str) -> Option<String> {
+fn email_header_value(headers: &HeaderMap, name: &str) -> Option<String> {
     headers
         .get(name)
         .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|value| valid_claim_email(value))
         .map(str::to_string)
+}
+
+fn password_header_value(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+}
+
+fn valid_claim_email(value: &str) -> bool {
+    let Some((local, domain)) = value.split_once('@') else {
+        return false;
+    };
+    if local.is_empty() || domain.is_empty() {
+        return false;
+    }
+    let Some((domain_name, tld)) = domain.rsplit_once('.') else {
+        return false;
+    };
+    !domain_name.is_empty() && !tld.is_empty()
+}
+
+fn claim_user_roles() -> &'static [&'static str] {
+    &[
+        "ADMIN",
+        "FILE_DOWNLOAD",
+        "PAGE_STREAMING",
+        "KOBO_SYNC",
+        "KOREADER_SYNC",
+    ]
+}
+
+fn claim_already_claimed_response() -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(json!({
+            "error": "Bad Request",
+            "message": "This server has already been claimed",
+            "path": "/api/v1/claim",
+            "status": 400,
+            "timestamp": SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis(),
+        })),
+    )
+        .into_response()
 }
 
 fn generate_claimed_user_id() -> String {

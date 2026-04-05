@@ -240,11 +240,7 @@ async fn runtime_owned_libraries_response(
     state: &OperationalState,
 ) -> Response {
     match runtime_owned_libraries(context.clone(), state).await {
-        Ok(libraries) => {
-            let mut response = Json(libraries_payload(libraries, context.is_admin)).into_response();
-            mark_runtime_owned(&mut response);
-            response
-        }
+        Ok(libraries) => Json(libraries_payload(libraries, context.is_admin)).into_response(),
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": discovery_error_message(&error) })),

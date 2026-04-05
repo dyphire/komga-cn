@@ -260,22 +260,22 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
                 .await
             })
         }),
-        readlist_tachiyomi_counters: Arc::new(|database_file, readlist_id, user_id| {
+        readlist_tachiyomi_counters: Arc::new(|database_file, ordered_book_ids, user_id| {
             Box::pin(async move {
                 infrastructure_metadata::readlist_tachiyomi_counters(
                     database_file.as_path(),
-                    &readlist_id,
+                    &ordered_book_ids,
                     &user_id,
                 )
                 .await
             })
         }),
         persist_readlist_tachiyomi_progress: Arc::new(
-            |database_file, readlist_id, user_id, last_book_read| {
+            |database_file, ordered_book_ids, user_id, last_book_read| {
                 Box::pin(async move {
                     infrastructure_metadata::persist_readlist_tachiyomi_progress(
                         database_file.as_path(),
-                        &readlist_id,
+                        &ordered_book_ids,
                         &user_id,
                         last_book_read,
                     )

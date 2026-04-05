@@ -112,8 +112,10 @@ pub(super) fn default_test_backend() -> MediaAssetsRuntimeAccessBackend {
         load_book_progression: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),
         persist_read_progress: Arc::new(|_, _, _, _, _, _| Box::pin(async { Ok(()) })),
         delete_persisted_read_progress: Arc::new(|_, _, _| Box::pin(async { Ok(()) })),
-        readlist_tachiyomi_counters: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),
-        persist_readlist_tachiyomi_progress: Arc::new(|_, _, _, _| Box::pin(async { Ok(None) })),
+        readlist_tachiyomi_counters: Arc::new(|_, _, _| Box::pin(async { Ok((0, 0, 0, 0, 0)) })),
+        persist_readlist_tachiyomi_progress: Arc::new(|_, _, _, _| {
+            Box::pin(async { Ok(Some(())) })
+        }),
         load_selected_book_thumbnail: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         load_book_thumbnail_by_id: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         load_persisted_book_thumbnails: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),

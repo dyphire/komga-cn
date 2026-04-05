@@ -49,6 +49,7 @@ pub struct OAuth2ClientConfig {
     pub client_secret: String,
     pub authorization_uri: String,
     pub token_uri: String,
+    pub scopes: Vec<String>,
 }
 
 pub type EnqueueTaskRecords =
@@ -135,6 +136,8 @@ pub struct OperationalState {
     pub runtime: RuntimeState,
     pub settings_store: Arc<ServerSettingsStore>,
     pub oauth2_clients: Arc<Vec<OAuth2ClientConfig>>,
+    pub oauth2_account_creation: bool,
+    pub oidc_email_verification: bool,
     pub enqueue_task_records: EnqueueTaskRecords,
     pub clear_unowned_tasks: ClearUnownedTasks,
     pub count_task_queue_by_type: CountTaskQueueByType,

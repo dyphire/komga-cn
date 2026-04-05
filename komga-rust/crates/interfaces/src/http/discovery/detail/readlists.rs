@@ -1,5 +1,7 @@
 use super::readlists_support::merge_readlist_write_input;
 use super::*;
+use axum_extra::extract::{Multipart, multipart::MultipartRejection};
+use std::time::{SystemTime, UNIX_EPOCH};
 pub async fn readlists(
     Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(auth_state): Extension<DiscoveryAuthState>,
@@ -205,38 +207,43 @@ pub async fn readlist_create(
 pub async fn readlist_match_comicrack(
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
-    body: Bytes,
+    multipart: Result<Multipart, MultipartRejection>,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
         return response;
     }
 
-    let xml = match extract_comicrack_upload_xml(&headers, &body) {
+    let xml = match extract_comicrack_upload_xml(multipart).await {
         Ok(xml) => xml,
-        Err(error_code) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(comicrack_error_payload(error_code)),
-            )
-                .into_response();
-        }
+        Err(error) => return comicrack_bad_request_response(error.as_str()),
     };
 
     let request = match parse_comicrack_readlist(&xml) {
         Ok(request) => request,
-        Err(error_code) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(comicrack_error_payload(error_code)),
-            )
-                .into_response();
-        }
+        Err(error_code) => return comicrack_bad_request_response(error_code),
     };
 
     match match_comicrack_readlist(auth_db.database_file.as_path(), &request).await {
         Ok(payload) => Json(payload).into_response(),
         Err(error) => internal_error_response(error),
     }
+}
+
+fn comicrack_bad_request_response(error_code: &str) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(json!({
+            "error": "Bad Request",
+            "message": error_code,
+            "path": "/api/v1/readlists/match/comicrack",
+            "status": 400,
+            "timestamp": SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis(),
+        })),
+    )
+        .into_response()
 }
 
 pub async fn readlist_update(
@@ -601,39 +608,29 @@ fn book_details_page_payload(
     })
 }
 
-fn extract_comicrack_upload_xml(headers: &HeaderMap, body: &[u8]) -> Result<Vec<u8>, &'static str> {
-    let Some(content_type) = headers
-        .get(axum::http::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-    else {
-        return Err("ERR_1015");
-    };
-    let Some(boundary) = content_type
-        .split(';')
-        .map(str::trim)
-        .find_map(|part| part.strip_prefix("boundary="))
-        .map(|boundary| boundary.trim_matches('"'))
-    else {
-        return Err("ERR_1015");
-    };
+async fn extract_comicrack_upload_xml(
+    multipart: Result<Multipart, MultipartRejection>,
+) -> Result<Vec<u8>, String> {
+    let mut multipart = multipart.map_err(|rejection| rejection.body_text())?;
 
-    let body = String::from_utf8_lossy(body);
-    let marker = format!("--{boundary}");
-    for part in body.split(&marker) {
-        if !part.contains("name=\"file\"") {
-            continue;
-        }
-        let Some((_, content)) = part.split_once("\r\n\r\n") else {
-            continue;
+    loop {
+        let field = multipart
+            .next_field()
+            .await
+            .map_err(|error| error.body_text())?;
+        let Some(field) = field else {
+            return Err("Required request part 'file' is not present".to_string());
         };
-        let content = content
-            .trim_matches('\r')
-            .trim_matches('\n')
-            .trim_end_matches("--");
-        if !content.trim().is_empty() {
-            return Ok(content.as_bytes().to_vec());
-        }
-    }
 
-    Err("ERR_1015")
+        if field.name() != Some("file") {
+            continue;
+        }
+
+        let bytes = field.bytes().await.map_err(|error| error.body_text())?;
+        if bytes.is_empty() {
+            return Err("ERR_1015".to_string());
+        }
+
+        return Ok(bytes.to_vec());
+    }
 }

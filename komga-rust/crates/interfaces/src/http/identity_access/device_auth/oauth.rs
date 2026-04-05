@@ -1,4 +1,20 @@
 use super::*;
+use axum_extra::extract::cookie::{Cookie, SameSite};
+use std::collections::HashMap;
+use std::io::Read;
+use std::sync::{LazyLock, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+static OAUTH2_AUTHORIZATION_STATES: LazyLock<
+    Mutex<HashMap<(String, String), OAuth2AuthorizationStateRecord>>,
+> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+const OAUTH2_AUTHORIZATION_STATE_MAX_AGE_SECONDS: u64 = 10 * 60;
+
+struct OAuth2AuthorizationStateRecord {
+    state: String,
+    issued_at_epoch_seconds: u64,
+}
 
 pub async fn oauth2_authorization(
     Extension(state): Extension<OperationalState>,
@@ -33,35 +49,44 @@ pub async fn oauth2_authorization(
         .set_token_uri(token_url)
         .set_redirect_uri(redirect_url);
 
-    let (url, csrf_state) = oauth_client
-        .authorize_url(CsrfToken::new_random)
-        .add_scope(Scope::new("openid".to_string()))
-        .add_scope(Scope::new("profile".to_string()))
-        .add_scope(Scope::new("email".to_string()))
-        .url();
+    let authorization_request = client.scopes.iter().cloned().fold(
+        oauth_client.authorize_url(CsrfToken::new_random),
+        |request, scope| request.add_scope(Scope::new(scope)),
+    );
+    let (url, csrf_state) = authorization_request.url();
 
-    let state_cookie = oauth2_state_cookie(client.registration_id.as_str(), csrf_state.secret());
+    let existing_session_token = oauth2_session_cookie_token(&headers);
+    let session_token = existing_session_token
+        .clone()
+        .unwrap_or_else(issue_oauth2_session_token);
+    store_oauth2_authorization_state(
+        session_token.as_str(),
+        client.registration_id.as_str(),
+        csrf_state.secret(),
+    );
 
-    (
+    let mut response = (
         StatusCode::FOUND,
-        [
-            (
-                header::LOCATION,
-                HeaderValue::from_str(url.as_str()).unwrap_or_else(|_| {
-                    HeaderValue::from_static(
-                        "/login?server_redirect=Y&error=oauth2_invalid_redirect",
-                    )
-                }),
-            ),
-            (
-                header::SET_COOKIE,
-                HeaderValue::from_str(state_cookie.as_str()).unwrap_or_else(|_| {
-                    HeaderValue::from_static("komga-oauth2-state=; Path=/; HttpOnly; SameSite=Lax")
-                }),
-            ),
-        ],
+        [(
+            header::LOCATION,
+            HeaderValue::from_str(url.as_str()).unwrap_or_else(|_| {
+                HeaderValue::from_static("/login?server_redirect=Y&error=oauth2_invalid_redirect")
+            }),
+        )],
     )
-        .into_response()
+        .into_response();
+
+    if existing_session_token.is_none() {
+        response.headers_mut().append(
+            header::SET_COOKIE,
+            HeaderValue::from_str(oauth2_session_cookie(session_token.as_str()).as_str())
+                .unwrap_or_else(|_| {
+                    HeaderValue::from_static("KOMGA-SESSION=; Path=/; HttpOnly; SameSite=Lax")
+                }),
+        );
+    }
+
+    response
 }
 
 pub async fn oauth2_login_code(
@@ -92,7 +117,12 @@ pub async fn oauth2_login_code(
     let Some(received_state) = query.state.as_deref() else {
         return oauth2_login_error_redirect("oauth2_state_missing");
     };
-    let Some(expected_state) = oauth2_state_from_headers(&headers, registration_id.as_str()) else {
+    let Some(session_token) = oauth2_session_cookie_token(&headers) else {
+        return oauth2_login_error_redirect("oauth2_state_missing");
+    };
+    let Some(expected_state) =
+        take_oauth2_authorization_state(session_token.as_str(), registration_id.as_str())
+    else {
         return oauth2_login_error_redirect("oauth2_state_missing");
     };
     if received_state != expected_state {
@@ -116,18 +146,26 @@ pub async fn oauth2_login_code(
         return oauth2_login_error_redirect("oauth2_missing_access_token");
     };
 
-    let email = resolve_oauth2_email(client_config, &token_payload, access_token)
-        .await
-        .or_else(|| {
-            token_payload
-                .get("email")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-        });
-    let Some(email) = email else {
-        return oauth2_login_error_redirect("ERR_1024");
+    let email = if oauth2_client_uses_oidc(client_config) {
+        let claims = resolve_oidc_claims(client_config, &token_payload, access_token).await;
+        let Some(email) = claims.email else {
+            return oauth2_login_error_redirect("ERR_1028");
+        };
+        if state.oidc_email_verification {
+            match claims.email_verified {
+                Some(true) => email,
+                Some(false) => return oauth2_login_error_redirect("ERR_1026"),
+                None => return oauth2_login_error_redirect("ERR_1027"),
+            }
+        } else {
+            email
+        }
+    } else {
+        let email = resolve_oauth2_email(client_config, access_token).await;
+        let Some(email) = email else {
+            return oauth2_login_error_redirect("ERR_1024");
+        };
+        email
     };
 
     let allow_create = oauth2_account_creation_enabled(&state).await;
@@ -159,7 +197,7 @@ fn oauth2_login_error_redirect(error: &str) -> Response {
 }
 
 fn oauth2_login_success_redirect(session_token: &str) -> Response {
-    let session_cookie = format!("KOMGA-SESSION={session_token}; Path=/; HttpOnly; SameSite=Lax");
+    let session_cookie = oauth2_session_cookie(session_token);
 
     (
         StatusCode::FOUND,
@@ -174,28 +212,100 @@ fn oauth2_login_success_redirect(session_token: &str) -> Response {
                     HeaderValue::from_static("KOMGA-SESSION=; Path=/; HttpOnly; SameSite=Lax")
                 }),
             ),
-            (
-                HeaderName::from_static("x-auth-token"),
-                HeaderValue::from_str(session_token)
-                    .unwrap_or_else(|_| HeaderValue::from_static("")),
-            ),
         ],
     )
         .into_response()
 }
 
-fn oauth2_state_cookie(registration_id: &str, state: &str) -> String {
-    format!(
-        "komga-oauth2-state-{registration_id}={state}; Path=/login/oauth2/code/{registration_id}; HttpOnly; SameSite=Lax"
-    )
+fn oauth2_client_uses_oidc(client: &crate::http::state::OAuth2ClientConfig) -> bool {
+    client
+        .scopes
+        .iter()
+        .any(|scope| scope.eq_ignore_ascii_case("openid"))
 }
 
-fn oauth2_state_from_headers(headers: &HeaderMap, registration_id: &str) -> Option<String> {
+#[derive(Default)]
+struct OidcIdentityClaims {
+    email: Option<String>,
+    email_verified: Option<bool>,
+}
+
+fn oauth2_session_cookie(session_token: &str) -> String {
+    Cookie::build(("KOMGA-SESSION", session_token.to_string()))
+        .path("/")
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .build()
+        .to_string()
+}
+
+fn oauth2_session_cookie_token(headers: &HeaderMap) -> Option<String> {
     let jar = CookieJar::from_headers(headers);
-    let cookie_name = format!("komga-oauth2-state-{registration_id}");
-    jar.get(cookie_name.as_str())
+    jar.get("KOMGA-SESSION")
         .map(|cookie| cookie.value().to_string())
         .filter(|value| !value.trim().is_empty())
+}
+
+fn issue_oauth2_session_token() -> String {
+    format!("komga-session-oauth-{}", random_hex_token(24))
+}
+
+fn store_oauth2_authorization_state(session_token: &str, registration_id: &str, state: &str) {
+    let mut states = OAUTH2_AUTHORIZATION_STATES
+        .lock()
+        .expect("oauth2 authorization state lock should not be poisoned");
+    prune_oauth2_authorization_states(&mut states);
+    states.insert(
+        (session_token.to_string(), registration_id.to_string()),
+        OAuth2AuthorizationStateRecord {
+            state: state.to_string(),
+            issued_at_epoch_seconds: now_epoch_seconds(),
+        },
+    );
+}
+
+fn take_oauth2_authorization_state(session_token: &str, registration_id: &str) -> Option<String> {
+    let mut states = OAUTH2_AUTHORIZATION_STATES
+        .lock()
+        .expect("oauth2 authorization state lock should not be poisoned");
+    prune_oauth2_authorization_states(&mut states);
+    states
+        .remove(&(session_token.to_string(), registration_id.to_string()))
+        .map(|record| record.state)
+}
+
+fn prune_oauth2_authorization_states(
+    states: &mut HashMap<(String, String), OAuth2AuthorizationStateRecord>,
+) {
+    let now = now_epoch_seconds();
+    states.retain(|_, record| {
+        now.saturating_sub(record.issued_at_epoch_seconds)
+            < OAUTH2_AUTHORIZATION_STATE_MAX_AGE_SECONDS
+    });
+}
+
+fn now_epoch_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn random_hex_token(byte_len: usize) -> String {
+    let mut bytes = vec![0u8; byte_len];
+    if let Ok(mut file) = std::fs::File::open("/dev/urandom") {
+        let _ = file.read_exact(&mut bytes);
+    } else {
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        for (index, byte) in bytes.iter_mut().enumerate() {
+            *byte = ((seed >> ((index % 8) * 8)) as u8) ^ (index as u8).wrapping_mul(31);
+        }
+    }
+
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 async fn exchange_oauth2_token(
@@ -249,14 +359,13 @@ async fn exchange_oauth2_token(
 
 async fn resolve_oauth2_email(
     client: &crate::http::state::OAuth2ClientConfig,
-    _token_payload: &Value,
     access_token: &str,
 ) -> Option<String> {
     let http = Client::new();
     let candidates = oauth2_userinfo_candidates(client);
     for endpoint in candidates {
         let request = http
-            .get(endpoint.as_str())
+            .get(endpoint.endpoint.as_str())
             .bearer_auth(access_token)
             .header("User-Agent", "komga-rust/runtime")
             .header(header::ACCEPT.as_str(), "application/json");
@@ -272,7 +381,11 @@ async fn resolve_oauth2_email(
             continue;
         };
 
-        if let Some(email) = extract_email_from_userinfo_payload(&payload) {
+        let email = match endpoint.kind {
+            OAuth2UserinfoKind::Standard => extract_standard_email_from_userinfo_payload(&payload),
+            OAuth2UserinfoKind::GithubEmails => extract_github_email_from_payload(&payload),
+        };
+        if let Some(email) = email {
             return Some(email);
         }
     }
@@ -280,7 +393,51 @@ async fn resolve_oauth2_email(
     None
 }
 
-fn extract_email_from_userinfo_payload(payload: &Value) -> Option<String> {
+async fn resolve_oidc_claims(
+    client: &crate::http::state::OAuth2ClientConfig,
+    token_payload: &Value,
+    access_token: &str,
+) -> OidcIdentityClaims {
+    let http = Client::new();
+    for endpoint in oauth2_userinfo_candidates(client) {
+        let request = http
+            .get(endpoint.endpoint.as_str())
+            .bearer_auth(access_token)
+            .header("User-Agent", "komga-rust/runtime")
+            .header(header::ACCEPT.as_str(), "application/json");
+
+        let Ok(response) = request.send().await else {
+            continue;
+        };
+        if !response.status().is_success() {
+            continue;
+        }
+
+        let Ok(payload) = response.json::<Value>().await else {
+            continue;
+        };
+        let claims = extract_oidc_claims(&payload);
+        if claims.email.is_some() || claims.email_verified.is_some() {
+            return claims;
+        }
+    }
+
+    extract_oidc_claims(token_payload)
+}
+
+fn extract_oidc_claims(payload: &Value) -> OidcIdentityClaims {
+    OidcIdentityClaims {
+        email: payload
+            .get("email")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        email_verified: payload.get("email_verified").and_then(Value::as_bool),
+    }
+}
+
+fn extract_standard_email_from_userinfo_payload(payload: &Value) -> Option<String> {
     if let Some(email) = payload
         .get("email")
         .and_then(Value::as_str)
@@ -290,15 +447,10 @@ fn extract_email_from_userinfo_payload(payload: &Value) -> Option<String> {
         return Some(email.to_string());
     }
 
-    if let Some(email) = payload
-        .get("preferred_username")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| value.contains('@'))
-    {
-        return Some(email.to_string());
-    }
+    None
+}
 
+fn extract_github_email_from_payload(payload: &Value) -> Option<String> {
     if let Some(array) = payload.as_array() {
         let selected = array.iter().find(|entry| {
             entry
@@ -308,7 +460,11 @@ fn extract_email_from_userinfo_payload(payload: &Value) -> Option<String> {
                 && entry
                     .get("primary")
                     .and_then(Value::as_bool)
-                    .unwrap_or(true)
+                    .unwrap_or(false)
+                && entry
+                    .get("verified")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
         });
         if let Some(email) = selected
             .and_then(|entry| entry.get("email"))
@@ -323,7 +479,20 @@ fn extract_email_from_userinfo_payload(payload: &Value) -> Option<String> {
     None
 }
 
-fn oauth2_userinfo_candidates(client: &crate::http::state::OAuth2ClientConfig) -> Vec<String> {
+#[derive(Clone, Copy)]
+enum OAuth2UserinfoKind {
+    Standard,
+    GithubEmails,
+}
+
+struct OAuth2UserinfoCandidate {
+    endpoint: String,
+    kind: OAuth2UserinfoKind,
+}
+
+fn oauth2_userinfo_candidates(
+    client: &crate::http::state::OAuth2ClientConfig,
+) -> Vec<OAuth2UserinfoCandidate> {
     let mut candidates = Vec::new();
     if let Ok(token_url) = reqwest::Url::parse(client.token_uri.as_str()) {
         let mut userinfo = token_url.clone();
@@ -332,7 +501,11 @@ fn oauth2_userinfo_candidates(client: &crate::http::state::OAuth2ClientConfig) -
             segments.pop();
             segments.push("userinfo");
         }
-        candidates.push(userinfo.to_string());
+        push_userinfo_candidate(
+            &mut candidates,
+            userinfo.to_string(),
+            OAuth2UserinfoKind::Standard,
+        );
     }
 
     if let Ok(auth_url) = reqwest::Url::parse(client.authorization_uri.as_str()) {
@@ -342,23 +515,71 @@ fn oauth2_userinfo_candidates(client: &crate::http::state::OAuth2ClientConfig) -
             segments.pop();
             segments.push("userinfo");
         }
-        candidates.push(userinfo.to_string());
+        push_userinfo_candidate(
+            &mut candidates,
+            userinfo.to_string(),
+            OAuth2UserinfoKind::Standard,
+        );
 
         if auth_url
             .host_str()
             .is_some_and(|host| host.contains("github.com"))
         {
-            candidates.push("https://api.github.com/user/emails".to_string());
-            candidates.push("https://api.github.com/user".to_string());
+            push_userinfo_candidate(
+                &mut candidates,
+                "https://api.github.com/user".to_string(),
+                OAuth2UserinfoKind::Standard,
+            );
+            push_userinfo_candidate(
+                &mut candidates,
+                "https://api.github.com/user/emails".to_string(),
+                OAuth2UserinfoKind::GithubEmails,
+            );
         }
     }
 
-    candidates.sort();
-    candidates.dedup();
+    if oauth2_client_supports_github_email_lookup(client) {
+        let derived_emails = candidates
+            .iter()
+            .filter(|candidate| matches!(candidate.kind, OAuth2UserinfoKind::Standard))
+            .map(|candidate| format!("{}/emails", candidate.endpoint.trim_end_matches('/')))
+            .collect::<Vec<_>>();
+        for endpoint in derived_emails {
+            push_userinfo_candidate(&mut candidates, endpoint, OAuth2UserinfoKind::GithubEmails);
+        }
+    }
+
+    candidates.sort_by(|left, right| left.endpoint.cmp(&right.endpoint));
+    candidates.dedup_by(|left, right| left.endpoint == right.endpoint);
     candidates
 }
 
+fn push_userinfo_candidate(
+    candidates: &mut Vec<OAuth2UserinfoCandidate>,
+    endpoint: String,
+    kind: OAuth2UserinfoKind,
+) {
+    if !candidates
+        .iter()
+        .any(|candidate| candidate.endpoint == endpoint)
+    {
+        candidates.push(OAuth2UserinfoCandidate { endpoint, kind });
+    }
+}
+
+fn oauth2_client_supports_github_email_lookup(
+    client: &crate::http::state::OAuth2ClientConfig,
+) -> bool {
+    client.registration_id.eq_ignore_ascii_case("github")
+        && client.scopes.iter().any(|scope| {
+            scope.eq_ignore_ascii_case("user") || scope.eq_ignore_ascii_case("user:email")
+        })
+}
+
 async fn oauth2_account_creation_enabled(state: &OperationalState) -> bool {
+    if state.oauth2_account_creation {
+        return true;
+    }
     if std::env::var("KOMGA_OAUTH2_ACCOUNT_CREATION")
         .ok()
         .is_some_and(|value| value.eq_ignore_ascii_case("true") || value == "1")

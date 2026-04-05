@@ -512,7 +512,7 @@ async fn router_book_read_progress_delete_clears_persisted_progress_and_koreader
         )
         .await
         .expect("koreader progress after delete request should complete");
-    assert_eq!(koreader.status(), StatusCode::NOT_FOUND);
+    assert_eq!(koreader.status(), StatusCode::OK);
 
     let verify_pool = connect_pool(paths.main_db.as_path(), 1)
         .await

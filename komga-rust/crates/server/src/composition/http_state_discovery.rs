@@ -1174,6 +1174,25 @@ pub(super) fn compose_persisted_discovery_access_backend(
                 })
             }
         }),
+        search_collection_ids: Arc::new({
+            let default_index_dir = lucene_data_directory.clone();
+            move |database_file, query, limit| {
+                let default_index_dir = default_index_dir.clone();
+                Box::pin(async move {
+                    let index_dir = resolve_discovery_index_dir(
+                        database_file.as_path(),
+                        default_index_dir.as_path(),
+                    );
+                    let index =
+                        SearchIndexLifecycle::bootstrap(index_dir.as_path()).map_err(|error| {
+                            format!("bootstrap search index for collections: {error}")
+                        })?;
+                    index
+                        .search_ids(&query, SearchEntityType::Collection, limit)
+                        .map_err(|error| format!("search index collections query: {error}"))
+                })
+            }
+        }),
         search_series_ids: Arc::new({
             let default_index_dir = lucene_data_directory.clone();
             move |database_file, query, limit| {

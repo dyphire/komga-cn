@@ -1,8 +1,9 @@
 #![allow(clippy::result_large_err)]
 
+use crate::http::helpers::validation_error_response;
 use axum::response::Response;
 use komga_application::library_catalog::LibraryChangeSet;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::handlers::bad_request_response;
 
@@ -30,7 +31,27 @@ pub(super) fn parse_create_library_change_set(body: &Value) -> Result<LibraryCha
 }
 
 pub(super) fn parse_update_library_change_set(body: &Value) -> Result<LibraryChangeSet, Response> {
-    parse_library_change_set(body, "library update payload must be a JSON object")
+    let mut normalized = match body.as_object() {
+        Some(body) => body.clone(),
+        None => {
+            return Err(bad_request_response(
+                "library update payload must be a JSON object",
+            ));
+        }
+    };
+
+    let mut violations = Vec::new();
+    normalize_nullable_patch_string_field(&mut normalized, "root", &mut violations)?;
+    normalize_nullable_patch_string_field(&mut normalized, "name", &mut violations)?;
+    if !violations.is_empty() {
+        return Err(validation_error_response(violations));
+    }
+    normalize_nullable_patch_string_array_field(&mut normalized, "scanDirectoryExclusions")?;
+
+    parse_library_change_set(
+        &Value::Object(normalized),
+        "library update payload must be a JSON object",
+    )
 }
 
 pub(super) fn is_deep_scan_query(query: &str) -> bool {
@@ -230,6 +251,43 @@ fn apply_string_array_field(
     Ok(())
 }
 
+fn normalize_nullable_patch_string_field(
+    body: &mut serde_json::Map<String, Value>,
+    key: &str,
+    violations: &mut Vec<Value>,
+) -> Result<(), Response> {
+    let Some(value) = body.get(key) else {
+        return Ok(());
+    };
+    if value.is_null() {
+        body.remove(key);
+        return Ok(());
+    }
+    let Some(value) = value.as_str() else {
+        return Err(bad_request_response(&format!("{key} must be a string")));
+    };
+    if value.trim().is_empty() {
+        violations.push(json!({
+            "fieldName": key,
+            "message": "must not be blank",
+        }));
+    }
+    Ok(())
+}
+
+fn normalize_nullable_patch_string_array_field(
+    body: &mut serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<(), Response> {
+    let Some(value) = body.get_mut(key) else {
+        return Ok(());
+    };
+    if value.is_null() {
+        *value = Value::Array(vec![]);
+    }
+    Ok(())
+}
+
 const VALID_SCAN_INTERVALS: &[&str] = &[
     "DISABLED",
     "HOURLY",
@@ -248,9 +306,10 @@ const VALID_SERIES_COVERS: &[&str] = &[
 
 #[cfg(test)]
 mod tests {
+    use axum::http::StatusCode;
     use serde_json::json;
 
-    use super::parse_create_library_change_set;
+    use super::{parse_create_library_change_set, parse_update_library_change_set};
 
     #[test]
     fn create_library_accepts_known_enum_values() {
@@ -296,5 +355,43 @@ mod tests {
             .expect_err("blank name should be rejected before persistence");
 
         assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn update_library_accepts_null_scan_directory_exclusions_as_clear() {
+        let payload = json!({
+            "scanDirectoryExclusions": null
+        });
+
+        let changes = parse_update_library_change_set(&payload)
+            .expect("null scanDirectoryExclusions should clear exclusions on PATCH");
+
+        assert_eq!(changes.scan_directory_exclusions, Some(Vec::new()));
+    }
+
+    #[test]
+    fn update_library_rejects_blank_name_or_root() {
+        let payload = json!({
+            "name": "   "
+        });
+
+        let response = parse_update_library_change_set(&payload)
+            .expect_err("blank PATCH name should be rejected before persistence");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn update_library_accepts_null_name_or_root_as_noop() {
+        let payload = json!({
+            "name": null,
+            "root": null
+        });
+
+        let changes = parse_update_library_change_set(&payload)
+            .expect("null PATCH name/root should be treated like omitted fields");
+
+        assert_eq!(changes.name, None);
+        assert_eq!(changes.root, None);
     }
 }

@@ -2,31 +2,39 @@ use super::*;
 
 pub(super) fn parse_koreader_progress_page(
     progress: &str,
-    page_count: u64,
-    default_progress: f64,
-) -> u64 {
-    let normalized_page_count = page_count.max(1);
-    let direct_page = progress
-        .trim()
-        .parse::<u64>()
-        .ok()
-        .filter(|value| *value > 0)
-        .map(|value| value.min(normalized_page_count));
-    if let Some(page) = direct_page {
-        return page;
+    _page_count: u64,
+    _default_progress: f64,
+) -> Option<u64> {
+    progress.parse::<u64>().ok().filter(|value| *value > 0)
+}
+
+pub(super) fn parse_koreader_epub_resource_index(progress: &str) -> Option<usize> {
+    let normalized = progress.trim().to_ascii_lowercase();
+
+    if let Some(index) =
+        parse_koreader_doc_fragment_index(normalized.as_str(), "docfragment[", ']', true)
+    {
+        return Some(index);
     }
 
-    let fragment_page = progress
-        .split(['[', ']', '#', '_', '.'])
-        .filter_map(|part| part.parse::<u64>().ok())
-        .find(|value| *value > 0)
-        .map(|value| value.min(normalized_page_count));
-    if let Some(page) = fragment_page {
-        return page;
-    }
+    parse_koreader_doc_fragment_index(normalized.as_str(), "#_doc_fragment_", '_', false)
+}
 
-    ((default_progress.clamp(0.0, 1.0) * normalized_page_count as f64).ceil() as u64)
-        .clamp(1, normalized_page_count)
+fn parse_koreader_doc_fragment_index(
+    progress: &str,
+    prefix: &str,
+    suffix: char,
+    one_based: bool,
+) -> Option<usize> {
+    let start = progress.find(prefix)? + prefix.len();
+    let tail = &progress[start..];
+    let end = tail.find(suffix)?;
+    let index = tail[..end].parse::<usize>().ok()?;
+    if one_based {
+        index.checked_sub(1)
+    } else {
+        Some(index)
+    }
 }
 
 pub(super) fn content_type_from_filename(file_name: &str, default_mime_type: &str) -> String {

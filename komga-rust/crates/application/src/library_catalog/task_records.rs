@@ -59,12 +59,9 @@ pub(super) fn metadata_refresh_task_records(
 }
 
 pub(super) fn empty_trash_task_records(library_id: &str) -> Vec<TaskQueueRecord> {
-    vec![
-        TaskQueueRecord::new(
-            format!("EMPTY_TRASH:{library_id}"),
-            70,
-            Some(library_id.to_string()),
-        ),
-        scan_library_task_record(library_id, false),
-    ]
+    vec![TaskQueueRecord::new(
+        format!("EMPTY_TRASH:{library_id}"),
+        70,
+        Some(library_id.to_string()),
+    )]
 }

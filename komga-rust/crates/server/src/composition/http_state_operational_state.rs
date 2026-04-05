@@ -28,6 +28,8 @@ pub(super) fn compose_operational_state(
             ),
         ),
         oauth2_clients: Arc::new(oauth2_clients(config)),
+        oauth2_account_creation: config.oauth2_account_creation,
+        oidc_email_verification: config.oidc_email_verification,
         enqueue_task_records: Arc::new(move |task_records, _urgent| {
             let mut queue = enqueue_task_queue
                 .lock()
@@ -194,6 +196,7 @@ fn oauth2_clients(config: &RuntimeConfig) -> Vec<OAuth2ClientConfig> {
             client_secret: client.client_secret.clone(),
             authorization_uri: client.authorization_uri.clone(),
             token_uri: client.token_uri.clone(),
+            scopes: client.scopes.clone(),
         })
         .collect()
 }
