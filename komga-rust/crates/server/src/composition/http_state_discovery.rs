@@ -81,6 +81,7 @@ pub(super) fn compose_discovery_detail_access_backends() -> DiscoveryDetailAcces
                             id: row.id,
                             series_id: row.series_id,
                             series_title: row.series_title,
+                            series_title_sort: row.series_title_sort,
                             library_id: row.library_id,
                             name: row.name,
                             url: row.url,

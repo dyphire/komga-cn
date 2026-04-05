@@ -74,6 +74,60 @@ async fn router_series_thumbnail_upload_parses_multipart_image_and_selected_flag
 }
 
 #[tokio::test]
+async fn router_series_thumbnail_upload_rejects_oneshot_series() {
+    let paths = new_router_fixture("router-series-thumbnail-upload-oneshot-rejected").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("series thumbnail oneshot db should open");
+    sqlx::query("UPDATE SERIES SET ONESHOT = ? WHERE ID = ?")
+        .bind(1_i64)
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("series oneshot flag should update");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let image_bytes = fixture_png_bytes();
+    let (content_type, body) =
+        multipart_image_upload_body("file", "series.png", "image/png", false, &image_bytes);
+
+    let upload = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/series/series-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(body))
+                .expect("oneshot series thumbnail upload request should build"),
+        )
+        .await
+        .expect("oneshot series thumbnail upload request should complete");
+
+    assert_eq!(upload.status(), StatusCode::BAD_REQUEST);
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("series thumbnail oneshot verify db should open");
+    let count =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM THUMBNAIL_SERIES WHERE SERIES_ID = ?")
+            .bind("series-1")
+            .fetch_one(&pool)
+            .await
+            .expect("series thumbnail count should load");
+    pool.close().await;
+
+    assert_eq!(count, 0);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_series_thumbnail_select_marks_uploaded_thumbnail_selected() {
     let paths = new_router_fixture("router-series-thumbnail-select-success").await;
     seed_router_contract_data(&paths).await;
@@ -406,6 +460,68 @@ async fn router_series_thumbnail_by_id_allows_missing_path_series_for_unrestrict
         .await
         .expect("series thumbnail missing path series body should be readable");
     assert_eq!(body.as_ref(), image_bytes.as_slice());
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_series_thumbnail_delete_rejects_non_user_uploaded_thumbnail() {
+    let paths = new_router_fixture("router-series-thumbnail-delete-generated-rejected").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("series generated thumbnail delete db should open");
+    sqlx::query(
+        "INSERT INTO THUMBNAIL_SERIES (ID, SERIES_ID, URL, THUMBNAIL, TYPE, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT, SELECTED) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("thumb-generated-1")
+    .bind("series-1")
+    .bind("")
+    .bind(fixture_png_bytes())
+    .bind("GENERATED")
+    .bind("image/png")
+    .bind(1_i64)
+    .bind(1_i64)
+    .bind(1_i64)
+    .bind(false)
+    .execute(&pool)
+    .await
+    .expect("generated series thumbnail row should insert");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/api/v1/series/series-1/thumbnails/thumb-generated-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("generated series thumbnail delete request should build"),
+        )
+        .await
+        .expect("generated series thumbnail delete request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("series generated thumbnail verify db should open");
+    let remaining = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM THUMBNAIL_SERIES WHERE ID = ? AND SERIES_ID = ?",
+    )
+    .bind("thumb-generated-1")
+    .bind("series-1")
+    .fetch_one(&pool)
+    .await
+    .expect("generated series thumbnail count should load");
+    pool.close().await;
+
+    assert_eq!(remaining, 1);
 
     cleanup_router_fixture(paths);
 }

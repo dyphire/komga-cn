@@ -574,6 +574,77 @@ async fn router_book_thumbnails_returns_empty_array_for_existing_book_without_po
 }
 
 #[tokio::test]
+async fn router_book_thumbnail_returns_not_found_for_existing_single_image_without_poster() {
+    let paths = new_router_fixture("router-book-thumbnail-single-image-no-poster").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for single-image thumbnail fixture");
+    sqlx::query(
+        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("book-image-1")
+    .bind(0_i64)
+    .bind("cover.png")
+    .bind("books/cover.png")
+    .bind("series-1")
+    .bind(1_i64)
+    .bind(5_i64)
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("single-image book row should be inserted");
+    sqlx::query("INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("image/png")
+        .bind("READY")
+        .bind("book-image-1")
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("single-image media row should be inserted");
+    sqlx::query(
+        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("5")
+    .bind(5.0_f64)
+    .bind("Cover Book")
+    .bind("2024-02-02")
+    .bind("book-image-1")
+    .execute(&pool)
+    .await
+    .expect("single-image book metadata row should be inserted");
+    pool.close().await;
+
+    let image_path = paths.config_dir.join("books/cover.png");
+    if let Some(parent) = image_path.parent() {
+        std::fs::create_dir_all(parent).expect("single-image parent directory should be created");
+    }
+    std::fs::write(&image_path, fixture_png_bytes())
+        .expect("single-image fixture should be written");
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-image-1/thumbnail")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("single-image thumbnail request should build"),
+        )
+        .await
+        .expect("single-image thumbnail request should complete");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_book_media_asset_routes_forbid_age_restricted_user() {
     let paths = new_router_fixture("router-book-media-asset-restricted-user").await;
     seed_router_contract_data(&paths).await;

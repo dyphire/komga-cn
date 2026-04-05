@@ -154,6 +154,14 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
         resolve_book_page_bytes: Arc::new(|media, page, page_number| {
             infrastructure_filesystem::resolve_book_page_bytes(&media, &page, page_number)
         }),
+        render_book_page_thumbnail: Arc::new(|media, page, page_number, max_edge| {
+            infrastructure_filesystem::render_book_page_thumbnail(
+                &media,
+                &page,
+                page_number,
+                max_edge,
+            )
+        }),
         load_archive_page_row: Arc::new(|media, page_number| {
             infrastructure_filesystem::load_archive_page_row(&media, page_number)
         }),
@@ -551,6 +559,15 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
         persisted_series_exists: Arc::new(|database_file, series_id| {
             Box::pin(async move {
                 infrastructure_filesystem::persisted_series_exists(
+                    database_file.as_path(),
+                    &series_id,
+                )
+                .await
+            })
+        }),
+        load_persisted_series_oneshot: Arc::new(|database_file, series_id| {
+            Box::pin(async move {
+                infrastructure_filesystem::load_persisted_series_oneshot(
                     database_file.as_path(),
                     &series_id,
                 )

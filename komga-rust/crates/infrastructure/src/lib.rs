@@ -1,3 +1,7 @@
+use std::sync::OnceLock;
+
+use pdfium_render::prelude::*;
+
 pub mod announcements_access;
 pub mod auth;
 pub mod claims_access;
@@ -31,3 +35,20 @@ pub use search::{
     sync_series_and_oneshot_books_after_metadata_update,
 };
 pub use sqlite::write_models::ServerSettingsStore;
+
+static PDFIUM: OnceLock<Result<Pdfium, String>> = OnceLock::new();
+
+pub(crate) fn load_pdfium() -> Result<&'static Pdfium, String> {
+    match PDFIUM.get_or_init(init_pdfium) {
+        Ok(pdfium) => Ok(pdfium),
+        Err(error) => Err(error.clone()),
+    }
+}
+
+fn init_pdfium() -> Result<Pdfium, String> {
+    let library_path = env!("KOMGA_PDFIUM_LIB_PATH");
+    let bindings = Pdfium::bind_to_library(library_path)
+        .or_else(|_| Pdfium::bind_to_system_library())
+        .map_err(|error| format!("failed to bind Pdfium at '{library_path}': {error}"))?;
+    Ok(Pdfium::new(bindings))
+}

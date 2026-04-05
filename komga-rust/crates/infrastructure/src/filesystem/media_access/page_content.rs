@@ -2,14 +2,18 @@ use std::fs;
 use std::io::Read;
 use std::path::Path;
 
+use image::GenericImageView;
+use image::imageops::FilterType;
 use komga_application::media_assets::{
     BookMediaRecord, BookPageRecord, book_media_is_pdf, book_media_is_rar_archive,
     book_media_is_single_image, book_media_is_zip_archive, content_type_from_filename,
     is_supported_page_image_file_name,
 };
 use lopdf::Document as PdfDocument;
+use pdfium_render::prelude::*;
 use zip::ZipArchive;
 
+use crate::load_pdfium;
 use crate::rar_support::{list_rar_entries, read_rar_entry_bytes};
 
 pub fn resolve_book_page_bytes(
@@ -35,6 +39,20 @@ pub fn resolve_book_page_bytes(
     read_zip_archive_page_bytes(media, page, page_number)
         .or_else(|| read_rar_archive_page_bytes(media, page, page_number))
         .or_else(|| read_pdf_page_bytes(media, page_number))
+}
+
+pub fn render_book_page_thumbnail(
+    media: &BookMediaRecord,
+    page: &BookPageRecord,
+    page_number: u64,
+    max_edge: u32,
+) -> Option<Vec<u8>> {
+    if book_media_is_pdf(media) {
+        return render_pdf_page_thumbnail(media, page_number, max_edge);
+    }
+
+    let bytes = resolve_book_page_bytes(media, page, page_number)?;
+    render_image_thumbnail_as_jpeg(&bytes, max_edge)
 }
 
 pub fn load_archive_page_row(media: &BookMediaRecord, page_number: u64) -> Option<BookPageRecord> {
@@ -129,6 +147,54 @@ pub fn read_pdf_page_as_single_page_pdf(
     let mut bytes = Vec::new();
     document.save_to(&mut bytes).ok()?;
     Some(bytes)
+}
+
+fn render_pdf_page_thumbnail(
+    media: &BookMediaRecord,
+    page_number: u64,
+    max_edge: u32,
+) -> Option<Vec<u8>> {
+    if !book_media_is_pdf(media) || page_number == 0 {
+        return None;
+    }
+
+    let pdfium = load_pdfium().ok()?;
+    let document = pdfium.load_pdf_from_file(&media.file_path, None).ok()?;
+    let page = document
+        .pages()
+        .get(i32::try_from(page_number.saturating_sub(1)).ok()?)
+        .ok()?;
+    let rendered = page
+        .render_with_config(
+            &PdfRenderConfig::new()
+                .set_target_width(i32::try_from(max_edge).unwrap_or(i32::MAX))
+                .set_maximum_height(i32::try_from(max_edge).unwrap_or(i32::MAX)),
+        )
+        .ok()?
+        .as_image()
+        .ok()?
+        .into_rgb8();
+
+    let mut output = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(rendered)
+        .write_to(&mut output, image::ImageFormat::Jpeg)
+        .ok()?;
+    Some(output.into_inner())
+}
+
+fn render_image_thumbnail_as_jpeg(bytes: &[u8], max_edge: u32) -> Option<Vec<u8>> {
+    let image = image::load_from_memory(bytes).ok()?;
+    let (width, height) = image.dimensions();
+    let resized = if width.max(height) > max_edge {
+        image.resize(max_edge, max_edge, FilterType::Lanczos3)
+    } else {
+        image
+    };
+    let mut output = std::io::Cursor::new(Vec::new());
+    resized
+        .write_to(&mut output, image::ImageFormat::Jpeg)
+        .ok()?;
+    Some(output.into_inner())
 }
 
 pub fn detect_pdf_page_count(media: &BookMediaRecord) -> Option<u64> {

@@ -150,6 +150,7 @@ pub(super) struct BookDetailReadModel {
     id: String,
     series_id: String,
     series_title: String,
+    pub(super) series_title_sort: String,
     library_id: String,
     name: String,
     url: String,
@@ -267,7 +268,7 @@ pub(super) struct SeriesDetailReadModel {
     oneshot: bool,
 }
 
-fn book_detail_payload(book: &BookDetailReadModel, is_admin: bool) -> Value {
+pub(super) fn book_detail_payload(book: &BookDetailReadModel, is_admin: bool) -> Value {
     let admin_url = admin_file_url(&book.url);
     let url = if is_admin {
         admin_url
@@ -585,6 +586,7 @@ mod tests {
                 id: "book-1".to_string(),
                 series_id: "series-1".to_string(),
                 series_title: "Series".to_string(),
+                series_title_sort: "Series".to_string(),
                 library_id: "lib-1".to_string(),
                 name: "Book".to_string(),
                 url: "/data/books/book.cbz".to_string(),

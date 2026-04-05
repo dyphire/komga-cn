@@ -975,6 +975,7 @@ mod tests {
             id: id.to_string(),
             series_id: "series-1".to_string(),
             series_title: series_title.to_string(),
+            series_title_sort: series_title.to_string(),
             library_id: "lib-1".to_string(),
             name: format!("Book {id}"),
             url: format!("/books/{id}.cbz"),

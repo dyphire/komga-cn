@@ -2,6 +2,19 @@
 
 use super::*;
 
+fn normalize_books_latest_unpaged_page_shape<T>(mut page: PageEnvelope<T>) -> PageEnvelope<T> {
+    const KOTLIN_PAGE_SIZE: usize = 20;
+
+    page.page = 0;
+    page.size = KOTLIN_PAGE_SIZE;
+    page.total_pages = if page.total_elements == 0 {
+        0
+    } else {
+        ((page.total_elements - 1) / KOTLIN_PAGE_SIZE) + 1
+    };
+    page
+}
+
 pub async fn load_book_poster_summaries(
     database_file: &FsPath,
 ) -> Result<HashMap<String, Vec<PersistedBookPosterSummary>>, String> {
@@ -856,10 +869,6 @@ pub async fn runtime_owned_books_latest_response(
     database_file: &FsPath,
 ) -> Option<Response> {
     let query = uri.query().unwrap_or_default();
-    let sorts = query_values(query, "sort")
-        .into_iter()
-        .map(decode_query_component)
-        .collect::<Vec<_>>();
 
     if !database_file.exists() {
         return None;
@@ -897,18 +906,19 @@ pub async fn runtime_owned_books_latest_response(
             page,
             size,
             unpaged,
-            if sorts.is_empty() {
-                vec![PersistedBooksSortMode::LastModifiedDateDesc]
-            } else {
-                parse_persisted_books_sort_modes(&sorts)
-            },
+            vec![PersistedBooksSortMode::LastModifiedDateDesc],
         ),
     )
     .await
     {
         Ok(page) => {
+            let (page, paged) = if unpaged {
+                (normalize_books_latest_unpaged_page_shape(page), true)
+            } else {
+                (page, true)
+            };
             let mut response =
-                Json(books_page_payload(page, context.is_admin, !unpaged)).into_response();
+                Json(books_page_payload(page, context.is_admin, paged)).into_response();
             mark_runtime_owned(&mut response);
             Some(response)
         }

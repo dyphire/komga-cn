@@ -422,6 +422,7 @@ mod tests {
             vec![OpdsV1NavigationEntry {
                 id: "entry-1".to_string(),
                 title: "Entry".to_string(),
+                content: "".to_string(),
                 href_path: "/opds/v1.2/entry-1".to_string(),
                 updated: Some("2024-01-02T03:04:05Z".to_string()),
             }],

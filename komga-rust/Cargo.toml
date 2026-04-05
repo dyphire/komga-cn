@@ -48,6 +48,7 @@ rusqlite = "0.32.1"
 pdfium-render = { version = "0.9.0", features = ["thread_safe"] }
 unrar = "0.5.8"
 unicode-normalization = "0.1.24"
+icu = "2.0"
 
 [package]
 name = "komga-rust"
@@ -83,4 +84,5 @@ sha2.workspace = true
 lopdf.workspace = true
 tantivy.workspace = true
 tempfile = "3.23.0"
+image.workspace = true
 komga-contract-testkit = { path = "crates/contract-testkit" }

@@ -54,6 +54,7 @@ pub(crate) struct SeriesFilterCriteria {
     pub(crate) title_sorts_ends_with_excluded: Option<Vec<String>>,
     pub(crate) deleted: Option<bool>,
     pub(crate) oneshot: Option<bool>,
+    pub(crate) exclude_newly_added: bool,
     pub(crate) read_statuses: Option<Vec<String>>,
     pub(crate) read_statuses_excluded: Option<Vec<String>>,
     pub(crate) genres: Option<Vec<String>>,
@@ -219,6 +220,7 @@ impl DerefMut for PersistedSeriesBrowseQuery {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PersistedSeriesSortMode {
     TitleAsc,
+    CreatedDesc,
     Latest,
     RelevanceAsc,
     RelevanceDesc,

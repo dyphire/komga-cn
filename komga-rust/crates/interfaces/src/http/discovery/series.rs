@@ -1,4 +1,5 @@
 use super::*;
+use komga_domain::discovery::PageEnvelope;
 
 fn optional_query_bool(query: &str, key: &str) -> Result<Option<bool>, ()> {
     match query_value(query, key) {
@@ -6,6 +7,91 @@ fn optional_query_bool(query: &str, key: &str) -> Result<Option<bool>, ()> {
         Some(value) if value.eq_ignore_ascii_case("false") => Ok(Some(false)),
         Some(_) => Err(()),
         None => Ok(None),
+    }
+}
+
+fn normalize_kotlin_unpaged_page_shape<T>(mut page: PageEnvelope<T>) -> PageEnvelope<T> {
+    let normalized_size = page.total_elements.max(20);
+    page.page = 0;
+    page.size = normalized_size;
+    page.total_pages = if page.total_elements == 0 {
+        0
+    } else {
+        ((page.total_elements - 1) / normalized_size) + 1
+    };
+    page
+}
+
+async fn series_feed(
+    headers: HeaderMap,
+    uri: Uri,
+    auth_state: DiscoveryAuthState,
+    database_file: &FsPath,
+    sort_mode: PersistedSeriesSortMode,
+    exclude_newly_added: bool,
+    kotlin_unpaged_page_shape: bool,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    if !database_file.exists() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let query = uri.query().unwrap_or_default();
+    let library_ids = requested_query_values(query, "library_id");
+    let context = match auth_state.resolve_query_context(&headers, library_ids.as_deref()) {
+        Some(context) => context,
+        None => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+
+    let page = query_value(query, "page")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
+    let size = query_value(query, "size")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(20)
+        .max(1);
+    let unpaged = query_bool(query, "unpaged");
+    let deleted = match optional_query_bool(query, "deleted") {
+        Ok(value) => value,
+        Err(()) => return StatusCode::BAD_REQUEST.into_response(),
+    };
+    let oneshot = match optional_query_bool(query, "oneshot") {
+        Ok(value) => value,
+        Err(()) => return StatusCode::BAD_REQUEST.into_response(),
+    };
+
+    match load_persisted_series_page(
+        database_file,
+        &context,
+        PersistedSeriesBrowseQuery::from_filters(
+            SeriesFilterCriteria {
+                library_ids,
+                deleted,
+                oneshot,
+                exclude_newly_added,
+                ..SeriesFilterCriteria::default()
+            },
+            None,
+            page,
+            size,
+            unpaged,
+            vec![sort_mode],
+        ),
+    )
+    .await
+    {
+        Ok(page) => {
+            let (page, paged) = if unpaged && kotlin_unpaged_page_shape {
+                (normalize_kotlin_unpaged_page_shape(page), true)
+            } else {
+                (page, !unpaged)
+            };
+            Json(series_page_payload(page, paged)).into_response()
+        }
+        Err(error) => internal_error_response(error),
     }
 }
 
@@ -91,60 +177,16 @@ pub async fn series_latest(
     auth_state: DiscoveryAuthState,
     database_file: &FsPath,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
-        return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    let query = uri.query().unwrap_or_default();
-    let library_ids = requested_query_values(query, "library_id");
-    let context = match auth_state.resolve_query_context(&headers, library_ids.as_deref()) {
-        Some(context) => context,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
-    };
-
-    let page = query_value(query, "page")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let size = query_value(query, "size")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(20)
-        .max(1);
-    let unpaged = query_bool(query, "unpaged");
-    let deleted = match optional_query_bool(query, "deleted") {
-        Ok(value) => value,
-        Err(()) => return StatusCode::BAD_REQUEST.into_response(),
-    };
-    let oneshot = match optional_query_bool(query, "oneshot") {
-        Ok(value) => value,
-        Err(()) => return StatusCode::BAD_REQUEST.into_response(),
-    };
-
-    match load_persisted_series_page(
+    series_feed(
+        headers,
+        uri,
+        auth_state,
         database_file,
-        &context,
-        PersistedSeriesBrowseQuery::from_filters(
-            SeriesFilterCriteria {
-                library_ids,
-                deleted,
-                oneshot,
-                ..SeriesFilterCriteria::default()
-            },
-            None,
-            page,
-            size,
-            unpaged,
-            vec![PersistedSeriesSortMode::Latest],
-        ),
+        PersistedSeriesSortMode::Latest,
+        false,
+        false,
     )
     .await
-    {
-        Ok(page) => Json(series_page_payload(page, !unpaged)).into_response(),
-        Err(error) => internal_error_response(error),
-    }
 }
 
 pub async fn series_alphabetical_groups(
@@ -239,7 +281,16 @@ pub async fn series_new(
     auth_state: DiscoveryAuthState,
     database_file: &FsPath,
 ) -> Response {
-    series_latest(headers, uri, auth_state, database_file).await
+    series_feed(
+        headers,
+        uri,
+        auth_state,
+        database_file,
+        PersistedSeriesSortMode::CreatedDesc,
+        false,
+        false,
+    )
+    .await
 }
 
 pub async fn series_updated(
@@ -248,5 +299,14 @@ pub async fn series_updated(
     auth_state: DiscoveryAuthState,
     database_file: &FsPath,
 ) -> Response {
-    series_latest(headers, uri, auth_state, database_file).await
+    series_feed(
+        headers,
+        uri,
+        auth_state,
+        database_file,
+        PersistedSeriesSortMode::Latest,
+        true,
+        true,
+    )
+    .await
 }

@@ -10,6 +10,7 @@ base64.workspace = true
 bcrypt.workspace = true
 flate2.workspace = true
 image.workspace = true
+icu.workspace = true
 language-tags.workspace = true
 komga-domain = { path = "../domain" }
 komga-application = { path = "../application" }
@@ -29,6 +30,7 @@ tokio-stream.workspace = true
 futures-util.workspace = true
 zip.workspace = true
 sqlx.workspace = true
+unicode-normalization.workspace = true
 
 [dev-dependencies]
 sqlx.workspace = true

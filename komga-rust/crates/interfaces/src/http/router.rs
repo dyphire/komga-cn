@@ -1,6 +1,6 @@
+use axum::Router;
 use axum::middleware;
 use axum::routing::{delete, get, patch, post, put};
-use axum::Router;
 
 use crate::http::cache;
 use crate::http::discovery_auth::DiscoveryAuthState;

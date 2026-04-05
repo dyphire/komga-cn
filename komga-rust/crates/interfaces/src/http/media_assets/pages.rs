@@ -34,7 +34,8 @@ async fn book_page_response(
         return response;
     }
 
-    let resolved_book_id = resolve_book_id_for_persisted(auth_db.database_file.as_path(), book_id).await;
+    let resolved_book_id =
+        resolve_book_id_for_persisted(auth_db.database_file.as_path(), book_id).await;
 
     let requested_page_number = if query.zero_based {
         page_number.saturating_add(1)
@@ -549,17 +550,18 @@ pub async fn book_page_thumbnail(
             &resolved_book_id,
             &media,
             page_number as u64,
-            false,
+            true,
         )
         .await
         {
             Ok(Some(row)) => row,
-            Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+            Ok(None) => return page_number_does_not_exist_response(),
             Err(error) => return internal_error_response(error),
         };
 
-        if let Some(bytes) = resolve_book_page_bytes(&media, &page_row, page_number as u64) {
-            let content_type = page_row_media_type(&page_row, &media);
+        if let Some(bytes) = render_book_page_thumbnail(&media, &page_row, page_number as u64, 300)
+        {
+            let content_type = "image/jpeg".to_string();
 
             let etag = asset_etag(bytes.as_slice());
             let last_modified = file_last_modified_header_value(media.file_path.as_path());

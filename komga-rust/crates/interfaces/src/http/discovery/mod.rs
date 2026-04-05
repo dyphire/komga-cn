@@ -13,7 +13,9 @@ use komga_domain::discovery::{DirectBrowseBooksListFamily, DiscoveryError};
 use serde_json::{Value, json};
 
 use crate::http::discovery_auth::DiscoveryAuthState;
-use crate::http::identity_access::auth::{require_auth, resolved_auth_user, user_id};
+use crate::http::identity_access::auth::{
+    require_admin, require_auth, resolved_auth_user, user_id,
+};
 
 use super::super::{AuthDatabaseState, OperationalState};
 use super::helpers::{

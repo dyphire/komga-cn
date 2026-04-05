@@ -15,6 +15,7 @@ pub struct PersistedBookDetailRecord {
     pub id: String,
     pub series_id: String,
     pub series_title: String,
+    pub series_title_sort: String,
     pub library_id: String,
     pub name: String,
     pub url: String,
@@ -143,6 +144,7 @@ pub async fn load_persisted_book_detail(
 
     let row = sqlx::query(
         "SELECT b.ID AS ID, b.SERIES_ID AS SERIES_ID, COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE, \
+                COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) AS SERIES_TITLE_SORT, \
                 b.LIBRARY_ID AS LIBRARY_ID, b.NAME AS NAME, b.URL AS URL, b.NUMBER AS NUMBER, \
                 b.CREATED_DATE AS CREATED_DATE, b.LAST_MODIFIED_DATE AS LAST_MODIFIED_DATE, \
                 CAST(b.FILE_LAST_MODIFIED AS TEXT) AS FILE_LAST_MODIFIED, \
@@ -200,6 +202,7 @@ pub async fn load_persisted_book_detail(
         id: row.get::<String, _>("ID"),
         series_id: row.get::<String, _>("SERIES_ID"),
         series_title: row.get::<String, _>("SERIES_TITLE"),
+        series_title_sort: row.get::<String, _>("SERIES_TITLE_SORT"),
         library_id: row.get::<String, _>("LIBRARY_ID"),
         name: row.get::<String, _>("NAME"),
         url: row.get::<String, _>("URL"),
@@ -271,9 +274,10 @@ pub async fn load_persisted_book_sibling_id(
         .map_err(|error| format!("open book sibling db: {error}"))?;
 
     let current = sqlx::query(
-        "SELECT SERIES_ID, NUMBER \
-         FROM BOOK \
-         WHERE ID = ?",
+        "SELECT b.SERIES_ID, bm.NUMBER_SORT AS NUMBER_SORT \
+         FROM BOOK b \
+         LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
+         WHERE b.ID = ?",
     )
     .bind(book_id)
     .fetch_optional(&pool)
@@ -285,43 +289,47 @@ pub async fn load_persisted_book_sibling_id(
     };
 
     let series_id = current.get::<String, _>("SERIES_ID");
-    let number = current.get::<i32, _>("NUMBER");
+    let Some(number_sort) = current.get::<Option<f64>, _>("NUMBER_SORT") else {
+        return Ok(None);
+    };
 
     let sibling_row = match direction {
         PersistedBookSiblingDirectionRecord::Previous => {
             sqlx::query(
-                "SELECT ID \
-                 FROM BOOK \
-                 WHERE SERIES_ID = ? \
-                 AND DELETED_DATE IS NULL \
-                 AND (NUMBER < ? \
-                 OR (NUMBER = ? \
-                 AND ID < ?)) \
-                 ORDER BY NUMBER DESC, ID DESC \
+                "SELECT b.ID \
+                 FROM BOOK b \
+                 JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
+                 WHERE b.SERIES_ID = ? \
+                 AND b.DELETED_DATE IS NULL \
+                 AND (bm.NUMBER_SORT < ? \
+                 OR (bm.NUMBER_SORT = ? \
+                 AND b.ID < ?)) \
+                 ORDER BY bm.NUMBER_SORT DESC, b.ID DESC \
                  LIMIT 1",
             )
             .bind(&series_id)
-            .bind(number)
-            .bind(number)
+            .bind(number_sort)
+            .bind(number_sort)
             .bind(book_id)
             .fetch_optional(&pool)
             .await
         }
         PersistedBookSiblingDirectionRecord::Next => {
             sqlx::query(
-                "SELECT ID \
-                 FROM BOOK \
-                 WHERE SERIES_ID = ? \
-                 AND DELETED_DATE IS NULL \
-                 AND (NUMBER > ? \
-                 OR (NUMBER = ? \
-                 AND ID > ?)) \
-                 ORDER BY NUMBER ASC, ID ASC \
+                "SELECT b.ID \
+                 FROM BOOK b \
+                 JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
+                 WHERE b.SERIES_ID = ? \
+                 AND b.DELETED_DATE IS NULL \
+                 AND (bm.NUMBER_SORT > ? \
+                 OR (bm.NUMBER_SORT = ? \
+                 AND b.ID > ?)) \
+                 ORDER BY bm.NUMBER_SORT ASC, b.ID ASC \
                  LIMIT 1",
             )
             .bind(&series_id)
-            .bind(number)
-            .bind(number)
+            .bind(number_sort)
+            .bind(number_sort)
             .bind(book_id)
             .fetch_optional(&pool)
             .await

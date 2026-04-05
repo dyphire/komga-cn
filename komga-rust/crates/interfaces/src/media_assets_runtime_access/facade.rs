@@ -100,6 +100,15 @@ pub(crate) fn resolve_book_page_bytes(
     (backend().resolve_book_page_bytes)(media.clone(), page.clone(), page_number)
 }
 
+pub(crate) fn render_book_page_thumbnail(
+    media: &BookMediaRecord,
+    page: &BookPageRecord,
+    page_number: u64,
+    max_edge: u32,
+) -> Option<Vec<u8>> {
+    (backend().render_book_page_thumbnail)(media.clone(), page.clone(), page_number, max_edge)
+}
+
 pub(crate) fn load_archive_page_row(
     media: &BookMediaRecord,
     page_number: u64,
@@ -504,6 +513,14 @@ pub(crate) async fn delete_series_thumbnail(
         thumbnail_id.to_string(),
     )
     .await
+}
+
+pub(crate) async fn load_persisted_series_oneshot(
+    database_file: &Path,
+    series_id: &str,
+) -> Result<Option<bool>, String> {
+    (backend().load_persisted_series_oneshot)(database_file.to_path_buf(), series_id.to_string())
+        .await
 }
 
 pub(crate) async fn load_persisted_readlist_name(

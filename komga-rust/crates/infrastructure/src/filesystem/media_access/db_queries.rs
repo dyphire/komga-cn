@@ -314,6 +314,25 @@ pub async fn persisted_series_exists(
     )
 }
 
+pub async fn load_persisted_series_oneshot(
+    database_file: &Path,
+    series_id: &str,
+) -> Result<Option<bool>, String> {
+    if !database_file.exists() {
+        return Ok(None);
+    }
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("open series oneshot db: {error}"))?;
+    let row =
+        sqlx::query("SELECT COALESCE(ONESHOT, 0) AS ONESHOT FROM SERIES WHERE ID = ? LIMIT 1")
+            .bind(series_id)
+            .fetch_optional(&pool)
+            .await
+            .map_err(|error| format!("query persisted series oneshot: {error}"))?;
+    Ok(row.map(|row| row.get::<i64, _>("ONESHOT") != 0))
+}
+
 pub async fn load_series_library_id(
     database_file: &Path,
     series_id: &str,

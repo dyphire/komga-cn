@@ -87,6 +87,9 @@ pub(super) fn default_test_backend() -> MediaAssetsRuntimeAccessBackend {
         resolve_book_page_bytes: Arc::new(|media, page, page_number| {
             resolve_book_page_bytes_for_tests(&media, &page, page_number)
         }),
+        render_book_page_thumbnail: Arc::new(|media, page, page_number, _max_edge| {
+            resolve_book_page_bytes_for_tests(&media, &page, page_number)
+        }),
         load_archive_page_row: Arc::new(|media, page_number| {
             load_archive_page_row_for_tests(&media, page_number)
         }),
@@ -169,6 +172,7 @@ pub(super) fn default_test_backend() -> MediaAssetsRuntimeAccessBackend {
         persisted_book_exists: Arc::new(|_, _| Box::pin(async { Ok(false) })),
         persisted_book_ids: Arc::new(|_| Box::pin(async { Ok(vec![]) })),
         persisted_series_exists: Arc::new(|_, _| Box::pin(async { Ok(false) })),
+        load_persisted_series_oneshot: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         persisted_readlist_exists: Arc::new(|_, _| Box::pin(async { Ok(false) })),
         persisted_collection_exists: Arc::new(|_, _| Box::pin(async { Ok(false) })),
         load_series_book_number_sorts: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),

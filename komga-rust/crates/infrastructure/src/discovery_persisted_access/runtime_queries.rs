@@ -65,14 +65,13 @@ pub async fn load_persisted_duplicate_books(
          FROM BOOK b \
          JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
          WHERE b.FILE_HASH IS NOT NULL \
-         AND TRIM(b.FILE_HASH) != '' \
+         AND b.FILE_HASH != '' \
          AND b.FILE_HASH IN (SELECT FILE_HASH \
-         FROM BOOK \
-         WHERE FILE_HASH IS NOT NULL \
-         AND TRIM(FILE_HASH) != '' \
-         GROUP BY FILE_HASH \
-         HAVING COUNT(*) > 1) \
-         ORDER BY b.FILE_HASH ASC, b.NUMBER ASC, b.ID ASC",
+                            FROM BOOK \
+                            WHERE FILE_HASH IS NOT NULL \
+                            AND FILE_HASH != '' \
+                            GROUP BY FILE_HASH, FILE_SIZE \
+                            HAVING COUNT(*) > 1)",
     )
     .fetch_all(&pool)
     .await
@@ -115,7 +114,9 @@ pub async fn load_persisted_book_tags(
                  FROM BOOK_METADATA_TAG bt \
                  JOIN BOOK b ON b.ID = bt.BOOK_ID",
             );
-            if let Some(authorized_library_ids) = authorized_library_ids.filter(|ids| !ids.is_empty()) {
+            if let Some(authorized_library_ids) =
+                authorized_library_ids.filter(|ids| !ids.is_empty())
+            {
                 query.push(" WHERE b.LIBRARY_ID IN (");
                 let mut separated = query.separated(",");
                 for library_id in authorized_library_ids {
@@ -134,7 +135,9 @@ pub async fn load_persisted_book_tags(
                  WHERE b.SERIES_ID = ",
             );
             query.push_bind(series_id);
-            if let Some(authorized_library_ids) = authorized_library_ids.filter(|ids| !ids.is_empty()) {
+            if let Some(authorized_library_ids) =
+                authorized_library_ids.filter(|ids| !ids.is_empty())
+            {
                 query.push(" AND b.LIBRARY_ID IN (");
                 let mut separated = query.separated(",");
                 for library_id in authorized_library_ids {
@@ -157,7 +160,9 @@ pub async fn load_persisted_book_tags(
                 separated.push_bind(library_id);
             }
             separated.push_unseparated(")");
-            if let Some(authorized_library_ids) = authorized_library_ids.filter(|ids| !ids.is_empty()) {
+            if let Some(authorized_library_ids) =
+                authorized_library_ids.filter(|ids| !ids.is_empty())
+            {
                 query.push(" AND b.LIBRARY_ID IN (");
                 let mut separated = query.separated(",");
                 for library_id in authorized_library_ids {
@@ -177,7 +182,9 @@ pub async fn load_persisted_book_tags(
                  WHERE rb.READLIST_ID = ",
             );
             query.push_bind(readlist_id);
-            if let Some(authorized_library_ids) = authorized_library_ids.filter(|ids| !ids.is_empty()) {
+            if let Some(authorized_library_ids) =
+                authorized_library_ids.filter(|ids| !ids.is_empty())
+            {
                 query.push(" AND b.LIBRARY_ID IN (");
                 let mut separated = query.separated(",");
                 for library_id in authorized_library_ids {

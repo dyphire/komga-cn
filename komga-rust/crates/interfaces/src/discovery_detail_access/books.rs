@@ -71,6 +71,7 @@ pub struct PersistedBookDetailRecord {
     pub id: String,
     pub series_id: String,
     pub series_title: String,
+    pub series_title_sort: String,
     pub library_id: String,
     pub name: String,
     pub url: String,

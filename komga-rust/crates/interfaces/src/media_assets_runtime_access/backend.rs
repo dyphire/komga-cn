@@ -110,6 +110,8 @@ pub struct MediaAssetsRuntimeAccessBackend {
     >,
     pub resolve_book_page_bytes:
         Arc<dyn Fn(BookMediaRecord, BookPageRecord, u64) -> Option<Vec<u8>> + Send + Sync>,
+    pub render_book_page_thumbnail:
+        Arc<dyn Fn(BookMediaRecord, BookPageRecord, u64, u32) -> Option<Vec<u8>> + Send + Sync>,
     pub load_archive_page_row:
         Arc<dyn Fn(BookMediaRecord, u64) -> Option<BookPageRecord> + Send + Sync>,
     pub load_archive_page_rows:
@@ -482,6 +484,15 @@ pub struct MediaAssetsRuntimeAccessBackend {
     >,
     pub persisted_series_exists: Arc<
         dyn Fn(PathBuf, String) -> futures_util::future::BoxFuture<'static, Result<bool, String>>
+            + Send
+            + Sync,
+    >,
+    pub load_persisted_series_oneshot: Arc<
+        dyn Fn(
+                PathBuf,
+                String,
+            )
+                -> futures_util::future::BoxFuture<'static, Result<Option<bool>, String>>
             + Send
             + Sync,
     >,

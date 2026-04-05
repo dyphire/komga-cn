@@ -229,6 +229,10 @@ pub async fn load_persisted_series_page(
         series = filter_rows(series, |row| row.oneshot == oneshot);
     }
 
+    if filters.exclude_newly_added {
+        series = filter_rows(series, |row| row.created != row.last_modified);
+    }
+
     if filters.read_statuses.is_some() || filters.read_statuses_excluded.is_some() {
         let Some(user_id) = context.user_id.as_deref() else {
             series.clear();
@@ -605,6 +609,7 @@ pub async fn load_persisted_series_page(
                     .title_sort
                     .to_ascii_lowercase()
                     .cmp(&right.title_sort.to_ascii_lowercase()),
+                PersistedSeriesSortMode::CreatedDesc => right.created.cmp(&left.created),
                 PersistedSeriesSortMode::Latest => right.last_modified.cmp(&left.last_modified),
                 PersistedSeriesSortMode::RelevanceAsc => {
                     compare_relevance_ranks(&relevance_ranks, &left.id, &right.id, false)

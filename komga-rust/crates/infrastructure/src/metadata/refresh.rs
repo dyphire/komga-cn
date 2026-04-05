@@ -3,7 +3,6 @@
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 
 use komga_application::media_assets::{
     BookMediaRecord, BookPageRecord, book_media_is_epub, book_media_is_pdf,
@@ -13,9 +12,8 @@ use pdfium_render::prelude::*;
 use sqlx::{Row, SqlitePool};
 
 use crate::filesystem::{load_archive_page_row, load_epub_cover_bytes, resolve_book_page_bytes};
+use crate::load_pdfium;
 use crate::sqlite::connect_pool;
-
-static PDFIUM: OnceLock<Result<Pdfium, String>> = OnceLock::new();
 
 fn thumbnail_max_edge_from_setting(value: Option<&str>) -> u32 {
     match value.unwrap_or("DEFAULT") {
@@ -760,21 +758,6 @@ fn render_pdf_thumbnail(
         width,
         height,
     )))
-}
-
-fn load_pdfium() -> Result<&'static Pdfium, String> {
-    match PDFIUM.get_or_init(init_pdfium) {
-        Ok(pdfium) => Ok(pdfium),
-        Err(error) => Err(error.clone()),
-    }
-}
-
-fn init_pdfium() -> Result<Pdfium, String> {
-    let library_path = env!("KOMGA_PDFIUM_LIB_PATH");
-    let bindings = Pdfium::bind_to_library(library_path)
-        .or_else(|_| Pdfium::bind_to_system_library())
-        .map_err(|error| format!("failed to bind Pdfium at '{library_path}': {error}"))?;
-    Ok(Pdfium::new(bindings))
 }
 
 type BoxFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, String>> + Send>>;

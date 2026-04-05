@@ -68,6 +68,7 @@ pub async fn load_persisted_book_detail(
             id: row.id,
             series_id: row.series_id,
             series_title: row.series_title,
+            series_title_sort: row.series_title_sort,
             library_id: row.library_id,
             name: row.name,
             url: row.url,

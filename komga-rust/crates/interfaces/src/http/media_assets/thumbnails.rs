@@ -210,24 +210,6 @@ pub async fn book_thumbnail(
             Err(error) => return internal_error_response(error),
         }
 
-        if book_media_supports_page_image(&media)
-            && let Some(bytes) = read_media_file_bytes(&media.file_path)
-        {
-            let content_type = content_type_from_filename(&media.file_name, &media.media_type);
-            let etag = asset_etag(bytes.as_slice());
-            let last_modified = file_last_modified_header_value(media.file_path.as_path());
-            if if_none_match_matches(&headers, etag.as_str()) {
-                return asset_not_modified_response(Some(etag.as_str()), last_modified.as_deref());
-            }
-
-            return asset_ok_response(
-                content_type.as_str(),
-                bytes,
-                Some(etag.as_str()),
-                last_modified.as_deref(),
-            );
-        }
-
         return StatusCode::NOT_FOUND.into_response();
     }
 
@@ -1075,6 +1057,13 @@ pub async fn series_thumbnail_upload(
     {
         return StatusCode::NOT_FOUND.into_response();
     }
+    match load_persisted_series_oneshot(auth_db.database_file.as_path(), &resolved_series_id).await
+    {
+        Ok(Some(true)) => return StatusCode::BAD_REQUEST.into_response(),
+        Ok(Some(false)) => {}
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => return internal_error_response(error),
+    }
 
     let (thumbnail_bytes, media_type, selected) =
         match parse_thumbnail_upload(multipart, "series").await {
@@ -1254,6 +1243,22 @@ pub async fn series_thumbnail_delete(
 
     let resolved_series_id =
         resolve_series_id_for_persisted(auth_db.database_file.as_path(), &series_id).await;
+    let thumbnail = match load_persisted_series_thumbnails(
+        auth_db.database_file.as_path(),
+        &resolved_series_id,
+    )
+    .await
+    {
+        Ok(rows) => rows.into_iter().find(|row| row.id == thumbnail_id),
+        Err(error) => return internal_error_response(error),
+    };
+    let Some(thumbnail) = thumbnail else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if thumbnail.thumbnail_type != "USER_UPLOADED" {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+
     match delete_series_thumbnail(
         auth_db.database_file.as_path(),
         &resolved_series_id,
