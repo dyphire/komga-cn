@@ -59,8 +59,55 @@ fn load_embedded_font_file(font_family: &str, font_file: &str) -> Option<Vec<u8>
     EmbeddedFonts::get(&path).map(|file| file.data.into_owned())
 }
 
+fn load_embedded_font_family_css(font_family: &str) -> Option<String> {
+    let mut font_files = EmbeddedFonts::iter()
+        .filter_map(|path| {
+            let path = path.as_ref();
+            let (family, file_name) = path.split_once('/')?;
+            if family != font_family || font_extension(file_name).is_none() {
+                return None;
+            }
+            Some(file_name.to_string())
+        })
+        .collect::<Vec<_>>();
+
+    if font_files.is_empty() {
+        return None;
+    }
+
+    font_files.sort_by_key(|file_name| file_name.to_ascii_lowercase());
+    let mut groups: Vec<(FontCharacteristics, Vec<String>)> = Vec::new();
+    for file_name in font_files {
+        let characteristics = font_characteristics(&file_name);
+        if let Some((_, files)) = groups
+            .iter_mut()
+            .find(|(current, _)| *current == characteristics)
+        {
+            files.push(file_name);
+        } else {
+            groups.push((characteristics, vec![file_name]));
+        }
+    }
+
+    Some(
+        groups
+            .into_iter()
+            .map(|(characteristics, files)| {
+                build_font_face_block(font_family, &characteristics, &files)
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+}
+
 fn filesystem_font_family_exists(fonts_directory: &Path, font_family: &str) -> bool {
     fonts_directory.join(font_family).is_dir()
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct FontCharacteristics {
+    style: &'static str,
+    weight: &'static str,
 }
 
 pub(crate) async fn get_font_file(
@@ -111,9 +158,15 @@ pub(crate) async fn get_font_family_css(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Some(css) =
-        load_font_family_css(state.runtime.fonts_data_directory.as_path(), &font_family)
-    else {
+    let fonts_directory = state.runtime.fonts_data_directory.as_path();
+    let css = if filesystem_font_family_exists(fonts_directory, &font_family) {
+        load_font_family_css(fonts_directory, &font_family)
+    } else {
+        load_embedded_font_family_css(&font_family)
+            .or_else(|| load_font_family_css(fonts_directory, &font_family))
+    };
+
+    let Some(css) = css else {
         return StatusCode::NOT_FOUND.into_response();
     };
     let content_disposition = format!("attachment; filename=\"{}.css\"", font_family);
@@ -155,4 +208,53 @@ fn font_media_type(file_name: &str) -> Option<&'static str> {
         Some("otf") => Some("font/otf"),
         _ => None,
     }
+}
+
+fn font_format(file_name: &str) -> Option<&'static str> {
+    match font_extension(file_name) {
+        Some("ttf") => Some("truetype"),
+        Some("otf") => Some("opentype"),
+        Some("woff") => Some("woff"),
+        Some("woff2") => Some("woff2"),
+        _ => None,
+    }
+}
+
+fn font_characteristics(file_name: &str) -> FontCharacteristics {
+    let lower = file_name.to_ascii_lowercase();
+    FontCharacteristics {
+        style: if lower.contains("italic") {
+            "italic"
+        } else {
+            "normal"
+        },
+        weight: if lower.contains("bold") {
+            "bold"
+        } else {
+            "normal"
+        },
+    }
+}
+
+fn build_font_face_block(
+    font_family: &str,
+    characteristics: &FontCharacteristics,
+    files: &[String],
+) -> String {
+    let src = files
+        .iter()
+        .map(|file_name| {
+            format!(
+                "url('{}') format('{}')",
+                file_name,
+                font_format(file_name).expect("font format should exist for grouped files")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+
+    format!(
+        "@font-face {{\n    font-family: '{}';\n    src: {};\n    font-weight: {};\n    font-style: {};\n}}\n",
+        font_family, src, characteristics.weight, characteristics.style,
+    )
 }

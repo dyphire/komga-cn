@@ -4,6 +4,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
+use reqwest::Url;
 use serde_json::Value;
 use sqlx::Row;
 
@@ -42,6 +43,7 @@ pub struct KoboMetadataRecord {
     pub language: String,
     pub file_size: u64,
     pub file_name: String,
+    pub media_type: String,
     pub contributor_names: Vec<String>,
     pub isbn: Option<String>,
     pub publisher_name: Option<String>,
@@ -51,6 +53,20 @@ pub struct KoboMetadataRecord {
     pub series_number: Option<String>,
     pub series_number_float: Option<f64>,
     pub oneshot: bool,
+    pub is_kepub: bool,
+    pub is_pre_paginated: bool,
+}
+
+fn decode_epub_extension_is_fixed_layout(blob: &[u8]) -> bool {
+    let mut decoder = GzDecoder::new(blob);
+    let mut json = String::new();
+    if decoder.read_to_string(&mut json).is_err() {
+        return false;
+    }
+    serde_json::from_str::<Value>(&json)
+        .ok()
+        .and_then(|value| value.get("isFixedLayout").and_then(Value::as_bool))
+        .unwrap_or(false)
 }
 
 #[derive(Debug)]
@@ -76,6 +92,7 @@ pub async fn load_kobo_metadata_record(
                 COALESCE(sm.LANGUAGE, 'en') AS LANGUAGE, \
                 COALESCE(b.FILE_SIZE, 0) AS FILE_SIZE, \
                 b.NAME AS FILE_NAME, \
+                COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE, \
                 NULLIF(TRIM(bm.ISBN), '') AS ISBN, \
                 NULLIF(TRIM(sm.PUBLISHER), '') AS PUBLISHER_NAME, \
                 tb.ID AS COVER_IMAGE_ID, \
@@ -83,14 +100,18 @@ pub async fn load_kobo_metadata_record(
                 sm.TITLE AS SERIES_NAME, \
                 NULLIF(TRIM(bm.NUMBER), '') AS SERIES_NUMBER, \
                 bm.NUMBER_SORT AS SERIES_NUMBER_FLOAT, \
-                COALESCE(b.ONESHOT, FALSE) AS ONESHOT \
+                COALESCE(b.ONESHOT, FALSE) AS ONESHOT, \
+                COALESCE(m.EPUB_IS_KEPUB, FALSE) AS EPUB_IS_KEPUB, \
+                m.EXTENSION_VALUE_BLOB AS EXTENSION_VALUE_BLOB \
          FROM BOOK b \
-         LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
-         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = b.SERIES_ID \
-         LEFT JOIN THUMBNAIL_BOOK tb ON tb.BOOK_ID = b.ID AND tb.SELECTED = TRUE \
+          LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
+          LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = b.SERIES_ID \
+          LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID \
+          LEFT JOIN THUMBNAIL_BOOK tb ON tb.BOOK_ID = b.ID AND tb.SELECTED = TRUE \
          WHERE b.ID = ? \
-           AND b.DELETED_DATE IS NULL \
-         LIMIT 1",
+            AND b.DELETED_DATE IS NULL \
+            AND bm.BOOK_ID IS NOT NULL \
+          LIMIT 1",
     )
     .bind(book_id)
     .fetch_optional(&pool)
@@ -129,6 +150,7 @@ pub async fn load_kobo_metadata_record(
         language: row.get::<String, _>("LANGUAGE"),
         file_size: row.get::<i64, _>("FILE_SIZE").max(0) as u64,
         file_name: row.get::<String, _>("FILE_NAME"),
+        media_type: row.get::<String, _>("MEDIA_TYPE"),
         contributor_names,
         isbn: row.get::<Option<String>, _>("ISBN"),
         publisher_name: row.get::<Option<String>, _>("PUBLISHER_NAME"),
@@ -138,6 +160,11 @@ pub async fn load_kobo_metadata_record(
         series_number: row.get::<Option<String>, _>("SERIES_NUMBER"),
         series_number_float: row.get::<Option<f64>, _>("SERIES_NUMBER_FLOAT"),
         oneshot: row.get::<bool, _>("ONESHOT"),
+        is_kepub: row.get::<bool, _>("EPUB_IS_KEPUB"),
+        is_pre_paginated: row
+            .get::<Option<Vec<u8>>, _>("EXTENSION_VALUE_BLOB")
+            .as_deref()
+            .is_some_and(decode_epub_extension_is_fixed_layout),
     }))
 }
 
@@ -190,37 +217,43 @@ pub async fn load_thumbnail_by_id(
     }
 
     let pool = connect_pool(database_file, 1).await?;
-    let direct = sqlx::query(
-        "SELECT MEDIA_TYPE, THUMBNAIL \
-         FROM THUMBNAIL_BOOK \
-         WHERE ID = ? \
+    let row = sqlx::query(
+        "SELECT tb.MEDIA_TYPE, tb.THUMBNAIL, tb.URL, l.ROOT AS LIBRARY_ROOT \
+         FROM THUMBNAIL_BOOK tb \
+         LEFT JOIN BOOK b ON b.ID = tb.BOOK_ID \
+         LEFT JOIN LIBRARY l ON l.ID = b.LIBRARY_ID \
+         WHERE tb.ID = ? \
          LIMIT 1",
     )
     .bind(thumbnail_id)
     .fetch_optional(&pool)
     .await?;
 
-    let row = if let Some(row) = direct {
-        Some(row)
-    } else {
-        sqlx::query(
-            "SELECT MEDIA_TYPE, THUMBNAIL \
-             FROM THUMBNAIL_BOOK \
-             WHERE BOOK_ID = ? \
-             ORDER BY SELECTED DESC, LAST_MODIFIED_DATE DESC, ID ASC \
-             LIMIT 1",
-        )
-        .bind(thumbnail_id)
-        .fetch_optional(&pool)
-        .await?
+    let Some(row) = row else {
+        return Ok(None);
     };
 
-    Ok(row.map(|row| {
-        (
-            row.get::<String, _>("MEDIA_TYPE"),
-            row.get::<Vec<u8>, _>("THUMBNAIL"),
-        )
-    }))
+    let media_type = row.get::<String, _>("MEDIA_TYPE");
+    if let Some(thumbnail) = row.get::<Option<Vec<u8>>, _>("THUMBNAIL") {
+        return Ok(Some((media_type, thumbnail)));
+    }
+
+    let Some(url) = row.get::<Option<String>, _>("URL") else {
+        return Ok(None);
+    };
+    let library_root = row.get::<Option<String>, _>("LIBRARY_ROOT");
+    let sidecar_path = Url::parse(&url)
+        .ok()
+        .and_then(|parsed| parsed.to_file_path().ok())
+        .or_else(|| library_root.map(|root| PathBuf::from(root).join(&url)));
+    let Some(sidecar_path) = sidecar_path else {
+        return Ok(None);
+    };
+
+    match std::fs::read(&sidecar_path) {
+        Ok(bytes) => Ok(Some((media_type, bytes))),
+        Err(_) => Ok(None),
+    }
 }
 
 pub async fn persisted_book_exists(

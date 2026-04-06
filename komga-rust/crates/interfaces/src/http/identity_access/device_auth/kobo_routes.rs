@@ -1,4 +1,73 @@
 use super::*;
+use crate::http::media_assets::{
+    attachment_disposition, normalize_book_epub_locator, progression_is_older_than_existing,
+    user_can_access_book_media,
+};
+use crate::runtime_identity_access::persisted_api_key_metadata;
+
+fn encode_kobo_thumbnail_as_jpeg(bytes: &[u8]) -> Option<Vec<u8>> {
+    let image = image::load_from_memory(bytes).ok()?;
+    let mut output = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut output, image::ImageFormat::Jpeg).ok()?;
+    Some(output.into_inner())
+}
+
+async fn kobo_book_thumbnail_response(
+    state: &OperationalState,
+    auth_token: &str,
+    headers: &HeaderMap,
+    thumbnail_id: &str,
+    width: &str,
+    height: &str,
+) -> Response {
+    if resolved_kobo_user(auth_token, headers, state.runtime.database_file.as_path())
+        .await
+        .is_none()
+    {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+
+    match load_thumbnail_by_id(state.runtime.database_file.as_path(), thumbnail_id).await {
+        Ok(Some((media_type, bytes))) => {
+            let jpeg_bytes = if media_type.eq_ignore_ascii_case("image/jpeg") {
+                bytes
+            } else {
+                match encode_kobo_thumbnail_as_jpeg(&bytes) {
+                    Some(jpeg_bytes) => jpeg_bytes,
+                    None => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+                }
+            };
+
+            (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, HeaderValue::from_static("image/jpeg"))],
+                jpeg_bytes,
+            )
+                .into_response()
+        }
+        Ok(None) => {
+            if load_kobo_proxy_enabled(state).await {
+                let location = format!(
+                    "https://cdn.kobo.com/book-images/{thumbnail_id}/{width}/{height}/false/image.jpg"
+                );
+                return (
+                    StatusCode::TEMPORARY_REDIRECT,
+                    [(
+                        header::LOCATION,
+                        HeaderValue::from_str(location.as_str()).unwrap_or_else(|_| {
+                            HeaderValue::from_static(
+                                "https://cdn.kobo.com/book-images/invalid/0/0/false/image.jpg",
+                            )
+                        }),
+                    )],
+                )
+                    .into_response();
+            }
+            StatusCode::NOT_FOUND.into_response()
+        }
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
 
 fn kobo_description(summary: &str) -> Value {
     if summary.trim().is_empty() {
@@ -48,6 +117,8 @@ pub async fn kobo_library_sync(
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let user_id_value = user_id(&current_user).to_string();
+    let current_api_key_id =
+        kobo_path_api_key_id(auth_token.as_str(), state.runtime.database_file.as_path()).await;
     let sync_token_raw = kobo_sync_token_from_request(&headers, &uri);
     let sync_token_payload = sync_token_raw
         .as_deref()
@@ -99,6 +170,7 @@ pub async fn kobo_library_sync(
     } else {
         KoboSyncPointState {
             user_id: user_id_value.clone(),
+            api_key_id: current_api_key_id.clone(),
             marker: now_sync_marker(),
             cursor: 0,
             from_marker: if let Some(sync_id) = from_sync_point_id.as_ref() {
@@ -270,10 +342,161 @@ pub async fn kobo_library_sync(
     response
 }
 
+async fn kobo_path_api_key_id(auth_token: &str, database_file: &FsPath) -> Option<String> {
+    kobo_path_api_key_metadata(auth_token, database_file)
+        .await
+        .map(|(id, _)| id)
+}
+
+async fn kobo_path_api_key_metadata(
+    auth_token: &str,
+    database_file: &FsPath,
+) -> Option<(String, String)> {
+    if !valid_kobo_path_token(auth_token) {
+        return None;
+    }
+
+    let mut metadata_headers = HeaderMap::new();
+    metadata_headers.insert("x-api-key", HeaderValue::from_str(auth_token).ok()?);
+    persisted_api_key_metadata(&metadata_headers, database_file)
+        .await
+        .map(|metadata| (metadata.id, metadata.comment))
+}
+
+async fn proxied_missing_kobo_book_response(
+    state: &OperationalState,
+    method: &axum::http::Method,
+    proxy_path: &str,
+    query: Option<&str>,
+    headers: &HeaderMap,
+    body: &Bytes,
+) -> Option<Response> {
+    if !load_kobo_proxy_enabled(state).await {
+        return None;
+    }
+
+    Some(
+        match proxy_kobo_catch_all_request(method, proxy_path, query, headers, body).await {
+            Ok(response) => response,
+            Err(status) => status.into_response(),
+        },
+    )
+}
+
+async fn built_in_kepub_conversion_available(state: &OperationalState) -> bool {
+    let persisted = state.settings_store.load_map().await.ok();
+    let configured_path = persisted
+        .as_ref()
+        .and_then(|settings| settings.get("KEPUBIFY_PATH"))
+        .and_then(|value| value.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+
+    let fallback_path = state.runtime.config_dir.as_ref().and_then(|config_dir| {
+        config_kepubify_path(config_dir.join("application.yml").as_path())
+            .or_else(|| config_kepubify_path(config_dir.join("application.yaml").as_path()))
+            .or_else(|| {
+                properties_kepubify_path(config_dir.join("application.properties").as_path())
+            })
+    });
+
+    if let Some(path) = configured_path {
+        if kepubify_path_is_available(path.as_str()) {
+            return true;
+        }
+        return fallback_path
+            .as_deref()
+            .is_some_and(kepubify_path_is_available);
+    }
+
+    fallback_path
+        .as_deref()
+        .is_some_and(kepubify_path_is_available)
+}
+
+fn config_kepubify_path(path: &FsPath) -> Option<String> {
+    std::fs::read_to_string(path).ok().and_then(|content| {
+        content.lines().find_map(|line| {
+            let trimmed = line.trim();
+            if !trimmed.starts_with("kepubify-path:") {
+                return None;
+            }
+            trimmed
+                .split_once(':')
+                .map(|(_, value)| {
+                    value
+                        .trim()
+                        .trim_matches(|character| character == '"' || character == '\'')
+                        .to_string()
+                })
+                .filter(|value| !value.is_empty())
+        })
+    })
+}
+
+fn properties_kepubify_path(path: &FsPath) -> Option<String> {
+    std::fs::read_to_string(path).ok().and_then(|content| {
+        content.lines().find_map(|line| {
+            let trimmed = line.trim();
+            if !trimmed.starts_with("komga.kobo.kepubify-path=") {
+                return None;
+            }
+            trimmed
+                .split_once('=')
+                .map(|(_, value)| {
+                    value
+                        .trim()
+                        .trim_matches(|character| character == '"' || character == '\'')
+                        .to_string()
+                })
+                .filter(|value| !value.is_empty())
+        })
+    })
+}
+
+fn kepubify_path_is_available(path: &str) -> bool {
+    let candidate = std::path::Path::new(path);
+    if (candidate.is_absolute() || path.contains(std::path::MAIN_SEPARATOR))
+        && let Ok(metadata) = std::fs::metadata(candidate)
+    {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            return metadata.is_file() && metadata.permissions().mode() & 0o111 != 0;
+        }
+        #[cfg(not(unix))]
+        {
+            return metadata.is_file();
+        }
+    }
+
+    let Some(paths) = std::env::var_os("PATH") else {
+        return false;
+    };
+
+    std::env::split_paths(&paths)
+        .map(|directory| directory.join(path))
+        .any(|candidate| {
+            std::fs::metadata(&candidate).ok().is_some_and(|metadata| {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+                }
+                #[cfg(not(unix))]
+                {
+                    metadata.is_file()
+                }
+            })
+        })
+}
+
 pub async fn kobo_library_book_metadata(
     Extension(state): Extension<OperationalState>,
     Path((auth_token, book_id)): Path<(String, String)>,
     headers: HeaderMap,
+    uri: axum::http::Uri,
 ) -> Response {
     if resolved_kobo_user(
         auth_token.as_str(),
@@ -289,16 +512,41 @@ pub async fn kobo_library_book_metadata(
     let database_file = state.runtime.database_file.as_path();
     let metadata = match load_kobo_metadata_record(database_file, &book_id).await {
         Ok(Some(metadata)) => metadata,
-        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Ok(None) => {
+            let book_exists = persisted_book_exists(database_file, &book_id)
+                .await
+                .unwrap_or(false);
+            if !book_exists {
+                let proxy_path = format!("/v1/library/{book_id}/metadata");
+                if let Some(response) = proxied_missing_kobo_book_response(
+                    &state,
+                    &axum::http::Method::GET,
+                    proxy_path.as_str(),
+                    uri.query(),
+                    &headers,
+                    &Bytes::new(),
+                )
+                .await
+                {
+                    return response;
+                }
+            }
+            return Json(Value::Array(Vec::new())).into_response();
+        }
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    let base_url = request_base_url(&headers);
-    let media_type = content_type_from_filename(&metadata.file_name, "application/octet-stream");
-    let format = if media_type == "application/epub+zip" {
-        "EPUB"
+    let base_url = format!(
+        "{}{}",
+        request_base_url_with_port(&headers, Some(state.runtime.bind_address.port())),
+        request_context_path(&headers)
+    );
+    let (format, convert_kepub) = if metadata.is_pre_paginated {
+        ("EPUB3FL", false)
+    } else if metadata.is_kepub || built_in_kepub_conversion_available(&state).await {
+        ("KEPUB", !metadata.is_kepub)
     } else {
-        "EPUB3"
+        ("EPUB3", false)
     };
     let contributor_roles = metadata
         .contributor_names
@@ -360,7 +608,7 @@ pub async fn kobo_library_book_metadata(
                     "Format": format,
                     "Platform": "Generic",
                     "Size": metadata.file_size,
-                    "Url": format!("{base_url}/kobo/{auth_token}/v1/books/{book_id}/file/epub"),
+                    "Url": format!("{base_url}/kobo/{auth_token}/v1/books/{book_id}/file/epub?convert_kepub={convert_kepub}"),
                 }
             ],
             "EntitlementId": book_id,
@@ -390,6 +638,7 @@ pub async fn kobo_library_book_state(
     Extension(state): Extension<OperationalState>,
     Path((auth_token, book_id)): Path<(String, String)>,
     headers: HeaderMap,
+    uri: axum::http::Uri,
 ) -> Response {
     let Some(current_user) = resolved_kobo_user(
         auth_token.as_str(),
@@ -406,14 +655,24 @@ pub async fn kobo_library_book_state(
         .await
         .unwrap_or(false)
     {
+        let proxy_path = format!("/v1/library/{book_id}/state");
+        if let Some(response) = proxied_missing_kobo_book_response(
+            &state,
+            &axum::http::Method::GET,
+            proxy_path.as_str(),
+            uri.query(),
+            &headers,
+            &Bytes::new(),
+        )
+        .await
+        {
+            return response;
+        }
+
         return StatusCode::NOT_FOUND.into_response();
     }
 
     let user_id_value = user_id(&current_user).to_string();
-    let page_count = load_book_page_count(database_file, &book_id)
-        .await
-        .unwrap_or(1)
-        .max(1);
     let created_timestamp = load_book_created_timestamp(database_file, &book_id)
         .await
         .unwrap_or(None)
@@ -428,7 +687,6 @@ pub async fn kobo_library_book_state(
         Some(record) => kobo_reading_state_payload(
             &book_id,
             &record,
-            page_count,
             parse_locator_payload(record.locator.as_deref()),
         ),
         None => kobo_empty_reading_state_payload(&book_id, created_timestamp.as_str()),
@@ -441,6 +699,7 @@ pub async fn kobo_library_book_state_update(
     Extension(state): Extension<OperationalState>,
     Path((auth_token, book_id)): Path<(String, String)>,
     headers: HeaderMap,
+    uri: axum::http::Uri,
     body: Bytes,
 ) -> Response {
     let Some(current_user) = resolved_kobo_user(
@@ -454,14 +713,7 @@ pub async fn kobo_library_book_state_update(
     };
 
     let database_file = state.runtime.database_file.as_path();
-    if !persisted_book_exists(database_file, &book_id)
-        .await
-        .unwrap_or(false)
-    {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    let payload = match serde_json::from_slice::<Value>(&body) {
+    let payload = match serde_json::from_slice::<KoboReadingStateUpdatePayload>(&body) {
         Ok(payload) => payload,
         Err(_) => {
             return (
@@ -472,155 +724,56 @@ pub async fn kobo_library_book_state_update(
         }
     };
 
-    let Some(state) = payload
-        .get("ReadingStates")
-        .and_then(Value::as_array)
-        .and_then(|values| values.first())
-    else {
+    if !persisted_book_exists(database_file, &book_id)
+        .await
+        .unwrap_or(false)
+    {
+        let proxy_path = format!("/v1/library/{book_id}/state");
+        if let Some(response) = proxied_missing_kobo_book_response(
+            &state,
+            &axum::http::Method::PUT,
+            proxy_path.as_str(),
+            uri.query(),
+            &headers,
+            &body,
+        )
+        .await
+        {
+            return response;
+        }
+
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let Some(state) = payload.reading_states.first() else {
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({ "error": "ReadingStates must contain one element" })),
         )
             .into_response();
     };
-    let Some(_entitlement_id) = state
-        .get("EntitlementId")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-    else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "EntitlementId is required" })),
-        )
-            .into_response();
+    let Some(location) = state.current_bookmark.location.as_ref() else {
+        return StatusCode::BAD_REQUEST.into_response();
     };
-
-    let Some(current_bookmark) = state.get("CurrentBookmark") else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "CurrentBookmark is required" })),
-        )
-            .into_response();
-    };
-    let Some(content_source_progress_percent) = current_bookmark
-        .get("ContentSourceProgressPercent")
-        .and_then(Value::as_f64)
+    let Some(content_source_progress_percent) =
+        state.current_bookmark.content_source_progress_percent
     else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "ContentSourceProgressPercent is required" })),
-        )
-            .into_response();
-    };
-    let Some(_bookmark_last_modified) = current_bookmark
-        .get("LastModified")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-    else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "CurrentBookmark.LastModified is required" })),
-        )
-            .into_response();
-    };
-    let Some(_statistics_last_modified) = state
-        .get("Statistics")
-        .and_then(|value| value.get("LastModified"))
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-    else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "Statistics.LastModified is required" })),
-        )
-            .into_response();
-    };
-    let Some(_status_info_last_modified) = state
-        .get("StatusInfo")
-        .and_then(|value| value.get("LastModified"))
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-    else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "StatusInfo.LastModified is required" })),
-        )
-            .into_response();
-    };
-    let Some(last_modified) = state
-        .get("LastModified")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-    else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "LastModified is required" })),
-        )
-            .into_response();
-    };
-    let Some(href_source) = current_bookmark
-        .get("Location")
-        .and_then(|value| value.get("Source"))
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-    else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "Location.Source is required" })),
-        )
-            .into_response();
+        return StatusCode::BAD_REQUEST.into_response();
     };
 
     let content_source_progress = content_source_progress_percent / 100.0;
-    let total_progress = current_bookmark
-        .get("ProgressPercent")
-        .and_then(Value::as_f64)
-        .unwrap_or(content_source_progress * 100.0)
-        / 100.0;
-    let total_progress = total_progress.clamp(0.0, 1.0);
-    let content_source_progress = content_source_progress.clamp(0.0, 1.0);
-    let Some(status) = state
-        .get("StatusInfo")
-        .and_then(|value| value.get("Status"))
-        .and_then(Value::as_str)
-    else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "StatusInfo.Status is required" })),
-        )
-            .into_response();
-    };
-    let completed = status.eq_ignore_ascii_case("Finished");
-    let progress_last_modified = last_modified.to_string();
-    let page_count = load_book_page_count(database_file, &book_id)
-        .await
-        .unwrap_or(1)
-        .max(1);
-    let computed_page = if completed {
-        page_count
+    let total_progress = state
+        .current_bookmark
+        .progress_percent
+        .map(|value| value / 100.0);
+    let completed = state.status_info.status.eq_ignore_ascii_case("Finished");
+    let progress_last_modified = state.last_modified.clone();
+    let kobo_span = if location.location_type.eq_ignore_ascii_case("kobospan") {
+        location.value.clone()
     } else {
-        ((total_progress * page_count as f64).ceil() as u64).clamp(0, page_count)
+        None
     };
-    let page = computed_page.max(1) as i64;
-
-    let href = href_source.to_string();
-    let kobo_span = current_bookmark
-        .get("Location")
-        .and_then(|value| value.get("Value"))
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
     let user_id_value = user_id(&current_user).to_string();
-    let request_locator = json!({
-        "href": href,
-        "type": "application/xhtml+xml",
-        "koboSpan": if kobo_span.is_empty() { Value::Null } else { Value::String(kobo_span) },
-        "locations": {
-            "progression": content_source_progress,
-            "totalProgression": total_progress,
-            "position": page,
-        },
-    });
 
     let locator = if completed {
         match load_book_last_epub_position_locator(database_file, &book_id).await {
@@ -630,25 +783,60 @@ pub async fn kobo_library_book_state_update(
             }
         }
     } else {
-        request_locator
+        let request_locator = json!({
+            "href": location.source,
+            "type": "application/xhtml+xml",
+            "koboSpan": kobo_span,
+            "locations": {
+                "progression": content_source_progress,
+                "totalProgression": total_progress,
+            },
+        });
+
+        match normalize_book_epub_locator(database_file, &book_id, &request_locator).await {
+            Ok(locator) => locator,
+            Err(_) => return kobo_state_update_failure(book_id.as_str()),
+        }
     };
 
-    let (device_id, device_name) = configured_api_key_identity(
-        auth_token.as_str(),
-        configured_api_key().as_deref(),
-        configured_api_key_id().as_deref(),
-        configured_api_key_comment().as_deref(),
-    );
-
-    let persist_result = persist_read_progress_with_locator(
+    let stale_progression = match progression_is_older_than_existing(
         database_file,
         &book_id,
         &user_id_value,
-        page,
-        completed,
-        &device_id,
-        &device_name,
         progress_last_modified.as_str(),
+    )
+    .await
+    {
+        Ok(stale) => stale,
+        Err(_) => return kobo_state_update_failure(book_id.as_str()),
+    };
+    if stale_progression {
+        return kobo_state_update_failure(book_id.as_str());
+    }
+
+    let (device_id, device_name) = kobo_path_api_key_metadata(auth_token.as_str(), database_file)
+        .await
+        .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
+
+    let locator_progression = locator
+        .get("locations")
+        .and_then(|value| value.get("progression"))
+        .and_then(Value::as_f64)
+        .unwrap_or(if completed {
+            1.0
+        } else {
+            content_source_progress
+        });
+
+    let persist_result = persist_book_progression(
+        database_file,
+        &book_id,
+        &user_id_value,
+        locator_progression,
+        false,
+        Some(progress_last_modified),
+        Some(device_id),
+        Some(device_name),
         Some(locator),
     )
     .await;
@@ -694,22 +882,37 @@ pub async fn kobo_book_file_epub(
     headers: HeaderMap,
     Query(query): Query<KoboBookFileQuery>,
 ) -> Response {
-    if resolved_kobo_user(
+    let Some(current_user) = resolved_kobo_user(
         auth_token.as_str(),
         &headers,
         state.runtime.database_file.as_path(),
     )
     .await
-    .is_none()
-    {
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
+    };
+
+    if !user_is_admin(&current_user) && !user_has_role(&current_user, "FILE_DOWNLOAD") {
+        return StatusCode::FORBIDDEN.into_response();
     }
 
-    let media = match load_book_media_file(state.runtime.database_file.as_path(), &book_id).await {
-        Ok(Some(media)) => media,
-        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    };
+    let media =
+        match load_persisted_book_media(state.runtime.database_file.as_path(), &book_id).await {
+            Ok(Some(media)) => media,
+            Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        };
+
+    if !user_can_access_book_media(
+        state.runtime.database_file.as_path(),
+        &book_id,
+        &current_user,
+        &media,
+    )
+    .await
+    {
+        return StatusCode::FORBIDDEN.into_response();
+    }
 
     let mut file_name = media.file_name.clone();
     let mut media_type = media.media_type.clone();
@@ -728,11 +931,19 @@ pub async fn kobo_book_file_epub(
                 .into_response();
         }
     } else {
-        match std::fs::read(&media.file_path) {
-            Ok(body) => body,
-            Err(_) => return StatusCode::NOT_FOUND.into_response(),
+        match read_media_file_bytes(&media.file_path) {
+            Some(body) => body,
+            None => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({ "error": "File not found, it may have moved" })),
+                )
+                    .into_response();
+            }
         }
     };
+
+    let content_disposition = attachment_disposition(&file_name);
 
     (
         StatusCode::OK,
@@ -744,7 +955,7 @@ pub async fn kobo_book_file_epub(
             ),
             (
                 header::CONTENT_DISPOSITION,
-                HeaderValue::from_str(format!("attachment; filename=\"{}\"", file_name).as_str())
+                HeaderValue::from_str(content_disposition.as_str())
                     .unwrap_or_else(|_| HeaderValue::from_static("attachment")),
             ),
         ],
@@ -755,39 +966,29 @@ pub async fn kobo_book_file_epub(
 
 pub async fn kobo_book_thumbnail(
     Extension(state): Extension<OperationalState>,
-    Path((auth_token, thumbnail_id, _, _, _)): Path<(String, String, String, String, String)>,
+    Path((auth_token, thumbnail_id, width, height, _)): Path<(
+        String,
+        String,
+        String,
+        String,
+        String,
+    )>,
     headers: HeaderMap,
 ) -> Response {
-    if resolved_kobo_user(
+    kobo_book_thumbnail_response(
+        &state,
         auth_token.as_str(),
         &headers,
-        state.runtime.database_file.as_path(),
+        thumbnail_id.as_str(),
+        width.as_str(),
+        height.as_str(),
     )
     .await
-    .is_none()
-    {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
-
-    match load_thumbnail_by_id(state.runtime.database_file.as_path(), &thumbnail_id).await {
-        Ok(Some((media_type, bytes))) => (
-            StatusCode::OK,
-            [(
-                header::CONTENT_TYPE,
-                HeaderValue::from_str(&media_type)
-                    .unwrap_or_else(|_| HeaderValue::from_static("image/jpeg")),
-            )],
-            bytes,
-        )
-            .into_response(),
-        Ok(None) => StatusCode::NOT_FOUND.into_response(),
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    }
 }
 
 pub async fn kobo_book_thumbnail_with_quality(
     Extension(state): Extension<OperationalState>,
-    Path((auth_token, thumbnail_id, _, _, _, _)): Path<(
+    Path((auth_token, thumbnail_id, width, height, _, _)): Path<(
         String,
         String,
         String,
@@ -797,31 +998,15 @@ pub async fn kobo_book_thumbnail_with_quality(
     )>,
     headers: HeaderMap,
 ) -> Response {
-    if resolved_kobo_user(
+    kobo_book_thumbnail_response(
+        &state,
         auth_token.as_str(),
         &headers,
-        state.runtime.database_file.as_path(),
+        thumbnail_id.as_str(),
+        width.as_str(),
+        height.as_str(),
     )
     .await
-    .is_none()
-    {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
-
-    match load_thumbnail_by_id(state.runtime.database_file.as_path(), &thumbnail_id).await {
-        Ok(Some((media_type, bytes))) => (
-            StatusCode::OK,
-            [(
-                header::CONTENT_TYPE,
-                HeaderValue::from_str(&media_type)
-                    .unwrap_or_else(|_| HeaderValue::from_static("image/jpeg")),
-            )],
-            bytes,
-        )
-            .into_response(),
-        Ok(None) => StatusCode::NOT_FOUND.into_response(),
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    }
 }
 
 pub async fn kobo_catch_all(
@@ -853,7 +1038,7 @@ pub async fn kobo_catch_all(
     }
 }
 
-async fn proxy_kobo_catch_all_request(
+pub(super) async fn proxy_kobo_catch_all_request(
     method: &axum::http::Method,
     path: &str,
     query: Option<&str>,

@@ -85,6 +85,7 @@ pub struct KoboMetadataRecord {
     pub language: String,
     pub file_size: u64,
     pub file_name: String,
+    pub media_type: String,
     pub contributor_names: Vec<String>,
     pub isbn: Option<String>,
     pub publisher_name: Option<String>,
@@ -94,6 +95,8 @@ pub struct KoboMetadataRecord {
     pub series_number: Option<String>,
     pub series_number_float: Option<f64>,
     pub oneshot: bool,
+    pub is_kepub: bool,
+    pub is_pre_paginated: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -156,8 +159,6 @@ pub struct RuntimeIdentityAccessBackend {
             + Sync,
     >,
     pub configured_api_key: Arc<dyn Fn() -> Option<String> + Send + Sync>,
-    pub configured_api_key_comment: Arc<dyn Fn() -> Option<String> + Send + Sync>,
-    pub configured_api_key_id: Arc<dyn Fn() -> Option<String> + Send + Sync>,
     pub load_book_created_timestamp: Arc<
         dyn Fn(PathBuf, String) -> BoxFuture<Result<Option<String>, sqlx::Error>> + Send + Sync,
     >,
@@ -168,8 +169,6 @@ pub struct RuntimeIdentityAccessBackend {
             + Send
             + Sync,
     >,
-    pub load_book_page_count:
-        Arc<dyn Fn(PathBuf, String) -> BoxFuture<Result<u64, sqlx::Error>> + Send + Sync>,
     pub load_kobo_metadata_record: Arc<
         dyn Fn(PathBuf, String) -> BoxFuture<Result<Option<KoboMetadataRecord>, sqlx::Error>>
             + Send

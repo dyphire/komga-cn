@@ -1,5 +1,34 @@
 use super::*;
 
+fn expected_open_dyslexic_css() -> &'static str {
+    "@font-face {\n    font-family: 'OpenDyslexic';\n    src: url('OpenDyslexic-Bold-Italic.woff') format('woff'),url('OpenDyslexic-Bold-Italic.woff2') format('woff2');\n    font-weight: bold;\n    font-style: italic;\n}\n\n@font-face {\n    font-family: 'OpenDyslexic';\n    src: url('OpenDyslexic-Bold.woff') format('woff'),url('OpenDyslexic-Bold.woff2') format('woff2');\n    font-weight: bold;\n    font-style: normal;\n}\n\n@font-face {\n    font-family: 'OpenDyslexic';\n    src: url('OpenDyslexic-Italic.woff') format('woff'),url('OpenDyslexic-Italic.woff2') format('woff2');\n    font-weight: normal;\n    font-style: italic;\n}\n\n@font-face {\n    font-family: 'OpenDyslexic';\n    src: url('OpenDyslexic-Regular.woff') format('woff'),url('OpenDyslexic-Regular.woff2') format('woff2');\n    font-weight: normal;\n    font-style: normal;\n}\n"
+}
+
+async fn insert_history_event(
+    paths: &RuntimeDbPaths,
+    id: &str,
+    event_type: &str,
+    book_id: Option<&str>,
+    series_id: Option<&str>,
+    timestamp: &str,
+) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("history event db should open");
+    sqlx::query(
+        "INSERT INTO HISTORICAL_EVENT (ID, TYPE, BOOK_ID, SERIES_ID, TIMESTAMP) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(id)
+    .bind(event_type)
+    .bind(book_id)
+    .bind(series_id)
+    .bind(timestamp)
+    .execute(&pool)
+    .await
+    .expect("history event should be inserted");
+    pool.close().await;
+}
+
 #[tokio::test]
 async fn router_get_font_file_downloads_embedded_font_without_auth_like_kotlin() {
     let paths = new_router_fixture("router-get-font-file-embedded-anonymous").await;
@@ -34,6 +63,96 @@ async fn router_get_font_file_downloads_embedded_font_without_auth_like_kotlin()
         .await
         .expect("embedded font file response body should read");
     assert!(!bytes.is_empty());
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_get_font_family_css_downloads_embedded_css_without_auth_like_kotlin() {
+    let paths = new_router_fixture("router-get-font-css-embedded-anonymous").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/fonts/resource/OpenDyslexic/css")
+                .body(Body::empty())
+                .expect("get embedded font css request should build"),
+        )
+        .await
+        .expect("get embedded font css request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE),
+        Some(&header::HeaderValue::from_static("text/css"))
+    );
+    assert_eq!(
+        response.headers().get(header::CONTENT_DISPOSITION),
+        Some(&header::HeaderValue::from_static(
+            "attachment; filename=\"OpenDyslexic.css\"",
+        ))
+    );
+
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("embedded font css response body should read");
+    let css = String::from_utf8(bytes.to_vec()).expect("embedded font css should be utf-8");
+    assert_eq!(css, expected_open_dyslexic_css());
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_get_font_family_css_downloads_filesystem_css_without_auth_like_kotlin() {
+    let paths = new_router_fixture("router-get-font-css-filesystem-anonymous").await;
+    seed_router_contract_data(&paths).await;
+
+    let family_dir = paths.config_dir.join("fonts").join("Custom Family");
+    std::fs::create_dir_all(&family_dir).expect("custom css family dir should be created");
+    std::fs::write(family_dir.join("Custom-BoldItalic.woff"), b"font-bytes")
+        .expect("custom bold italic woff should be written");
+    std::fs::write(family_dir.join("Custom-BoldItalic.woff2"), b"font-bytes")
+        .expect("custom bold italic woff2 should be written");
+    std::fs::write(family_dir.join("Custom-Regular.ttf"), b"font-bytes")
+        .expect("custom regular ttf should be written");
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/fonts/resource/Custom%20Family/css")
+                .body(Body::empty())
+                .expect("get filesystem font css request should build"),
+        )
+        .await
+        .expect("get filesystem font css request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE),
+        Some(&header::HeaderValue::from_static("text/css"))
+    );
+    assert_eq!(
+        response.headers().get(header::CONTENT_DISPOSITION),
+        Some(&header::HeaderValue::from_static(
+            "attachment; filename=\"Custom Family.css\"",
+        ))
+    );
+
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("filesystem font css response body should read");
+    let css = String::from_utf8(bytes.to_vec()).expect("filesystem font css should be utf-8");
+    assert_eq!(
+        css,
+        "@font-face {\n    font-family: 'Custom Family';\n    src: url('Custom-BoldItalic.woff') format('woff'),url('Custom-BoldItalic.woff2') format('woff2');\n    font-weight: bold;\n    font-style: italic;\n}\n\n@font-face {\n    font-family: 'Custom Family';\n    src: url('Custom-Regular.ttf') format('truetype');\n    font-weight: normal;\n    font-style: normal;\n}\n"
+    );
 
     cleanup_router_fixture(paths);
 }
@@ -157,6 +276,113 @@ async fn router_get_fonts_families_returns_embedded_and_filesystem_families_like
         .collect::<Vec<_>>();
     assert!(families.contains(&"OpenDyslexic".to_string()));
     assert!(families.contains(&"Custom Family".to_string()));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_get_history_honors_type_sort_override_like_kotlin() {
+    let paths = new_router_fixture("router-get-history-type-sort-override").await;
+    seed_router_contract_data(&paths).await;
+    insert_history_event(
+        &paths,
+        "event-series",
+        "SERIES_ADDED",
+        None,
+        Some("series-1"),
+        "2024-02-01T00:00:00Z",
+    )
+    .await;
+    insert_history_event(
+        &paths,
+        "event-book",
+        "BOOK_ADDED",
+        Some("book-1"),
+        None,
+        "2024-01-01T00:00:00Z",
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/history?sort=type,asc")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("get history type-sort request should build"),
+        )
+        .await
+        .expect("get history type-sort request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let content = payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("history type-sort payload should expose content array");
+    assert_eq!(
+        content[0].get("id").and_then(Value::as_str),
+        Some("event-book")
+    );
+    assert_eq!(
+        content[1].get("id").and_then(Value::as_str),
+        Some("event-series")
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_get_history_marks_unknown_sort_as_unsorted_like_kotlin() {
+    let paths = new_router_fixture("router-get-history-unknown-sort-unsorted").await;
+    seed_router_contract_data(&paths).await;
+    insert_history_event(
+        &paths,
+        "event-1",
+        "BOOK_ADDED",
+        Some("book-1"),
+        None,
+        "2024-01-01T00:00:00Z",
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/history?sort=unknown,asc")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("get history unknown-sort request should build"),
+        )
+        .await
+        .expect("get history unknown-sort request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("sort"),
+        Some(&json!({
+            "empty": true,
+            "sorted": false,
+            "unsorted": true,
+        }))
+    );
+    assert_eq!(
+        payload.get("pageable").and_then(|value| value.get("sort")),
+        Some(&json!({
+            "empty": true,
+            "sorted": false,
+            "unsorted": true,
+        }))
+    );
 
     cleanup_router_fixture(paths);
 }

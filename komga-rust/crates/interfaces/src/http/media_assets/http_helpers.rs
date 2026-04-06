@@ -8,7 +8,7 @@ pub(super) fn internal_error_response(error: impl std::fmt::Display) -> Response
         .into_response()
 }
 
-pub(super) fn attachment_disposition(file_name: &str) -> String {
+pub(crate) fn attachment_disposition(file_name: &str) -> String {
     format!("attachment; filename=\"=?UTF-8?Q?{file_name}?=\"; filename*=UTF-8''{file_name}",)
 }
 

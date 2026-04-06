@@ -66,7 +66,10 @@ mod thumbnails;
 #[path = "types.rs"]
 mod types;
 
+pub(crate) use access_control::user_can_access_book_media;
 pub use handlers::*;
+pub(crate) use http_helpers::attachment_disposition;
+pub(crate) use read_progress::{normalize_book_epub_locator, progression_is_older_than_existing};
 
 use access_control::*;
 use archive_payload::*;

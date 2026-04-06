@@ -22,5 +22,5 @@ pub use libraries::{
     load_persisted_library_write_model, persist_library_create, persist_library_update,
     validate_library_before_persist,
 };
-pub use page_hashes::{delete_all_page_hash_matches, delete_page_hash_match, upsert_page_hash};
+pub use page_hashes::upsert_page_hash;
 pub use server_settings::ServerSettingsStore;

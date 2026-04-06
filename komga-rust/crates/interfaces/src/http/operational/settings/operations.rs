@@ -36,11 +36,13 @@ pub(crate) async fn get_history(
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(20);
+    let sorts = query_values(query, "sort");
 
     let page_data = match operations_access::load_history_page(
         state.runtime.database_file.as_path(),
         page,
         size,
+        &sorts,
     )
     .await
     {

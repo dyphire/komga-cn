@@ -16,7 +16,7 @@ pub async fn runtime_owned_persisted_series_page(
         return None;
     }
 
-    let sort_modes = parse_persisted_series_sort_modes(sorts);
+    let sort_modes = parse_persisted_series_sort_modes(sorts, full_text_search.as_deref());
     let has_persisted_rows = match persisted_series_exist(database_file).await {
         Ok(has_rows) => has_rows,
         Err(error) => return Some(Err(error)),
@@ -42,7 +42,10 @@ pub async fn runtime_owned_persisted_series_page(
     )
 }
 
-pub fn parse_persisted_series_sort_modes(sorts: &[String]) -> Vec<PersistedSeriesSortMode> {
+pub fn parse_persisted_series_sort_modes(
+    sorts: &[String],
+    full_text_search: Option<&str>,
+) -> Vec<PersistedSeriesSortMode> {
     let mut modes = sorts
         .iter()
         .filter_map(|sort| match sort.as_str() {
@@ -56,8 +59,20 @@ pub fn parse_persisted_series_sort_modes(sorts: &[String]) -> Vec<PersistedSerie
         })
         .collect::<Vec<_>>();
     modes.dedup();
-    if modes.is_empty() {
-        modes.push(PersistedSeriesSortMode::TitleAsc);
+    if modes.is_empty()
+        && full_text_search
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_some()
+    {
+        // Intentional divergence from Kotlin's implicit Sort.by("relevance") behavior:
+        // Kotlin's Lucene-backed default ordering depends on Lucene hit ordering, which can
+        // disagree with the actual relevance scores Rust gets from Tantivy. Reproducing that
+        // backend-specific quirk only for the implicit no-sort path would make default full-text
+        // ordering behave differently from explicit `relevance,asc`, which is harder to reason
+        // about and less internally consistent. We intentionally keep the implicit full-text path
+        // aligned with Rust's explicit ascending relevance semantics.
+        modes.push(PersistedSeriesSortMode::RelevanceAsc);
     }
     modes
 }
@@ -137,7 +152,16 @@ pub async fn runtime_owned_series_list_response(
     {
         match persisted_page {
             Ok(page) => {
-                let mut response = Json(series_page_payload(page, !unpaged)).into_response();
+                let mut response = Json(series_page_payload(
+                    page,
+                    !unpaged,
+                    !sorts.is_empty()
+                        || full_text_search
+                            .as_ref()
+                            .map(|value| !value.trim().is_empty())
+                            .unwrap_or(false),
+                ))
+                .into_response();
                 mark_runtime_owned(&mut response);
                 return Some(response);
             }

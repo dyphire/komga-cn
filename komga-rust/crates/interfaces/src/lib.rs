@@ -32,9 +32,9 @@ pub use operational_runtime_access::{
     install_operational_runtime_access,
 };
 pub use operational_settings_access::{
-    ClaimInitialAdminUserResult, OperationalSettingsAccessBackend, PageHashThumbnail,
-    PersistedServerSettings, TransientBookAnalysis, TransientBookFileMetadata, TransientBookPage,
-    install_operational_settings_access,
+    ClaimInitialAdminUserResult, OperationalSettingsAccessBackend, PageHashDeleteTarget,
+    PageHashDeleteTargetPage, PageHashThumbnail, PersistedServerSettings, TransientBookAnalysis,
+    TransientBookFileMetadata, TransientBookPage, install_operational_settings_access,
 };
 pub use runtime_identity_access::{
     KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedBookMediaFile,

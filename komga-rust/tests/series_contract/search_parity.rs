@@ -95,6 +95,31 @@ async fn router_discovery_series_list_locks_main_search_parity_for_retained_inpu
 }
 
 #[tokio::test]
+async fn router_discovery_series_list_defaults_to_relevance_sort_when_full_text_search_is_present()
+{
+    let paths = new_router_fixture("router-discovery-series-list-default-relevance-sort").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_authors_scope_variants(&paths).await;
+    update_series_search_fixture_title(&paths, "series-2", "Café 東京 Series Series 2").await;
+    seed_router_series_title_sort(&paths, "series-3", "Zeta Filing Title").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let admin_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let default_relevance_ids = series_list_ids(&app, &admin_token, None, Some("series")).await;
+    assert_eq!(
+        default_relevance_ids,
+        // Intentional exemption: Kotlin's default `Sort.by("relevance")` ordering is a Lucene-
+        // specific hit-order quirk. The Rust route keeps the implicit full-text path aligned with
+        // explicit `relevance,asc` score semantics instead of reproducing a backend-specific
+        // exception only for requests that omit `sort`.
+        vec!["series-3", "series-2", "series-1"]
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_discovery_series_list_keeps_title_sort_and_alternate_title_results_within_top_k() {
     let paths = new_router_fixture("router-discovery-series-list-title-ranking-guardrails").await;
     seed_router_contract_data(&paths).await;

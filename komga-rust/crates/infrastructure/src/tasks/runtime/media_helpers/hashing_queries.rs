@@ -117,10 +117,11 @@ pub(in crate::task_queue) fn find_duplicate_pages_to_delete(
                 pages
                     .into_iter()
                     .map(|page| HashedPageToDelete {
-                        hash: page.hash,
-                        number: page.number,
+                        file_hash: page.file_hash,
+                        file_size: page.file_size,
                         file_name: page.file_name,
                         media_type: page.media_type,
+                        page_number: page.page_number,
                     })
                     .collect(),
             )

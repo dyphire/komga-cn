@@ -1,8 +1,9 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use reqwest::Url;
 use serde_json::{Value, json};
-use sqlx::Row;
+use sqlx::{QueryBuilder, Row, Sqlite};
 
 use crate::sqlite::connect_pool;
 
@@ -14,14 +15,41 @@ pub struct PageHashUnknownSource {
     pub media_type: String,
 }
 
+#[derive(Clone, Debug)]
+pub struct PageHashUnknownMatchTarget {
+    pub book_id: String,
+    pub page_number: u64,
+}
+
+#[derive(Clone, Debug)]
+pub struct PageHashDeleteTargetPage {
+    pub file_hash: String,
+    pub file_size: i64,
+    pub file_name: String,
+    pub media_type: String,
+    pub page_number: i64,
+}
+
+#[derive(Clone, Debug)]
+pub struct PageHashDeleteTarget {
+    pub book_id: String,
+    pub pages: Vec<PageHashDeleteTargetPage>,
+}
+
 pub async fn load_page_hashes_page(
     database_file: &Path,
     page: u64,
     size: u64,
+    actions: &[String],
+    sorts: &[String],
 ) -> Result<Value, sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
+    let order_by = known_page_hash_order_by(sorts);
 
-    let total_elements = sqlx::query("SELECT COUNT(*) AS COUNT FROM PAGE_HASH")
+    let mut count_query = QueryBuilder::<Sqlite>::new("SELECT COUNT(*) AS COUNT FROM PAGE_HASH ph");
+    push_known_page_hash_action_filter(&mut count_query, actions);
+    let total_elements = count_query
+        .build()
         .fetch_one(&pool)
         .await?
         .get::<i64, _>("COUNT") as u64;
@@ -29,7 +57,7 @@ pub async fn load_page_hashes_page(
     let size = size.max(1);
     let offset = page.saturating_mul(size);
 
-    let content = sqlx::query(
+    let mut query = QueryBuilder::<Sqlite>::new(
         "SELECT \
              ph.HASH, \
              ph.SIZE, \
@@ -39,35 +67,44 @@ pub async fn load_page_hashes_page(
              ph.LAST_MODIFIED_DATE, \
              COUNT(mp.BOOK_ID) AS MATCH_COUNT \
          FROM PAGE_HASH ph \
-         LEFT JOIN MEDIA_PAGE mp ON mp.FILE_HASH = ph.HASH \
-         GROUP BY \
+         LEFT JOIN MEDIA_PAGE mp ON mp.FILE_HASH = ph.HASH",
+    );
+    push_known_page_hash_action_filter(&mut query, actions);
+    query.push(
+        " GROUP BY \
              ph.HASH, \
              ph.SIZE, \
              ph.ACTION, \
              ph.DELETE_COUNT, \
              ph.CREATED_DATE, \
-             ph.LAST_MODIFIED_DATE \
-         ORDER BY ph.LAST_MODIFIED_DATE DESC, ph.HASH DESC \
-         LIMIT ? \
-         OFFSET ?",
-    )
-    .bind((size.min(i64::MAX as u64)) as i64)
-    .bind((offset.min(i64::MAX as u64)) as i64)
-    .fetch_all(&pool)
-    .await?
-    .into_iter()
-    .map(|row| {
-        json!({
-            "hash": row.get::<String, _>("HASH"),
-            "size": row.get::<Option<i64>, _>("SIZE"),
-            "action": row.get::<String, _>("ACTION"),
-            "deleteCount": row.get::<i64, _>("DELETE_COUNT"),
-            "matchCount": row.get::<i64, _>("MATCH_COUNT"),
-            "created": sqlite_datetime_to_utc(&row.get::<String, _>("CREATED_DATE")),
-            "lastModified": sqlite_datetime_to_utc(&row.get::<String, _>("LAST_MODIFIED_DATE")),
+             ph.LAST_MODIFIED_DATE",
+    );
+    if !order_by.is_empty() {
+        query.push(" ORDER BY ");
+        query.push(order_by.join(", "));
+    }
+    query.push(" LIMIT ");
+    query.push_bind((size.min(i64::MAX as u64)) as i64);
+    query.push(" OFFSET ");
+    query.push_bind((offset.min(i64::MAX as u64)) as i64);
+
+    let content = query
+        .build()
+        .fetch_all(&pool)
+        .await?
+        .into_iter()
+        .map(|row| {
+            json!({
+                "hash": row.get::<String, _>("HASH"),
+                "size": row.get::<Option<i64>, _>("SIZE"),
+                "action": row.get::<String, _>("ACTION"),
+                "deleteCount": row.get::<i64, _>("DELETE_COUNT"),
+                "matchCount": row.get::<i64, _>("MATCH_COUNT"),
+                "created": sqlite_datetime_to_iso_local(&row.get::<String, _>("CREATED_DATE")),
+                "lastModified": sqlite_datetime_to_iso_local(&row.get::<String, _>("LAST_MODIFIED_DATE")),
+            })
         })
-    })
-    .collect::<Vec<_>>();
+        .collect::<Vec<_>>();
 
     Ok(page_payload(
         page,
@@ -75,7 +112,7 @@ pub async fn load_page_hashes_page(
         offset,
         total_elements,
         content,
-        true,
+        !order_by.is_empty(),
     ))
 }
 
@@ -230,6 +267,64 @@ pub async fn load_page_hash_thumbnail(
     Ok(thumbnail)
 }
 
+pub async fn load_page_hash_delete_targets(
+    database_file: &Path,
+    page_hash: &str,
+) -> Result<Vec<PageHashDeleteTarget>, sqlx::Error> {
+    let pool = connect_pool(database_file, 1).await?;
+    let rows = sqlx::query(
+        "SELECT mp.BOOK_ID AS BOOK_ID, mp.FILE_HASH AS FILE_HASH, mp.NUMBER AS NUMBER, mp.FILE_NAME AS FILE_NAME, mp.MEDIA_TYPE AS MEDIA_TYPE, mp.FILE_SIZE AS FILE_SIZE \
+         FROM MEDIA_PAGE mp \
+         WHERE mp.FILE_HASH = ? \
+         ORDER BY mp.BOOK_ID ASC, mp.NUMBER ASC",
+    )
+    .bind(page_hash)
+    .fetch_all(&pool)
+    .await?;
+
+    let mut by_book = BTreeMap::<String, Vec<PageHashDeleteTargetPage>>::new();
+    for row in rows {
+        let book_id = row.get::<String, _>("BOOK_ID");
+        by_book
+            .entry(book_id)
+            .or_default()
+            .push(PageHashDeleteTargetPage {
+                file_hash: row.get::<String, _>("FILE_HASH"),
+                file_size: row.get::<i64, _>("FILE_SIZE"),
+                file_name: row.get::<String, _>("FILE_NAME"),
+                media_type: row.get::<String, _>("MEDIA_TYPE"),
+                page_number: row.get::<i64, _>("NUMBER") + 1,
+            });
+    }
+
+    Ok(by_book
+        .into_iter()
+        .map(|(book_id, pages)| PageHashDeleteTarget { book_id, pages })
+        .collect())
+}
+
+pub async fn load_unknown_page_hash_match_target(
+    database_file: &Path,
+    page_hash: &str,
+) -> Result<Option<PageHashUnknownMatchTarget>, sqlx::Error> {
+    let pool = connect_pool(database_file, 1).await?;
+    let row = sqlx::query(
+        "SELECT mp.BOOK_ID AS BOOK_ID, mp.NUMBER AS NUMBER \
+         FROM MEDIA_PAGE mp \
+         WHERE mp.FILE_HASH = ? \
+         ORDER BY mp.BOOK_ID ASC, mp.NUMBER ASC \
+         LIMIT 1",
+    )
+    .bind(page_hash)
+    .fetch_optional(&pool)
+    .await?;
+
+    Ok(row.map(|row| PageHashUnknownMatchTarget {
+        book_id: row.get::<String, _>("BOOK_ID"),
+        page_number: row.get::<i64, _>("NUMBER").max(0) as u64 + 1,
+    }))
+}
+
 pub async fn load_unknown_page_hash_source(
     database_file: &Path,
     page_hash: &str,
@@ -309,6 +404,46 @@ fn page_payload(
     })
 }
 
+fn push_known_page_hash_action_filter(query: &mut QueryBuilder<Sqlite>, actions: &[String]) {
+    if actions.is_empty() {
+        return;
+    }
+
+    query.push(" WHERE ph.ACTION IN (");
+    let mut separated = query.separated(", ");
+    for action in actions {
+        separated.push_bind(action.clone());
+    }
+    separated.push_unseparated(")");
+}
+
+fn known_page_hash_order_by(sorts: &[String]) -> Vec<String> {
+    sorts
+        .iter()
+        .filter_map(|sort| {
+            let mut parts = sort.split(',');
+            let property = parts.next()?.trim();
+            let direction = parts.next().unwrap_or("asc").trim();
+            let column = match property {
+                "hash" => "ph.HASH",
+                "matchCount" => "MATCH_COUNT",
+                "deleteCount" => "ph.DELETE_COUNT",
+                "deleteSize" => "ph.SIZE * ph.DELETE_COUNT",
+                "fileSize" => "ph.SIZE",
+                "createdDate" => "ph.CREATED_DATE",
+                "lastModifiedDate" => "ph.LAST_MODIFIED_DATE",
+                _ => return None,
+            };
+            let direction = if direction.eq_ignore_ascii_case("desc") {
+                "DESC"
+            } else {
+                "ASC"
+            };
+            Some(format!("{column} {direction}"))
+        })
+        .collect()
+}
+
 fn unknown_page_hash_order_by(sorts: &[String]) -> Vec<String> {
     sorts
         .iter()
@@ -380,10 +515,6 @@ fn url_to_file_path(value: &str) -> Result<String, sqlx::Error> {
         .map_err(|()| sqlx::Error::Protocol(format!("invalid file url: {value}")))
 }
 
-fn sqlite_datetime_to_utc(value: &str) -> String {
-    if value.ends_with('Z') || value.contains('T') {
-        value.to_string()
-    } else {
-        format!("{}Z", value.replace(' ', "T"))
-    }
+fn sqlite_datetime_to_iso_local(value: &str) -> String {
+    value.replace(' ', "T").trim_end_matches('Z').to_string()
 }

@@ -66,9 +66,10 @@ pub(super) fn try_execute(
                 Err(error) => return Some(Err(error)),
             };
             for (book_id, pages) in targets {
-                let payload = match serde_json::to_string(&super::super::RemoveHashedPagesPayload {
-                    pages,
-                }) {
+                let priority = task.priority.saturating_add(1);
+                let payload = match serde_json::to_string(
+                    &super::super::RemoveHashedPagesPayload::new(book_id.clone(), pages, priority),
+                ) {
                     Ok(payload) => payload,
                     Err(error) => {
                         return Some(Err(TaskExecutionError::runtime(format!(
@@ -78,10 +79,11 @@ pub(super) fn try_execute(
                 };
                 scheduler.enqueue(
                     TaskQueueRecord::new(
-                        format!("REMOVE_HASHED_PAGES:{book_id}"),
-                        task.priority.saturating_sub(5),
-                        Some(book_id),
+                        super::super::remove_hashed_pages_task_id(book_id.as_str()),
+                        priority,
+                        None,
                     )
+                    .with_simple_type("REMOVE_HASHED_PAGES")
                     .with_payload(payload),
                 );
             }
@@ -110,6 +112,16 @@ pub(super) fn try_execute(
                         ))));
                     }
                 };
+            if parsed.book_id != book_id {
+                return Some(Err(TaskExecutionError::invalid_task(
+                    "REMOVE_HASHED_PAGES payload book id must match task id",
+                )));
+            }
+            if parsed.unique_id != task.id {
+                return Some(Err(TaskExecutionError::invalid_task(
+                    "REMOVE_HASHED_PAGES payload unique id must match task id",
+                )));
+            }
 
             let regenerate_thumbnail = match remove_hashed_pages(runtime, book_id, &parsed.pages) {
                 Ok(value) => value,
@@ -119,8 +131,8 @@ pub(super) fn try_execute(
                 scheduler.enqueue(
                     TaskQueueRecord::new(
                         format!("GENERATE_BOOK_THUMBNAIL_{book_id}"),
-                        task.priority.saturating_sub(1),
-                        Some(book_id.to_string()),
+                        task.priority.saturating_add(1),
+                        None,
                     )
                     .with_simple_type("GENERATE_BOOK_THUMBNAIL"),
                 );

@@ -1,6 +1,10 @@
 use super::*;
 
-pub fn series_page_payload(page: PageEnvelope<PersistedSeriesSummary>, paged: bool) -> Value {
+pub fn series_page_payload(
+    page: PageEnvelope<PersistedSeriesSummary>,
+    paged: bool,
+    sorted: bool,
+) -> Value {
     let content = page.content.iter().map(series_payload).collect::<Vec<_>>();
     let number_of_elements = content.len();
     let first = page.page == 0;
@@ -13,9 +17,9 @@ pub fn series_page_payload(page: PageEnvelope<PersistedSeriesSummary>, paged: bo
             "pageNumber": page.page,
             "pageSize": page.size,
             "sort": {
-                "empty": false,
-                "sorted": true,
-                "unsorted": false
+                "empty": !sorted,
+                "sorted": sorted,
+                "unsorted": !sorted
             },
             "offset": offset,
             "paged": paged,
@@ -28,9 +32,9 @@ pub fn series_page_payload(page: PageEnvelope<PersistedSeriesSummary>, paged: bo
         "size": page.size,
         "number": page.page,
         "sort": {
-            "empty": false,
-            "sorted": true,
-            "unsorted": false
+            "empty": !sorted,
+            "sorted": sorted,
+            "unsorted": !sorted
         },
         "numberOfElements": number_of_elements,
         "empty": number_of_elements == 0

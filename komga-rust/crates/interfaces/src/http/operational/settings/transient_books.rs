@@ -5,12 +5,13 @@ use axum::extract::Path as AxumPath;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde_json::Value;
+use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::http::identity_access::auth::require_admin;
 use crate::operational_settings_access::transient_books as transient_books_access;
 
 use super::super::super::{OperationalState, TransientBookPageRecord, TransientBookRecord};
-use super::normalize_requested_path;
 
 #[path = "transient_books/discovery.rs"]
 mod discovery;
@@ -21,8 +22,31 @@ use discovery::{infer_transient_series_and_number, list_transient_book_entries};
 use payload::{transient_book_id, transient_book_payload};
 use transient_books_access::{
     InfrastructureTransientBookPage, analyze_transient_book, load_transient_book_file_metadata,
-    transient_book_exists, transient_book_media_type, transient_book_page_content,
+    transient_book_page_content, validate_transient_scan_root,
 };
+
+const TRANSIENT_BOOKS_PATH: &str = "/api/v1/transient-books";
+
+fn transient_books_bad_request(message: &str) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({
+            "error": "Bad Request",
+            "message": message,
+            "path": TRANSIENT_BOOKS_PATH,
+            "status": 400,
+            "timestamp": SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis(),
+        })),
+    )
+        .into_response()
+}
+
+fn transient_books_json_error_response(status: StatusCode, error: &str) -> Response {
+    (status, Json(serde_json::json!({ "error": error }))).into_response()
+}
 
 pub(crate) async fn post_transient_books(
     Extension(state): Extension<OperationalState>,
@@ -36,17 +60,20 @@ pub(crate) async fn post_transient_books(
     let Ok(payload) = serde_json::from_slice::<Value>(&body) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
-    let Some(requested_path) = payload
-        .get("path")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|path| !path.is_empty())
-    else {
+    let Some(requested_path) = payload.get("path").and_then(Value::as_str) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
 
-    let resolved_path = normalize_requested_path(requested_path, state.runtime.config_dir.as_ref());
-    let scanned_books = list_transient_book_entries(&resolved_path);
+    match validate_transient_scan_root(state.runtime.database_file.as_path(), requested_path).await
+    {
+        Ok(()) => {}
+        Err(error_code) if matches!(error_code.as_str(), "ERR_1016" | "ERR_1017") => {
+            return transient_books_bad_request(&error_code);
+        }
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+
+    let scanned_books = list_transient_book_entries(PathBuf::from(requested_path).as_path());
 
     let mut store = state
         .transient_books
@@ -142,10 +169,6 @@ pub(crate) async fn post_transient_book_analyze(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    if !transient_book_exists(record.path.as_str()) {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
     let analysis = analyze_transient_book(record.path.as_str());
     let inferred_series_and_number = infer_transient_series_and_number(
         state.runtime.database_file.as_path(),
@@ -161,42 +184,25 @@ pub(crate) async fn post_transient_book_analyze(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    match analysis {
-        Ok(analysis) => {
-            let (inferred_series_id, inferred_number) = inferred_series_and_number;
-            entry.status = analysis.status;
-            entry.media_type = analysis.media_type;
-            entry.pages = analysis
-                .pages
-                .into_iter()
-                .map(|page| TransientBookPageRecord {
-                    number: page.number,
-                    file_name: page.file_name,
-                    media_type: page.media_type,
-                    width: page.width,
-                    height: page.height,
-                    size_bytes: page.size_bytes,
-                })
-                .collect();
-            entry.files = analysis.files;
-            entry.comment = analysis.comment;
-            entry.number = analysis.number.or(inferred_number);
-            entry.series_id = analysis.series_id.or(inferred_series_id);
-        }
-        Err(comment) => {
-            entry.media_type = transient_book_media_type(record.path.as_str());
-            entry.status = if entry.media_type == "application/octet-stream" {
-                "UNSUPPORTED".to_string()
-            } else {
-                "ERROR".to_string()
-            };
-            entry.pages.clear();
-            entry.files.clear();
-            entry.comment = comment;
-            entry.number = None;
-            entry.series_id = None;
-        }
-    }
+    let (inferred_series_id, inferred_number) = inferred_series_and_number;
+    entry.status = analysis.status;
+    entry.media_type = analysis.media_type;
+    entry.pages = analysis
+        .pages
+        .into_iter()
+        .map(|page| TransientBookPageRecord {
+            number: page.number,
+            file_name: page.file_name,
+            media_type: page.media_type,
+            width: page.width,
+            height: page.height,
+            size_bytes: page.size_bytes,
+        })
+        .collect();
+    entry.files = analysis.files;
+    entry.comment = analysis.comment;
+    entry.number = analysis.number.or(inferred_number);
+    entry.series_id = analysis.series_id.or(inferred_series_id);
 
     let payload = transient_book_payload(entry);
     let records = store.records.clone();
@@ -209,11 +215,18 @@ pub(crate) async fn post_transient_book_analyze(
 pub(crate) async fn get_transient_book_page(
     Extension(state): Extension<OperationalState>,
     headers: HeaderMap,
-    AxumPath((transient_book_id, page_number)): AxumPath<(String, u32)>,
+    AxumPath((transient_book_id, page_number)): AxumPath<(String, i32)>,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
         return response;
     }
+    if page_number <= 0 {
+        return transient_books_json_error_response(
+            StatusCode::BAD_REQUEST,
+            "Page number does not exist",
+        );
+    }
+    let page_number = page_number as u32;
     let store = state
         .transient_books
         .lock()
@@ -222,7 +235,13 @@ pub(crate) async fn get_transient_book_page(
         return StatusCode::NOT_FOUND.into_response();
     };
     if !record.status.eq_ignore_ascii_case("READY") {
-        return StatusCode::NOT_FOUND.into_response();
+        return transient_books_json_error_response(StatusCode::NOT_FOUND, "Book analysis failed");
+    }
+    if !PathBuf::from(record.path.as_str()).exists() {
+        return transient_books_json_error_response(
+            StatusCode::NOT_FOUND,
+            "File not found, it may have moved",
+        );
     }
 
     let pages = record
@@ -243,7 +262,10 @@ pub(crate) async fn get_transient_book_page(
         pages.as_slice(),
         page_number,
     ) else {
-        return StatusCode::BAD_REQUEST.into_response();
+        return transient_books_json_error_response(
+            StatusCode::BAD_REQUEST,
+            "Page number does not exist",
+        );
     };
 
     ([(header::CONTENT_TYPE, content_type)], bytes).into_response()

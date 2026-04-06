@@ -89,7 +89,7 @@ async fn series_feed(
             } else {
                 (page, !unpaged)
             };
-            Json(series_page_payload(page, paged)).into_response()
+            Json(series_page_payload(page, paged, true)).into_response()
         }
         Err(error) => internal_error_response(error),
     }
@@ -163,7 +163,7 @@ pub async fn series(
         Err(error) => return internal_error_response(error),
     };
 
-    let mut response = Json(series_page_payload(series_page, !unpaged)).into_response();
+    let mut response = Json(series_page_payload(series_page, !unpaged, true)).into_response();
     if wants_persisted_marker(&headers, None) {
         mark_persisted_owned(&mut response);
     }
@@ -247,15 +247,22 @@ pub async fn series_list(
         return response;
     }
 
-    let payload = serde_json::from_slice::<Value>(&body).ok();
-    let full_text_search = payload.as_ref().and_then(extract_full_text_search);
-    let strict_runtime_shape = should_use_strict_runtime_shape(payload.as_ref());
+    let payload = if body.is_empty() {
+        return StatusCode::BAD_REQUEST.into_response();
+    } else {
+        match serde_json::from_slice::<Value>(&body) {
+            Ok(Value::Object(object)) => Value::Object(object),
+            Ok(_) | Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+        }
+    };
+    let full_text_search = extract_full_text_search(&payload);
+    let strict_runtime_shape = should_use_strict_runtime_shape(Some(&payload));
 
     if auth_db.database_file.exists()
         && let Some(runtime_response) = runtime_owned_series_list_response(
             &headers,
             &uri,
-            payload.as_ref(),
+            Some(&payload),
             full_text_search.clone(),
             &auth_state,
             auth_db.database_file.as_path(),

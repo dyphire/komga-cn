@@ -2,24 +2,29 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use komga_application::media_assets::{
+    BookMediaRecord, BookPageRecord, book_media_is_pdf, book_media_is_single_image,
+    content_type_from_filename,
+};
 use serde_json::Value;
 use std::io::Cursor;
 use zip::ZipArchive;
 
+use crate::filesystem::{
+    load_archive_page_row, load_pdf_page_row, load_persisted_book_media,
+    load_persisted_book_page_row, render_book_page_thumbnail, resolve_book_page_bytes,
+};
 use crate::rar_support::read_rar_entry_bytes;
 use crate::sqlite::connect_pool;
 use crate::sqlite::read_models::{
+    load_page_hash_delete_targets as load_page_hash_delete_targets_model,
     load_page_hash_matches_page as load_page_hash_matches_page_model,
     load_page_hash_thumbnail as load_page_hash_thumbnail_model,
     load_page_hashes_page as load_page_hashes_page_model,
     load_page_hashes_unknown_page as load_page_hashes_unknown_page_model,
-    load_unknown_page_hash_source,
+    load_unknown_page_hash_match_target, load_unknown_page_hash_source,
 };
-use crate::sqlite::write_models::{
-    delete_all_page_hash_matches as delete_all_page_hash_matches_model,
-    delete_page_hash_match as delete_page_hash_match_model,
-    upsert_page_hash as upsert_page_hash_model,
-};
+use crate::sqlite::write_models::upsert_page_hash as upsert_page_hash_model;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PageHashThumbnail {
@@ -27,12 +32,31 @@ pub struct PageHashThumbnail {
     pub media_type: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PageHashDeleteTargetPage {
+    pub file_hash: String,
+    pub file_size: i64,
+    pub file_name: String,
+    pub media_type: String,
+    pub page_number: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PageHashDeleteTarget {
+    pub book_id: String,
+    pub pages: Vec<PageHashDeleteTargetPage>,
+}
+
+const KOTLIN_PDF_MIN_EDGE: u32 = 3200;
+
 pub async fn load_page_hashes_page(
     database_file: &Path,
     page: u64,
     size: u64,
+    actions: &[String],
+    sorts: &[String],
 ) -> Result<Value, sqlx::Error> {
-    load_page_hashes_page_model(database_file, page, size).await
+    load_page_hashes_page_model(database_file, page, size, actions, sorts).await
 }
 
 pub async fn load_page_hashes_unknown_page(
@@ -54,6 +78,33 @@ pub async fn load_page_hash_matches_page(
     load_page_hash_matches_page_model(database_file, page_hash, page, size, sorts).await
 }
 
+pub async fn load_page_hash_delete_targets(
+    database_file: &Path,
+    page_hash: &str,
+) -> Result<Vec<PageHashDeleteTarget>, sqlx::Error> {
+    load_page_hash_delete_targets_model(database_file, page_hash)
+        .await
+        .map(|targets| {
+            targets
+                .into_iter()
+                .map(|target| PageHashDeleteTarget {
+                    book_id: target.book_id,
+                    pages: target
+                        .pages
+                        .into_iter()
+                        .map(|page| PageHashDeleteTargetPage {
+                            file_hash: page.file_hash,
+                            file_size: page.file_size,
+                            file_name: page.file_name,
+                            media_type: page.media_type,
+                            page_number: page.page_number,
+                        })
+                        .collect(),
+                })
+                .collect()
+        })
+}
+
 pub async fn load_page_hash_thumbnail(
     database_file: &Path,
     page_hash: &str,
@@ -65,21 +116,74 @@ pub async fn load_page_hash_thumbnail(
         }));
     }
 
-    let Some(source) = load_unknown_page_hash_source(database_file, page_hash).await? else {
+    let Some((bytes, media_type)) =
+        load_unknown_page_hash_source_bytes(database_file, page_hash).await?
+    else {
         return Ok(None);
     };
-    if !source.media_type.starts_with("image/") {
+
+    Ok(Some(PageHashThumbnail { bytes, media_type }))
+}
+
+pub async fn load_unknown_page_hash_thumbnail(
+    database_file: &Path,
+    page_hash: &str,
+    resize_to: Option<u32>,
+) -> Result<Option<PageHashThumbnail>, sqlx::Error> {
+    let Some(target) = load_unknown_page_hash_match_target(database_file, page_hash).await? else {
         return Ok(None);
+    };
+
+    let Some(media) = load_persisted_book_media(database_file, &target.book_id)
+        .await
+        .map_err(as_sqlx_protocol_error)?
+    else {
+        return Ok(None);
+    };
+
+    let Some(page) =
+        load_page_hash_page_row(database_file, &target.book_id, &media, target.page_number)
+            .await
+            .map_err(as_sqlx_protocol_error)?
+    else {
+        return Ok(None);
+    };
+
+    if let Some(max_edge) = resize_to {
+        let Some(bytes) = render_book_page_thumbnail(&media, &page, target.page_number, max_edge)
+        else {
+            return Ok(None);
+        };
+
+        return Ok(Some(PageHashThumbnail {
+            bytes,
+            media_type: "image/jpeg".to_string(),
+        }));
     }
 
-    let source_path = PathBuf::from(source.library_root).join(source.book_url);
-    let Some(bytes) = read_unknown_thumbnail_bytes(&source_path, &source.file_name) else {
+    if book_media_is_pdf(&media) {
+        let Some(bytes) = render_book_page_thumbnail(
+            &media,
+            &page,
+            target.page_number,
+            pdf_render_max_edge(&page),
+        ) else {
+            return Ok(None);
+        };
+
+        return Ok(Some(PageHashThumbnail {
+            media_type: "image/jpeg".to_string(),
+            bytes,
+        }));
+    }
+
+    let Some(bytes) = resolve_book_page_bytes(&media, &page, target.page_number) else {
         return Ok(None);
     };
 
     Ok(Some(PageHashThumbnail {
+        media_type: page_media_type(&page, &media),
         bytes,
-        media_type: source.media_type,
     }))
 }
 
@@ -99,22 +203,6 @@ pub async fn upsert_page_hash(
     }
 
     Ok(())
-}
-
-pub async fn delete_all_page_hash_matches(
-    database_file: &Path,
-    page_hash: &str,
-) -> Result<u64, sqlx::Error> {
-    delete_all_page_hash_matches_model(database_file, page_hash).await
-}
-
-pub async fn delete_page_hash_match(
-    database_file: &Path,
-    page_hash: &str,
-    book_id: &str,
-    page_number: u64,
-) -> Result<u64, sqlx::Error> {
-    delete_page_hash_match_model(database_file, page_hash, book_id, page_number).await
 }
 
 fn read_unknown_thumbnail_bytes(source_path: &Path, file_name: &str) -> Option<Vec<u8>> {
@@ -147,6 +235,55 @@ fn read_unknown_thumbnail_bytes(source_path: &Path, file_name: &str) -> Option<V
     None
 }
 
+async fn load_page_hash_page_row(
+    database_file: &Path,
+    book_id: &str,
+    media: &BookMediaRecord,
+    page_number: u64,
+) -> Result<Option<BookPageRecord>, String> {
+    if let Some(row) = load_persisted_book_page_row(database_file, book_id, page_number).await? {
+        return Ok(Some(row));
+    }
+
+    if book_media_is_single_image(media) && page_number == 1 {
+        return Ok(Some(single_image_page_row(media, page_number)));
+    }
+
+    Ok(load_archive_page_row(media, page_number).or_else(|| load_pdf_page_row(media, page_number)))
+}
+
+fn single_image_page_row(media: &BookMediaRecord, page_number: u64) -> BookPageRecord {
+    BookPageRecord {
+        number: page_number,
+        file_name: media.file_name.clone(),
+        media_type: content_type_from_filename(&media.file_name, &media.media_type),
+        width: None,
+        height: None,
+        file_size: fs::metadata(&media.file_path)
+            .ok()
+            .and_then(|metadata| i64::try_from(metadata.len()).ok())
+            .unwrap_or(0),
+    }
+}
+
+fn page_media_type(page: &BookPageRecord, media: &BookMediaRecord) -> String {
+    if page.media_type.is_empty() {
+        content_type_from_filename(&page.file_name, &media.media_type)
+    } else {
+        page.media_type.clone()
+    }
+}
+
+fn pdf_render_max_edge(page: &BookPageRecord) -> u32 {
+    let width = page.width.unwrap_or_default().max(0) as u32;
+    let height = page.height.unwrap_or_default().max(0) as u32;
+    width.max(height).max(KOTLIN_PDF_MIN_EDGE)
+}
+
+fn as_sqlx_protocol_error(error: String) -> sqlx::Error {
+    sqlx::Error::Protocol(error)
+}
+
 async fn page_hash_exists(database_file: &Path, page_hash: &str) -> Result<bool, sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
     let exists = sqlx::query_scalar::<_, i64>("SELECT 1 FROM PAGE_HASH WHERE HASH = ? LIMIT 1")
@@ -161,6 +298,18 @@ async fn build_known_page_hash_thumbnail(
     database_file: &Path,
     page_hash: &str,
 ) -> Result<Option<Vec<u8>>, sqlx::Error> {
+    let Some((bytes, _)) = load_unknown_page_hash_source_bytes(database_file, page_hash).await?
+    else {
+        return Ok(None);
+    };
+
+    Ok(encode_image_bytes_as_thumbnail_jpeg(&bytes, 500))
+}
+
+async fn load_unknown_page_hash_source_bytes(
+    database_file: &Path,
+    page_hash: &str,
+) -> Result<Option<(Vec<u8>, String)>, sqlx::Error> {
     let Some(source) = load_unknown_page_hash_source(database_file, page_hash).await? else {
         return Ok(None);
     };
@@ -169,11 +318,10 @@ async fn build_known_page_hash_thumbnail(
     }
 
     let source_path = PathBuf::from(source.library_root).join(source.book_url);
-    let Some(bytes) = read_unknown_thumbnail_bytes(&source_path, &source.file_name) else {
-        return Ok(None);
-    };
-
-    Ok(encode_image_bytes_as_thumbnail_jpeg(&bytes, 500))
+    Ok(
+        read_unknown_thumbnail_bytes(&source_path, &source.file_name)
+            .map(|bytes| (bytes, source.media_type)),
+    )
 }
 
 async fn insert_page_hash_thumbnail(

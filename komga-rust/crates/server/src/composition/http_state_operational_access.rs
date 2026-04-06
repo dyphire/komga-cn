@@ -384,12 +384,13 @@ pub(super) fn compose_operational_settings_access_backend() -> OperationalSettin
                 .await
             })
         }),
-        load_history_page: Arc::new(|database_file, page, size| {
+        load_history_page: Arc::new(|database_file, page, size, sorts| {
             Box::pin(async move {
                 infrastructure_operational_settings::load_history_page(
                     database_file.as_path(),
                     page,
                     size,
+                    &sorts,
                 )
                 .await
             })
@@ -409,12 +410,30 @@ pub(super) fn compose_operational_settings_access_backend() -> OperationalSettin
                 })
             })
         }),
-        load_page_hashes_page: Arc::new(|database_file, page, size| {
+        load_unknown_page_hash_thumbnail: Arc::new(|database_file, page_hash, resize_to| {
+            Box::pin(async move {
+                infrastructure_page_hashes::load_unknown_page_hash_thumbnail(
+                    database_file.as_path(),
+                    &page_hash,
+                    resize_to,
+                )
+                .await
+                .map(|value| {
+                    value.map(|row| InterfacesPageHashThumbnail {
+                        media_type: row.media_type,
+                        bytes: row.bytes,
+                    })
+                })
+            })
+        }),
+        load_page_hashes_page: Arc::new(|database_file, page, size, actions, sorts| {
             Box::pin(async move {
                 infrastructure_page_hashes::load_page_hashes_page(
                     database_file.as_path(),
                     page,
                     size,
+                    &actions,
+                    &sorts,
                 )
                 .await
             })
@@ -442,6 +461,34 @@ pub(super) fn compose_operational_settings_access_backend() -> OperationalSettin
                 .await
             })
         }),
+        load_page_hash_delete_targets: Arc::new(|database_file, hash| {
+            Box::pin(async move {
+                infrastructure_page_hashes::load_page_hash_delete_targets(
+                    database_file.as_path(),
+                    &hash,
+                )
+                .await
+                .map(|targets| {
+                    targets
+                        .into_iter()
+                        .map(|target| InterfacesPageHashDeleteTarget {
+                            book_id: target.book_id,
+                            pages: target
+                                .pages
+                                .into_iter()
+                                .map(|page| InterfacesPageHashDeleteTargetPage {
+                                    file_hash: page.file_hash,
+                                    file_size: page.file_size,
+                                    file_name: page.file_name,
+                                    media_type: page.media_type,
+                                    page_number: page.page_number,
+                                })
+                                .collect(),
+                        })
+                        .collect()
+                })
+            })
+        }),
         upsert_page_hash: Arc::new(|database_file, hash, size, action| {
             Box::pin(async move {
                 infrastructure_page_hashes::upsert_page_hash(
@@ -451,28 +498,6 @@ pub(super) fn compose_operational_settings_access_backend() -> OperationalSettin
                     &action,
                 )
                 .await
-            })
-        }),
-        delete_all_page_hash_matches: Arc::new(|database_file, hash| {
-            Box::pin(async move {
-                infrastructure_page_hashes::delete_all_page_hash_matches(
-                    database_file.as_path(),
-                    &hash,
-                )
-                .await
-                .map(|_| ())
-            })
-        }),
-        delete_page_hash_match: Arc::new(|database_file, hash, media_id, page_number| {
-            Box::pin(async move {
-                infrastructure_page_hashes::delete_page_hash_match(
-                    database_file.as_path(),
-                    &hash,
-                    &media_id,
-                    page_number,
-                )
-                .await
-                .map(|_| ())
             })
         }),
         load_server_settings: Arc::new(|settings_store| {
@@ -550,28 +575,27 @@ pub(super) fn compose_operational_settings_access_backend() -> OperationalSettin
             Box::pin(async move { settings_store.apply_changes(changes.as_slice()).await })
         }),
         analyze_transient_book: Arc::new(|path| {
-            infrastructure_filesystem::analyze_transient_book(&path).map(|value| {
-                InterfacesTransientBookAnalysis {
-                    status: value.status,
-                    media_type: value.media_type,
-                    pages: value
-                        .pages
-                        .into_iter()
-                        .map(|page| InterfacesTransientBookPage {
-                            number: page.number,
-                            file_name: page.file_name,
-                            media_type: page.media_type,
-                            width: page.width,
-                            height: page.height,
-                            size_bytes: page.size_bytes,
-                        })
-                        .collect(),
-                    files: value.files,
-                    comment: value.comment,
-                    number: value.number,
-                    series_id: value.series_id,
-                }
-            })
+            let value = infrastructure_filesystem::analyze_transient_book(&path);
+            InterfacesTransientBookAnalysis {
+                status: value.status,
+                media_type: value.media_type,
+                pages: value
+                    .pages
+                    .into_iter()
+                    .map(|page| InterfacesTransientBookPage {
+                        number: page.number,
+                        file_name: page.file_name,
+                        media_type: page.media_type,
+                        width: page.width,
+                        height: page.height,
+                        size_bytes: page.size_bytes,
+                    })
+                    .collect(),
+                files: value.files,
+                comment: value.comment,
+                number: value.number,
+                series_id: value.series_id,
+            }
         }),
         infer_transient_series_and_number: Arc::new(|database_file, transient_name| {
             Box::pin(async move {
@@ -584,6 +608,15 @@ pub(super) fn compose_operational_settings_access_backend() -> OperationalSettin
         }),
         list_transient_book_entries: Arc::new(|root| {
             infrastructure_filesystem::list_transient_book_entries(root.as_path())
+        }),
+        validate_transient_scan_root: Arc::new(|database_file, path| {
+            Box::pin(async move {
+                infrastructure_filesystem::validate_transient_scan_root(
+                    database_file.as_path(),
+                    std::path::Path::new(&path),
+                )
+                .await
+            })
         }),
         load_transient_book_file_metadata: Arc::new(|path| {
             infrastructure_filesystem::load_transient_book_file_metadata(&path).map(|value| {
@@ -598,12 +631,6 @@ pub(super) fn compose_operational_settings_access_backend() -> OperationalSettin
         }),
         transient_book_content_type: Arc::new(|path, media_type| {
             infrastructure_filesystem::transient_book_content_type(&path, &media_type)
-        }),
-        transient_book_exists: Arc::new(|path| {
-            infrastructure_filesystem::transient_book_exists(&path)
-        }),
-        transient_book_media_type: Arc::new(|path| {
-            infrastructure_filesystem::transient_book_media_type(&path)
         }),
         transient_book_page_content: Arc::new(|path, media_type, pages, page_number| {
             let pages = pages

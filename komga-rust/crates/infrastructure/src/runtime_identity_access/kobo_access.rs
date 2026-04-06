@@ -38,10 +38,6 @@ pub async fn load_book_media_file(
     (backend().load_book_media_file)(database_file.to_path_buf(), book_id.to_string()).await
 }
 
-pub async fn load_book_page_count(database_file: &Path, book_id: &str) -> Result<u64, sqlx::Error> {
-    (backend().load_book_page_count)(database_file.to_path_buf(), book_id.to_string()).await
-}
-
 pub async fn load_kobo_metadata_record(
     database_file: &Path,
     book_id: &str,

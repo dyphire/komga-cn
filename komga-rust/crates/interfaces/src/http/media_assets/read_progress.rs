@@ -211,7 +211,7 @@ fn normalized_epub_locator(locator: &Value, matched_position: &Value) -> Value {
     locator
 }
 
-async fn normalize_book_epub_locator(
+pub(crate) async fn normalize_book_epub_locator(
     database_file: &FsPath,
     book_id: &str,
     locator: &Value,
@@ -280,7 +280,7 @@ async fn normalize_book_epub_locator(
     Ok(normalized_epub_locator(locator, &matched_position))
 }
 
-async fn progression_is_older_than_existing(
+pub(crate) async fn progression_is_older_than_existing(
     database_file: &FsPath,
     book_id: &str,
     user_id: &str,

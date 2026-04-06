@@ -21,6 +21,7 @@ pub struct PersistedLibraryMaintenanceFlags {
 #[derive(Clone, Debug)]
 pub struct PersistedBookArchiveSource {
     pub file_path: PathBuf,
+    pub file_last_modified: i64,
     pub media_type: String,
     pub media_status: String,
 }
@@ -45,10 +46,53 @@ pub struct PersistedConversionTarget {
 
 #[derive(Clone, Debug)]
 pub struct PersistedHashedPageToDelete {
-    pub hash: String,
-    pub number: i64,
+    pub file_hash: String,
+    pub file_size: i64,
     pub file_name: String,
     pub media_type: String,
+    pub page_number: i64,
+}
+
+pub fn load_book_hashed_pages(
+    database_file: &Path,
+    book_id: &str,
+) -> Result<Vec<PersistedHashedPageToDelete>, String> {
+    let database_file = database_file.to_path_buf();
+    let book_id = book_id.to_string();
+
+    run_database_query(database_file, move |pool| {
+        let book_id = book_id.clone();
+        Box::pin(async move {
+            let rows = sqlx::query(
+                r#"
+                SELECT
+                FILE_HASH AS FILE_HASH,
+                COALESCE(FILE_SIZE, -1) AS FILE_SIZE,
+                FILE_NAME AS FILE_NAME,
+                MEDIA_TYPE AS MEDIA_TYPE,
+                NUMBER AS PAGE_NUMBER
+                FROM MEDIA_PAGE
+                WHERE BOOK_ID = ?
+                ORDER BY NUMBER ASC
+                "#,
+            )
+            .bind(&book_id)
+            .fetch_all(&pool)
+            .await
+            .map_err(|error| format!("failed to load hashed pages for '{book_id}': {error}"))?;
+
+            Ok(rows
+                .into_iter()
+                .map(|row| PersistedHashedPageToDelete {
+                    file_hash: row.get::<String, _>("FILE_HASH"),
+                    file_size: row.get::<i64, _>("FILE_SIZE"),
+                    file_name: row.get::<String, _>("FILE_NAME"),
+                    media_type: row.get::<String, _>("MEDIA_TYPE"),
+                    page_number: row.get::<i64, _>("PAGE_NUMBER") + 1,
+                })
+                .collect())
+        })
+    })
 }
 
 pub fn load_sidecar_url_for_parent(
@@ -341,7 +385,8 @@ pub fn load_duplicate_pages_to_delete(
                 mp.FILE_HASH AS FILE_HASH,
                 mp.NUMBER AS PAGE_NUMBER,
                 mp.FILE_NAME AS FILE_NAME,
-                mp.MEDIA_TYPE AS MEDIA_TYPE
+                mp.MEDIA_TYPE AS MEDIA_TYPE,
+                mp.FILE_SIZE AS FILE_SIZE
                 FROM MEDIA_PAGE mp
                 JOIN BOOK b ON b.ID = mp.BOOK_ID
                 JOIN PAGE_HASH ph ON ph.HASH = mp.FILE_HASH
@@ -377,10 +422,11 @@ pub fn load_duplicate_pages_to_delete(
                     .entry(book_id)
                     .or_default()
                     .push(PersistedHashedPageToDelete {
-                        hash: row.get::<String, _>("FILE_HASH"),
-                        number: row.get::<i64, _>("PAGE_NUMBER"),
+                        file_hash: row.get::<String, _>("FILE_HASH"),
+                        file_size: row.get::<i64, _>("FILE_SIZE"),
                         file_name: row.get::<String, _>("FILE_NAME"),
                         media_type: row.get::<String, _>("MEDIA_TYPE"),
+                        page_number: row.get::<i64, _>("PAGE_NUMBER") + 1,
                     });
             }
 
@@ -626,6 +672,7 @@ pub fn load_book_archive_source(
                 r#"
                 SELECT
                 b.URL AS BOOK_URL,
+                b.FILE_LAST_MODIFIED AS FILE_LAST_MODIFIED,
                 l.ROOT AS LIBRARY_ROOT,
                 COALESCE(m.MEDIA_TYPE, '') AS MEDIA_TYPE,
                 COALESCE(m.STATUS, '') AS MEDIA_STATUS
@@ -644,6 +691,7 @@ pub fn load_book_archive_source(
             Ok(row.map(|row| PersistedBookArchiveSource {
                 file_path: PathBuf::from(row.get::<String, _>("LIBRARY_ROOT"))
                     .join(row.get::<String, _>("BOOK_URL")),
+                file_last_modified: row.get::<i64, _>("FILE_LAST_MODIFIED"),
                 media_type: row.get::<String, _>("MEDIA_TYPE"),
                 media_status: row.get::<String, _>("MEDIA_STATUS"),
             }))

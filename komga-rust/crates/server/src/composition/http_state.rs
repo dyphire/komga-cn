@@ -54,6 +54,8 @@ use komga_interfaces::{
     KoreaderBookTarget as InterfacesKoreaderBookTarget,
     LibrarySnapshot as InterfacesLibrarySnapshot, MediaAssetsRuntimeAccessBackend,
     OperationalRuntimeAccessBackend, OperationalSettingsAccessBackend,
+    PageHashDeleteTarget as InterfacesPageHashDeleteTarget,
+    PageHashDeleteTargetPage as InterfacesPageHashDeleteTargetPage,
     PageHashThumbnail as InterfacesPageHashThumbnail,
     PersistedBookFeedRecord as InterfacesPersistedBookFeedRecord,
     PersistedBookMediaFile as InterfacesPersistedBookMediaFile,

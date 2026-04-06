@@ -10,8 +10,10 @@ pub use crate::read_models::{
 pub use announcements::load_announcement_read_ids;
 pub use client_settings::{load_client_settings_global, load_client_settings_user};
 pub use page_hashes::{
-    PageHashUnknownSource, load_page_hash_matches_page, load_page_hash_thumbnail,
-    load_page_hashes_page, load_page_hashes_unknown_page, load_unknown_page_hash_source,
+    PageHashDeleteTarget, PageHashDeleteTargetPage, PageHashUnknownMatchTarget,
+    PageHashUnknownSource, load_page_hash_delete_targets, load_page_hash_matches_page,
+    load_page_hash_thumbnail, load_page_hashes_page, load_page_hashes_unknown_page,
+    load_unknown_page_hash_match_target, load_unknown_page_hash_source,
 };
 pub use sse_snapshot::{
     BookSnapshot, CollectionSnapshot, LibrarySnapshot, ReadListSnapshot, SeriesSnapshot,

@@ -237,6 +237,15 @@ async fn spawn_request_body_echo_server() -> SingleResponseServer {
             .position(|window| window == b"\r\n\r\n")
             .expect("mock request echo server should receive complete headers");
         let headers = String::from_utf8_lossy(&request[..header_end]);
+        let request_target = headers
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .unwrap_or("/");
+        let request_query = request_target
+            .split_once('?')
+            .map(|(_, query)| query)
+            .unwrap_or("");
         let content_length = headers
             .lines()
             .find_map(|line| {
@@ -251,8 +260,9 @@ async fn spawn_request_body_echo_server() -> SingleResponseServer {
         let body_start = header_end + 4;
         let body_end = body_start + content_length;
         let body = String::from_utf8_lossy(&request[body_start..body_end]).to_string();
-        let response_body = serde_json::to_string(&json!({ "received": body }))
-            .expect("mock request echo payload should serialize");
+        let response_body =
+            serde_json::to_string(&json!({ "received": body, "query": request_query }))
+                .expect("mock request echo payload should serialize");
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
             response_body.len(),

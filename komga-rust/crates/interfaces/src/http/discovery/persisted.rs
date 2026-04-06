@@ -64,7 +64,7 @@ use backend::{
     persisted_backend_load_series_read_progress_counts,
     persisted_backend_load_series_total_book_counts, persisted_backend_persisted_books_exist,
     persisted_backend_persisted_series_exist, persisted_backend_persisted_utc_date_minus_days,
-    persisted_backend_search_book_ids, persisted_backend_search_series_ids,
+    persisted_backend_search_book_ids, persisted_backend_search_series_scored_ids,
 };
 pub(super) use common_helpers::filter_rows;
 pub(super) use delegates::*;

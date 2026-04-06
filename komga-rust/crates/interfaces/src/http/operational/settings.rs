@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 #[path = "settings/announcements.rs"]
 mod announcements;
 #[path = "settings/claims.rs"]
@@ -122,17 +120,4 @@ mod tests {
             "hello world,team"
         );
     }
-}
-
-fn normalize_requested_path(requested_path: &str, runtime_config_dir: Option<&PathBuf>) -> PathBuf {
-    let raw = PathBuf::from(requested_path);
-    let candidate = if raw.is_absolute() {
-        raw
-    } else if let Some(config_dir) = runtime_config_dir {
-        config_dir.join(raw)
-    } else {
-        raw
-    };
-
-    candidate.canonicalize().unwrap_or(candidate)
 }

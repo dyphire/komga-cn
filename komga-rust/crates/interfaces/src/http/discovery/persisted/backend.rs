@@ -111,8 +111,8 @@ pub struct PersistedDiscoveryAccessBackend {
         Arc<dyn Fn(PathBuf, String, usize) -> BoxFutureResult<Vec<String>> + Send + Sync>,
     pub search_collection_ids:
         Arc<dyn Fn(PathBuf, String, usize) -> BoxFutureResult<Vec<String>> + Send + Sync>,
-    pub search_series_ids:
-        Arc<dyn Fn(PathBuf, String, usize) -> BoxFutureResult<Vec<String>> + Send + Sync>,
+    pub search_series_scored_ids:
+        Arc<dyn Fn(PathBuf, String, usize) -> BoxFutureResult<Vec<(f32, String)>> + Send + Sync>,
 }
 
 static PERSISTED_DISCOVERY_ACCESS_BACKEND: OnceLock<PersistedDiscoveryAccessBackend> =
@@ -449,11 +449,11 @@ pub(crate) async fn persisted_backend_search_collection_ids(
     (backend.search_collection_ids)(database_file.to_path_buf(), query.to_string(), limit).await
 }
 
-pub(super) async fn persisted_backend_search_series_ids(
+pub(super) async fn persisted_backend_search_series_scored_ids(
     database_file: &FsPath,
     query: &str,
     limit: usize,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<(f32, String)>, String> {
     let backend = persisted_discovery_backend()?;
-    (backend.search_series_ids)(database_file.to_path_buf(), query.to_string(), limit).await
+    (backend.search_series_scored_ids)(database_file.to_path_buf(), query.to_string(), limit).await
 }

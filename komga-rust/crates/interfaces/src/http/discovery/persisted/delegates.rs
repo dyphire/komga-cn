@@ -282,6 +282,7 @@ pub(crate) async fn runtime_owned_series_list_response(
 pub(crate) fn series_page_payload(
     page: PageEnvelope<PersistedSeriesSummary>,
     paged: bool,
+    sorted: bool,
 ) -> Value {
-    series_queries::series_page_payload(page, paged)
+    series_queries::series_page_payload(page, paged, sorted)
 }

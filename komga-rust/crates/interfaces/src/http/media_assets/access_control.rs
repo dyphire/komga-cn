@@ -11,7 +11,7 @@ pub(super) fn user_can_access_library(user: &AuthUser, library_id: &str) -> bool
             .any(|shared_library_id| shared_library_id == library_id)
 }
 
-pub(super) async fn user_can_access_book_media(
+pub(crate) async fn user_can_access_book_media(
     database_file: &FsPath,
     book_id: &str,
     user: &AuthUser,

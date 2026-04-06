@@ -438,16 +438,15 @@ impl SearchIndexLifecycle {
         Ok(())
     }
 
-    pub fn search_ids(
+    pub fn search_scored_ids(
         &self,
         query: &str,
         entity_type: SearchEntityType,
         limit: usize,
-    ) -> Result<Vec<String>, SearchError> {
+    ) -> Result<Vec<(f32, String)>, SearchError> {
         let searcher = self.reader.searcher();
         let parser = self.build_query_parser(entity_type);
         let normalized_query = normalize_multilingual_width(query);
-
         let parsed = match parser.parse_query(normalized_query.as_ref()) {
             Ok(parsed) => parsed,
             Err(_) => return Ok(Vec::new()),
@@ -477,7 +476,23 @@ impl SearchIndexLifecycle {
             ordering => ordering,
         });
 
-        Ok(ranked_ids.into_iter().map(|(_, id)| id).collect())
+        Ok(ranked_ids)
+    }
+
+    pub fn search_ids(
+        &self,
+        query: &str,
+        entity_type: SearchEntityType,
+        limit: usize,
+    ) -> Result<Vec<String>, SearchError> {
+        self.search_scored_ids(query, entity_type, limit)
+            .map(|mut ranked_ids| {
+                ranked_ids.sort_by(|left, right| match right.0.total_cmp(&left.0) {
+                    std::cmp::Ordering::Equal => left.1.cmp(&right.1),
+                    ordering => ordering,
+                });
+                ranked_ids.into_iter().map(|(_, id)| id).collect()
+            })
     }
 
     fn build_query_parser(&self, entity_type: SearchEntityType) -> QueryParser {

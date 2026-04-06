@@ -191,6 +191,7 @@ pub async fn load_history_page(
     database_file: &Path,
     page: u64,
     size: u64,
+    sorts: &[String],
 ) -> Result<Value, sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
 
@@ -205,26 +206,31 @@ pub async fn load_history_page(
     let size = size.max(1);
     let offset = page.saturating_mul(size);
 
-    let events = sqlx::query(
+    let (order_by, sort_payload) = history_sort_details(sorts);
+    let mut sql = String::from(
         "SELECT ID, TYPE, BOOK_ID, SERIES_ID, TIMESTAMP \
-         FROM HISTORICAL_EVENT \
-         ORDER BY TIMESTAMP DESC, ID DESC \
-         LIMIT ? \
-         OFFSET ?",
-    )
-    .bind((size.min(i64::MAX as u64)) as i64)
-    .bind((offset.min(i64::MAX as u64)) as i64)
-    .fetch_all(&pool)
-    .await?
-    .into_iter()
-    .map(|row| PersistedHistoricalEvent {
-        id: row.get::<String, _>("ID"),
-        event_type: row.get::<String, _>("TYPE"),
-        book_id: row.get::<Option<String>, _>("BOOK_ID"),
-        series_id: row.get::<Option<String>, _>("SERIES_ID"),
-        timestamp: row.get::<String, _>("TIMESTAMP"),
-    })
-    .collect::<Vec<_>>();
+         FROM HISTORICAL_EVENT",
+    );
+    if !order_by.is_empty() {
+        sql.push_str(" ORDER BY ");
+        sql.push_str(&order_by.join(", "));
+    }
+    sql.push_str(" LIMIT ? OFFSET ?");
+
+    let events = sqlx::query(&sql)
+        .bind((size.min(i64::MAX as u64)) as i64)
+        .bind((offset.min(i64::MAX as u64)) as i64)
+        .fetch_all(&pool)
+        .await?
+        .into_iter()
+        .map(|row| PersistedHistoricalEvent {
+            id: row.get::<String, _>("ID"),
+            event_type: row.get::<String, _>("TYPE"),
+            book_id: row.get::<Option<String>, _>("BOOK_ID"),
+            series_id: row.get::<Option<String>, _>("SERIES_ID"),
+            timestamp: row.get::<String, _>("TIMESTAMP"),
+        })
+        .collect::<Vec<_>>();
 
     let mut properties_by_id: HashMap<String, serde_json::Map<String, Value>> = HashMap::new();
     if !events.is_empty() {
@@ -283,11 +289,7 @@ pub async fn load_history_page(
         "pageable": {
             "pageNumber": page,
             "pageSize": size,
-            "sort": {
-                "empty": false,
-                "sorted": true,
-                "unsorted": false,
-            },
+            "sort": sort_payload.clone(),
             "offset": offset,
             "paged": true,
             "unpaged": false,
@@ -298,14 +300,55 @@ pub async fn load_history_page(
         "first": first,
         "size": size,
         "number": page,
-        "sort": {
-            "empty": false,
-            "sorted": true,
-            "unsorted": false,
-        },
+        "sort": sort_payload,
         "numberOfElements": number_of_elements,
         "empty": number_of_elements == 0,
     }))
+}
+
+fn history_sort_details(sorts: &[String]) -> (Vec<String>, Value) {
+    let order_by = history_order_by(sorts);
+    let is_sorted = sorts.is_empty() || !order_by.is_empty();
+    let payload = json!({
+        "empty": !is_sorted,
+        "sorted": is_sorted,
+        "unsorted": !is_sorted,
+    });
+
+    (order_by, payload)
+}
+
+fn history_order_by(sorts: &[String]) -> Vec<String> {
+    if sorts.is_empty() {
+        return vec!["TIMESTAMP DESC".to_string()];
+    }
+
+    sorts
+        .iter()
+        .filter_map(|sort| history_sort_clause(sort))
+        .collect()
+}
+
+fn history_sort_clause(sort: &str) -> Option<String> {
+    let (property, direction) = match sort.split_once(',') {
+        Some((property, direction)) => (property.trim(), direction.trim()),
+        None => (sort.trim(), "asc"),
+    };
+
+    let field = match property {
+        "type" => "TYPE",
+        "bookId" => "BOOK_ID",
+        "seriesId" => "SERIES_ID",
+        "timestamp" => "TIMESTAMP",
+        _ => return None,
+    };
+    let direction = if direction.eq_ignore_ascii_case("desc") {
+        "DESC"
+    } else {
+        "ASC"
+    };
+
+    Some(format!("{field} {direction}"))
 }
 
 pub async fn load_client_settings_global(
@@ -644,7 +687,7 @@ mod tests {
         .await
         .expect("event property should be inserted");
 
-        let page = load_history_page(db_path.as_path(), 0, 20)
+        let page = load_history_page(db_path.as_path(), 0, 20, &[])
             .await
             .expect("history page should load");
         let page = page.as_object().expect("history page should be an object");
@@ -678,6 +721,82 @@ mod tests {
         assert_eq!(content[1]["id"], "event-1");
         assert_eq!(content[1]["bookId"], "book-1");
         assert_eq!(content[1]["properties"], serde_json::json!({}));
+    }
+
+    #[tokio::test]
+    async fn load_history_page_honors_supported_sort_override() {
+        let (db_path, pool) = create_history_test_db("history-page-type-sort").await;
+
+        sqlx::query(
+            "INSERT INTO HISTORICAL_EVENT (ID, TYPE, BOOK_ID, SERIES_ID, TIMESTAMP) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind("event-series")
+        .bind("SERIES_ADDED")
+        .bind(None::<&str>)
+        .bind(Some("series-1"))
+        .bind("2024-02-01T00:00:00Z")
+        .execute(&pool)
+        .await
+        .expect("series event should be inserted");
+        sqlx::query(
+            "INSERT INTO HISTORICAL_EVENT (ID, TYPE, BOOK_ID, SERIES_ID, TIMESTAMP) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind("event-book")
+        .bind("BOOK_ADDED")
+        .bind(Some("book-1"))
+        .bind(None::<&str>)
+        .bind("2024-01-01T00:00:00Z")
+        .execute(&pool)
+        .await
+        .expect("book event should be inserted");
+
+        let page = load_history_page(db_path.as_path(), 0, 20, &["type,asc".to_string()])
+            .await
+            .expect("history page with type sort should load");
+        let content = page["content"]
+            .as_array()
+            .expect("history content should be an array");
+
+        assert_eq!(content[0]["id"], "event-book");
+        assert_eq!(content[1]["id"], "event-series");
+    }
+
+    #[tokio::test]
+    async fn load_history_page_marks_unknown_sort_as_unsorted() {
+        let (db_path, pool) = create_history_test_db("history-page-unknown-sort").await;
+
+        sqlx::query(
+            "INSERT INTO HISTORICAL_EVENT (ID, TYPE, BOOK_ID, SERIES_ID, TIMESTAMP) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind("event-1")
+        .bind("BOOK_ADDED")
+        .bind(Some("book-1"))
+        .bind(None::<&str>)
+        .bind("2024-01-01T00:00:00Z")
+        .execute(&pool)
+        .await
+        .expect("event should be inserted");
+
+        let page = load_history_page(db_path.as_path(), 0, 20, &["unknown,asc".to_string()])
+            .await
+            .expect("history page with unknown sort should load");
+
+        assert_eq!(
+            page["sort"],
+            serde_json::json!({
+                "empty": true,
+                "sorted": false,
+                "unsorted": true,
+            })
+        );
+        assert_eq!(
+            page["pageable"]["sort"],
+            serde_json::json!({
+                "empty": true,
+                "sorted": false,
+                "unsorted": true,
+            })
+        );
     }
 
     #[tokio::test]

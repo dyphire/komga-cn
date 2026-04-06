@@ -60,6 +60,21 @@ pub struct PageHashThumbnail {
     pub bytes: Vec<u8>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PageHashDeleteTargetPage {
+    pub file_hash: String,
+    pub file_size: i64,
+    pub file_name: String,
+    pub media_type: String,
+    pub page_number: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PageHashDeleteTarget {
+    pub book_id: String,
+    pub pages: Vec<PageHashDeleteTargetPage>,
+}
+
 pub enum ClaimInitialAdminUserResult {
     Created(AuthUser),
     AlreadyClaimed,
@@ -112,8 +127,11 @@ pub struct OperationalSettingsAccessBackend {
     pub delete_syncpoints_by_user_and_key_ids: Arc<
         dyn Fn(PathBuf, String, Vec<String>) -> BoxFuture<Result<(), sqlx::Error>> + Send + Sync,
     >,
-    pub load_history_page:
-        Arc<dyn Fn(PathBuf, u64, u64) -> BoxFuture<Result<Value, sqlx::Error>> + Send + Sync>,
+    pub load_history_page: Arc<
+        dyn Fn(PathBuf, u64, u64, Vec<String>) -> BoxFuture<Result<Value, sqlx::Error>>
+            + Send
+            + Sync,
+    >,
     pub load_page_hash_matches_page: Arc<
         dyn Fn(PathBuf, String, u64, u64, Vec<String>) -> BoxFuture<Result<Value, sqlx::Error>>
             + Send
@@ -124,10 +142,27 @@ pub struct OperationalSettingsAccessBackend {
             + Send
             + Sync,
     >,
-    pub load_page_hashes_page:
-        Arc<dyn Fn(PathBuf, u64, u64) -> BoxFuture<Result<Value, sqlx::Error>> + Send + Sync>,
+    pub load_unknown_page_hash_thumbnail: Arc<
+        dyn Fn(
+                PathBuf,
+                String,
+                Option<u32>,
+            ) -> BoxFuture<Result<Option<PageHashThumbnail>, sqlx::Error>>
+            + Send
+            + Sync,
+    >,
+    pub load_page_hashes_page: Arc<
+        dyn Fn(PathBuf, u64, u64, Vec<String>, Vec<String>) -> BoxFuture<Result<Value, sqlx::Error>>
+            + Send
+            + Sync,
+    >,
     pub load_page_hashes_unknown_page: Arc<
         dyn Fn(PathBuf, u64, u64, Vec<String>) -> BoxFuture<Result<Value, sqlx::Error>>
+            + Send
+            + Sync,
+    >,
+    pub load_page_hash_delete_targets: Arc<
+        dyn Fn(PathBuf, String) -> BoxFuture<Result<Vec<PageHashDeleteTarget>, sqlx::Error>>
             + Send
             + Sync,
     >,
@@ -135,11 +170,6 @@ pub struct OperationalSettingsAccessBackend {
         dyn Fn(PathBuf, String, Option<i64>, String) -> BoxFuture<Result<(), sqlx::Error>>
             + Send
             + Sync,
-    >,
-    pub delete_all_page_hash_matches:
-        Arc<dyn Fn(PathBuf, String) -> BoxFuture<Result<(), sqlx::Error>> + Send + Sync>,
-    pub delete_page_hash_match: Arc<
-        dyn Fn(PathBuf, String, String, u64) -> BoxFuture<Result<(), sqlx::Error>> + Send + Sync,
     >,
     pub load_server_settings: Arc<
         dyn Fn(Arc<ServerSettingsStore>) -> BoxFuture<Result<PersistedServerSettings, String>>
@@ -154,17 +184,16 @@ pub struct OperationalSettingsAccessBackend {
             + Send
             + Sync,
     >,
-    pub analyze_transient_book:
-        Arc<dyn Fn(String) -> Result<TransientBookAnalysis, String> + Send + Sync>,
+    pub analyze_transient_book: Arc<dyn Fn(String) -> TransientBookAnalysis + Send + Sync>,
     pub infer_transient_series_and_number:
         Arc<dyn Fn(PathBuf, String) -> BoxFuture<(Option<String>, Option<f64>)> + Send + Sync>,
     pub list_transient_book_entries: Arc<dyn Fn(PathBuf) -> Vec<Value> + Send + Sync>,
+    pub validate_transient_scan_root:
+        Arc<dyn Fn(PathBuf, String) -> BoxFuture<Result<(), String>> + Send + Sync>,
     pub load_transient_book_file_metadata:
         Arc<dyn Fn(String) -> Option<TransientBookFileMetadata> + Send + Sync>,
     pub load_transient_book_media: Arc<dyn Fn(String) -> Option<Vec<u8>> + Send + Sync>,
     pub transient_book_content_type: Arc<dyn Fn(String, String) -> &'static str + Send + Sync>,
-    pub transient_book_exists: Arc<dyn Fn(String) -> bool + Send + Sync>,
-    pub transient_book_media_type: Arc<dyn Fn(String) -> String + Send + Sync>,
     pub transient_book_page_content: Arc<
         dyn Fn(String, String, Vec<TransientBookPage>, u32) -> Option<(String, Vec<u8>)>
             + Send
@@ -233,22 +262,22 @@ fn default_test_backend() -> OperationalSettingsAccessBackend {
         load_font_file: Arc::new(|_, _, _| None),
         delete_syncpoints_by_user: Arc::new(|_, _| Box::pin(async { Ok(()) })),
         delete_syncpoints_by_user_and_key_ids: Arc::new(|_, _, _| Box::pin(async { Ok(()) })),
-        load_history_page: Arc::new(|_, _, _| {
+        load_history_page: Arc::new(|_, _, _, _| {
             Box::pin(async { Ok(Value::Object(Default::default())) })
         }),
         load_page_hash_matches_page: Arc::new(|_, _, _, _, _| {
             Box::pin(async { Ok(Value::Object(Default::default())) })
         }),
         load_page_hash_thumbnail: Arc::new(|_, _| Box::pin(async { Ok(None) })),
-        load_page_hashes_page: Arc::new(|_, _, _| {
+        load_unknown_page_hash_thumbnail: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),
+        load_page_hashes_page: Arc::new(|_, _, _, _, _| {
             Box::pin(async { Ok(Value::Object(Default::default())) })
         }),
         load_page_hashes_unknown_page: Arc::new(|_, _, _, _| {
             Box::pin(async { Ok(Value::Object(Default::default())) })
         }),
+        load_page_hash_delete_targets: Arc::new(|_, _| Box::pin(async { Ok(Vec::new()) })),
         upsert_page_hash: Arc::new(|_, _, _, _| Box::pin(async { Ok(()) })),
-        delete_all_page_hash_matches: Arc::new(|_, _| Box::pin(async { Ok(()) })),
-        delete_page_hash_match: Arc::new(|_, _, _, _| Box::pin(async { Ok(()) })),
         load_server_settings: Arc::new(|settings_store| {
             Box::pin(async move {
                 let persisted = settings_store.load_map().await?;
@@ -323,16 +352,21 @@ fn default_test_backend() -> OperationalSettingsAccessBackend {
         apply_server_settings_changes: Arc::new(|settings_store, changes| {
             Box::pin(async move { settings_store.apply_changes(changes.as_slice()).await })
         }),
-        analyze_transient_book: Arc::new(|_| {
-            Err("transient book analysis is not configured for tests".to_string())
+        analyze_transient_book: Arc::new(|_| TransientBookAnalysis {
+            status: "ERROR".to_string(),
+            media_type: String::new(),
+            pages: Vec::new(),
+            files: Vec::new(),
+            comment: "ERR_1005".to_string(),
+            number: None,
+            series_id: None,
         }),
         infer_transient_series_and_number: Arc::new(|_, _| Box::pin(async { (None, None) })),
         list_transient_book_entries: Arc::new(|_| Vec::new()),
+        validate_transient_scan_root: Arc::new(|_, _| Box::pin(async { Ok(()) })),
         load_transient_book_file_metadata: Arc::new(|_| None),
         load_transient_book_media: Arc::new(|_| None),
         transient_book_content_type: Arc::new(|_, _| "application/octet-stream"),
-        transient_book_exists: Arc::new(|_| false),
-        transient_book_media_type: Arc::new(|_| String::new()),
         transient_book_page_content: Arc::new(|_, _, _, _| None),
     }
 }
@@ -511,8 +545,9 @@ pub(crate) mod operations {
         database_file: &std::path::Path,
         page: u64,
         size: u64,
+        sorts: &[String],
     ) -> Result<Value, sqlx::Error> {
-        (backend().load_history_page)(database_file.to_path_buf(), page, size).await
+        (backend().load_history_page)(database_file.to_path_buf(), page, size, sorts.to_vec()).await
     }
 }
 
@@ -544,12 +579,28 @@ pub(crate) mod page_hashes {
             .await
     }
 
+    pub(crate) async fn load_unknown_page_hash_thumbnail(
+        database_file: &std::path::Path,
+        page_hash: &str,
+        resize_to: Option<u32>,
+    ) -> Result<Option<PageHashThumbnail>, sqlx::Error> {
+        (backend().load_unknown_page_hash_thumbnail)(
+            database_file.to_path_buf(),
+            page_hash.to_string(),
+            resize_to,
+        )
+        .await
+    }
+
     pub(crate) async fn load_page_hashes_page(
         database_file: &std::path::Path,
         page: u64,
         size: u64,
+        actions: Vec<String>,
+        sorts: Vec<String>,
     ) -> Result<Value, sqlx::Error> {
-        (backend().load_page_hashes_page)(database_file.to_path_buf(), page, size).await
+        (backend().load_page_hashes_page)(database_file.to_path_buf(), page, size, actions, sorts)
+            .await
     }
 
     pub(crate) async fn load_page_hashes_unknown_page(
@@ -559,6 +610,14 @@ pub(crate) mod page_hashes {
         sorts: Vec<String>,
     ) -> Result<Value, sqlx::Error> {
         (backend().load_page_hashes_unknown_page)(database_file.to_path_buf(), page, size, sorts)
+            .await
+    }
+
+    pub(crate) async fn load_page_hash_delete_targets(
+        database_file: &std::path::Path,
+        hash: &str,
+    ) -> Result<Vec<PageHashDeleteTarget>, sqlx::Error> {
+        (backend().load_page_hash_delete_targets)(database_file.to_path_buf(), hash.to_string())
             .await
     }
 
@@ -573,29 +632,6 @@ pub(crate) mod page_hashes {
             hash.to_string(),
             size,
             action.to_string(),
-        )
-        .await
-    }
-
-    pub(crate) async fn delete_all_page_hash_matches(
-        database_file: &std::path::Path,
-        hash: &str,
-    ) -> Result<(), sqlx::Error> {
-        (backend().delete_all_page_hash_matches)(database_file.to_path_buf(), hash.to_string())
-            .await
-    }
-
-    pub(crate) async fn delete_page_hash_match(
-        database_file: &std::path::Path,
-        hash: &str,
-        media_id: &str,
-        page_number: u64,
-    ) -> Result<(), sqlx::Error> {
-        (backend().delete_page_hash_match)(
-            database_file.to_path_buf(),
-            hash.to_string(),
-            media_id.to_string(),
-            page_number,
         )
         .await
     }
@@ -639,7 +675,7 @@ pub(crate) mod transient_books {
 
     use super::*;
 
-    pub(crate) fn analyze_transient_book(path: &str) -> Result<TransientBookAnalysis, String> {
+    pub(crate) fn analyze_transient_book(path: &str) -> TransientBookAnalysis {
         (backend().analyze_transient_book)(path.to_string())
     }
 
@@ -658,18 +694,18 @@ pub(crate) mod transient_books {
         (backend().list_transient_book_entries)(root.to_path_buf())
     }
 
+    pub(crate) async fn validate_transient_scan_root(
+        database_file: &std::path::Path,
+        path: &str,
+    ) -> Result<(), String> {
+        (backend().validate_transient_scan_root)(database_file.to_path_buf(), path.to_string())
+            .await
+    }
+
     pub(crate) fn load_transient_book_file_metadata(
         path: &str,
     ) -> Option<TransientBookFileMetadata> {
         (backend().load_transient_book_file_metadata)(path.to_string())
-    }
-
-    pub(crate) fn transient_book_exists(path: &str) -> bool {
-        (backend().transient_book_exists)(path.to_string())
-    }
-
-    pub(crate) fn transient_book_media_type(path: &str) -> String {
-        (backend().transient_book_media_type)(path.to_string())
     }
 
     pub(crate) fn transient_book_page_content(

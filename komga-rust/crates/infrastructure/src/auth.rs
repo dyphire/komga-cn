@@ -11,9 +11,7 @@ pub use device_auth::{
     load_koreader_book_target, load_read_progress, load_thumbnail_by_id,
     persist_read_progress_with_locator, persisted_book_exists,
 };
-pub use device_auth_config::{
-    configured_api_key, configured_api_key_comment, configured_api_key_id,
-};
+pub use device_auth_config::configured_api_key;
 pub use kobo_sync::{
     load_kobo_sync_deltas, load_kobo_sync_snapshot, load_sync_point_marker, load_sync_point_state,
     proxy_kobo_store_library_sync, remove_sync_point, save_sync_point,

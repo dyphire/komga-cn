@@ -24,20 +24,29 @@ pub fn decode_or_passthrough_sync_token(value: &str) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
-    let normalized = trimmed.strip_prefix("KOMGA.").unwrap_or(trimmed);
-    let decoded = STANDARD
-        .decode(normalized)
-        .ok()
-        .or_else(|| STANDARD_NO_PAD.decode(normalized).ok())
-        .and_then(|bytes| String::from_utf8(bytes).ok())
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    if let Some(decoded) = decoded.as_ref()
-        && let Some(raw_sync_token) = extract_calibre_web_raw_sync_token(decoded)
-    {
-        return Some(raw_sync_token);
+
+    if let Some(normalized) = trimmed.strip_prefix("KOMGA.") {
+        return STANDARD
+            .decode(normalized)
+            .ok()
+            .or_else(|| STANDARD_NO_PAD.decode(normalized).ok())
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
     }
-    decoded.or_else(|| Some(trimmed.to_string()))
+
+    if !trimmed.contains('.') {
+        let decoded = STANDARD
+            .decode(trimmed)
+            .ok()
+            .or_else(|| STANDARD_NO_PAD.decode(trimmed).ok())
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        return decoded.and_then(|decoded| extract_calibre_web_raw_sync_token(&decoded));
+    }
+
+    Some(trimmed.to_string())
 }
 
 #[allow(dead_code)]
@@ -158,6 +167,7 @@ pub struct KomgaSyncTokenPayload {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct KoboSyncPointState {
     pub user_id: String,
+    pub api_key_id: Option<String>,
     pub marker: String,
     pub cursor: usize,
     pub from_marker: Option<String>,

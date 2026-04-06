@@ -1193,7 +1193,7 @@ pub(super) fn compose_persisted_discovery_access_backend(
                 })
             }
         }),
-        search_series_ids: Arc::new({
+        search_series_scored_ids: Arc::new({
             let default_index_dir = lucene_data_directory.clone();
             move |database_file, query, limit| {
                 let default_index_dir = default_index_dir.clone();
@@ -1205,7 +1205,7 @@ pub(super) fn compose_persisted_discovery_access_backend(
                     let index = SearchIndexLifecycle::bootstrap(index_dir.as_path())
                         .map_err(|error| format!("bootstrap search index for series: {error}"))?;
                     index
-                        .search_ids(&query, SearchEntityType::Series, limit)
+                        .search_scored_ids(&query, SearchEntityType::Series, limit)
                         .map_err(|error| format!("search index series query: {error}"))
                 })
             }

@@ -34,6 +34,7 @@ tower = { version = "0.5.2", features = ["util"] }
 tower-sessions = "0.15.0"
 oauth2 = "5.0.0"
 tantivy = "0.26.0"
+tar = "0.4.45"
 zip = "8.4.0"
 flate2 = "1.1.9"
 lopdf = "0.40.0"

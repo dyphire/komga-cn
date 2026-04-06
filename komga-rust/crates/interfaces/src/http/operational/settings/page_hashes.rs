@@ -4,6 +4,8 @@ use axum::extract::Extension;
 use axum::extract::Path as AxumPath;
 use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
+use komga_application::task_processing::TaskQueueRecord;
+use serde::Deserialize;
 use serde_json::Value;
 
 use crate::http::identity_access::auth::require_admin;
@@ -11,6 +13,19 @@ use crate::operational_settings_access::page_hashes as page_hashes_access;
 
 use super::super::super::OperationalState;
 use super::{query_value, query_values};
+
+const REMOVE_HASHED_PAGES_PRIORITY: i32 = 4;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeletePageHashMatchRequest {
+    book_id: String,
+    url: String,
+    page_number: i64,
+    file_name: String,
+    file_size: i64,
+    media_type: String,
+}
 
 pub(crate) async fn get_page_hashes(
     Extension(state): Extension<OperationalState>,
@@ -29,11 +44,18 @@ pub(crate) async fn get_page_hashes(
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(20);
+    let actions = match parse_page_hash_actions(query_values(query, "action")) {
+        Ok(actions) => actions,
+        Err(status) => return status.into_response(),
+    };
+    let sorts = query_values(query, "sort");
 
     let page_data = match page_hashes_access::load_page_hashes_page(
         state.runtime.database_file.as_path(),
         page,
         size,
+        actions,
+        sorts,
     )
     .await
     {
@@ -42,6 +64,58 @@ pub(crate) async fn get_page_hashes(
     };
 
     Json(page_data).into_response()
+}
+
+fn parse_page_hash_actions(raw_values: Vec<String>) -> Result<Vec<String>, StatusCode> {
+    let mut actions = Vec::new();
+
+    for raw_value in raw_values {
+        for action in raw_value.split(',') {
+            if !matches!(action, "DELETE_MANUAL" | "DELETE_AUTO" | "IGNORE") {
+                return Err(StatusCode::BAD_REQUEST);
+            }
+            actions.push(action.to_string());
+        }
+    }
+
+    Ok(actions)
+}
+
+fn remove_hashed_pages_task_page(
+    file_name: String,
+    media_type: String,
+    file_hash: String,
+    file_size: i64,
+    page_number: i64,
+) -> Value {
+    serde_json::json!({
+        "fileName": file_name,
+        "mediaType": media_type,
+        "fileHash": file_hash,
+        "fileSize": file_size,
+        "pageNumber": page_number,
+    })
+}
+
+fn build_remove_hashed_pages_task(
+    book_id: String,
+    pages: Vec<Value>,
+) -> Result<TaskQueueRecord, StatusCode> {
+    let unique_id = format!("REMOVE_HASHED_PAGES_{book_id}");
+    let payload = serde_json::to_string(&serde_json::json!({
+        "bookId": book_id,
+        "pages": pages,
+        "priority": REMOVE_HASHED_PAGES_PRIORITY,
+        "groupId": Value::Null,
+        "uniqueId": unique_id.clone(),
+    }))
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(
+        TaskQueueRecord::new(unique_id, REMOVE_HASHED_PAGES_PRIORITY, None)
+            .with_simple_type("REMOVE_HASHED_PAGES")
+            .with_payload(payload),
+    )
 }
 
 pub(crate) async fn get_page_hashes_unknown(
@@ -141,14 +215,25 @@ pub(crate) async fn get_page_hash_unknown_thumbnail(
     Extension(state): Extension<OperationalState>,
     headers: HeaderMap,
     AxumPath(page_hash): AxumPath<String>,
+    uri: Uri,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
         return response;
     }
 
-    let thumbnail = match page_hashes_access::load_page_hash_thumbnail(
+    let query = uri.query().unwrap_or_default();
+    let resize_to = match query_value(query, "resize") {
+        None => None,
+        Some(value) => match value.parse::<u32>() {
+            Ok(parsed) if parsed > 0 => Some(parsed),
+            _ => return StatusCode::BAD_REQUEST.into_response(),
+        },
+    };
+
+    let thumbnail = match page_hashes_access::load_unknown_page_hash_thumbnail(
         state.runtime.database_file.as_path(),
         &page_hash,
+        resize_to,
     )
     .await
     {
@@ -220,13 +305,40 @@ pub(crate) async fn post_page_hash_delete_all(
         return response;
     }
 
-    match page_hashes_access::delete_all_page_hash_matches(
+    let delete_targets = match page_hashes_access::load_page_hash_delete_targets(
         state.runtime.database_file.as_path(),
         &page_hash,
     )
     .await
     {
-        Ok(_) => StatusCode::ACCEPTED.into_response(),
+        Ok(targets) => targets,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
+    let mut task_records = Vec::with_capacity(delete_targets.len());
+    for target in delete_targets {
+        let pages = target
+            .pages
+            .into_iter()
+            .map(|page| {
+                remove_hashed_pages_task_page(
+                    page.file_name,
+                    page.media_type,
+                    page.file_hash,
+                    page.file_size,
+                    page.page_number,
+                )
+            })
+            .collect::<Vec<_>>();
+        let task_record = match build_remove_hashed_pages_task(target.book_id, pages) {
+            Ok(task_record) => task_record,
+            Err(status) => return status.into_response(),
+        };
+        task_records.push(task_record);
+    }
+
+    match (state.enqueue_task_records)(task_records, true) {
+        Ok(()) => StatusCode::ACCEPTED.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
@@ -241,34 +353,35 @@ pub(crate) async fn post_page_hash_delete_match(
         return response;
     }
 
-    let Ok(payload) = serde_json::from_slice::<Value>(&body) else {
-        return StatusCode::BAD_REQUEST.into_response();
-    };
-
-    let Some(book_id) = payload
-        .get("bookId")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+    let Ok(DeletePageHashMatchRequest {
+        book_id,
+        url,
+        page_number,
+        file_name,
+        file_size,
+        media_type,
+    }) = serde_json::from_slice::<DeletePageHashMatchRequest>(&body)
     else {
         return StatusCode::BAD_REQUEST.into_response();
     };
-    let Some(page_number) = payload.get("pageNumber").and_then(Value::as_i64) else {
-        return StatusCode::BAD_REQUEST.into_response();
-    };
-    if page_number <= 0 {
-        return StatusCode::BAD_REQUEST.into_response();
-    }
+    drop(url);
 
-    match page_hashes_access::delete_page_hash_match(
-        state.runtime.database_file.as_path(),
-        &page_hash,
+    let task_record = match build_remove_hashed_pages_task(
         book_id,
-        page_number as u64,
-    )
-    .await
-    {
-        Ok(_) => StatusCode::ACCEPTED.into_response(),
+        vec![remove_hashed_pages_task_page(
+            file_name,
+            media_type,
+            page_hash,
+            file_size,
+            page_number,
+        )],
+    ) {
+        Ok(task_record) => task_record,
+        Err(status) => return status.into_response(),
+    };
+
+    match (state.enqueue_task_records)(vec![task_record], true) {
+        Ok(()) => StatusCode::ACCEPTED.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }

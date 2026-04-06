@@ -4,7 +4,7 @@ use axum::http::{HeaderMap, StatusCode};
 use base64::engine::general_purpose::STANDARD;
 use komga_application::identity_access::{
     KoboSyncBookSnapshot, KoboSyncReadListSnapshot, KoboSyncReadProgressSnapshot, KoboSyncSnapshot,
-    sanitize_identifier,
+    generated_kobo_api_token, sanitize_identifier,
 };
 use std::collections::HashMap;
 use std::fs;
@@ -179,7 +179,7 @@ fn kobo_reading_state_payload_prefers_locator_progress_values() {
         }
     });
 
-    let payload = kobo_reading_state_payload("book-1", &progress, 10, locator);
+    let payload = kobo_reading_state_payload("book-1", &progress, locator);
     assert_eq!(
         payload
             .get("CurrentBookmark")

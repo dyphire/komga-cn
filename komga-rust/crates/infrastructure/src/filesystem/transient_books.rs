@@ -5,10 +5,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use image::GenericImageView;
 use lopdf::{Document as PdfDocument, Object};
+use pdfium_render::prelude::*;
 use serde_json::{Value, json};
 use sqlx::Row;
 use zip::ZipArchive;
 
+use crate::load_pdfium;
 use crate::rar_support::{list_rar_entries, read_rar_entry_bytes};
 use crate::sqlite::connect_pool;
 
@@ -90,6 +92,33 @@ pub async fn infer_transient_series_and_number(
     (exact_match.or(fuzzy_match), number)
 }
 
+pub async fn validate_transient_scan_root(database_file: &Path, root: &Path) -> Result<(), String> {
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("transient scan validation db open failed: {error}"))?;
+
+    let library_roots = sqlx::query("SELECT ROOT AS ROOT FROM LIBRARY")
+        .fetch_all(&pool)
+        .await
+        .map_err(|error| format!("transient scan library roots query failed: {error}"))?
+        .into_iter()
+        .map(|row| PathBuf::from(row.get::<String, _>("ROOT")))
+        .collect::<Vec<_>>();
+    pool.close().await;
+
+    for library_root in library_roots {
+        if root.starts_with(&library_root) {
+            return Err("ERR_1017".to_string());
+        }
+    }
+
+    if !root.is_dir() || fs::read_dir(root).is_err() {
+        return Err("ERR_1016".to_string());
+    }
+
+    Ok(())
+}
+
 pub fn transient_book_exists(path: &str) -> bool {
     Path::new(path).exists()
 }
@@ -106,29 +135,52 @@ pub fn load_transient_book_media(path: &str) -> Option<Vec<u8>> {
     fs::read(path).ok()
 }
 
-pub fn analyze_transient_book(path: &str) -> Result<TransientBookAnalysis, String> {
+pub fn analyze_transient_book(path: &str) -> TransientBookAnalysis {
     if !transient_book_exists(path) {
-        return Err("File not found, it may have moved".to_string());
+        return transient_analysis_error("ERROR", String::new(), "ERR_1018");
     }
 
     let media_type = transient_book_media_type(path);
-    let (pages, files) = if transient_media_is_image(path, &media_type) {
-        analyze_transient_image(path)
-    } else if transient_media_is_zip_archive(path, &media_type) {
-        analyze_transient_zip_archive(path, media_type == "application/epub+zip")?
-    } else if transient_media_is_rar_archive(path, &media_type) {
-        analyze_transient_rar_archive(path)?
-    } else if transient_media_is_pdf(path, &media_type) {
-        analyze_transient_pdf(path)?
+    if PathBuf::from(path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("epub"))
+        && media_type != "application/epub+zip"
+    {
+        return transient_analysis_error("ERROR", media_type, "ERR_1032");
+    }
+
+    let analysis_result = if media_type.starts_with("image/") {
+        Ok(analyze_transient_image(path))
+    } else if matches!(
+        media_type.as_str(),
+        "application/zip" | "application/epub+zip"
+    ) {
+        analyze_transient_zip_archive(path, media_type == "application/epub+zip").map_err(|_| {
+            if media_type == "application/epub+zip" {
+                "ERR_1032"
+            } else {
+                "ERR_1008"
+            }
+        })
+    } else if media_type == "application/vnd.comicbook-rar" {
+        analyze_transient_rar_archive(path).map_err(|_| "ERR_1008")
+    } else if media_type == "application/pdf" {
+        analyze_transient_pdf(path).map_err(|_| "ERR_1005")
     } else {
-        return Err(format!("unsupported media type: {media_type}"));
+        return transient_analysis_error("UNSUPPORTED", media_type, "ERR_1001");
+    };
+
+    let (pages, files) = match analysis_result {
+        Ok(result) => result,
+        Err(error_code) => return transient_analysis_error("ERROR", media_type, error_code),
     };
 
     if pages.is_empty() {
-        return Err("Book analysis failed".to_string());
+        return transient_analysis_error("ERROR", media_type, "ERR_1006");
     }
 
-    Ok(TransientBookAnalysis {
+    TransientBookAnalysis {
         status: "READY".to_string(),
         media_type,
         pages,
@@ -136,7 +188,23 @@ pub fn analyze_transient_book(path: &str) -> Result<TransientBookAnalysis, Strin
         comment: String::new(),
         number: None,
         series_id: None,
-    })
+    }
+}
+
+fn transient_analysis_error(
+    status: &str,
+    media_type: String,
+    comment: &str,
+) -> TransientBookAnalysis {
+    TransientBookAnalysis {
+        status: status.to_string(),
+        media_type,
+        pages: Vec::new(),
+        files: Vec::new(),
+        comment: comment.to_string(),
+        number: None,
+        series_id: None,
+    }
 }
 
 pub fn transient_book_page_content(
@@ -154,8 +222,9 @@ pub fn transient_book_page_content(
     } else {
         media_type.to_string()
     };
+    let content_type = transient_book_content_type(path, media_type.as_str());
 
-    if transient_media_is_image(path, media_type.as_str()) {
+    if media_type.starts_with("image/") {
         if page_number != 1 {
             return None;
         }
@@ -168,7 +237,7 @@ pub fn transient_book_page_content(
         .find(|entry| entry.number == page_number)
         .cloned()?;
 
-    if transient_media_is_zip_archive(path, media_type.as_str()) {
+    if matches!(content_type, "application/zip" | "application/epub+zip") {
         let file = fs::File::open(path).ok()?;
         let mut archive = ZipArchive::new(file).ok()?;
         let mut entry = archive.by_name(page.file_name.as_str()).ok()?;
@@ -177,16 +246,16 @@ pub fn transient_book_page_content(
         return Some((page.media_type, bytes));
     }
 
-    if transient_media_is_rar_archive(path, media_type.as_str()) {
+    if content_type == "application/vnd.comicbook-rar" {
         let bytes = read_rar_entry_bytes(Path::new(path), page.file_name.as_str())
             .ok()
             .flatten()?;
         return Some((page.media_type, bytes));
     }
 
-    if transient_media_is_pdf(path, media_type.as_str()) {
-        let bytes = read_pdf_page_content_bytes(path, page_number)?;
-        return Some(("application/pdf".to_string(), bytes));
+    if content_type == "application/pdf" {
+        let bytes = render_pdf_page_image_bytes(path, page_number)?;
+        return Some(("image/jpeg".to_string(), bytes));
     }
 
     None
@@ -195,6 +264,11 @@ pub fn transient_book_page_content(
 pub fn transient_book_content_type(path: &str, media_type: &str) -> &'static str {
     if !media_type.is_empty() {
         return match media_type {
+            "image/jpeg" => "image/jpeg",
+            "image/png" => "image/png",
+            "image/gif" => "image/gif",
+            "image/webp" => "image/webp",
+            "image/avif" => "image/avif",
             "application/pdf" => "application/pdf",
             "application/epub+zip" => "application/epub+zip",
             "application/zip" => "application/zip",
@@ -209,11 +283,31 @@ pub fn transient_book_content_type(path: &str, media_type: &str) -> &'static str
         .map(|value| value.to_ascii_lowercase())
         .as_deref()
     {
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("png") => "image/png",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("avif") => "image/avif",
         Some("pdf") => "application/pdf",
-        Some("epub") => "application/epub+zip",
+        Some("epub") => detect_epub_media_type(path),
         Some("cbz") | Some("zip") => "application/zip",
         Some("cbr") | Some("rar") => "application/vnd.comicbook-rar",
         _ => "application/octet-stream",
+    }
+}
+
+fn detect_epub_media_type(path: &str) -> &'static str {
+    let Ok(file) = fs::File::open(path) else {
+        return "application/octet-stream";
+    };
+    let Ok(mut archive) = ZipArchive::new(file) else {
+        return "application/octet-stream";
+    };
+
+    if archive.by_name("META-INF/container.xml").is_ok() {
+        "application/epub+zip"
+    } else {
+        "application/zip"
     }
 }
 
@@ -362,11 +456,33 @@ fn analyze_transient_pdf(path: &str) -> Result<(Vec<TransientBookPage>, Vec<Stri
     Ok((pages, vec![file_name]))
 }
 
-fn read_pdf_page_content_bytes(path: &str, page_number: u32) -> Option<Vec<u8>> {
-    let document = PdfDocument::load(path).ok()?;
-    let pages = document.get_pages();
-    let object_id = *pages.get(&page_number)?;
-    document.get_page_content(object_id).ok()
+fn render_pdf_page_image_bytes(path: &str, page_number: u32) -> Option<Vec<u8>> {
+    if page_number == 0 {
+        return None;
+    }
+
+    let pdfium = load_pdfium().ok()?;
+    let document = pdfium.load_pdf_from_file(path, None).ok()?;
+    let page = document
+        .pages()
+        .get(i32::try_from(page_number.saturating_sub(1)).ok()?)
+        .ok()?;
+    let rendered = page
+        .render_with_config(
+            &PdfRenderConfig::new()
+                .set_target_width(1600)
+                .set_maximum_height(1600),
+        )
+        .ok()?
+        .as_image()
+        .ok()?
+        .into_rgb8();
+
+    let mut output = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(rendered)
+        .write_to(&mut output, image::ImageFormat::Jpeg)
+        .ok()?;
+    Some(output.into_inner())
 }
 
 fn pdf_page_dimensions(document: &PdfDocument, page_number: u32) -> Option<(u32, u32)> {
@@ -396,35 +512,6 @@ fn pdf_numeric_value(object: &Object) -> Option<f64> {
         Object::Real(value) => Some((*value).into()),
         _ => None,
     }
-}
-
-fn transient_media_is_image(path: &str, media_type: &str) -> bool {
-    if media_type.starts_with("image/") {
-        return true;
-    }
-    matches!(
-        PathBuf::from(path)
-            .extension()
-            .and_then(|value| value.to_str())
-            .map(|value| value.to_ascii_lowercase())
-            .as_deref(),
-        Some("jpg") | Some("jpeg") | Some("png") | Some("gif") | Some("webp") | Some("avif")
-    )
-}
-
-fn transient_media_is_zip_archive(path: &str, media_type: &str) -> bool {
-    matches!(
-        transient_book_content_type(path, media_type),
-        "application/zip" | "application/epub+zip"
-    )
-}
-
-fn transient_media_is_rar_archive(path: &str, media_type: &str) -> bool {
-    transient_book_content_type(path, media_type) == "application/vnd.comicbook-rar"
-}
-
-fn transient_media_is_pdf(path: &str, media_type: &str) -> bool {
-    transient_book_content_type(path, media_type) == "application/pdf"
 }
 
 fn transient_entry_media_type(file_name: &str) -> String {
@@ -616,6 +703,20 @@ mod tests {
         output.into_inner()
     }
 
+    fn write_zip_as_epub(path: &Path) {
+        let file = File::create(path).expect("zip-as-epub fixture should be created");
+        let mut zip = ZipWriter::new(file);
+        let options = SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Stored)
+            .unix_permissions(0o644);
+        zip.start_file("page-1.png", options)
+            .expect("zip-as-epub page entry should be created");
+        zip.write_all(b"not-an-image")
+            .expect("zip-as-epub page bytes should be written");
+        zip.finish()
+            .expect("zip-as-epub fixture should finish successfully");
+    }
+
     fn write_single_page_pdf(path: &Path, width: i64, height: i64) {
         let mut document = PdfDocument::with_version("1.5");
         let pages_id = document.new_object_id();
@@ -658,8 +759,7 @@ mod tests {
         let path = unique_temp_path("single-image", "png");
         fs::write(&path, png_bytes(3, 5)).expect("transient image fixture should be written");
 
-        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
-            .expect("single image transient analysis should succeed");
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref());
 
         assert_eq!(analysis.status, "READY");
         assert_eq!(analysis.pages.len(), 1);
@@ -684,8 +784,7 @@ mod tests {
         zip.finish()
             .expect("cbz fixture should finish successfully");
 
-        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
-            .expect("cbz transient analysis should succeed");
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref());
 
         assert_eq!(analysis.status, "READY");
         assert_eq!(analysis.pages.len(), 1);
@@ -700,8 +799,7 @@ mod tests {
         let path = unique_temp_path("pdf-page-dimensions", "pdf");
         write_single_page_pdf(&path, 595, 842);
 
-        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
-            .expect("pdf transient analysis should succeed");
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref());
 
         assert_eq!(analysis.status, "READY");
         assert_eq!(analysis.pages.len(), 1);
@@ -716,8 +814,7 @@ mod tests {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../komga/src/test/resources/archives/rar4.rar");
 
-        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
-            .expect("rar transient analysis should succeed when fixture is available");
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref());
 
         assert_eq!(analysis.status, "READY");
         assert!(
@@ -739,8 +836,7 @@ mod tests {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../komga/src/test/resources/archives/rar4.rar");
 
-        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
-            .expect("rar transient analysis should succeed when fixture is available");
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref());
 
         assert_eq!(analysis.status, "READY");
         assert!(
@@ -751,5 +847,34 @@ mod tests {
             analysis.pages[0].size_bytes.is_some_and(|size| size > 0),
             "rar page size_bytes should be populated"
         );
+    }
+
+    #[test]
+    fn analyze_transient_book_returns_err_1018_for_missing_file() {
+        let path = unique_temp_path("missing-file", "png");
+
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref());
+
+        assert_eq!(analysis.status, "ERROR");
+        assert_eq!(analysis.media_type, "");
+        assert_eq!(analysis.comment, "ERR_1018");
+        assert!(analysis.pages.is_empty());
+        assert!(analysis.files.is_empty());
+    }
+
+    #[test]
+    fn analyze_transient_book_returns_err_1032_for_broken_epub() {
+        let path = unique_temp_path("broken-epub", "epub");
+        write_zip_as_epub(&path);
+
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref());
+
+        assert_eq!(analysis.status, "ERROR");
+        assert_eq!(analysis.media_type, "application/zip");
+        assert_eq!(analysis.comment, "ERR_1032");
+        assert!(analysis.pages.is_empty());
+        assert!(analysis.files.is_empty());
+
+        let _ = fs::remove_file(path);
     }
 }

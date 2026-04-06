@@ -13,20 +13,24 @@ pub async fn load_persisted_series_page(
 ) -> Result<PageEnvelope<PersistedSeriesSummary>, String> {
     let mut series = Vec::new();
     let filters = &query.filters;
-    let mut relevance_ranks: HashMap<String, usize> = HashMap::new();
+    let mut relevance_scores: HashMap<String, f32> = HashMap::new();
     if let Some(search) = query.search.as_ref().map(|value| value.trim())
         && !search.is_empty()
     {
         let total_count = persisted_backend_load_persisted_series_count(database_file).await?;
-        let candidate_ids =
-            persisted_backend_search_series_ids(database_file, search, total_count.max(1)).await?;
+        let ranked_candidates =
+            persisted_backend_search_series_scored_ids(database_file, search, total_count.max(1))
+                .await?;
+        let candidate_ids = ranked_candidates
+            .iter()
+            .map(|(_, id)| id.clone())
+            .collect::<Vec<_>>();
         if candidate_ids.is_empty() {
             series.clear();
         } else {
-            relevance_ranks = candidate_ids
+            relevance_scores = ranked_candidates
                 .iter()
-                .enumerate()
-                .map(|(index, id)| (id.clone(), index))
+                .map(|(score, id)| (id.clone(), *score))
                 .collect();
             series = persisted_backend_load_persisted_series_summaries_by_ids(
                 database_file,
@@ -602,28 +606,30 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    series.sort_by(|left, right| {
-        for sort_mode in &query.sort_modes {
-            let ordering = match sort_mode {
-                PersistedSeriesSortMode::TitleAsc => left
-                    .title_sort
-                    .to_ascii_lowercase()
-                    .cmp(&right.title_sort.to_ascii_lowercase()),
-                PersistedSeriesSortMode::CreatedDesc => right.created.cmp(&left.created),
-                PersistedSeriesSortMode::Latest => right.last_modified.cmp(&left.last_modified),
-                PersistedSeriesSortMode::RelevanceAsc => {
-                    compare_relevance_ranks(&relevance_ranks, &left.id, &right.id, false)
+    if !query.sort_modes.is_empty() {
+        series.sort_by(|left, right| {
+            for sort_mode in &query.sort_modes {
+                let ordering = match sort_mode {
+                    PersistedSeriesSortMode::TitleAsc => left
+                        .title_sort
+                        .to_ascii_lowercase()
+                        .cmp(&right.title_sort.to_ascii_lowercase()),
+                    PersistedSeriesSortMode::CreatedDesc => right.created.cmp(&left.created),
+                    PersistedSeriesSortMode::Latest => right.last_modified.cmp(&left.last_modified),
+                    PersistedSeriesSortMode::RelevanceAsc => {
+                        compare_relevance_scores(&relevance_scores, &left.id, &right.id, false)
+                    }
+                    PersistedSeriesSortMode::RelevanceDesc => {
+                        compare_relevance_scores(&relevance_scores, &left.id, &right.id, true)
+                    }
+                };
+                if ordering != std::cmp::Ordering::Equal {
+                    return ordering;
                 }
-                PersistedSeriesSortMode::RelevanceDesc => {
-                    compare_relevance_ranks(&relevance_ranks, &left.id, &right.id, true)
-                }
-            };
-            if ordering != std::cmp::Ordering::Equal {
-                return ordering;
             }
-        }
-        left.id.cmp(&right.id)
-    });
+            left.id.cmp(&right.id)
+        });
+    }
 
     let total_elements = series.len();
     let content = if query.unpaged {
@@ -651,17 +657,19 @@ pub async fn load_persisted_series_page(
     ))
 }
 
-fn compare_relevance_ranks(
-    relevance_ranks: &HashMap<String, usize>,
+fn compare_relevance_scores(
+    relevance_scores: &HashMap<String, f32>,
     left_id: &str,
     right_id: &str,
     descending: bool,
 ) -> std::cmp::Ordering {
-    let left_rank = relevance_ranks.get(left_id).copied();
-    let right_rank = relevance_ranks.get(right_id).copied();
-    match (left_rank, right_rank) {
-        (Some(left), Some(right)) if descending => left.cmp(&right),
-        (Some(left), Some(right)) => right.cmp(&left),
+    let left_score = relevance_scores.get(left_id).copied();
+    let right_score = relevance_scores.get(right_id).copied();
+    match (left_score, right_score) {
+        (Some(left), Some(right)) if descending => {
+            right.total_cmp(&left).then_with(|| left_id.cmp(right_id))
+        }
+        (Some(left), Some(right)) => left.total_cmp(&right).then_with(|| left_id.cmp(right_id)),
         _ => std::cmp::Ordering::Equal,
     }
 }

@@ -7,9 +7,9 @@ use axum_extra::extract::cookie::CookieJar;
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use komga_application::identity_access::{
     AuthOutcome, AuthUser, KOBO_SYNC_ITEM_LIMIT, KoboSyncPointState, build_kobo_sync_events,
-    build_komga_sync_token_payload, configured_api_key_identity, decode_or_passthrough_sync_token,
-    generated_kobo_api_token, generated_kobo_token_triplet, is_kobo_store_sync_token_candidate,
-    now_sync_marker, parse_komga_sync_token_payload, resolve_koreader_user_id, user_id,
+    build_komga_sync_token_payload, decode_or_passthrough_sync_token, generated_kobo_token_triplet,
+    is_kobo_store_sync_token_candidate, now_sync_marker, parse_komga_sync_token_payload,
+    resolve_koreader_user_id, user_id,
 };
 use oauth2::{
     AuthUrl, ClientId, ClientSecret, CsrfToken, RedirectUrl, Scope, TokenUrl, basic::BasicClient,
@@ -22,17 +22,21 @@ use std::path::Path as FsPath;
 use crate::OperationalState;
 use crate::http::identity_access::auth::{
     auth_token_user, persisted_api_key_user_by_token, session_token_for_user_with_namespace,
+    user_has_role, user_is_admin,
 };
-use crate::http::request_urls::request_base_url;
+use crate::http::request_urls::{
+    request_base_url, request_base_url_with_port, request_context_path,
+};
 use crate::http::state::AuthDatabaseState;
+use crate::media_assets_runtime_access::{
+    load_persisted_book_media, persist_book_progression, read_media_file_bytes,
+};
 use crate::runtime_identity_access::{
-    KoreaderBookLookupError, PersistedReadProgressRecord, configured_api_key,
-    configured_api_key_comment, configured_api_key_id, ensure_oauth_user,
-    load_book_created_timestamp, load_book_last_epub_position_locator, load_book_media_file,
-    load_book_page_count, load_kobo_metadata_record, load_kobo_sync_snapshot,
-    load_koreader_book_target, load_read_progress, load_sync_point_marker, load_sync_point_state,
-    load_thumbnail_by_id, persist_read_progress_with_locator, persisted_book_exists,
-    proxy_kobo_store_library_sync, remove_sync_point, save_sync_point,
+    KoreaderBookLookupError, PersistedReadProgressRecord, configured_api_key, ensure_oauth_user,
+    load_book_created_timestamp, load_book_last_epub_position_locator, load_kobo_metadata_record,
+    load_kobo_sync_snapshot, load_koreader_book_target, load_read_progress, load_sync_point_marker,
+    load_sync_point_state, load_thumbnail_by_id, persist_read_progress_with_locator,
+    persisted_book_exists, proxy_kobo_store_library_sync, remove_sync_point, save_sync_point,
 };
 
 #[path = "device_auth/auth_resolvers.rs"]
@@ -62,13 +66,6 @@ pub use oauth::{oauth2_authorization, oauth2_login_code};
 use auth_resolvers::*;
 use helpers::*;
 
-#[derive(Deserialize)]
-#[serde(rename_all = "PascalCase")]
-struct KoboDeviceAuthRequest {
-    #[serde(default)]
-    user_key: String,
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "PascalCase")]
 struct KoboDeviceAuthResponse {
@@ -77,6 +74,48 @@ struct KoboDeviceAuthResponse {
     token_type: &'static str,
     tracking_id: String,
     user_key: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct KoboReadingStateUpdatePayload {
+    #[serde(default)]
+    reading_states: Vec<KoboReadingStateUpdateEntry>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct KoboReadingStateUpdateEntry {
+    last_modified: String,
+    current_bookmark: KoboReadingStateBookmark,
+    status_info: KoboReadingStateStatusInfo,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct KoboReadingStateBookmark {
+    progress_percent: Option<f64>,
+    content_source_progress_percent: Option<f64>,
+    location: Option<KoboReadingStateLocation>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct KoboReadingStateLocation {
+    value: Option<String>,
+    #[serde(rename = "Type", default = "default_kobo_location_type")]
+    location_type: String,
+    source: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct KoboReadingStateStatusInfo {
+    status: String,
+}
+
+fn default_kobo_location_type() -> String {
+    "KoboSpan".to_string()
 }
 
 #[derive(Deserialize, Serialize)]

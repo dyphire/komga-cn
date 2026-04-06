@@ -8,9 +8,13 @@ use komga_rust::infrastructure::metadata::generate_book_thumbnail;
 use komga_rust::infrastructure::sqlite::connect_pool;
 use komga_server::app::build_router_with_config;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha512};
 use sqlx::Row;
 use std::fs::File;
 use std::io::Write;
+use std::sync::{Mutex, OnceLock};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 use tower::util::ServiceExt;
 use zip::CompressionMethod;
 use zip::ZipWriter;
@@ -51,6 +55,109 @@ mod thumbnails_and_generated;
 #[test]
 fn books_media_contract_target_is_registered() {
     assert_required_target_declared("books/media", "books_media_contract");
+}
+
+struct SingleResponseServer {
+    url: String,
+    join: tokio::task::JoinHandle<()>,
+}
+
+fn kobo_proxy_env_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn restore_env_var(name: &str, previous: Option<String>) {
+    match previous {
+        Some(value) => unsafe { std::env::set_var(name, value) },
+        None => unsafe { std::env::remove_var(name) },
+    }
+}
+
+async fn spawn_single_response_server(
+    status_code: u16,
+    content_type: &str,
+    body: &str,
+) -> SingleResponseServer {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("mock response server should bind");
+    let address = listener
+        .local_addr()
+        .expect("mock response server should have local addr");
+    let body = body.to_string();
+    let content_type = content_type.to_string();
+    let join = tokio::spawn(async move {
+        let (mut stream, _) = listener
+            .accept()
+            .await
+            .expect("mock response server should accept one connection");
+        let mut request = [0_u8; 2048];
+        let _ = stream.read(&mut request).await;
+        let status_text = match status_code {
+            200 => "OK",
+            404 => "Not Found",
+            500 => "Internal Server Error",
+            503 => "Service Unavailable",
+            _ => "OK",
+        };
+        let response = format!(
+            "HTTP/1.1 {status_code} {status_text}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .await
+            .expect("mock response server should write response");
+    });
+
+    SingleResponseServer {
+        url: format!("http://{address}/feed.json"),
+        join,
+    }
+}
+
+async fn upsert_server_setting(paths: &RuntimeDbPaths, key: &str, value: &str) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("server settings db should open");
+
+    sqlx::query("INSERT OR REPLACE INTO SERVER_SETTINGS (KEY, VALUE) VALUES (?, ?)")
+        .bind(key)
+        .bind(value)
+        .execute(&pool)
+        .await
+        .expect("server setting should upsert");
+
+    pool.close().await;
+}
+
+async fn seed_kobo_sync_api_key(paths: &RuntimeDbPaths, api_key: &str, user_id: &str) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("user api key seed db should open");
+
+    let api_key_hash = {
+        let mut hasher = Sha512::new();
+        hasher.update(api_key.as_bytes());
+        hasher
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    };
+
+    sqlx::query("INSERT INTO USER_API_KEY (ID, USER_ID, API_KEY, COMMENT) VALUES (?, ?, ?, ?)")
+        .bind(format!("api-key-{api_key}"))
+        .bind(user_id)
+        .bind(api_key_hash)
+        .bind("kobo sync")
+        .execute(&pool)
+        .await
+        .expect("user api key row should be inserted");
+
+    pool.close().await;
 }
 
 fn write_router_epub_with_cover(paths: &RuntimeDbPaths, relative_book_path: &str) {

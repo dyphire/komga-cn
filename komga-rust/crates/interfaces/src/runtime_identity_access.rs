@@ -92,6 +92,7 @@ pub struct KoboMetadataRecord {
     pub language: String,
     pub file_size: u64,
     pub file_name: String,
+    pub media_type: String,
     pub contributor_names: Vec<String>,
     pub isbn: Option<String>,
     pub publisher_name: Option<String>,
@@ -101,6 +102,8 @@ pub struct KoboMetadataRecord {
     pub series_number: Option<String>,
     pub series_number_float: Option<f64>,
     pub oneshot: bool,
+    pub is_kepub: bool,
+    pub is_pre_paginated: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -162,8 +165,6 @@ pub struct RuntimeIdentityAccessBackend {
             + Sync,
     >,
     pub configured_api_key: Arc<dyn Fn() -> Option<String> + Send + Sync>,
-    pub configured_api_key_comment: Arc<dyn Fn() -> Option<String> + Send + Sync>,
-    pub configured_api_key_id: Arc<dyn Fn() -> Option<String> + Send + Sync>,
     pub load_book_created_timestamp: Arc<
         dyn Fn(PathBuf, String) -> BoxFuture<Result<Option<String>, sqlx::Error>> + Send + Sync,
     >,
@@ -174,8 +175,6 @@ pub struct RuntimeIdentityAccessBackend {
             + Send
             + Sync,
     >,
-    pub load_book_page_count:
-        Arc<dyn Fn(PathBuf, String) -> BoxFuture<Result<u64, sqlx::Error>> + Send + Sync>,
     pub load_kobo_metadata_record: Arc<
         dyn Fn(PathBuf, String) -> BoxFuture<Result<Option<KoboMetadataRecord>, sqlx::Error>>
             + Send
@@ -363,12 +362,9 @@ fn default_test_backend() -> RuntimeIdentityAccessBackend {
         }),
         ensure_oauth_user: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),
         configured_api_key: Arc::new(|| None),
-        configured_api_key_comment: Arc::new(|| None),
-        configured_api_key_id: Arc::new(|| None),
         load_book_created_timestamp: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         load_book_last_epub_position_locator: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         load_book_media_file: Arc::new(|_, _| Box::pin(async { Ok(None) })),
-        load_book_page_count: Arc::new(|_, _| Box::pin(async { Ok(0) })),
         load_kobo_metadata_record: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         load_kobo_sync_snapshot: Arc::new(|_, _| {
             Box::pin(async {
@@ -604,14 +600,6 @@ pub fn configured_api_key() -> Option<String> {
     (backend().configured_api_key)()
 }
 
-pub fn configured_api_key_comment() -> Option<String> {
-    (backend().configured_api_key_comment)()
-}
-
-pub fn configured_api_key_id() -> Option<String> {
-    (backend().configured_api_key_id)()
-}
-
 pub async fn load_book_created_timestamp(
     database_file: &Path,
     book_id: &str,
@@ -628,17 +616,6 @@ pub async fn load_book_last_epub_position_locator(
         book_id.to_string(),
     )
     .await
-}
-
-pub async fn load_book_media_file(
-    database_file: &Path,
-    book_id: &str,
-) -> Result<Option<PersistedBookMediaFile>, sqlx::Error> {
-    (backend().load_book_media_file)(database_file.to_path_buf(), book_id.to_string()).await
-}
-
-pub async fn load_book_page_count(database_file: &Path, book_id: &str) -> Result<u64, sqlx::Error> {
-    (backend().load_book_page_count)(database_file.to_path_buf(), book_id.to_string()).await
 }
 
 pub async fn load_kobo_metadata_record(

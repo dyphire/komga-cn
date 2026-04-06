@@ -190,14 +190,6 @@ pub fn configured_api_key() -> Option<String> {
     (backend().configured_api_key)()
 }
 
-pub fn configured_api_key_comment() -> Option<String> {
-    (backend().configured_api_key_comment)()
-}
-
-pub fn configured_api_key_id() -> Option<String> {
-    (backend().configured_api_key_id)()
-}
-
 pub async fn open_auth_pool(database_file: &Path) -> Result<SqlitePool, sqlx::Error> {
     (backend().open_auth_pool)(database_file.to_path_buf()).await
 }

@@ -52,7 +52,7 @@ impl SqliteTaskQueueStore {
                         id: row.get::<String, _>("ID"),
                         priority: row.get::<i64, _>("PRIORITY") as i32,
                         group: row.get::<Option<String>, _>("GROUP_ID"),
-                        simple_type: row.get::<String, _>("SIMPLE_TYPE"),
+                        simple_type: runtime_simple_type(&row.get::<String, _>("SIMPLE_TYPE")),
                         payload: row.get::<Option<String>, _>("PAYLOAD"),
                         owner: row.get::<Option<String>, _>("OWNER"),
                     })
@@ -228,19 +228,37 @@ struct PersistedTaskRow {
 
 impl PersistedTaskRow {
     fn from_record(task: &PersistedTaskStoreRecord) -> Self {
+        let simple_type = persisted_simple_type(task.simple_type.as_str());
         Self {
             id: task.id.clone(),
             priority: task.priority,
             group: task.group.clone(),
-            class_name: kotlin_task_class_name(&task.simple_type),
-            simple_type: task.simple_type.clone(),
+            class_name: kotlin_task_class_name(simple_type.as_str()),
+            simple_type,
             payload: persisted_task_payload(task),
             owner: task.owner.clone(),
         }
     }
 }
 
+fn persisted_simple_type(simple_type: &str) -> String {
+    match simple_type {
+        "REMOVE_HASHED_PAGES" => "RemoveHashedPages".to_string(),
+        _ => simple_type.to_string(),
+    }
+}
+
+fn runtime_simple_type(simple_type: &str) -> String {
+    match simple_type {
+        "RemoveHashedPages" => "REMOVE_HASHED_PAGES".to_string(),
+        _ => simple_type.to_string(),
+    }
+}
+
 fn kotlin_task_class_name(simple_type: &str) -> String {
+    if simple_type == "RemoveHashedPages" {
+        return "org.gotson.komga.application.tasks.Task$RemoveHashedPages".to_string();
+    }
     format!(
         "org.gotson.komga.task.{}.RuntimeTask",
         simple_type.to_ascii_lowercase()

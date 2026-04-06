@@ -1,6 +1,12 @@
 use std::fs;
 use std::path::Path;
 
+#[derive(Clone, PartialEq, Eq)]
+struct FontCharacteristics {
+    style: &'static str,
+    weight: &'static str,
+}
+
 pub fn list_font_families(fonts_directory: &Path) -> Vec<String> {
     let mut families = fs::read_dir(fonts_directory)
         .ok()
@@ -32,40 +38,55 @@ pub fn load_font_family_css(fonts_directory: &Path, font_family: &str) -> Option
         return None;
     };
 
-    let mut blocks = Vec::new();
+    let mut font_files = Vec::new();
     for entry in entries.filter_map(Result::ok) {
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(_) => continue,
+        };
+        if !file_type.is_file() {
+            continue;
+        }
+
         let path = entry.path();
         let file_name = match path.file_name().and_then(|value| value.to_str()) {
             Some(value) => value,
             None => continue,
         };
-        let Some(format) = font_format(file_name) else {
+        if font_format(file_name).is_none() {
             continue;
-        };
+        }
 
-        let lower = file_name.to_ascii_lowercase();
-        let style = if lower.contains("italic") {
-            "italic"
-        } else {
-            "normal"
-        };
-        let weight = if lower.contains("bold") {
-            "bold"
-        } else {
-            "normal"
-        };
-
-        blocks.push(format!(
-            "@font-face {{\n  font-family: '{}';\n  src: url('{}') format('{}');\n  font-weight: {};\n  font-style: {};\n}}",
-            font_family, file_name, format, weight, style,
-        ));
+        font_files.push(file_name.to_string());
     }
+
+    font_files.sort_by_key(|file_name| file_name.to_ascii_lowercase());
+
+    let mut groups: Vec<(FontCharacteristics, Vec<String>)> = Vec::new();
+    for file_name in font_files {
+        let characteristics = font_characteristics(&file_name);
+        if let Some((_, files)) = groups
+            .iter_mut()
+            .find(|(current, _)| *current == characteristics)
+        {
+            files.push(file_name);
+        } else {
+            groups.push((characteristics, vec![file_name]));
+        }
+    }
+
+    let blocks = groups
+        .into_iter()
+        .map(|(characteristics, files)| {
+            build_font_face_block(font_family, &characteristics, &files)
+        })
+        .collect::<Vec<_>>();
 
     if blocks.is_empty() {
-        return None;
+        return Some(String::new());
     }
 
-    Some(blocks.join("\n\n"))
+    Some(blocks.join("\n"))
 }
 
 fn font_extension(file_name: &str) -> Option<&str> {
@@ -95,6 +116,45 @@ fn font_format(file_name: &str) -> Option<&'static str> {
         Some("woff2") => Some("woff2"),
         _ => None,
     }
+}
+
+fn font_characteristics(file_name: &str) -> FontCharacteristics {
+    let lower = file_name.to_ascii_lowercase();
+    FontCharacteristics {
+        style: if lower.contains("italic") {
+            "italic"
+        } else {
+            "normal"
+        },
+        weight: if lower.contains("bold") {
+            "bold"
+        } else {
+            "normal"
+        },
+    }
+}
+
+fn build_font_face_block(
+    font_family: &str,
+    characteristics: &FontCharacteristics,
+    files: &[String],
+) -> String {
+    let src = files
+        .iter()
+        .map(|file_name| {
+            format!(
+                "url('{}') format('{}')",
+                file_name,
+                font_format(file_name).expect("font format should exist for grouped files")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+
+    format!(
+        "@font-face {{\n    font-family: '{}';\n    src: {};\n    font-weight: {};\n    font-style: {};\n}}\n",
+        font_family, src, characteristics.weight, characteristics.style,
+    )
 }
 
 #[cfg(test)]
@@ -148,6 +208,8 @@ mod tests {
         fs::create_dir_all(&family_dir).expect("family dir should be created");
         fs::write(family_dir.join("Demo-Regular.ttf"), b"font-bytes")
             .expect("regular font should be created");
+        fs::write(family_dir.join("Demo-BoldItalic.woff"), b"font-bytes")
+            .expect("bold italic woff should be created");
         fs::write(family_dir.join("Demo-BoldItalic.woff2"), b"font-bytes")
             .expect("bold italic font should be created");
         fs::write(family_dir.join("notes.txt"), b"ignore")
@@ -156,8 +218,10 @@ mod tests {
         let css = load_font_family_css(root.as_path(), "Demo Family");
 
         let css = css.expect("css should be generated");
-        assert!(css.contains("@font-face {\n  font-family: 'Demo Family';\n  src: url('Demo-Regular.ttf') format('truetype');\n  font-weight: normal;\n  font-style: normal;\n}"));
-        assert!(css.contains("@font-face {\n  font-family: 'Demo Family';\n  src: url('Demo-BoldItalic.woff2') format('woff2');\n  font-weight: bold;\n  font-style: italic;\n}"));
+        assert_eq!(
+            css,
+            "@font-face {\n    font-family: 'Demo Family';\n    src: url('Demo-BoldItalic.woff') format('woff'),url('Demo-BoldItalic.woff2') format('woff2');\n    font-weight: bold;\n    font-style: italic;\n}\n\n@font-face {\n    font-family: 'Demo Family';\n    src: url('Demo-Regular.ttf') format('truetype');\n    font-weight: normal;\n    font-style: normal;\n}\n"
+        );
         assert!(!css.contains("notes.txt"));
 
         let _ = fs::remove_dir_all(root);

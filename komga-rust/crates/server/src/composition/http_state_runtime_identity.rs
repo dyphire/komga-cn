@@ -151,8 +151,6 @@ pub(super) fn compose_runtime_identity_access_backend() -> RuntimeIdentityAccess
             })
         }),
         configured_api_key: Arc::new(infrastructure_auth::configured_api_key),
-        configured_api_key_comment: Arc::new(infrastructure_auth::configured_api_key_comment),
-        configured_api_key_id: Arc::new(infrastructure_auth::configured_api_key_id),
         load_book_created_timestamp: Arc::new(|database_file, book_id| {
             Box::pin(async move {
                 infrastructure_auth::load_book_created_timestamp(database_file.as_path(), &book_id)
@@ -173,11 +171,6 @@ pub(super) fn compose_runtime_identity_access_backend() -> RuntimeIdentityAccess
                 infrastructure_auth::load_book_media_file(database_file.as_path(), &book_id)
                     .await
                     .map(|value| value.map(map_persisted_book_media_file))
-            })
-        }),
-        load_book_page_count: Arc::new(|database_file, book_id| {
-            Box::pin(async move {
-                infrastructure_auth::load_book_page_count(database_file.as_path(), &book_id).await
             })
         }),
         load_kobo_metadata_record: Arc::new(|database_file, book_id| {
@@ -410,6 +403,7 @@ fn map_kobo_metadata_record(
         language: record.language,
         file_size: record.file_size,
         file_name: record.file_name,
+        media_type: record.media_type,
         contributor_names: record.contributor_names,
         isbn: record.isbn,
         publisher_name: record.publisher_name,
@@ -419,6 +413,8 @@ fn map_kobo_metadata_record(
         series_number: record.series_number,
         series_number_float: record.series_number_float,
         oneshot: record.oneshot,
+        is_kepub: record.is_kepub,
+        is_pre_paginated: record.is_pre_paginated,
     }
 }
 

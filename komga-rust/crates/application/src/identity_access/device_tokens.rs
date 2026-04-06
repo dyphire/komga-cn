@@ -17,21 +17,12 @@ pub fn sanitize_identifier(value: &str) -> String {
 }
 
 pub fn generated_kobo_token_triplet(user_key: &str) -> (String, String, String) {
-    let key = user_key.trim();
-    let normalized = if key.is_empty() {
-        "anonymous".to_string()
-    } else {
-        sanitize_identifier(key)
-    };
-    let access = random_hex(24);
-    let refresh = random_hex(24);
+    let _ = user_key;
+    let access = random_alphanumeric(24);
+    let refresh = random_alphanumeric(24);
     let tracking = random_uuid_like();
 
-    (
-        format!("kobo-{normalized}-{access}"),
-        format!("kobo-{normalized}-{refresh}"),
-        tracking,
-    )
+    (access, refresh, tracking)
 }
 
 pub fn generated_kobo_api_token(auth_token: &str, authenticated_user_id: &str) -> String {
@@ -65,6 +56,25 @@ fn random_hex(len: usize) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
     hex.chars().take(len).collect()
+}
+
+fn random_alphanumeric(len: usize) -> String {
+    const ALPHABET: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    let mut bytes = vec![0u8; len];
+    if let Ok(mut file) = std::fs::File::open("/dev/urandom") {
+        let _ = file.read_exact(&mut bytes);
+    } else {
+        let seed = random_hex(len * 2);
+        let seed_bytes = seed.as_bytes();
+        for (idx, byte) in bytes.iter_mut().enumerate() {
+            *byte = seed_bytes[idx % seed_bytes.len()];
+        }
+    }
+
+    bytes
+        .into_iter()
+        .map(|byte| ALPHABET[(byte as usize) % ALPHABET.len()] as char)
+        .collect()
 }
 
 pub fn random_uuid_like() -> String {
