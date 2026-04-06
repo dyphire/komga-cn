@@ -72,61 +72,231 @@ async fn router_discovery_series_list_supports_deleted_filter_in_runtime_owned_m
 }
 
 #[tokio::test]
-async fn router_discovery_series_rejects_legacy_search_query_inputs() {
-    let paths = new_router_fixture("router-discovery-series-legacy-search-query").await;
+async fn router_discovery_removed_v1_series_routes_return_not_found() {
+    let paths = new_router_fixture("router-discovery-removed-v1-series-routes").await;
     seed_router_contract_data(&paths).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
-    for legacy_query_name in ["searchRegex", "search_regex"] {
+    for route in [
+        "/api/v1/series?page=0&size=20",
+        "/api/v1/series/alphabetical-groups?page=0&size=20",
+        "/api/v1/series/series-1/books?page=0&size=20",
+    ] {
         let response = app
             .clone()
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri(format!(
-                        "/api/v1/series?page=0&size=20&{legacy_query_name}=series"
-                    ))
+                    .uri(route)
                     .header("x-auth-token", &auth_token)
                     .body(Body::empty())
-                    .expect("legacy series query request should build"),
+                    .expect("removed series v1 request should build"),
             )
             .await
-            .expect("legacy series query request should complete");
+            .expect("removed series v1 request should complete");
 
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "route: {route}");
     }
 
     cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
-async fn router_discovery_series_alphabetical_groups_rejects_legacy_search_query_inputs() {
+async fn router_discovery_series_alphabetical_groups_groups_by_title_sort_first_character() {
+    let paths = new_router_fixture("router-discovery-series-alphabetical-groups-title-sort").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_custom_series(&paths, "series-2", "Series 2", "library-1").await;
+    seed_router_custom_series(&paths, "series-3", "Series 3", "library-1").await;
+    seed_router_series_title_sort(&paths, "series-1", "Alpha Shelf").await;
+    seed_router_series_title_sort(&paths, "series-2", "Beta Shelf").await;
+    seed_router_series_title_sort(&paths, "series-3", "Beta Archive").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/series/list/alphabetical-groups")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .expect("alphabetical-groups request should build"),
+        )
+        .await
+        .expect("alphabetical-groups request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let groups = payload
+        .as_array()
+        .expect("alphabetical-groups payload should be an array")
+        .iter()
+        .map(|entry| {
+            (
+                entry
+                    .get("group")
+                    .and_then(Value::as_str)
+                    .expect("group entry should expose group")
+                    .to_string(),
+                entry
+                    .get("count")
+                    .and_then(Value::as_i64)
+                    .expect("group entry should expose count"),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(groups, vec![("a".to_string(), 1), ("b".to_string(), 2)]);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_alphabetical_groups_rejects_unknown_condition_type() {
     let paths =
-        new_router_fixture("router-discovery-series-alphabetical-groups-legacy-search-query").await;
+        new_router_fixture("router-discovery-series-alphabetical-groups-unknown-condition").await;
     seed_router_contract_data(&paths).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
-    for legacy_query_name in ["regexSearch", "searchRegex", "search_regex"] {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/series/list/alphabetical-groups")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "condition": {
+                            "type": "UnknownSeriesCondition",
+                            "operator": "isTrue"
+                        }
+                    })
+                    .to_string(),
+                ))
+                .expect("invalid alphabetical-groups request should build"),
+        )
+        .await
+        .expect("invalid alphabetical-groups request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload,
+        json!({
+            "error": "invalid series alphabetical-groups request: InvalidSemantics(\"unsupported series condition type: UnknownSeriesCondition\")"
+        })
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_alphabetical_groups_rejects_empty_untyped_condition() {
+    let paths =
+        new_router_fixture("router-discovery-series-alphabetical-groups-empty-condition").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/series/list/alphabetical-groups")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "condition": {} }).to_string()))
+                .expect("empty-condition alphabetical-groups request should build"),
+        )
+        .await
+        .expect("empty-condition alphabetical-groups request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = response_json(response).await;
+    let error = payload
+        .get("error")
+        .and_then(Value::as_str)
+        .expect("empty-condition response should expose error string");
+    assert!(error.starts_with("invalid series alphabetical-groups request:"));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_alphabetical_groups_rejects_unknown_webui_condition_leaf() {
+    let paths =
+        new_router_fixture("router-discovery-series-alphabetical-groups-unknown-webui-leaf").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/series/list/alphabetical-groups")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "condition": {
+                            "unknownField": {
+                                "operator": "isTrue"
+                            }
+                        }
+                    })
+                    .to_string(),
+                ))
+                .expect("unknown-webui-leaf alphabetical-groups request should build"),
+        )
+        .await
+        .expect("unknown-webui-leaf alphabetical-groups request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = response_json(response).await;
+    let error = payload
+        .get("error")
+        .and_then(Value::as_str)
+        .expect("unknown-webui-leaf response should expose error string");
+    assert!(error.starts_with("invalid series alphabetical-groups request:"));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_alphabetical_groups_rejects_non_object_bodies() {
+    let paths =
+        new_router_fixture("router-discovery-series-alphabetical-groups-non-object-body").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    for (case, body) in [("array", Body::from("[]")), ("null", Body::from("null"))] {
         let response = app
             .clone()
             .oneshot(
                 Request::builder()
-                    .method("GET")
-                    .uri(format!(
-                        "/api/v1/series/alphabetical-groups?page=0&size=20&{legacy_query_name}=series"
-                    ))
+                    .method("POST")
+                    .uri("/api/v1/series/list/alphabetical-groups")
                     .header("x-auth-token", &auth_token)
-                    .body(Body::empty())
-                    .expect("legacy alphabetical-groups query request should build"),
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(body)
+                    .expect("non-object alphabetical-groups request should build"),
             )
             .await
-            .expect("legacy alphabetical-groups query request should complete");
+            .expect("non-object alphabetical-groups request should complete");
 
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "case: {case}");
     }
 
     cleanup_router_fixture(paths);

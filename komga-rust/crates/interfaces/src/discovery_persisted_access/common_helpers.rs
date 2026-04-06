@@ -14,7 +14,7 @@ pub fn first_group_key(title: &str) -> String {
         .trim()
         .chars()
         .next()
-        .map(|ch| ch.to_ascii_uppercase().to_string())
+        .map(|ch| ch.to_lowercase().collect::<String>())
         .unwrap_or_else(|| "#".to_string())
 }
 
@@ -81,29 +81,6 @@ pub fn invalid_runtime_books_list_response(error: DiscoveryError) -> Response {
         })),
     )
         .into_response()
-}
-
-pub fn empty_books_page_response(uri: &Uri, is_admin: bool) -> Response {
-    let query = uri.query().unwrap_or_default();
-    let page = query_value(query, "page")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let size = query_value(query, "size")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(20)
-        .max(1);
-    let unpaged = query_bool(query, "unpaged");
-    let page_number = if unpaged { 0 } else { page };
-    let page_size = if unpaged { 1 } else { size };
-
-    let mut response = Json(books_page_payload(
-        PageEnvelope::from_slice(vec![], page_number, page_size, 0),
-        is_admin,
-        !unpaged,
-    ))
-    .into_response();
-    mark_persisted_owned(&mut response);
-    response
 }
 
 #[cfg(test)]

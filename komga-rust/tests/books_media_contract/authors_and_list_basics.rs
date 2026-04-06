@@ -1,100 +1,32 @@
 use super::*;
 
 #[tokio::test]
-async fn router_authors_v1_filters_by_search_query() {
-    let paths = new_router_fixture("router-authors-v1-search").await;
+async fn router_removed_books_and_authors_v1_routes_return_not_found() {
+    let paths = new_router_fixture("router-removed-books-and-authors-v1-routes").await;
     seed_router_contract_data(&paths).await;
-    seed_router_authors_scope_variants(&paths).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/api/v1/authors?search=jane")
-                .header("x-auth-token", &auth_token)
-                .body(Body::empty())
-                .expect("authors v1 search request should build"),
-        )
-        .await
-        .expect("authors v1 search request should complete");
+    for route in [
+        "/api/v1/books?page=0&size=20",
+        "/api/v1/authors?search=jane",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header("x-auth-token", &auth_token)
+                    .body(Body::empty())
+                    .expect("removed v1 route request should build"),
+            )
+            .await
+            .expect("removed v1 route request should complete");
 
-    assert_eq!(response.status(), StatusCode::OK);
-    let payload = response_json(response).await;
-    let authors = payload
-        .as_array()
-        .expect("authors v1 search payload should be an array");
-    assert_eq!(authors.len(), 1);
-    assert_eq!(authors[0].get("name"), Some(&json!("Jane Writer")));
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_authors_v1_filters_by_collection_id() {
-    let paths = new_router_fixture("router-authors-v1-collection").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_authors_scope_variants(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/api/v1/authors?collection_id=collection-1")
-                .header("x-auth-token", &auth_token)
-                .body(Body::empty())
-                .expect("authors v1 collection request should build"),
-        )
-        .await
-        .expect("authors v1 collection request should complete");
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let payload = response_json(response).await;
-    let authors = payload
-        .as_array()
-        .expect("authors v1 collection payload should be an array");
-    assert_eq!(authors.len(), 1);
-    assert_eq!(authors[0].get("name"), Some(&json!("Jane Writer")));
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_authors_v1_filters_by_series_id() {
-    let paths = new_router_fixture("router-authors-v1-series").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_authors_scope_variants(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/api/v1/authors?series_id=series-1")
-                .header("x-auth-token", &auth_token)
-                .body(Body::empty())
-                .expect("authors v1 series request should build"),
-        )
-        .await
-        .expect("authors v1 series request should complete");
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let payload = response_json(response).await;
-    let authors = payload
-        .as_array()
-        .expect("authors v1 series payload should be an array");
-    assert_eq!(authors.len(), 1);
-    assert_eq!(authors[0].get("name"), Some(&json!("Jane Writer")));
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "route: {route}");
+    }
 
     cleanup_router_fixture(paths);
 }
@@ -154,30 +86,6 @@ async fn router_author_endpoints_filter_to_authorized_libraries() {
         let payload = response_json(response).await;
         assert_eq!(payload, expected, "route: {route}");
     }
-
-    let v1_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/api/v1/authors")
-                .header("x-auth-token", &auth_token)
-                .body(Body::empty())
-                .expect("authors v1 authorized-libraries request should build"),
-        )
-        .await
-        .expect("authors v1 authorized-libraries request should complete");
-
-    assert_eq!(v1_response.status(), StatusCode::OK);
-    let payload = response_json(v1_response).await;
-    let authors = payload
-        .as_array()
-        .expect("authors v1 authorized-libraries payload should be an array");
-    let author_names = authors
-        .iter()
-        .filter_map(|entry| entry.get("name").and_then(Value::as_str))
-        .collect::<Vec<_>>();
-    assert_eq!(author_names, vec!["Alex Side", "Jane Writer"]);
 
     let v2_response = app
         .oneshot(

@@ -598,33 +598,35 @@ pub async fn load_persisted_books_page(
         });
     }
 
-    books.sort_by(|left, right| {
-        for sort_mode in &query.sort_modes {
-            let ordering = match sort_mode {
-                PersistedBooksSortMode::TitleAsc => left
-                    .title
-                    .to_ascii_lowercase()
-                    .cmp(&right.title.to_ascii_lowercase()),
-                PersistedBooksSortMode::CreatedDateDesc => right.created.cmp(&left.created),
-                PersistedBooksSortMode::LastModifiedDateDesc => {
-                    right.last_modified.cmp(&left.last_modified)
+    if !query.sort_modes.is_empty() {
+        books.sort_by(|left, right| {
+            for sort_mode in &query.sort_modes {
+                let ordering = match sort_mode {
+                    PersistedBooksSortMode::TitleAsc => left
+                        .title
+                        .to_ascii_lowercase()
+                        .cmp(&right.title.to_ascii_lowercase()),
+                    PersistedBooksSortMode::CreatedDateDesc => right.created.cmp(&left.created),
+                    PersistedBooksSortMode::LastModifiedDateDesc => {
+                        right.last_modified.cmp(&left.last_modified)
+                    }
+                    PersistedBooksSortMode::ReleaseDateDesc => {
+                        right.metadata_release_date.cmp(&left.metadata_release_date)
+                    }
+                    PersistedBooksSortMode::RelevanceAsc => {
+                        compare_relevance_ranks(&relevance_ranks, &left.id, &right.id, false)
+                    }
+                    PersistedBooksSortMode::RelevanceDesc => {
+                        compare_relevance_ranks(&relevance_ranks, &left.id, &right.id, true)
+                    }
+                };
+                if ordering != std::cmp::Ordering::Equal {
+                    return ordering;
                 }
-                PersistedBooksSortMode::ReleaseDateDesc => {
-                    right.metadata_release_date.cmp(&left.metadata_release_date)
-                }
-                PersistedBooksSortMode::RelevanceAsc => {
-                    compare_relevance_ranks(&relevance_ranks, &left.id, &right.id, false)
-                }
-                PersistedBooksSortMode::RelevanceDesc => {
-                    compare_relevance_ranks(&relevance_ranks, &left.id, &right.id, true)
-                }
-            };
-            if ordering != std::cmp::Ordering::Equal {
-                return ordering;
             }
-        }
-        left.id.cmp(&right.id)
-    });
+            left.id.cmp(&right.id)
+        });
+    }
 
     let total_elements = books.len();
     let content = if query.unpaged {
@@ -695,7 +697,7 @@ pub async fn runtime_owned_persisted_books_page(
         return None;
     }
 
-    let sort_modes = parse_persisted_books_sort_modes(sorts);
+    let sort_modes = parse_persisted_books_sort_modes(sorts, full_text_search.as_deref());
     let has_persisted_rows = match persisted_books_exist(database_file).await {
         Ok(has_rows) => has_rows,
         Err(error) => return Some(Err(error)),
@@ -721,7 +723,14 @@ pub async fn runtime_owned_persisted_books_page(
     )
 }
 
-pub fn parse_persisted_books_sort_modes(sorts: &[String]) -> Vec<PersistedBooksSortMode> {
+pub fn parse_persisted_books_sort_modes(
+    sorts: &[String],
+    full_text_search: Option<&str>,
+) -> Vec<PersistedBooksSortMode> {
+    let has_full_text_search = full_text_search
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some();
     let mut modes = sorts
         .iter()
         .filter_map(|sort| match sort.as_str() {
@@ -731,14 +740,14 @@ pub fn parse_persisted_books_sort_modes(sorts: &[String]) -> Vec<PersistedBooksS
             "createdDate,desc" => Some(PersistedBooksSortMode::CreatedDateDesc),
             "lastModifiedDate,desc" => Some(PersistedBooksSortMode::LastModifiedDateDesc),
             "metadata.releaseDate,desc" => Some(PersistedBooksSortMode::ReleaseDateDesc),
-            "relevance,asc" => Some(PersistedBooksSortMode::RelevanceAsc),
-            "relevance,desc" => Some(PersistedBooksSortMode::RelevanceDesc),
+            "relevance,asc" if has_full_text_search => Some(PersistedBooksSortMode::RelevanceAsc),
+            "relevance,desc" if has_full_text_search => Some(PersistedBooksSortMode::RelevanceDesc),
             _ => None,
         })
         .collect::<Vec<_>>();
     modes.dedup();
-    if modes.is_empty() {
-        modes.push(PersistedBooksSortMode::TitleAsc);
+    if modes.is_empty() && sorts.is_empty() && has_full_text_search {
+        modes.push(PersistedBooksSortMode::RelevanceDesc);
     }
     modes
 }
@@ -761,6 +770,8 @@ pub async fn runtime_owned_books_list_response(
         .into_iter()
         .map(decode_query_component)
         .collect::<Vec<_>>();
+    let persisted_sort_modes =
+        parse_persisted_books_sort_modes(&sorts, full_text_search.as_deref());
     let page = query_value(query_string, "page")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
@@ -842,8 +853,9 @@ pub async fn runtime_owned_books_list_response(
     {
         match persisted_page {
             Ok(page) => {
+                let sorted = !persisted_sort_modes.is_empty();
                 let mut response =
-                    Json(books_page_payload(page, is_admin, !unpaged)).into_response();
+                    Json(books_page_payload(page, is_admin, !unpaged, sorted)).into_response();
                 mark_runtime_owned(&mut response);
                 return Some(response);
             }
@@ -918,7 +930,7 @@ pub async fn runtime_owned_books_latest_response(
                 (page, true)
             };
             let mut response =
-                Json(books_page_payload(page, context.is_admin, paged)).into_response();
+                Json(books_page_payload(page, context.is_admin, paged, true)).into_response();
             mark_runtime_owned(&mut response);
             Some(response)
         }

@@ -102,75 +102,6 @@ fn should_use_strict_runtime_shape(payload: Option<&Value>) -> bool {
         .is_some()
 }
 
-pub async fn series(
-    headers: HeaderMap,
-    uri: Uri,
-    auth_state: DiscoveryAuthState,
-    database_file: &FsPath,
-) -> Response {
-    if let Some(response) = require_auth(&headers) {
-        return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    let query = uri.query().unwrap_or_default();
-    if contains_legacy_search_query(query) {
-        return StatusCode::BAD_REQUEST.into_response();
-    }
-    let requested_library_ids = requested_query_values(query, "library_id");
-    let library_ids =
-        remap_requested_library_ids_for_persisted(database_file, requested_library_ids.as_ref())
-            .await
-            .or(requested_library_ids);
-    let collection_ids = requested_query_values(query, "collection_id");
-    let search = query_value(query, "search").map(decode_query_component);
-    let page = query_value(query, "page")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let size = query_value(query, "size")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(20)
-        .max(1);
-    let unpaged = query_bool(query, "unpaged");
-
-    let context = match auth_state.resolve_query_context(&headers, library_ids.as_deref()) {
-        Some(context) => context,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
-    };
-
-    let series_page = match load_persisted_series_page(
-        database_file,
-        &context,
-        PersistedSeriesBrowseQuery::from_filters(
-            SeriesFilterCriteria {
-                library_ids,
-                collection_ids,
-                ..SeriesFilterCriteria::default()
-            },
-            search,
-            page,
-            size,
-            unpaged,
-            vec![PersistedSeriesSortMode::TitleAsc],
-        ),
-    )
-    .await
-    {
-        Ok(page) => page,
-        Err(error) => return internal_error_response(error),
-    };
-
-    let mut response = Json(series_page_payload(series_page, !unpaged, true)).into_response();
-    if wants_persisted_marker(&headers, None) {
-        mark_persisted_owned(&mut response);
-    }
-
-    response
-}
-
 pub async fn series_latest(
     headers: HeaderMap,
     uri: Uri,
@@ -195,6 +126,10 @@ pub async fn series_alphabetical_groups(
     auth_state: DiscoveryAuthState,
     database_file: &FsPath,
 ) -> Response {
+    if !body.is_object() {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+
     if let Some(response) = require_auth(&headers) {
         return response;
     }
@@ -203,7 +138,10 @@ pub async fn series_alphabetical_groups(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let filters = match parse_runtime_series_filters(body.get("condition")) {
+    let filters = match parse_runtime_series_filters_with_mode(
+        body.get("condition"),
+        OperatorValidationMode::Strict,
+    ) {
         Ok(filters) => filters,
         Err(error) => {
             return (

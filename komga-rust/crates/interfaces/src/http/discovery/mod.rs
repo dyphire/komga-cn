@@ -19,9 +19,8 @@ use crate::http::identity_access::auth::{
 
 use super::super::{AuthDatabaseState, OperationalState};
 use super::helpers::{
-    books_page_payload, contains_legacy_search_input, contains_legacy_search_query,
-    extract_full_text_search, mark_persisted_owned, mark_runtime_owned, query_bool, query_value,
-    query_values, wants_persisted_marker,
+    books_page_payload, extract_full_text_search, mark_runtime_owned, query_bool, query_value,
+    query_values,
 };
 
 #[path = "books.rs"]
@@ -35,7 +34,7 @@ mod series;
 #[path = "series_routes.rs"]
 mod series_routes;
 
-pub use books::{book_tags, books, books_duplicates, books_latest, books_list, books_ondeck};
+pub use books::{book_tags, books_duplicates, books_latest, books_list, books_ondeck};
 pub use detail::{
     DiscoveryDetailAccessBackends, DiscoveryDetailBooksAccessBackend,
     DiscoveryDetailCollectionsAccessBackend, DiscoveryDetailReadlistsAccessBackend,
@@ -54,7 +53,7 @@ pub use detail::{
     series_detail, series_metadata_update,
 };
 pub use facets::{
-    age_ratings, authors, authors_names, authors_roles, authors_v2, genres, languages, publishers,
+    age_ratings, authors_names, authors_roles, authors_v2, genres, languages, publishers,
     series_release_dates, series_tags, sharing_labels, tags,
 };
 pub use persisted::{
@@ -63,9 +62,8 @@ pub use persisted::{
     PersistedDiscoveryAccessBackend, PersistedSeriesSummary, install_persisted_discovery_access,
 };
 pub use series::{
-    series, series_alphabetical_groups, series_latest, series_list, series_new, series_updated,
+    series_alphabetical_groups, series_latest, series_list, series_new, series_updated,
 };
-pub use series_routes::{series_alphabetical_groups_deprecated, series_books};
 
 #[path = "filters.rs"]
 mod filters;
@@ -74,15 +72,6 @@ mod persisted;
 
 use filters::*;
 use persisted::*;
-
-pub(super) async fn authors_route(
-    Extension(auth_state): Extension<DiscoveryAuthState>,
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    headers: HeaderMap,
-    uri: Uri,
-) -> Response {
-    authors(headers, uri, auth_state, auth_db.database_file.as_path()).await
-}
 
 pub(super) async fn authors_names_route(
     Extension(auth_state): Extension<DiscoveryAuthState>,
@@ -162,15 +151,6 @@ pub(super) async fn sharing_labels_route(
     uri: Uri,
 ) -> Response {
     sharing_labels(headers, uri, auth_state, auth_db.database_file.as_path()).await
-}
-
-pub(super) async fn series_route(
-    Extension(auth_state): Extension<DiscoveryAuthState>,
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    headers: HeaderMap,
-    uri: Uri,
-) -> Response {
-    series(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn series_new_route(

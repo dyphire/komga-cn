@@ -22,7 +22,7 @@ pub async fn load_persisted_alphabetical_groups(
 
     let mut counts = BTreeMap::<String, i64>::new();
     for series in page.content {
-        let group = first_group_key(&series.title);
+        let group = first_group_key(&series.title_sort);
         *counts.entry(group).or_insert(0) += 1;
     }
 

@@ -181,7 +181,6 @@ pub fn build_router(
             "/api/v1/libraries/{library_id}",
             get(library_catalog::library_detail_route)
                 .patch(library_catalog::library_update_route)
-                .put(library_catalog::library_update_route)
                 .delete(library_catalog::library_delete_route),
         )
         .route(
@@ -200,7 +199,6 @@ pub fn build_router(
             "/api/v1/libraries/{library_id}/empty-trash",
             post(library_catalog::library_empty_trash_route),
         )
-        .route("/api/v1/authors", get(discovery::authors_route))
         .route("/api/v1/authors/names", get(discovery::authors_names_route))
         .route("/api/v1/authors/roles", get(discovery::authors_roles_route))
         .route("/api/v1/genres", get(discovery::genres_route))
@@ -210,7 +208,6 @@ pub fn build_router(
         .route("/api/v1/publishers", get(discovery::publishers_route))
         .route("/api/v1/age-ratings", get(discovery::age_ratings_route))
         .route("/api/v1/sharing-labels", get(discovery::sharing_labels_route))
-        .route("/api/v1/series", get(discovery::series_route))
         .route("/api/v1/series/new", get(discovery::series_new_route))
         .route("/api/v1/series/updated", get(discovery::series_updated_route))
         .route(
@@ -218,16 +215,8 @@ pub fn build_router(
             get(discovery::series_release_dates_route),
         )
         .route("/api/v1/series/latest", get(discovery::series_latest_route))
-        .route(
-            "/api/v1/series/alphabetical-groups",
-            get(discovery::series_alphabetical_groups_deprecated),
-        )
         .route("/api/v1/tags/book", get(discovery::book_tags))
         .route("/api/v1/series/{series_id}", get(discovery::series_detail_route))
-        .route(
-            "/api/v1/series/{series_id}/books",
-            get(discovery::series_books),
-        )
         .route(
             "/api/v1/series/{series_id}/collections",
             get(discovery::series_collections_route),
@@ -274,7 +263,6 @@ pub fn build_router(
             "/api/v1/series/list/alphabetical-groups",
             post(discovery::series_alphabetical_groups_route),
         )
-        .route("/api/v1/books", get(discovery::books))
         .route("/api/v1/books/list", post(discovery::books_list))
         .route("/api/v1/books/latest", get(discovery::books_latest))
         .route("/api/v1/books/ondeck", get(discovery::books_ondeck))

@@ -1,5 +1,26 @@
 use super::*;
 
+async fn books_list_response(
+    app: &axum::Router,
+    auth_token: &str,
+    runtime_owned: bool,
+    body: Body,
+) -> axum::response::Response {
+    let mut builder = Request::builder()
+        .method("POST")
+        .uri("/api/v1/books/list?page=0&size=20")
+        .header("x-auth-token", auth_token)
+        .header(header::CONTENT_TYPE, "application/json");
+    if runtime_owned {
+        builder = builder.header("x-komga-runtime-search-ownership", "runtime-rust-owned");
+    }
+
+    app.clone()
+        .oneshot(builder.body(body).expect("books/list request should build"))
+        .await
+        .expect("books/list request should complete")
+}
+
 #[tokio::test]
 async fn router_discovery_books_list_locks_main_search_parity_for_retained_inputs() {
     let paths = new_router_fixture("router-discovery-books-list-main-search-parity").await;
@@ -16,6 +37,9 @@ async fn router_discovery_books_list_locks_main_search_parity_for_retained_input
     let relevance_desc_ids =
         books_list_ids(&app, &admin_token, Some("relevance,desc"), Some("book")).await;
     assert_eq!(relevance_desc_ids, vec!["book-2", "book-1", "book-3"]);
+
+    let default_relevance_ids = books_list_ids(&app, &admin_token, None, Some("book")).await;
+    assert_eq!(default_relevance_ids, vec!["book-2", "book-1", "book-3"]);
 
     let relevance_asc_ids =
         books_list_ids(&app, &admin_token, Some("relevance,asc"), Some("book")).await;
@@ -87,8 +111,114 @@ async fn router_discovery_books_list_retains_accent_folded_and_cjk_recall() {
 }
 
 #[tokio::test]
-async fn router_discovery_books_list_rejects_legacy_regex_search_body_input() {
+async fn router_discovery_books_list_ignores_legacy_regex_search_body_input() {
     let paths = new_router_fixture("router-discovery-books-list-legacy-regex-search").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let baseline_ids = books_list_ids(&app, &auth_token, None, None).await;
+
+    for legacy_field in ["regexSearch", "searchRegex", "search_regex"] {
+        let mut payload = json!({
+            "condition": {
+                "type": "Title",
+                "operator": "contains",
+                "value": "book"
+            }
+        });
+        payload[legacy_field] = Value::String("(".to_string());
+
+        let response =
+            books_list_response(&app, &auth_token, true, Body::from(payload.to_string())).await;
+
+        assert_eq!(response.status(), StatusCode::OK, "field={legacy_field}");
+
+        let payload = response_json(response).await;
+        let ids = payload
+            .get("content")
+            .and_then(Value::as_array)
+            .expect("books/list payload should expose content array")
+            .iter()
+            .filter_map(|entry| entry.get("id").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        assert_eq!(ids, baseline_ids, "field={legacy_field}");
+    }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_books_list_rejects_invalid_request_bodies() {
+    let paths = new_router_fixture("router-discovery-books-list-invalid-bodies").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    for (case, body) in [
+        ("empty", Body::empty()),
+        ("invalid-json", Body::from("{")),
+        ("array-body", Body::from("[]")),
+    ] {
+        let response = books_list_response(&app, &auth_token, false, body).await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "case={case}");
+    }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_books_list_blank_full_text_search_does_not_report_relevance_sort() {
+    let paths = new_router_fixture("router-discovery-books-list-blank-search-unsorted-meta").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/books/list?page=0&size=20&sort=relevance,desc")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "condition": {
+                            "type": "Title",
+                            "operator": "contains",
+                            "value": "book"
+                        },
+                        "fullTextSearch": "   "
+                    })
+                    .to_string(),
+                ))
+                .expect("blank-search books/list request should build"),
+        )
+        .await
+        .expect("blank-search books/list request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(payload.pointer("/sort/sorted"), Some(&json!(false)));
+    assert_eq!(payload.pointer("/sort/unsorted"), Some(&json!(true)));
+    assert_eq!(
+        payload.pointer("/pageable/sort/sorted"),
+        Some(&json!(false))
+    );
+    assert_eq!(
+        payload.pointer("/pageable/sort/unsorted"),
+        Some(&json!(true))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_books_list_marks_unsorted_page_shape_without_full_text_search() {
+    let paths = new_router_fixture("router-discovery-books-list-unsorted-page-shape").await;
     seed_router_contract_data(&paths).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
@@ -100,7 +230,6 @@ async fn router_discovery_books_list_rejects_legacy_regex_search_body_input() {
                 .method("POST")
                 .uri("/api/v1/books/list?page=0&size=20")
                 .header("x-auth-token", &auth_token)
-                .header("x-komga-runtime-search-ownership", "runtime-rust-owned")
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(
                     json!({
@@ -108,17 +237,27 @@ async fn router_discovery_books_list_rejects_legacy_regex_search_body_input() {
                             "type": "Title",
                             "operator": "contains",
                             "value": "book"
-                        },
-                        "regexSearch": "book"
+                        }
                     })
                     .to_string(),
                 ))
-                .expect("legacy books/list regexSearch request should build"),
+                .expect("unsorted books/list request should build"),
         )
         .await
-        .expect("legacy books/list regexSearch request should complete");
+        .expect("unsorted books/list request should complete");
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(payload.pointer("/sort/sorted"), Some(&json!(false)));
+    assert_eq!(payload.pointer("/sort/unsorted"), Some(&json!(true)));
+    assert_eq!(
+        payload.pointer("/pageable/sort/sorted"),
+        Some(&json!(false))
+    );
+    assert_eq!(
+        payload.pointer("/pageable/sort/unsorted"),
+        Some(&json!(true))
+    );
 
     cleanup_router_fixture(paths);
 }

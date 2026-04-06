@@ -9,48 +9,42 @@ pub async fn load_persisted_ondeck_books(
         .map_err(|error| format!("open books ondeck db: {error}"))?;
 
     let rows = sqlx::query(
-        "SELECT b.ID, b.LIBRARY_ID, b.NAME, COALESCE(bm.TITLE, b.NAME) AS TITLE, b.SERIES_ID, \
-                b.NUMBER \
-         FROM BOOK b \
+        "SELECT b.ID, b.LIBRARY_ID, b.NAME, COALESCE(bm.TITLE, b.NAME) AS TITLE \
+         FROM READ_PROGRESS_SERIES rps \
+         JOIN SERIES s ON s.ID = rps.SERIES_ID \
+         JOIN BOOK b ON b.SERIES_ID = s.ID \
          JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
-         WHERE b.SERIES_ID IN (SELECT DISTINCT b_done.SERIES_ID \
-         FROM BOOK b_done \
-         JOIN READ_PROGRESS rp_done ON rp_done.BOOK_ID = b_done.ID \
-         WHERE rp_done.USER_ID = ? \
-         AND rp_done.COMPLETED = 1) \
-         AND b.SERIES_ID NOT IN (SELECT DISTINCT b_prog.SERIES_ID \
-         FROM BOOK b_prog \
-         JOIN READ_PROGRESS rp_prog ON rp_prog.BOOK_ID = b_prog.ID \
-         WHERE rp_prog.USER_ID = ? \
-         AND rp_prog.COMPLETED = 0) \
+         LEFT JOIN READ_PROGRESS rp ON rp.BOOK_ID = b.ID AND rp.USER_ID = rps.USER_ID \
+         WHERE rps.USER_ID = ? \
+         AND rps.IN_PROGRESS_COUNT = 0 \
+         AND rps.READ_COUNT != s.BOOK_COUNT \
+         AND rp.COMPLETED IS NULL \
          AND NOT EXISTS (SELECT 1 \
-         FROM READ_PROGRESS rp_seen \
-         WHERE rp_seen.BOOK_ID = b.ID \
-         AND rp_seen.USER_ID = ? \
-         AND rp_seen.COMPLETED = 1) \
-         ORDER BY b.SERIES_ID ASC, b.NUMBER ASC",
+                         FROM BOOK b_prev \
+                         JOIN BOOK_METADATA bm_prev ON bm_prev.BOOK_ID = b_prev.ID \
+                         LEFT JOIN READ_PROGRESS rp_prev ON rp_prev.BOOK_ID = b_prev.ID \
+                                                      AND rp_prev.USER_ID = rps.USER_ID \
+                         WHERE b_prev.SERIES_ID = b.SERIES_ID \
+                         AND rp_prev.COMPLETED IS NULL \
+                         AND (COALESCE(bm_prev.NUMBER_SORT, 0) < COALESCE(bm.NUMBER_SORT, 0) \
+                              OR (COALESCE(bm_prev.NUMBER_SORT, 0) = COALESCE(bm.NUMBER_SORT, 0) \
+                                  AND b_prev.ID < b.ID))) \
+         ORDER BY rps.MOST_RECENT_READ_DATE DESC",
     )
-    .bind(user_id)
-    .bind(user_id)
     .bind(user_id)
     .fetch_all(&pool)
     .await
     .map_err(|error| format!("query persisted books ondeck: {error}"))?;
 
-    let mut first_per_series = BTreeMap::<String, BookBrowseEntry>::new();
-    for row in rows {
-        let series_id = row.get::<String, _>("SERIES_ID");
-        first_per_series
-            .entry(series_id)
-            .or_insert_with(|| BookBrowseEntry {
-                id: row.get::<String, _>("ID"),
-                library_id: row.get::<String, _>("LIBRARY_ID"),
-                name: row.get::<String, _>("NAME"),
-                title: row.get::<String, _>("TITLE"),
-            });
-    }
-
-    Ok(first_per_series.into_values().collect())
+    Ok(rows
+        .into_iter()
+        .map(|row| BookBrowseEntry {
+            id: row.get::<String, _>("ID"),
+            library_id: row.get::<String, _>("LIBRARY_ID"),
+            name: row.get::<String, _>("NAME"),
+            title: row.get::<String, _>("TITLE"),
+        })
+        .collect())
 }
 
 pub async fn load_persisted_duplicate_books(

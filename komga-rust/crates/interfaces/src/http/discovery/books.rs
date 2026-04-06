@@ -1,4 +1,5 @@
 use super::*;
+use crate::http::discovery_auth::{AgeRestrictionKind, QueryRestrictions};
 use icu::collator::{
     Collator,
     options::{CollatorOptions, Strength},
@@ -330,88 +331,144 @@ fn normalize_books_latest_unpaged_page_shape<T>(mut page: PageEnvelope<T>) -> Pa
     page
 }
 
-fn should_use_strict_runtime_shape(payload: Option<&Value>, has_oneshot_bootstrap: bool) -> bool {
-    has_oneshot_bootstrap
-        || payload
-            .and_then(|value| value.get("condition"))
-            .and_then(|condition| condition.get("type"))
-            .is_some()
+fn normalized_ondeck_sharing_labels(labels: &[String]) -> Vec<String> {
+    labels
+        .iter()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .collect()
 }
 
-pub async fn books(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(auth_state): Extension<DiscoveryAuthState>,
-    headers: HeaderMap,
-    uri: Uri,
-) -> Response {
-    if let Some(response) = require_auth(&headers) {
-        return response;
-    }
+fn ondeck_content_allowed_by_restrictions(
+    restrictions: Option<&QueryRestrictions>,
+    age_rating: Option<u16>,
+    sharing_labels: &[String],
+) -> bool {
+    let Some(restrictions) = restrictions else {
+        return true;
+    };
 
-    if !auth_db.database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
+    let labels = normalized_ondeck_sharing_labels(sharing_labels);
 
-    if auth_db.database_file.exists() {
-        let query = uri.query().unwrap_or_default();
-        let requested_library_ids = requested_query_values(query, "library_id");
-        let library_ids = remap_requested_library_ids_for_persisted(
-            auth_db.database_file.as_path(),
-            requested_library_ids.as_ref(),
+    let age_allowed = if restrictions.age_restriction == Some(AgeRestrictionKind::AllowOnly) {
+        restrictions
+            .age
+            .map(|age_limit| age_rating.is_some_and(|age| age <= age_limit))
+    } else {
+        None
+    };
+    let label_allowed = if restrictions.labels_allow.is_empty() {
+        None
+    } else {
+        Some(
+            restrictions
+                .labels_allow
+                .iter()
+                .any(|candidate| labels.contains(candidate)),
         )
-        .await
-        .or(requested_library_ids);
+    };
 
-        let context = match auth_state.resolve_query_context(&headers, library_ids.as_deref()) {
-            Some(context) => context,
-            None => return StatusCode::UNAUTHORIZED.into_response(),
-        };
-
-        let page = query_value(query, "page")
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(0);
-        let size = query_value(query, "size")
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(20)
-            .max(1);
-        let unpaged = query_bool(query, "unpaged");
-        let sort_values = query_values(query, "sort")
-            .into_iter()
-            .map(decode_query_component)
-            .collect::<Vec<_>>();
-        let search = query_value(query, "search").map(decode_query_component);
-
-        let sort_modes = parse_persisted_books_sort_modes(&sort_values);
-        match load_persisted_books_page(
-            auth_db.database_file.as_path(),
-            &context,
-            PersistedBooksBrowseQuery::from_filters(
-                BooksFilterCriteria {
-                    library_ids,
-                    ..BooksFilterCriteria::default()
-                },
-                search,
-                page,
-                size,
-                unpaged,
-                sort_modes,
-            ),
-        )
-        .await
-        {
-            Ok(page) => {
-                let (page, paged) = if unpaged {
-                    (normalize_books_latest_unpaged_page_shape(page), true)
-                } else {
-                    (page, true)
-                };
-                return Json(books_page_payload(page, context.is_admin, paged)).into_response();
-            }
-            Err(error) => return internal_error_response(error),
-        }
+    let allowed = match (age_allowed, label_allowed) {
+        (None, label_allowed) => label_allowed != Some(false),
+        (age_allowed, None) => age_allowed != Some(false),
+        (age_allowed, label_allowed) => age_allowed != Some(false) || label_allowed != Some(false),
+    };
+    if !allowed {
+        return false;
     }
 
-    empty_books_page_response(&uri, false)
+    let age_denied = if restrictions.age_restriction == Some(AgeRestrictionKind::Exclude) {
+        restrictions
+            .age
+            .is_some_and(|age_limit| age_rating.is_some_and(|age| age >= age_limit))
+    } else {
+        false
+    };
+    let label_denied = if restrictions.labels_exclude.is_empty() {
+        false
+    } else {
+        restrictions
+            .labels_exclude
+            .iter()
+            .any(|candidate| labels.contains(candidate))
+    };
+
+    !age_denied && !label_denied
+}
+
+fn ondeck_page_payload(content: Vec<Value>, uri: &Uri) -> Value {
+    let query = uri.query().unwrap_or_default();
+    let requested_page = query_value(query, "page")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
+    let requested_size = query_value(query, "size")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(20)
+        .max(1);
+    let unpaged = query_bool(query, "unpaged");
+
+    let total_elements = content.len();
+    let page_size = if unpaged {
+        total_elements.max(20)
+    } else {
+        requested_size
+    };
+    let offset = if unpaged {
+        0
+    } else {
+        requested_page.saturating_mul(page_size)
+    };
+    let content = if unpaged {
+        content
+    } else if offset >= total_elements {
+        vec![]
+    } else {
+        content.into_iter().skip(offset).take(page_size).collect()
+    };
+
+    let page = if unpaged { 0 } else { requested_page };
+    let total_pages = if total_elements == 0 {
+        0
+    } else {
+        total_elements.div_ceil(page_size)
+    };
+    let number_of_elements = content.len();
+    let first = page == 0;
+    let last = total_pages == 0 || page + 1 >= total_pages;
+    let sort = json!({
+        "empty": true,
+        "sorted": false,
+        "unsorted": true,
+    });
+
+    json!({
+        "content": content,
+        "pageable": {
+            "pageNumber": page,
+            "pageSize": page_size,
+            "sort": sort.clone(),
+            "offset": offset,
+            "paged": true,
+            "unpaged": false,
+        },
+        "last": last,
+        "totalElements": total_elements,
+        "totalPages": total_pages,
+        "first": first,
+        "size": page_size,
+        "number": page,
+        "sort": sort,
+        "numberOfElements": number_of_elements,
+        "empty": number_of_elements == 0,
+    })
+}
+
+fn should_use_strict_runtime_shape(payload: &Value, has_oneshot_bootstrap: bool) -> bool {
+    has_oneshot_bootstrap
+        || payload
+            .get("condition")
+            .and_then(|condition| condition.get("type"))
+            .is_some()
 }
 
 pub async fn books_list(
@@ -429,32 +486,32 @@ pub async fn books_list(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let payload = serde_json::from_slice::<Value>(&body).ok();
-    if payload.as_ref().is_some_and(contains_legacy_search_input) {
+    let payload = if body.is_empty() {
         return StatusCode::BAD_REQUEST.into_response();
-    }
-    let full_text_search = payload.as_ref().and_then(extract_full_text_search);
-    let is_exact_oneshot_bootstrap = exact_oneshot_bootstrap_series_id(payload.as_ref()).is_some();
-    let strict_runtime_shape =
-        should_use_strict_runtime_shape(payload.as_ref(), is_exact_oneshot_bootstrap);
+    } else {
+        match serde_json::from_slice::<Value>(&body) {
+            Ok(Value::Object(object)) => Value::Object(object),
+            Ok(_) | Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+        }
+    };
 
-    if (auth_db.database_file.exists() || is_exact_oneshot_bootstrap)
-        && let Some(runtime_response) = runtime_owned_books_list_response(
-            &headers,
-            &uri,
-            payload.as_ref(),
-            full_text_search.clone(),
-            &auth_state,
-            auth_db.database_file.as_path(),
-            strict_runtime_shape,
-        )
-        .await
+    let full_text_search = extract_full_text_search(&payload);
+    let is_exact_oneshot_bootstrap = exact_oneshot_bootstrap_series_id(Some(&payload)).is_some();
+    let strict_runtime_shape =
+        should_use_strict_runtime_shape(&payload, is_exact_oneshot_bootstrap);
+
+    if let Some(runtime_response) = runtime_owned_books_list_response(
+        &headers,
+        &uri,
+        Some(&payload),
+        full_text_search.clone(),
+        &auth_state,
+        auth_db.database_file.as_path(),
+        strict_runtime_shape,
+    )
+    .await
     {
         return runtime_response;
-    }
-
-    if !auth_db.database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     invalid_runtime_books_list_response(DiscoveryError::InvalidSemantics(
@@ -520,7 +577,8 @@ pub async fn books_latest(
                 } else {
                     (page, true)
                 };
-                return Json(books_page_payload(page, context.is_admin, paged)).into_response();
+                return Json(books_page_payload(page, context.is_admin, paged, true))
+                    .into_response();
             }
             Err(error) => return internal_error_response(error),
         }
@@ -549,6 +607,7 @@ pub async fn books_latest(
 
 pub async fn books_ondeck(
     Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(auth_state): Extension<DiscoveryAuthState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -560,14 +619,81 @@ pub async fn books_ondeck(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Some(user) = resolved_auth_user(&headers) else {
+    let query = uri.query().unwrap_or_default();
+    let requested_library_ids = requested_query_values(query, "library_id");
+    let library_ids = remap_requested_library_ids_for_persisted(
+        auth_db.database_file.as_path(),
+        requested_library_ids.as_ref(),
+    )
+    .await
+    .or(requested_library_ids);
+    let context = match auth_state.resolve_query_context(&headers, library_ids.as_deref()) {
+        Some(context) => context,
+        None => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+    let Some(user_id) = context.user_id.as_deref() else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let user_id = user_id(&user).to_string();
 
-    match load_persisted_ondeck_books(auth_db.database_file.as_path(), &user_id).await {
+    match load_persisted_ondeck_books(auth_db.database_file.as_path(), user_id).await {
         Ok(entries) => {
-            let mut response = Json(books_page_for_entries(entries, &uri)).into_response();
+            let filtered_entries =
+                if let Some(allowed_ids) = context.authorized_library_ids.as_ref() {
+                    filter_rows(entries, |row| {
+                        allowed_ids.iter().any(|id| id == row.library_id.as_str())
+                    })
+                } else {
+                    entries
+                };
+            let mut content = Vec::with_capacity(filtered_entries.len());
+            for entry in filtered_entries {
+                let resource = match super::detail::load_persisted_book_resource(
+                    auth_db.database_file.as_path(),
+                    &entry.id,
+                )
+                .await
+                {
+                    Ok(Some(resource)) => resource,
+                    Ok(None) => {
+                        return internal_error_response(format!(
+                            "missing persisted on-deck book resource for '{}'",
+                            entry.id
+                        ));
+                    }
+                    Err(error) => return internal_error_response(error),
+                };
+
+                if !ondeck_content_allowed_by_restrictions(
+                    context.restrictions.as_ref(),
+                    resource.age_rating,
+                    &resource.sharing_labels,
+                ) {
+                    continue;
+                }
+
+                let detail = match super::detail::load_persisted_book_detail(
+                    auth_db.database_file.as_path(),
+                    &entry.id,
+                    Some(user_id),
+                )
+                .await
+                {
+                    Ok(Some(detail)) => detail,
+                    Ok(None) => {
+                        return internal_error_response(format!(
+                            "missing persisted on-deck book detail for '{}'",
+                            entry.id
+                        ));
+                    }
+                    Err(error) => return internal_error_response(error),
+                };
+                content.push(super::detail::book_detail_payload(
+                    &detail,
+                    context.is_admin,
+                ));
+            }
+
+            let mut response = Json(ondeck_page_payload(content, &uri)).into_response();
             mark_runtime_owned(&mut response);
             response
         }

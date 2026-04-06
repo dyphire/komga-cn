@@ -1,11 +1,5 @@
 use super::*;
 
-pub(super) fn parse_runtime_series_filters_impl(
-    condition: Option<&Value>,
-) -> Result<RuntimeSeriesFilters, DiscoveryError> {
-    parse_runtime_series_filters_with_mode_impl(condition, OperatorValidationMode::Lenient)
-}
-
 pub(super) fn parse_runtime_series_filters_with_mode_impl(
     condition: Option<&Value>,
     mode: OperatorValidationMode,
@@ -14,15 +8,19 @@ pub(super) fn parse_runtime_series_filters_with_mode_impl(
         return Ok(RuntimeSeriesFilters::default());
     };
 
-    if condition.get("type").and_then(Value::as_str).is_none() {
-        let normalized = normalize_series_condition_shape(condition)?;
-        return parse_runtime_series_filters_with_mode_impl(Some(&normalized), mode);
-    }
-
-    let Some(condition_type) = condition.get("type").and_then(Value::as_str) else {
-        return Err(DiscoveryError::InvalidSemantics(
-            "series condition missing type".to_string(),
-        ));
+    let condition_type = match condition.get("type").and_then(Value::as_str) {
+        Some(condition_type) => condition_type,
+        None => {
+            let normalized = normalize_series_condition_shape(condition)?;
+            if mode.is_strict()
+                && should_reject_unknown_untyped_series_condition_shape(condition, &normalized)
+            {
+                return Err(DiscoveryError::InvalidSemantics(
+                    "unsupported series condition shape".to_string(),
+                ));
+            }
+            return parse_runtime_series_filters_with_mode_impl(Some(&normalized), mode);
+        }
     };
 
     match condition_type {
@@ -57,6 +55,27 @@ pub(super) fn parse_runtime_series_filters_with_mode_impl(
     }
 }
 
+fn should_reject_unknown_untyped_series_condition_shape(
+    original: &Value,
+    normalized: &Value,
+) -> bool {
+    let Some(object) = original.as_object() else {
+        return false;
+    };
+
+    if object.contains_key("allOf") || object.contains_key("anyOf") {
+        return false;
+    }
+
+    matches!(
+        normalized.get("type").and_then(Value::as_str),
+        Some("AllOfSeries" | "AnyOfSeries")
+    ) && normalized
+        .get("conditions")
+        .and_then(Value::as_array)
+        .is_some_and(|conditions| conditions.is_empty())
+}
+
 pub(super) fn parse_runtime_books_filters_impl(
     condition: Option<&Value>,
 ) -> Result<RuntimeBooksFilters, DiscoveryError> {
@@ -71,15 +90,12 @@ pub(super) fn parse_runtime_books_filters_with_mode_impl(
         return Ok(RuntimeBooksFilters::default());
     };
 
-    if condition.get("type").and_then(Value::as_str).is_none() {
-        let normalized = normalize_books_condition_shape(condition)?;
-        return parse_runtime_books_filters_with_mode_impl(Some(&normalized), mode);
-    }
-
-    let Some(condition_type) = condition.get("type").and_then(Value::as_str) else {
-        return Err(DiscoveryError::InvalidSemantics(
-            "books condition missing type".to_string(),
-        ));
+    let condition_type = match condition.get("type").and_then(Value::as_str) {
+        Some(condition_type) => condition_type,
+        None => {
+            let normalized = normalize_books_condition_shape(condition)?;
+            return parse_runtime_books_filters_with_mode_impl(Some(&normalized), mode);
+        }
     };
 
     match condition_type {

@@ -191,14 +191,6 @@ pub(crate) fn invalid_runtime_books_list_response(error: DiscoveryError) -> Resp
     common_helpers::invalid_runtime_books_list_response(error)
 }
 
-pub(crate) fn empty_books_page_response(uri: &Uri, is_admin: bool) -> Response {
-    common_helpers::empty_books_page_response(uri, is_admin)
-}
-
-pub(crate) fn parse_persisted_books_sort_modes(sorts: &[String]) -> Vec<PersistedBooksSortMode> {
-    books_queries::parse_persisted_books_sort_modes(sorts)
-}
-
 pub(crate) async fn persisted_utc_date_minus_days(
     database_file: &FsPath,
     days: i64,

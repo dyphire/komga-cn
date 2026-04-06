@@ -11,7 +11,7 @@ use tower::util::ServiceExt;
 use zip::ZipArchive;
 
 #[path = "support/runtime_router_contract_support.rs"]
-mod runtime_router_contract_support;
+pub mod runtime_router_contract_support;
 
 use runtime_router_contract_support::*;
 

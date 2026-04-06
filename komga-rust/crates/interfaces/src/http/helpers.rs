@@ -2,7 +2,7 @@ use crate::http::discovery_auth::{
     AgeRestrictionKind, DetailAccessDenial, DiscoveryQueryContext, QueryRestrictions,
 };
 use axum::Json;
-use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
+use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use komga_application::discovery::BookReadModel;
 use komga_domain::common_ids::{LibraryId, UserId};
@@ -13,14 +13,13 @@ use komga_domain::discovery::{
 };
 use serde_json::{Value, json};
 
-use super::super::{
-    PERSISTED_OWNERSHIP_MARKER, ReadProgress, ReadProgressState, SEARCH_OWNERSHIP_HEADER,
-};
+use super::super::{ReadProgress, ReadProgressState, SEARCH_OWNERSHIP_HEADER};
 
 pub(crate) fn books_page_payload(
     page: PageEnvelope<BookReadModel>,
     is_admin: bool,
     paged: bool,
+    sorted: bool,
 ) -> Value {
     let content = page
         .content
@@ -42,9 +41,9 @@ pub(crate) fn books_page_payload(
             "pageNumber": page.page,
             "pageSize": page.size,
             "sort": {
-                "empty": false,
-                "sorted": true,
-                "unsorted": false
+                "empty": !sorted,
+                "sorted": sorted,
+                "unsorted": !sorted
             },
             "offset": offset,
             "paged": paged,
@@ -57,9 +56,9 @@ pub(crate) fn books_page_payload(
         "size": page.size,
         "number": page.page,
         "sort": {
-            "empty": false,
-            "sorted": true,
-            "unsorted": false
+            "empty": !sorted,
+            "sorted": sorted,
+            "unsorted": !sorted
         },
         "numberOfElements": number_of_elements,
         "empty": number_of_elements == 0
@@ -136,43 +135,6 @@ pub(crate) fn extract_full_text_search(payload: &Value) -> Option<String> {
         .get("fullTextSearch")
         .and_then(|value| value.as_str())
         .map(str::to_owned)
-}
-
-pub(crate) fn contains_legacy_search_input(payload: &Value) -> bool {
-    payload.get("regexSearch").is_some()
-        || payload.get("searchRegex").is_some()
-        || payload.get("search_regex").is_some()
-}
-
-pub(crate) fn contains_legacy_search_query(query: &str) -> bool {
-    query_value(query, "regexSearch").is_some()
-        || query_value(query, "searchRegex").is_some()
-        || query_value(query, "search_regex").is_some()
-}
-
-pub(crate) fn wants_persisted_marker(headers: &HeaderMap, payload: Option<&Value>) -> bool {
-    let ownership = payload
-        .and_then(|payload| payload.get("ownership"))
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_ascii_lowercase());
-
-    let requested_persisted_marker = headers
-        .get(SEARCH_OWNERSHIP_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value == PERSISTED_OWNERSHIP_MARKER);
-
-    let is_persisted_ownership = ownership
-        .as_deref()
-        .is_some_and(|value| value == PERSISTED_OWNERSHIP_MARKER);
-
-    is_persisted_ownership || requested_persisted_marker
-}
-
-pub(crate) fn mark_persisted_owned(response: &mut Response) {
-    response.headers_mut().insert(
-        HeaderName::from_static(SEARCH_OWNERSHIP_HEADER),
-        HeaderValue::from_static(PERSISTED_OWNERSHIP_MARKER),
-    );
 }
 
 pub fn mark_runtime_owned(response: &mut Response) {

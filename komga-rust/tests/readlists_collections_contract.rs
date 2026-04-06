@@ -9,7 +9,7 @@ use tower::util::ServiceExt;
 use zip::CompressionMethod;
 
 #[path = "support/runtime_router_contract_support.rs"]
-mod runtime_router_contract_support;
+pub mod runtime_router_contract_support;
 
 use runtime_router_contract_support::*;
 

@@ -15,12 +15,6 @@ use request_mapping::*;
 use shared::*;
 pub(super) use shared::{normalize_release_date_date_time, parse_iso8601_duration_to_days};
 
-pub(super) fn parse_runtime_series_filters(
-    condition: Option<&Value>,
-) -> Result<RuntimeSeriesFilters, DiscoveryError> {
-    dispatch::parse_runtime_series_filters_impl(condition)
-}
-
 pub(super) fn parse_runtime_series_filters_with_mode(
     condition: Option<&Value>,
     mode: OperatorValidationMode,

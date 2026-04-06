@@ -12,7 +12,7 @@ use tokio::net::TcpListener;
 use tower::util::ServiceExt;
 
 #[path = "support/runtime_router_contract_support.rs"]
-mod runtime_router_contract_support;
+pub mod runtime_router_contract_support;
 
 use runtime_router_contract_support::*;
 

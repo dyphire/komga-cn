@@ -21,7 +21,7 @@ use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
 #[path = "support/runtime_router_contract_support.rs"]
-mod runtime_router_contract_support;
+pub mod runtime_router_contract_support;
 
 use runtime_router_contract_support::*;
 
@@ -41,6 +41,8 @@ mod file_page_resource_routes;
 mod kobo_koreader_detail_metadata_readlists;
 #[path = "books_media_contract/manifests.rs"]
 mod manifests;
+#[path = "books_media_contract/ondeck.rs"]
+mod ondeck;
 #[path = "books_media_contract/positions_and_pdf_pages.rs"]
 mod positions_and_pdf_pages;
 #[path = "books_media_contract/progression.rs"]
