@@ -398,11 +398,12 @@ pub(super) fn install_opds_access_backends(lucene_data_directory: &std::path::Pa
                 .map_err(|error| error.to_string())
             })
         }),
-        load_collection_series: Arc::new(|database_file, collection_id| {
+        load_collection_series: Arc::new(|database_file, collection_id, ordered| {
             Box::pin(async move {
                 infrastructure_opds_persisted::load_collection_series(
                     database_file.as_path(),
                     &collection_id,
+                    ordered,
                 )
                 .await
                 .map(|rows| rows.into_iter().map(map_persisted_series_record).collect())
@@ -526,6 +527,8 @@ fn map_persisted_named_record(
     InterfacesPersistedNamedRecord {
         id: row.id,
         name: row.name,
+        last_modified: row.last_modified,
+        ordered: row.ordered,
     }
 }
 

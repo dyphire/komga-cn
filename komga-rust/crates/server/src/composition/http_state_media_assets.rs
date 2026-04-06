@@ -75,6 +75,19 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
                 ),
             })
         }),
+        refresh_book_search_documents_after_metadata_update: Arc::new(
+            |database_file, index_dir, book_id| {
+                Box::pin(async move {
+                    komga_infrastructure::sync_entity_upsert_from_database(
+                        database_file.as_path(),
+                        index_dir.as_path(),
+                        komga_infrastructure::SearchEntityType::Book,
+                        &book_id,
+                    )
+                    .map(|_| ())
+                })
+            },
+        ),
         persist_book_page_hashes_with_media_content: Arc::new(|database_file, book_id| {
             Box::pin(async move {
                 infrastructure_filesystem::persist_book_page_hashes_from_media_content(
@@ -95,6 +108,9 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
             std::fs::metadata(path)
                 .ok()
                 .and_then(|meta| i64::try_from(meta.len()).ok())
+        }),
+        load_epub_cover_bytes: Arc::new(|media| {
+            infrastructure_filesystem::load_epub_cover_bytes(&media)
         }),
         load_persisted_book_media: Arc::new(|database_file, book_id| {
             Box::pin(async move {

@@ -111,9 +111,8 @@ pub use readlists_support::{
     load_visible_persisted_readlist_books, match_comicrack_readlist,
     paginate_persisted_readlist_books, parse_comicrack_readlist,
     parse_persisted_readlist_books_query, parse_readlists_sort, persist_readlist_create,
-    persist_readlist_update, persisted_readlists_exist, readlist_payload, readlist_search_score,
-    readlist_write_input, readlists_page_payload, sort_visible_persisted_readlist_books,
-    upsert_readlist_search_document,
+    persist_readlist_update, readlist_payload, readlists_page_payload,
+    sort_visible_persisted_readlist_books, upsert_readlist_search_document,
 };
 pub use series_detail::{series_collections, series_detail, series_metadata_update};
 pub use series_persistence::{

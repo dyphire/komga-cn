@@ -64,6 +64,18 @@ fn encode_image_bytes_as_jpeg(bytes: &[u8]) -> Option<Vec<u8>> {
     Some(output.into_inner())
 }
 
+fn encode_image_bytes_as_small_jpeg(bytes: &[u8], max_edge: u32) -> Option<Vec<u8>> {
+    let image = image::load_from_memory(bytes).ok()?;
+    let resized = if image.width().max(image.height()) > max_edge {
+        image.resize(max_edge, max_edge, image::imageops::FilterType::Lanczos3)
+    } else {
+        image
+    };
+    let mut output = std::io::Cursor::new(Vec::new());
+    resized.write_to(&mut output, ImageFormat::Jpeg).ok()?;
+    Some(output.into_inner())
+}
+
 fn response_from_thumbnail_bytes(
     headers: &HeaderMap,
     bytes: Vec<u8>,
@@ -85,6 +97,18 @@ fn response_from_thumbnail_jpeg_bytes(headers: &HeaderMap, bytes: Vec<u8>) -> Re
     response_from_thumbnail_bytes(headers, jpeg_bytes, "image/jpeg")
 }
 
+fn response_from_thumbnail_small_jpeg_bytes(
+    headers: &HeaderMap,
+    bytes: Vec<u8>,
+    media_type: &str,
+    max_edge: u32,
+) -> Response {
+    match encode_image_bytes_as_small_jpeg(&bytes, max_edge) {
+        Some(jpeg_bytes) => response_from_thumbnail_bytes(headers, jpeg_bytes, "image/jpeg"),
+        None => response_from_thumbnail_bytes(headers, bytes, media_type),
+    }
+}
+
 fn set_one_hour_private_cache_control(response: &mut Response) {
     response.headers_mut().insert(
         header::CACHE_CONTROL,
@@ -92,22 +116,58 @@ fn set_one_hour_private_cache_control(response: &mut Response) {
     );
 }
 
+fn thumbnail_max_edge_from_setting(value: &str) -> u32 {
+    match value {
+        "MEDIUM" => 600,
+        "LARGE" => 900,
+        "XLARGE" => 1200,
+        _ => 300,
+    }
+}
+
 async fn load_book_thumbnail_source_bytes(
     database_file: &FsPath,
     book_id: &str,
+    media: &PersistedBookMedia,
 ) -> Option<Vec<u8>> {
     if let Ok(Some(thumbnail)) = load_selected_book_thumbnail(database_file, book_id).await {
-        return Some(thumbnail.thumbnail);
+        if thumbnail.thumbnail_type != "GENERATED" {
+            return Some(thumbnail.thumbnail);
+        }
     }
 
-    let Ok(Some(media)) = load_persisted_book_media(database_file, book_id).await else {
-        return None;
+    if book_media_is_epub(media) {
+        return load_epub_cover_bytes(media).map(|(bytes, _)| bytes);
+    }
+
+    if book_media_is_pdf(media) {
+        let page_row = load_persisted_book_page_row(database_file, book_id, 1)
+            .await
+            .ok()
+            .flatten()
+            .or_else(|| load_pdf_page_row(media, 1))?;
+        return render_book_page_thumbnail(media, &page_row, 1, 300);
+    }
+
+    if book_media_is_single_image(media) {
+        return read_media_file_bytes(&media.file_path);
+    }
+
+    let page_row = load_persisted_book_page_row(database_file, book_id, 1)
+        .await
+        .ok()
+        .flatten()
+        .or_else(|| load_archive_page_row(media, 1))?;
+    let media_type = if page_row.media_type.is_empty() {
+        content_type_from_filename(&page_row.file_name, &media.media_type)
+    } else {
+        page_row.media_type.clone()
     };
-    if !book_media_supports_page_image(&media) {
+    if !media_type.to_ascii_lowercase().starts_with("image/") {
         return None;
     }
 
-    read_media_file_bytes(&media.file_path)
+    resolve_book_page_bytes(media, &page_row, 1)
 }
 
 async fn load_series_thumbnail_source_bytes(
@@ -143,7 +203,10 @@ async fn load_readlist_mosaic_bytes(
 
     let mut images = Vec::new();
     for book_id in book_ids {
-        if let Some(bytes) = load_book_thumbnail_source_bytes(database_file, &book_id).await {
+        if let Ok(Some(media)) = load_persisted_book_media(database_file, &book_id).await
+            && let Some(bytes) =
+                load_book_thumbnail_source_bytes(database_file, &book_id, &media).await
+        {
             images.push(bytes);
         }
     }
@@ -214,6 +277,114 @@ pub async fn book_thumbnail(
     }
 
     StatusCode::NOT_FOUND.into_response()
+}
+
+async fn book_thumbnail_opds_response(
+    auth_db: &AuthDatabaseState,
+    headers: &HeaderMap,
+    book_id: &str,
+) -> Response {
+    if let Ok(Some(media)) =
+        load_persisted_book_media(auth_db.database_file.as_path(), book_id).await
+    {
+        if let Some(user) = resolved_auth_user(headers)
+            && !user_can_access_book_media(auth_db.database_file.as_path(), book_id, &user, &media)
+                .await
+        {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+
+        if let Some(bytes) =
+            load_book_thumbnail_source_bytes(auth_db.database_file.as_path(), book_id, &media).await
+        {
+            return response_from_thumbnail_jpeg_bytes(headers, bytes);
+        }
+
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    StatusCode::NOT_FOUND.into_response()
+}
+
+async fn book_thumbnail_opds_small_response(
+    auth_db: &AuthDatabaseState,
+    headers: &HeaderMap,
+    book_id: &str,
+    max_edge: u32,
+) -> Response {
+    if let Ok(Some(media)) =
+        load_persisted_book_media(auth_db.database_file.as_path(), book_id).await
+    {
+        if let Some(user) = resolved_auth_user(headers)
+            && !user_can_access_book_media(auth_db.database_file.as_path(), book_id, &user, &media)
+                .await
+        {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+
+        match load_selected_book_thumbnail(auth_db.database_file.as_path(), book_id).await {
+            Ok(Some(thumbnail)) => {
+                if thumbnail.thumbnail_type == "GENERATED" {
+                    return response_from_thumbnail_bytes(
+                        headers,
+                        thumbnail.thumbnail,
+                        thumbnail.media_type.as_str(),
+                    );
+                }
+
+                return response_from_thumbnail_small_jpeg_bytes(
+                    headers,
+                    thumbnail.thumbnail,
+                    thumbnail.media_type.as_str(),
+                    max_edge,
+                );
+            }
+            Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+            Err(error) => return internal_error_response(error),
+        }
+    }
+
+    StatusCode::NOT_FOUND.into_response()
+}
+
+pub async fn book_thumbnail_opds(
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    Path(book_id): Path<String>,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    book_thumbnail_opds_response(&auth_db, &headers, &book_id).await
+}
+
+pub async fn book_thumbnail_opds_small(
+    Extension(operational): Extension<OperationalState>,
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    Path(book_id): Path<String>,
+) -> Response {
+    if let Some(response) = require_auth(&headers) {
+        return response;
+    }
+
+    let settings = match crate::operational_settings_access::server_settings::load_server_settings(
+        operational.settings_store.as_ref(),
+    )
+    .await
+    {
+        Ok(settings) => settings,
+        Err(error) => return internal_error_response(error),
+    };
+
+    book_thumbnail_opds_small_response(
+        &auth_db,
+        &headers,
+        &book_id,
+        thumbnail_max_edge_from_setting(settings.thumbnail_size),
+    )
+    .await
 }
 
 pub async fn book_thumbnail_by_id(

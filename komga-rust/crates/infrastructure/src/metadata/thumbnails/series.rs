@@ -57,7 +57,7 @@ pub async fn load_selected_series_thumbnail(
         .await
         .map_err(|error| format!("open selected series thumbnail db: {error}"))?;
     let row = sqlx::query(
-        "SELECT MEDIA_TYPE, THUMBNAIL \
+        "SELECT TYPE, MEDIA_TYPE, THUMBNAIL \
          FROM THUMBNAIL_SERIES \
          WHERE SERIES_ID = ? \
          ORDER BY SELECTED DESC, LAST_MODIFIED_DATE DESC, ID ASC \
@@ -69,6 +69,7 @@ pub async fn load_selected_series_thumbnail(
     .map_err(|error| format!("query selected series thumbnail: {error}"))?;
 
     Ok(row.map(|row| EntityThumbnailBinary {
+        thumbnail_type: row.get::<String, _>("TYPE"),
         media_type: row.get::<String, _>("MEDIA_TYPE"),
         thumbnail: row
             .get::<Option<Vec<u8>>, _>("THUMBNAIL")
@@ -88,7 +89,7 @@ pub async fn load_series_thumbnail_by_id(
         .await
         .map_err(|error| format!("open single series thumbnail db: {error}"))?;
     let row = sqlx::query(
-        "SELECT MEDIA_TYPE, THUMBNAIL, URL \
+        "SELECT TYPE, MEDIA_TYPE, THUMBNAIL, URL \
          FROM THUMBNAIL_SERIES \
          WHERE ID = ? \
          LIMIT 1",
@@ -102,12 +103,14 @@ pub async fn load_series_thumbnail_by_id(
         return Ok(None);
     };
 
+    let thumbnail_type = row.get::<String, _>("TYPE");
     let media_type = row.get::<String, _>("MEDIA_TYPE");
     let thumbnail = row.get::<Option<Vec<u8>>, _>("THUMBNAIL");
     let url = row.get::<Option<String>, _>("URL");
     let maybe_thumbnail = load_thumbnail_bytes_or_sidecar(thumbnail, url)?;
 
     Ok(maybe_thumbnail.map(|thumbnail| EntityThumbnailBinary {
+        thumbnail_type,
         media_type,
         thumbnail,
     }))

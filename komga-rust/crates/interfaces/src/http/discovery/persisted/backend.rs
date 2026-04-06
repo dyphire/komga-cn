@@ -111,6 +111,8 @@ pub struct PersistedDiscoveryAccessBackend {
         Arc<dyn Fn(PathBuf, String, usize) -> BoxFutureResult<Vec<String>> + Send + Sync>,
     pub search_collection_ids:
         Arc<dyn Fn(PathBuf, String, usize) -> BoxFutureResult<Vec<String>> + Send + Sync>,
+    pub search_readlist_scored_ids:
+        Arc<dyn Fn(PathBuf, String, usize) -> BoxFutureResult<Vec<(f32, String)>> + Send + Sync>,
     pub search_series_scored_ids:
         Arc<dyn Fn(PathBuf, String, usize) -> BoxFutureResult<Vec<(f32, String)>> + Send + Sync>,
 }
@@ -447,6 +449,16 @@ pub(crate) async fn persisted_backend_search_collection_ids(
 ) -> Result<Vec<String>, String> {
     let backend = persisted_discovery_backend()?;
     (backend.search_collection_ids)(database_file.to_path_buf(), query.to_string(), limit).await
+}
+
+pub(crate) async fn persisted_backend_search_readlist_scored_ids(
+    database_file: &FsPath,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<(f32, String)>, String> {
+    let backend = persisted_discovery_backend()?;
+    (backend.search_readlist_scored_ids)(database_file.to_path_buf(), query.to_string(), limit)
+        .await
 }
 
 pub(super) async fn persisted_backend_search_series_scored_ids(

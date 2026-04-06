@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use axum::Json;
-use axum::extract::{Extension, Path as AxumPath};
+use axum::extract::{Extension, Path as AxumPath, Query};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
@@ -10,6 +10,7 @@ use crate::http::identity_access::auth::{require_auth, resolved_auth_user, user_
 use crate::http::media_assets;
 use crate::http::request_urls::app_absolute_url;
 use crate::http::state::AuthDatabaseState;
+use crate::http::state::OperationalState;
 use crate::http::state::RuntimeProfile;
 
 #[path = "content_opds/auth_payload.rs"]
@@ -176,6 +177,10 @@ pub(crate) async fn opds_v1_collection_detail_route(
     uri: Uri,
     AxumPath(collection_id): AxumPath<String>,
 ) -> Response {
+    if resolved_auth_user(&headers).is_none() {
+        return v1::opds_v1_basic_unauthorized_response();
+    }
+
     opds_v1_collection_detail(
         headers,
         uri,
@@ -207,6 +212,127 @@ pub(crate) async fn opds_v1_book_file_route(
         AxumPath(book_id),
     )
     .await
+}
+
+pub(crate) async fn opds_v1_book_thumbnail_route(
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    AxumPath(book_id): AxumPath<String>,
+) -> Response {
+    if resolved_auth_user(&headers).is_none() {
+        return v1::opds_v1_basic_unauthorized_response();
+    }
+
+    media_assets::book_thumbnail_opds(Extension(auth_db), headers, AxumPath(book_id)).await
+}
+
+pub(crate) async fn opds_v1_book_thumbnail_small_route(
+    Extension(operational): Extension<OperationalState>,
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    AxumPath(book_id): AxumPath<String>,
+) -> Response {
+    if resolved_auth_user(&headers).is_none() {
+        return v1::opds_v1_basic_unauthorized_response();
+    }
+
+    media_assets::book_thumbnail_opds_small(
+        Extension(operational),
+        Extension(auth_db),
+        headers,
+        AxumPath(book_id),
+    )
+    .await
+}
+
+pub(crate) async fn opds_v2_book_file_route(
+    Extension(profile): Extension<RuntimeProfile>,
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    AxumPath(book_id): AxumPath<String>,
+) -> Response {
+    if resolved_auth_user(&headers).is_none() {
+        return opds_catalog_unauthorized_response(&headers);
+    }
+
+    media_assets::book_file(
+        Extension(profile),
+        Extension(auth_db),
+        headers,
+        AxumPath(book_id),
+    )
+    .await
+}
+
+pub(crate) async fn opds_v2_book_file_with_suffix_route(
+    Extension(profile): Extension<RuntimeProfile>,
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    AxumPath((book_id, file_name)): AxumPath<(String, String)>,
+) -> Response {
+    if resolved_auth_user(&headers).is_none() {
+        return opds_catalog_unauthorized_response(&headers);
+    }
+
+    media_assets::book_file_with_suffix(
+        Extension(profile),
+        Extension(auth_db),
+        headers,
+        AxumPath((book_id, file_name)),
+    )
+    .await
+}
+
+pub(crate) async fn opds_v2_book_page_route(
+    Extension(profile): Extension<RuntimeProfile>,
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    Query(query): Query<media_assets::BookPageQuery>,
+    AxumPath((book_id, page_number)): AxumPath<(String, u32)>,
+) -> Response {
+    if resolved_auth_user(&headers).is_none() {
+        return opds_catalog_unauthorized_response(&headers);
+    }
+
+    media_assets::book_page_opds_v2(
+        Extension(profile),
+        Extension(auth_db),
+        headers,
+        Query(query),
+        AxumPath((book_id, page_number)),
+    )
+    .await
+}
+
+pub(crate) async fn opds_v2_book_page_raw_route(
+    Extension(profile): Extension<RuntimeProfile>,
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    AxumPath((book_id, page_number)): AxumPath<(String, i32)>,
+) -> Response {
+    if resolved_auth_user(&headers).is_none() {
+        return opds_catalog_unauthorized_response(&headers);
+    }
+
+    media_assets::book_page_raw(
+        Extension(profile),
+        Extension(auth_db),
+        headers,
+        AxumPath((book_id, page_number)),
+    )
+    .await
+}
+
+pub(crate) async fn opds_v2_book_thumbnail_route(
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    AxumPath(book_id): AxumPath<String>,
+) -> Response {
+    if resolved_auth_user(&headers).is_none() {
+        return opds_catalog_unauthorized_response(&headers);
+    }
+
+    media_assets::book_thumbnail_opds(Extension(auth_db), headers, AxumPath(book_id)).await
 }
 
 pub(crate) async fn opds_v2_libraries_route(

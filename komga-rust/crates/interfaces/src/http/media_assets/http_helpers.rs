@@ -9,11 +9,42 @@ pub(super) fn internal_error_response(error: impl std::fmt::Display) -> Response
 }
 
 pub(crate) fn attachment_disposition(file_name: &str) -> String {
-    format!("attachment; filename=\"=?UTF-8?Q?{file_name}?=\"; filename*=UTF-8''{file_name}",)
+    format!(
+        "attachment; filename=\"{}\"; filename*=UTF-8''{}",
+        ascii_content_disposition_filename(file_name),
+        content_disposition_filename_star(file_name)
+    )
 }
 
 pub(super) fn inline_disposition(file_name: &str) -> String {
-    format!("inline; filename=\"=?UTF-8?Q?{file_name}?=\"; filename*=UTF-8''{file_name}",)
+    format!(
+        "inline; filename=\"{}\"; filename*=UTF-8''{}",
+        ascii_content_disposition_filename(file_name),
+        content_disposition_filename_star(file_name)
+    )
+}
+
+fn ascii_content_disposition_filename(file_name: &str) -> String {
+    file_name
+        .chars()
+        .map(|character| match character {
+            ' '..='~' if !matches!(character, '"' | '\\' | ';') => character,
+            _ => '_',
+        })
+        .collect()
+}
+
+fn content_disposition_filename_star(file_name: &str) -> String {
+    file_name
+        .as_bytes()
+        .iter()
+        .flat_map(|byte| match byte {
+            b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z' | b'-' | b'.' | b'_' | b'~' => {
+                char::from(*byte).to_string().chars().collect::<Vec<_>>()
+            }
+            _ => format!("%{byte:02X}").chars().collect::<Vec<_>>(),
+        })
+        .collect()
 }
 
 pub(super) fn format_size_bytes(size_bytes: u64) -> String {
@@ -35,30 +66,4 @@ pub(super) fn format_size_bytes(size_bytes: u64) -> String {
     } else {
         format!("{size:.1} {}", UNITS[unit_index])
     }
-}
-
-pub(super) fn requested_byte_range(
-    headers: &HeaderMap,
-    total_len: usize,
-) -> Option<(usize, usize)> {
-    let range = headers.get(header::RANGE)?.to_str().ok()?;
-    let bytes_range = range.strip_prefix("bytes=")?;
-    let (start, end) = bytes_range.split_once('-')?;
-
-    if start.is_empty() {
-        return None;
-    }
-
-    let start = start.parse::<usize>().ok()?;
-    let end = if end.is_empty() {
-        total_len.checked_sub(1)?
-    } else {
-        end.parse::<usize>().ok()?
-    };
-
-    if start > end || end >= total_len {
-        return None;
-    }
-
-    Some((start, end))
 }

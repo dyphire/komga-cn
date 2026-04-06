@@ -23,6 +23,17 @@ pub async fn book_page_opds_v1(
     book_page_response(&auth_db, &headers, &book_id, page_number, query).await
 }
 
+pub async fn book_page_opds_v2(
+    Extension(_profile): Extension<RuntimeProfile>,
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    Query(mut query): Query<BookPageQuery>,
+    Path((book_id, page_number)): Path<(String, u32)>,
+) -> Response {
+    query.content_negotiation = false;
+    book_page_response(&auth_db, &headers, &book_id, page_number, query).await
+}
+
 async fn book_page_response(
     auth_db: &AuthDatabaseState,
     headers: &HeaderMap,

@@ -12,6 +12,7 @@ pub struct EntityThumbnailRecord {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EntityThumbnailBinary {
+    pub thumbnail_type: String,
     pub media_type: String,
     pub thumbnail: Vec<u8>,
 }

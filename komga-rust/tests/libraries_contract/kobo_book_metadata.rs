@@ -346,7 +346,8 @@ async fn router_kobo_book_metadata_returns_empty_array_when_book_is_missing_and_
 }
 
 #[tokio::test]
-async fn router_kobo_book_metadata_returns_empty_array_when_book_exists_but_metadata_row_is_missing() {
+async fn router_kobo_book_metadata_returns_empty_array_when_book_exists_but_metadata_row_is_missing()
+ {
     let _guard = kobo_proxy_env_lock()
         .lock()
         .expect("kobo proxy env lock should not be poisoned");

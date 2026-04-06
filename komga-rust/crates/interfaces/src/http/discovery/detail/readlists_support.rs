@@ -58,10 +58,6 @@ pub struct ComicRackRequestMatchGroup {
 
 pub type PersistedVisibleReadlistBook = BookDetailReadModel;
 
-pub async fn persisted_readlists_exist(database_file: &FsPath) -> Result<bool, String> {
-    readlists_access::persisted_readlists_exist(database_file).await
-}
-
 pub async fn load_persisted_readlists(
     database_file: &FsPath,
     library_ids: Option<&[String]>,
@@ -152,38 +148,6 @@ async fn load_persisted_readlist_book_ids(
         .collect::<Vec<_>>();
 
     Ok((book_ids.clone(), book_ids.len() < total_count))
-}
-
-pub fn readlist_write_input(payload: &Value) -> PersistedReadlistWriteInput {
-    let name = payload
-        .get("name")
-        .and_then(Value::as_str)
-        .unwrap_or("readlist")
-        .to_string();
-    let summary = payload
-        .get("summary")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-    let ordered = payload
-        .get("ordered")
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
-    let book_ids = payload
-        .get("bookIds")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-
-    PersistedReadlistWriteInput {
-        name,
-        summary,
-        ordered,
-        book_ids,
-    }
 }
 
 pub fn merge_readlist_write_input(
@@ -539,12 +503,11 @@ pub async fn load_visible_persisted_readlist_books(
     readlist_id: &str,
     query: &PersistedReadlistBooksQuery,
 ) -> Result<Option<Vec<PersistedVisibleReadlistBook>>, String> {
-    let requested_library_ids = query.library_ids.as_deref();
-    let Some(context) = auth_state.resolve_query_context(headers, requested_library_ids) else {
+    let Some(context) = auth_state.resolve_query_context(headers, None) else {
         return Ok(None);
     };
 
-    let Some(_readlist) = load_persisted_readlist_detail(
+    let Some(readlist) = load_persisted_readlist_detail(
         database_file,
         readlist_id,
         context.authorized_library_ids.as_deref(),
@@ -553,6 +516,9 @@ pub async fn load_visible_persisted_readlist_books(
     else {
         return Ok(None);
     };
+    if context.authorized_library_ids.is_some() && readlist.book_ids.is_empty() {
+        return Ok(None);
+    }
 
     let rows =
         readlists_access::load_persisted_readlist_book_rows(database_file, readlist_id).await?;
@@ -751,6 +717,10 @@ pub fn decode_query_component(value: &str) -> String {
 pub enum ReadListsSort {
     NameAsc,
     NameDesc,
+    CreatedDateAsc,
+    CreatedDateDesc,
+    LastModifiedDateAsc,
+    LastModifiedDateDesc,
     SearchOrName,
 }
 
@@ -765,23 +735,21 @@ pub fn parse_readlists_sort(value: &str) -> ReadListsSort {
         } else {
             ReadListsSort::NameAsc
         }
+    } else if field.eq_ignore_ascii_case("createdDate") {
+        if direction.eq_ignore_ascii_case("desc") {
+            ReadListsSort::CreatedDateDesc
+        } else {
+            ReadListsSort::CreatedDateAsc
+        }
+    } else if field.eq_ignore_ascii_case("lastModifiedDate") {
+        if direction.eq_ignore_ascii_case("desc") {
+            ReadListsSort::LastModifiedDateDesc
+        } else {
+            ReadListsSort::LastModifiedDateAsc
+        }
     } else {
         ReadListsSort::SearchOrName
     }
-}
-
-pub fn readlist_search_score(readlist: &ReadListReadModel, tokens: &[String]) -> usize {
-    let name = readlist.name.to_ascii_lowercase();
-    let summary = readlist.summary.to_ascii_lowercase();
-
-    tokens
-        .iter()
-        .map(|token| {
-            let name_hits = name.matches(token).count();
-            let summary_hits = summary.matches(token).count();
-            name_hits + summary_hits
-        })
-        .sum::<usize>()
 }
 
 pub fn readlists_page_payload(page: PageEnvelope<ReadListReadModel>) -> Value {

@@ -57,7 +57,7 @@ pub async fn load_selected_book_thumbnail(
         .map_err(|error| format!("open selected book thumbnail db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT MEDIA_TYPE, THUMBNAIL \
+        "SELECT TYPE, MEDIA_TYPE, THUMBNAIL \
          FROM THUMBNAIL_BOOK \
          WHERE BOOK_ID = ? \
          ORDER BY SELECTED DESC, LAST_MODIFIED_DATE DESC, ID ASC \
@@ -69,6 +69,7 @@ pub async fn load_selected_book_thumbnail(
     .map_err(|error| format!("query selected book thumbnail: {error}"))?;
 
     Ok(row.map(|row| EntityThumbnailBinary {
+        thumbnail_type: row.get::<String, _>("TYPE"),
         media_type: row.get::<String, _>("MEDIA_TYPE"),
         thumbnail: row.get::<Vec<u8>, _>("THUMBNAIL"),
     }))
@@ -87,7 +88,7 @@ pub async fn load_book_thumbnail_by_id(
         .map_err(|error| format!("open single book thumbnail db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT MEDIA_TYPE, THUMBNAIL \
+        "SELECT TYPE, MEDIA_TYPE, THUMBNAIL \
          FROM THUMBNAIL_BOOK \
          WHERE ID = ? \
          LIMIT 1",
@@ -98,6 +99,7 @@ pub async fn load_book_thumbnail_by_id(
     .map_err(|error| format!("query single book thumbnail: {error}"))?;
 
     Ok(row.map(|row| EntityThumbnailBinary {
+        thumbnail_type: row.get::<String, _>("TYPE"),
         media_type: row.get::<String, _>("MEDIA_TYPE"),
         thumbnail: row.get::<Vec<u8>, _>("THUMBNAIL"),
     }))

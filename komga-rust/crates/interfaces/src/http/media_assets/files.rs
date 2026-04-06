@@ -259,33 +259,8 @@ async fn book_file_response(
                 .into_response();
         };
 
-        let content_type = content_type_from_filename(&media.file_name, &media.media_type);
+        let content_type = media.media_type.clone();
         let content_disposition = attachment_disposition(&media.file_name);
-
-        if let Some((start, end)) = requested_byte_range(headers, body.len()) {
-            let mut response =
-                (StatusCode::PARTIAL_CONTENT, body[start..=end].to_vec()).into_response();
-            response.headers_mut().insert(
-                header::CONTENT_TYPE,
-                HeaderValue::from_str(&content_type)
-                    .expect("book file content type should be valid"),
-            );
-            response.headers_mut().insert(
-                header::CONTENT_DISPOSITION,
-                HeaderValue::from_str(&content_disposition)
-                    .expect("book file content disposition should be valid"),
-            );
-            response
-                .headers_mut()
-                .insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
-            response.headers_mut().insert(
-                header::CONTENT_RANGE,
-                HeaderValue::from_str(&format!("bytes {start}-{end}/{}", body.len()))
-                    .expect("book file content-range should be valid"),
-            );
-
-            return response;
-        }
 
         return (
             StatusCode::OK,

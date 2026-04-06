@@ -78,6 +78,8 @@ pub(super) struct PersistedBookFeedItem {
 pub(super) struct PersistedCollection {
     pub(super) id: String,
     pub(super) name: String,
+    pub(super) last_modified: String,
+    pub(super) ordered: bool,
 }
 
 #[derive(Clone, Debug, Default)]

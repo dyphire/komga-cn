@@ -529,8 +529,14 @@ pub fn build_router(
             "/opds/v1.2/books/{book_id}/file/{file_name}",
             get(opds::opds_v1_book_file_route),
         )
-        .route("/opds/v1.2/books/{book_id}/thumbnail", get(media_assets::book_thumbnail))
-        .route("/opds/v1.2/books/{book_id}/thumbnail/small", get(media_assets::book_thumbnail))
+        .route(
+            "/opds/v1.2/books/{book_id}/thumbnail",
+            get(opds::opds_v1_book_thumbnail_route),
+        )
+        .route(
+            "/opds/v1.2/books/{book_id}/thumbnail/small",
+            get(opds::opds_v1_book_thumbnail_small_route),
+        )
         .route(
             "/opds/v1.2/books/{book_id}/pages/{page_number}",
             get(media_assets::book_page_opds_v1),
@@ -616,22 +622,22 @@ pub fn build_router(
             "/opds/v2/books/{book_id}/manifest/{manifest_profile}",
             get(opds::opds_manifest_profile_route),
         )
-        .route("/opds/v2/books/{book_id}/file", get(media_assets::book_file))
+        .route("/opds/v2/books/{book_id}/file", get(opds::opds_v2_book_file_route))
         .route(
             "/opds/v2/books/{book_id}/file/{*file_name}",
-            get(media_assets::book_file_with_suffix),
+            get(opds::opds_v2_book_file_with_suffix_route),
         )
         .route(
             "/opds/v2/books/{book_id}/thumbnail",
-            get(media_assets::book_thumbnail),
+            get(opds::opds_v2_book_thumbnail_route),
         )
         .route(
             "/opds/v2/books/{book_id}/pages/{page_number}",
-            get(media_assets::book_page),
+            get(opds::opds_v2_book_page_route),
         )
         .route(
             "/opds/v2/books/{book_id}/pages/{page_number}/raw",
-            get(media_assets::book_page_raw),
+            get(opds::opds_v2_book_page_raw_route),
         )
         .route(
             "/opds/v2/books/{book_id}/progression",

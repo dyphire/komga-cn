@@ -15,7 +15,8 @@ pub use super::operations::{
     series_metadata_refresh,
 };
 pub use super::pages::{
-    book_page, book_page_opds_v1, book_page_raw, book_page_thumbnail, book_pages, book_positions,
+    BookPageQuery, book_page, book_page_opds_v1, book_page_opds_v2, book_page_raw,
+    book_page_thumbnail, book_pages, book_positions,
 };
 pub use super::read_progress::{
     book_progression, book_progression_get, book_read_progress, book_read_progress_delete,
@@ -24,10 +25,11 @@ pub use super::read_progress::{
     series_tachiyomi_read_progress_put,
 };
 pub use super::thumbnails::{
-    book_thumbnail, book_thumbnail_by_id, book_thumbnail_delete, book_thumbnail_select,
-    book_thumbnail_upload, book_thumbnails, collection_thumbnail, collection_thumbnail_by_id,
-    collection_thumbnail_delete, collection_thumbnail_select, collection_thumbnail_upload,
-    collection_thumbnails, readlist_thumbnail, readlist_thumbnail_by_id, readlist_thumbnail_delete,
+    book_thumbnail, book_thumbnail_by_id, book_thumbnail_delete, book_thumbnail_opds,
+    book_thumbnail_opds_small, book_thumbnail_select, book_thumbnail_upload, book_thumbnails,
+    collection_thumbnail, collection_thumbnail_by_id, collection_thumbnail_delete,
+    collection_thumbnail_select, collection_thumbnail_upload, collection_thumbnails,
+    readlist_thumbnail, readlist_thumbnail_by_id, readlist_thumbnail_delete,
     readlist_thumbnail_select, readlist_thumbnail_upload, readlist_thumbnails, series_thumbnail,
     series_thumbnail_by_id, series_thumbnail_delete, series_thumbnail_select,
     series_thumbnail_upload, series_thumbnails,

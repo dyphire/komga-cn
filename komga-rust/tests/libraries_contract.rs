@@ -20,11 +20,11 @@ pub mod runtime_router_contract_support;
 
 use runtime_router_contract_support::*;
 
-#[path = "libraries_contract/kobo_library_sync.rs"]
-mod kobo_library_sync;
-#[path = "libraries_contract/libraries_api.rs"]
-mod libraries_api;
 #[path = "libraries_contract/kobo_book_metadata.rs"]
 mod kobo_book_metadata;
+#[path = "libraries_contract/kobo_library_sync.rs"]
+mod kobo_library_sync;
 #[path = "libraries_contract/kobo_misc.rs"]
 mod kobo_misc;
+#[path = "libraries_contract/libraries_api.rs"]
+mod libraries_api;

@@ -61,6 +61,8 @@ pub struct PersistedBookSearchRecord {
 pub struct PersistedNamedRecord {
     pub id: String,
     pub name: String,
+    pub last_modified: String,
+    pub ordered: bool,
 }
 
 pub struct PersistedBookFeedRecord {
@@ -490,6 +492,10 @@ pub async fn load_collection_search_records_by_ids(
         .map(|row| PersistedNamedRecord {
             id: row.get::<String, _>("ID"),
             name: row.get::<String, _>("NAME"),
+            last_modified: row
+                .try_get::<String, _>("LAST_MODIFIED")
+                .unwrap_or_default(),
+            ordered: row.try_get::<bool, _>("ORDERED").unwrap_or(false),
         })
         .collect())
 }
@@ -520,6 +526,10 @@ pub async fn load_readlist_search_records_by_ids(
         .map(|row| PersistedNamedRecord {
             id: row.get::<String, _>("ID"),
             name: row.get::<String, _>("NAME"),
+            last_modified: row
+                .try_get::<String, _>("LAST_MODIFIED")
+                .unwrap_or_default(),
+            ordered: row.try_get::<bool, _>("ORDERED").unwrap_or(false),
         })
         .collect())
 }
@@ -609,6 +619,10 @@ pub async fn load_collection_search_records_limited(
         .map(|row| PersistedNamedRecord {
             id: row.get::<String, _>("ID"),
             name: row.get::<String, _>("NAME"),
+            last_modified: row
+                .try_get::<String, _>("LAST_MODIFIED")
+                .unwrap_or_default(),
+            ordered: row.try_get::<bool, _>("ORDERED").unwrap_or(false),
         })
         .collect())
 }
@@ -636,6 +650,10 @@ pub async fn load_readlist_search_records_limited(
         .map(|row| PersistedNamedRecord {
             id: row.get::<String, _>("ID"),
             name: row.get::<String, _>("NAME"),
+            last_modified: row
+                .try_get::<String, _>("LAST_MODIFIED")
+                .unwrap_or_default(),
+            ordered: row.try_get::<bool, _>("ORDERED").unwrap_or(false),
         })
         .collect())
 }
@@ -701,7 +719,7 @@ pub async fn load_collections(
     let pool = connect_pool(database_file, 1).await?;
     let rows = if let Some(library_id) = library_id {
         sqlx::query(
-            "SELECT DISTINCT c.ID, c.NAME, \
+            "SELECT DISTINCT c.ID, c.NAME, c.ORDERED, \
                     COALESCE(c.LAST_MODIFIED_DATE, c.CREATED_DATE, '') AS LAST_MODIFIED \
              FROM COLLECTION c \
              JOIN COLLECTION_SERIES cs ON cs.COLLECTION_ID = c.ID \
@@ -714,7 +732,7 @@ pub async fn load_collections(
         .await?
     } else {
         sqlx::query(
-            "SELECT ID, NAME, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED \
+            "SELECT ID, NAME, ORDERED, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED \
              FROM COLLECTION \
              ORDER BY NAME COLLATE NOCASE ASC, ID ASC",
         )
@@ -727,6 +745,10 @@ pub async fn load_collections(
         .map(|row| PersistedNamedRecord {
             id: row.get::<String, _>("ID"),
             name: row.get::<String, _>("NAME"),
+            last_modified: row
+                .try_get::<String, _>("LAST_MODIFIED")
+                .unwrap_or_default(),
+            ordered: row.try_get::<bool, _>("ORDERED").unwrap_or(false),
         })
         .collect())
 }
@@ -741,7 +763,7 @@ pub async fn load_collection(
 
     let pool = connect_pool(database_file, 1).await?;
     let row = sqlx::query(
-        "SELECT ID, NAME, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED \
+        "SELECT ID, NAME, ORDERED, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED \
          FROM COLLECTION \
          WHERE ID = ? \
          LIMIT 1",
@@ -753,6 +775,10 @@ pub async fn load_collection(
     Ok(row.map(|row| PersistedNamedRecord {
         id: row.get::<String, _>("ID"),
         name: row.get::<String, _>("NAME"),
+        last_modified: row
+            .try_get::<String, _>("LAST_MODIFIED")
+            .unwrap_or_default(),
+        ordered: row.try_get::<bool, _>("ORDERED").unwrap_or(false),
     }))
 }
 
@@ -811,13 +837,14 @@ pub async fn load_collection_books(
 pub async fn load_collection_series(
     database_file: &Path,
     collection_id: &str,
+    ordered: bool,
 ) -> Result<Vec<PersistedSeriesRecord>, sqlx::Error> {
     if !database_file.exists() {
         return Ok(vec![]);
     }
 
     let pool = connect_pool(database_file, 1).await?;
-    let rows = sqlx::query(
+    let query = if ordered {
         "SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE, \
                 COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING, \
                 COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS, \
@@ -832,11 +859,27 @@ pub async fn load_collection_series(
          AND s.DELETED_DATE IS NULL \
          GROUP BY s.ID, s.LIBRARY_ID, TITLE, AGE_RATING, LAST_MODIFIED \
          ORDER BY cs.NUMBER ASC, COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC, \
-                  s.ID ASC",
-    )
-    .bind(collection_id)
-    .fetch_all(&pool)
-    .await?;
+                  s.ID ASC"
+    } else {
+        "SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE, \
+                COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING, \
+                COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS, \
+                COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED \
+         FROM COLLECTION_SERIES cs \
+         JOIN SERIES s ON s.ID = cs.SERIES_ID \
+         LEFT \
+         JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+         LEFT \
+         JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
+         WHERE cs.COLLECTION_ID = ? \
+         AND s.DELETED_DATE IS NULL \
+         GROUP BY s.ID, s.LIBRARY_ID, TITLE, AGE_RATING, LAST_MODIFIED \
+         ORDER BY COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC, s.ID ASC"
+    };
+    let rows = sqlx::query(query)
+        .bind(collection_id)
+        .fetch_all(&pool)
+        .await?;
 
     Ok(rows
         .into_iter()

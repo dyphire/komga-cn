@@ -205,6 +205,18 @@ pub async fn book_readlists(
             Err(error) => return internal_error_response(error),
         };
 
+        let detail_query = PersistedReadlistBooksQuery {
+            page: 0,
+            size: 20,
+            unpaged: false,
+            library_ids: None,
+            deleted: None,
+            tags: Vec::new(),
+            read_statuses: Vec::new(),
+            media_statuses: Vec::new(),
+            authors: Vec::new(),
+        };
+
         readlists.retain(|readlist| {
             readlist
                 .book_ids
@@ -212,8 +224,44 @@ pub async fn book_readlists(
                 .any(|candidate| candidate == &book_id)
         });
 
+        let mut visible_readlists = Vec::with_capacity(readlists.len());
+        for mut readlist in readlists {
+            let Some(visible_books) = (match load_visible_persisted_readlist_books(
+                auth_db.database_file.as_path(),
+                &auth_state,
+                &headers,
+                &readlist.id,
+                &detail_query,
+            )
+            .await
+            {
+                Ok(books) => books,
+                Err(error) => return internal_error_response(error),
+            }) else {
+                continue;
+            };
+
+            let visible_book_ids = visible_books
+                .into_iter()
+                .map(|book| book.id)
+                .collect::<Vec<_>>();
+            if !visible_book_ids
+                .iter()
+                .any(|candidate| candidate == &book_id)
+            {
+                continue;
+            }
+
+            readlist.filtered = readlist.book_ids != visible_book_ids;
+            readlist.book_ids = visible_book_ids;
+            visible_readlists.push(readlist);
+        }
+
         return Json(Value::Array(
-            readlists.iter().map(readlist_payload).collect::<Vec<_>>(),
+            visible_readlists
+                .iter()
+                .map(readlist_payload)
+                .collect::<Vec<_>>(),
         ))
         .into_response();
     }

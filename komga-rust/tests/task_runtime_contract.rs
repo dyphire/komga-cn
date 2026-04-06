@@ -19,6 +19,8 @@ use runtime_router_contract_support::*;
 
 #[path = "task_runtime_contract/import_and_transient.rs"]
 mod import_and_transient;
+#[path = "task_runtime_contract/metadata_aggregation.rs"]
+mod metadata_aggregation;
 #[path = "task_runtime_contract/ownership_guards.rs"]
 mod ownership_guards;
 #[path = "task_runtime_contract/search_index_lifecycle.rs"]

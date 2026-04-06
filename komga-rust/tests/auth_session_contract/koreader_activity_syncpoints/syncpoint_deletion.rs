@@ -163,7 +163,8 @@ async fn router_delete_syncpoints_me_with_whitespace_only_single_key_id_does_not
 }
 
 #[tokio::test]
-async fn router_delete_syncpoints_me_without_key_id_deletes_syncpoint_child_rows_for_current_user() {
+async fn router_delete_syncpoints_me_without_key_id_deletes_syncpoint_child_rows_for_current_user()
+{
     let paths = new_router_fixture("router-delete-syncpoints-me-all-subentities").await;
     seed_router_contract_data(&paths).await;
     seed_syncpoint_user(&paths, "other-user", "other@example.org").await;
@@ -208,7 +209,8 @@ async fn router_delete_syncpoints_me_without_key_id_deletes_syncpoint_child_rows
 }
 
 #[tokio::test]
-async fn router_delete_syncpoints_me_with_key_id_deletes_syncpoint_child_rows_only_for_matching_keys() {
+async fn router_delete_syncpoints_me_with_key_id_deletes_syncpoint_child_rows_only_for_matching_keys()
+ {
     let paths = new_router_fixture("router-delete-syncpoints-me-key-subentities").await;
     seed_router_contract_data(&paths).await;
     seed_syncpoint_user(&paths, "other-user", "other@example.org").await;

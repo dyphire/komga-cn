@@ -67,6 +67,9 @@ pub(super) fn default_test_backend() -> MediaAssetsRuntimeAccessBackend {
     MediaAssetsRuntimeAccessBackend {
         media_import_service: Arc::new(|_| Box::new(DefaultRuntimeMediaImportService)),
         book_metadata_service: Arc::new(|_| Box::new(DefaultRuntimeBookMetadataService)),
+        refresh_book_search_documents_after_metadata_update: Arc::new(|_, _, _| {
+            Box::pin(async { Ok(()) })
+        }),
         persist_book_page_hashes_with_media_content: Arc::new(|_, _| Box::pin(async { Ok(()) })),
         decode_epub_positions: Arc::new(|blob| decode_epub_positions_for_tests(&blob)),
         load_epub_archive_positions: Arc::new(|media| {
@@ -78,6 +81,7 @@ pub(super) fn default_test_backend() -> MediaAssetsRuntimeAccessBackend {
                 .ok()
                 .map(|metadata| metadata.len().min(i64::MAX as u64) as i64)
         }),
+        load_epub_cover_bytes: Arc::new(|_| None),
         load_persisted_book_media: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         load_persisted_book_media_files: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),
         book_media_is_ready_status: Arc::new(|_, _| Box::pin(async { Ok(false) })),

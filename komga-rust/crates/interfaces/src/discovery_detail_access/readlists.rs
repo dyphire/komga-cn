@@ -9,8 +9,6 @@ type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
 pub struct DiscoveryDetailReadlistsAccessBackend {
-    pub persisted_readlists_exist:
-        Arc<dyn Fn(PathBuf) -> BoxFuture<Result<bool, String>> + Send + Sync>,
     pub load_persisted_readlists: Arc<
         dyn Fn(PathBuf) -> BoxFuture<Result<Vec<PersistedReadlistRecord>, String>> + Send + Sync,
     >,
@@ -67,11 +65,6 @@ pub(crate) fn install_backend(backend: DiscoveryDetailReadlistsAccessBackend) {
 
 fn backend() -> &'static DiscoveryDetailReadlistsAccessBackend {
     BACKEND.get_or_init(|| DiscoveryDetailReadlistsAccessBackend {
-        persisted_readlists_exist: Arc::new(|_| {
-            Box::pin(async {
-                Err("discovery detail readlists backend is not configured".to_string())
-            })
-        }),
         load_persisted_readlists: Arc::new(|_| {
             Box::pin(async {
                 Err("discovery detail readlists backend is not configured".to_string())
@@ -155,10 +148,6 @@ pub struct PersistedComicrackMatchCandidateRecord {
 pub struct PersistedBookAuthorRecord {
     pub name: String,
     pub role: String,
-}
-
-pub async fn persisted_readlists_exist(database_file: &FsPath) -> Result<bool, String> {
-    (backend().persisted_readlists_exist)(database_file.to_path_buf()).await
 }
 
 pub async fn load_persisted_readlists(

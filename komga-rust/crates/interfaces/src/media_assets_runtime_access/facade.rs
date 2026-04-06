@@ -16,6 +16,19 @@ pub(crate) fn book_metadata_service(database_file: &Path) -> Box<dyn RuntimeBook
     (backend().book_metadata_service)(database_file.to_path_buf())
 }
 
+pub(crate) async fn refresh_book_search_documents_after_metadata_update(
+    database_file: &Path,
+    index_dir: &Path,
+    book_id: &str,
+) -> Result<(), String> {
+    (backend().refresh_book_search_documents_after_metadata_update)(
+        database_file.to_path_buf(),
+        index_dir.to_path_buf(),
+        book_id.to_string(),
+    )
+    .await
+}
+
 pub(crate) async fn persist_book_page_hashes_with_media_content(
     database_file: &Path,
     book_id: &str,
@@ -59,6 +72,10 @@ pub(crate) async fn book_media_is_ready_status(
     book_id: &str,
 ) -> Result<bool, String> {
     (backend().book_media_is_ready_status)(database_file.to_path_buf(), book_id.to_string()).await
+}
+
+pub(crate) fn load_epub_cover_bytes(media: &BookMediaRecord) -> Option<(Vec<u8>, String)> {
+    (backend().load_epub_cover_bytes)(media.clone())
 }
 
 pub(crate) async fn load_persisted_series_thumbnail_media(

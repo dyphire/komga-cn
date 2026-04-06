@@ -64,6 +64,8 @@ pub struct PersistedBookSearchRecord {
 pub struct PersistedNamedRecord {
     pub id: String,
     pub name: String,
+    pub last_modified: String,
+    pub ordered: bool,
 }
 
 pub struct PersistedBookFeedRecord {
@@ -154,7 +156,7 @@ pub struct OpdsPersistedAccessBackend {
             + Sync,
     >,
     pub load_collection_series: Arc<
-        dyn Fn(PathBuf, String) -> BoxFuture<Result<Vec<PersistedSeriesRecord>, String>>
+        dyn Fn(PathBuf, String, bool) -> BoxFuture<Result<Vec<PersistedSeriesRecord>, String>>
             + Send
             + Sync,
     >,
@@ -273,6 +275,12 @@ pub async fn load_collection_books(
 pub async fn load_collection_series(
     database_file: &Path,
     collection_id: &str,
+    ordered: bool,
 ) -> Result<Vec<PersistedSeriesRecord>, String> {
-    (backend().load_collection_series)(database_file.to_path_buf(), collection_id.to_string()).await
+    (backend().load_collection_series)(
+        database_file.to_path_buf(),
+        collection_id.to_string(),
+        ordered,
+    )
+    .await
 }

@@ -516,6 +516,8 @@ pub(super) async fn load_collections(
         .map(|row| PersistedCollection {
             id: row.id,
             name: row.name,
+            last_modified: row.last_modified,
+            ordered: row.ordered,
         })
         .collect())
 }
@@ -528,6 +530,8 @@ pub(super) async fn load_collection(
     Ok(row.map(|row| PersistedCollection {
         id: row.id,
         name: row.name,
+        last_modified: row.last_modified,
+        ordered: row.ordered,
     }))
 }
 
@@ -542,8 +546,10 @@ pub(super) async fn load_collection_books(
 pub(super) async fn load_collection_series(
     database_file: &Path,
     collection_id: &str,
+    ordered: bool,
 ) -> Result<Vec<PersistedSeries>, String> {
-    let rows = opds_persisted_access::load_collection_series(database_file, collection_id).await?;
+    let rows = opds_persisted_access::load_collection_series(database_file, collection_id, ordered)
+        .await?;
     Ok(rows.into_iter().map(map_series_record).collect())
 }
 

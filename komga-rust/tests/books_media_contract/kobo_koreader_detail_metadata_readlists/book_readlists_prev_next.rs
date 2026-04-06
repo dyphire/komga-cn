@@ -36,6 +36,152 @@ async fn router_discovery_book_readlists_returns_existing_persisted_readlists() 
 }
 
 #[tokio::test]
+async fn router_discovery_book_readlists_applies_content_restrictions_to_book_ids_and_filtered_like_kotlin()
+ {
+    let paths = new_router_fixture("router-discovery-book-readlists-content-restrictions").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_age_exclude_user(
+        &paths,
+        "restricted-user",
+        "restricted@example.org",
+        "router-contract-restricted-123",
+        18,
+    )
+    .await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("book readlists restricted db should open");
+    sqlx::query(
+        "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("series-2")
+    .bind(0_i64)
+    .bind("Series 2")
+    .bind("series/series-2")
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("restricted secondary series should be inserted");
+    sqlx::query(
+        "INSERT INTO SERIES_METADATA (STATUS, TITLE, TITLE_SORT, PUBLISHER, LANGUAGE, AGE_RATING, SERIES_ID) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("ONGOING")
+    .bind("Series 2")
+    .bind("Series 2")
+    .bind("PubHouse")
+    .bind("EN")
+    .bind(21_i64)
+    .bind("series-2")
+    .execute(&pool)
+    .await
+    .expect("restricted secondary series metadata should be inserted");
+    sqlx::query(
+        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("book-2")
+    .bind(0_i64)
+    .bind("book-2.epub")
+    .bind("books/book-2.epub")
+    .bind("series-2")
+    .bind(2_048_i64)
+    .bind(2_i64)
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("restricted secondary book should be inserted");
+    sqlx::query("INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("application/epub+zip")
+        .bind("READY")
+        .bind("book-2")
+        .bind(10_i64)
+        .execute(&pool)
+        .await
+        .expect("restricted secondary media should be inserted");
+    sqlx::query(
+        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("2")
+    .bind(2.0_f64)
+    .bind("Book 2")
+    .bind("2024-01-16")
+    .bind("book-2")
+    .execute(&pool)
+    .await
+    .expect("restricted secondary book metadata should be inserted");
+    sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT) VALUES (?, ?, ?)")
+        .bind("readlist-2")
+        .bind("Filtered ReadList")
+        .bind(2_i64)
+        .execute(&pool)
+        .await
+        .expect("filtered readlist row should be inserted");
+    sqlx::query("INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)")
+        .bind("readlist-2")
+        .bind("book-1")
+        .bind(0_i64)
+        .execute(&pool)
+        .await
+        .expect("filtered readlist visible book should be inserted");
+    sqlx::query("INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)")
+        .bind("readlist-2")
+        .bind("book-2")
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("filtered readlist restricted book should be inserted");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "restricted@example.org",
+        "router-contract-restricted-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/readlists")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("restricted book readlists request should build"),
+        )
+        .await
+        .expect("restricted book readlists request should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let payload = response_json(response).await;
+    let content = payload
+        .as_array()
+        .expect("restricted book readlists payload should be an array");
+    assert_eq!(content.len(), 2);
+
+    let allowed = content
+        .iter()
+        .find(|entry| entry.get("id") == Some(&json!("readlist-1")))
+        .expect("allowed readlist should be returned for visible target book");
+    assert_eq!(allowed.get("filtered"), Some(&Value::Bool(false)));
+    assert_eq!(allowed.get("bookIds"), Some(&json!(["book-1"])));
+    assert!(allowed.get("name").is_some());
+    assert!(allowed.get("summary").is_some());
+    assert!(allowed.get("ordered").is_some());
+    assert!(allowed.get("createdDate").is_some());
+    assert!(allowed.get("lastModifiedDate").is_some());
+
+    let filtered = content
+        .iter()
+        .find(|entry| entry.get("id") == Some(&json!("readlist-2")))
+        .expect("partially visible readlist should still be returned");
+    assert_eq!(filtered.get("filtered"), Some(&Value::Bool(true)));
+    assert_eq!(filtered.get("bookIds"), Some(&json!(["book-1"])));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_book_previous_uses_metadata_number_sort_instead_of_book_number() {
     let paths = new_router_fixture("router-book-previous-number-sort").await;
     seed_router_contract_data(&paths).await;
@@ -121,7 +267,7 @@ async fn router_book_previous_uses_metadata_number_sort_instead_of_book_number()
 }
 
 #[tokio::test]
-async fn router_book_previous_excludes_deleted_books_even_when_they_sort_closer() {
+async fn router_book_previous_returns_deleted_books_when_they_sort_closer() {
     let paths = new_router_fixture("router-book-previous-excludes-deleted").await;
     seed_router_contract_data(&paths).await;
 
@@ -240,14 +386,15 @@ async fn router_book_previous_excludes_deleted_books_even_when_they_sort_closer(
     let payload = response_json(response).await;
     assert_eq!(
         payload.get("id"),
-        Some(&Value::String("book-prev-active".to_string()))
+        Some(&Value::String("book-prev-deleted".to_string()))
     );
+    assert_eq!(payload.get("deleted"), Some(&Value::Bool(true)));
 
     cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
-async fn router_book_previous_breaks_number_sort_ties_by_book_id() {
+async fn router_book_previous_skips_equal_number_sort_ties() {
     let paths = new_router_fixture("router-book-previous-number-sort-tie").await;
     seed_router_contract_data(&paths).await;
 
@@ -327,12 +474,7 @@ async fn router_book_previous_breaks_number_sort_ties_by_book_id() {
         .await
         .expect("book previous tie request should complete");
 
-    assert_eq!(response.status(), StatusCode::OK);
-    let payload = response_json(response).await;
-    assert_eq!(
-        payload.get("id"),
-        Some(&Value::String("book-0a".to_string()))
-    );
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
     cleanup_router_fixture(paths);
 }
@@ -423,7 +565,7 @@ async fn router_book_next_uses_metadata_number_sort_instead_of_book_number() {
 }
 
 #[tokio::test]
-async fn router_book_next_excludes_deleted_books_even_when_they_sort_closer() {
+async fn router_book_next_returns_deleted_books_when_they_sort_closer() {
     let paths = new_router_fixture("router-book-next-excludes-deleted").await;
     seed_router_contract_data(&paths).await;
 
@@ -542,14 +684,15 @@ async fn router_book_next_excludes_deleted_books_even_when_they_sort_closer() {
     let payload = response_json(response).await;
     assert_eq!(
         payload.get("id"),
-        Some(&Value::String("book-next-active".to_string()))
+        Some(&Value::String("book-next-deleted".to_string()))
     );
+    assert_eq!(payload.get("deleted"), Some(&Value::Bool(true)));
 
     cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
-async fn router_book_next_breaks_number_sort_ties_by_book_id() {
+async fn router_book_next_skips_equal_number_sort_ties() {
     let paths = new_router_fixture("router-book-next-number-sort-tie").await;
     seed_router_contract_data(&paths).await;
 
@@ -629,11 +772,125 @@ async fn router_book_next_breaks_number_sort_ties_by_book_id() {
         .await
         .expect("book next tie request should complete");
 
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_next_reuses_book_detail_payload_fields() {
+    let paths = new_router_fixture("router-book-next-detail-payload").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("book next detail payload db should open");
+    sqlx::query(
+        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("book-next-detail")
+    .bind(0_i64)
+    .bind("book next detail.cbz")
+    .bind("file:/library%20root/books/book%20next%20detail.cbz")
+    .bind("series-1")
+    .bind(4_096_i64)
+    .bind(2_i64)
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("next detail sibling book row should be inserted");
+    sqlx::query("INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("application/vnd.comicbook+zip")
+        .bind("READY")
+        .bind("book-next-detail")
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("next detail sibling media row should be inserted");
+    sqlx::query(
+        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("2")
+    .bind(2.0_f64)
+    .bind("Next Detail Payload")
+    .bind("2024-01-16")
+    .bind("book-next-detail")
+    .execute(&pool)
+    .await
+    .expect("next detail sibling metadata row should be inserted");
+    sqlx::query(
+        "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, DEVICE_ID, DEVICE_NAME) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind("book-next-detail")
+    .bind("admin-user")
+    .bind(5_i64)
+    .bind(false)
+    .bind("device-next")
+    .bind("Next Reader")
+    .execute(&pool)
+    .await
+    .expect("next detail sibling read progress row should be inserted");
+    pool.close().await;
+
+    let books_dir = paths.config_dir.join("books");
+    std::fs::create_dir_all(&books_dir)
+        .expect("books directory should be created for next detail payload fixture");
+    let file = File::create(books_dir.join("book next detail.cbz"))
+        .expect("next detail payload cbz fixture should be created");
+    let mut zip = ZipWriter::new(file);
+    let options = SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Stored)
+        .unix_permissions(0o644);
+    zip.start_file("page-1.png", options)
+        .expect("next detail payload page entry should be created");
+    zip.write_all(&fixture_png_bytes())
+        .expect("next detail payload page payload should be written");
+    zip.finish()
+        .expect("next detail payload cbz fixture should finish successfully");
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/next")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book next detail payload request should build"),
+        )
+        .await
+        .expect("book next detail payload request should complete");
+
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
     assert_eq!(
         payload.get("id"),
-        Some(&Value::String("book-1z".to_string()))
+        Some(&Value::String("book-next-detail".to_string()))
+    );
+    assert_eq!(
+        payload.get("url"),
+        Some(&Value::String(
+            "/library root/books/book next detail.cbz".to_string()
+        ))
+    );
+    assert_eq!(
+        payload.get("fileLastModified"),
+        Some(&Value::String("1970-01-01T00:00:00Z".to_string()))
+    );
+    assert_eq!(
+        payload
+            .get("readProgress")
+            .and_then(|progress| progress.get("deviceId")),
+        Some(&Value::String("device-next".to_string()))
+    );
+    assert_eq!(
+        payload
+            .get("readProgress")
+            .and_then(|progress| progress.get("deviceName")),
+        Some(&Value::String("Next Reader".to_string()))
     );
 
     cleanup_router_fixture(paths);

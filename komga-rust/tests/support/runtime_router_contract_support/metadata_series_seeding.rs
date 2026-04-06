@@ -219,11 +219,7 @@ pub async fn seed_router_series_alternate_title(
     pool.close().await;
 }
 
-pub async fn seed_router_series_aggregated_tag(
-    paths: &RuntimeDbPaths,
-    series_id: &str,
-    tag: &str,
-) {
+pub async fn seed_router_series_aggregated_tag(paths: &RuntimeDbPaths, series_id: &str, tag: &str) {
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract series aggregated tag db should open");

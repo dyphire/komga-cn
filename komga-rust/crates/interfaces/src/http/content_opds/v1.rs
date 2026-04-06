@@ -1,6 +1,6 @@
 use super::*;
 
-fn opds_v1_basic_unauthorized_response() -> Response {
+pub(super) fn opds_v1_basic_unauthorized_response() -> Response {
     (
         StatusCode::UNAUTHORIZED,
         [(
@@ -78,6 +78,7 @@ pub(crate) async fn opds_v1_catalog(headers: HeaderMap) -> Response {
                 "/opds/v1.2/publishers",
             ),
         ],
+        None,
         None,
         &[
             format!(
@@ -662,18 +663,30 @@ pub(crate) async fn opds_v1_collection_detail(
     else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    let restrictions = opds_restrictions(&headers);
 
-    let series = load_collection_series(database_file, collection_id)
+    let visible_series = load_collection_series(database_file, collection_id, collection.ordered)
         .await
         .unwrap_or_default()
         .into_iter()
         .filter(|series| library_visible(&allowed_library_ids, &series.library_id))
         .collect::<Vec<_>>();
+    if visible_series.is_empty() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let series = visible_series
+        .into_iter()
+        .filter(|series| {
+            content_allowed_by_restrictions(
+                restrictions.as_ref(),
+                series.age_rating,
+                &series.sharing_labels,
+            )
+        })
+        .collect::<Vec<_>>();
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
     let (series, has_next) = paginate_vec(series, page, size);
-    if series.is_empty() {
-        return StatusCode::FORBIDDEN.into_response();
-    }
 
     let entries = series
         .into_iter()
@@ -684,17 +697,18 @@ pub(crate) async fn opds_v1_collection_detail(
                 title: series.title,
                 content: String::new(),
                 href_path: format!("/opds/v1.2/series/{id}"),
-                updated: None,
+                updated: Some(series.last_modified),
             }
         })
         .collect::<Vec<_>>();
 
-    opds_v1_navigation_feed_response(
+    opds_v1_navigation_feed_response_with_feed_updated(
         &headers,
         collection.id.as_str(),
         collection.name.as_str(),
         format!("/opds/v1.2/collections/{collection_id}").as_str(),
         entries,
+        Some(collection.last_modified.as_str()),
         Some((page, has_next)),
     )
 }

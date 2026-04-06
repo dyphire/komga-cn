@@ -5,17 +5,15 @@ use std::mem;
 use tantivy::Index;
 use tantivy::schema::{IndexRecordOption, TextFieldIndexing, TextOptions};
 use tantivy::tokenizer::{
-    AsciiFoldingFilter, LowerCaser, RawTokenizer, RemoveLongFilter, SimpleTokenizer, TextAnalyzer,
-    Token, TokenFilter, TokenStream, Tokenizer,
+    AsciiFoldingFilter, LowerCaser, RawTokenizer, SimpleTokenizer, TextAnalyzer, Token,
+    TokenFilter, TokenStream, Tokenizer,
 };
 
-pub(in crate::search) const SEARCH_ANALYZER_VERSION: u32 = 4;
+pub(in crate::search) const SEARCH_ANALYZER_VERSION: u32 = 6;
 
 pub fn search_analyzer_version() -> u32 {
     SEARCH_ANALYZER_VERSION
 }
-
-const MAX_TOKEN_LENGTH: usize = 40;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(in crate::search) enum SearchFieldClass {
@@ -97,7 +95,6 @@ fn tokenizer_profile_name(class: SearchFieldClass, phase: SearchAnalyzerPhase) -
 
 fn build_default_text_analyzer() -> TextAnalyzer {
     TextAnalyzer::builder(SimpleTokenizer::default())
-        .filter(RemoveLongFilter::limit(MAX_TOKEN_LENGTH))
         .filter(MultilingualWidthNormalizer)
         .filter(LowerCaser)
         .filter(CjkBigramApproximationFilter)
@@ -107,11 +104,10 @@ fn build_default_text_analyzer() -> TextAnalyzer {
 
 fn build_multilingual_index_text_analyzer() -> TextAnalyzer {
     TextAnalyzer::builder(SimpleTokenizer::default())
-        .filter(RemoveLongFilter::limit(MAX_TOKEN_LENGTH))
         .filter(MultilingualWidthNormalizer)
         .filter(LowerCaser)
         .filter(CjkBigramApproximationFilter)
-        .filter(StagedNgramApproximationFilter::new(3, 8, true))
+        .filter(StagedNgramApproximationFilter::new(3, 10, true))
         .filter(AsciiFoldingFilter)
         .build()
 }
@@ -674,6 +670,14 @@ mod tests {
     }
 
     #[test]
+    fn multilingual_query_analyzer_preserves_tokens_longer_than_forty_chars() {
+        assert_multilingual_query_tokens(
+            "supercalifragilisticexpialidociousencyclopedia",
+            &["supercalifragilisticexpialidociousencyclopedia"],
+        );
+    }
+
+    #[test]
     fn multilingual_query_analyzer_normalizes_fullwidth_latin_digits_and_spacing() {
         assert_multilingual_query_tokens("Ｂａｔｍａｎ　東京　１２３", &["batman", "東京", "123"]);
     }
@@ -750,6 +754,28 @@ mod tests {
             ],
             "index analyzer should keep the original multilingual terms while approximating legacy ngram indexing",
         );
+    }
+
+    #[test]
+    fn multilingual_index_analyzer_emits_nine_and_ten_char_ngrams() {
+        let tokens = collect_tokens(
+            build_index_time_analyzer(SearchFieldClass::MultilingualFullText),
+            "Encyclopedia",
+        );
+
+        assert!(tokens.contains(&"cyclopedi".to_string()));
+        assert!(tokens.contains(&"cyclopedia".to_string()));
+    }
+
+    #[test]
+    fn multilingual_index_analyzer_preserves_tokens_longer_than_forty_chars() {
+        let tokens = collect_tokens(
+            build_index_time_analyzer(SearchFieldClass::MultilingualFullText),
+            "supercalifragilisticexpialidociousencyclopedia",
+        );
+
+        assert!(tokens.contains(&"supercalifragilisticexpialidociousencyclopedia".to_string()));
+        assert!(tokens.contains(&"alidocious".to_string()));
     }
 
     #[test]

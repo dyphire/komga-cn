@@ -186,7 +186,8 @@ async fn router_users_update_expires_target_users_existing_session_when_restrict
 }
 
 #[tokio::test]
-async fn router_users_update_keeps_target_users_existing_session_when_effective_access_is_unchanged() {
+async fn router_users_update_keeps_target_users_existing_session_when_effective_access_is_unchanged()
+ {
     let paths = new_router_fixture("router-users-update-keeps-target-session-when-unchanged").await;
     seed_router_contract_data(&paths).await;
     seed_router_library_restricted_user(

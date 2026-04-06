@@ -48,6 +48,15 @@ pub struct MediaAssetsRuntimeAccessBackend {
         Arc<dyn Fn(PathBuf) -> Box<dyn RuntimeMediaImportService> + Send + Sync>,
     pub book_metadata_service:
         Arc<dyn Fn(PathBuf) -> Box<dyn RuntimeBookMetadataService> + Send + Sync>,
+    pub refresh_book_search_documents_after_metadata_update: Arc<
+        dyn Fn(
+                PathBuf,
+                PathBuf,
+                String,
+            ) -> futures_util::future::BoxFuture<'static, Result<(), String>>
+            + Send
+            + Sync,
+    >,
     pub persist_book_page_hashes_with_media_content: Arc<
         dyn Fn(PathBuf, String) -> futures_util::future::BoxFuture<'static, Result<(), String>>
             + Send
@@ -58,6 +67,8 @@ pub struct MediaAssetsRuntimeAccessBackend {
         Arc<dyn Fn(BookMediaRecord) -> Option<Vec<Value>> + Send + Sync>,
     pub read_media_file_bytes: Arc<dyn Fn(PathBuf) -> Option<Vec<u8>> + Send + Sync>,
     pub read_media_file_size: Arc<dyn Fn(PathBuf) -> Option<i64> + Send + Sync>,
+    pub load_epub_cover_bytes:
+        Arc<dyn Fn(BookMediaRecord) -> Option<(Vec<u8>, String)> + Send + Sync>,
     pub load_persisted_book_media: Arc<
         dyn Fn(
                 PathBuf,

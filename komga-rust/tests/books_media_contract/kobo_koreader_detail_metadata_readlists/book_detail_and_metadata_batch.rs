@@ -395,3 +395,268 @@ async fn router_book_metadata_batch_update_refreshes_book_search_results() {
 
     cleanup_router_fixture(paths);
 }
+
+#[tokio::test]
+async fn router_book_metadata_update_refreshes_book_full_text_search_results() {
+    let paths = new_router_fixture("router-book-metadata-update-refreshes-search").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let initial_search = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/books/list?page=0&size=20")
+                .header("x-auth-token", &auth_token)
+                .header("x-komga-runtime-search-ownership", "runtime-rust-owned")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "fullTextSearch": "Updated Single Title"
+                    })
+                    .to_string(),
+                ))
+                .expect("initial single metadata search request should build"),
+        )
+        .await
+        .expect("initial single metadata search request should complete");
+    assert_eq!(initial_search.status(), StatusCode::OK);
+    let initial_payload = response_json(initial_search).await;
+    let initial_content = initial_payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("initial single metadata search should expose content array");
+    assert!(initial_content.is_empty());
+
+    let update = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/books/book-1/metadata")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "title": "Updated Single Title"
+                    })
+                    .to_string(),
+                ))
+                .expect("single book metadata update request should build"),
+        )
+        .await
+        .expect("single book metadata update request should complete");
+    assert_eq!(update.status(), StatusCode::NO_CONTENT);
+
+    let updated_search = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/books/list?page=0&size=20")
+                .header("x-auth-token", &auth_token)
+                .header("x-komga-runtime-search-ownership", "runtime-rust-owned")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "fullTextSearch": "Updated Single Title"
+                    })
+                    .to_string(),
+                ))
+                .expect("updated single metadata search request should build"),
+        )
+        .await
+        .expect("updated single metadata search request should complete");
+    assert_eq!(updated_search.status(), StatusCode::OK);
+    let updated_payload = response_json(updated_search).await;
+    let updated_content = updated_payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("updated single metadata search should expose content array");
+    assert_eq!(updated_content.len(), 1);
+    assert_eq!(
+        updated_content[0].get("id"),
+        Some(&Value::String("book-1".to_string()))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_metadata_update_rejects_invalid_isbn_values() {
+    let paths = new_router_fixture("router-book-metadata-update-invalid-isbn").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    for invalid_isbn in ["1617290459", "978-123-456-789-6"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/api/v1/books/book-1/metadata")
+                    .header("x-auth-token", &auth_token)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({
+                            "isbn": invalid_isbn,
+                        })
+                        .to_string(),
+                    ))
+                    .expect("invalid isbn metadata update request should build"),
+            )
+            .await
+            .expect("invalid isbn metadata update request should complete");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_metadata_update_rejects_blank_title_and_number_values() {
+    let paths = new_router_fixture("router-book-metadata-update-blank-title-number").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    for payload in [json!({ "title": "" }), json!({ "number": "" })] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/api/v1/books/book-1/metadata")
+                    .header("x-auth-token", &auth_token)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(payload.to_string()))
+                    .expect("blank title/number metadata update request should build"),
+            )
+            .await
+            .expect("blank title/number metadata update request should complete");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_metadata_update_returns_not_found_for_missing_book() {
+    let paths = new_router_fixture("router-book-metadata-update-missing-book").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/books/missing/metadata")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "summary": "ignored" }).to_string()))
+                .expect("missing book metadata update request should build"),
+        )
+        .await
+        .expect("missing book metadata update request should complete");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_metadata_update_rejects_invalid_link_urls() {
+    let paths = new_router_fixture("router-book-metadata-update-invalid-link-url").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/books/book-1/metadata")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "links": [
+                            {
+                                "label": "AniList",
+                                "url": "not-a-url"
+                            }
+                        ]
+                    })
+                    .to_string(),
+                ))
+                .expect("invalid link url metadata update request should build"),
+        )
+        .await
+        .expect("invalid link url metadata update request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_metadata_update_accepts_normalized_valid_isbn_13() {
+    let paths = new_router_fixture("router-book-metadata-update-valid-isbn-13").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let update = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/books/book-1/metadata")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "isbn": "978-161-729-045-9abc xxxoefj",
+                    })
+                    .to_string(),
+                ))
+                .expect("valid isbn metadata update request should build"),
+        )
+        .await
+        .expect("valid isbn metadata update request should complete");
+    assert_eq!(update.status(), StatusCode::NO_CONTENT);
+
+    let detail = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book detail after valid isbn metadata update request should build"),
+        )
+        .await
+        .expect("book detail after valid isbn metadata update request should complete");
+    assert_eq!(detail.status(), StatusCode::OK);
+
+    let payload = response_json(detail).await;
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|metadata| metadata.get("isbn")),
+        Some(&Value::String("9781617290459".to_string()))
+    );
+
+    cleanup_router_fixture(paths);
+}

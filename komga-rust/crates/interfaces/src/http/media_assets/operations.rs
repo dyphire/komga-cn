@@ -113,6 +113,16 @@ pub async fn book_metadata_update(
 
     match service.update_book_metadata(&book_id, &patch).await {
         Ok(Some(series_id)) => {
+            if let Err(error) = refresh_book_search_documents_after_metadata_update(
+                auth_db.database_file.as_path(),
+                state.runtime.lucene_data_directory.as_path(),
+                &book_id,
+            )
+            .await
+            {
+                return internal_error_response(error);
+            }
+
             if let Some(series_id) = series_id {
                 let task = TaskQueueRecord::new(
                     format!("AGGREGATE_SERIES_METADATA:{series_id}"),
@@ -218,11 +228,11 @@ fn parse_book_metadata_patch(
     patch: &serde_json::Map<String, Value>,
 ) -> Result<ApplicationBookMetadataPatch, String> {
     Ok(ApplicationBookMetadataPatch {
-        title: optional_non_null_string(patch, "title")?,
+        title: optional_non_blank_string(patch, "title")?,
         title_lock: optional_bool(patch, "titleLock")?,
         summary: optional_nullable_string(patch, "summary")?,
         summary_lock: optional_bool(patch, "summaryLock")?,
-        number: optional_non_null_string(patch, "number")?,
+        number: optional_non_blank_string(patch, "number")?,
         number_lock: optional_bool(patch, "numberLock")?,
         number_sort: optional_f64(patch, "numberSort")?,
         number_sort_lock: optional_bool(patch, "numberSortLock")?,
@@ -232,7 +242,7 @@ fn parse_book_metadata_patch(
         authors_lock: optional_bool(patch, "authorsLock")?,
         tags: optional_string_vec(patch, "tags")?,
         tags_lock: optional_bool(patch, "tagsLock")?,
-        isbn: optional_nullable_string(patch, "isbn")?,
+        isbn: optional_nullable_isbn(patch, "isbn")?,
         isbn_lock: optional_bool(patch, "isbnLock")?,
         links: optional_links(patch, "links")?,
         links_lock: optional_bool(patch, "linksLock")?,
@@ -264,16 +274,21 @@ fn optional_f64(patch: &serde_json::Map<String, Value>, key: &str) -> Result<Opt
     }
 }
 
-fn optional_non_null_string(
+fn optional_non_blank_string(
     patch: &serde_json::Map<String, Value>,
     key: &str,
 ) -> Result<Option<String>, String> {
     match patch.get(key) {
         Some(value) if value.is_null() => Ok(None),
-        Some(value) => value
-            .as_str()
-            .map(|value| Some(value.to_string()))
-            .ok_or_else(|| format!("{key} must be a string or null")),
+        Some(value) => {
+            let value = value
+                .as_str()
+                .ok_or_else(|| format!("{key} must be a string or null"))?;
+            if value.trim().is_empty() {
+                return Err(format!("{key} must not be blank"));
+            }
+            Ok(Some(value.to_string()))
+        }
         None => Ok(None),
     }
 }
@@ -290,6 +305,45 @@ fn optional_nullable_string(
             .ok_or_else(|| format!("{key} must be a string or null")),
         None => Ok(None),
     }
+}
+
+fn optional_nullable_isbn(
+    patch: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Option<Option<String>>, String> {
+    match patch.get(key) {
+        Some(value) if value.is_null() => Ok(Some(None)),
+        Some(value) => {
+            let value = value
+                .as_str()
+                .ok_or_else(|| format!("{key} must be a string or null"))?;
+            if !value.trim().is_empty() && !is_valid_isbn13(value) {
+                return Err(format!("{key} must be null, blank, or a valid ISBN-13"));
+            }
+            Ok(Some(Some(value.to_string())))
+        }
+        None => Ok(None),
+    }
+}
+
+fn is_valid_isbn13(value: &str) -> bool {
+    let digits = value
+        .chars()
+        .filter_map(|character| character.to_digit(10))
+        .collect::<Vec<_>>();
+    if digits.len() != 13 {
+        return false;
+    }
+
+    let checksum = digits
+        .iter()
+        .take(12)
+        .enumerate()
+        .map(|(index, digit)| if index % 2 == 0 { *digit } else { digit * 3 })
+        .sum::<u32>();
+    let expected_check_digit = (10 - (checksum % 10)) % 10;
+
+    digits[12] == expected_check_digit
 }
 
 fn optional_string_vec(
@@ -367,13 +421,16 @@ fn optional_links(
                 let label = entry
                     .get("label")
                     .and_then(Value::as_str)
-                    .ok_or_else(|| "link.label must be a non-empty string".to_string())?;
+                    .ok_or_else(|| "links.label must be a string".to_string())?;
                 let url = entry
                     .get("url")
                     .and_then(Value::as_str)
-                    .ok_or_else(|| "link.url must be a non-empty string".to_string())?;
-                if label.trim().is_empty() || url.trim().is_empty() {
-                    return Err("link label/url must not be blank".to_string());
+                    .ok_or_else(|| "links.url must be a string".to_string())?;
+                if label.trim().is_empty() {
+                    return Err("links.label must not be blank".to_string());
+                }
+                if url.trim().is_empty() || reqwest::Url::parse(url).is_err() {
+                    return Err("links.url must be a valid URL".to_string());
                 }
                 Ok(ApplicationBookMetadataLink {
                     label: label.to_string(),

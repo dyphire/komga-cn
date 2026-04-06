@@ -280,7 +280,7 @@ async fn router_post_filesystem_rejects_relative_path_even_when_it_exists_like_k
 
 #[tokio::test]
 async fn router_post_filesystem_absolute_directory_hides_hidden_entries_and_uses_parent_like_kotlin()
-{
+ {
     let paths = new_router_fixture("router-post-filesystem-absolute-directory").await;
     seed_router_contract_data(&paths).await;
 

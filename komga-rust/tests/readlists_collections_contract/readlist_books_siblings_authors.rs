@@ -93,6 +93,63 @@ async fn router_readlist_books_returns_paginated_content_and_library_filter() {
 }
 
 #[tokio::test]
+async fn router_readlist_books_returns_empty_page_when_library_id_filter_excludes_visible_books_like_kotlin()
+ {
+    let paths = new_router_fixture("router-readlist-books-library-filter-empty-page").await;
+    seed_router_contract_data(&paths).await;
+    seed_readlist_endpoint_variants(&paths).await;
+    seed_router_library_restricted_user(
+        &paths,
+        "library-restricted-user",
+        "library-restricted@example.org",
+        "router-contract-library-restricted-123",
+        &["library-1"],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "library-restricted@example.org",
+        "router-contract-library-restricted-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/readlists/readlist-1/books?library_id=library-2&unpaged=true")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("readlist books library-filter-empty request should build"),
+        )
+        .await
+        .expect("readlist books library-filter-empty request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let content = payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("readlist books empty payload should expose content array");
+    assert!(content.is_empty());
+    assert_eq!(
+        payload.get("totalElements").and_then(Value::as_u64),
+        Some(0)
+    );
+    assert_eq!(
+        payload
+            .get("pageable")
+            .and_then(|pageable| pageable.get("unpaged"))
+            .and_then(Value::as_bool),
+        Some(true),
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_book_tags_supports_readlist_scope() {
     let paths = new_router_fixture("router-book-tags-readlist-scope").await;
     seed_router_contract_data(&paths).await;
@@ -225,6 +282,197 @@ async fn router_readlist_books_and_siblings_follow_release_date_when_unordered()
         next_payload.get("id").and_then(Value::as_str),
         Some("book-3")
     );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_readlist_books_filters_content_restricted_books_like_kotlin() {
+    let paths = new_router_fixture("router-readlist-books-content-restrictions").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_age_exclude_user(
+        &paths,
+        "restricted-user",
+        "restricted@example.org",
+        "router-contract-restricted-123",
+        18,
+    )
+    .await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("readlist books content restriction db should open");
+    sqlx::query(
+        "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("series-2")
+    .bind(0_i64)
+    .bind("Series 2")
+    .bind("series/series-2")
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("restricted series row should be inserted");
+    sqlx::query(
+        "INSERT INTO SERIES_METADATA (STATUS, TITLE, TITLE_SORT, PUBLISHER, LANGUAGE, AGE_RATING, SERIES_ID) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("ONGOING")
+    .bind("Series 2")
+    .bind("Series 2")
+    .bind("PubHouse")
+    .bind("EN")
+    .bind(21_i64)
+    .bind("series-2")
+    .execute(&pool)
+    .await
+    .expect("restricted series metadata row should be inserted");
+    sqlx::query(
+        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("book-2")
+    .bind(0_i64)
+    .bind("book-2.epub")
+    .bind("books/book-2.epub")
+    .bind("series-2")
+    .bind(2_048_i64)
+    .bind(2_i64)
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("restricted book row should be inserted");
+    sqlx::query("INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("application/epub+zip")
+        .bind("READY")
+        .bind("book-2")
+        .bind(10_i64)
+        .execute(&pool)
+        .await
+        .expect("restricted media row should be inserted");
+    sqlx::query(
+        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("2")
+    .bind(2.0_f64)
+    .bind("Book 2")
+    .bind("2024-01-16")
+    .bind("book-2")
+    .execute(&pool)
+    .await
+    .expect("restricted book metadata row should be inserted");
+    sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT, ORDERED) VALUES (?, ?, ?, ?)")
+        .bind("readlist-2")
+        .bind("Filtered ReadList")
+        .bind(2_i64)
+        .bind(true)
+        .execute(&pool)
+        .await
+        .expect("filtered readlist row should be inserted");
+    sqlx::query("INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)")
+        .bind("readlist-2")
+        .bind("book-1")
+        .bind(0_i64)
+        .execute(&pool)
+        .await
+        .expect("visible readlist book row should be inserted");
+    sqlx::query("INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)")
+        .bind("readlist-2")
+        .bind("book-2")
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("restricted readlist book row should be inserted");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "restricted@example.org",
+        "router-contract-restricted-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/readlists/readlist-2/books?unpaged=true")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("restricted readlist books request should build"),
+        )
+        .await
+        .expect("restricted readlist books request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let content = payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("restricted readlist books payload should expose content array");
+    let ids = content
+        .iter()
+        .filter_map(|entry| entry.get("id").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec!["book-1"]);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_readlist_books_returns_not_found_for_library_hidden_readlist_like_kotlin() {
+    let paths = new_router_fixture("router-readlist-books-library-hidden-not-found").await;
+    seed_router_contract_data(&paths).await;
+    seed_readlist_endpoint_variants(&paths).await;
+    seed_router_library_restricted_user(
+        &paths,
+        "library-restricted-user",
+        "library-restricted@example.org",
+        "router-contract-library-restricted-123",
+        &["library-1"],
+    )
+    .await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("readlist books library-hidden db should open");
+    sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT, ORDERED) VALUES (?, ?, ?, ?)")
+        .bind("readlist-2")
+        .bind("Library Hidden ReadList")
+        .bind(1_i64)
+        .bind(true)
+        .execute(&pool)
+        .await
+        .expect("library-hidden readlist row should be inserted");
+    sqlx::query("INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)")
+        .bind("readlist-2")
+        .bind("book-3")
+        .bind(0_i64)
+        .execute(&pool)
+        .await
+        .expect("library-hidden readlist book row should be inserted");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "library-restricted@example.org",
+        "router-contract-library-restricted-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/readlists/readlist-2/books?unpaged=true")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("library-hidden readlist books request should build"),
+        )
+        .await
+        .expect("library-hidden readlist books request should complete");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
     cleanup_router_fixture(paths);
 }

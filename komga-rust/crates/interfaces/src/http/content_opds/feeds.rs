@@ -28,12 +28,27 @@ pub(super) fn opds_v1_navigation_feed_response(
     entries: Vec<OpdsV1NavigationEntry>,
     pagination: Option<(usize, bool)>,
 ) -> Response {
+    opds_v1_navigation_feed_response_with_feed_updated(
+        headers, feed_id, title, self_path, entries, None, pagination,
+    )
+}
+
+pub(super) fn opds_v1_navigation_feed_response_with_feed_updated(
+    headers: &HeaderMap,
+    feed_id: &str,
+    title: &str,
+    self_path: &str,
+    entries: Vec<OpdsV1NavigationEntry>,
+    feed_updated: Option<&str>,
+    pagination: Option<(usize, bool)>,
+) -> Response {
     opds_v1_navigation_feed_response_with_extra_links(
         headers,
         feed_id,
         title,
         self_path,
         entries,
+        feed_updated,
         pagination,
         &[],
     )
@@ -45,18 +60,23 @@ pub(super) fn opds_v1_navigation_feed_response_with_extra_links(
     title: &str,
     self_path: &str,
     entries: Vec<OpdsV1NavigationEntry>,
+    feed_updated: Option<&str>,
     pagination: Option<(usize, bool)>,
     extra_links: &[String],
 ) -> Response {
     let self_href = app_absolute_url(headers, self_path);
     let start_href = app_absolute_url(headers, "/opds/v1.2/catalog");
     let now = opds_now_timestamp();
+    let feed_updated = feed_updated
+        .filter(|value| !value.is_empty())
+        .map(normalize_opds_updated)
+        .unwrap_or_else(|| now.clone());
 
     let mut body = String::new();
     body.push_str("<feed xmlns=\"http://www.w3.org/2005/Atom\">");
     body.push_str(format!("<id>{}</id>", xml_escape(feed_id)).as_str());
     body.push_str(format!("<title>{}</title>", xml_escape(title)).as_str());
-    body.push_str(format!("<updated>{}</updated><author><name>Komga</name><uri>https://github.com/gotson/komga</uri></author>", xml_escape(&now)).as_str());
+    body.push_str(format!("<updated>{}</updated><author><name>Komga</name><uri>https://github.com/gotson/komga</uri></author>", xml_escape(&feed_updated)).as_str());
     body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"self\" href=\"{}\"/>", xml_escape(&self_href)).as_str());
     body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"start\" href=\"{}\"/>", xml_escape(&start_href)).as_str());
     for link in extra_links {
