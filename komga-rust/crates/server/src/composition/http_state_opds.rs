@@ -518,20 +518,39 @@ fn map_persisted_readlist_record(
     }
 }
 
+fn map_persisted_book_author_record(
+    row: infrastructure_opds_persisted::PersistedBookAuthorRecord,
+) -> InterfacesPersistedBookAuthorRecord {
+    InterfacesPersistedBookAuthorRecord {
+        name: row.name,
+        role: row.role,
+    }
+}
+
 fn map_persisted_readlist_book_record(
     row: infrastructure_opds_persisted::PersistedReadlistBookRecord,
 ) -> InterfacesPersistedReadlistBookRecord {
     InterfacesPersistedReadlistBookRecord {
         id: row.id,
+        series_id: row.series_id,
         title: row.title,
         series_title: row.series_title,
         number: row.number,
+        number_sort: row.number_sort,
         summary: row.summary,
-        authors: row.authors,
+        isbn: row.isbn,
+        authors: row
+            .authors
+            .into_iter()
+            .map(map_persisted_book_author_record)
+            .collect(),
+        tags: row.tags,
         file_name: row.file_name,
         file_size: row.file_size,
         media_type: row.media_type,
         media_status: row.media_status,
+        page_count: row.page_count,
+        epub_divina_compatible: row.epub_divina_compatible,
         library_id: row.library_id,
         age_rating: row.age_rating,
         sharing_labels: row.sharing_labels,

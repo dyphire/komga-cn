@@ -1110,7 +1110,7 @@ pub(crate) async fn opds_v1_readlist_detail(
                 title: format!("{} {}: {}", book.series_title, book.number, book.title),
                 updated: Some(book.last_modified),
                 content,
-                authors: book.authors,
+                authors: book.authors.into_iter().map(|author| author.name).collect(),
                 acquisition_media_type: book.media_type,
                 acquisition_href_path: format!(
                     "/opds/v1.2/books/{}/file/{}",

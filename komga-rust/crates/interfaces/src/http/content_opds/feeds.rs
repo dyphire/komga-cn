@@ -592,12 +592,55 @@ pub(super) fn opds_navigation_response_with_paging(
         .into_response()
 }
 
-pub(super) fn opds_publications_response(
+pub(super) fn opds_publications_response_with_paging(
     headers: &HeaderMap,
     title: &str,
-    self_href: &str,
+    self_path: &str,
+    modified: Option<&str>,
     publications: Vec<Value>,
+    page: usize,
+    size: usize,
+    total: usize,
 ) -> Response {
+    let self_href = app_absolute_url(headers, self_path);
+    let modified = modified
+        .filter(|value| !value.is_empty())
+        .map(normalize_opds_updated)
+        .unwrap_or_else(opds_now_timestamp);
+
+    let mut links = vec![
+        json!({
+            "rel": "self",
+            "href": self_href,
+        }),
+        json!({
+            "title": "Home",
+            "rel": "start",
+            "href": app_absolute_url(headers, "/opds/v2/catalog"),
+            "type": "application/opds+json",
+        }),
+        json!({
+            "title": "Search",
+            "rel": "search",
+            "href": app_absolute_url(headers, "/opds/v2/search{?query}"),
+            "type": "application/opds+json",
+            "templated": true,
+        }),
+    ];
+
+    if page > 0 {
+        links.push(json!({
+            "rel": "previous",
+            "href": app_absolute_url(headers, page_link_path(self_path, page.saturating_sub(1)).as_str()),
+        }));
+    }
+    if page.saturating_add(1).saturating_mul(size) < total {
+        links.push(json!({
+            "rel": "next",
+            "href": app_absolute_url(headers, page_link_path(self_path, page + 1).as_str()),
+        }));
+    }
+
     (
         StatusCode::OK,
         [(
@@ -607,105 +650,16 @@ pub(super) fn opds_publications_response(
         Json(json!({
             "metadata": {
                 "title": title,
+                "modified": modified,
+                "itemsPerPage": size,
+                "currentPage": page + 1,
+                "numberOfItems": total,
             },
-            "links": [
-                {
-                    "rel": "self",
-                    "href": self_href,
-                    "type": "application/opds+json",
-                },
-                {
-                    "rel": "start",
-                    "href": app_absolute_url(headers, "/opds/v2/catalog"),
-                    "type": "application/opds+json",
-                },
-                {
-                    "rel": "search",
-                    "href": app_absolute_url(headers, "/opds/v2/search{?query}"),
-                    "type": "application/opds+json",
-                    "templated": true,
-                }
-            ],
+            "links": links,
             "publications": publications,
         })),
     )
         .into_response()
-}
-
-pub(super) fn opds_publication_for_book(
-    headers: &HeaderMap,
-    book_id: &str,
-    title: &str,
-    media_type: &str,
-) -> Value {
-    let auth_href = app_absolute_url(headers, "/opds/v2/auth");
-    let manifest_href = app_absolute_url(
-        headers,
-        format!("/opds/v2/books/{book_id}/manifest").as_str(),
-    );
-    let file_href = app_absolute_url(headers, format!("/opds/v2/books/{book_id}/file").as_str());
-    let progression_href = app_absolute_url(
-        headers,
-        format!("/opds/v2/books/{book_id}/progression").as_str(),
-    );
-    let thumbnail_href = app_absolute_url(
-        headers,
-        format!("/opds/v2/books/{book_id}/thumbnail").as_str(),
-    );
-
-    json!({
-        "@context": "https://readium.org/webpub-manifest/context.jsonld",
-        "metadata": {
-            "title": title,
-        },
-        "links": [
-            {
-                "rel": "self",
-                "href": manifest_href,
-                "type": "application/opds-publication+json",
-                "properties": {
-                    "authenticate": {
-                        "href": auth_href.as_str(),
-                        "type": "application/opds-authentication+json",
-                    },
-                },
-            },
-            {
-                "rel": "http://opds-spec.org/acquisition",
-                "href": file_href,
-                "type": media_type,
-                "properties": {
-                    "authenticate": {
-                        "href": auth_href.as_str(),
-                        "type": "application/opds-authentication+json",
-                    },
-                },
-            },
-            {
-                "rel": "http://www.cantook.com/api/progression",
-                "href": progression_href,
-                "type": "application/vnd.readium.progression+json",
-                "properties": {
-                    "authenticate": {
-                        "href": auth_href.as_str(),
-                        "type": "application/opds-authentication+json",
-                    },
-                },
-            }
-        ],
-        "images": [
-            {
-                "href": thumbnail_href,
-                "type": "image/jpeg",
-                "properties": {
-                    "authenticate": {
-                        "href": auth_href.as_str(),
-                        "type": "application/opds-authentication+json",
-                    },
-                },
-            }
-        ],
-    })
 }
 
 pub(super) fn opds_publication_for_feed_entry(

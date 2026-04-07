@@ -219,19 +219,6 @@ pub(crate) async fn load_on_deck_books(
     .await
 }
 
-pub(crate) async fn load_latest_books(
-    database_file: &Path,
-    library_id: Option<&str>,
-    limit: i64,
-) -> Result<Vec<OpdsBookFeedEntry>, String> {
-    (backend().load_latest_books)(
-        database_file.to_path_buf(),
-        library_id.map(str::to_string),
-        limit,
-    )
-    .await
-}
-
 pub(crate) async fn load_latest_books_paged(
     database_file: &Path,
     allowed_library_ids: &Option<HashSet<String>>,

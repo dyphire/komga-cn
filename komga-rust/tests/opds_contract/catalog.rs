@@ -551,6 +551,308 @@ async fn router_opds_v2_collections_top_level_navigation_hides_empty_subsections
 }
 
 #[tokio::test]
+async fn router_opds_v2_collection_unauthorized_returns_opds_auth_document() {
+    let paths = new_router_fixture("router-opds-v2-collection-unauthorized-auth-doc").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/collections/collection-1")
+                .body(Body::empty())
+                .expect("opds v2 collection unauthorized request should build"),
+        )
+        .await
+        .expect("opds v2 collection unauthorized request should complete");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok()),
+        Some("Basic realm=\"Realm\"")
+    );
+    assert!(
+        response
+            .headers()
+            .get(header::LINK)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| {
+                value.contains("/opds/v2/auth")
+                    && value.contains("http://opds-spec.org/auth/document")
+                    && value.contains("application/opds-authentication+json")
+            })
+    );
+    assert!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.contains("application/opds-authentication+json"))
+    );
+
+    let payload = response_json(response).await;
+    assert!(
+        payload
+            .get("id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value.contains("/opds/v2/auth"))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_collection_returns_not_found_for_missing_or_out_of_scope_collection() {
+    let paths = new_router_fixture("router-opds-v2-collection-scope-not-found").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_authors_scope_variants(&paths).await;
+    seed_router_library_restricted_user(
+        &paths,
+        "library-user",
+        "library-user@example.org",
+        "router-contract-library-123",
+        &["library-1"],
+    )
+    .await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("opds v2 collection scope db should open");
+    sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("collection-2")
+        .bind("Collection 2")
+        .bind(false)
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("library-scoped collection should be inserted");
+    sqlx::query(
+        "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
+    )
+    .bind("collection-2")
+    .bind("series-3")
+    .bind(0_i64)
+    .execute(&pool)
+    .await
+    .expect("library-scoped collection series should be inserted");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "library-user@example.org",
+        "router-contract-library-123",
+    )
+    .await;
+
+    let hidden_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/collections/collection-2")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("hidden collection request should build"),
+        )
+        .await
+        .expect("hidden collection request should complete");
+    assert_eq!(hidden_response.status(), StatusCode::NOT_FOUND);
+
+    let missing_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/collections/missing-collection")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("missing collection request should build"),
+        )
+        .await
+        .expect("missing collection request should complete");
+    assert_eq!(missing_response.status(), StatusCode::NOT_FOUND);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_collection_uses_kotlin_navigation_shape_and_ordering() {
+    let paths = new_router_fixture("router-opds-v2-collection-shape").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_custom_series(&paths, "series-2", "Alpha Display", "library-1").await;
+    update_router_series_metadata_titles(&paths, "series-1", "Zeta Display", "Zulu Sort").await;
+    update_router_series_metadata_titles(&paths, "series-2", "Alpha Display", "Alpha Sort").await;
+    update_router_collection_last_modified(&paths, "collection-1", "2024-01-20 01:02:03").await;
+    seed_router_collection_series_entry(&paths, "collection-1", "series-2", 99).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/collections/collection-1?size=1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v2 collection request should build"),
+        )
+        .await
+        .expect("opds v2 collection request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert!(payload.get("publications").is_none());
+    assert!(payload.get("groups").is_none());
+    assert!(payload.get("facets").is_none());
+
+    let metadata = payload
+        .get("metadata")
+        .expect("collection metadata should be present");
+    assert_eq!(
+        metadata.get("title").and_then(Value::as_str),
+        Some("Collection 1")
+    );
+    assert_eq!(
+        metadata.get("modified").and_then(Value::as_str),
+        Some("2024-01-20T01:02:03Z")
+    );
+    assert_eq!(
+        metadata.get("itemsPerPage").and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(metadata.get("currentPage").and_then(Value::as_u64), Some(1));
+    assert_eq!(
+        metadata.get("numberOfItems").and_then(Value::as_u64),
+        Some(2)
+    );
+
+    let links = payload
+        .get("links")
+        .and_then(Value::as_array)
+        .expect("collection links should be present");
+    let self_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("self"))
+        .expect("collection self link should be present");
+    assert_eq!(
+        self_link.get("href").and_then(Value::as_str),
+        Some("http://localhost/opds/v2/collections/collection-1")
+    );
+    assert!(self_link.get("type").is_none());
+    let start_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("start"))
+        .expect("collection start link should be present");
+    assert_eq!(
+        start_link.get("title").and_then(Value::as_str),
+        Some("Home")
+    );
+    let search_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("search"))
+        .expect("collection search link should be present");
+    assert_eq!(
+        search_link.get("title").and_then(Value::as_str),
+        Some("Search")
+    );
+    assert_eq!(
+        search_link.get("templated").and_then(Value::as_bool),
+        Some(true)
+    );
+    let next_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("next"))
+        .expect("collection next link should be present");
+    assert_eq!(
+        next_link.get("href").and_then(Value::as_str),
+        Some("http://localhost/opds/v2/collections/collection-1?page=1")
+    );
+
+    let navigation = payload
+        .get("navigation")
+        .and_then(Value::as_array)
+        .expect("collection navigation should be present");
+    assert_eq!(navigation.len(), 1);
+    assert_eq!(
+        navigation[0].get("title").and_then(Value::as_str),
+        Some("Alpha Display")
+    );
+    assert_eq!(
+        navigation[0].get("href").and_then(Value::as_str),
+        Some("http://localhost/opds/v2/series/series-2")
+    );
+    assert_eq!(
+        navigation[0].get("type").and_then(Value::as_str),
+        Some("application/opds+json")
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_collection_returns_empty_feed_when_series_are_filtered_by_restrictions() {
+    let paths = new_router_fixture("router-opds-v2-collection-empty-visible-feed").await;
+    seed_router_contract_data(&paths).await;
+    update_router_series_age_rating(&paths, "series-1", 21).await;
+    seed_router_age_exclude_user(
+        &paths,
+        "restricted-user",
+        "restricted@example.org",
+        "router-contract-restricted-123",
+        12,
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "restricted@example.org",
+        "router-contract-restricted-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/collections/collection-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v2 collection empty-feed request should build"),
+        )
+        .await
+        .expect("opds v2 collection empty-feed request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|metadata| metadata.get("title"))
+            .and_then(Value::as_str),
+        Some("Collection 1")
+    );
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|metadata| metadata.get("numberOfItems"))
+            .and_then(Value::as_u64),
+        Some(0)
+    );
+    assert!(payload.get("navigation").is_none());
+    assert!(payload.get("publications").is_none());
+    assert!(payload.get("groups").is_none());
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_opds_v2_readlists_unauthorized_returns_opds_auth_document() {
     let paths = new_router_fixture("router-opds-v2-readlists-auth-doc").await;
     seed_router_contract_data(&paths).await;
@@ -867,6 +1169,29 @@ async fn clear_router_collections_and_readlists(paths: &RuntimeDbPaths) {
     pool.close().await;
 }
 
+async fn seed_router_collection_series_entry(
+    paths: &RuntimeDbPaths,
+    collection_id: &str,
+    series_id: &str,
+    number: i64,
+) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("opds collection-series seed db should open");
+
+    sqlx::query(
+        "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
+    )
+    .bind(collection_id)
+    .bind(series_id)
+    .bind(number)
+    .execute(&pool)
+    .await
+    .expect("collection series entry should be inserted");
+
+    pool.close().await;
+}
+
 async fn seed_router_readlist(
     paths: &RuntimeDbPaths,
     readlist_id: &str,
@@ -892,6 +1217,27 @@ async fn seed_router_readlist(
         .execute(&pool)
         .await
         .expect("readlist book row should be inserted");
+
+    pool.close().await;
+}
+
+async fn seed_router_readlist_book_entry(
+    paths: &RuntimeDbPaths,
+    readlist_id: &str,
+    book_id: &str,
+    number: i64,
+) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("opds readlist-book seed db should open");
+
+    sqlx::query("INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)")
+        .bind(readlist_id)
+        .bind(book_id)
+        .bind(number)
+        .execute(&pool)
+        .await
+        .expect("readlist book entry should be inserted");
 
     pool.close().await;
 }
@@ -2197,9 +2543,62 @@ async fn router_opds_v2_book_page_raw_unauthorized_returns_opds_auth_document() 
 }
 
 #[tokio::test]
-async fn router_opds_v2_library_recommended_includes_modified_metadata() {
-    let paths = new_router_fixture("router-opds-v2-library-recommended-modified").await;
+async fn router_opds_v2_library_recommended_unauthorized_returns_opds_auth_document() {
+    let paths =
+        new_router_fixture("router-opds-v2-library-recommended-unauthorized-auth-doc").await;
     seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/libraries/library-1")
+                .body(Body::empty())
+                .expect("opds v2 library recommended unauthorized request should build"),
+        )
+        .await
+        .expect("opds v2 library recommended unauthorized request should complete");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok()),
+        Some("Basic realm=\"Realm\"")
+    );
+    assert!(
+        response
+            .headers()
+            .get(header::LINK)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| {
+                value.contains("/opds/v2/auth")
+                    && value.contains("http://opds-spec.org/auth/document")
+                    && value.contains("application/opds-authentication+json")
+            })
+    );
+
+    let payload = response_json(response).await;
+    assert!(
+        payload
+            .get("id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value.contains("/opds/v2/auth"))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_library_recommended_uses_kotlin_shape() {
+    let paths = new_router_fixture("router-opds-v2-library-recommended-shape").await;
+    seed_router_contract_data(&paths).await;
+    update_router_library_last_modified(&paths, "library-1", "2024-02-03 04:05:06").await;
+    update_router_book_isbn(&paths, "book-1", "9781234567890").await;
+    update_router_book_number_metadata(&paths, "book-1", "Special", 10.0).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
@@ -2218,15 +2617,2408 @@ async fn router_opds_v2_library_recommended_includes_modified_metadata() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
+
+    let metadata = payload
+        .get("metadata")
+        .expect("library recommended metadata should be present");
+    assert_eq!(
+        metadata.get("title").and_then(Value::as_str),
+        Some("Library 1 - Recommended")
+    );
+    assert_eq!(
+        metadata.get("modified").and_then(Value::as_str),
+        Some("2024-02-03T04:05:06Z")
+    );
+
+    let links = payload
+        .get("links")
+        .and_then(Value::as_array)
+        .expect("library recommended links should be present");
+    let self_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("self"))
+        .expect("library recommended self link should be present");
+    assert_eq!(
+        self_link.get("href").and_then(Value::as_str),
+        Some("http://localhost/opds/v2/libraries/library-1")
+    );
+    assert!(self_link.get("type").is_none());
+
+    let start_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("start"))
+        .expect("library recommended start link should be present");
+    assert_eq!(
+        start_link.get("title").and_then(Value::as_str),
+        Some("Home")
+    );
+
+    let search_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("search"))
+        .expect("library recommended search link should be present");
+    assert_eq!(
+        search_link.get("title").and_then(Value::as_str),
+        Some("Search")
+    );
+    assert_eq!(
+        search_link.get("templated").and_then(Value::as_bool),
+        Some(true)
+    );
+
+    let navigation = payload
+        .get("navigation")
+        .and_then(Value::as_array)
+        .expect("library recommended navigation should be present");
+    let navigation_titles = navigation
+        .iter()
+        .filter_map(|entry| entry.get("title").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        navigation_titles,
+        vec!["Recommended", "Browse", "Collections", "Read lists"]
+    );
+
+    let groups = payload
+        .get("groups")
+        .and_then(Value::as_array)
+        .expect("library recommended groups should be present");
     assert!(
-        payload
+        groups.iter().all(|group| {
+            group
+                .get("metadata")
+                .and_then(|metadata| metadata.get("title"))
+                .and_then(Value::as_str)
+                != Some("Libraries")
+        }),
+        "library route should not include all-libraries group"
+    );
+    for group in groups {
+        let group_metadata = group
             .get("metadata")
-            .and_then(|value| value.get("modified"))
-            .and_then(Value::as_str)
-            .is_some_and(|value| !value.is_empty())
+            .expect("library recommended group metadata should be present");
+        assert!(
+            group_metadata
+                .get("itemsPerPage")
+                .and_then(Value::as_u64)
+                .is_some_and(|value| value > 0),
+            "recommended group should expose pagination metadata, group={group}"
+        );
+        assert_eq!(
+            group_metadata.get("currentPage").and_then(Value::as_u64),
+            Some(1),
+            "recommended group should expose first page, group={group}"
+        );
+        assert!(
+            group_metadata
+                .get("numberOfItems")
+                .and_then(Value::as_u64)
+                .is_some(),
+            "recommended group should expose total items, group={group}"
+        );
+    }
+
+    let latest_books_group = groups
+        .iter()
+        .find(|group| {
+            group
+                .get("metadata")
+                .and_then(|metadata| metadata.get("title"))
+                .and_then(Value::as_str)
+                == Some("Latest Books")
+        })
+        .expect("latest books group should be present");
+    let publication = latest_books_group
+        .get("publications")
+        .and_then(Value::as_array)
+        .and_then(|publications| publications.first())
+        .expect("latest books group should include a publication");
+    assert_eq!(
+        publication.get("@context").and_then(Value::as_str),
+        Some("https://readium.org/webpub-manifest/context.jsonld")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("identifier"))
+            .and_then(Value::as_str),
+        Some("urn:isbn:9781234567890")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("belongsTo"))
+            .and_then(|belongs_to| belongs_to.get("series"))
+            .and_then(Value::as_array)
+            .and_then(|series| series.first())
+            .and_then(|series| series.get("position"))
+            .and_then(Value::as_f64),
+        Some(10.0)
+    );
+    let publication_links = publication
+        .get("links")
+        .and_then(Value::as_array)
+        .expect("publication links should be present");
+    assert!(
+        publication_links.iter().any(|link| {
+            link.get("rel").and_then(Value::as_str)
+                == Some("http://www.cantook.com/api/progression")
+        }),
+        "library recommended publication should expose progression link"
+    );
+    assert!(
+        publication
+            .get("images")
+            .and_then(Value::as_array)
+            .is_some_and(|images| !images.is_empty()),
+        "library recommended publication should expose images"
     );
 
     cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_on_deck_unauthorized_returns_opds_auth_document() {
+    let paths = new_router_fixture("router-opds-v2-on-deck-unauthorized-auth-doc").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/libraries/on-deck")
+                .body(Body::empty())
+                .expect("opds v2 on-deck unauthorized request should build"),
+        )
+        .await
+        .expect("opds v2 on-deck unauthorized request should complete");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok()),
+        Some("Basic realm=\"Realm\"")
+    );
+    assert!(
+        response
+            .headers()
+            .get(header::LINK)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| {
+                value.contains("/opds/v2/auth")
+                    && value.contains("http://opds-spec.org/auth/document")
+                    && value.contains("application/opds-authentication+json")
+            })
+    );
+
+    let payload = response_json(response).await;
+    assert!(
+        payload
+            .get("id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value.contains("/opds/v2/auth"))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_on_deck_uses_kotlin_shape_and_visible_results() {
+    let paths = new_router_fixture("router-opds-v2-on-deck-shape").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_pdf_book(&paths, "book-pdf", "series-1", "book-pdf.pdf", "Book PDF").await;
+    seed_router_library(&paths, "library-2", "Library 2").await;
+    seed_router_custom_series(&paths, "series-2", "Series 2", "library-2").await;
+    seed_catalog_book(
+        &paths,
+        "book-library-2-read",
+        "series-2",
+        "library-2",
+        "Book Library 2 Read",
+        1,
+        "2024-03-01 00:00:00",
+    )
+    .await;
+    seed_catalog_book(
+        &paths,
+        "book-library-2-on-deck",
+        "series-2",
+        "library-2",
+        "Book Library 2 On Deck",
+        2,
+        "2024-03-01 00:00:00",
+    )
+    .await;
+    update_router_book_isbn(&paths, "book-pdf", "9780000000002").await;
+    update_router_book_isbn(&paths, "book-library-2-on-deck", "9780000000006").await;
+    seed_router_read_progress_entry(
+        &paths,
+        "book-1",
+        "admin-user",
+        10,
+        true,
+        "2024-03-01 00:00:00",
+    )
+    .await;
+    seed_router_read_progress_entry(
+        &paths,
+        "book-library-2-read",
+        "admin-user",
+        10,
+        true,
+        "2024-03-02 00:00:00",
+    )
+    .await;
+    upsert_router_series_read_progress(
+        &paths,
+        "series-1",
+        "admin-user",
+        1,
+        0,
+        "2024-03-01 00:00:00",
+    )
+    .await;
+    upsert_router_series_read_progress(
+        &paths,
+        "series-2",
+        "admin-user",
+        1,
+        0,
+        "2024-03-02 00:00:00",
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/libraries/on-deck?size=1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v2 on-deck request should build"),
+        )
+        .await
+        .expect("opds v2 on-deck request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert!(payload.get("navigation").is_none());
+    assert!(payload.get("groups").is_none());
+
+    let metadata = payload
+        .get("metadata")
+        .expect("on-deck metadata should be present");
+    assert_eq!(
+        metadata.get("title").and_then(Value::as_str),
+        Some("All libraries - On Deck")
+    );
+    assert!(
+        metadata.get("modified").and_then(Value::as_str).is_some(),
+        "on-deck metadata.modified should be present"
+    );
+    assert_eq!(
+        metadata.get("itemsPerPage").and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(metadata.get("currentPage").and_then(Value::as_u64), Some(1));
+    assert_eq!(
+        metadata.get("numberOfItems").and_then(Value::as_u64),
+        Some(2)
+    );
+
+    let links = payload
+        .get("links")
+        .and_then(Value::as_array)
+        .expect("on-deck links should be present");
+    let self_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("self"))
+        .expect("on-deck self link should be present");
+    assert_eq!(
+        self_link.get("href").and_then(Value::as_str),
+        Some("http://localhost/opds/v2/libraries/on-deck")
+    );
+    assert!(self_link.get("type").is_none());
+    let start_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("start"))
+        .expect("on-deck start link should be present");
+    assert_eq!(
+        start_link.get("title").and_then(Value::as_str),
+        Some("Home")
+    );
+    let search_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("search"))
+        .expect("on-deck search link should be present");
+    assert_eq!(
+        search_link.get("title").and_then(Value::as_str),
+        Some("Search")
+    );
+    assert_eq!(
+        search_link.get("templated").and_then(Value::as_bool),
+        Some(true)
+    );
+    let next_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("next"))
+        .expect("on-deck next link should be present");
+    assert_eq!(
+        next_link.get("href").and_then(Value::as_str),
+        Some("http://localhost/opds/v2/libraries/on-deck?page=1")
+    );
+
+    let publications = payload
+        .get("publications")
+        .and_then(Value::as_array)
+        .expect("on-deck publications should be present");
+    assert_eq!(publications.len(), 1);
+    let publication = &publications[0];
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("title"))
+            .and_then(Value::as_str),
+        Some("Book Library 2 On Deck"),
+        "top-level on-deck should expose the most recent visible series pick across all visible libraries"
+    );
+    assert_eq!(
+        publication.get("@context").and_then(Value::as_str),
+        Some("https://readium.org/webpub-manifest/context.jsonld")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("identifier"))
+            .and_then(Value::as_str),
+        Some("urn:isbn:9780000000006")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("published"))
+            .and_then(Value::as_str),
+        Some("2024-01-15")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("belongsTo"))
+            .and_then(|belongs_to| belongs_to.get("series"))
+            .and_then(Value::as_array)
+            .and_then(|series| series.first())
+            .and_then(|series| series.get("name"))
+            .and_then(Value::as_str),
+        Some("Series 2")
+    );
+    let publication_links = publication
+        .get("links")
+        .and_then(Value::as_array)
+        .expect("on-deck publication links should be present");
+    assert!(
+        publication_links.iter().any(|link| {
+            link.get("rel").and_then(Value::as_str)
+                == Some("http://www.cantook.com/api/progression")
+        }),
+        "on-deck publication should expose progression link"
+    );
+    assert!(
+        publication_links.iter().all(|link| {
+            link.get("properties")
+                .and_then(|properties| properties.get("authenticate"))
+                .and_then(|authenticate| authenticate.get("href"))
+                .and_then(Value::as_str)
+                == Some("http://localhost/opds/v2/auth")
+        }),
+        "all on-deck publication links should carry authenticate properties"
+    );
+    assert!(
+        publication
+            .get("images")
+            .and_then(Value::as_array)
+            .is_some_and(|images| !images.is_empty()),
+        "on-deck publication should expose images"
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_on_deck_filters_results_for_restricted_user() {
+    let paths = new_router_fixture("router-opds-v2-on-deck-restricted-results").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_pdf_book(&paths, "book-pdf", "series-1", "book-pdf.pdf", "Book PDF").await;
+    seed_router_library(&paths, "library-2", "Library 2").await;
+    seed_router_custom_series(&paths, "series-2", "Series 2", "library-2").await;
+    seed_catalog_book(
+        &paths,
+        "book-library-2-read",
+        "series-2",
+        "library-2",
+        "Book Library 2 Read",
+        1,
+        "2024-03-01 00:00:00",
+    )
+    .await;
+    seed_catalog_book(
+        &paths,
+        "book-library-2-on-deck",
+        "series-2",
+        "library-2",
+        "Book Library 2 On Deck",
+        2,
+        "2024-03-01 00:00:00",
+    )
+    .await;
+    seed_router_library_restricted_user(
+        &paths,
+        "restricted-user",
+        "restricted@example.org",
+        "restricted-pass-123",
+        &["library-1"],
+    )
+    .await;
+    seed_router_read_progress_entry(
+        &paths,
+        "book-1",
+        "restricted-user",
+        10,
+        true,
+        "2024-03-01 00:00:00",
+    )
+    .await;
+    seed_router_read_progress_entry(
+        &paths,
+        "book-library-2-read",
+        "restricted-user",
+        10,
+        true,
+        "2024-03-02 00:00:00",
+    )
+    .await;
+    upsert_router_series_read_progress(
+        &paths,
+        "series-1",
+        "restricted-user",
+        1,
+        0,
+        "2024-03-01 00:00:00",
+    )
+    .await;
+    upsert_router_series_read_progress(
+        &paths,
+        "series-2",
+        "restricted-user",
+        1,
+        0,
+        "2024-03-02 00:00:00",
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "restricted@example.org",
+        "restricted-pass-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/libraries/on-deck")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("restricted on-deck request should build"),
+        )
+        .await
+        .expect("restricted on-deck request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|metadata| metadata.get("numberOfItems"))
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    let publications = payload
+        .get("publications")
+        .and_then(Value::as_array)
+        .expect("restricted on-deck publications should be present");
+    assert_eq!(publications.len(), 1);
+    assert_eq!(
+        publications[0]
+            .get("metadata")
+            .and_then(|metadata| metadata.get("title"))
+            .and_then(Value::as_str),
+        Some("Book PDF")
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_library_on_deck_unauthorized_returns_opds_auth_document() {
+    let paths = new_router_fixture("router-opds-v2-library-on-deck-unauthorized-auth-doc").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_read_progress(&paths, true).await;
+    seed_router_pdf_book(&paths, "book-pdf", "series-1", "book-pdf.pdf", "Book PDF").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/libraries/library-1/on-deck")
+                .body(Body::empty())
+                .expect("opds v2 library on-deck unauthorized request should build"),
+        )
+        .await
+        .expect("opds v2 library on-deck unauthorized request should complete");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok()),
+        Some("Basic realm=\"Realm\"")
+    );
+    assert!(
+        response
+            .headers()
+            .get(header::LINK)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| {
+                value.contains("/opds/v2/auth")
+                    && value.contains("http://opds-spec.org/auth/document")
+                    && value.contains("application/opds-authentication+json")
+            })
+    );
+
+    let payload = response_json(response).await;
+    assert!(
+        payload
+            .get("id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value.contains("/opds/v2/auth"))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_library_on_deck_respects_kotlin_library_scope_statuses() {
+    let paths = new_router_fixture("router-opds-v2-library-on-deck-scope").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_library(&paths, "library-2", "Library 2").await;
+    seed_router_library_restricted_user(
+        &paths,
+        "restricted-user",
+        "restricted@example.org",
+        "restricted-pass-123",
+        &["library-1"],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "restricted@example.org",
+        "restricted-pass-123",
+    )
+    .await;
+
+    let forbidden_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/libraries/library-2/on-deck")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("forbidden on-deck request should build"),
+        )
+        .await
+        .expect("forbidden on-deck request should complete");
+    assert_eq!(forbidden_response.status(), StatusCode::FORBIDDEN);
+
+    let missing_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/libraries/missing-library/on-deck")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("missing-library on-deck request should build"),
+        )
+        .await
+        .expect("missing-library on-deck request should complete");
+    assert_eq!(missing_response.status(), StatusCode::NOT_FOUND);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_library_on_deck_uses_kotlin_shape() {
+    let paths = new_router_fixture("router-opds-v2-library-on-deck-shape").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_read_progress(&paths, true).await;
+    seed_router_pdf_book(&paths, "book-pdf", "series-1", "book-pdf.pdf", "Book PDF").await;
+    update_router_library_last_modified(&paths, "library-1", "2024-02-03 04:05:06").await;
+    update_router_book_isbn(&paths, "book-pdf", "9780000000002").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/libraries/library-1/on-deck?size=1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v2 library on-deck request should build"),
+        )
+        .await
+        .expect("opds v2 library on-deck request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+
+    let metadata = payload
+        .get("metadata")
+        .expect("library on-deck metadata should be present");
+    assert_eq!(
+        metadata.get("title").and_then(Value::as_str),
+        Some("Library 1 - On Deck")
+    );
+    assert_eq!(
+        metadata.get("modified").and_then(Value::as_str),
+        Some("2024-02-03T04:05:06Z")
+    );
+    assert_eq!(
+        metadata.get("itemsPerPage").and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(metadata.get("currentPage").and_then(Value::as_u64), Some(1));
+    assert_eq!(
+        metadata.get("numberOfItems").and_then(Value::as_u64),
+        Some(1)
+    );
+
+    let links = payload
+        .get("links")
+        .and_then(Value::as_array)
+        .expect("library on-deck links should be present");
+    let self_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("self"))
+        .expect("library on-deck self link should be present");
+    assert_eq!(
+        self_link.get("href").and_then(Value::as_str),
+        Some("http://localhost/opds/v2/libraries/library-1/on-deck")
+    );
+    assert!(self_link.get("type").is_none());
+
+    let start_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("start"))
+        .expect("library on-deck start link should be present");
+    assert_eq!(
+        start_link.get("title").and_then(Value::as_str),
+        Some("Home")
+    );
+    let search_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("search"))
+        .expect("library on-deck search link should be present");
+    assert_eq!(
+        search_link.get("title").and_then(Value::as_str),
+        Some("Search")
+    );
+    assert_eq!(
+        search_link.get("templated").and_then(Value::as_bool),
+        Some(true)
+    );
+    assert!(
+        links
+            .iter()
+            .all(|link| link.get("rel").and_then(Value::as_str) != Some("next")),
+        "single-item on-deck feed should not expose next link"
+    );
+
+    let publications = payload
+        .get("publications")
+        .and_then(Value::as_array)
+        .expect("library on-deck publications should be present");
+    assert_eq!(publications.len(), 1);
+    let publication = &publications[0];
+    assert_eq!(
+        publication.get("@context").and_then(Value::as_str),
+        Some("https://readium.org/webpub-manifest/context.jsonld")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("title"))
+            .and_then(Value::as_str),
+        Some("Book PDF")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("identifier"))
+            .and_then(Value::as_str),
+        Some("urn:isbn:9780000000002")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("numberOfPages"))
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("published"))
+            .and_then(Value::as_str),
+        Some("2024-02-01")
+    );
+
+    let publication_links = publication
+        .get("links")
+        .and_then(Value::as_array)
+        .expect("on-deck publication links should be present");
+    let progression_link = publication_links
+        .iter()
+        .find(|link| {
+            link.get("rel").and_then(Value::as_str)
+                == Some("http://www.cantook.com/api/progression")
+        })
+        .expect("on-deck publication progression link should be present");
+    assert_eq!(
+        progression_link.get("href").and_then(Value::as_str),
+        Some("http://localhost/opds/v2/books/book-pdf/progression")
+    );
+    assert!(
+        publication_links.iter().all(|link| {
+            link.get("properties")
+                .and_then(|properties| properties.get("authenticate"))
+                .and_then(|authenticate| authenticate.get("href"))
+                .and_then(Value::as_str)
+                == Some("http://localhost/opds/v2/auth")
+        }),
+        "all on-deck publication links should carry authenticate properties"
+    );
+
+    let images = publication
+        .get("images")
+        .and_then(Value::as_array)
+        .expect("on-deck publication images should be present");
+    assert_eq!(
+        images[0].get("href").and_then(Value::as_str),
+        Some("http://localhost/opds/v2/books/book-pdf/thumbnail")
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_latest_books_unauthorized_returns_opds_auth_document() {
+    let paths = new_router_fixture("router-opds-v2-latest-books-unauthorized-auth-doc").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/libraries/books/latest")
+                .body(Body::empty())
+                .expect("opds v2 latest-books unauthorized request should build"),
+        )
+        .await
+        .expect("opds v2 latest-books unauthorized request should complete");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok()),
+        Some("Basic realm=\"Realm\"")
+    );
+    assert!(
+        response
+            .headers()
+            .get(header::LINK)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| {
+                value.contains("/opds/v2/auth")
+                    && value.contains("http://opds-spec.org/auth/document")
+                    && value.contains("application/opds-authentication+json")
+            })
+    );
+
+    let payload = response_json(response).await;
+    assert!(
+        payload
+            .get("id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value.contains("/opds/v2/auth"))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_latest_books_uses_kotlin_shape_and_visible_results() {
+    let paths = new_router_fixture("router-opds-v2-latest-books-shape").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_library(&paths, "library-2", "Library 2").await;
+    seed_router_custom_series(&paths, "series-2", "Series 2", "library-2").await;
+    seed_catalog_book(
+        &paths,
+        "book-library-2",
+        "series-2",
+        "library-2",
+        "Book Library 2",
+        1,
+        "2024-03-01 00:00:00",
+    )
+    .await;
+    update_router_book_created_date(&paths, "book-1", "2024-01-01 00:00:00").await;
+    update_router_book_isbn(&paths, "book-library-2", "9780000000003").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/libraries/books/latest?size=1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v2 latest-books request should build"),
+        )
+        .await
+        .expect("opds v2 latest-books request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert!(payload.get("navigation").is_none());
+    assert!(payload.get("groups").is_none());
+
+    let metadata = payload
+        .get("metadata")
+        .expect("latest-books metadata should be present");
+    assert_eq!(
+        metadata.get("title").and_then(Value::as_str),
+        Some("All libraries - Latest Books")
+    );
+    assert!(
+        metadata.get("modified").and_then(Value::as_str).is_some(),
+        "latest-books metadata.modified should be present"
+    );
+    assert_eq!(
+        metadata.get("itemsPerPage").and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(metadata.get("currentPage").and_then(Value::as_u64), Some(1));
+    assert_eq!(
+        metadata.get("numberOfItems").and_then(Value::as_u64),
+        Some(2)
+    );
+
+    let links = payload
+        .get("links")
+        .and_then(Value::as_array)
+        .expect("latest-books links should be present");
+    let self_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("self"))
+        .expect("latest-books self link should be present");
+    assert_eq!(
+        self_link.get("href").and_then(Value::as_str),
+        Some("http://localhost/opds/v2/libraries/books/latest")
+    );
+    assert!(self_link.get("type").is_none());
+    let start_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("start"))
+        .expect("latest-books start link should be present");
+    assert_eq!(
+        start_link.get("title").and_then(Value::as_str),
+        Some("Home")
+    );
+    let search_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("search"))
+        .expect("latest-books search link should be present");
+    assert_eq!(
+        search_link.get("title").and_then(Value::as_str),
+        Some("Search")
+    );
+    assert_eq!(
+        search_link.get("templated").and_then(Value::as_bool),
+        Some(true)
+    );
+    let next_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("next"))
+        .expect("latest-books next link should be present");
+    assert_eq!(
+        next_link.get("href").and_then(Value::as_str),
+        Some("http://localhost/opds/v2/libraries/books/latest?page=1")
+    );
+
+    let publications = payload
+        .get("publications")
+        .and_then(Value::as_array)
+        .expect("latest-books publications should be present");
+    assert_eq!(publications.len(), 1);
+    let publication = &publications[0];
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("title"))
+            .and_then(Value::as_str),
+        Some("Book Library 2"),
+        "top-level latest-books should expose the most recent visible book across all visible libraries"
+    );
+    assert_eq!(
+        publication.get("@context").and_then(Value::as_str),
+        Some("https://readium.org/webpub-manifest/context.jsonld")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("identifier"))
+            .and_then(Value::as_str),
+        Some("urn:isbn:9780000000003")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("published"))
+            .and_then(Value::as_str),
+        Some("2024-01-15")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("belongsTo"))
+            .and_then(|belongs_to| belongs_to.get("series"))
+            .and_then(Value::as_array)
+            .and_then(|series| series.first())
+            .and_then(|series| series.get("name"))
+            .and_then(Value::as_str),
+        Some("Series 2")
+    );
+    let publication_links = publication
+        .get("links")
+        .and_then(Value::as_array)
+        .expect("latest-books publication links should be present");
+    assert!(
+        publication_links.iter().any(|link| {
+            link.get("rel").and_then(Value::as_str)
+                == Some("http://www.cantook.com/api/progression")
+        }),
+        "latest-books publication should expose progression link"
+    );
+    assert!(
+        publication_links.iter().all(|link| {
+            link.get("properties")
+                .and_then(|properties| properties.get("authenticate"))
+                .and_then(|authenticate| authenticate.get("href"))
+                .and_then(Value::as_str)
+                == Some("http://localhost/opds/v2/auth")
+        }),
+        "all latest-books publication links should carry authenticate properties"
+    );
+    assert!(
+        publication
+            .get("images")
+            .and_then(Value::as_array)
+            .is_some_and(|images| !images.is_empty()),
+        "latest-books publication should expose images"
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_latest_books_filters_results_for_restricted_user() {
+    let paths = new_router_fixture("router-opds-v2-latest-books-restricted-results").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_library(&paths, "library-2", "Library 2").await;
+    seed_router_custom_series(&paths, "series-2", "Series 2", "library-2").await;
+    seed_catalog_book(
+        &paths,
+        "book-library-2",
+        "series-2",
+        "library-2",
+        "Book Library 2",
+        1,
+        "2024-03-01 00:00:00",
+    )
+    .await;
+    seed_router_library_restricted_user(
+        &paths,
+        "restricted-user",
+        "restricted@example.org",
+        "restricted-pass-123",
+        &["library-1"],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "restricted@example.org",
+        "restricted-pass-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/libraries/books/latest")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("restricted latest-books request should build"),
+        )
+        .await
+        .expect("restricted latest-books request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|metadata| metadata.get("numberOfItems"))
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    let publications = payload
+        .get("publications")
+        .and_then(Value::as_array)
+        .expect("restricted latest-books publications should be present");
+    assert_eq!(publications.len(), 1);
+    assert_eq!(
+        publications[0]
+            .get("metadata")
+            .and_then(|metadata| metadata.get("title"))
+            .and_then(Value::as_str),
+        Some("Book 1")
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_library_latest_books_unauthorized_returns_opds_auth_document() {
+    let paths =
+        new_router_fixture("router-opds-v2-library-latest-books-unauthorized-auth-doc").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/libraries/library-1/books/latest")
+                .body(Body::empty())
+                .expect("opds v2 library latest-books unauthorized request should build"),
+        )
+        .await
+        .expect("opds v2 library latest-books unauthorized request should complete");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok()),
+        Some("Basic realm=\"Realm\"")
+    );
+    assert!(
+        response
+            .headers()
+            .get(header::LINK)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| {
+                value.contains("/opds/v2/auth")
+                    && value.contains("http://opds-spec.org/auth/document")
+                    && value.contains("application/opds-authentication+json")
+            })
+    );
+
+    let payload = response_json(response).await;
+    assert!(
+        payload
+            .get("id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value.contains("/opds/v2/auth"))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_library_latest_books_respects_kotlin_library_scope_statuses() {
+    let paths = new_router_fixture("router-opds-v2-library-latest-books-scope").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_library(&paths, "library-2", "Library 2").await;
+    seed_router_library_restricted_user(
+        &paths,
+        "restricted-user",
+        "restricted@example.org",
+        "restricted-pass-123",
+        &["library-1"],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "restricted@example.org",
+        "restricted-pass-123",
+    )
+    .await;
+
+    let forbidden_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/libraries/library-2/books/latest")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("forbidden latest-books request should build"),
+        )
+        .await
+        .expect("forbidden latest-books request should complete");
+    assert_eq!(forbidden_response.status(), StatusCode::FORBIDDEN);
+
+    let missing_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/libraries/missing-library/books/latest")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("missing-library latest-books request should build"),
+        )
+        .await
+        .expect("missing-library latest-books request should complete");
+    assert_eq!(missing_response.status(), StatusCode::NOT_FOUND);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_library_latest_books_uses_kotlin_shape_and_unscoped_results() {
+    let paths = new_router_fixture("router-opds-v2-library-latest-books-shape").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_library(&paths, "library-2", "Library 2").await;
+    seed_router_custom_series(&paths, "series-2", "Series 2", "library-2").await;
+    seed_catalog_book(
+        &paths,
+        "book-library-2",
+        "series-2",
+        "library-2",
+        "Book Library 2",
+        1,
+        "2024-03-01 00:00:00",
+    )
+    .await;
+    update_router_library_last_modified(&paths, "library-1", "2024-02-03 04:05:06").await;
+    update_router_book_created_date(&paths, "book-1", "2024-01-01 00:00:00").await;
+    update_router_book_isbn(&paths, "book-library-2", "9780000000003").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/libraries/library-1/books/latest?size=1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v2 library latest-books request should build"),
+        )
+        .await
+        .expect("opds v2 library latest-books request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert!(payload.get("navigation").is_none());
+    assert!(payload.get("groups").is_none());
+
+    let metadata = payload
+        .get("metadata")
+        .expect("library latest-books metadata should be present");
+    assert_eq!(
+        metadata.get("title").and_then(Value::as_str),
+        Some("Library 1 - Latest Books")
+    );
+    assert_eq!(
+        metadata.get("modified").and_then(Value::as_str),
+        Some("2024-02-03T04:05:06Z")
+    );
+    assert_eq!(
+        metadata.get("itemsPerPage").and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(metadata.get("currentPage").and_then(Value::as_u64), Some(1));
+    assert_eq!(
+        metadata.get("numberOfItems").and_then(Value::as_u64),
+        Some(2)
+    );
+
+    let links = payload
+        .get("links")
+        .and_then(Value::as_array)
+        .expect("library latest-books links should be present");
+    let self_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("self"))
+        .expect("library latest-books self link should be present");
+    assert_eq!(
+        self_link.get("href").and_then(Value::as_str),
+        Some("http://localhost/opds/v2/libraries/library-1/books/latest")
+    );
+    assert!(self_link.get("type").is_none());
+    let start_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("start"))
+        .expect("library latest-books start link should be present");
+    assert_eq!(
+        start_link.get("title").and_then(Value::as_str),
+        Some("Home")
+    );
+    let search_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("search"))
+        .expect("library latest-books search link should be present");
+    assert_eq!(
+        search_link.get("title").and_then(Value::as_str),
+        Some("Search")
+    );
+    assert_eq!(
+        search_link.get("templated").and_then(Value::as_bool),
+        Some(true)
+    );
+    let next_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("next"))
+        .expect("library latest-books next link should be present");
+    assert_eq!(
+        next_link.get("href").and_then(Value::as_str),
+        Some("http://localhost/opds/v2/libraries/library-1/books/latest?page=1")
+    );
+
+    let publications = payload
+        .get("publications")
+        .and_then(Value::as_array)
+        .expect("library latest-books publications should be present");
+    assert_eq!(publications.len(), 1);
+    let publication = &publications[0];
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("title"))
+            .and_then(Value::as_str),
+        Some("Book Library 2"),
+        "Kotlin keeps the library-scoped route title/self metadata, but latest-books still comes from all visible libraries"
+    );
+    assert_eq!(
+        publication.get("@context").and_then(Value::as_str),
+        Some("https://readium.org/webpub-manifest/context.jsonld")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("identifier"))
+            .and_then(Value::as_str),
+        Some("urn:isbn:9780000000003")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("published"))
+            .and_then(Value::as_str),
+        Some("2024-01-15")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("belongsTo"))
+            .and_then(|belongs_to| belongs_to.get("series"))
+            .and_then(Value::as_array)
+            .and_then(|series| series.first())
+            .and_then(|series| series.get("name"))
+            .and_then(Value::as_str),
+        Some("Series 2")
+    );
+    let publication_links = publication
+        .get("links")
+        .and_then(Value::as_array)
+        .expect("latest-books publication links should be present");
+    assert!(
+        publication_links.iter().any(|link| {
+            link.get("rel").and_then(Value::as_str)
+                == Some("http://www.cantook.com/api/progression")
+        }),
+        "latest-books publication should expose progression link"
+    );
+    assert!(
+        publication_links.iter().all(|link| {
+            link.get("properties")
+                .and_then(|properties| properties.get("authenticate"))
+                .and_then(|authenticate| authenticate.get("href"))
+                .and_then(Value::as_str)
+                == Some("http://localhost/opds/v2/auth")
+        }),
+        "all latest-books publication links should carry authenticate properties"
+    );
+    assert!(
+        publication
+            .get("images")
+            .and_then(Value::as_array)
+            .is_some_and(|images| !images.is_empty()),
+        "latest-books publication should expose images"
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_keep_reading_unauthorized_returns_opds_auth_document() {
+    let paths = new_router_fixture("router-opds-v2-keep-reading-unauthorized-auth-doc").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/libraries/keep-reading")
+                .body(Body::empty())
+                .expect("opds v2 keep-reading unauthorized request should build"),
+        )
+        .await
+        .expect("opds v2 keep-reading unauthorized request should complete");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok()),
+        Some("Basic realm=\"Realm\"")
+    );
+    assert!(
+        response
+            .headers()
+            .get(header::LINK)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| {
+                value.contains("/opds/v2/auth")
+                    && value.contains("http://opds-spec.org/auth/document")
+                    && value.contains("application/opds-authentication+json")
+            })
+    );
+
+    let payload = response_json(response).await;
+    assert!(
+        payload
+            .get("id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value.contains("/opds/v2/auth"))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_keep_reading_uses_kotlin_shape_and_visible_results() {
+    let paths = new_router_fixture("router-opds-v2-keep-reading-shape").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_library(&paths, "library-2", "Library 2").await;
+    seed_router_custom_series(&paths, "series-2", "Series 2", "library-2").await;
+    seed_catalog_book(
+        &paths,
+        "book-library-2-keep-reading",
+        "series-2",
+        "library-2",
+        "Book Library 2 Keep Reading",
+        1,
+        "2024-03-01 00:00:00",
+    )
+    .await;
+    update_router_book_isbn(&paths, "book-library-2-keep-reading", "9780000000004").await;
+    seed_router_read_progress_entry(
+        &paths,
+        "book-1",
+        "admin-user",
+        4,
+        false,
+        "2024-01-01 00:00:00",
+    )
+    .await;
+    seed_router_read_progress_entry(
+        &paths,
+        "book-library-2-keep-reading",
+        "admin-user",
+        7,
+        false,
+        "2024-03-02 00:00:00",
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/libraries/keep-reading?size=1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v2 keep-reading request should build"),
+        )
+        .await
+        .expect("opds v2 keep-reading request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert!(payload.get("navigation").is_none());
+    assert!(payload.get("groups").is_none());
+
+    let metadata = payload
+        .get("metadata")
+        .expect("keep-reading metadata should be present");
+    assert_eq!(
+        metadata.get("title").and_then(Value::as_str),
+        Some("All libraries - Keep Reading")
+    );
+    assert!(
+        metadata.get("modified").and_then(Value::as_str).is_some(),
+        "keep-reading metadata.modified should be present"
+    );
+    assert_eq!(
+        metadata.get("itemsPerPage").and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(metadata.get("currentPage").and_then(Value::as_u64), Some(1));
+    assert_eq!(
+        metadata.get("numberOfItems").and_then(Value::as_u64),
+        Some(2)
+    );
+
+    let links = payload
+        .get("links")
+        .and_then(Value::as_array)
+        .expect("keep-reading links should be present");
+    let self_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("self"))
+        .expect("keep-reading self link should be present");
+    assert_eq!(
+        self_link.get("href").and_then(Value::as_str),
+        Some("http://localhost/opds/v2/libraries/keep-reading")
+    );
+    assert!(self_link.get("type").is_none());
+    let start_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("start"))
+        .expect("keep-reading start link should be present");
+    assert_eq!(
+        start_link.get("title").and_then(Value::as_str),
+        Some("Home")
+    );
+    let search_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("search"))
+        .expect("keep-reading search link should be present");
+    assert_eq!(
+        search_link.get("title").and_then(Value::as_str),
+        Some("Search")
+    );
+    assert_eq!(
+        search_link.get("templated").and_then(Value::as_bool),
+        Some(true)
+    );
+    let next_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("next"))
+        .expect("keep-reading next link should be present");
+    assert_eq!(
+        next_link.get("href").and_then(Value::as_str),
+        Some("http://localhost/opds/v2/libraries/keep-reading?page=1")
+    );
+
+    let publications = payload
+        .get("publications")
+        .and_then(Value::as_array)
+        .expect("keep-reading publications should be present");
+    assert_eq!(publications.len(), 1);
+    let publication = &publications[0];
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("title"))
+            .and_then(Value::as_str),
+        Some("Book Library 2 Keep Reading"),
+        "top-level keep-reading should expose the most recent visible in-progress book across all visible libraries"
+    );
+    assert_eq!(
+        publication.get("@context").and_then(Value::as_str),
+        Some("https://readium.org/webpub-manifest/context.jsonld")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("identifier"))
+            .and_then(Value::as_str),
+        Some("urn:isbn:9780000000004")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("published"))
+            .and_then(Value::as_str),
+        Some("2024-01-15")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("belongsTo"))
+            .and_then(|belongs_to| belongs_to.get("series"))
+            .and_then(Value::as_array)
+            .and_then(|series| series.first())
+            .and_then(|series| series.get("name"))
+            .and_then(Value::as_str),
+        Some("Series 2")
+    );
+    let publication_links = publication
+        .get("links")
+        .and_then(Value::as_array)
+        .expect("keep-reading publication links should be present");
+    assert!(
+        publication_links.iter().any(|link| {
+            link.get("rel").and_then(Value::as_str)
+                == Some("http://www.cantook.com/api/progression")
+        }),
+        "keep-reading publication should expose progression link"
+    );
+    assert!(
+        publication_links.iter().all(|link| {
+            link.get("properties")
+                .and_then(|properties| properties.get("authenticate"))
+                .and_then(|authenticate| authenticate.get("href"))
+                .and_then(Value::as_str)
+                == Some("http://localhost/opds/v2/auth")
+        }),
+        "all keep-reading publication links should carry authenticate properties"
+    );
+    assert!(
+        publication
+            .get("images")
+            .and_then(Value::as_array)
+            .is_some_and(|images| !images.is_empty()),
+        "keep-reading publication should expose images"
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_keep_reading_filters_results_for_restricted_user() {
+    let paths = new_router_fixture("router-opds-v2-keep-reading-restricted-results").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_library(&paths, "library-2", "Library 2").await;
+    seed_router_custom_series(&paths, "series-2", "Series 2", "library-2").await;
+    seed_catalog_book(
+        &paths,
+        "book-library-2-keep-reading",
+        "series-2",
+        "library-2",
+        "Book Library 2 Keep Reading",
+        1,
+        "2024-03-01 00:00:00",
+    )
+    .await;
+    seed_router_library_restricted_user(
+        &paths,
+        "restricted-user",
+        "restricted@example.org",
+        "restricted-pass-123",
+        &["library-1"],
+    )
+    .await;
+    seed_router_read_progress_entry(
+        &paths,
+        "book-1",
+        "restricted-user",
+        4,
+        false,
+        "2024-01-01 00:00:00",
+    )
+    .await;
+    seed_router_read_progress_entry(
+        &paths,
+        "book-library-2-keep-reading",
+        "restricted-user",
+        7,
+        false,
+        "2024-03-02 00:00:00",
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "restricted@example.org",
+        "restricted-pass-123",
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/libraries/keep-reading")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("restricted keep-reading request should build"),
+        )
+        .await
+        .expect("restricted keep-reading request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|metadata| metadata.get("numberOfItems"))
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    let publications = payload
+        .get("publications")
+        .and_then(Value::as_array)
+        .expect("restricted keep-reading publications should be present");
+    assert_eq!(publications.len(), 1);
+    assert_eq!(
+        publications[0]
+            .get("metadata")
+            .and_then(|metadata| metadata.get("title"))
+            .and_then(Value::as_str),
+        Some("Book 1")
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_library_keep_reading_unauthorized_returns_opds_auth_document() {
+    let paths =
+        new_router_fixture("router-opds-v2-library-keep-reading-unauthorized-auth-doc").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/libraries/library-1/keep-reading")
+                .body(Body::empty())
+                .expect("opds v2 library keep-reading unauthorized request should build"),
+        )
+        .await
+        .expect("opds v2 library keep-reading unauthorized request should complete");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok()),
+        Some("Basic realm=\"Realm\"")
+    );
+    assert!(
+        response
+            .headers()
+            .get(header::LINK)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| {
+                value.contains("/opds/v2/auth")
+                    && value.contains("http://opds-spec.org/auth/document")
+                    && value.contains("application/opds-authentication+json")
+            })
+    );
+
+    let payload = response_json(response).await;
+    assert!(
+        payload
+            .get("id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value.contains("/opds/v2/auth"))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_library_keep_reading_respects_kotlin_library_scope_statuses() {
+    let paths = new_router_fixture("router-opds-v2-library-keep-reading-scope").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_library(&paths, "library-2", "Library 2").await;
+    seed_router_library_restricted_user(
+        &paths,
+        "restricted-user",
+        "restricted@example.org",
+        "restricted-pass-123",
+        &["library-1"],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "restricted@example.org",
+        "restricted-pass-123",
+    )
+    .await;
+
+    let forbidden_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/libraries/library-2/keep-reading")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("forbidden keep-reading request should build"),
+        )
+        .await
+        .expect("forbidden keep-reading request should complete");
+    assert_eq!(forbidden_response.status(), StatusCode::FORBIDDEN);
+
+    let missing_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/libraries/missing-library/keep-reading")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("missing-library keep-reading request should build"),
+        )
+        .await
+        .expect("missing-library keep-reading request should complete");
+    assert_eq!(missing_response.status(), StatusCode::NOT_FOUND);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_library_keep_reading_uses_kotlin_shape_and_unscoped_results() {
+    let paths = new_router_fixture("router-opds-v2-library-keep-reading-shape").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_library(&paths, "library-2", "Library 2").await;
+    seed_router_custom_series(&paths, "series-2", "Series 2", "library-2").await;
+    seed_catalog_book(
+        &paths,
+        "book-library-2-keep-reading",
+        "series-2",
+        "library-2",
+        "Book Library 2 Keep Reading",
+        1,
+        "2024-03-01 00:00:00",
+    )
+    .await;
+    update_router_library_last_modified(&paths, "library-1", "2024-02-03 04:05:06").await;
+    update_router_book_isbn(&paths, "book-library-2-keep-reading", "9780000000004").await;
+    seed_router_read_progress_entry(
+        &paths,
+        "book-1",
+        "admin-user",
+        4,
+        false,
+        "2024-01-01 00:00:00",
+    )
+    .await;
+    seed_router_read_progress_entry(
+        &paths,
+        "book-library-2-keep-reading",
+        "admin-user",
+        7,
+        false,
+        "2024-03-02 00:00:00",
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/libraries/library-1/keep-reading?size=1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v2 library keep-reading request should build"),
+        )
+        .await
+        .expect("opds v2 library keep-reading request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert!(payload.get("navigation").is_none());
+    assert!(payload.get("groups").is_none());
+
+    let metadata = payload
+        .get("metadata")
+        .expect("library keep-reading metadata should be present");
+    assert_eq!(
+        metadata.get("title").and_then(Value::as_str),
+        Some("Library 1 - Keep Reading")
+    );
+    assert_eq!(
+        metadata.get("modified").and_then(Value::as_str),
+        Some("2024-02-03T04:05:06Z")
+    );
+    assert_eq!(
+        metadata.get("itemsPerPage").and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(metadata.get("currentPage").and_then(Value::as_u64), Some(1));
+    assert_eq!(
+        metadata.get("numberOfItems").and_then(Value::as_u64),
+        Some(2)
+    );
+
+    let links = payload
+        .get("links")
+        .and_then(Value::as_array)
+        .expect("library keep-reading links should be present");
+    let self_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("self"))
+        .expect("library keep-reading self link should be present");
+    assert_eq!(
+        self_link.get("href").and_then(Value::as_str),
+        Some("http://localhost/opds/v2/libraries/library-1/keep-reading")
+    );
+    assert!(self_link.get("type").is_none());
+    let start_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("start"))
+        .expect("library keep-reading start link should be present");
+    assert_eq!(
+        start_link.get("title").and_then(Value::as_str),
+        Some("Home")
+    );
+    let search_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("search"))
+        .expect("library keep-reading search link should be present");
+    assert_eq!(
+        search_link.get("title").and_then(Value::as_str),
+        Some("Search")
+    );
+    assert_eq!(
+        search_link.get("templated").and_then(Value::as_bool),
+        Some(true)
+    );
+    let next_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("next"))
+        .expect("library keep-reading next link should be present");
+    assert_eq!(
+        next_link.get("href").and_then(Value::as_str),
+        Some("http://localhost/opds/v2/libraries/library-1/keep-reading?page=1")
+    );
+
+    let publications = payload
+        .get("publications")
+        .and_then(Value::as_array)
+        .expect("library keep-reading publications should be present");
+    assert_eq!(publications.len(), 1);
+    let publication = &publications[0];
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("title"))
+            .and_then(Value::as_str),
+        Some("Book Library 2 Keep Reading"),
+        "Kotlin keeps the library-scoped route title/self metadata, but keep-reading results still come from all visible libraries"
+    );
+    assert_eq!(
+        publication.get("@context").and_then(Value::as_str),
+        Some("https://readium.org/webpub-manifest/context.jsonld")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("identifier"))
+            .and_then(Value::as_str),
+        Some("urn:isbn:9780000000004")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("published"))
+            .and_then(Value::as_str),
+        Some("2024-01-15")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("belongsTo"))
+            .and_then(|belongs_to| belongs_to.get("series"))
+            .and_then(Value::as_array)
+            .and_then(|series| series.first())
+            .and_then(|series| series.get("name"))
+            .and_then(Value::as_str),
+        Some("Series 2")
+    );
+    let publication_links = publication
+        .get("links")
+        .and_then(Value::as_array)
+        .expect("keep-reading publication links should be present");
+    assert!(
+        publication_links.iter().any(|link| {
+            link.get("rel").and_then(Value::as_str)
+                == Some("http://www.cantook.com/api/progression")
+        }),
+        "keep-reading publication should expose progression link"
+    );
+    assert!(
+        publication_links.iter().all(|link| {
+            link.get("properties")
+                .and_then(|properties| properties.get("authenticate"))
+                .and_then(|authenticate| authenticate.get("href"))
+                .and_then(Value::as_str)
+                == Some("http://localhost/opds/v2/auth")
+        }),
+        "all keep-reading publication links should carry authenticate properties"
+    );
+    assert!(
+        publication
+            .get("images")
+            .and_then(Value::as_array)
+            .is_some_and(|images| !images.is_empty()),
+        "keep-reading publication should expose images"
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_readlist_unauthorized_returns_opds_auth_document() {
+    let paths = new_router_fixture("router-opds-v2-readlist-unauthorized-auth-doc").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/readlists/readlist-1")
+                .body(Body::empty())
+                .expect("opds v2 readlist unauthorized request should build"),
+        )
+        .await
+        .expect("opds v2 readlist unauthorized request should complete");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok()),
+        Some("Basic realm=\"Realm\"")
+    );
+    assert!(
+        response
+            .headers()
+            .get(header::LINK)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| {
+                value.contains("/opds/v2/auth")
+                    && value.contains("http://opds-spec.org/auth/document")
+                    && value.contains("application/opds-authentication+json")
+            })
+    );
+
+    let payload = response_json(response).await;
+    assert!(
+        payload
+            .get("id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value.contains("/opds/v2/auth"))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_readlist_returns_not_found_for_missing_or_out_of_scope_readlist() {
+    let paths = new_router_fixture("router-opds-v2-readlist-scope").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_library(&paths, "library-2", "Library 2").await;
+    seed_router_custom_series(&paths, "series-2", "Series 2", "library-2").await;
+    seed_catalog_book(
+        &paths,
+        "book-library-2-readlist",
+        "series-2",
+        "library-2",
+        "Book Library 2 Readlist",
+        1,
+        "2024-03-01 00:00:00",
+    )
+    .await;
+    seed_router_readlist(
+        &paths,
+        "readlist-2",
+        "ReadList 2",
+        "book-library-2-readlist",
+    )
+    .await;
+    seed_router_library_restricted_user(
+        &paths,
+        "restricted-user",
+        "restricted@example.org",
+        "restricted-pass-123",
+        &["library-1"],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "restricted@example.org",
+        "restricted-pass-123",
+    )
+    .await;
+
+    let hidden_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/readlists/readlist-2")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("hidden readlist request should build"),
+        )
+        .await
+        .expect("hidden readlist request should complete");
+    assert_eq!(hidden_response.status(), StatusCode::NOT_FOUND);
+
+    let missing_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/readlists/missing-readlist")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("missing readlist request should build"),
+        )
+        .await
+        .expect("missing readlist request should complete");
+    assert_eq!(missing_response.status(), StatusCode::NOT_FOUND);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_readlist_keeps_books_without_sharing_labels() {
+    let paths = new_router_fixture("router-opds-v2-readlist-without-sharing-labels").await;
+    seed_router_contract_data(&paths).await;
+    clear_router_series_sharing_labels(&paths, "series-1").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/readlists/readlist-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v2 readlist request should build"),
+        )
+        .await
+        .expect("opds v2 readlist request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let publications = payload
+        .get("publications")
+        .and_then(Value::as_array)
+        .expect("readlist publications should be present");
+    assert_eq!(publications.len(), 1);
+    assert_eq!(
+        publications[0]
+            .get("metadata")
+            .and_then(|metadata| metadata.get("title"))
+            .and_then(Value::as_str),
+        Some("Book 1")
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_readlist_uses_kotlin_shape_and_publications() {
+    let paths = new_router_fixture("router-opds-v2-readlist-shape").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_pdf_book(&paths, "book-pdf", "series-1", "book-pdf.pdf", "Book PDF").await;
+    seed_router_readlist_book_entry(&paths, "readlist-1", "book-pdf", -1).await;
+    update_router_readlist_ordered(&paths, "readlist-1", false).await;
+    update_router_readlist_last_modified(&paths, "readlist-1", "2024-02-03 04:05:06").await;
+    update_router_book_isbn(&paths, "book-1", "9780000000005").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/readlists/readlist-1?size=1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v2 readlist request should build"),
+        )
+        .await
+        .expect("opds v2 readlist request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert!(payload.get("navigation").is_none());
+    assert!(payload.get("groups").is_none());
+
+    let metadata = payload
+        .get("metadata")
+        .expect("readlist metadata should be present");
+    assert_eq!(
+        metadata.get("title").and_then(Value::as_str),
+        Some("ReadList 1")
+    );
+    assert_eq!(
+        metadata.get("modified").and_then(Value::as_str),
+        Some("2024-02-03T04:05:06Z")
+    );
+    assert_eq!(
+        metadata.get("itemsPerPage").and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(metadata.get("currentPage").and_then(Value::as_u64), Some(1));
+    assert_eq!(
+        metadata.get("numberOfItems").and_then(Value::as_u64),
+        Some(2)
+    );
+
+    let links = payload
+        .get("links")
+        .and_then(Value::as_array)
+        .expect("readlist links should be present");
+    let self_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("self"))
+        .expect("readlist self link should be present");
+    assert_eq!(
+        self_link.get("href").and_then(Value::as_str),
+        Some("http://localhost/opds/v2/readlists/readlist-1")
+    );
+    assert!(self_link.get("type").is_none());
+    let start_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("start"))
+        .expect("readlist start link should be present");
+    assert_eq!(
+        start_link.get("title").and_then(Value::as_str),
+        Some("Home")
+    );
+    let search_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("search"))
+        .expect("readlist search link should be present");
+    assert_eq!(
+        search_link.get("title").and_then(Value::as_str),
+        Some("Search")
+    );
+    assert_eq!(
+        search_link.get("templated").and_then(Value::as_bool),
+        Some(true)
+    );
+    let next_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("next"))
+        .expect("readlist next link should be present");
+    assert_eq!(
+        next_link.get("href").and_then(Value::as_str),
+        Some("http://localhost/opds/v2/readlists/readlist-1?page=1")
+    );
+
+    let publications = payload
+        .get("publications")
+        .and_then(Value::as_array)
+        .expect("readlist publications should be present");
+    assert_eq!(publications.len(), 1);
+    let publication = &publications[0];
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("title"))
+            .and_then(Value::as_str),
+        Some("Book 1"),
+        "readlist is unordered in the fixture, so Kotlin sorts by releaseDate ascending rather than READLIST_BOOK.NUMBER"
+    );
+    assert_eq!(
+        publication.get("@context").and_then(Value::as_str),
+        Some("https://readium.org/webpub-manifest/context.jsonld")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("identifier"))
+            .and_then(Value::as_str),
+        Some("urn:isbn:9780000000005")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("published"))
+            .and_then(Value::as_str),
+        Some("2024-01-15")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("belongsTo"))
+            .and_then(|belongs_to| belongs_to.get("series"))
+            .and_then(Value::as_array)
+            .and_then(|series| series.first())
+            .and_then(|series| series.get("name"))
+            .and_then(Value::as_str),
+        Some("Series 1")
+    );
+    let publication_links = publication
+        .get("links")
+        .and_then(Value::as_array)
+        .expect("readlist publication links should be present");
+    assert!(
+        publication_links.iter().any(|link| {
+            link.get("rel").and_then(Value::as_str)
+                == Some("http://www.cantook.com/api/progression")
+        }),
+        "readlist publication should expose progression link"
+    );
+    assert!(
+        publication_links.iter().all(|link| {
+            link.get("properties")
+                .and_then(|properties| properties.get("authenticate"))
+                .and_then(|authenticate| authenticate.get("href"))
+                .and_then(Value::as_str)
+                == Some("http://localhost/opds/v2/auth")
+        }),
+        "all readlist publication links should carry authenticate properties"
+    );
+    assert!(
+        publication
+            .get("images")
+            .and_then(Value::as_array)
+            .is_some_and(|images| !images.is_empty()),
+        "readlist publication should expose images"
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+async fn seed_router_read_progress_entry(
+    paths: &RuntimeDbPaths,
+    book_id: &str,
+    user_id: &str,
+    page: i64,
+    completed: bool,
+    read_date: &str,
+) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("opds read-progress seed db should open");
+
+    sqlx::query(
+        "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, READ_DATE) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(book_id)
+    .bind(user_id)
+    .bind(page)
+    .bind(completed)
+    .bind(read_date)
+    .execute(&pool)
+    .await
+    .expect("read progress row should be inserted");
+
+    pool.close().await;
+}
+
+async fn upsert_router_series_read_progress(
+    paths: &RuntimeDbPaths,
+    series_id: &str,
+    user_id: &str,
+    read_count: i64,
+    in_progress_count: i64,
+    most_recent_read_date: &str,
+) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("opds series read-progress seed db should open");
+
+    sqlx::query(
+        "INSERT INTO READ_PROGRESS_SERIES (SERIES_ID, USER_ID, READ_COUNT, IN_PROGRESS_COUNT, MOST_RECENT_READ_DATE) VALUES (?, ?, ?, ?, ?) \
+         ON CONFLICT (SERIES_ID, USER_ID) DO UPDATE SET READ_COUNT = excluded.READ_COUNT, IN_PROGRESS_COUNT = excluded.IN_PROGRESS_COUNT, MOST_RECENT_READ_DATE = excluded.MOST_RECENT_READ_DATE",
+    )
+    .bind(series_id)
+    .bind(user_id)
+    .bind(read_count)
+    .bind(in_progress_count)
+    .bind(most_recent_read_date)
+    .execute(&pool)
+    .await
+    .expect("series read progress row should be upserted");
+
+    pool.close().await;
 }
 
 async fn update_router_book_isbn(paths: &RuntimeDbPaths, book_id: &str, isbn: &str) {

@@ -8,14 +8,14 @@ use serde_json::{Value, json};
 use crate::http::identity_access::auth::{require_auth, resolved_auth_user, user_id};
 use crate::http::request_urls::app_absolute_url;
 use crate::opds_catalog_access::{
-    OpdsSeriesEntry, load_keep_reading_books, load_latest_books, load_latest_series_paged,
-    load_on_deck_books,
+    OpdsBookFeedEntry, OpdsSeriesEntry, load_keep_reading_books, load_latest_books_paged,
+    load_latest_series_paged, load_on_deck_books,
 };
 
 use super::auth_payload::opds_catalog_unauthorized_response;
 use super::feeds::{
     normalize_opds_updated, opds_navigation_response_with_paging, opds_publication_for_feed_entry,
-    opds_publications_response, opds_subsection_navigation_link, parse_page_size,
+    opds_publications_response_with_paging, opds_subsection_navigation_link, parse_page_size,
 };
 use super::persisted::{
     allowed_library_ids, content_allowed_by_restrictions, has_visible_collections_for_scope,
@@ -26,15 +26,16 @@ use super::persisted::{
 
 pub(super) async fn opds_v2_keep_reading_feed(
     headers: HeaderMap,
+    uri: Uri,
     database_file: &Path,
     library_id: Option<&str>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
-        return response;
+    if require_auth(&headers).is_some() {
+        return opds_catalog_unauthorized_response(&headers);
     }
 
     let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
-        return StatusCode::UNAUTHORIZED.into_response();
+        return opds_catalog_unauthorized_response(&headers);
     };
     if let Some(response) =
         validate_library_scope(database_file, &allowed_library_ids, library_id).await
@@ -43,12 +44,27 @@ pub(super) async fn opds_v2_keep_reading_feed(
     }
 
     let Some(user) = resolved_auth_user(&headers) else {
-        return StatusCode::UNAUTHORIZED.into_response();
+        return opds_catalog_unauthorized_response(&headers);
     };
     let user_id = user_id(&user).to_string();
+    let selected_library = if let Some(id) = library_id {
+        match load_library(database_file, id).await {
+            Ok(library) => library,
+            Err(error) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": format!("load OPDS keep-reading library scope: {error}") })),
+                )
+                    .into_response();
+            }
+        }
+    } else {
+        None
+    };
     let restrictions = opds_restrictions(&headers);
+    let (page, size) = parse_page_size(uri.query().unwrap_or_default());
 
-    let books = match load_keep_reading_books(database_file, &user_id, library_id).await {
+    let books = match load_keep_reading_books(database_file, &user_id, None).await {
         Ok(books) => books,
         Err(error) => {
             return (
@@ -59,7 +75,7 @@ pub(super) async fn opds_v2_keep_reading_feed(
         }
     };
 
-    let publications = books
+    let visible_books = books
         .into_iter()
         .filter(|book| {
             library_visible(&allowed_library_ids, &book.library_id)
@@ -69,33 +85,47 @@ pub(super) async fn opds_v2_keep_reading_feed(
                     &book.sharing_labels,
                 )
         })
+        .collect::<Vec<_>>();
+    let total_visible_books = visible_books.len();
+    let publications = visible_books
+        .into_iter()
+        .skip(page.saturating_mul(size))
+        .take(size)
         .map(|book| opds_publication_for_feed_entry(&headers, &book))
         .collect::<Vec<_>>();
 
     let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
-    opds_publications_response(
+    let self_path = format!("/opds/v2/libraries{library_segment}/keep-reading");
+    let title = selected_library
+        .as_ref()
+        .map(|library| format!("{} - Keep Reading", library.name))
+        .unwrap_or_else(|| "All libraries - Keep Reading".to_string());
+    opds_publications_response_with_paging(
         &headers,
-        "Keep Reading",
-        app_absolute_url(
-            &headers,
-            format!("/opds/v2/libraries{library_segment}/keep-reading").as_str(),
-        )
-        .as_str(),
+        title.as_str(),
+        self_path.as_str(),
+        selected_library
+            .as_ref()
+            .map(|library| library.last_modified.as_str()),
         publications,
+        page,
+        size,
+        total_visible_books,
     )
 }
 
 pub(super) async fn opds_v2_on_deck_feed(
     headers: HeaderMap,
+    uri: Uri,
     database_file: &Path,
     library_id: Option<&str>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
-        return response;
+    if require_auth(&headers).is_some() {
+        return opds_catalog_unauthorized_response(&headers);
     }
 
     let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
-        return StatusCode::UNAUTHORIZED.into_response();
+        return opds_catalog_unauthorized_response(&headers);
     };
     if let Some(response) =
         validate_library_scope(database_file, &allowed_library_ids, library_id).await
@@ -104,10 +134,24 @@ pub(super) async fn opds_v2_on_deck_feed(
     }
 
     let Some(user) = resolved_auth_user(&headers) else {
-        return StatusCode::UNAUTHORIZED.into_response();
+        return opds_catalog_unauthorized_response(&headers);
     };
     let user_id = user_id(&user).to_string();
     let restrictions = opds_restrictions(&headers);
+    let selected_library = if let Some(id) = library_id {
+        match load_library(database_file, id).await {
+            Ok(library) => library,
+            Err(error) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": format!("load OPDS on-deck library scope: {error}") })),
+                )
+                    .into_response();
+            }
+        }
+    } else {
+        None
+    };
 
     let books = match load_on_deck_books(database_file, &user_id, library_id).await {
         Ok(books) => books,
@@ -120,7 +164,8 @@ pub(super) async fn opds_v2_on_deck_feed(
         }
     };
 
-    let publications = books
+    let (page, size) = parse_page_size(uri.query().unwrap_or_default());
+    let visible_books = books
         .into_iter()
         .filter(|book| {
             library_visible(&allowed_library_ids, &book.library_id)
@@ -130,43 +175,81 @@ pub(super) async fn opds_v2_on_deck_feed(
                     &book.sharing_labels,
                 )
         })
+        .collect::<Vec<_>>();
+    let total_visible_books = visible_books.len();
+    let publications = visible_books
+        .into_iter()
+        .skip(page.saturating_mul(size))
+        .take(size)
         .map(|book| opds_publication_for_feed_entry(&headers, &book))
         .collect::<Vec<_>>();
 
     let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
-    opds_publications_response(
+    let self_path = format!("/opds/v2/libraries{library_segment}/on-deck");
+    let title = selected_library
+        .as_ref()
+        .map(|library| format!("{} - On Deck", library.name))
+        .unwrap_or_else(|| "All libraries - On Deck".to_string());
+    opds_publications_response_with_paging(
         &headers,
-        "On Deck",
-        app_absolute_url(
-            &headers,
-            format!("/opds/v2/libraries{library_segment}/on-deck").as_str(),
-        )
-        .as_str(),
+        title.as_str(),
+        self_path.as_str(),
+        selected_library
+            .as_ref()
+            .map(|library| library.last_modified.as_str()),
         publications,
+        page,
+        size,
+        total_visible_books,
     )
 }
 
 pub(super) async fn opds_v2_latest_books_feed(
     headers: HeaderMap,
+    uri: Uri,
     database_file: &Path,
     library_id: Option<&str>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
-        return response;
+    if require_auth(&headers).is_some() {
+        return opds_catalog_unauthorized_response(&headers);
     }
 
     let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
-        return StatusCode::UNAUTHORIZED.into_response();
+        return opds_catalog_unauthorized_response(&headers);
     };
     if let Some(response) =
         validate_library_scope(database_file, &allowed_library_ids, library_id).await
     {
         return response;
     }
-    let restrictions = opds_restrictions(&headers);
 
-    let books = match load_latest_books(database_file, library_id, 100).await {
-        Ok(books) => books,
+    let selected_library = if let Some(id) = library_id {
+        match load_library(database_file, id).await {
+            Ok(library) => library,
+            Err(error) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": format!("load OPDS latest-books library scope: {error}") })),
+                )
+                    .into_response();
+            }
+        }
+    } else {
+        None
+    };
+    let restrictions = opds_restrictions(&headers);
+    let (page, size) = parse_page_size(uri.query().unwrap_or_default());
+
+    let (visible_books, total_visible_books) = match load_visible_latest_books_page(
+        database_file,
+        &allowed_library_ids,
+        restrictions.as_ref(),
+        page,
+        size,
+    )
+    .await
+    {
+        Ok(result) => result,
         Err(error) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -176,30 +259,82 @@ pub(super) async fn opds_v2_latest_books_feed(
         }
     };
 
-    let publications = books
+    let publications = visible_books
         .into_iter()
-        .filter(|book| {
-            library_visible(&allowed_library_ids, &book.library_id)
-                && content_allowed_by_restrictions(
-                    restrictions.as_ref(),
-                    book.age_rating,
-                    &book.sharing_labels,
-                )
-        })
         .map(|book| opds_publication_for_feed_entry(&headers, &book))
         .collect::<Vec<_>>();
 
     let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
-    opds_publications_response(
+    let self_path = format!("/opds/v2/libraries{library_segment}/books/latest");
+    let title = selected_library
+        .as_ref()
+        .map(|library| format!("{} - Latest Books", library.name))
+        .unwrap_or_else(|| "All libraries - Latest Books".to_string());
+    opds_publications_response_with_paging(
         &headers,
-        "Latest Books",
-        app_absolute_url(
-            &headers,
-            format!("/opds/v2/libraries{library_segment}/books/latest").as_str(),
-        )
-        .as_str(),
+        title.as_str(),
+        self_path.as_str(),
+        selected_library
+            .as_ref()
+            .map(|library| library.last_modified.as_str()),
         publications,
+        page,
+        size,
+        total_visible_books,
     )
+}
+
+async fn load_visible_latest_books_page(
+    database_file: &Path,
+    allowed_library_ids: &Option<std::collections::HashSet<String>>,
+    restrictions: Option<&super::types::OpdsRestrictions>,
+    page: usize,
+    size: usize,
+) -> Result<(Vec<OpdsBookFeedEntry>, usize), String> {
+    let mut offset = 0;
+    let mut visible = Vec::new();
+    let mut total = 0;
+    let scan_limit = std::cmp::max(size, 100) as i64;
+    let page_start = page.saturating_mul(size);
+    let page_end = page_start.saturating_add(size);
+
+    loop {
+        let batch = load_latest_books_paged(
+            database_file,
+            allowed_library_ids,
+            None,
+            None,
+            offset,
+            scan_limit,
+        )
+        .await?;
+        if batch.is_empty() {
+            break;
+        }
+
+        let batch_len = batch.len();
+        for book in batch {
+            if library_visible(allowed_library_ids, &book.library_id)
+                && content_allowed_by_restrictions(
+                    restrictions,
+                    book.age_rating,
+                    &book.sharing_labels,
+                )
+            {
+                if total >= page_start && total < page_end {
+                    visible.push(book);
+                }
+                total += 1;
+            }
+        }
+
+        if batch_len < scan_limit as usize {
+            break;
+        }
+        offset += batch_len as i64;
+    }
+
+    Ok((visible, total))
 }
 
 pub(super) async fn opds_v2_latest_series_feed(

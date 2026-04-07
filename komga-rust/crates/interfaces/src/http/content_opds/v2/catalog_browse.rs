@@ -61,7 +61,7 @@ async fn opds_v2_recommended(
     }
 
     let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
-        return StatusCode::UNAUTHORIZED.into_response();
+        return opds_catalog_unauthorized_response(&headers);
     };
 
     let libraries = match load_libraries(database_file).await {
@@ -88,7 +88,7 @@ async fn opds_v2_recommended(
     };
 
     let Some(user) = resolved_auth_user(&headers) else {
-        return StatusCode::UNAUTHORIZED.into_response();
+        return opds_catalog_unauthorized_response(&headers);
     };
     let user_id_value = user_id(&user).to_string();
 
@@ -288,7 +288,7 @@ async fn opds_v2_recommended(
         .as_ref()
         .map(|library| library.last_modified.as_str())
         .filter(|value| !value.is_empty())
-        .map(str::to_string)
+        .map(normalize_opds_updated)
         .unwrap_or_else(opds_now_timestamp);
 
     (
@@ -445,47 +445,53 @@ fn recommended_group_metadata(
 
 pub(crate) async fn opds_v2_libraries_keep_reading(
     headers: HeaderMap,
+    uri: Uri,
     database_file: &Path,
 ) -> Response {
-    opds_v2_keep_reading_feed(headers, database_file, None).await
+    opds_v2_keep_reading_feed(headers, uri, database_file, None).await
 }
 
 pub(crate) async fn opds_v2_library_keep_reading(
     headers: HeaderMap,
+    uri: Uri,
     database_file: &Path,
     library_id: &str,
 ) -> Response {
-    opds_v2_keep_reading_feed(headers, database_file, Some(library_id)).await
+    opds_v2_keep_reading_feed(headers, uri, database_file, Some(library_id)).await
 }
 
 pub(crate) async fn opds_v2_libraries_on_deck(
     headers: HeaderMap,
+    uri: Uri,
     database_file: &Path,
 ) -> Response {
-    opds_v2_on_deck_feed(headers, database_file, None).await
+    opds_v2_on_deck_feed(headers, uri, database_file, None).await
 }
 
 pub(crate) async fn opds_v2_library_on_deck(
     headers: HeaderMap,
+    uri: Uri,
     database_file: &Path,
     library_id: &str,
 ) -> Response {
-    opds_v2_on_deck_feed(headers, database_file, Some(library_id)).await
+    opds_v2_on_deck_feed(headers, uri, database_file, Some(library_id)).await
 }
 
 pub(crate) async fn opds_v2_libraries_latest_books(
     headers: HeaderMap,
+    uri: Uri,
     database_file: &Path,
 ) -> Response {
-    opds_v2_latest_books_feed(headers, database_file, None).await
+    opds_v2_latest_books_feed(headers, uri, database_file, None).await
 }
 
 pub(crate) async fn opds_v2_library_latest_books(
     headers: HeaderMap,
+    uri: Uri,
     database_file: &Path,
     library_id: &str,
 ) -> Response {
-    opds_v2_latest_books_feed(headers, database_file, Some(library_id)).await
+    opds_v2_latest_books_feed(headers, uri, database_file, Some(library_id)).await
 }
 
 pub(crate) async fn opds_v2_libraries_latest_series(

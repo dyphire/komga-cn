@@ -46,17 +46,28 @@ pub struct PersistedReadlistRecord {
     pub ordered: bool,
 }
 
+pub struct PersistedBookAuthorRecord {
+    pub name: String,
+    pub role: String,
+}
+
 pub struct PersistedReadlistBookRecord {
     pub id: String,
+    pub series_id: String,
     pub title: String,
     pub series_title: String,
     pub number: String,
+    pub number_sort: f64,
     pub summary: String,
-    pub authors: Vec<String>,
+    pub isbn: Option<String>,
+    pub authors: Vec<PersistedBookAuthorRecord>,
+    pub tags: Vec<String>,
     pub file_name: String,
     pub file_size: i64,
     pub media_type: String,
     pub media_status: Option<String>,
+    pub page_count: i64,
+    pub epub_divina_compatible: bool,
     pub library_id: String,
     pub age_rating: Option<u16>,
     pub sharing_labels: Vec<String>,

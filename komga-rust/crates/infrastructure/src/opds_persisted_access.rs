@@ -48,17 +48,28 @@ pub struct PersistedReadlistRecord {
     pub ordered: bool,
 }
 
+pub struct PersistedBookAuthorRecord {
+    pub name: String,
+    pub role: String,
+}
+
 pub struct PersistedReadlistBookRecord {
     pub id: String,
+    pub series_id: String,
     pub title: String,
     pub series_title: String,
     pub number: String,
+    pub number_sort: f64,
     pub summary: String,
-    pub authors: Vec<String>,
+    pub isbn: Option<String>,
+    pub authors: Vec<PersistedBookAuthorRecord>,
+    pub tags: Vec<String>,
     pub file_name: String,
     pub file_size: i64,
     pub media_type: String,
     pub media_status: Option<String>,
+    pub page_count: i64,
+    pub epub_divina_compatible: bool,
     pub library_id: String,
     pub age_rating: Option<u16>,
     pub sharing_labels: Vec<String>,
@@ -106,6 +117,29 @@ fn parsed_age_rating(row: &sqlx::sqlite::SqliteRow) -> Option<u16> {
 fn parsed_sharing_labels(row: &sqlx::sqlite::SqliteRow) -> Vec<String> {
     row.get::<String, _>("SHARING_LABELS")
         .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn parsed_book_author_records(row: &sqlx::sqlite::SqliteRow) -> Vec<PersistedBookAuthorRecord> {
+    row.get::<String, _>("AUTHORS")
+        .split('\u{001e}')
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            let mut parts = value.splitn(2, '\u{001f}');
+            let name = parts.next().unwrap_or_default().trim().to_string();
+            let role = parts.next().unwrap_or_default().trim().to_string();
+            PersistedBookAuthorRecord { name, role }
+        })
+        .filter(|author| !author.name.is_empty())
+        .collect()
+}
+
+fn parsed_book_tags(row: &sqlx::sqlite::SqliteRow) -> Vec<String> {
+    row.get::<String, _>("TAGS")
+        .split('\u{001e}')
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
@@ -357,14 +391,22 @@ pub async fn load_readlist_books(
 
     let pool = connect_pool(database_file, 1).await?;
     let rows = sqlx::query(
-        "SELECT b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE, \
+        "SELECT b.ID, b.SERIES_ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE, \
                 COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE, \
                 COALESCE(bm.NUMBER, CAST(b.NUMBER AS TEXT), '') AS NUMBER, \
+                COALESCE(bm.NUMBER_SORT, CAST(b.NUMBER AS REAL), 0) AS NUMBER_SORT, \
                 COALESCE(bm.SUMMARY, '') AS SUMMARY, \
-                COALESCE(GROUP_CONCAT(DISTINCT bma.NAME), '') AS AUTHORS, \
+                COALESCE(bm.ISBN, '') AS ISBN, \
+                COALESCE((SELECT GROUP_CONCAT(NAME || char(31) || COALESCE(ROLE, ''), char(30)) \
+                          FROM BOOK_METADATA_AUTHOR \
+                          WHERE BOOK_ID = b.ID), '') AS AUTHORS, \
+                COALESCE((SELECT GROUP_CONCAT(TAG, char(30)) \
+                          FROM (SELECT DISTINCT TAG FROM BOOK_METADATA_TAG WHERE BOOK_ID = b.ID)), '') AS TAGS, \
                 b.NAME AS FILE_NAME, COALESCE(b.FILE_SIZE, 0) AS FILE_SIZE, \
                 COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE, \
                 m.STATUS AS MEDIA_STATUS, \
+                COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT, \
+                COALESCE(m.EPUB_DIVINA_COMPATIBLE, 0) AS EPUB_DIVINA_COMPATIBLE, \
                 COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING, \
                 COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS, \
                 COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') AS LAST_MODIFIED, \
@@ -379,19 +421,18 @@ pub async fn load_readlist_books(
          JOIN SERIES s ON s.ID = b.SERIES_ID \
          LEFT \
          JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
-         LEFT \
-         JOIN BOOK_METADATA_AUTHOR bma ON bma.BOOK_ID = b.ID \
-         LEFT \
-         JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
-         WHERE rb.READLIST_ID = ? \
-         AND b.DELETED_DATE IS NULL \
-         GROUP BY b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME), \
-                  COALESCE(sm.TITLE, s.NAME), COALESCE(bm.NUMBER, CAST(b.NUMBER AS TEXT), ''), \
-                  COALESCE(bm.SUMMARY, ''), b.NAME, COALESCE(b.FILE_SIZE, 0), \
-                   COALESCE(m.MEDIA_TYPE, 'application/octet-stream'), m.STATUS, \
-                   COALESCE(sm.AGE_RATING, NULL), \
-                   COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, ''), \
-                   bm.RELEASE_DATE \
+         LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
+           WHERE rb.READLIST_ID = ? \
+           AND b.DELETED_DATE IS NULL \
+          GROUP BY b.ID, b.SERIES_ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME), \
+                   COALESCE(sm.TITLE, s.NAME), COALESCE(bm.NUMBER, CAST(b.NUMBER AS TEXT), ''), \
+                   COALESCE(bm.NUMBER_SORT, CAST(b.NUMBER AS REAL), 0), COALESCE(bm.SUMMARY, ''), COALESCE(bm.ISBN, ''), \
+                   b.NAME, COALESCE(b.FILE_SIZE, 0), \
+                    COALESCE(m.MEDIA_TYPE, 'application/octet-stream'), m.STATUS, \
+                    COALESCE(m.PAGE_COUNT, 0), COALESCE(m.EPUB_DIVINA_COMPATIBLE, 0), \
+                    COALESCE(sm.AGE_RATING, NULL), \
+                    COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, ''), \
+                    bm.RELEASE_DATE \
           ORDER BY rb.NUMBER ASC",
     )
     .bind(readlist_id)
@@ -402,21 +443,24 @@ pub async fn load_readlist_books(
         .into_iter()
         .map(|row| PersistedReadlistBookRecord {
             id: row.get::<String, _>("ID"),
+            series_id: row.get::<String, _>("SERIES_ID"),
             title: row.get::<String, _>("TITLE"),
             series_title: row.get::<String, _>("SERIES_TITLE"),
             number: row.get::<String, _>("NUMBER"),
+            number_sort: row.get::<f64, _>("NUMBER_SORT"),
             summary: row.get::<String, _>("SUMMARY"),
-            authors: row
-                .get::<String, _>("AUTHORS")
-                .split(',')
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-                .collect(),
+            isbn: row
+                .try_get::<String, _>("ISBN")
+                .ok()
+                .filter(|value| !value.is_empty()),
+            authors: parsed_book_author_records(&row),
+            tags: parsed_book_tags(&row),
             file_name: row.get::<String, _>("FILE_NAME"),
             file_size: row.get::<i64, _>("FILE_SIZE"),
             media_type: row.get::<String, _>("MEDIA_TYPE"),
             media_status: row.try_get::<String, _>("MEDIA_STATUS").ok(),
+            page_count: row.get::<i64, _>("PAGE_COUNT"),
+            epub_divina_compatible: row.get::<bool, _>("EPUB_DIVINA_COMPATIBLE"),
             library_id: row.get::<String, _>("LIBRARY_ID"),
             age_rating: parsed_age_rating(&row),
             sharing_labels: parsed_sharing_labels(&row),

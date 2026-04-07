@@ -1,4 +1,5 @@
 use crate::http::discovery_auth::AgeRestrictionKind;
+use crate::opds_catalog_access::OpdsBookAuthorEntry;
 
 #[derive(Clone)]
 pub(super) struct PersistedLibrary {
@@ -41,15 +42,21 @@ pub(super) struct PersistedReadlist {
 
 pub(super) struct PersistedReadlistBook {
     pub(super) id: String,
+    pub(super) series_id: String,
     pub(super) title: String,
     pub(super) series_title: String,
     pub(super) number: String,
+    pub(super) number_sort: f64,
     pub(super) summary: String,
-    pub(super) authors: Vec<String>,
+    pub(super) isbn: Option<String>,
+    pub(super) authors: Vec<OpdsBookAuthorEntry>,
+    pub(super) tags: Vec<String>,
     pub(super) file_name: String,
     pub(super) file_size: i64,
     pub(super) media_type: String,
     pub(super) media_status: Option<String>,
+    pub(super) page_count: i64,
+    pub(super) epub_divina_compatible: bool,
     pub(super) library_id: String,
     pub(super) age_rating: Option<u16>,
     pub(super) sharing_labels: Vec<String>,

@@ -616,15 +616,28 @@ fn map_readlist_book_record(
 ) -> PersistedReadlistBook {
     PersistedReadlistBook {
         id: row.id,
+        series_id: row.series_id,
         title: row.title,
         series_title: row.series_title,
         number: row.number,
+        number_sort: row.number_sort,
         summary: row.summary,
-        authors: row.authors,
+        isbn: row.isbn,
+        authors: row
+            .authors
+            .into_iter()
+            .map(|author| crate::opds_catalog_access::OpdsBookAuthorEntry {
+                name: author.name,
+                role: author.role,
+            })
+            .collect(),
+        tags: row.tags,
         file_name: row.file_name,
         file_size: row.file_size,
         media_type: row.media_type,
         media_status: row.media_status,
+        page_count: row.page_count,
+        epub_divina_compatible: row.epub_divina_compatible,
         library_id: row.library_id,
         age_rating: row.age_rating,
         sharing_labels: row.sharing_labels,
@@ -672,19 +685,6 @@ pub(super) async fn load_series_page(
         publishers,
         offset,
         limit,
-    )
-    .await
-}
-
-pub(super) async fn collection_empty_for_authorized_user(
-    database_file: &Path,
-    collection_id: &str,
-    allowed_library_ids: &Option<HashSet<String>>,
-) -> bool {
-    catalog_queries::collection_empty_for_authorized_user(
-        database_file,
-        collection_id,
-        allowed_library_ids,
     )
     .await
 }

@@ -115,6 +115,73 @@ async fn update_router_library_last_modified(
     pool.close().await;
 }
 
+async fn update_router_collection_last_modified(
+    paths: &RuntimeDbPaths,
+    collection_id: &str,
+    last_modified: &str,
+) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("opds collection last-modified update db should open");
+
+    sqlx::query("UPDATE COLLECTION SET LAST_MODIFIED_DATE = ? WHERE ID = ?")
+        .bind(last_modified)
+        .bind(collection_id)
+        .execute(&pool)
+        .await
+        .expect("collection last modified should be updated");
+
+    pool.close().await;
+}
+
+async fn update_router_readlist_last_modified(
+    paths: &RuntimeDbPaths,
+    readlist_id: &str,
+    last_modified: &str,
+) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("opds readlist last-modified update db should open");
+
+    sqlx::query("UPDATE READLIST SET LAST_MODIFIED_DATE = ? WHERE ID = ?")
+        .bind(last_modified)
+        .bind(readlist_id)
+        .execute(&pool)
+        .await
+        .expect("readlist last modified should be updated");
+
+    pool.close().await;
+}
+
+async fn update_router_readlist_ordered(paths: &RuntimeDbPaths, readlist_id: &str, ordered: bool) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("opds readlist ordered update db should open");
+
+    sqlx::query("UPDATE READLIST SET ORDERED = ? WHERE ID = ?")
+        .bind(ordered)
+        .bind(readlist_id)
+        .execute(&pool)
+        .await
+        .expect("readlist ordered flag should be updated");
+
+    pool.close().await;
+}
+
+async fn clear_router_series_sharing_labels(paths: &RuntimeDbPaths, series_id: &str) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("opds series sharing labels delete db should open");
+
+    sqlx::query("DELETE FROM SERIES_METADATA_SHARING WHERE SERIES_ID = ?")
+        .bind(series_id)
+        .execute(&pool)
+        .await
+        .expect("series sharing labels should be deleted");
+
+    pool.close().await;
+}
+
 async fn seed_router_library(paths: &RuntimeDbPaths, library_id: &str, name: &str) {
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await

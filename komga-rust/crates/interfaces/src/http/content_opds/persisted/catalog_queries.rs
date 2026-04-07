@@ -16,10 +16,7 @@ use crate::opds_catalog_access::{
     load_on_deck_books as load_on_deck_book_entries, load_series_page as load_series_entries_page,
 };
 
-use super::{
-    PersistedBookFeedItem, PersistedReadlist, PersistedSeries, library_visible,
-    load_collection_books,
-};
+use super::{PersistedBookFeedItem, PersistedReadlist, PersistedSeries};
 
 fn persisted_book_feed_item(entry: OpdsBookFeedEntry) -> PersistedBookFeedItem {
     PersistedBookFeedItem {
@@ -213,22 +210,6 @@ pub(super) async fn load_series_page(
     )
     .await
     .map(|entries| entries.into_iter().map(persisted_series).collect())
-}
-
-pub(super) async fn collection_empty_for_authorized_user(
-    database_file: &Path,
-    collection_id: &str,
-    allowed_library_ids: &Option<HashSet<String>>,
-) -> bool {
-    let Ok(books) = load_collection_books(database_file, collection_id).await else {
-        return false;
-    };
-    if books.is_empty() {
-        return true;
-    }
-    books
-        .into_iter()
-        .any(|book| library_visible(allowed_library_ids, &book.library_id))
 }
 
 pub(super) async fn load_all_readlists(

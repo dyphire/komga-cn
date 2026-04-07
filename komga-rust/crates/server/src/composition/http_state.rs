@@ -57,6 +57,7 @@ use komga_interfaces::{
     PageHashDeleteTarget as InterfacesPageHashDeleteTarget,
     PageHashDeleteTargetPage as InterfacesPageHashDeleteTargetPage,
     PageHashThumbnail as InterfacesPageHashThumbnail,
+    PersistedBookAuthorRecord as InterfacesPersistedBookAuthorRecord,
     PersistedBookFeedRecord as InterfacesPersistedBookFeedRecord,
     PersistedBookMediaFile as InterfacesPersistedBookMediaFile,
     PersistedBookSearchRecord as InterfacesPersistedBookSearchRecord,

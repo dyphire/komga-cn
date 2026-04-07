@@ -20,10 +20,10 @@ pub use opds_manifest_access::{
     ManifestBookRecord, OpdsManifestAccessBackend, install_opds_manifest_access,
 };
 pub use opds_persisted_access::{
-    OpdsPersistedAccessBackend, PersistedBookFeedRecord, PersistedBookSearchRecord,
-    PersistedLibraryRecord, PersistedNamedRecord, PersistedReadlistBookRecord,
-    PersistedReadlistRecord, PersistedSeriesBookRecord, PersistedSeriesRecord,
-    PersistedSeriesSearchRecord, install_opds_persisted_access,
+    OpdsPersistedAccessBackend, PersistedBookAuthorRecord, PersistedBookFeedRecord,
+    PersistedBookSearchRecord, PersistedLibraryRecord, PersistedNamedRecord,
+    PersistedReadlistBookRecord, PersistedReadlistRecord, PersistedSeriesBookRecord,
+    PersistedSeriesRecord, PersistedSeriesSearchRecord, install_opds_persisted_access,
 };
 pub use operational_runtime_access::{
     BookSnapshot, CollectionSnapshot, LibrarySnapshot, OperationalRuntimeAccessBackend,
