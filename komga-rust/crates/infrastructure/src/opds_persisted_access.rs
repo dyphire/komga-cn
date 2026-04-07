@@ -2,6 +2,11 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::sqlite::connect_pool;
+use icu::collator::{
+    Collator,
+    options::{CollatorOptions, Strength},
+};
+use icu::locale::locale;
 use sqlx::Row;
 use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
@@ -24,8 +29,15 @@ pub struct PersistedSeriesRecord {
 pub struct PersistedSeriesBookRecord {
     pub id: String,
     pub title: String,
+    pub summary: String,
+    pub authors: Vec<String>,
     pub file_name: String,
+    pub file_size: i64,
     pub media_type: String,
+    pub page_count: i64,
+    pub epub_divina_compatible: bool,
+    pub last_read: Option<i64>,
+    pub last_read_date: Option<String>,
     pub last_modified: String,
 }
 
@@ -33,23 +45,32 @@ pub struct PersistedReadlistRecord {
     pub id: String,
     pub name: String,
     pub last_modified: String,
+    pub ordered: bool,
 }
 
 pub struct PersistedReadlistBookRecord {
     pub id: String,
     pub title: String,
+    pub series_title: String,
+    pub number: String,
+    pub summary: String,
+    pub authors: Vec<String>,
     pub file_name: String,
+    pub file_size: i64,
     pub media_type: String,
+    pub media_status: Option<String>,
     pub library_id: String,
     pub age_rating: Option<u16>,
     pub sharing_labels: Vec<String>,
     pub last_modified: String,
+    pub release_date: Option<String>,
 }
 
 pub struct PersistedSeriesSearchRecord {
     pub id: String,
     pub title: String,
     pub library_id: String,
+    pub last_modified: String,
 }
 
 pub struct PersistedBookSearchRecord {
@@ -158,7 +179,7 @@ pub async fn load_readlists_for_library(
 
     let pool = connect_pool(database_file, 1).await?;
     let rows = sqlx::query(
-        "SELECT DISTINCT rl.ID, rl.NAME, \
+        "SELECT DISTINCT rl.ID, rl.NAME, rl.ORDERED, \
                 COALESCE(rl.LAST_MODIFIED_DATE, rl.CREATED_DATE, '') AS LAST_MODIFIED \
          FROM READLIST rl \
          JOIN READLIST_BOOK rb ON rb.READLIST_ID = rl.ID \
@@ -176,6 +197,7 @@ pub async fn load_readlists_for_library(
             id: row.get::<String, _>("ID"),
             name: row.get::<String, _>("NAME"),
             last_modified: row.get::<String, _>("LAST_MODIFIED"),
+            ordered: row.get::<bool, _>("ORDERED"),
         })
         .collect())
 }
@@ -200,7 +222,6 @@ pub async fn load_series(
          LEFT \
          JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
          WHERE s.ID = ? \
-         AND s.DELETED_DATE IS NULL \
          GROUP BY s.ID, s.LIBRARY_ID, TITLE, AGE_RATING, LAST_MODIFIED \
          LIMIT 1",
     )
@@ -221,6 +242,7 @@ pub async fn load_series(
 pub async fn load_series_books_paged(
     database_file: &Path,
     series_id: &str,
+    user_id: &str,
     offset: i64,
     limit: i64,
 ) -> Result<Vec<PersistedSeriesBookRecord>, sqlx::Error> {
@@ -230,20 +252,40 @@ pub async fn load_series_books_paged(
 
     let pool = connect_pool(database_file, 1).await?;
     let rows = sqlx::query(
-        "SELECT b.ID, COALESCE(bm.TITLE, b.NAME) AS TITLE, b.NAME AS FILE_NAME, \
+        "SELECT b.ID, COALESCE(bm.TITLE, b.NAME) AS TITLE, \
+                COALESCE(bm.SUMMARY, '') AS SUMMARY, \
+                COALESCE(GROUP_CONCAT(DISTINCT bma.NAME), '') AS AUTHORS, \
+                b.NAME AS FILE_NAME, COALESCE(b.FILE_SIZE, 0) AS FILE_SIZE, \
                 COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE, \
+                COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT, \
+                COALESCE(m.EPUB_DIVINA_COMPATIBLE, 0) AS EPUB_DIVINA_COMPATIBLE, \
+                rp.PAGE AS LAST_READ, \
+                rp.READ_DATE AS LAST_READ_DATE, \
                 COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') AS LAST_MODIFIED \
-         FROM BOOK b \
-         LEFT \
-         JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
-         LEFT \
-         JOIN MEDIA m ON m.BOOK_ID = b.ID \
-         WHERE b.SERIES_ID = ? \
-         AND b.DELETED_DATE IS NULL \
-         ORDER BY COALESCE(bm.NUMBER_SORT, CAST(b.NUMBER AS REAL), 0) ASC, b.ID ASC \
-         LIMIT ? \
-         OFFSET ?",
+          FROM BOOK b \
+          LEFT \
+          JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
+          LEFT \
+          JOIN BOOK_METADATA_AUTHOR bma ON bma.BOOK_ID = b.ID \
+          LEFT \
+          JOIN MEDIA m ON m.BOOK_ID = b.ID \
+          LEFT \
+          JOIN READ_PROGRESS rp ON rp.BOOK_ID = b.ID AND rp.USER_ID = ? \
+          WHERE b.SERIES_ID = ? \
+          AND b.DELETED_DATE IS NULL \
+          AND COALESCE(m.STATUS, '') = 'READY' \
+          GROUP BY b.ID, COALESCE(bm.TITLE, b.NAME), COALESCE(bm.SUMMARY, ''), \
+                   b.NAME, COALESCE(b.FILE_SIZE, 0), \
+                   COALESCE(m.MEDIA_TYPE, 'application/octet-stream'), \
+                   COALESCE(m.PAGE_COUNT, 0), \
+                   COALESCE(m.EPUB_DIVINA_COMPATIBLE, 0), \
+                   rp.PAGE, rp.READ_DATE, \
+                   COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') \
+           ORDER BY COALESCE(bm.NUMBER_SORT, CAST(b.NUMBER AS REAL), 0) ASC, b.ID ASC \
+           LIMIT ? \
+           OFFSET ?",
     )
+    .bind(user_id)
     .bind(series_id)
     .bind(limit)
     .bind(offset)
@@ -255,8 +297,24 @@ pub async fn load_series_books_paged(
         .map(|row| PersistedSeriesBookRecord {
             id: row.get::<String, _>("ID"),
             title: row.get::<String, _>("TITLE"),
+            summary: row.get::<String, _>("SUMMARY"),
+            authors: row
+                .get::<String, _>("AUTHORS")
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .collect(),
             file_name: row.get::<String, _>("FILE_NAME"),
+            file_size: row.get::<i64, _>("FILE_SIZE"),
             media_type: row.get::<String, _>("MEDIA_TYPE"),
+            page_count: row.get::<i64, _>("PAGE_COUNT"),
+            epub_divina_compatible: row.get::<bool, _>("EPUB_DIVINA_COMPATIBLE"),
+            last_read: row.try_get::<Option<i64>, _>("LAST_READ").ok().flatten(),
+            last_read_date: row
+                .try_get::<Option<String>, _>("LAST_READ_DATE")
+                .ok()
+                .flatten(),
             last_modified: row.get::<String, _>("LAST_MODIFIED"),
         })
         .collect())
@@ -272,7 +330,7 @@ pub async fn load_readlist(
 
     let pool = connect_pool(database_file, 1).await?;
     let row = sqlx::query(
-        "SELECT ID, NAME, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED \
+        "SELECT ID, NAME, ORDERED, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED \
          FROM READLIST \
          WHERE ID = ? \
          LIMIT 1",
@@ -285,6 +343,7 @@ pub async fn load_readlist(
         id: row.get::<String, _>("ID"),
         name: row.get::<String, _>("NAME"),
         last_modified: row.get::<String, _>("LAST_MODIFIED"),
+        ordered: row.get::<bool, _>("ORDERED"),
     }))
 }
 
@@ -298,11 +357,18 @@ pub async fn load_readlist_books(
 
     let pool = connect_pool(database_file, 1).await?;
     let rows = sqlx::query(
-        "SELECT b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE, b.NAME AS FILE_NAME, \
+        "SELECT b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE, \
+                COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE, \
+                COALESCE(bm.NUMBER, CAST(b.NUMBER AS TEXT), '') AS NUMBER, \
+                COALESCE(bm.SUMMARY, '') AS SUMMARY, \
+                COALESCE(GROUP_CONCAT(DISTINCT bma.NAME), '') AS AUTHORS, \
+                b.NAME AS FILE_NAME, COALESCE(b.FILE_SIZE, 0) AS FILE_SIZE, \
                 COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE, \
+                m.STATUS AS MEDIA_STATUS, \
                 COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING, \
                 COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS, \
-                COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') AS LAST_MODIFIED \
+                COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') AS LAST_MODIFIED, \
+                bm.RELEASE_DATE AS RELEASE_DATE \
          FROM READLIST_BOOK rb \
          JOIN BOOK b ON b.ID = rb.BOOK_ID \
          LEFT \
@@ -314,14 +380,19 @@ pub async fn load_readlist_books(
          LEFT \
          JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
          LEFT \
+         JOIN BOOK_METADATA_AUTHOR bma ON bma.BOOK_ID = b.ID \
+         LEFT \
          JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
          WHERE rb.READLIST_ID = ? \
          AND b.DELETED_DATE IS NULL \
-         GROUP BY b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME), b.NAME, \
-                  COALESCE(m.MEDIA_TYPE, 'application/octet-stream'), \
-                  COALESCE(sm.AGE_RATING, NULL), \
-                  COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') \
-         ORDER BY rb.NUMBER ASC",
+         GROUP BY b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME), \
+                  COALESCE(sm.TITLE, s.NAME), COALESCE(bm.NUMBER, CAST(b.NUMBER AS TEXT), ''), \
+                  COALESCE(bm.SUMMARY, ''), b.NAME, COALESCE(b.FILE_SIZE, 0), \
+                   COALESCE(m.MEDIA_TYPE, 'application/octet-stream'), m.STATUS, \
+                   COALESCE(sm.AGE_RATING, NULL), \
+                   COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, ''), \
+                   bm.RELEASE_DATE \
+          ORDER BY rb.NUMBER ASC",
     )
     .bind(readlist_id)
     .fetch_all(&pool)
@@ -332,12 +403,25 @@ pub async fn load_readlist_books(
         .map(|row| PersistedReadlistBookRecord {
             id: row.get::<String, _>("ID"),
             title: row.get::<String, _>("TITLE"),
+            series_title: row.get::<String, _>("SERIES_TITLE"),
+            number: row.get::<String, _>("NUMBER"),
+            summary: row.get::<String, _>("SUMMARY"),
+            authors: row
+                .get::<String, _>("AUTHORS")
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .collect(),
             file_name: row.get::<String, _>("FILE_NAME"),
+            file_size: row.get::<i64, _>("FILE_SIZE"),
             media_type: row.get::<String, _>("MEDIA_TYPE"),
+            media_status: row.try_get::<String, _>("MEDIA_STATUS").ok(),
             library_id: row.get::<String, _>("LIBRARY_ID"),
             age_rating: parsed_age_rating(&row),
             sharing_labels: parsed_sharing_labels(&row),
             last_modified: row.get::<String, _>("LAST_MODIFIED"),
+            release_date: row.try_get::<String, _>("RELEASE_DATE").ok(),
         })
         .collect())
 }
@@ -408,10 +492,11 @@ pub async fn load_series_search_records_by_ids(
 
     let pool = connect_pool(database_file, 1).await?;
     let sql = format!(
-        "SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE \
-         FROM SERIES s \
-         LEFT \
-         JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+        "SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE, \
+                COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED \
+          FROM SERIES s \
+          LEFT \
+          JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
          WHERE s.DELETED_DATE IS NULL \
          AND s.ID IN ({})",
         placeholder_list(ids.len())
@@ -428,6 +513,7 @@ pub async fn load_series_search_records_by_ids(
             id: row.get::<String, _>("ID"),
             title: row.get::<String, _>("TITLE"),
             library_id: row.get::<String, _>("LIBRARY_ID"),
+            last_modified: row.get::<String, _>("LAST_MODIFIED"),
         })
         .collect())
 }
@@ -486,8 +572,9 @@ pub async fn load_collection_search_records_by_ids(
         query = query.bind(id);
     }
 
-    let rows = query.fetch_all(&pool).await?;
-    Ok(rows
+    Ok(query
+        .fetch_all(&pool)
+        .await?
         .into_iter()
         .map(|row| PersistedNamedRecord {
             id: row.get::<String, _>("ID"),
@@ -495,7 +582,7 @@ pub async fn load_collection_search_records_by_ids(
             last_modified: row
                 .try_get::<String, _>("LAST_MODIFIED")
                 .unwrap_or_default(),
-            ordered: row.try_get::<bool, _>("ORDERED").unwrap_or(false),
+            ordered: false,
         })
         .collect())
 }
@@ -521,7 +608,7 @@ pub async fn load_readlist_search_records_by_ids(
     }
 
     let rows = query.fetch_all(&pool).await?;
-    Ok(rows
+    let mut records = rows
         .into_iter()
         .map(|row| PersistedNamedRecord {
             id: row.get::<String, _>("ID"),
@@ -531,7 +618,11 @@ pub async fn load_readlist_search_records_by_ids(
                 .unwrap_or_default(),
             ordered: row.try_get::<bool, _>("ORDERED").unwrap_or(false),
         })
-        .collect())
+        .collect::<Vec<_>>();
+
+    records.sort_by_cached_key(|record| unicode_collation_sort_key(record.name.as_str()));
+
+    Ok(records)
 }
 
 pub async fn load_series_search_records_limited(
@@ -544,7 +635,8 @@ pub async fn load_series_search_records_limited(
 
     let pool = connect_pool(database_file, 1).await?;
     let rows = sqlx::query(
-        "SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE \
+        "SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE, \
+                COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED \
          FROM SERIES s \
          LEFT \
          JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
@@ -561,6 +653,7 @@ pub async fn load_series_search_records_limited(
             id: row.get::<String, _>("ID"),
             title: row.get::<String, _>("TITLE"),
             library_id: row.get::<String, _>("LIBRARY_ID"),
+            last_modified: row.get::<String, _>("LAST_MODIFIED"),
         })
         .collect())
 }
@@ -614,7 +707,7 @@ pub async fn load_collection_search_records_limited(
     .bind(limit)
     .fetch_all(&pool)
     .await?;
-    Ok(rows
+    let mut records = rows
         .into_iter()
         .map(|row| PersistedNamedRecord {
             id: row.get::<String, _>("ID"),
@@ -624,7 +717,11 @@ pub async fn load_collection_search_records_limited(
                 .unwrap_or_default(),
             ordered: row.try_get::<bool, _>("ORDERED").unwrap_or(false),
         })
-        .collect())
+        .collect::<Vec<_>>();
+
+    records.sort_by_cached_key(|record| unicode_collation_sort_key(record.name.as_str()));
+
+    Ok(records)
 }
 
 pub async fn load_readlist_search_records_limited(
@@ -708,6 +805,13 @@ fn unicode_collation_sort_key(value: &str) -> String {
         .collect()
 }
 
+fn tertiary_unicode_collator() -> icu::collator::CollatorBorrowed<'static> {
+    let mut options = CollatorOptions::default();
+    options.strength = Some(Strength::Tertiary);
+    Collator::try_new(locale!("und").into(), options)
+        .expect("unicode collator for OPDS collection sorting should construct")
+}
+
 pub async fn load_collections(
     database_file: &Path,
     library_id: Option<&str>,
@@ -740,7 +844,7 @@ pub async fn load_collections(
         .await?
     };
 
-    Ok(rows
+    let mut records = rows
         .into_iter()
         .map(|row| PersistedNamedRecord {
             id: row.get::<String, _>("ID"),
@@ -750,7 +854,19 @@ pub async fn load_collections(
                 .unwrap_or_default(),
             ordered: row.try_get::<bool, _>("ORDERED").unwrap_or(false),
         })
-        .collect())
+        .collect::<Vec<_>>();
+
+    let collator = tertiary_unicode_collator();
+    records.sort_by(|left, right| {
+        let ordering = collator.compare(left.name.as_str(), right.name.as_str());
+        if ordering.is_eq() {
+            left.id.cmp(&right.id)
+        } else {
+            ordering
+        }
+    });
+
+    Ok(records)
 }
 
 pub async fn load_collection(

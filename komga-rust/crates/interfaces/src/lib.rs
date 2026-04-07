@@ -13,8 +13,8 @@ pub use media_assets_runtime_access::{
     install_media_assets_runtime_access,
 };
 pub use opds_catalog_access::{
-    BrowsePublisherEntry, BrowseSeriesNavigationEntry, OpdsBookFeedEntry, OpdsCatalogAccessBackend,
-    OpdsReadlistEntry, OpdsSeriesEntry, install_opds_catalog_access,
+    BrowsePublisherEntry, BrowseSeriesNavigationEntry, OpdsBookAuthorEntry, OpdsBookFeedEntry,
+    OpdsCatalogAccessBackend, OpdsReadlistEntry, OpdsSeriesEntry, install_opds_catalog_access,
 };
 pub use opds_manifest_access::{
     ManifestBookRecord, OpdsManifestAccessBackend, install_opds_manifest_access,

@@ -86,4 +86,6 @@ lopdf.workspace = true
 tantivy.workspace = true
 tempfile = "3.23.0"
 image.workspace = true
+icu.workspace = true
+time.workspace = true
 komga-contract-testkit = { path = "crates/contract-testkit" }

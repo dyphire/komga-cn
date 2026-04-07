@@ -99,118 +99,19 @@ pub(crate) async fn opds_v2_collection(
 
 pub(crate) async fn opds_v2_libraries_readlists(
     headers: HeaderMap,
+    uri: Uri,
     database_file: &Path,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
-        return response;
-    }
-
-    let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-
-    let readlists = match load_all_readlists(database_file).await {
-        Ok(readlists) => readlists,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("load OPDS readlists: {error}") })),
-            )
-                .into_response();
-        }
-    };
-
-    let mut navigation = Vec::new();
-    for readlist in readlists {
-        let readlist_books = match load_readlist_books(database_file, &readlist.id).await {
-            Ok(books) => books,
-            Err(_) => continue,
-        };
-        if readlist_books
-            .iter()
-            .any(|book| library_visible(&allowed_library_ids, &book.library_id))
-        {
-            navigation.push(json!({
-                "title": readlist.name,
-                "href": app_absolute_url(&headers, format!("/opds/v2/readlists/{}", readlist.id).as_str()),
-                "type": "application/opds+json",
-            }));
-        }
-    }
-
-    opds_navigation_response(
-        &headers,
-        "Read lists",
-        app_absolute_url(&headers, "/opds/v2/libraries/readlists").as_str(),
-        navigation,
-    )
+    opds_v2_readlists_feed(headers, uri, database_file, None).await
 }
 
 pub(crate) async fn opds_v2_library_readlists(
     headers: HeaderMap,
+    uri: Uri,
     database_file: &Path,
     library_id: &str,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
-        return response;
-    }
-
-    let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-
-    if !library_visible(&allowed_library_ids, library_id) {
-        return StatusCode::FORBIDDEN.into_response();
-    }
-
-    let readlists = match load_readlists_for_library(database_file, library_id).await {
-        Ok(readlists) => readlists,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("load OPDS library readlists: {error}") })),
-            )
-                .into_response();
-        }
-    };
-
-    let navigation = readlists
-        .into_iter()
-        .map(|readlist| {
-            json!({
-                "title": readlist.name,
-                "href": app_absolute_url(&headers, format!("/opds/v2/readlists/{}", readlist.id).as_str()),
-                "type": "application/opds+json",
-            })
-        })
-        .collect::<Vec<_>>();
-
-    (
-        StatusCode::OK,
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/opds+json"),
-        )],
-        Json(json!({
-            "metadata": {
-                "title": "Read lists",
-            },
-            "links": [
-                {
-                    "rel": "self",
-                    "href": app_absolute_url(&headers, format!("/opds/v2/libraries/{library_id}/readlists").as_str()),
-                    "type": "application/opds+json",
-                },
-                {
-                    "rel": "start",
-                    "href": app_absolute_url(&headers, "/opds/v2/catalog"),
-                    "type": "application/opds+json",
-                }
-            ],
-            "navigation": navigation,
-        })),
-    )
-        .into_response()
+    opds_v2_readlists_feed(headers, uri, database_file, Some(library_id)).await
 }
 
 pub(crate) async fn opds_v2_series(

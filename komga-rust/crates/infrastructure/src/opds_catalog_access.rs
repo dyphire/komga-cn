@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::path::Path;
 
 use crate::sqlite::connect_pool;
@@ -13,21 +13,41 @@ pub struct BrowsePublisherEntry {
     pub publisher: String,
 }
 
+pub struct OpdsBookAuthorEntry {
+    pub name: String,
+    pub role: String,
+}
+
 pub struct OpdsBookFeedEntry {
     pub id: String,
+    pub series_id: String,
     pub title: String,
+    pub series_title: String,
+    pub number: String,
+    pub number_sort: f64,
+    pub summary: String,
+    pub isbn: Option<String>,
+    pub authors: Vec<OpdsBookAuthorEntry>,
+    pub tags: Vec<String>,
     pub file_name: String,
+    pub file_size: i64,
     pub media_type: String,
+    pub page_count: i64,
+    pub epub_divina_compatible: bool,
+    pub last_read: Option<i64>,
+    pub last_read_date: Option<String>,
     pub library_id: String,
     pub age_rating: Option<u16>,
     pub sharing_labels: Vec<String>,
     pub last_modified: String,
+    pub release_date: Option<String>,
 }
 
 pub struct OpdsSeriesEntry {
     pub id: String,
     pub library_id: String,
     pub title: String,
+    pub one_shot: bool,
     pub age_rating: Option<u16>,
     pub sharing_labels: Vec<String>,
     pub last_modified: String,
@@ -42,6 +62,29 @@ fn parsed_age_rating(row: &sqlx::sqlite::SqliteRow) -> Option<u16> {
 fn parsed_sharing_labels(row: &sqlx::sqlite::SqliteRow) -> Vec<String> {
     row.get::<String, _>("SHARING_LABELS")
         .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn parsed_book_authors(row: &sqlx::sqlite::SqliteRow) -> Vec<OpdsBookAuthorEntry> {
+    row.get::<String, _>("AUTHORS")
+        .split('')
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            let mut parts = value.splitn(2, '');
+            let name = parts.next().unwrap_or_default().trim().to_string();
+            let role = parts.next().unwrap_or_default().trim().to_string();
+            OpdsBookAuthorEntry { name, role }
+        })
+        .filter(|author| !author.name.is_empty())
+        .collect()
+}
+
+fn parsed_book_tags(row: &sqlx::sqlite::SqliteRow) -> Vec<String> {
+    row.get::<String, _>("TAGS")
+        .split('')
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
@@ -218,27 +261,46 @@ pub async fn load_keep_reading_books(
 
     let pool = connect_pool(database_file, 1).await?;
     let rows = sqlx::query(
-        "SELECT b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE, b.NAME AS FILE_NAME, \
+        "SELECT b.ID, b.LIBRARY_ID, b.SERIES_ID, COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE, \
+                COALESCE(bm.NUMBER, CAST(b.NUMBER AS TEXT), '') AS NUMBER, \
+                COALESCE(bm.NUMBER_SORT, CAST(b.NUMBER AS REAL), 0) AS NUMBER_SORT, \
+                COALESCE(bm.TITLE, b.NAME) AS TITLE, COALESCE(bm.SUMMARY, '') AS SUMMARY, \
+                COALESCE(bm.ISBN, '') AS ISBN, \
+                COALESCE((SELECT GROUP_CONCAT(NAME || char(31) || COALESCE(ROLE, ''), char(30)) \
+                          FROM BOOK_METADATA_AUTHOR \
+                          WHERE BOOK_ID = b.ID), '') AS AUTHORS, \
+                COALESCE((SELECT GROUP_CONCAT(TAG, char(30)) \
+                          FROM (SELECT DISTINCT TAG FROM BOOK_METADATA_TAG WHERE BOOK_ID = b.ID)), '') AS TAGS, \
+                COALESCE(bm.RELEASE_DATE, '') AS RELEASE_DATE, \
+                b.NAME AS FILE_NAME, COALESCE(b.FILE_SIZE, 0) AS FILE_SIZE, \
                 COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE, \
+                COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT, \
+                COALESCE(m.EPUB_DIVINA_COMPATIBLE, 0) AS EPUB_DIVINA_COMPATIBLE, \
+                rp.PAGE AS LAST_READ, rp.READ_DATE AS LAST_READ_DATE, \
                 COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING, \
                 COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS, \
                 COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') AS LAST_MODIFIED \
-         FROM READ_PROGRESS rp \
-         JOIN BOOK b ON b.ID = rp.BOOK_ID \
-          LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
-          LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID \
-          LEFT JOIN SERIES s ON s.ID = b.SERIES_ID \
-          LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
-          LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
-         WHERE rp.USER_ID = ? \
-         AND rp.COMPLETED = 0 \
-         AND b.DELETED_DATE IS NULL \
-         AND (? IS NULL OR b.LIBRARY_ID = ?) \
-         GROUP BY b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME), b.NAME, \
-                  COALESCE(m.MEDIA_TYPE, 'application/octet-stream'),
-                  COALESCE(sm.AGE_RATING, NULL),
-                  COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') \
-         ORDER BY rp.LAST_MODIFIED_DATE DESC, b.ID ASC",
+           FROM READ_PROGRESS rp \
+           JOIN BOOK b ON b.ID = rp.BOOK_ID \
+            LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
+            LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID \
+            LEFT JOIN SERIES s ON s.ID = b.SERIES_ID \
+            LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+            LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
+          WHERE rp.USER_ID = ? \
+          AND rp.COMPLETED = 0 \
+          AND b.DELETED_DATE IS NULL \
+          AND COALESCE(m.STATUS, '') = 'READY' \
+          AND (? IS NULL OR b.LIBRARY_ID = ?) \
+            GROUP BY b.ID, b.LIBRARY_ID, b.SERIES_ID, COALESCE(sm.TITLE, s.NAME), \
+                     COALESCE(bm.NUMBER, CAST(b.NUMBER AS TEXT), ''), \
+                     COALESCE(bm.NUMBER_SORT, CAST(b.NUMBER AS REAL), 0), \
+                     COALESCE(bm.TITLE, b.NAME), COALESCE(bm.SUMMARY, ''), COALESCE(bm.ISBN, ''), COALESCE(bm.RELEASE_DATE, ''), b.NAME, \
+                    COALESCE(b.FILE_SIZE, 0), COALESCE(m.MEDIA_TYPE, 'application/octet-stream'), \
+                    COALESCE(m.PAGE_COUNT, 0), COALESCE(m.EPUB_DIVINA_COMPATIBLE, 0), \
+                    rp.PAGE, rp.READ_DATE, COALESCE(sm.AGE_RATING, NULL),
+                   COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') \
+          ORDER BY COALESCE(rp.READ_DATE, '') DESC, b.ID ASC",
     )
     .bind(user_id)
     .bind(library_id)
@@ -250,13 +312,36 @@ pub async fn load_keep_reading_books(
         .into_iter()
         .map(|row| OpdsBookFeedEntry {
             id: row.get::<String, _>("ID"),
+            series_id: row.get::<String, _>("SERIES_ID"),
             title: row.get::<String, _>("TITLE"),
+            series_title: row.get::<String, _>("SERIES_TITLE"),
+            number: row.get::<String, _>("NUMBER"),
+            number_sort: row.get::<f64, _>("NUMBER_SORT"),
+            summary: row.get::<String, _>("SUMMARY"),
+            isbn: row
+                .try_get::<String, _>("ISBN")
+                .ok()
+                .filter(|value| !value.is_empty()),
+            authors: parsed_book_authors(&row),
+            tags: parsed_book_tags(&row),
             file_name: row.get::<String, _>("FILE_NAME"),
+            file_size: row.get::<i64, _>("FILE_SIZE"),
             media_type: row.get::<String, _>("MEDIA_TYPE"),
+            page_count: row.get::<i64, _>("PAGE_COUNT"),
+            epub_divina_compatible: row.get::<bool, _>("EPUB_DIVINA_COMPATIBLE"),
+            last_read: row.try_get::<Option<i64>, _>("LAST_READ").ok().flatten(),
+            last_read_date: row
+                .try_get::<Option<String>, _>("LAST_READ_DATE")
+                .ok()
+                .flatten(),
             library_id: row.get::<String, _>("LIBRARY_ID"),
             age_rating: parsed_age_rating(&row),
             sharing_labels: parsed_sharing_labels(&row),
             last_modified: row.get::<String, _>("LAST_MODIFIED"),
+            release_date: row
+                .try_get::<String, _>("RELEASE_DATE")
+                .ok()
+                .filter(|value| !value.is_empty()),
         })
         .collect())
 }
@@ -272,42 +357,61 @@ pub async fn load_on_deck_books(
 
     let pool = connect_pool(database_file, 1).await?;
     let rows = sqlx::query(
-        "SELECT b.ID, b.LIBRARY_ID, b.SERIES_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE, \
-                b.NAME AS FILE_NAME, \
+        "SELECT b.ID, b.LIBRARY_ID, b.SERIES_ID, COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE, \
+                COALESCE(bm.NUMBER, CAST(b.NUMBER AS TEXT), '') AS NUMBER, \
+                COALESCE(bm.NUMBER_SORT, CAST(b.NUMBER AS REAL), 0) AS NUMBER_SORT, \
+                COALESCE(bm.TITLE, b.NAME) AS TITLE, COALESCE(bm.SUMMARY, '') AS SUMMARY, \
+                COALESCE(bm.ISBN, '') AS ISBN, \
+                COALESCE((SELECT GROUP_CONCAT(NAME || char(31) || COALESCE(ROLE, ''), char(30)) \
+                          FROM BOOK_METADATA_AUTHOR \
+                          WHERE BOOK_ID = b.ID), '') AS AUTHORS, \
+                COALESCE((SELECT GROUP_CONCAT(TAG, char(30)) \
+                          FROM (SELECT DISTINCT TAG FROM BOOK_METADATA_TAG WHERE BOOK_ID = b.ID)), '') AS TAGS, \
+                COALESCE(bm.RELEASE_DATE, '') AS RELEASE_DATE, \
+                b.NAME AS FILE_NAME, COALESCE(b.FILE_SIZE, 0) AS FILE_SIZE, \
                 COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE, \
+                COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT, \
+                COALESCE(m.EPUB_DIVINA_COMPATIBLE, 0) AS EPUB_DIVINA_COMPATIBLE, \
                 COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING, \
                 COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS, \
                 COALESCE(bm.NUMBER_SORT, CAST(b.NUMBER AS REAL), 0) AS ORDER_INDEX, \
-                COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') AS LAST_MODIFIED \
-         FROM BOOK b \
-          LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
-          LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID \
-          LEFT JOIN SERIES s ON s.ID = b.SERIES_ID \
-          LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
-          LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
-         WHERE b.DELETED_DATE IS NULL \
-         AND (? IS NULL OR b.LIBRARY_ID = ?) \
-         AND b.SERIES_ID IN (SELECT DISTINCT b_done.SERIES_ID \
-         FROM BOOK b_done \
-         JOIN READ_PROGRESS rp_done ON rp_done.BOOK_ID = b_done.ID \
-         WHERE rp_done.USER_ID = ? \
-         AND rp_done.COMPLETED = 1) \
-         AND b.SERIES_ID NOT IN (SELECT DISTINCT b_prog.SERIES_ID \
-         FROM BOOK b_prog \
-         JOIN READ_PROGRESS rp_prog ON rp_prog.BOOK_ID = b_prog.ID \
-         WHERE rp_prog.USER_ID = ? \
-         AND rp_prog.COMPLETED = 0) \
-         AND NOT EXISTS (SELECT 1 \
-         FROM READ_PROGRESS rp_seen \
-          WHERE rp_seen.BOOK_ID = b.ID \
-          AND rp_seen.USER_ID = ? \
-          AND rp_seen.COMPLETED = 1) \
-         GROUP BY b.ID, b.LIBRARY_ID, b.SERIES_ID, COALESCE(bm.TITLE, b.NAME), b.NAME,
-                  COALESCE(m.MEDIA_TYPE, 'application/octet-stream'), COALESCE(sm.AGE_RATING, NULL),
-                  COALESCE(bm.NUMBER_SORT, CAST(b.NUMBER AS REAL), 0),
-                  COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') \
-          ORDER BY b.SERIES_ID ASC, ORDER_INDEX ASC, b.ID ASC",
+                COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') AS LAST_MODIFIED, \
+                COALESCE(rps.MOST_RECENT_READ_DATE, '') AS MOST_RECENT_READ_DATE \
+           FROM BOOK b \
+            LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
+            LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID \
+            LEFT JOIN SERIES s ON s.ID = b.SERIES_ID \
+            LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+            LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
+           LEFT JOIN READ_PROGRESS_SERIES rps ON rps.SERIES_ID = b.SERIES_ID AND rps.USER_ID = ? \
+           WHERE b.DELETED_DATE IS NULL \
+           AND (? IS NULL OR b.LIBRARY_ID = ?) \
+          AND b.SERIES_ID IN (SELECT DISTINCT b_done.SERIES_ID \
+          FROM BOOK b_done \
+          JOIN READ_PROGRESS rp_done ON rp_done.BOOK_ID = b_done.ID \
+          WHERE rp_done.USER_ID = ? \
+          AND rp_done.COMPLETED = 1) \
+          AND b.SERIES_ID NOT IN (SELECT DISTINCT b_prog.SERIES_ID \
+          FROM BOOK b_prog \
+          JOIN READ_PROGRESS rp_prog ON rp_prog.BOOK_ID = b_prog.ID \
+          WHERE rp_prog.USER_ID = ? \
+          AND rp_prog.COMPLETED = 0) \
+          AND NOT EXISTS (SELECT 1 \
+          FROM READ_PROGRESS rp_seen \
+           WHERE rp_seen.BOOK_ID = b.ID \
+            AND rp_seen.USER_ID = ? \
+           ) \
+          GROUP BY b.ID, b.LIBRARY_ID, b.SERIES_ID, COALESCE(sm.TITLE, s.NAME),
+                    COALESCE(bm.NUMBER, CAST(b.NUMBER AS TEXT), ''), COALESCE(bm.NUMBER_SORT, CAST(b.NUMBER AS REAL), 0), COALESCE(bm.TITLE, b.NAME),
+                    COALESCE(bm.SUMMARY, ''), COALESCE(bm.ISBN, ''), COALESCE(bm.RELEASE_DATE, ''), b.NAME, COALESCE(b.FILE_SIZE, 0),
+                    COALESCE(m.MEDIA_TYPE, 'application/octet-stream'), COALESCE(m.PAGE_COUNT, 0),
+                   COALESCE(m.EPUB_DIVINA_COMPATIBLE, 0), COALESCE(sm.AGE_RATING, NULL),
+                   COALESCE(bm.NUMBER_SORT, CAST(b.NUMBER AS REAL), 0),
+                   COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, ''),
+                   COALESCE(rps.MOST_RECENT_READ_DATE, '') \
+           ORDER BY COALESCE(rps.MOST_RECENT_READ_DATE, '') DESC, b.SERIES_ID ASC, ORDER_INDEX ASC, b.ID ASC",
     )
+    .bind(user_id)
     .bind(library_id)
     .bind(library_id)
     .bind(user_id)
@@ -316,24 +420,46 @@ pub async fn load_on_deck_books(
     .fetch_all(&pool)
     .await?;
 
-    let mut first_per_series = BTreeMap::<String, OpdsBookFeedEntry>::new();
+    let mut seen_series = HashSet::<String>::new();
+    let mut first_per_series = Vec::<OpdsBookFeedEntry>::new();
     for row in rows {
         let series_id = row.get::<String, _>("SERIES_ID");
-        first_per_series
-            .entry(series_id)
-            .or_insert_with(|| OpdsBookFeedEntry {
-                id: row.get::<String, _>("ID"),
-                title: row.get::<String, _>("TITLE"),
-                file_name: row.get::<String, _>("FILE_NAME"),
-                media_type: row.get::<String, _>("MEDIA_TYPE"),
-                library_id: row.get::<String, _>("LIBRARY_ID"),
-                age_rating: parsed_age_rating(&row),
-                sharing_labels: parsed_sharing_labels(&row),
-                last_modified: row.get::<String, _>("LAST_MODIFIED"),
-            });
+        if !seen_series.insert(series_id) {
+            continue;
+        }
+        first_per_series.push(OpdsBookFeedEntry {
+            id: row.get::<String, _>("ID"),
+            series_id: row.get::<String, _>("SERIES_ID"),
+            title: row.get::<String, _>("TITLE"),
+            series_title: row.get::<String, _>("SERIES_TITLE"),
+            number: row.get::<String, _>("NUMBER"),
+            number_sort: row.get::<f64, _>("NUMBER_SORT"),
+            summary: row.get::<String, _>("SUMMARY"),
+            isbn: row
+                .try_get::<String, _>("ISBN")
+                .ok()
+                .filter(|value| !value.is_empty()),
+            authors: parsed_book_authors(&row),
+            tags: parsed_book_tags(&row),
+            file_name: row.get::<String, _>("FILE_NAME"),
+            file_size: row.get::<i64, _>("FILE_SIZE"),
+            media_type: row.get::<String, _>("MEDIA_TYPE"),
+            page_count: row.get::<i64, _>("PAGE_COUNT"),
+            epub_divina_compatible: row.get::<bool, _>("EPUB_DIVINA_COMPATIBLE"),
+            last_read: None,
+            last_read_date: None,
+            library_id: row.get::<String, _>("LIBRARY_ID"),
+            age_rating: parsed_age_rating(&row),
+            sharing_labels: parsed_sharing_labels(&row),
+            last_modified: row.get::<String, _>("LAST_MODIFIED"),
+            release_date: row
+                .try_get::<String, _>("RELEASE_DATE")
+                .ok()
+                .filter(|value| !value.is_empty()),
+        });
     }
 
-    Ok(first_per_series.into_values().collect())
+    Ok(first_per_series)
 }
 
 pub async fn load_latest_books(
@@ -341,12 +467,13 @@ pub async fn load_latest_books(
     library_id: Option<&str>,
     limit: i64,
 ) -> Result<Vec<OpdsBookFeedEntry>, sqlx::Error> {
-    load_latest_books_paged(database_file, &None, library_id, 0, limit).await
+    load_latest_books_paged(database_file, &None, None, library_id, 0, limit).await
 }
 
 pub async fn load_latest_books_paged(
     database_file: &Path,
     allowed_library_ids: &Option<HashSet<String>>,
+    user_id: Option<&str>,
     library_id: Option<&str>,
     offset: i64,
     limit: i64,
@@ -374,27 +501,51 @@ pub async fn load_latest_books_paged(
     }
     let where_clause = clauses.join(" AND ");
     let sql = format!(
-        "SELECT b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE, b.NAME AS FILE_NAME, \
+        "SELECT b.ID, b.LIBRARY_ID, b.SERIES_ID, COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE, \
+                COALESCE(bm.NUMBER, CAST(b.NUMBER AS TEXT), '') AS NUMBER, \
+                COALESCE(bm.NUMBER_SORT, CAST(b.NUMBER AS REAL), 0) AS NUMBER_SORT, \
+                COALESCE(bm.TITLE, b.NAME) AS TITLE, COALESCE(bm.SUMMARY, '') AS SUMMARY, \
+                COALESCE(bm.ISBN, '') AS ISBN, \
+                COALESCE((SELECT GROUP_CONCAT(NAME || char(31) || COALESCE(ROLE, ''), char(30)) \
+                          FROM BOOK_METADATA_AUTHOR \
+                          WHERE BOOK_ID = b.ID), '') AS AUTHORS, \
+                COALESCE((SELECT GROUP_CONCAT(TAG, char(30)) \
+                          FROM (SELECT DISTINCT TAG FROM BOOK_METADATA_TAG WHERE BOOK_ID = b.ID)), '') AS TAGS, \
+                COALESCE(bm.RELEASE_DATE, '') AS RELEASE_DATE, \
+                b.NAME AS FILE_NAME, COALESCE(b.FILE_SIZE, 0) AS FILE_SIZE, \
                 COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE, \
+                COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT, \
+                COALESCE(m.EPUB_DIVINA_COMPATIBLE, 0) AS EPUB_DIVINA_COMPATIBLE, \
+                rp.PAGE AS LAST_READ, rp.READ_DATE AS LAST_READ_DATE, \
                 COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING, \
                 COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS, \
                 COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') AS LAST_MODIFIED \
-         FROM BOOK b \
-          LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
-          LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID \
-          LEFT JOIN SERIES s ON s.ID = b.SERIES_ID \
-          LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
-          LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
-          WHERE {where_clause} \
-          GROUP BY b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME), b.NAME,
-                   COALESCE(m.MEDIA_TYPE, 'application/octet-stream'),
-                   COALESCE(sm.AGE_RATING, NULL),
-                   COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') \
-          ORDER BY b.CREATED_DATE DESC, b.ID DESC \
-          LIMIT ? \
-          OFFSET ?",
+           FROM BOOK b \
+            LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
+            LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID \
+            LEFT JOIN SERIES s ON s.ID = b.SERIES_ID \
+            LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+            LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
+           LEFT JOIN READ_PROGRESS rp ON rp.BOOK_ID = b.ID AND (? IS NOT NULL AND rp.USER_ID = ?) \
+           WHERE {where_clause} \
+           AND COALESCE(m.STATUS, '') = 'READY' \
+           GROUP BY b.ID, b.LIBRARY_ID, b.SERIES_ID, COALESCE(sm.TITLE, s.NAME),
+                    COALESCE(bm.NUMBER, CAST(b.NUMBER AS TEXT), ''),
+                    COALESCE(bm.NUMBER_SORT, CAST(b.NUMBER AS REAL), 0),
+                    COALESCE(bm.TITLE, b.NAME), COALESCE(bm.SUMMARY, ''), COALESCE(bm.RELEASE_DATE, ''),
+                    COALESCE(bm.ISBN, ''), b.NAME, COALESCE(b.FILE_SIZE, 0),
+                    COALESCE(m.MEDIA_TYPE, 'application/octet-stream'),
+                    COALESCE(m.PAGE_COUNT, 0),
+                    COALESCE(m.EPUB_DIVINA_COMPATIBLE, 0),
+                    rp.PAGE, rp.READ_DATE, COALESCE(sm.AGE_RATING, NULL),
+                    COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') \
+           ORDER BY b.CREATED_DATE DESC, b.ID DESC \
+           LIMIT ? \
+           OFFSET ?",
     );
     let mut query = sqlx::query(sql.as_str());
+    query = query.bind(user_id);
+    query = query.bind(user_id);
     if let Some(id) = library_id {
         query = query.bind(id);
     }
@@ -407,13 +558,36 @@ pub async fn load_latest_books_paged(
         .into_iter()
         .map(|row| OpdsBookFeedEntry {
             id: row.get::<String, _>("ID"),
+            series_id: row.get::<String, _>("SERIES_ID"),
             title: row.get::<String, _>("TITLE"),
+            series_title: row.get::<String, _>("SERIES_TITLE"),
+            number: row.get::<String, _>("NUMBER"),
+            number_sort: row.get::<f64, _>("NUMBER_SORT"),
+            summary: row.get::<String, _>("SUMMARY"),
+            isbn: row
+                .try_get::<String, _>("ISBN")
+                .ok()
+                .filter(|value| !value.is_empty()),
+            authors: parsed_book_authors(&row),
+            tags: parsed_book_tags(&row),
             file_name: row.get::<String, _>("FILE_NAME"),
+            file_size: row.get::<i64, _>("FILE_SIZE"),
             media_type: row.get::<String, _>("MEDIA_TYPE"),
+            page_count: row.get::<i64, _>("PAGE_COUNT"),
+            epub_divina_compatible: row.get::<bool, _>("EPUB_DIVINA_COMPATIBLE"),
+            last_read: row.try_get::<Option<i64>, _>("LAST_READ").ok().flatten(),
+            last_read_date: row
+                .try_get::<Option<String>, _>("LAST_READ_DATE")
+                .ok()
+                .flatten(),
             library_id: row.get::<String, _>("LIBRARY_ID"),
             age_rating: parsed_age_rating(&row),
             sharing_labels: parsed_sharing_labels(&row),
             last_modified: row.get::<String, _>("LAST_MODIFIED"),
+            release_date: row
+                .try_get::<String, _>("RELEASE_DATE")
+                .ok()
+                .filter(|value| !value.is_empty()),
         })
         .collect())
 }
@@ -458,6 +632,7 @@ pub async fn load_latest_series_paged(
     let sql = format!(
         "SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE, \
                 COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) AS TITLE_SORT, \
+                COALESCE(s.ONESHOT, 0) AS ONESHOT, \
                 COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING, \
                 COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS, \
                 COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED \
@@ -465,7 +640,7 @@ pub async fn load_latest_series_paged(
          LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
          LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
          WHERE {where_clause} \
-         GROUP BY s.ID, s.LIBRARY_ID, TITLE, AGE_RATING, LAST_MODIFIED \
+          GROUP BY s.ID, s.LIBRARY_ID, TITLE, ONESHOT, AGE_RATING, LAST_MODIFIED \
          ORDER BY s.LAST_MODIFIED_DATE DESC, s.ID DESC \
          LIMIT ? \
          OFFSET ?",
@@ -485,6 +660,7 @@ pub async fn load_latest_series_paged(
             id: row.get::<String, _>("ID"),
             library_id: row.get::<String, _>("LIBRARY_ID"),
             title: row.get::<String, _>("TITLE"),
+            one_shot: row.get::<bool, _>("ONESHOT"),
             age_rating: parsed_age_rating(&row),
             sharing_labels: parsed_sharing_labels(&row),
             last_modified: row.get::<String, _>("LAST_MODIFIED"),
@@ -505,6 +681,7 @@ pub async fn load_library_series(
     let pool = connect_pool(database_file, 1).await?;
     let rows = sqlx::query(
         "SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE, \
+                COALESCE(s.ONESHOT, 0) AS ONESHOT, \
                 COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING, \
                 COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS, \
                 COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED \
@@ -513,7 +690,7 @@ pub async fn load_library_series(
          LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
          WHERE s.DELETED_DATE IS NULL \
          AND s.LIBRARY_ID = ? \
-         GROUP BY s.ID, s.LIBRARY_ID, TITLE, TITLE_SORT, AGE_RATING, LAST_MODIFIED \
+         GROUP BY s.ID, s.LIBRARY_ID, TITLE, TITLE_SORT, ONESHOT, AGE_RATING, LAST_MODIFIED \
          ORDER BY TITLE_SORT COLLATE NOCASE ASC, s.ID ASC \
          LIMIT ? \
          OFFSET ?",
@@ -530,6 +707,7 @@ pub async fn load_library_series(
             id: row.get::<String, _>("ID"),
             library_id: row.get::<String, _>("LIBRARY_ID"),
             title: row.get::<String, _>("TITLE"),
+            one_shot: row.get::<bool, _>("ONESHOT"),
             age_rating: parsed_age_rating(&row),
             sharing_labels: parsed_sharing_labels(&row),
             last_modified: row.get::<String, _>("LAST_MODIFIED"),
@@ -576,6 +754,7 @@ pub async fn load_series_page(
     let where_clause = clauses.join(" AND ");
     let sql = format!(
         "SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE, \
+                COALESCE(s.ONESHOT, 0) AS ONESHOT, \
                 COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING, \
                 COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS, \
                 COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED \
@@ -583,7 +762,7 @@ pub async fn load_series_page(
          LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
          LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
          WHERE {where_clause} \
-         GROUP BY s.ID, s.LIBRARY_ID, TITLE, AGE_RATING, LAST_MODIFIED \
+         GROUP BY s.ID, s.LIBRARY_ID, TITLE, ONESHOT, AGE_RATING, LAST_MODIFIED \
          ORDER BY COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC, s.ID ASC \
          LIMIT ? \
          OFFSET ?",
@@ -606,6 +785,7 @@ pub async fn load_series_page(
             id: row.get::<String, _>("ID"),
             library_id: row.get::<String, _>("LIBRARY_ID"),
             title: row.get::<String, _>("TITLE"),
+            one_shot: row.get::<bool, _>("ONESHOT"),
             age_rating: row
                 .try_get::<i64, _>("AGE_RATING")
                 .ok()

@@ -115,11 +115,12 @@ pub(super) fn install_opds_access_backends(lucene_data_directory: &std::path::Pa
             })
         }),
         load_latest_books_paged: Arc::new(
-            |database_file, allowed_library_ids, library_id, offset, limit| {
+            |database_file, allowed_library_ids, user_id, library_id, offset, limit| {
                 Box::pin(async move {
                     infrastructure_opds_catalog::load_latest_books_paged(
                         database_file.as_path(),
                         &allowed_library_ids,
+                        user_id.as_deref(),
                         library_id.as_deref(),
                         offset,
                         limit,
@@ -246,11 +247,12 @@ pub(super) fn install_opds_access_backends(lucene_data_directory: &std::path::Pa
                     .map_err(|error| error.to_string())
             })
         }),
-        load_series_books_paged: Arc::new(|database_file, series_id, offset, limit| {
+        load_series_books_paged: Arc::new(|database_file, series_id, user_id, offset, limit| {
             Box::pin(async move {
                 infrastructure_opds_persisted::load_series_books_paged(
                     database_file.as_path(),
                     &series_id,
+                    &user_id,
                     offset,
                     limit,
                 )
@@ -418,13 +420,34 @@ fn map_opds_book_feed_entry(
 ) -> InterfacesOpdsBookFeedEntry {
     InterfacesOpdsBookFeedEntry {
         id: row.id,
+        series_id: row.series_id,
         title: row.title,
+        series_title: row.series_title,
+        number: row.number,
+        number_sort: row.number_sort,
+        summary: row.summary,
+        isbn: row.isbn,
+        authors: row
+            .authors
+            .into_iter()
+            .map(|author| komga_interfaces::OpdsBookAuthorEntry {
+                name: author.name,
+                role: author.role,
+            })
+            .collect(),
+        tags: row.tags,
         file_name: row.file_name,
+        file_size: row.file_size,
         media_type: row.media_type,
+        page_count: row.page_count,
+        epub_divina_compatible: row.epub_divina_compatible,
+        last_read: row.last_read,
+        last_read_date: row.last_read_date,
         library_id: row.library_id,
         age_rating: row.age_rating,
         sharing_labels: row.sharing_labels,
         last_modified: row.last_modified,
+        release_date: row.release_date,
     }
 }
 
@@ -435,6 +458,7 @@ fn map_opds_series_entry(
         id: row.id,
         library_id: row.library_id,
         title: row.title,
+        one_shot: row.one_shot,
         age_rating: row.age_rating,
         sharing_labels: row.sharing_labels,
         last_modified: row.last_modified,
@@ -470,8 +494,15 @@ fn map_persisted_series_book_record(
     InterfacesPersistedSeriesBookRecord {
         id: row.id,
         title: row.title,
+        summary: row.summary,
+        authors: row.authors,
         file_name: row.file_name,
+        file_size: row.file_size,
         media_type: row.media_type,
+        page_count: row.page_count,
+        epub_divina_compatible: row.epub_divina_compatible,
+        last_read: row.last_read,
+        last_read_date: row.last_read_date,
         last_modified: row.last_modified,
     }
 }
@@ -483,6 +514,7 @@ fn map_persisted_readlist_record(
         id: row.id,
         name: row.name,
         last_modified: row.last_modified,
+        ordered: row.ordered,
     }
 }
 
@@ -492,12 +524,19 @@ fn map_persisted_readlist_book_record(
     InterfacesPersistedReadlistBookRecord {
         id: row.id,
         title: row.title,
+        series_title: row.series_title,
+        number: row.number,
+        summary: row.summary,
+        authors: row.authors,
         file_name: row.file_name,
+        file_size: row.file_size,
         media_type: row.media_type,
+        media_status: row.media_status,
         library_id: row.library_id,
         age_rating: row.age_rating,
         sharing_labels: row.sharing_labels,
         last_modified: row.last_modified,
+        release_date: row.release_date,
     }
 }
 
@@ -508,6 +547,7 @@ fn map_persisted_series_search_record(
         id: row.id,
         title: row.title,
         library_id: row.library_id,
+        last_modified: row.last_modified,
     }
 }
 

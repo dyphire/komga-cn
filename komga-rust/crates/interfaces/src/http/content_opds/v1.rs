@@ -1,4 +1,13 @@
+use super::feeds::normalize_opds_updated;
+use super::types::{PersistedBookFeedItem, PersistedSeriesBook};
 use super::*;
+use crate::media_assets_runtime_access::{
+    load_archive_page_rows, load_persisted_book_media, load_persisted_book_pages,
+};
+use komga_application::media_assets::content_type_from_filename;
+use time::format_description::well_known::Rfc3339;
+use time::macros::format_description;
+use time::{OffsetDateTime, PrimitiveDateTime, UtcOffset};
 
 pub(super) fn opds_v1_basic_unauthorized_response() -> Response {
     (
@@ -148,12 +157,14 @@ pub(crate) async fn opds_v1_on_deck(
         .collect::<Vec<_>>();
     let (books, has_next) = paginate_vec(books, page, size);
 
-    opds_v1_acquisition_feed_response(
+    let entries = build_book_feed_acquisition_entries(database_file, &headers, books).await;
+
+    opds_v1_acquisition_feed_response_with_entries(
         &headers,
         "ondeck",
         "On Deck",
         "/opds/v1.2/ondeck",
-        books,
+        entries,
         None,
         Some((page, has_next)),
     )
@@ -193,12 +204,14 @@ pub(crate) async fn opds_v1_keep_reading(
         .collect::<Vec<_>>();
     let (books, has_next) = paginate_vec(books, page, size);
 
-    opds_v1_acquisition_feed_response(
+    let entries = build_book_feed_acquisition_entries(database_file, &headers, books).await;
+
+    opds_v1_acquisition_feed_response_with_entries(
         &headers,
         "keepReading",
         "Keep Reading",
         "/opds/v1.2/keep-reading",
-        books,
+        entries,
         None,
         Some((page, has_next)),
     )
@@ -297,43 +310,115 @@ pub(crate) async fn opds_v1_books_latest(
         return response;
     }
 
+    let Some(user) = resolved_auth_user(&headers) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let current_user_id = user_id(&user).to_string();
+
     let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let restrictions = opds_restrictions(&headers);
 
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
-    let books = load_latest_books_paged(
-        database_file,
-        &allowed_library_ids,
-        None,
-        page.saturating_mul(size) as i64,
-        (size + 1) as i64,
-    )
-    .await
-    .unwrap_or_default();
-    let books = books
-        .into_iter()
-        .filter(|book| {
+    let visible_offset = page.saturating_mul(size);
+    let mut raw_offset = 0_i64;
+    let batch_limit = (size + 1).max(20) as i64;
+    let mut visible_seen = 0usize;
+    let mut books = Vec::with_capacity(size + 1);
+    let has_next = loop {
+        let batch = load_latest_books_paged(
+            database_file,
+            &allowed_library_ids,
+            Some(&current_user_id),
+            None,
+            raw_offset,
+            batch_limit,
+        )
+        .await
+        .unwrap_or_default();
+        if batch.is_empty() {
+            break false;
+        }
+        let batch_len = batch.len();
+        raw_offset += batch_len as i64;
+
+        for book in batch.into_iter().filter(|book| {
             library_visible(&allowed_library_ids, &book.library_id)
                 && content_allowed_by_restrictions(
                     restrictions.as_ref(),
                     book.age_rating,
                     &book.sharing_labels,
                 )
-        })
-        .collect::<Vec<_>>();
-    let (books, has_next) = paginate_vec(books, 0, size);
+        }) {
+            if visible_seen < visible_offset {
+                visible_seen += 1;
+                continue;
+            }
+            books.push(book);
+            if books.len() > size {
+                break;
+            }
+        }
 
-    opds_v1_acquisition_feed_response(
+        if books.len() > size {
+            break true;
+        }
+        if batch_len < batch_limit as usize {
+            break false;
+        }
+    };
+    let books = books.into_iter().take(size).collect::<Vec<_>>();
+    let entries = build_book_feed_acquisition_entries(database_file, &headers, books).await;
+    opds_v1_acquisition_feed_response_with_entries(
         &headers,
         "latestBooks",
         "Latest books",
         "/opds/v1.2/books/latest",
-        books,
+        entries,
         None,
         Some((page, has_next)),
     )
+}
+
+async fn build_book_feed_acquisition_entries(
+    database_file: &Path,
+    headers: &HeaderMap,
+    books: Vec<PersistedBookFeedItem>,
+) -> Vec<OpdsV1AcquisitionEntry> {
+    let mut entries = Vec::with_capacity(books.len());
+    for book in books {
+        let extra_links = book_feed_page_streaming_links(database_file, headers, &book).await;
+        let extension = std::path::Path::new(book.file_name.as_str())
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let mut content = format!("{extension} - {}", book.file_size);
+        if !book.summary.trim().is_empty() {
+            content.push_str("\n\n");
+            content.push_str(book.summary.trim());
+        }
+
+        entries.push(OpdsV1AcquisitionEntry {
+            id: book.id.clone(),
+            title: format!("{} {}: {}", book.series_title, book.number, book.title),
+            updated: Some(book.last_modified),
+            content,
+            authors: book.authors,
+            acquisition_media_type: book.media_type,
+            acquisition_href_path: format!(
+                "/opds/v1.2/books/{}/file/{}",
+                book.id,
+                query_escape(book.file_name.as_str())
+            ),
+            thumbnail_href_path: format!("/opds/v1.2/books/{}/thumbnail/small", book.id),
+            image_href_path: format!("/opds/v1.2/books/{}/thumbnail", book.id),
+            extra_links,
+        });
+    }
+
+    entries
 }
 
 pub(crate) async fn opds_v1_libraries(headers: HeaderMap, database_file: &Path) -> Response {
@@ -391,19 +476,22 @@ pub(crate) async fn opds_v1_collections(
         .await
         .unwrap_or_default()
     {
-        let books = load_collection_books(database_file, &collection.id)
+        let series = load_collection_series(database_file, &collection.id, collection.ordered)
             .await
             .unwrap_or_default();
-        if books
+        let has_visible_series = series
             .iter()
-            .any(|book| library_visible(&allowed_library_ids, &book.library_id))
-        {
+            .any(|series| library_visible(&allowed_library_ids, &series.library_id));
+        let keep_empty_collection_visible = series.is_empty() && allowed_library_ids.is_none();
+        let visible = has_visible_series || keep_empty_collection_visible;
+        if visible {
+            let updated = localized_opds_updated(&collection.last_modified);
             rows.push(OpdsV1NavigationEntry {
                 id: collection.id.clone(),
                 title: collection.name,
                 content: String::new(),
                 href_path: format!("/opds/v1.2/collections/{}", collection.id),
-                updated: None,
+                updated,
             });
         }
     }
@@ -419,6 +507,30 @@ pub(crate) async fn opds_v1_collections(
         rows,
         Some((page, has_next)),
     )
+}
+
+fn localized_opds_updated(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if OffsetDateTime::parse(trimmed, &Rfc3339).is_ok() {
+        return Some(trimmed.to_string());
+    }
+
+    let sqlite_format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+    let iso_naive_format = format_description!("[year]-[month]-[day]T[hour]:[minute]:[second]");
+    let parsed = PrimitiveDateTime::parse(trimmed, sqlite_format)
+        .or_else(|_| PrimitiveDateTime::parse(trimmed, iso_naive_format));
+
+    Some(match parsed {
+        Ok(value) => value
+            .assume_utc()
+            .to_offset(UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC))
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| trimmed.to_string()),
+        Err(_) => trimmed.to_string(),
+    })
 }
 
 pub(crate) async fn opds_v1_readlists(
@@ -448,7 +560,7 @@ pub(crate) async fn opds_v1_readlists(
                 title: readlist.name,
                 content: String::new(),
                 href_path: format!("/opds/v1.2/readlists/{}", readlist.id),
-                updated: None,
+                updated: Some(readlist.last_modified),
             });
         }
     }
@@ -515,6 +627,11 @@ pub(crate) async fn opds_v1_series_detail(
         return response;
     }
 
+    let Some(user) = resolved_auth_user(&headers) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let current_user_id = user_id(&user).to_string();
+
     let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -525,37 +642,252 @@ pub(crate) async fn opds_v1_series_detail(
     if !library_visible(&allowed_library_ids, &series.library_id) {
         return StatusCode::FORBIDDEN.into_response();
     }
+    let restrictions = opds_restrictions(&headers);
+    if !content_allowed_by_restrictions(
+        restrictions.as_ref(),
+        series.age_rating,
+        &series.sharing_labels,
+    ) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
+    let feed_updated = localized_opds_updated(&series.last_modified);
     let books = load_series_books_paged(
         database_file,
         &series.id,
+        &current_user_id,
         page.saturating_mul(size) as i64,
         (size + 1) as i64,
     )
     .await
     .unwrap_or_default()
-    .into_iter()
-    .map(|book| PersistedBookFeedItem {
-        id: book.id,
-        title: book.title,
-        file_name: book.file_name,
-        media_type: book.media_type,
-        library_id: series.library_id.clone(),
-        age_rating: None,
-        sharing_labels: vec![],
-        last_modified: book.last_modified,
-    })
-    .collect::<Vec<_>>();
-    let (books, has_next) = paginate_vec(books, 0, size);
-    opds_v1_acquisition_feed_response(
+    .into_iter();
+    let mut entries = Vec::new();
+    for book in books {
+        let updated = localized_opds_updated(&book.last_modified);
+        let extra_links = series_book_page_streaming_links(database_file, &headers, &book).await;
+        let extension = std::path::Path::new(book.file_name.as_str())
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let mut content = format!("{extension} - {}", book.file_size);
+        if !book.summary.trim().is_empty() {
+            content.push_str("\n\n");
+            content.push_str(book.summary.trim());
+        }
+
+        entries.push(OpdsV1AcquisitionEntry {
+            id: book.id.clone(),
+            title: book.title,
+            updated,
+            content,
+            authors: book.authors,
+            acquisition_media_type: book.media_type,
+            acquisition_href_path: format!(
+                "/opds/v1.2/books/{}/file/{}",
+                book.id,
+                query_escape(book.file_name.as_str())
+            ),
+            thumbnail_href_path: format!("/opds/v1.2/books/{}/thumbnail/small", book.id),
+            image_href_path: format!("/opds/v1.2/books/{}/thumbnail", book.id),
+            extra_links,
+        });
+    }
+    let (entries, has_next) = paginate_vec(entries, 0, size);
+    opds_v1_acquisition_feed_response_with_entries(
         &headers,
         series.id.as_str(),
         series.title.as_str(),
         format!("/opds/v1.2/series/{series_id}").as_str(),
-        books,
-        Some(series.last_modified.as_str()),
+        entries,
+        feed_updated.as_deref(),
         Some((page, has_next)),
     )
+}
+
+async fn series_book_page_streaming_links(
+    database_file: &Path,
+    headers: &HeaderMap,
+    book: &PersistedSeriesBook,
+) -> Vec<String> {
+    opds_book_page_streaming_links(
+        database_file,
+        headers,
+        &book.id,
+        &book.media_type,
+        book.page_count,
+        book.epub_divina_compatible,
+        book.last_read,
+        book.last_read_date.as_deref(),
+    )
+    .await
+}
+
+async fn book_feed_page_streaming_links(
+    database_file: &Path,
+    headers: &HeaderMap,
+    book: &PersistedBookFeedItem,
+) -> Vec<String> {
+    opds_book_page_streaming_links(
+        database_file,
+        headers,
+        &book.id,
+        &book.media_type,
+        book.page_count,
+        book.epub_divina_compatible,
+        book.last_read,
+        book.last_read_date.as_deref(),
+    )
+    .await
+}
+
+async fn opds_book_page_streaming_links(
+    database_file: &Path,
+    headers: &HeaderMap,
+    book_id: &str,
+    media_type: &str,
+    page_count: i64,
+    epub_divina_compatible: bool,
+    last_read: Option<i64>,
+    last_read_date: Option<&str>,
+) -> Vec<String> {
+    let media_types = opds_book_page_stream_media_types(
+        database_file,
+        book_id,
+        media_type,
+        page_count,
+        epub_divina_compatible,
+    )
+    .await;
+    if media_types.is_empty() {
+        return vec![];
+    }
+
+    let supported_formats = ["image/jpeg", "image/png", "image/gif"];
+    let (link_type, href) = if media_types.len() == 1
+        && supported_formats.contains(&media_types[0].as_str())
+    {
+        (
+            media_types[0].clone(),
+            app_absolute_url(
+                headers,
+                format!("/opds/v1.2/books/{book_id}/pages/{{pageNumber}}").as_str(),
+            ),
+        )
+    } else {
+        (
+            "image/jpeg".to_string(),
+            app_absolute_url(
+                headers,
+                format!("/opds/v1.2/books/{book_id}/pages/{{pageNumber}}?convert=jpeg").as_str(),
+            ),
+        )
+    };
+
+    let mut read_progress_attributes = String::new();
+    if let Some(last_read) = last_read {
+        read_progress_attributes
+            .push_str(format!(" pse:lastRead=\"{}\"", last_read.max(0)).as_str());
+        if let Some(last_read_date) = last_read_date.map(str::trim)
+            && !last_read_date.is_empty()
+        {
+            read_progress_attributes.push_str(
+                format!(
+                    " pse:lastReadDate=\"{}\"",
+                    xml_escape(&normalize_opds_updated(last_read_date)),
+                )
+                .as_str(),
+            );
+        }
+    }
+
+    vec![format!(
+        "<link type=\"{}\" rel=\"http://vaemendis.net/opds-pse/stream\" href=\"{}\" pse:count=\"{}\"{}/>",
+        xml_escape(&link_type),
+        xml_escape(&href),
+        page_count,
+        read_progress_attributes,
+    )]
+}
+
+async fn opds_book_page_stream_media_types(
+    database_file: &Path,
+    book_id: &str,
+    media_type: &str,
+    page_count: i64,
+    epub_divina_compatible: bool,
+) -> Vec<String> {
+    if page_count <= 0 && media_type != "application/pdf" && !media_type.starts_with("image/") {
+        return vec![];
+    }
+
+    if media_type == "application/pdf" {
+        return vec!["image/jpeg".to_string()];
+    }
+
+    if media_type.starts_with("image/")
+        || matches!(
+            media_type,
+            "application/vnd.comicbook+zip" | "application/vnd.comicbook-rar"
+        )
+        || (media_type == "application/epub+zip" && epub_divina_compatible)
+    {
+        return load_divina_page_media_types_for_opds(database_file, book_id).await;
+    }
+
+    vec![]
+}
+
+async fn load_divina_page_media_types_for_opds(database_file: &Path, book_id: &str) -> Vec<String> {
+    let persisted = load_persisted_book_pages(database_file, book_id)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|page| {
+            if page.media_type.is_empty() {
+                content_type_from_filename(&page.file_name, "image/jpeg")
+            } else {
+                page.media_type
+            }
+        })
+        .collect::<Vec<_>>();
+    if !persisted.is_empty() {
+        return dedup_media_types(persisted);
+    }
+
+    let Ok(Some(media)) = load_persisted_book_media(database_file, book_id).await else {
+        return vec![];
+    };
+
+    let media_content_type = content_type_from_filename(&media.file_name, &media.media_type);
+    if media_content_type.starts_with("image/") {
+        return vec![media_content_type];
+    }
+
+    dedup_media_types(
+        load_archive_page_rows(&media)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|page| {
+                if page.media_type.is_empty() {
+                    content_type_from_filename(&page.file_name, "image/jpeg")
+                } else {
+                    page.media_type
+                }
+            })
+            .collect(),
+    )
+}
+
+fn dedup_media_types(media_types: Vec<String>) -> Vec<String> {
+    let mut deduped = Vec::new();
+    for media_type in media_types {
+        if !deduped.contains(&media_type) {
+            deduped.push(media_type);
+        }
+    }
+    deduped
 }
 
 pub(crate) async fn opds_v1_library_detail(
@@ -732,34 +1064,73 @@ pub(crate) async fn opds_v1_readlist_detail(
     else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    let restrictions = opds_restrictions(&headers);
 
-    let books = load_readlist_books(database_file, readlist_id)
+    let visible_books = load_readlist_books(database_file, readlist_id)
         .await
         .unwrap_or_default()
         .into_iter()
         .filter(|book| library_visible(&allowed_library_ids, &book.library_id))
-        .map(|book| PersistedBookFeedItem {
-            id: book.id,
-            title: book.title,
-            file_name: book.file_name,
-            media_type: book.media_type,
-            library_id: book.library_id,
-            age_rating: book.age_rating,
-            sharing_labels: book.sharing_labels,
-            last_modified: book.last_modified,
+        .collect::<Vec<_>>();
+    if visible_books.is_empty() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let mut filtered_books = visible_books
+        .into_iter()
+        .filter(|book| {
+            book.media_status.as_deref() == Some("READY")
+                && content_allowed_by_restrictions(
+                    restrictions.as_ref(),
+                    book.age_rating,
+                    &book.sharing_labels,
+                )
+        })
+        .collect::<Vec<_>>();
+    if !readlist.ordered {
+        filtered_books.sort_by_key(|book| book.release_date.clone());
+    }
+
+    let entries = filtered_books
+        .into_iter()
+        .map(|book| {
+            let extension = std::path::Path::new(book.file_name.as_str())
+                .extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            let mut content = format!("{extension} - {}", book.file_size);
+            if !book.summary.trim().is_empty() {
+                content.push_str("\n\n");
+                content.push_str(book.summary.trim());
+            }
+
+            OpdsV1AcquisitionEntry {
+                id: book.id.clone(),
+                title: format!("{} {}: {}", book.series_title, book.number, book.title),
+                updated: Some(book.last_modified),
+                content,
+                authors: book.authors,
+                acquisition_media_type: book.media_type,
+                acquisition_href_path: format!(
+                    "/opds/v1.2/books/{}/file/{}",
+                    book.id,
+                    query_escape(book.file_name.as_str())
+                ),
+                thumbnail_href_path: format!("/opds/v1.2/books/{}/thumbnail/small", book.id),
+                image_href_path: format!("/opds/v1.2/books/{}/thumbnail", book.id),
+                extra_links: vec![],
+            }
         })
         .collect::<Vec<_>>();
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
-    let (books, has_next) = paginate_vec(books, page, size);
-    if books.is_empty() {
-        return StatusCode::FORBIDDEN.into_response();
-    }
-    opds_v1_acquisition_feed_response(
+    let (entries, has_next) = paginate_vec(entries, page, size);
+    opds_v1_acquisition_feed_response_with_entries(
         &headers,
         readlist.id.as_str(),
         readlist.name.as_str(),
         format!("/opds/v1.2/readlists/{readlist_id}").as_str(),
-        books,
+        entries,
         Some(readlist.last_modified.as_str()),
         Some((page, has_next)),
     )
@@ -783,6 +1154,7 @@ pub(crate) async fn opds_v1_series(headers: HeaderMap, uri: Uri, database_file: 
             (!trimmed.is_empty()).then_some(trimmed.to_string())
         });
     let publishers = query_values(query, "publisher");
+    let self_path = series_feed_self_path(search.as_deref(), publishers.as_slice());
 
     let search_rows = if let Some(search_term) = search.as_deref() {
         load_opds_v1_series_search_results(
@@ -801,7 +1173,7 @@ pub(crate) async fn opds_v1_series(headers: HeaderMap, uri: Uri, database_file: 
                 title: series.title,
                 content: String::new(),
                 href_path: format!("/opds/v1.2/series/{series_id}"),
-                updated: None,
+                updated: Some(series.last_modified),
             }
         })
         .collect::<Vec<_>>()
@@ -824,7 +1196,7 @@ pub(crate) async fn opds_v1_series(headers: HeaderMap, uri: Uri, database_file: 
                 title: series.title,
                 content: String::new(),
                 href_path: format!("/opds/v1.2/series/{series_id}"),
-                updated: None,
+                updated: Some(series.last_modified),
             }
         })
         .collect::<Vec<_>>()
@@ -843,10 +1215,26 @@ pub(crate) async fn opds_v1_series(headers: HeaderMap, uri: Uri, database_file: 
             .map(|term| format!("Series search for: {term}"))
             .unwrap_or_else(|| "All series".to_string())
             .as_str(),
-        "/opds/v1.2/series",
+        self_path.as_str(),
         entries,
         Some((page, has_next)),
     )
+}
+
+fn series_feed_self_path(search: Option<&str>, publishers: &[String]) -> String {
+    let mut query_parts = Vec::new();
+    if let Some(search) = search {
+        query_parts.push(format!("search={}", query_escape(search)));
+    }
+    for publisher in publishers {
+        query_parts.push(format!("publisher={}", query_escape(publisher)));
+    }
+
+    if query_parts.is_empty() {
+        "/opds/v1.2/series".to_string()
+    } else {
+        format!("/opds/v1.2/series?{}", query_parts.join("&"))
+    }
 }
 
 fn nav_entry_with_content(

@@ -203,18 +203,24 @@ pub(super) async fn load_series_books(
     database_file: &Path,
     series_id: &str,
 ) -> Result<Vec<PersistedSeriesBook>, String> {
-    load_series_books_paged(database_file, series_id, 0, i64::MAX).await
+    load_series_books_paged(database_file, series_id, "", 0, i64::MAX).await
 }
 
 pub(super) async fn load_series_books_paged(
     database_file: &Path,
     series_id: &str,
+    user_id: &str,
     offset: i64,
     limit: i64,
 ) -> Result<Vec<PersistedSeriesBook>, String> {
-    let records =
-        opds_persisted_access::load_series_books_paged(database_file, series_id, offset, limit)
-            .await?;
+    let records = opds_persisted_access::load_series_books_paged(
+        database_file,
+        series_id,
+        user_id,
+        offset,
+        limit,
+    )
+    .await?;
     Ok(records.into_iter().map(map_series_book_record).collect())
 }
 
@@ -256,6 +262,7 @@ pub(super) async fn load_unified_search_results(
                 id: row.id,
                 title: row.title,
                 library_id: row.library_id,
+                last_modified: row.last_modified,
             })
             .collect(),
         book_rows
@@ -322,6 +329,7 @@ pub(super) async fn load_opds_v1_series_search_results(
                     id: row.id,
                     title: row.title,
                     library_id: row.library_id,
+                    last_modified: row.last_modified,
                 })
         })
         .collect())
@@ -345,16 +353,17 @@ pub(super) async fn has_visible_collections_for_scope(
         Err(_) => return false,
     };
     for collection in collections {
-        let books = match load_collection_books(database_file, &collection.id).await {
-            Ok(books) => books,
-            Err(_) => continue,
-        };
-        if books.iter().any(|book| {
-            library_visible(allowed_library_ids, &book.library_id)
+        let series =
+            match load_collection_series(database_file, &collection.id, collection.ordered).await {
+                Ok(series) => series,
+                Err(_) => continue,
+            };
+        if series.iter().any(|series| {
+            library_visible(allowed_library_ids, &series.library_id)
                 && content_allowed_by_restrictions(
                     restrictions,
-                    book.age_rating,
-                    &book.sharing_labels,
+                    series.age_rating,
+                    &series.sharing_labels,
                 )
         }) {
             return true;
@@ -466,6 +475,7 @@ pub(super) async fn load_on_deck_books(
 pub(super) async fn load_latest_books_paged(
     database_file: &Path,
     allowed_library_ids: &Option<HashSet<String>>,
+    user_id: Option<&str>,
     library_id: Option<&str>,
     offset: i64,
     limit: i64,
@@ -473,6 +483,7 @@ pub(super) async fn load_latest_books_paged(
     catalog_queries::load_latest_books_paged(
         database_file,
         allowed_library_ids,
+        user_id,
         library_id,
         offset,
         limit,
@@ -578,8 +589,15 @@ fn map_series_book_record(
     PersistedSeriesBook {
         id: row.id,
         title: row.title,
+        summary: row.summary,
+        authors: row.authors,
         file_name: row.file_name,
+        file_size: row.file_size,
         media_type: row.media_type,
+        page_count: row.page_count,
+        epub_divina_compatible: row.epub_divina_compatible,
+        last_read: row.last_read,
+        last_read_date: row.last_read_date,
         last_modified: row.last_modified,
     }
 }
@@ -589,6 +607,7 @@ fn map_readlist_record(row: opds_persisted_access::PersistedReadlistRecord) -> P
         id: row.id,
         name: row.name,
         last_modified: row.last_modified,
+        ordered: row.ordered,
     }
 }
 
@@ -598,12 +617,19 @@ fn map_readlist_book_record(
     PersistedReadlistBook {
         id: row.id,
         title: row.title,
+        series_title: row.series_title,
+        number: row.number,
+        summary: row.summary,
+        authors: row.authors,
         file_name: row.file_name,
+        file_size: row.file_size,
         media_type: row.media_type,
+        media_status: row.media_status,
         library_id: row.library_id,
         age_rating: row.age_rating,
         sharing_labels: row.sharing_labels,
         last_modified: row.last_modified,
+        release_date: row.release_date,
     }
 }
 
@@ -613,8 +639,17 @@ fn map_book_feed_record(
     PersistedBookFeedItem {
         id: row.id,
         title: row.title,
+        series_title: String::new(),
+        number: String::new(),
+        summary: String::new(),
+        authors: vec![],
         file_name: row.file_name,
+        file_size: 0,
         media_type: row.media_type,
+        page_count: 0,
+        epub_divina_compatible: false,
+        last_read: None,
+        last_read_date: None,
         library_id: row.library_id,
         age_rating: row.age_rating,
         sharing_labels: row.sharing_labels,

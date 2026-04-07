@@ -27,8 +27,15 @@ pub struct PersistedSeriesRecord {
 pub struct PersistedSeriesBookRecord {
     pub id: String,
     pub title: String,
+    pub summary: String,
+    pub authors: Vec<String>,
     pub file_name: String,
+    pub file_size: i64,
     pub media_type: String,
+    pub page_count: i64,
+    pub epub_divina_compatible: bool,
+    pub last_read: Option<i64>,
+    pub last_read_date: Option<String>,
     pub last_modified: String,
 }
 
@@ -36,23 +43,32 @@ pub struct PersistedReadlistRecord {
     pub id: String,
     pub name: String,
     pub last_modified: String,
+    pub ordered: bool,
 }
 
 pub struct PersistedReadlistBookRecord {
     pub id: String,
     pub title: String,
+    pub series_title: String,
+    pub number: String,
+    pub summary: String,
+    pub authors: Vec<String>,
     pub file_name: String,
+    pub file_size: i64,
     pub media_type: String,
+    pub media_status: Option<String>,
     pub library_id: String,
     pub age_rating: Option<u16>,
     pub sharing_labels: Vec<String>,
     pub last_modified: String,
+    pub release_date: Option<String>,
 }
 
 pub struct PersistedSeriesSearchRecord {
     pub id: String,
     pub title: String,
     pub library_id: String,
+    pub last_modified: String,
 }
 
 pub struct PersistedBookSearchRecord {
@@ -101,6 +117,7 @@ pub struct OpdsPersistedAccessBackend {
     pub load_series_books_paged: Arc<
         dyn Fn(
                 PathBuf,
+                String,
                 String,
                 i64,
                 i64,
@@ -203,12 +220,14 @@ pub async fn load_series(
 pub async fn load_series_books_paged(
     database_file: &Path,
     series_id: &str,
+    user_id: &str,
     offset: i64,
     limit: i64,
 ) -> Result<Vec<PersistedSeriesBookRecord>, String> {
     (backend().load_series_books_paged)(
         database_file.to_path_buf(),
         series_id.to_string(),
+        user_id.to_string(),
         offset,
         limit,
     )

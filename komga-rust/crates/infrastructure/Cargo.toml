@@ -13,6 +13,7 @@ komga-application = { path = "../application" }
 komga-kepubify = { path = "../kepubify" }
 flate2.workspace = true
 image.workspace = true
+icu.workspace = true
 lopdf.workspace = true
 pdfium-render.workspace = true
 quick-xml.workspace = true

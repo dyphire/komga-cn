@@ -34,7 +34,6 @@ use self::auth_payload::opds_catalog_unauthorized_response;
 use self::feed_endpoints::*;
 use self::feeds::*;
 use self::persisted::*;
-use self::types::*;
 
 pub(crate) use self::auth_payload::opds_auth;
 pub(crate) use self::manifest::{opds_manifest, opds_manifest_with_profile};
@@ -79,6 +78,10 @@ pub(crate) async fn opds_v1_series_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
+    if resolved_auth_user(&headers).is_none() {
+        return v1::opds_v1_basic_unauthorized_response();
+    }
+
     opds_v1_series(headers, uri, auth_db.database_file.as_path()).await
 }
 
@@ -95,6 +98,10 @@ pub(crate) async fn opds_v1_on_deck_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
+    if resolved_auth_user(&headers).is_none() {
+        return v1::opds_v1_basic_unauthorized_response();
+    }
+
     opds_v1_on_deck(headers, uri, auth_db.database_file.as_path()).await
 }
 
@@ -103,6 +110,10 @@ pub(crate) async fn opds_v1_keep_reading_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
+    if resolved_auth_user(&headers).is_none() {
+        return v1::opds_v1_basic_unauthorized_response();
+    }
+
     opds_v1_keep_reading(headers, uri, auth_db.database_file.as_path()).await
 }
 
@@ -119,6 +130,10 @@ pub(crate) async fn opds_v1_books_latest_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
+    if resolved_auth_user(&headers).is_none() {
+        return v1::opds_v1_basic_unauthorized_response();
+    }
+
     opds_v1_books_latest(headers, uri, auth_db.database_file.as_path()).await
 }
 
@@ -134,6 +149,10 @@ pub(crate) async fn opds_v1_collections_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
+    if resolved_auth_user(&headers).is_none() {
+        return v1::opds_v1_basic_unauthorized_response();
+    }
+
     opds_v1_collections(headers, uri, auth_db.database_file.as_path()).await
 }
 
@@ -142,6 +161,10 @@ pub(crate) async fn opds_v1_readlists_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
+    if resolved_auth_user(&headers).is_none() {
+        return v1::opds_v1_basic_unauthorized_response();
+    }
+
     opds_v1_readlists(headers, uri, auth_db.database_file.as_path()).await
 }
 
@@ -159,6 +182,10 @@ pub(crate) async fn opds_v1_series_detail_route(
     uri: Uri,
     AxumPath(series_id): AxumPath<String>,
 ) -> Response {
+    if resolved_auth_user(&headers).is_none() {
+        return v1::opds_v1_basic_unauthorized_response();
+    }
+
     opds_v1_series_detail(headers, uri, auth_db.database_file.as_path(), &series_id).await
 }
 
@@ -196,6 +223,10 @@ pub(crate) async fn opds_v1_readlist_detail_route(
     uri: Uri,
     AxumPath(readlist_id): AxumPath<String>,
 ) -> Response {
+    if resolved_auth_user(&headers).is_none() {
+        return v1::opds_v1_basic_unauthorized_response();
+    }
+
     opds_v1_readlist_detail(headers, uri, auth_db.database_file.as_path(), &readlist_id).await
 }
 
@@ -353,16 +384,18 @@ pub(crate) async fn opds_v2_library_route(
 pub(crate) async fn opds_v2_library_readlists_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
+    uri: Uri,
     AxumPath(library_id): AxumPath<String>,
 ) -> Response {
-    opds_v2_library_readlists(headers, auth_db.database_file.as_path(), &library_id).await
+    opds_v2_library_readlists(headers, uri, auth_db.database_file.as_path(), &library_id).await
 }
 
 pub(crate) async fn opds_v2_libraries_readlists_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
+    uri: Uri,
 ) -> Response {
-    opds_v2_libraries_readlists(headers, auth_db.database_file.as_path()).await
+    opds_v2_libraries_readlists(headers, uri, auth_db.database_file.as_path()).await
 }
 
 pub(crate) async fn opds_v2_libraries_keep_reading_route(
@@ -413,16 +446,18 @@ pub(crate) async fn opds_v2_library_latest_books_route(
 pub(crate) async fn opds_v2_libraries_latest_series_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
+    uri: Uri,
 ) -> Response {
-    opds_v2_libraries_latest_series(headers, auth_db.database_file.as_path()).await
+    opds_v2_libraries_latest_series(headers, uri, auth_db.database_file.as_path()).await
 }
 
 pub(crate) async fn opds_v2_library_latest_series_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
+    uri: Uri,
     AxumPath(library_id): AxumPath<String>,
 ) -> Response {
-    opds_v2_library_latest_series(headers, auth_db.database_file.as_path(), &library_id).await
+    opds_v2_library_latest_series(headers, uri, auth_db.database_file.as_path(), &library_id).await
 }
 
 pub(crate) async fn opds_v2_libraries_browse_route(

@@ -182,6 +182,135 @@ pub async fn seed_router_pdf_book(
     write_single_page_pdf_fixture(&pdf_path);
 }
 
+pub async fn seed_router_cbz_book(
+    paths: &RuntimeDbPaths,
+    book_id: &str,
+    series_id: &str,
+    file_name: &str,
+    title: &str,
+) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("router contract db should open for cbz book seed");
+
+    let relative_path = format!("books/{file_name}");
+    sqlx::query(
+        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(book_id)
+    .bind(0_i64)
+    .bind(file_name)
+    .bind(&relative_path)
+    .bind(series_id)
+    .bind(4_096_i64)
+    .bind(98_i64)
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("cbz book row should be inserted");
+
+    sqlx::query(
+        "INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) \
+         VALUES (?, ?, ?, ?)",
+    )
+    .bind("application/vnd.comicbook+zip")
+    .bind("READY")
+    .bind(book_id)
+    .bind(1_i64)
+    .execute(&pool)
+    .await
+    .expect("cbz media row should be inserted");
+
+    sqlx::query(
+        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("98")
+    .bind(98.0_f64)
+    .bind(title)
+    .bind("2024-02-02")
+    .bind(book_id)
+    .execute(&pool)
+    .await
+    .expect("cbz book metadata row should be inserted");
+
+    pool.close().await;
+
+    let archive_path = paths.config_dir.join(relative_path);
+    if let Some(parent) = archive_path.parent() {
+        std::fs::create_dir_all(parent).expect("cbz parent directory should be created");
+    }
+    let file = File::create(&archive_path).expect("cbz fixture file should be created");
+    let mut zip = ZipWriter::new(file);
+    let options = SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Stored)
+        .unix_permissions(0o644);
+    zip.start_file("page-1.png", options)
+        .expect("cbz page entry should be created");
+    zip.write_all(&fixture_png_bytes())
+        .expect("cbz page payload should be written");
+    zip.finish()
+        .expect("cbz fixture should finish successfully");
+}
+
+pub async fn seed_router_epub_divina_book(
+    paths: &RuntimeDbPaths,
+    book_id: &str,
+    series_id: &str,
+    file_name: &str,
+    title: &str,
+) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("router contract db should open for epub divina book seed");
+
+    let relative_path = format!("books/{file_name}");
+    sqlx::query(
+        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(book_id)
+    .bind(0_i64)
+    .bind(file_name)
+    .bind(&relative_path)
+    .bind(series_id)
+    .bind(4_096_i64)
+    .bind(97_i64)
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("epub divina book row should be inserted");
+
+    sqlx::query(
+        "INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT, EPUB_DIVINA_COMPATIBLE) \
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("application/epub+zip")
+    .bind("READY")
+    .bind(book_id)
+    .bind(1_i64)
+    .bind(true)
+    .execute(&pool)
+    .await
+    .expect("epub divina media row should be inserted");
+
+    sqlx::query(
+        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("97")
+    .bind(97.0_f64)
+    .bind(title)
+    .bind("2024-02-03")
+    .bind(book_id)
+    .execute(&pool)
+    .await
+    .expect("epub divina metadata row should be inserted");
+
+    pool.close().await;
+
+    write_router_epub_resource(paths, &relative_path, "page-1.png", &fixture_png_bytes());
+}
+
 pub fn fixture_png_bytes() -> Vec<u8> {
     vec![
         0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,

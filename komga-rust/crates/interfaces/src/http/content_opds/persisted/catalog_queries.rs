@@ -25,8 +25,21 @@ fn persisted_book_feed_item(entry: OpdsBookFeedEntry) -> PersistedBookFeedItem {
     PersistedBookFeedItem {
         id: entry.id,
         title: entry.title,
+        series_title: entry.series_title,
+        number: entry.number,
+        summary: entry.summary,
+        authors: entry
+            .authors
+            .into_iter()
+            .map(|author| author.name)
+            .collect(),
         file_name: entry.file_name,
+        file_size: entry.file_size,
         media_type: entry.media_type,
+        page_count: entry.page_count,
+        epub_divina_compatible: entry.epub_divina_compatible,
+        last_read: entry.last_read,
+        last_read_date: entry.last_read_date,
         library_id: entry.library_id,
         age_rating: entry.age_rating,
         sharing_labels: entry.sharing_labels,
@@ -50,6 +63,7 @@ fn persisted_readlist(entry: OpdsReadlistEntry) -> PersistedReadlist {
         id: entry.id,
         name: entry.name,
         last_modified: entry.last_modified,
+        ordered: false,
     }
 }
 
@@ -135,6 +149,7 @@ pub(super) async fn load_on_deck_books(
 pub(super) async fn load_latest_books_paged(
     database_file: &Path,
     allowed_library_ids: &Option<HashSet<String>>,
+    user_id: Option<&str>,
     library_id: Option<&str>,
     offset: i64,
     limit: i64,
@@ -142,6 +157,7 @@ pub(super) async fn load_latest_books_paged(
     load_latest_book_entries_paged(
         database_file,
         allowed_library_ids,
+        user_id,
         library_id,
         offset,
         limit,

@@ -145,6 +145,159 @@ async fn router_opds_v1_series_search_feed_uses_search_title_for_non_blank_searc
 }
 
 #[tokio::test]
+async fn router_opds_v1_series_unauthorized_includes_basic_challenge() {
+    let paths = new_router_fixture("router-opds-v1-series-basic-challenge").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v1.2/series")
+                .body(Body::empty())
+                .expect("opds v1 series unauthorized request should build"),
+        )
+        .await
+        .expect("opds v1 series unauthorized request should complete");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok()),
+        Some("Basic realm=\"Realm\"")
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v1_series_preserves_active_query_params_in_self_prev_next_links() {
+    let paths = new_router_fixture("router-opds-v1-series-query-links").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_authors_scope_variants(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v1.2/series?page=1&size=1&search=Series&publisher=PubHouse&publisher=AltPub")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v1 series query-links request should build"),
+        )
+        .await
+        .expect("opds v1 series query-links request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(
+        body.contains("rel=\"self\" href=\"http://localhost/opds/v1.2/series?search=Series&amp;publisher=PubHouse&amp;publisher=AltPub\""),
+        "body={body}"
+    );
+    assert!(
+        body.contains("rel=\"previous\" href=\"http://localhost/opds/v1.2/series?search=Series&amp;publisher=PubHouse&amp;publisher=AltPub&amp;page=0\""),
+        "body={body}"
+    );
+    assert!(
+        body.contains("rel=\"next\" href=\"http://localhost/opds/v1.2/series?search=Series&amp;publisher=PubHouse&amp;publisher=AltPub&amp;page=2\""),
+        "body={body}"
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v1_series_feed_uses_series_last_modified_for_entry_updated() {
+    let paths = new_router_fixture("router-opds-v1-series-entry-updated").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("opds v1 series entry-updated db should open");
+    sqlx::query("UPDATE SERIES SET LAST_MODIFIED_DATE = ?, CREATED_DATE = ? WHERE ID = ?")
+        .bind("2024-03-03 00:00:00")
+        .bind("2024-03-03 00:00:00")
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("series last modified should update for entry-updated test");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v1.2/series")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v1 series entry-updated request should build"),
+        )
+        .await
+        .expect("opds v1 series entry-updated request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(
+        body.contains("<entry><title>Series 1</title><updated>2024-03-03T00:00:00Z</updated><id>series-1</id><content></content>"),
+        "body={body}"
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v1_series_search_feed_uses_series_last_modified_for_entry_updated() {
+    let paths = new_router_fixture("router-opds-v1-series-search-entry-updated").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("opds v1 series search entry-updated db should open");
+    sqlx::query("UPDATE SERIES SET LAST_MODIFIED_DATE = ?, CREATED_DATE = ? WHERE ID = ?")
+        .bind("2024-03-04 00:00:00")
+        .bind("2024-03-04 00:00:00")
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("series last modified should update for search entry-updated test");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v1.2/series?search=Series%201")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v1 series search entry-updated request should build"),
+        )
+        .await
+        .expect("opds v1 series search entry-updated request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(
+        body.contains("<entry><title>Series 1</title><updated>2024-03-04T00:00:00Z</updated><id>series-1</id><content></content>"),
+        "body={body}"
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_opds_v1_search_uses_acquisition_type_and_utf8_encodings() {
     let paths = new_router_fixture("router-opds-v1-search-opensearch-shape").await;
     seed_router_contract_data(&paths).await;

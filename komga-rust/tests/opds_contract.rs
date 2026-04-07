@@ -96,6 +96,25 @@ async fn update_router_library_name(paths: &RuntimeDbPaths, library_id: &str, na
     pool.close().await;
 }
 
+async fn update_router_library_last_modified(
+    paths: &RuntimeDbPaths,
+    library_id: &str,
+    last_modified: &str,
+) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("opds library last-modified update db should open");
+
+    sqlx::query("UPDATE LIBRARY SET LAST_MODIFIED_DATE = ? WHERE ID = ?")
+        .bind(last_modified)
+        .bind(library_id)
+        .execute(&pool)
+        .await
+        .expect("library last modified should be updated");
+
+    pool.close().await;
+}
+
 async fn seed_router_library(paths: &RuntimeDbPaths, library_id: &str, name: &str) {
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await

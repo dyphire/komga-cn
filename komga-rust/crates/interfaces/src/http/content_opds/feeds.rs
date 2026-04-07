@@ -8,8 +8,9 @@ use time::format_description::well_known::Rfc3339;
 use time::{OffsetDateTime, UtcOffset};
 
 use crate::http::request_urls::app_absolute_url;
+use crate::opds_catalog_access::OpdsBookFeedEntry;
 
-use super::types::{PersistedBookFeedItem, PersistedSeries};
+use super::types::PersistedSeries;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct OpdsV1NavigationEntry {
@@ -18,6 +19,20 @@ pub(super) struct OpdsV1NavigationEntry {
     pub content: String,
     pub href_path: String,
     pub updated: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct OpdsV1AcquisitionEntry {
+    pub id: String,
+    pub title: String,
+    pub updated: Option<String>,
+    pub content: String,
+    pub authors: Vec<String>,
+    pub acquisition_media_type: String,
+    pub acquisition_href_path: String,
+    pub thumbnail_href_path: String,
+    pub image_href_path: String,
+    pub extra_links: Vec<String>,
 }
 
 pub(super) fn opds_v1_navigation_feed_response(
@@ -73,7 +88,9 @@ pub(super) fn opds_v1_navigation_feed_response_with_extra_links(
         .unwrap_or_else(|| now.clone());
 
     let mut body = String::new();
-    body.push_str("<feed xmlns=\"http://www.w3.org/2005/Atom\">");
+    body.push_str(
+        "<feed xmlns=\"http://www.w3.org/2005/Atom\" xmlns:pse=\"http://vaemendis.net/opds-pse/ns\">",
+    );
     body.push_str(format!("<id>{}</id>", xml_escape(feed_id)).as_str());
     body.push_str(format!("<title>{}</title>", xml_escape(title)).as_str());
     body.push_str(format!("<updated>{}</updated><author><name>Komga</name><uri>https://github.com/gotson/komga</uri></author>", xml_escape(&feed_updated)).as_str());
@@ -86,13 +103,12 @@ pub(super) fn opds_v1_navigation_feed_response_with_extra_links(
         if page > 0 {
             let previous_href = app_absolute_url(
                 headers,
-                format!("{self_path}?page={}", page.saturating_sub(1)).as_str(),
+                page_link_path(self_path, page.saturating_sub(1)).as_str(),
             );
             body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"previous\" href=\"{}\"/>", xml_escape(previous_href.as_str())).as_str());
         }
         if has_next {
-            let next_href =
-                app_absolute_url(headers, format!("{self_path}?page={}", page + 1).as_str());
+            let next_href = app_absolute_url(headers, page_link_path(self_path, page + 1).as_str());
             body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"next\" href=\"{}\"/>", xml_escape(next_href.as_str())).as_str());
         }
     }
@@ -110,7 +126,7 @@ pub(super) fn opds_v1_navigation_feed_response_with_extra_links(
                 xml_escape(&entry.title),
                 xml_escape(&entry_updated),
                 xml_escape(&entry.id),
-                xml_escape(&entry.content),
+                opds_content_markup(&entry.content),
                 xml_escape(&href),
             )
             .as_str(),
@@ -148,7 +164,9 @@ pub(super) fn opds_v1_library_series_feed_response(
         .to_string();
 
     let mut body = String::new();
-    body.push_str("<feed xmlns=\"http://www.w3.org/2005/Atom\">");
+    body.push_str(
+        "<feed xmlns=\"http://www.w3.org/2005/Atom\" xmlns:pse=\"http://vaemendis.net/opds-pse/ns\">",
+    );
     body.push_str(format!("<id>{}</id>", xml_escape(feed_id)).as_str());
     body.push_str(format!("<title>{}</title>", xml_escape(title)).as_str());
     body.push_str(format!("<updated>{}</updated><author><name>Komga</name><uri>https://github.com/gotson/komga</uri></author>", xml_escape(feed_updated.as_str())).as_str());
@@ -203,12 +221,12 @@ pub(super) fn opds_v1_library_series_feed_response(
         .into_response()
 }
 
-pub(super) fn opds_v1_acquisition_feed_response(
+pub(super) fn opds_v1_acquisition_feed_response_with_entries(
     headers: &HeaderMap,
     feed_id: &str,
     title: &str,
     self_path: &str,
-    books: Vec<PersistedBookFeedItem>,
+    entries: Vec<OpdsV1AcquisitionEntry>,
     feed_updated: Option<&str>,
     pagination: Option<(usize, bool)>,
 ) -> Response {
@@ -217,11 +235,13 @@ pub(super) fn opds_v1_acquisition_feed_response(
     let now = opds_now_timestamp();
     let feed_updated = feed_updated
         .filter(|value| !value.is_empty())
-        .unwrap_or(now.as_str())
-        .to_string();
+        .map(normalize_opds_updated)
+        .unwrap_or(now.clone());
 
     let mut body = String::new();
-    body.push_str("<feed xmlns=\"http://www.w3.org/2005/Atom\">");
+    body.push_str(
+        "<feed xmlns=\"http://www.w3.org/2005/Atom\" xmlns:pse=\"http://vaemendis.net/opds-pse/ns\">",
+    );
     body.push_str(format!("<id>{}</id>", xml_escape(feed_id)).as_str());
     body.push_str(format!("<title>{}</title>", xml_escape(title)).as_str());
     body.push_str(format!("<updated>{}</updated><author><name>Komga</name><uri>https://github.com/gotson/komga</uri></author>", xml_escape(feed_updated.as_str())).as_str());
@@ -231,50 +251,45 @@ pub(super) fn opds_v1_acquisition_feed_response(
         if page > 0 {
             let previous_href = app_absolute_url(
                 headers,
-                format!("{self_path}?page={}", page.saturating_sub(1)).as_str(),
+                page_link_path(self_path, page.saturating_sub(1)).as_str(),
             );
             body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=acquisition\" rel=\"previous\" href=\"{}\"/>", xml_escape(previous_href.as_str())).as_str());
         }
         if has_next {
-            let next_href =
-                app_absolute_url(headers, format!("{self_path}?page={}", page + 1).as_str());
+            let next_href = app_absolute_url(headers, page_link_path(self_path, page + 1).as_str());
             body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=acquisition\" rel=\"next\" href=\"{}\"/>", xml_escape(next_href.as_str())).as_str());
         }
     }
 
-    for book in books {
-        let entry_updated = if book.last_modified.is_empty() {
-            now.clone()
-        } else {
-            book.last_modified.clone()
-        };
-        let book_href = app_absolute_url(
-            headers,
-            format!(
-                "/opds/v1.2/books/{}/file/{}",
-                book.id,
-                query_escape(book.file_name.as_str()),
-            )
-            .as_str(),
-        );
-        let thumb_href = app_absolute_url(
-            headers,
-            format!("/opds/v1.2/books/{}/thumbnail/small", book.id).as_str(),
-        );
-        let image_href = app_absolute_url(
-            headers,
-            format!("/opds/v1.2/books/{}/thumbnail", book.id).as_str(),
-        );
+    for entry in entries {
+        let entry_updated = entry
+            .updated
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .map(normalize_opds_updated)
+            .unwrap_or_else(|| now.clone());
+        let book_href = app_absolute_url(headers, entry.acquisition_href_path.as_str());
+        let thumb_href = app_absolute_url(headers, entry.thumbnail_href_path.as_str());
+        let image_href = app_absolute_url(headers, entry.image_href_path.as_str());
+        let authors = entry
+            .authors
+            .into_iter()
+            .map(|author| format!("<author><name>{}</name></author>", xml_escape(&author)))
+            .collect::<String>();
+        let extra_links = entry.extra_links.join("");
         body.push_str(
             format!(
-                "<entry><title>{}</title><updated>{}</updated><id>{}</id><content></content><link type=\"{}\" rel=\"http://opds-spec.org/acquisition\" href=\"{}\"/><link type=\"image/jpeg\" rel=\"http://opds-spec.org/image/thumbnail\" href=\"{}\"/><link type=\"image/jpeg\" rel=\"http://opds-spec.org/image\" href=\"{}\"/></entry>",
-                xml_escape(&book.title),
+                "<entry><title>{}</title><updated>{}</updated><id>{}</id><content>{}</content>{}<link type=\"{}\" rel=\"http://opds-spec.org/acquisition\" href=\"{}\"/><link type=\"image/jpeg\" rel=\"http://opds-spec.org/image/thumbnail\" href=\"{}\"/><link type=\"image/jpeg\" rel=\"http://opds-spec.org/image\" href=\"{}\"/>{}</entry>",
+                xml_escape(&entry.title),
                 xml_escape(&entry_updated),
-                xml_escape(&book.id),
-                xml_escape(&book.media_type),
+                xml_escape(&entry.id),
+                opds_content_markup(&entry.content),
+                authors,
+                xml_escape(&entry.acquisition_media_type),
                 xml_escape(&book_href),
                 xml_escape(&thumb_href),
                 xml_escape(&image_href),
+                extra_links,
             )
             .as_str(),
         );
@@ -302,6 +317,10 @@ pub(super) fn xml_escape(value: &str) -> String {
         .replace('\'', "&apos;")
 }
 
+fn opds_content_markup(value: &str) -> String {
+    xml_escape(value).replace('\n', "<br/>")
+}
+
 pub(super) fn query_escape(value: &str) -> String {
     value
         .bytes()
@@ -313,6 +332,14 @@ pub(super) fn query_escape(value: &str) -> String {
             _ => format!("%{:02X}", byte),
         })
         .collect::<String>()
+}
+
+fn page_link_path(self_path: &str, page: usize) -> String {
+    if self_path.contains('?') {
+        format!("{self_path}&page={page}")
+    } else {
+        format!("{self_path}?page={page}")
+    }
 }
 
 pub(super) fn query_value<'a>(query: &'a str, key: &str) -> Option<&'a str> {
@@ -400,12 +427,12 @@ pub(super) fn opds_now_timestamp() -> String {
     format_opds_timestamp(now_utc, offset)
 }
 
-fn normalize_opds_updated(value: &str) -> String {
+pub(super) fn normalize_opds_updated(value: &str) -> String {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return opds_now_timestamp();
     }
-    if trimmed.ends_with('Z') || trimmed.contains('+') {
+    if OffsetDateTime::parse(trimmed, &Rfc3339).is_ok() {
         return trimmed.to_string();
     }
     if let Some((date, time)) = trimmed.split_once(' ') {
@@ -495,12 +522,55 @@ pub(super) fn opds_navigation_link(headers: &HeaderMap, title: &str, path: &str)
     })
 }
 
-pub(super) fn opds_navigation_response(
+pub(super) fn opds_navigation_response_with_paging(
     headers: &HeaderMap,
     title: &str,
-    self_href: &str,
+    self_path: &str,
+    modified: Option<&str>,
     navigation: Vec<Value>,
+    page: usize,
+    size: usize,
+    total: usize,
 ) -> Response {
+    let self_href = app_absolute_url(headers, self_path);
+    let modified = modified
+        .filter(|value| !value.is_empty())
+        .map(normalize_opds_updated)
+        .unwrap_or_else(opds_now_timestamp);
+
+    let mut links = vec![
+        json!({
+            "rel": "self",
+            "href": self_href,
+        }),
+        json!({
+            "title": "Home",
+            "rel": "start",
+            "href": app_absolute_url(headers, "/opds/v2/catalog"),
+            "type": "application/opds+json",
+        }),
+        json!({
+            "title": "Search",
+            "rel": "search",
+            "href": app_absolute_url(headers, "/opds/v2/search{?query}"),
+            "type": "application/opds+json",
+            "templated": true,
+        }),
+    ];
+
+    if page > 0 {
+        links.push(json!({
+            "rel": "previous",
+            "href": app_absolute_url(headers, page_link_path(self_path, page.saturating_sub(1)).as_str()),
+        }));
+    }
+    if page.saturating_add(1).saturating_mul(size) < total {
+        links.push(json!({
+            "rel": "next",
+            "href": app_absolute_url(headers, page_link_path(self_path, page + 1).as_str()),
+        }));
+    }
+
     (
         StatusCode::OK,
         [(
@@ -510,25 +580,12 @@ pub(super) fn opds_navigation_response(
         Json(json!({
             "metadata": {
                 "title": title,
+                "modified": modified,
+                "itemsPerPage": size,
+                "currentPage": page + 1,
+                "numberOfItems": total,
             },
-            "links": [
-                {
-                    "rel": "self",
-                    "href": self_href,
-                    "type": "application/opds+json",
-                },
-                {
-                    "rel": "start",
-                    "href": app_absolute_url(headers, "/opds/v2/catalog"),
-                    "type": "application/opds+json",
-                },
-                {
-                    "rel": "search",
-                    "href": app_absolute_url(headers, "/opds/v2/search{?query}"),
-                    "type": "application/opds+json",
-                    "templated": true,
-                }
-            ],
+            "links": links,
             "navigation": navigation,
         })),
     )
@@ -581,26 +638,284 @@ pub(super) fn opds_publication_for_book(
     title: &str,
     media_type: &str,
 ) -> Value {
+    let auth_href = app_absolute_url(headers, "/opds/v2/auth");
+    let manifest_href = app_absolute_url(
+        headers,
+        format!("/opds/v2/books/{book_id}/manifest").as_str(),
+    );
+    let file_href = app_absolute_url(headers, format!("/opds/v2/books/{book_id}/file").as_str());
+    let progression_href = app_absolute_url(
+        headers,
+        format!("/opds/v2/books/{book_id}/progression").as_str(),
+    );
+    let thumbnail_href = app_absolute_url(
+        headers,
+        format!("/opds/v2/books/{book_id}/thumbnail").as_str(),
+    );
+
     json!({
+        "@context": "https://readium.org/webpub-manifest/context.jsonld",
         "metadata": {
             "title": title,
         },
         "links": [
             {
                 "rel": "self",
-                "href": app_absolute_url(headers, format!("/opds/v2/books/{book_id}/manifest").as_str()),
+                "href": manifest_href,
                 "type": "application/opds-publication+json",
+                "properties": {
+                    "authenticate": {
+                        "href": auth_href.as_str(),
+                        "type": "application/opds-authentication+json",
+                    },
+                },
             },
             {
                 "rel": "http://opds-spec.org/acquisition",
-                "href": app_absolute_url(headers, format!("/opds/v2/books/{book_id}/file").as_str()),
+                "href": file_href,
                 "type": media_type,
+                "properties": {
+                    "authenticate": {
+                        "href": auth_href.as_str(),
+                        "type": "application/opds-authentication+json",
+                    },
+                },
             },
             {
-                "rel": "http://opds-spec.org/image/thumbnail",
-                "href": app_absolute_url(headers, format!("/opds/v2/books/{book_id}/thumbnail").as_str()),
+                "rel": "http://www.cantook.com/api/progression",
+                "href": progression_href,
+                "type": "application/vnd.readium.progression+json",
+                "properties": {
+                    "authenticate": {
+                        "href": auth_href.as_str(),
+                        "type": "application/opds-authentication+json",
+                    },
+                },
+            }
+        ],
+        "images": [
+            {
+                "href": thumbnail_href,
                 "type": "image/jpeg",
+                "properties": {
+                    "authenticate": {
+                        "href": auth_href.as_str(),
+                        "type": "application/opds-authentication+json",
+                    },
+                },
             }
         ],
     })
+}
+
+pub(super) fn opds_publication_for_feed_entry(
+    headers: &HeaderMap,
+    book: &OpdsBookFeedEntry,
+) -> Value {
+    let auth_href = app_absolute_url(headers, "/opds/v2/auth");
+    let manifest_href = app_absolute_url(
+        headers,
+        format!("/opds/v2/books/{}/manifest", book.id).as_str(),
+    );
+    let file_href = app_absolute_url(headers, format!("/opds/v2/books/{}/file", book.id).as_str());
+    let progression_href = app_absolute_url(
+        headers,
+        format!("/opds/v2/books/{}/progression", book.id).as_str(),
+    );
+    let thumbnail_href = app_absolute_url(
+        headers,
+        format!("/opds/v2/books/{}/thumbnail", book.id).as_str(),
+    );
+
+    let mut metadata = serde_json::Map::new();
+    metadata.insert("title".to_string(), Value::String(book.title.clone()));
+    if let Some(isbn) = book.isbn.as_ref().filter(|value| !value.is_empty()) {
+        metadata.insert(
+            "identifier".to_string(),
+            Value::String(format!("urn:isbn:{isbn}")),
+        );
+    }
+    if !book.summary.is_empty() {
+        metadata.insert(
+            "description".to_string(),
+            Value::String(book.summary.clone()),
+        );
+    }
+    if book.page_count > 0 {
+        metadata.insert(
+            "numberOfPages".to_string(),
+            Value::Number(book.page_count.into()),
+        );
+    }
+    if let Some(release_date) = book.release_date.as_ref().filter(|value| !value.is_empty()) {
+        metadata.insert("published".to_string(), Value::String(release_date.clone()));
+    }
+    if !book.last_modified.is_empty() {
+        metadata.insert(
+            "modified".to_string(),
+            Value::String(normalize_opds_updated(&book.last_modified)),
+        );
+    }
+    if !book.tags.is_empty() {
+        metadata.insert(
+            "subject".to_string(),
+            Value::Array(
+                book.tags
+                    .iter()
+                    .cloned()
+                    .map(Value::String)
+                    .collect::<Vec<_>>(),
+            ),
+        );
+    }
+    extend_metadata_with_role_authors(&mut metadata, &book.authors);
+    if !book.series_id.is_empty() && !book.series_title.is_empty() {
+        let mut series_entry = serde_json::Map::new();
+        series_entry.insert("name".to_string(), Value::String(book.series_title.clone()));
+        if let Some(number) = serde_json::Number::from_f64(book.number_sort) {
+            series_entry.insert("position".to_string(), Value::Number(number));
+        }
+        series_entry.insert(
+            "links".to_string(),
+            Value::Array(vec![json!({
+                "href": app_absolute_url(headers, format!("/opds/v2/series/{}", book.series_id).as_str()),
+                "type": "application/opds+json",
+            })]),
+        );
+        metadata.insert(
+            "belongsTo".to_string(),
+            Value::Object(serde_json::Map::from_iter([(
+                "series".to_string(),
+                Value::Array(vec![Value::Object(series_entry)]),
+            )])),
+        );
+    }
+
+    let mut links = vec![
+        json!({
+            "rel": "self",
+            "href": manifest_href,
+            "type": publication_manifest_type(book.media_type.as_str()),
+            "properties": {
+                "authenticate": {
+                    "href": auth_href.as_str(),
+                    "type": "application/opds-authentication+json",
+                },
+            },
+        }),
+        json!({
+            "rel": "http://opds-spec.org/acquisition",
+            "href": file_href,
+            "type": book.media_type,
+            "properties": {
+                "authenticate": {
+                    "href": auth_href.as_str(),
+                    "type": "application/opds-authentication+json",
+                },
+            },
+        }),
+        json!({
+            "rel": "http://www.cantook.com/api/progression",
+            "href": progression_href,
+            "type": "application/vnd.readium.progression+json",
+            "properties": {
+                "authenticate": {
+                    "href": auth_href.as_str(),
+                    "type": "application/opds-authentication+json",
+                },
+            },
+        }),
+    ];
+
+    if book.media_type == "application/pdf"
+        || (book.media_type == "application/epub+zip" && book.epub_divina_compatible)
+    {
+        links.push(json!({
+            "href": app_absolute_url(headers, format!("/opds/v2/books/{}/manifest/divina", book.id).as_str()),
+            "type": "application/divina+json",
+            "properties": {
+                "authenticate": {
+                    "href": auth_href.as_str(),
+                    "type": "application/opds-authentication+json",
+                },
+            },
+        }));
+    }
+
+    json!({
+        "@context": "https://readium.org/webpub-manifest/context.jsonld",
+        "metadata": Value::Object(metadata),
+        "links": links,
+        "images": [
+            {
+                "href": thumbnail_href,
+                "type": "image/jpeg",
+                "properties": {
+                    "authenticate": {
+                        "href": auth_href.as_str(),
+                        "type": "application/opds-authentication+json",
+                    },
+                },
+            }
+        ],
+    })
+}
+
+fn publication_manifest_type(media_type: &str) -> &'static str {
+    match media_type {
+        media if media.starts_with("image/") => "application/divina+json",
+        "application/vnd.comicbook+zip" | "application/vnd.comicbook-rar" | "application/zip" => {
+            "application/divina+json"
+        }
+        _ => "application/webpub+json",
+    }
+}
+
+fn extend_metadata_with_role_authors(
+    metadata: &mut serde_json::Map<String, Value>,
+    authors: &[crate::opds_catalog_access::OpdsBookAuthorEntry],
+) {
+    let mut author = Vec::new();
+    let mut translator = Vec::new();
+    let mut editor = Vec::new();
+    let mut artist = Vec::new();
+    let mut illustrator = Vec::new();
+    let mut letterer = Vec::new();
+    let mut penciler = Vec::new();
+    let mut colorist = Vec::new();
+    let mut inker = Vec::new();
+    let mut contributor = Vec::new();
+
+    for entry in authors {
+        let target = match entry.role.as_str() {
+            "author" => &mut author,
+            "translator" => &mut translator,
+            "editor" => &mut editor,
+            "artist" => &mut artist,
+            "illustrator" => &mut illustrator,
+            "letterer" => &mut letterer,
+            "penciler" | "penciller" => &mut penciler,
+            "colorist" => &mut colorist,
+            "inker" => &mut inker,
+            _ => &mut contributor,
+        };
+        target.push(Value::String(entry.name.clone()));
+    }
+
+    for (key, values) in [
+        ("author", author),
+        ("translator", translator),
+        ("editor", editor),
+        ("artist", artist),
+        ("illustrator", illustrator),
+        ("letterer", letterer),
+        ("penciler", penciler),
+        ("colorist", colorist),
+        ("inker", inker),
+        ("contributor", contributor),
+    ] {
+        if !values.is_empty() {
+            metadata.insert(key.to_string(), Value::Array(values));
+        }
+    }
 }
