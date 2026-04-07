@@ -88,4 +88,5 @@ tempfile = "3.23.0"
 image.workspace = true
 icu.workspace = true
 time.workspace = true
+http-body-util = "0.1.3"
 komga-contract-testkit = { path = "crates/contract-testkit" }

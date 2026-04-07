@@ -35,6 +35,8 @@ mod series;
 mod series_routes;
 
 pub use books::{book_tags, books_duplicates, books_latest, books_list, books_ondeck};
+pub(crate) use detail::load_persisted_book_series_id;
+pub(crate) use detail::load_persisted_webpub_metadata_additions;
 pub use detail::{
     DiscoveryDetailAccessBackends, DiscoveryDetailBooksAccessBackend,
     DiscoveryDetailCollectionsAccessBackend, DiscoveryDetailReadlistsAccessBackend,

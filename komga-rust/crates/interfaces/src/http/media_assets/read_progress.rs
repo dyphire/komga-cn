@@ -7,6 +7,8 @@ use std::io::Read;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
+const READIUM_PROGRESSION_MEDIA_TYPE: &str = "application/vnd.readium.progression+json";
+
 fn decode_epub_extension_positions_and_layout(blob: &[u8]) -> Result<(Vec<Value>, bool), String> {
     let mut decoder = GzDecoder::new(blob);
     let mut json = String::new();
@@ -1085,7 +1087,14 @@ pub async fn book_progression_get(
     }
 
     match load_book_progression(auth_db.database_file.as_path(), &book_id, user_id(&user)).await {
-        Ok(Some(progression)) => Json(progression).into_response(),
+        Ok(Some(progression)) => (
+            [(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static(READIUM_PROGRESSION_MEDIA_TYPE),
+            )],
+            Json(progression),
+        )
+            .into_response(),
         Ok(None) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => internal_error_response(error),
     }

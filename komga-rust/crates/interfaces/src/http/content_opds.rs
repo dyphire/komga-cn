@@ -522,9 +522,10 @@ pub(crate) async fn opds_v2_collection_route(
 pub(crate) async fn opds_v2_series_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
+    uri: Uri,
     AxumPath(series_id): AxumPath<String>,
 ) -> Response {
-    opds_v2_series(headers, auth_db.database_file.as_path(), &series_id).await
+    opds_v2_series(headers, uri, auth_db.database_file.as_path(), &series_id).await
 }
 
 pub(crate) async fn opds_v2_readlist_route(

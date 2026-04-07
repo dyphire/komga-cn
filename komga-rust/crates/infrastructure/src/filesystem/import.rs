@@ -7,6 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use komga_application::media_assets::{
     BooksImportEntry, ImportBookOutcome, ImportCopyMode, MediaImportPort,
+    register_runtime_book_import_event,
 };
 use sqlx::Row;
 
@@ -31,33 +32,54 @@ impl MediaImportPort for FilesystemImportPort {
         copy_mode: ImportCopyMode,
         entry: BooksImportEntry,
     ) -> Result<Option<ImportBookOutcome>, String> {
-        let library_roots = load_library_roots(self.database_file.as_path())
-            .await
-            .unwrap_or_default();
-        if source_inside_library_roots(entry.source_file.as_path(), &library_roots) {
-            return Ok(None);
+        let source_file = entry.source_file.clone();
+        let result = import_book_impl(self.database_file.as_path(), copy_mode, entry).await;
+
+        match &result {
+            Ok(Some(outcome)) => register_runtime_book_import_event(
+                Some(outcome.imported_book_id.clone()),
+                source_file.to_string_lossy().to_string(),
+                true,
+                None,
+            ),
+            Err(error) => register_runtime_book_import_event(
+                None,
+                source_file.to_string_lossy().to_string(),
+                false,
+                Some(error.clone()),
+            ),
+            Ok(None) => {}
         }
 
-        let target =
-            match load_import_series_target(self.database_file.as_path(), &entry.series_id).await {
-                Ok(Some(target)) => target,
-                Ok(None) => {
-                    return Err(format!(
-                        "series target for import was not found: {}",
-                        entry.series_id
-                    ));
-                }
-                Err(error) => return Err(error),
-            };
+        result
+    }
+}
 
-        let mut upgrade_destination_name: Option<String> = None;
-        if let Some(upgrade_book_id) = entry.upgrade_book_id.as_deref() {
-            let upgrade_target = match load_import_upgrade_book_target(
-                self.database_file.as_path(),
-                upgrade_book_id,
-            )
-            .await
-            {
+async fn import_book_impl(
+    database_file: &Path,
+    copy_mode: ImportCopyMode,
+    entry: BooksImportEntry,
+) -> Result<Option<ImportBookOutcome>, String> {
+    let library_roots = load_library_roots(database_file).await.unwrap_or_default();
+    if source_inside_library_roots(entry.source_file.as_path(), &library_roots) {
+        return Ok(None);
+    }
+
+    let target = match load_import_series_target(database_file, &entry.series_id).await {
+        Ok(Some(target)) => target,
+        Ok(None) => {
+            return Err(format!(
+                "series target for import was not found: {}",
+                entry.series_id
+            ));
+        }
+        Err(error) => return Err(error),
+    };
+
+    let mut upgrade_destination_name: Option<String> = None;
+    if let Some(upgrade_book_id) = entry.upgrade_book_id.as_deref() {
+        let upgrade_target =
+            match load_import_upgrade_book_target(database_file, upgrade_book_id).await {
                 Ok(Some(target)) => target,
                 Ok(None) => {
                     return Err(format!(
@@ -67,70 +89,69 @@ impl MediaImportPort for FilesystemImportPort {
                 Err(error) => return Err(error),
             };
 
-            if upgrade_target.series_id != entry.series_id {
-                return Err(format!(
-                    "upgrade target series mismatch for import: expected {}, got {}",
-                    entry.series_id, upgrade_target.series_id
-                ));
-            }
-
-            upgrade_destination_name = Some(upgrade_target.file_name.clone());
-            let upgrade_file = PathBuf::from(upgrade_target.library_root)
-                .join(upgrade_target.series_url)
-                .join(upgrade_target.file_name);
-            let _ = fs::remove_file(upgrade_file);
-        }
-
-        let Some(destination_name) = resolve_import_destination_name(
-            entry.source_file.as_path(),
-            upgrade_destination_name
-                .as_deref()
-                .or(entry.destination_name.as_deref()),
-        ) else {
+        if upgrade_target.series_id != entry.series_id {
             return Err(format!(
-                "destination name for import is invalid: {}",
-                entry.destination_name.as_deref().unwrap_or_default()
+                "upgrade target series mismatch for import: expected {}, got {}",
+                entry.series_id, upgrade_target.series_id
             ));
-        };
-
-        let destination_dir = PathBuf::from(&target.library_root).join(&target.series_url);
-        fs::create_dir_all(&destination_dir)
-            .map_err(|error| format!("create destination directory for import: {error}"))?;
-
-        let destination_file = destination_dir.join(destination_name);
-        apply_import_copy_mode(copy_mode, entry.source_file.as_path(), &destination_file)?;
-
-        let sidecar_imported =
-            import_book_sidecars(copy_mode, entry.source_file.as_path(), &destination_file)
-                .unwrap_or(false);
-
-        let imported_book_id = scanner_book_id_for_path(&destination_file);
-        if let Some(upgrade_book_id) = entry.upgrade_book_id.as_deref() {
-            let _ = migrate_upgraded_book_identity(
-                self.database_file.as_path(),
-                upgrade_book_id,
-                imported_book_id.as_str(),
-                &destination_file,
-            )
-            .await;
         }
 
-        let _ = persist_book_imported_event(
-            self.database_file.as_path(),
+        upgrade_destination_name = Some(upgrade_target.file_name.clone());
+        let upgrade_file = PathBuf::from(upgrade_target.library_root)
+            .join(upgrade_target.series_url)
+            .join(upgrade_target.file_name);
+        let _ = fs::remove_file(upgrade_file);
+    }
+
+    let Some(destination_name) = resolve_import_destination_name(
+        entry.source_file.as_path(),
+        upgrade_destination_name
+            .as_deref()
+            .or(entry.destination_name.as_deref()),
+    ) else {
+        return Err(format!(
+            "destination name for import is invalid: {}",
+            entry.destination_name.as_deref().unwrap_or_default()
+        ));
+    };
+
+    let destination_dir = PathBuf::from(&target.library_root).join(&target.series_url);
+    fs::create_dir_all(&destination_dir)
+        .map_err(|error| format!("create destination directory for import: {error}"))?;
+
+    let destination_file = destination_dir.join(destination_name);
+    apply_import_copy_mode(copy_mode, entry.source_file.as_path(), &destination_file)?;
+
+    let sidecar_imported =
+        import_book_sidecars(copy_mode, entry.source_file.as_path(), &destination_file)
+            .unwrap_or(false);
+
+    let imported_book_id = scanner_book_id_for_path(&destination_file);
+    if let Some(upgrade_book_id) = entry.upgrade_book_id.as_deref() {
+        let _ = migrate_upgraded_book_identity(
+            database_file,
+            upgrade_book_id,
             imported_book_id.as_str(),
-            target.series_id.as_str(),
             &destination_file,
-            entry.source_file.as_path(),
-            entry.upgrade_book_id.is_some(),
         )
         .await;
-
-        Ok(Some(ImportBookOutcome {
-            library_id: target.library_id,
-            imported_book_id,
-            sidecar_imported,
-        }))
     }
+
+    let _ = persist_book_imported_event(
+        database_file,
+        imported_book_id.as_str(),
+        target.series_id.as_str(),
+        &destination_file,
+        entry.source_file.as_path(),
+        entry.upgrade_book_id.is_some(),
+    )
+    .await;
+
+    Ok(Some(ImportBookOutcome {
+        library_id: target.library_id,
+        imported_book_id,
+        sidecar_imported,
+    }))
 }
 
 struct ImportSeriesTarget {

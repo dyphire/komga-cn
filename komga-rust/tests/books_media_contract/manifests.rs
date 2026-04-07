@@ -1,5 +1,546 @@
 use super::*;
 
+fn fixture_epub_manifest_extension_blob() -> Vec<u8> {
+    vec![
+        31, 139, 8, 0, 156, 175, 212, 105, 2, 255, 133, 142, 193, 10, 131, 48, 16, 68, 127, 165,
+        108, 175, 86, 241, 154, 99, 75, 123, 18, 42, 120, 44, 30, 150, 184, 38, 161, 209, 132, 100,
+        45, 22, 241, 223, 155, 30, 45, 66, 143, 51, 243, 120, 204, 2, 38, 222, 204, 76, 93, 133,
+        111, 55, 49, 136, 30, 109, 164, 12, 216, 73, 16, 143, 5, 216, 176, 37, 16, 208, 48, 6, 134,
+        12, 116, 160, 62, 197, 251, 245, 92, 55, 133, 212, 232, 153, 66, 62, 107, 30, 236, 209, 39,
+        226, 84, 38, 70, 106, 99, 187, 64, 99, 18, 180, 107, 155, 129, 197, 177, 27, 48, 60, 227,
+        198, 120, 113, 47, 10, 191, 70, 51, 160, 162, 88, 200, 239, 150, 251, 81, 237, 216, 124,
+        34, 42, 19, 121, 35, 171, 83, 121, 40, 255, 253, 83, 180, 243, 111, 253, 0, 129, 229, 31,
+        54, 3, 1, 0, 0,
+    ]
+}
+
+fn overwrite_cbz_with_single_page(
+    paths: &RuntimeDbPaths,
+    relative_book_path: &str,
+    page_name: &str,
+    page_bytes: &[u8],
+) {
+    let archive_path = paths.config_dir.join(relative_book_path);
+    let file = File::create(&archive_path).expect("cbz fixture should be recreated");
+    let mut zip = ZipWriter::new(file);
+    let options = SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Stored)
+        .unix_permissions(0o644);
+    zip.start_file(page_name, options)
+        .expect("cbz replacement page entry should be created");
+    zip.write_all(page_bytes)
+        .expect("cbz replacement page payload should be written");
+    zip.finish()
+        .expect("cbz replacement fixture should finish successfully");
+}
+
+#[tokio::test]
+async fn router_book_manifest_epub_exposes_epub_specific_shape() {
+    let paths = new_router_fixture("router-book-manifest-epub-specific-shape").await;
+    seed_router_contract_data(&paths).await;
+    write_router_epub_with_cover(&paths, "books/book-1.epub");
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for epub manifest seed");
+    for (file_name, media_type, sub_type, file_size) in [
+        (
+            "OEBPS/chapter.xhtml",
+            "application/xhtml+xml",
+            "EPUB_PAGE",
+            128_i64,
+        ),
+        ("OEBPS/images/cover.png", "image/png", "EPUB_ASSET", 67_i64),
+    ] {
+        sqlx::query(
+            "INSERT INTO MEDIA_FILE (FILE_NAME, BOOK_ID, MEDIA_TYPE, SUB_TYPE, FILE_SIZE) \
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(file_name)
+        .bind("book-1")
+        .bind(media_type)
+        .bind(sub_type)
+        .bind(file_size)
+        .execute(&pool)
+        .await
+        .expect("epub media file row should be inserted");
+    }
+    sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
+        .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
+        .bind(fixture_epub_manifest_extension_blob())
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("epub extension blob should be seeded");
+    sqlx::query("UPDATE BOOK SET LAST_MODIFIED_DATE = ? WHERE ID = ?")
+        .bind("2024-02-03 04:05:06")
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("book last modified should be updated");
+    sqlx::query("UPDATE BOOK_METADATA SET SUMMARY = ?, ISBN = ? WHERE BOOK_ID = ?")
+        .bind("Fixture summary")
+        .bind("9781234567890")
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("book metadata should be enriched for epub manifest");
+    sqlx::query("UPDATE SERIES_METADATA SET READING_DIRECTION = ? WHERE SERIES_ID = ?")
+        .bind("RIGHT_TO_LEFT")
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("series reading direction should be updated");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/manifest/epub")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("epub manifest request should build"),
+        )
+        .await
+        .expect("epub manifest request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|value| value.get("description"))
+            .and_then(Value::as_str),
+        Some("Fixture summary")
+    );
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|value| value.get("identifier"))
+            .and_then(Value::as_str),
+        Some("urn:isbn:9781234567890")
+    );
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|value| value.get("numberOfPages"))
+            .and_then(Value::as_i64),
+        Some(10)
+    );
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|value| value.get("published"))
+            .and_then(Value::as_str),
+        Some("2024-01-15")
+    );
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|value| value.get("modified"))
+            .and_then(Value::as_str),
+        Some("2024-02-03T04:05:06Z")
+    );
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|value| value.get("subject"))
+            .and_then(Value::as_array),
+        Some(&vec![Value::String("favorite-tag".to_string())])
+    );
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|value| value.get("conformsTo"))
+            .and_then(Value::as_str),
+        Some("https://readium.org/webpub-manifest/profiles/epub")
+    );
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|value| value.get("rendition"))
+            .and_then(|value| value.get("layout"))
+            .and_then(Value::as_str),
+        Some("reflowable")
+    );
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|value| value.get("language"))
+            .and_then(Value::as_str),
+        Some("EN")
+    );
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|value| value.get("readingProgression"))
+            .and_then(Value::as_str),
+        Some("rtl")
+    );
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|value| value.get("contributor"))
+            .and_then(Value::as_array),
+        Some(&vec![Value::String("Jane Writer".to_string())])
+    );
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|value| value.get("belongsTo"))
+            .and_then(|value| value.get("series"))
+            .and_then(Value::as_array)
+            .and_then(|entries| entries.first())
+            .and_then(|entry| entry.get("name"))
+            .and_then(Value::as_str),
+        Some("Series 1")
+    );
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|value| value.get("belongsTo"))
+            .and_then(|value| value.get("series"))
+            .and_then(Value::as_array)
+            .and_then(|entries| entries.first())
+            .and_then(|entry| entry.get("position"))
+            .and_then(Value::as_f64),
+        Some(1.0)
+    );
+    assert_eq!(
+        payload
+            .get("readingOrder")
+            .and_then(Value::as_array)
+            .and_then(|entries| entries.first())
+            .and_then(|entry| entry.get("href"))
+            .and_then(Value::as_str),
+        Some("http://localhost/api/v1/books/book-1/resource/OEBPS/chapter.xhtml")
+    );
+    assert_eq!(
+        payload
+            .get("readingOrder")
+            .and_then(Value::as_array)
+            .and_then(|entries| entries.first())
+            .and_then(|entry| entry.get("type"))
+            .and_then(Value::as_str),
+        Some("application/xhtml+xml")
+    );
+    assert!(
+        payload
+            .get("resources")
+            .and_then(Value::as_array)
+            .is_some_and(|entries| entries.iter().any(|entry| {
+                entry.get("href").and_then(Value::as_str)
+                    == Some("http://localhost/api/v1/books/book-1/resource/OEBPS/images/cover.png")
+                    && entry.get("type").and_then(Value::as_str) == Some("image/png")
+            })),
+        "epub manifest should expose epub asset resource: {payload:?}"
+    );
+    assert_eq!(
+        payload
+            .get("toc")
+            .and_then(Value::as_array)
+            .and_then(|entries| entries.first())
+            .and_then(|entry| entry.get("href"))
+            .and_then(Value::as_str),
+        Some("http://localhost/api/v1/books/book-1/resource/OEBPS/chapter.xhtml#part-1")
+    );
+    assert_eq!(
+        payload
+            .get("landmarks")
+            .and_then(Value::as_array)
+            .and_then(|entries| entries.first())
+            .and_then(|entry| entry.get("href"))
+            .and_then(Value::as_str),
+        Some("http://localhost/api/v1/books/book-1/resource/OEBPS/images/cover.png")
+    );
+    assert_eq!(
+        payload
+            .get("pageList")
+            .and_then(Value::as_array)
+            .and_then(|entries| entries.first())
+            .and_then(|entry| entry.get("href"))
+            .and_then(Value::as_str),
+        Some("http://localhost/api/v1/books/book-1/resource/OEBPS/chapter.xhtml#page-1")
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_manifest_dispatches_to_epub_profile_payload() {
+    let paths = new_router_fixture("router-book-manifest-default-uses-epub-profile").await;
+    seed_router_contract_data(&paths).await;
+    write_router_epub_with_cover(&paths, "books/book-1.epub");
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for generic epub manifest seed");
+    for (file_name, media_type, sub_type, file_size) in [
+        (
+            "OEBPS/chapter.xhtml",
+            "application/xhtml+xml",
+            "EPUB_PAGE",
+            128_i64,
+        ),
+        ("OEBPS/images/cover.png", "image/png", "EPUB_ASSET", 67_i64),
+    ] {
+        sqlx::query(
+            "INSERT INTO MEDIA_FILE (FILE_NAME, BOOK_ID, MEDIA_TYPE, SUB_TYPE, FILE_SIZE) \
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(file_name)
+        .bind("book-1")
+        .bind(media_type)
+        .bind(sub_type)
+        .bind(file_size)
+        .execute(&pool)
+        .await
+        .expect("generic epub manifest media file row should insert");
+    }
+    sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
+        .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
+        .bind(fixture_epub_manifest_extension_blob())
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("generic epub manifest extension should seed");
+    sqlx::query("UPDATE MEDIA SET EPUB_DIVINA_COMPATIBLE = ? WHERE BOOK_ID = ?")
+        .bind(true)
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("generic epub manifest divina compatibility should seed");
+    sqlx::query("UPDATE BOOK_METADATA SET SUMMARY = ? WHERE BOOK_ID = ?")
+        .bind("Fixture summary")
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("generic epub manifest summary should seed");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/manifest")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("generic epub manifest request should build"),
+        )
+        .await
+        .expect("generic epub manifest request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|value| value.get("description"))
+            .and_then(Value::as_str),
+        Some("Fixture summary")
+    );
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|value| value.get("conformsTo"))
+            .and_then(Value::as_str),
+        Some("https://readium.org/webpub-manifest/profiles/epub")
+    );
+    assert!(
+        payload
+            .get("links")
+            .and_then(Value::as_array)
+            .is_some_and(|entries| entries.iter().any(|entry| {
+                entry.get("href").and_then(Value::as_str)
+                    == Some("http://localhost/api/v1/books/book-1/manifest/divina")
+                    && entry.get("type").and_then(Value::as_str) == Some("application/divina+json")
+            })),
+        "generic epub manifest should expose divina alternate link when epub is compatible: {payload:?}"
+    );
+    assert_eq!(
+        payload
+            .get("readingOrder")
+            .and_then(Value::as_array)
+            .and_then(|entries| entries.first())
+            .and_then(|entry| entry.get("href"))
+            .and_then(Value::as_str),
+        Some("http://localhost/api/v1/books/book-1/resource/OEBPS/chapter.xhtml")
+    );
+    assert_eq!(
+        payload
+            .get("toc")
+            .and_then(Value::as_array)
+            .map(|entries| entries.is_empty()),
+        Some(false)
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_manifest_dispatches_to_pdf_profile_payload() {
+    let paths = new_router_fixture("router-book-manifest-default-uses-pdf-profile").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_pdf_book(
+        &paths,
+        "book-pdf-1",
+        "series-1",
+        "fixture-page.pdf",
+        "Readable Page Title",
+    )
+    .await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for generic pdf manifest metadata seed");
+    sqlx::query("UPDATE BOOK_METADATA SET SUMMARY = ? WHERE BOOK_ID = ?")
+        .bind("PDF fixture summary")
+        .bind("book-pdf-1")
+        .execute(&pool)
+        .await
+        .expect("generic pdf manifest summary should seed");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/manifest")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("generic pdf manifest request should build"),
+        )
+        .await
+        .expect("generic pdf manifest request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|value| value.get("description"))
+            .and_then(Value::as_str),
+        Some("PDF fixture summary")
+    );
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|value| value.get("conformsTo"))
+            .and_then(Value::as_str),
+        Some("https://readium.org/webpub-manifest/profiles/pdf")
+    );
+    assert!(
+        payload
+            .get("links")
+            .and_then(Value::as_array)
+            .is_some_and(|entries| entries.iter().any(|entry| {
+                entry.get("href").and_then(Value::as_str)
+                    == Some("http://localhost/api/v1/books/book-pdf-1/manifest/divina")
+                    && entry.get("type").and_then(Value::as_str) == Some("application/divina+json")
+            })),
+        "generic pdf manifest should expose divina alternate link: {payload:?}"
+    );
+    assert_eq!(
+        payload
+            .get("readingOrder")
+            .and_then(Value::as_array)
+            .and_then(|entries| entries.first())
+            .and_then(|entry| entry.get("href"))
+            .and_then(Value::as_str),
+        Some("http://localhost/api/v1/books/book-pdf-1/pages/1/raw")
+    );
+    assert_eq!(
+        payload
+            .get("readingOrder")
+            .and_then(Value::as_array)
+            .and_then(|entries| entries.first())
+            .and_then(|entry| entry.get("type"))
+            .and_then(Value::as_str),
+        Some("application/pdf")
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_manifest_dispatches_to_divina_profile_payload() {
+    let paths = new_router_fixture("router-book-manifest-default-uses-divina-profile").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_cbz_book(&paths, "book-3", "book-3.cbz", "Book 3").await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for generic divina manifest metadata seed");
+    sqlx::query("UPDATE BOOK_METADATA SET SUMMARY = ? WHERE BOOK_ID = ?")
+        .bind("Divina fixture summary")
+        .bind("book-3")
+        .execute(&pool)
+        .await
+        .expect("generic divina manifest summary should seed");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-3/manifest")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("generic divina manifest request should build"),
+        )
+        .await
+        .expect("generic divina manifest request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/divina+json")
+    );
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|value| value.get("description"))
+            .and_then(Value::as_str),
+        Some("Divina fixture summary")
+    );
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|value| value.get("conformsTo"))
+            .and_then(Value::as_str),
+        Some("https://readium.org/webpub-manifest/profiles/divina")
+    );
+    assert_eq!(
+        payload
+            .get("readingOrder")
+            .and_then(Value::as_array)
+            .and_then(|entries| entries.first())
+            .and_then(|entry| entry.get("type"))
+            .and_then(Value::as_str),
+        Some("image/png")
+    );
+
+    cleanup_router_fixture(paths);
+}
+
 #[tokio::test]
 async fn router_opds_v2_divina_manifest_uses_page_media_type_in_reading_order() {
     let paths = new_router_fixture("router-opds-v2-divina-manifest-page-media-type").await;
@@ -26,6 +567,175 @@ async fn router_opds_v2_divina_manifest_uses_page_media_type_in_reading_order() 
 
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
+    assert_eq!(
+        payload
+            .get("readingOrder")
+            .and_then(Value::as_array)
+            .and_then(|entries| entries.first())
+            .and_then(|entry| entry.get("type"))
+            .and_then(Value::as_str),
+        Some("image/png")
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_divina_manifest_exposes_jpeg_alternate_for_webp_pages() {
+    let paths = new_router_fixture("router-opds-v2-divina-manifest-webp-alternate").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_cbz_book(&paths, "book-webp-1", "book-webp-1.cbz", "Book WEBP").await;
+    overwrite_cbz_with_single_page(
+        &paths,
+        "books/book-webp-1.cbz",
+        "page-1.webp",
+        &fixture_png_bytes(),
+    );
+
+    let mut config = runtime_config_for_paths(&paths);
+    config.mode = RuntimeMode::Isolated;
+    let app = build_router_with_config(&config);
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/books/book-webp-1/manifest/divina")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v2 webp divina manifest request should build"),
+        )
+        .await
+        .expect("opds v2 webp divina manifest request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload
+            .get("readingOrder")
+            .and_then(Value::as_array)
+            .and_then(|entries| entries.first())
+            .and_then(|entry| entry.get("type"))
+            .and_then(Value::as_str),
+        Some("image/webp")
+    );
+    assert_eq!(
+        payload
+            .get("readingOrder")
+            .and_then(Value::as_array)
+            .and_then(|entries| entries.first())
+            .and_then(|entry| entry.get("alternate"))
+            .and_then(Value::as_array)
+            .and_then(|entries| entries.first())
+            .and_then(|entry| entry.get("href"))
+            .and_then(Value::as_str),
+        Some(
+            "http://localhost/opds/v2/books/book-webp-1/pages/1?contentNegotiation=false&convert=jpeg"
+        )
+    );
+    assert_eq!(
+        payload
+            .get("readingOrder")
+            .and_then(Value::as_array)
+            .and_then(|entries| entries.first())
+            .and_then(|entry| entry.get("alternate"))
+            .and_then(Value::as_array)
+            .and_then(|entries| entries.first())
+            .and_then(|entry| entry.get("type"))
+            .and_then(Value::as_str),
+        Some("image/jpeg")
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_divina_manifest_accepts_divina_compatible_epub() {
+    let paths = new_router_fixture("router-opds-v2-divina-manifest-compatible-epub").await;
+    seed_router_contract_data(&paths).await;
+    write_router_epub_with_cover(&paths, "books/book-1.epub");
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for opds epub divina manifest seed");
+    for (file_name, media_type, sub_type, file_size) in [
+        (
+            "OEBPS/chapter.xhtml",
+            "application/xhtml+xml",
+            "EPUB_PAGE",
+            128_i64,
+        ),
+        ("OEBPS/images/cover.png", "image/png", "EPUB_ASSET", 67_i64),
+    ] {
+        sqlx::query(
+            "INSERT INTO MEDIA_FILE (FILE_NAME, BOOK_ID, MEDIA_TYPE, SUB_TYPE, FILE_SIZE) \
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(file_name)
+        .bind("book-1")
+        .bind(media_type)
+        .bind(sub_type)
+        .bind(file_size)
+        .execute(&pool)
+        .await
+        .expect("opds epub divina manifest media file row should insert");
+    }
+    sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
+        .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
+        .bind(fixture_epub_manifest_extension_blob())
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("opds epub divina manifest extension should seed");
+    sqlx::query("UPDATE MEDIA SET EPUB_DIVINA_COMPATIBLE = ? WHERE BOOK_ID = ?")
+        .bind(true)
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("opds epub divina compatibility should seed");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/books/book-1/manifest/divina")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds epub divina manifest request should build"),
+        )
+        .await
+        .expect("opds epub divina manifest request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/opds-publication+json")
+    );
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|value| value.get("conformsTo"))
+            .and_then(Value::as_str),
+        Some("https://readium.org/webpub-manifest/profiles/divina")
+    );
+    assert_eq!(
+        payload
+            .get("readingOrder")
+            .and_then(Value::as_array)
+            .and_then(|entries| entries.first())
+            .and_then(|entry| entry.get("href"))
+            .and_then(Value::as_str),
+        Some("http://localhost/opds/v2/books/book-1/pages/1?contentNegotiation=false")
+    );
     assert_eq!(
         payload
             .get("readingOrder")

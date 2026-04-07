@@ -48,6 +48,7 @@ pub struct SseSnapshot {
     pub books: HashMap<String, BookSnapshot>,
     pub readlists: HashMap<String, ReadListSnapshot>,
     pub collections: HashMap<String, CollectionSnapshot>,
+    pub book_imports: Vec<BookImportSnapshot>,
     pub thumbnails_book: HashMap<String, ThumbnailBookSnapshot>,
     pub thumbnails_series: HashMap<String, ThumbnailSnapshot>,
     pub thumbnails_collection: HashMap<String, ThumbnailCollectionSnapshot>,
@@ -84,6 +85,16 @@ pub struct ReadListSnapshot {
 pub struct CollectionSnapshot {
     pub series_ids: Vec<String>,
     pub last_modified: String,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct BookImportSnapshot {
+    pub event_id: String,
+    pub book_id: Option<String>,
+    pub source_file: String,
+    pub success: bool,
+    pub message: Option<String>,
+    pub timestamp: String,
 }
 
 #[derive(Clone, Eq, PartialEq)]

@@ -93,7 +93,7 @@ pub(super) fn opds_v1_navigation_feed_response_with_extra_links(
     );
     body.push_str(format!("<id>{}</id>", xml_escape(feed_id)).as_str());
     body.push_str(format!("<title>{}</title>", xml_escape(title)).as_str());
-    body.push_str(format!("<updated>{}</updated><author><name>Komga</name><uri>https://github.com/gotson/komga</uri></author>", xml_escape(&feed_updated)).as_str());
+    body.push_str(format!("<updated>{}</updated><author><name>Komga</name><uri>https://github.com/huihuimoe/komga-riir</uri></author>", xml_escape(&feed_updated)).as_str());
     body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"self\" href=\"{}\"/>", xml_escape(&self_href)).as_str());
     body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"start\" href=\"{}\"/>", xml_escape(&start_href)).as_str());
     for link in extra_links {
@@ -169,7 +169,7 @@ pub(super) fn opds_v1_library_series_feed_response(
     );
     body.push_str(format!("<id>{}</id>", xml_escape(feed_id)).as_str());
     body.push_str(format!("<title>{}</title>", xml_escape(title)).as_str());
-    body.push_str(format!("<updated>{}</updated><author><name>Komga</name><uri>https://github.com/gotson/komga</uri></author>", xml_escape(feed_updated.as_str())).as_str());
+    body.push_str(format!("<updated>{}</updated><author><name>Komga</name><uri>https://github.com/huihuimoe/komga-riir</uri></author>", xml_escape(feed_updated.as_str())).as_str());
     body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"self\" href=\"{}\"/>", xml_escape(&self_href)).as_str());
     body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"start\" href=\"{}\"/>", xml_escape(&start_href)).as_str());
     if page > 0 {
@@ -244,7 +244,7 @@ pub(super) fn opds_v1_acquisition_feed_response_with_entries(
     );
     body.push_str(format!("<id>{}</id>", xml_escape(feed_id)).as_str());
     body.push_str(format!("<title>{}</title>", xml_escape(title)).as_str());
-    body.push_str(format!("<updated>{}</updated><author><name>Komga</name><uri>https://github.com/gotson/komga</uri></author>", xml_escape(feed_updated.as_str())).as_str());
+    body.push_str(format!("<updated>{}</updated><author><name>Komga</name><uri>https://github.com/huihuimoe/komga-riir</uri></author>", xml_escape(feed_updated.as_str())).as_str());
     body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=acquisition\" rel=\"self\" href=\"{}\"/>", xml_escape(&self_href)).as_str());
     body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"start\" href=\"{}\"/>", xml_escape(&start_href)).as_str());
     if let Some((page, has_next)) = pagination {

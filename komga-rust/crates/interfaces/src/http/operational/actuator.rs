@@ -8,10 +8,14 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use crate::http::identity_access::auth::require_admin;
+use crate::http::identity_access::auth::{require_admin, resolved_auth_user, user_is_admin};
 use crate::operational_runtime_access::metrics as operational_metrics_access;
 
 use super::super::OperationalState;
+
+const PRODUCT_GROUP: &str = "moe.huihui";
+const PRODUCT_ARTIFACT: &str = "komga";
+const PRODUCT_NAME: &str = "komga-rust";
 
 pub(crate) async fn actuator_root(headers: HeaderMap) -> Response {
     if let Some(response) = require_admin(&headers) {
@@ -31,10 +35,20 @@ pub(crate) async fn actuator_root(headers: HeaderMap) -> Response {
     .into_response()
 }
 
-pub(crate) async fn actuator_health(Extension(state): Extension<OperationalState>) -> Response {
+pub(crate) async fn actuator_health(
+    headers: HeaderMap,
+    Extension(state): Extension<OperationalState>,
+) -> Response {
     let db_ready = state.runtime.database_file.exists();
     let tasks_ready = state.runtime.tasks_db_file.exists();
     let status = if db_ready { "UP" } else { "DOWN" };
+
+    if resolved_auth_user(&headers)
+        .as_ref()
+        .is_none_or(|user| !user_is_admin(user))
+    {
+        return Json(json!({ "status": status })).into_response();
+    }
 
     Json(json!({
         "status": status,
@@ -72,6 +86,12 @@ pub(crate) async fn actuator_info(
     let version = std::env::var("KOMGA_VERSION").ok();
 
     let mut payload = serde_json::Map::new();
+    payload.insert(
+        "build".to_string(),
+        build_info_json(version.as_deref(), build_time.as_deref()),
+    );
+    payload.insert("os".to_string(), os_info_json());
+
     if branch.is_some() || commit_id.is_some() || commit_time.is_some() {
         payload.insert(
             "git".to_string(),
@@ -84,17 +104,93 @@ pub(crate) async fn actuator_info(
             }),
         );
     }
-    if version.is_some() || build_time.is_some() {
-        payload.insert(
-            "build".to_string(),
-            json!({
-                "version": version,
-                "time": build_time,
-            }),
-        );
+    Json(Value::Object(payload)).into_response()
+}
+
+fn build_info_json(version: Option<&str>, build_time: Option<&str>) -> Value {
+    let version = version
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(product_version);
+
+    let mut build = serde_json::Map::from_iter([
+        (
+            "artifact".to_string(),
+            Value::String(PRODUCT_ARTIFACT.to_string()),
+        ),
+        ("name".to_string(), Value::String(PRODUCT_NAME.to_string())),
+        ("version".to_string(), Value::String(version)),
+        (
+            "group".to_string(),
+            Value::String(PRODUCT_GROUP.to_string()),
+        ),
+    ]);
+
+    if let Some(build_time) = build_time.filter(|value| !value.is_empty()) {
+        build.insert("time".to_string(), Value::String(build_time.to_string()));
     }
 
-    Json(Value::Object(payload)).into_response()
+    Value::Object(build)
+}
+
+fn os_info_json() -> Value {
+    let mut os = serde_json::Map::from_iter([
+        (
+            "name".to_string(),
+            Value::String(normalized_os_name(std::env::consts::OS)),
+        ),
+        (
+            "arch".to_string(),
+            Value::String(normalized_arch(std::env::consts::ARCH)),
+        ),
+    ]);
+
+    if let Some(version) = os_version() {
+        os.insert("version".to_string(), Value::String(version));
+    }
+
+    Value::Object(os)
+}
+
+fn product_version() -> String {
+    include_str!("../../../../../../gradle.properties")
+        .lines()
+        .find_map(|line: &str| line.strip_prefix("version="))
+        .map(str::trim)
+        .filter(|value: &&str| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
+}
+
+fn normalized_os_name(os: &str) -> String {
+    match os {
+        "linux" => "Linux".to_string(),
+        "macos" => "macOS".to_string(),
+        "windows" => "Windows".to_string(),
+        other => {
+            let mut chars = other.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        }
+    }
+}
+
+fn normalized_arch(arch: &str) -> String {
+    match arch {
+        "x86_64" => "amd64".to_string(),
+        "aarch64" => "arm64".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn os_version() -> Option<String> {
+    ["/proc/sys/kernel/osrelease", "/proc/version_signature"]
+        .into_iter()
+        .find_map(|path| fs::read_to_string(path).ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 pub(crate) async fn actuator_logfile(
@@ -215,6 +311,7 @@ async fn metric_detail_json(
             simple_metric(
                 metric_name,
                 "Libraries count",
+                Some("count"),
                 operational_metrics_access::load_libraries_count(database_file).await?,
             )
             .await,
@@ -223,6 +320,7 @@ async fn metric_detail_json(
             metric_library_value(
                 metric_name,
                 "Series count grouped by library",
+                Some("count"),
                 operational_metrics_access::load_series_grouped_by_library(database_file).await?,
                 tag_filters.get("library").map(String::as_str),
             )
@@ -232,6 +330,7 @@ async fn metric_detail_json(
             metric_library_value(
                 metric_name,
                 "Books count grouped by library",
+                Some("count"),
                 operational_metrics_access::load_books_grouped_by_library(database_file).await?,
                 tag_filters.get("library").map(String::as_str),
             )
@@ -241,6 +340,7 @@ async fn metric_detail_json(
             metric_library_value(
                 metric_name,
                 "Books file size grouped by library",
+                Some("bytes"),
                 operational_metrics_access::load_books_filesize_grouped_by_library(database_file)
                     .await?,
                 tag_filters.get("library").map(String::as_str),
@@ -251,6 +351,7 @@ async fn metric_detail_json(
             metric_library_value(
                 metric_name,
                 "Sidecars count grouped by library",
+                Some("count"),
                 operational_metrics_access::load_sidecars_grouped_by_library(database_file).await?,
                 tag_filters.get("library").map(String::as_str),
             )
@@ -260,6 +361,7 @@ async fn metric_detail_json(
             simple_metric(
                 metric_name,
                 "Collections count",
+                Some("count"),
                 operational_metrics_access::load_collections_count(database_file).await?,
             )
             .await,
@@ -268,6 +370,7 @@ async fn metric_detail_json(
             simple_metric(
                 metric_name,
                 "Read lists count",
+                Some("count"),
                 operational_metrics_access::load_readlists_count(database_file).await?,
             )
             .await,
@@ -334,6 +437,7 @@ async fn metric_tasks_failure(database_file: &Path) -> Result<Value, String> {
 async fn metric_library_value(
     name: &str,
     description: &str,
+    base_unit: Option<&str>,
     values: Vec<(String, f64)>,
     requested_library: Option<&str>,
 ) -> Result<Value, String> {
@@ -346,27 +450,57 @@ async fn metric_library_value(
         None => values.iter().map(|(_, value)| *value).sum::<f64>(),
     };
 
-    Ok(json!({
-        "name": name,
-        "description": description,
-        "measurements": [{ "statistic": "VALUE", "value": value }],
-        "availableTags": [
-            {
-                "tag": "library",
-                "values": values
-                    .iter()
-                    .map(|(library, _)| library.clone())
-                    .collect::<Vec<_>>(),
-            }
-        ]
-    }))
+    let mut metric = serde_json::Map::from_iter([
+        ("name".to_string(), Value::String(name.to_string())),
+        (
+            "description".to_string(),
+            Value::String(description.to_string()),
+        ),
+        (
+            "measurements".to_string(),
+            json!([{ "statistic": "VALUE", "value": value }]),
+        ),
+        (
+            "availableTags".to_string(),
+            json!([
+                {
+                    "tag": "library",
+                    "values": values
+                        .iter()
+                        .map(|(library, _)| library.clone())
+                        .collect::<Vec<_>>(),
+                }
+            ]),
+        ),
+    ]);
+    if let Some(base_unit) = base_unit {
+        metric.insert("baseUnit".to_string(), Value::String(base_unit.to_string()));
+    }
+
+    Ok(Value::Object(metric))
 }
 
-async fn simple_metric(name: &str, description: &str, value: f64) -> Value {
-    json!({
-        "name": name,
-        "description": description,
-        "measurements": [{ "statistic": "VALUE", "value": value }],
-        "availableTags": [],
-    })
+async fn simple_metric(
+    name: &str,
+    description: &str,
+    base_unit: Option<&str>,
+    value: f64,
+) -> Value {
+    let mut metric = serde_json::Map::from_iter([
+        ("name".to_string(), Value::String(name.to_string())),
+        (
+            "description".to_string(),
+            Value::String(description.to_string()),
+        ),
+        (
+            "measurements".to_string(),
+            json!([{ "statistic": "VALUE", "value": value }]),
+        ),
+        ("availableTags".to_string(), Value::Array(vec![])),
+    ]);
+    if let Some(base_unit) = base_unit {
+        metric.insert("baseUnit".to_string(), Value::String(base_unit.to_string()));
+    }
+
+    Value::Object(metric)
 }

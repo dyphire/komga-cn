@@ -199,13 +199,6 @@ pub(super) async fn load_series(
     Ok(record.map(map_series_record))
 }
 
-pub(super) async fn load_series_books(
-    database_file: &Path,
-    series_id: &str,
-) -> Result<Vec<PersistedSeriesBook>, String> {
-    load_series_books_paged(database_file, series_id, "", 0, i64::MAX).await
-}
-
 pub(super) async fn load_series_books_paged(
     database_file: &Path,
     series_id: &str,
@@ -222,6 +215,13 @@ pub(super) async fn load_series_books_paged(
     )
     .await?;
     Ok(records.into_iter().map(map_series_book_record).collect())
+}
+
+pub(super) async fn load_series_tags(
+    database_file: &Path,
+    series_id: &str,
+) -> Result<Vec<String>, String> {
+    opds_persisted_access::load_series_tags(database_file, series_id).await
 }
 
 pub(super) async fn load_readlist(
@@ -262,6 +262,8 @@ pub(super) async fn load_unified_search_results(
                 id: row.id,
                 title: row.title,
                 library_id: row.library_id,
+                age_rating: row.age_rating,
+                sharing_labels: row.sharing_labels,
                 last_modified: row.last_modified,
             })
             .collect(),
@@ -269,8 +271,32 @@ pub(super) async fn load_unified_search_results(
             .into_iter()
             .map(|row| PersistedBookSearchResult {
                 id: row.id,
+                series_id: row.series_id,
                 title: row.title,
+                series_title: row.series_title,
+                number: row.number,
+                number_sort: row.number_sort,
+                summary: row.summary,
+                isbn: row.isbn,
+                authors: row
+                    .authors
+                    .into_iter()
+                    .map(|author| crate::opds_catalog_access::OpdsBookAuthorEntry {
+                        name: author.name,
+                        role: author.role,
+                    })
+                    .collect(),
+                tags: row.tags,
+                file_name: row.file_name,
+                file_size: row.file_size,
+                media_type: row.media_type,
+                page_count: row.page_count,
+                epub_divina_compatible: row.epub_divina_compatible,
                 library_id: row.library_id,
+                age_rating: row.age_rating,
+                sharing_labels: row.sharing_labels,
+                last_modified: row.last_modified,
+                release_date: row.release_date,
             })
             .collect(),
         collection_rows
@@ -329,6 +355,8 @@ pub(super) async fn load_opds_v1_series_search_results(
                     id: row.id,
                     title: row.title,
                     library_id: row.library_id,
+                    age_rating: row.age_rating,
+                    sharing_labels: row.sharing_labels,
                     last_modified: row.last_modified,
                 })
         })
@@ -577,6 +605,7 @@ fn map_series_record(row: opds_persisted_access::PersistedSeriesRecord) -> Persi
         id: row.id,
         library_id: row.library_id,
         title: row.title,
+        summary: row.summary,
         age_rating: row.age_rating,
         sharing_labels: row.sharing_labels,
         last_modified: row.last_modified,
@@ -588,9 +617,22 @@ fn map_series_book_record(
 ) -> PersistedSeriesBook {
     PersistedSeriesBook {
         id: row.id,
+        series_id: row.series_id,
         title: row.title,
+        series_title: row.series_title,
+        number: row.number,
+        number_sort: row.number_sort,
         summary: row.summary,
-        authors: row.authors,
+        isbn: row.isbn,
+        authors: row
+            .authors
+            .into_iter()
+            .map(|author| crate::opds_catalog_access::OpdsBookAuthorEntry {
+                name: author.name,
+                role: author.role,
+            })
+            .collect(),
+        tags: row.tags,
         file_name: row.file_name,
         file_size: row.file_size,
         media_type: row.media_type,
@@ -598,7 +640,11 @@ fn map_series_book_record(
         epub_divina_compatible: row.epub_divina_compatible,
         last_read: row.last_read,
         last_read_date: row.last_read_date,
+        library_id: row.library_id,
+        age_rating: row.age_rating,
+        sharing_labels: row.sharing_labels,
         last_modified: row.last_modified,
+        release_date: row.release_date,
     }
 }
 

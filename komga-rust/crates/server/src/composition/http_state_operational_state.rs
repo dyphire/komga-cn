@@ -65,6 +65,8 @@ pub(super) fn compose_operational_state(
         sse: Arc::new(Mutex::new(SseOperationalState {
             accepting_connections: true,
             book_import_events: Vec::<BookImportSseEvent>::new(),
+            session_expired_events: Vec::new(),
+            next_session_expired_event_id: 1,
         })),
         announcements_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
         releases_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),

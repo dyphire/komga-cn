@@ -256,7 +256,7 @@ async fn load_cached_releases(state: &OperationalState) -> Result<Option<Value>,
     }
 
     let url = std::env::var("KOMGA_RUST_RELEASES_URL").unwrap_or_else(|_| {
-        "https://api.github.com/repos/gotson/komga/releases?per_page=20".to_string()
+        "https://api.github.com/repos/huihuimoe/komga-riir/releases?per_page=20".to_string()
     });
     let upstream = Client::new()
         .get(url)

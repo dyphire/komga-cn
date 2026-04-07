@@ -1,5 +1,6 @@
-use super::super::types::PersistedReadlistBook;
+use super::super::types::{PersistedBookSearchResult, PersistedReadlistBook, PersistedSeriesBook};
 use super::*;
+use serde_json::Value;
 
 pub(crate) async fn opds_v2_libraries_collections(
     headers: HeaderMap,
@@ -192,6 +193,7 @@ pub(crate) async fn opds_v2_library_readlists(
 
 pub(crate) async fn opds_v2_series(
     headers: HeaderMap,
+    uri: Uri,
     database_file: &Path,
     series_id: &str,
 ) -> Response {
@@ -220,39 +222,151 @@ pub(crate) async fn opds_v2_series(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    let books = match load_series_books(database_file, &series.id).await {
-        Ok(books) => books,
+    let restrictions = opds_restrictions(&headers);
+    if !content_allowed_by_restrictions(
+        restrictions.as_ref(),
+        series.age_rating,
+        &series.sharing_labels,
+    ) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let Some(user) = resolved_auth_user(&headers) else {
+        return opds_catalog_unauthorized_response(&headers);
+    };
+    let current_user_id = user_id(&user).to_string();
+
+    let tag = uri.query().and_then(|raw| {
+        raw.split('&').find_map(|pair| {
+            let (key, value) = pair.split_once('=')?;
+            (key == "tag").then_some(percent_decode(&value.replace('+', " ")))
+        })
+    });
+    let (page, size) = parse_page_size(uri.query().unwrap_or_default());
+
+    let books =
+        match load_series_books_paged(database_file, &series.id, &current_user_id, 0, i64::MAX)
+            .await
+        {
+            Ok(books) => books,
+            Err(error) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": format!("load OPDS series books: {error}") })),
+                )
+                    .into_response();
+            }
+        };
+
+    let visible_books = books
+        .into_iter()
+        .filter(|book| library_visible(&allowed_library_ids, &book.library_id))
+        .filter(|book| {
+            content_allowed_by_restrictions(
+                restrictions.as_ref(),
+                book.age_rating,
+                &book.sharing_labels,
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let series_tags = match load_series_tags(database_file, &series.id).await {
+        Ok(tags) => tags,
         Err(error) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("load OPDS series books: {error}") })),
+                Json(json!({ "error": format!("load OPDS series tags: {error}") })),
             )
                 .into_response();
         }
     };
 
-    let publications = books
+    let tag_links = series_tags
         .into_iter()
-        .map(|book| {
-            json!({
-                "metadata": {
-                    "title": book.title,
-                },
-                "links": [
-                    {
-                        "rel": "self",
-                        "href": app_absolute_url(&headers, format!("/opds/v2/books/{}/manifest", book.id).as_str()),
-                        "type": "application/opds-publication+json",
-                    },
-                    {
-                        "rel": "http://opds-spec.org/acquisition",
-                        "href": app_absolute_url(&headers, format!("/opds/v2/books/{}/file", book.id).as_str()),
-                        "type": book.media_type,
-                    }
-                ],
-            })
+        .map(|tag_value| {
+            let mut link = serde_json::Map::new();
+            link.insert("title".to_string(), Value::String(tag_value.clone()));
+            link.insert(
+                "href".to_string(),
+                Value::String(app_absolute_url(
+                    &headers,
+                    format!(
+                        "/opds/v2/series/{series_id}?tag={}",
+                        query_escape(tag_value.as_str())
+                    )
+                    .as_str(),
+                )),
+            );
+            link.insert(
+                "type".to_string(),
+                Value::String("application/opds+json".to_string()),
+            );
+            if tag.as_deref() == Some(tag_value.as_str()) {
+                link.insert("rel".to_string(), Value::String("self".to_string()));
+            }
+            Value::Object(link)
         })
         .collect::<Vec<_>>();
+
+    let filtered_books = visible_books
+        .into_iter()
+        .filter(|book| {
+            tag.as_ref()
+                .is_none_or(|selected| book.tags.iter().any(|value| value == selected))
+        })
+        .collect::<Vec<_>>();
+
+    let total_filtered_books = filtered_books.len();
+    let publications = filtered_books
+        .into_iter()
+        .skip(page.saturating_mul(size))
+        .take(size)
+        .map(|book| opds_publication_for_feed_entry(&headers, &series_book_feed_entry(book)))
+        .collect::<Vec<_>>();
+
+    let self_path = format!("/opds/v2/series/{series_id}");
+    let page_path = if let Some(selected_tag) = tag.as_deref() {
+        format!("{self_path}?tag={}&size={size}", query_escape(selected_tag))
+    } else {
+        format!("{self_path}?size={size}")
+    };
+    let modified = series
+        .last_modified
+        .trim()
+        .is_empty()
+        .then(opds_now_timestamp)
+        .unwrap_or_else(|| normalize_opds_updated(series.last_modified.as_str()));
+
+    let mut links = vec![
+        json!({
+            "rel": "self",
+            "href": app_absolute_url(&headers, self_path.as_str()),
+        }),
+        json!({
+            "title": "Home",
+            "rel": "start",
+            "href": app_absolute_url(&headers, "/opds/v2/catalog"),
+            "type": "application/opds+json",
+        }),
+        json!({
+            "title": "Search",
+            "rel": "search",
+            "href": app_absolute_url(&headers, "/opds/v2/search{?query}"),
+            "type": "application/opds+json",
+            "templated": true,
+        }),
+    ];
+    if page > 0 {
+        links.push(json!({
+            "rel": "previous",
+            "href": app_absolute_url(&headers, series_page_link_path(page_path.as_str(), page.saturating_sub(1)).as_str()),
+        }));
+    }
+    if page.saturating_add(1).saturating_mul(size) < total_filtered_books {
+        links.push(json!({
+            "rel": "next",
+            "href": app_absolute_url(&headers, series_page_link_path(page_path.as_str(), page + 1).as_str()),
+        }));
+    }
 
     (
         StatusCode::OK,
@@ -263,23 +377,62 @@ pub(crate) async fn opds_v2_series(
         Json(json!({
             "metadata": {
                 "title": series.title,
+                "description": series.summary,
+                "modified": modified,
+                "itemsPerPage": size,
+                "currentPage": page + 1,
+                "numberOfItems": total_filtered_books,
             },
-            "links": [
-                {
-                    "rel": "self",
-                    "href": app_absolute_url(&headers, format!("/opds/v2/series/{}", series.id).as_str()),
-                    "type": "application/opds+json",
-                },
-                {
-                    "rel": "start",
-                    "href": app_absolute_url(&headers, "/opds/v2/catalog"),
-                    "type": "application/opds+json",
-                }
-            ],
+            "links": links,
             "publications": publications,
+            "facets": if tag_links.is_empty() {
+                Value::Null
+            } else {
+                Value::Array(vec![json!({
+                    "metadata": { "title": "Tag" },
+                    "links": tag_links,
+                })])
+            },
         })),
     )
         .into_response()
+}
+
+fn series_book_feed_entry(
+    book: PersistedSeriesBook,
+) -> crate::opds_catalog_access::OpdsBookFeedEntry {
+    crate::opds_catalog_access::OpdsBookFeedEntry {
+        id: book.id,
+        series_id: book.series_id,
+        title: book.title,
+        series_title: book.series_title,
+        number: book.number,
+        number_sort: book.number_sort,
+        summary: book.summary,
+        isbn: book.isbn,
+        authors: book.authors,
+        tags: book.tags,
+        file_name: book.file_name,
+        file_size: book.file_size,
+        media_type: book.media_type,
+        page_count: book.page_count,
+        epub_divina_compatible: book.epub_divina_compatible,
+        last_read: book.last_read,
+        last_read_date: book.last_read_date,
+        library_id: book.library_id,
+        age_rating: book.age_rating,
+        sharing_labels: book.sharing_labels,
+        last_modified: book.last_modified,
+        release_date: book.release_date,
+    }
+}
+
+fn series_page_link_path(self_path: &str, page: usize) -> String {
+    if self_path.contains('?') {
+        format!("{self_path}&page={page}")
+    } else {
+        format!("{self_path}?page={page}")
+    }
 }
 
 pub(crate) async fn opds_v2_readlist(
@@ -394,6 +547,35 @@ fn readlist_book_feed_entry(
     }
 }
 
+fn search_book_feed_entry(
+    book: PersistedBookSearchResult,
+) -> crate::opds_catalog_access::OpdsBookFeedEntry {
+    crate::opds_catalog_access::OpdsBookFeedEntry {
+        id: book.id,
+        series_id: book.series_id,
+        title: book.title,
+        series_title: book.series_title,
+        number: book.number,
+        number_sort: book.number_sort,
+        summary: book.summary,
+        isbn: book.isbn,
+        authors: book.authors,
+        tags: book.tags,
+        file_name: book.file_name,
+        file_size: book.file_size,
+        media_type: book.media_type,
+        page_count: book.page_count,
+        epub_divina_compatible: book.epub_divina_compatible,
+        last_read: None,
+        last_read_date: None,
+        library_id: book.library_id,
+        age_rating: book.age_rating,
+        sharing_labels: book.sharing_labels,
+        last_modified: book.last_modified,
+        release_date: book.release_date,
+    }
+}
+
 pub(crate) async fn opds_v2_search(
     headers: HeaderMap,
     database_file: &Path,
@@ -406,6 +588,7 @@ pub(crate) async fn opds_v2_search(
     let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
+    let restrictions = opds_restrictions(&headers);
 
     let search_query = query.unwrap_or_default().trim();
 
@@ -423,7 +606,14 @@ pub(crate) async fn opds_v2_search(
 
     let mut series_navigation = series
         .into_iter()
-        .filter(|item| library_visible(&allowed_library_ids, &item.library_id))
+        .filter(|item| {
+            library_visible(&allowed_library_ids, &item.library_id)
+                && content_allowed_by_restrictions(
+                    restrictions.as_ref(),
+                    item.age_rating,
+                    &item.sharing_labels,
+                )
+        })
         .map(|item| {
             json!({
                 "title": item.title,
@@ -436,21 +626,15 @@ pub(crate) async fn opds_v2_search(
 
     let mut book_publications = books
         .into_iter()
-        .filter(|item| library_visible(&allowed_library_ids, &item.library_id))
-        .map(|item| {
-            json!({
-                "metadata": {
-                    "title": item.title,
-                },
-                "links": [
-                    {
-                        "rel": "self",
-                        "href": app_absolute_url(&headers, format!("/opds/v2/books/{}/manifest", item.id).as_str()),
-                        "type": "application/opds-publication+json",
-                    }
-                ],
-            })
+        .filter(|item| {
+            library_visible(&allowed_library_ids, &item.library_id)
+                && content_allowed_by_restrictions(
+                    restrictions.as_ref(),
+                    item.age_rating,
+                    &item.sharing_labels,
+                )
         })
+        .map(|item| opds_publication_for_feed_entry(&headers, &search_book_feed_entry(item)))
         .collect::<Vec<_>>();
     book_publications.truncate(20);
 
@@ -460,10 +644,14 @@ pub(crate) async fn opds_v2_search(
             Ok(books) => books,
             Err(_) => continue,
         };
-        if books
-            .iter()
-            .any(|book| library_visible(&allowed_library_ids, &book.library_id))
-        {
+        if books.iter().any(|book| {
+            library_visible(&allowed_library_ids, &book.library_id)
+                && content_allowed_by_restrictions(
+                    restrictions.as_ref(),
+                    book.age_rating,
+                    &book.sharing_labels,
+                )
+        }) {
             collections_navigation.push(json!({
                 "title": item.name,
                 "href": app_absolute_url(&headers, format!("/opds/v2/collections/{}", item.id).as_str()),
@@ -479,10 +667,14 @@ pub(crate) async fn opds_v2_search(
             Ok(books) => books,
             Err(_) => continue,
         };
-        if books
-            .iter()
-            .any(|book| library_visible(&allowed_library_ids, &book.library_id))
-        {
+        if books.iter().any(|book| {
+            library_visible(&allowed_library_ids, &book.library_id)
+                && content_allowed_by_restrictions(
+                    restrictions.as_ref(),
+                    book.age_rating,
+                    &book.sharing_labels,
+                )
+        }) {
             readlist_navigation.push(json!({
                 "title": item.name,
                 "href": app_absolute_url(&headers, format!("/opds/v2/readlists/{}", item.id).as_str()),
@@ -535,6 +727,7 @@ pub(crate) async fn opds_v2_search(
         Json(json!({
             "metadata": {
                 "title": "Search results",
+                "modified": opds_now_timestamp(),
             },
             "links": [
                 {

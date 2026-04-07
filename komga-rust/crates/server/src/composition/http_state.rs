@@ -17,7 +17,6 @@ use komga_infrastructure::filesystem as infrastructure_filesystem;
 use komga_infrastructure::library_catalog::SqliteLibraryCatalogAdapter;
 use komga_infrastructure::metadata as infrastructure_metadata;
 use komga_infrastructure::opds_catalog_access as infrastructure_opds_catalog;
-use komga_infrastructure::opds_manifest_access as infrastructure_opds_manifest;
 use komga_infrastructure::opds_persisted_access as infrastructure_opds_persisted;
 use komga_infrastructure::operational_metrics_access as infrastructure_operational_metrics;
 use komga_infrastructure::operational_settings_access as infrastructure_operational_settings;
@@ -46,7 +45,7 @@ use komga_interfaces::http::state::{
     SseOperationalState, TransientBooksStore,
 };
 use komga_interfaces::{
-    BookSnapshot as InterfacesBookSnapshot,
+    BookImportSnapshot as InterfacesBookImportSnapshot, BookSnapshot as InterfacesBookSnapshot,
     ClaimInitialAdminUserResult as InterfacesClaimInitialAdminUserResult,
     CollectionSnapshot as InterfacesCollectionSnapshot,
     KoboMetadataRecord as InterfacesKoboMetadataRecord,
@@ -61,7 +60,7 @@ use komga_interfaces::{
     PersistedBookFeedRecord as InterfacesPersistedBookFeedRecord,
     PersistedBookMediaFile as InterfacesPersistedBookMediaFile,
     PersistedBookSearchRecord as InterfacesPersistedBookSearchRecord,
-    PersistedLibraryRecord as InterfacesPersistedLibraryRecord,
+    PersistedLibraryRecord as InterfacesPersistedLibraryRecord, PersistedMediaFileRecord,
     PersistedNamedRecord as InterfacesPersistedNamedRecord,
     PersistedReadProgressRecord as InterfacesPersistedReadProgressRecord,
     PersistedReadlistBookRecord as InterfacesPersistedReadlistBookRecord,
@@ -87,11 +86,10 @@ use komga_interfaces::{
 use komga_interfaces::{
     BrowsePublisherEntry as InterfacesBrowsePublisherEntry,
     BrowseSeriesNavigationEntry as InterfacesBrowseSeriesNavigationEntry,
-    ManifestBookRecord as InterfacesManifestBookRecord,
     OpdsBookFeedEntry as InterfacesOpdsBookFeedEntry, OpdsCatalogAccessBackend,
-    OpdsManifestAccessBackend, OpdsPersistedAccessBackend,
-    OpdsReadlistEntry as InterfacesOpdsReadlistEntry, OpdsSeriesEntry as InterfacesOpdsSeriesEntry,
-    install_opds_catalog_access, install_opds_manifest_access, install_opds_persisted_access,
+    OpdsPersistedAccessBackend, OpdsReadlistEntry as InterfacesOpdsReadlistEntry,
+    OpdsSeriesEntry as InterfacesOpdsSeriesEntry, install_opds_catalog_access,
+    install_opds_persisted_access,
 };
 use tokio::sync::watch;
 

@@ -26,21 +26,21 @@ pub(super) struct BooksImportEntry {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum ManifestProfile {
+pub(crate) enum ManifestProfile {
     Epub,
     Pdf,
     Divina,
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum ManifestVariant {
+pub(crate) enum ManifestVariant {
     Default,
     Epub,
     Pdf,
     Divina,
 }
 
-pub(super) enum ManifestBuildOutcome {
+pub(crate) enum ManifestBuildOutcome {
     Found(&'static str, Value),
     BadRequest(String),
     NotFound,

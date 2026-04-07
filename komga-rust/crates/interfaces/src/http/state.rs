@@ -156,6 +156,8 @@ pub struct OperationalState {
 pub struct SseOperationalState {
     pub accepting_connections: bool,
     pub book_import_events: Vec<BookImportSseEvent>,
+    pub session_expired_events: Vec<SessionExpiredSseEvent>,
+    pub next_session_expired_event_id: u64,
 }
 
 #[derive(Clone)]
@@ -164,6 +166,12 @@ pub struct BookImportSseEvent {
     pub source_file: String,
     pub success: bool,
     pub message: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct SessionExpiredSseEvent {
+    pub id: u64,
+    pub user_id: String,
 }
 
 #[derive(Clone)]

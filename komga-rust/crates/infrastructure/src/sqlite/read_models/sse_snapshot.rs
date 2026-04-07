@@ -12,6 +12,7 @@ pub struct SseSnapshot {
     pub books: HashMap<String, BookSnapshot>,
     pub readlists: HashMap<String, ReadListSnapshot>,
     pub collections: HashMap<String, CollectionSnapshot>,
+    pub book_imports: Vec<BookImportSnapshot>,
     pub thumbnails_book: HashMap<String, ThumbnailBookSnapshot>,
     pub thumbnails_series: HashMap<String, ThumbnailSnapshot>,
     pub thumbnails_collection: HashMap<String, ThumbnailCollectionSnapshot>,
@@ -48,6 +49,16 @@ pub struct ReadListSnapshot {
 pub struct CollectionSnapshot {
     pub series_ids: Vec<String>,
     pub last_modified: String,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct BookImportSnapshot {
+    pub event_id: String,
+    pub book_id: Option<String>,
+    pub source_file: String,
+    pub success: bool,
+    pub message: Option<String>,
+    pub timestamp: String,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -197,6 +208,30 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
         }
     }
 
+    let book_import_rows = sqlx::query(
+        "SELECT he.ID AS ID, he.BOOK_ID AS BOOK_ID, he.TIMESTAMP AS TIMESTAMP, \
+                MAX(CASE WHEN hep.\"KEY\" = 'source' THEN hep.VALUE END) AS SOURCE_FILE \
+         FROM HISTORICAL_EVENT he \
+         LEFT JOIN HISTORICAL_EVENT_PROPERTIES hep ON hep.ID = he.ID \
+         WHERE he.TYPE = 'BookImported' \
+         GROUP BY he.ID, he.BOOK_ID, he.TIMESTAMP \
+         ORDER BY he.TIMESTAMP ASC, he.ID ASC",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap_or_default();
+    let book_imports = book_import_rows
+        .into_iter()
+        .map(|row| BookImportSnapshot {
+            event_id: row.get::<String, _>("ID"),
+            book_id: row.try_get::<String, _>("BOOK_ID").ok(),
+            source_file: row.try_get::<String, _>("SOURCE_FILE").unwrap_or_default(),
+            success: true,
+            message: None,
+            timestamp: row.get::<String, _>("TIMESTAMP"),
+        })
+        .collect::<Vec<_>>();
+
     let read_progress_rows = sqlx::query(
         "SELECT BOOK_ID, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED \
          FROM READ_PROGRESS \
@@ -338,6 +373,7 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
         books,
         readlists,
         collections,
+        book_imports,
         thumbnails_book,
         thumbnails_series,
         thumbnails_collection,

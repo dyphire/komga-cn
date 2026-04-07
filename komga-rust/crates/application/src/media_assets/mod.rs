@@ -11,7 +11,9 @@ pub use contracts::{
 };
 pub use file_import::{
     BooksImportEntry, BooksImportPayload, ImportBookOutcome, ImportCopyMode, MediaImportPort,
-    MediaImportService, QueuedBookImportPayload, generate_prefixed_id,
+    MediaImportService, QueuedBookImportPayload, RuntimeBookImportEvent,
+    current_runtime_book_import_event_cursor, generate_prefixed_id,
+    pending_runtime_book_import_events, register_runtime_book_import_event,
 };
 pub use metadata_update::{
     BookMetadata, BookMetadataAuthor, BookMetadataLink, BookMetadataPatch, BookMetadataPort,

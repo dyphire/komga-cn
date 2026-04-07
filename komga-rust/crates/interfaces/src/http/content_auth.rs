@@ -25,6 +25,8 @@ use crate::http::identity_access::auth::{
     session_token_from_headers, unauthorized_json_response, user_id, user_is_admin,
     user_payload_json,
 };
+use crate::http::operational::register_session_expired_event;
+use crate::http::state::OperationalState;
 use crate::runtime_identity_access::{
     AuthUserAgeRestrictionInput, CreateAuthUserInput, SharedLibrariesInput, UpdateAuthUserInput,
     create_auth_user, delete_auth_user, update_auth_user,
@@ -299,6 +301,7 @@ pub(super) async fn users_delete(
     headers: HeaderMap,
     Path(target_user_id): Path<String>,
     auth_db: AuthDatabaseState,
+    state: OperationalState,
 ) -> Response {
     let Some(current_user) = authenticated_user(&headers, &auth_db).await else {
         return StatusCode::UNAUTHORIZED.into_response();
@@ -311,7 +314,11 @@ pub(super) async fn users_delete(
     }
 
     match delete_auth_user(auth_db.database_file.as_path(), &target_user_id).await {
-        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(true) => {
+            invalidate_user_sessions(&target_user_id);
+            register_session_expired_event(&state, &target_user_id);
+            StatusCode::NO_CONTENT.into_response()
+        }
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
@@ -322,6 +329,7 @@ pub(super) async fn users_update(
     Path(target_user_id): Path<String>,
     body: Value,
     auth_db: AuthDatabaseState,
+    state: OperationalState,
 ) -> Response {
     let Some(current_user) = authenticated_user(&headers, &auth_db).await else {
         return StatusCode::UNAUTHORIZED.into_response();
@@ -409,6 +417,7 @@ pub(super) async fn users_update(
         Ok(result) => {
             if result.expire_sessions {
                 invalidate_user_sessions(&target_user_id);
+                register_session_expired_event(&state, &target_user_id);
             }
             StatusCode::NO_CONTENT.into_response()
         }
@@ -469,6 +478,7 @@ pub(super) async fn users_by_id_password(
     Path(target_user_id): Path<String>,
     body: Value,
     auth_db: AuthDatabaseState,
+    state: OperationalState,
 ) -> Response {
     let Some(current_user) = authenticated_user(&headers, &auth_db).await else {
         return StatusCode::UNAUTHORIZED.into_response();
@@ -494,6 +504,7 @@ pub(super) async fn users_by_id_password(
         Some(true) => {
             if user_id(&current_user) != target_user_id {
                 invalidate_user_sessions(&target_user_id);
+                register_session_expired_event(&state, &target_user_id);
             }
             StatusCode::NO_CONTENT.into_response()
         }
@@ -528,19 +539,21 @@ pub(crate) async fn users_create_route(
 
 pub(crate) async fn users_update_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(state): Extension<OperationalState>,
     headers: HeaderMap,
     path: Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    users_update(headers, path, body, auth_db).await
+    users_update(headers, path, body, auth_db, state).await
 }
 
 pub(crate) async fn users_delete_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(state): Extension<OperationalState>,
     headers: HeaderMap,
     path: Path<String>,
 ) -> Response {
-    users_delete(headers, path, auth_db).await
+    users_delete(headers, path, auth_db, state).await
 }
 
 pub(crate) async fn users_me_password_route(
@@ -553,11 +566,12 @@ pub(crate) async fn users_me_password_route(
 
 pub(crate) async fn users_by_id_password_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(state): Extension<OperationalState>,
     headers: HeaderMap,
     path: Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    users_by_id_password(headers, path, body, auth_db).await
+    users_by_id_password(headers, path, body, auth_db, state).await
 }
 
 pub(crate) async fn users_me_api_keys_create_route(

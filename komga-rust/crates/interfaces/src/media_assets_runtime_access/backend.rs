@@ -42,6 +42,13 @@ pub trait RuntimeBookMetadataService: Send + Sync {
     ) -> futures_util::future::BoxFuture<'a, Result<Vec<String>, String>>;
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PersistedMediaFileRecord {
+    pub file_name: String,
+    pub media_type: String,
+    pub sub_type: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct MediaAssetsRuntimeAccessBackend {
     pub media_import_service:
@@ -84,6 +91,16 @@ pub struct MediaAssetsRuntimeAccessBackend {
                 String,
             ) -> futures_util::future::BoxFuture<'static, Result<Vec<String>, String>>
             + Send
+            + Sync,
+    >,
+    pub load_persisted_media_file_records: Arc<
+        dyn Fn(
+                PathBuf,
+                String,
+            ) -> futures_util::future::BoxFuture<
+                'static,
+                Result<Vec<PersistedMediaFileRecord>, String>,
+            > + Send
             + Sync,
     >,
     pub book_media_is_ready_status: Arc<

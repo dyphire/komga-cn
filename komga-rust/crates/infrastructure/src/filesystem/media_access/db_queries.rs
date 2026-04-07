@@ -7,6 +7,13 @@ use sqlx::Row;
 
 use crate::sqlite::connect_pool;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PersistedMediaFileRow {
+    pub file_name: String,
+    pub media_type: String,
+    pub sub_type: Option<String>,
+}
+
 pub async fn load_persisted_book_media(
     database_file: &Path,
     book_id: &str,
@@ -66,6 +73,41 @@ pub async fn load_persisted_book_media_files(
                 .map(|row| row.get::<String, _>("FILE_NAME"))
                 .collect()
         })
+}
+
+pub async fn load_persisted_media_file_records(
+    database_file: &Path,
+    book_id: &str,
+) -> Result<Vec<PersistedMediaFileRow>, String> {
+    if !database_file.exists() {
+        return Ok(Vec::new());
+    }
+
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("open book media file records db: {error}"))?;
+
+    sqlx::query(
+        "SELECT FILE_NAME, COALESCE(MEDIA_TYPE, '') AS MEDIA_TYPE, SUB_TYPE \
+         FROM MEDIA_FILE WHERE BOOK_ID = ? ORDER BY FILE_NAME ASC",
+    )
+    .bind(book_id)
+    .fetch_all(&pool)
+    .await
+    .map_err(|error| format!("query persisted media file records: {error}"))
+    .map(|rows| {
+        rows.into_iter()
+            .map(|row| {
+                let file_name = row.get::<String, _>("FILE_NAME");
+                let media_type = row.get::<String, _>("MEDIA_TYPE");
+                PersistedMediaFileRow {
+                    media_type: content_type_from_filename(&file_name, &media_type),
+                    file_name,
+                    sub_type: row.get::<Option<String>, _>("SUB_TYPE"),
+                }
+            })
+            .collect()
+    })
 }
 
 pub async fn book_media_is_ready_status(

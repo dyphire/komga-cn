@@ -84,7 +84,8 @@ pub use detail_access_series::{
 pub use books_detail::{book_detail, book_readlists, book_sibling_next, book_sibling_previous};
 pub use books_persistence::{
     PersistedBookSiblingDirection, load_persisted_book_detail, load_persisted_book_resource,
-    load_persisted_book_sibling_detail, resolve_book_id_for_persisted,
+    load_persisted_book_series_id, load_persisted_book_sibling_detail,
+    resolve_book_id_for_persisted,
 };
 pub use collections::{
     collection_create, collection_delete, collection_detail, collection_series, collection_update,
@@ -265,6 +266,168 @@ pub(super) struct SeriesDetailReadModel {
     books_metadata_last_modified: String,
     deleted: bool,
     oneshot: bool,
+}
+
+pub(crate) async fn load_persisted_webpub_metadata_additions(
+    database_file: &FsPath,
+    book_id: &str,
+) -> Result<Option<(Map<String, Value>, bool)>, String> {
+    let Some(book) = load_persisted_book_detail(database_file, book_id, None).await? else {
+        return Ok(None);
+    };
+
+    let series = load_persisted_series_detail(database_file, &book.series_id, None).await?;
+
+    let mut metadata = Map::new();
+    if !book.metadata_summary.is_empty() {
+        metadata.insert(
+            "description".to_string(),
+            Value::String(book.metadata_summary.clone()),
+        );
+    }
+    if !book.metadata_isbn.is_empty() {
+        metadata.insert(
+            "identifier".to_string(),
+            Value::String(format!("urn:isbn:{}", book.metadata_isbn)),
+        );
+    }
+    if book.media_pages_count > 0 {
+        metadata.insert(
+            "numberOfPages".to_string(),
+            Value::Number(book.media_pages_count.into()),
+        );
+    }
+    if let Some(release_date) = book
+        .metadata_release_date
+        .as_ref()
+        .filter(|value| !value.is_empty())
+    {
+        metadata.insert("published".to_string(), Value::String(release_date.clone()));
+    }
+    if !book.last_modified.is_empty() {
+        metadata.insert(
+            "modified".to_string(),
+            Value::String(normalize_webpub_modified(&book.last_modified)),
+        );
+    }
+    if !book.metadata_tags.is_empty() {
+        metadata.insert(
+            "subject".to_string(),
+            Value::Array(
+                book.metadata_tags
+                    .iter()
+                    .cloned()
+                    .map(Value::String)
+                    .collect(),
+            ),
+        );
+    }
+    extend_webpub_metadata_with_role_authors(&mut metadata, &book.metadata_authors);
+    if !book.series_title.is_empty() {
+        let mut series_entry = Map::new();
+        series_entry.insert("name".to_string(), Value::String(book.series_title.clone()));
+        if let Some(position) = serde_json::Number::from_f64(book.metadata_number_sort) {
+            series_entry.insert("position".to_string(), Value::Number(position));
+        }
+        metadata.insert(
+            "belongsTo".to_string(),
+            Value::Object(Map::from_iter([(
+                "series".to_string(),
+                Value::Array(vec![Value::Object(series_entry)]),
+            )])),
+        );
+    }
+
+    if let Some(series) = series {
+        if !series.language.is_empty() {
+            metadata.insert("language".to_string(), Value::String(series.language));
+        }
+        if let Some(reading_progression) =
+            webpub_reading_progression(series.reading_direction.as_str())
+        {
+            metadata.insert(
+                "readingProgression".to_string(),
+                Value::String(reading_progression.to_string()),
+            );
+        }
+    }
+
+    Ok(Some((metadata, book.media_epub_divina_compatible)))
+}
+
+fn normalize_webpub_modified(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return trimmed.to_string();
+    }
+    if OffsetDateTime::parse(trimmed, &Rfc3339).is_ok() {
+        return trimmed.to_string();
+    }
+    if let Some((date, time)) = trimmed.split_once(' ') {
+        return format!("{date}T{time}Z");
+    }
+    if trimmed.contains('T') {
+        return format!("{trimmed}Z");
+    }
+    trimmed.to_string()
+}
+
+fn webpub_reading_progression(reading_direction: &str) -> Option<&'static str> {
+    match reading_direction.trim().to_ascii_uppercase().as_str() {
+        "LEFT_TO_RIGHT" => Some("ltr"),
+        "RIGHT_TO_LEFT" => Some("rtl"),
+        "VERTICAL" | "WEBTOON" => Some("ttb"),
+        _ => None,
+    }
+}
+
+fn extend_webpub_metadata_with_role_authors(
+    metadata: &mut Map<String, Value>,
+    authors: &[BookMetadataAuthorReadModel],
+) {
+    let mut author = Vec::new();
+    let mut translator = Vec::new();
+    let mut editor = Vec::new();
+    let mut artist = Vec::new();
+    let mut illustrator = Vec::new();
+    let mut letterer = Vec::new();
+    let mut penciler = Vec::new();
+    let mut colorist = Vec::new();
+    let mut inker = Vec::new();
+    let mut contributor = Vec::new();
+
+    for entry in authors {
+        let target = match entry.role.trim().to_ascii_lowercase().as_str() {
+            "author" => &mut author,
+            "translator" => &mut translator,
+            "editor" => &mut editor,
+            "artist" => &mut artist,
+            "illustrator" => &mut illustrator,
+            "letterer" => &mut letterer,
+            "penciler" | "penciller" => &mut penciler,
+            "colorist" => &mut colorist,
+            "inker" => &mut inker,
+            _ => &mut contributor,
+        };
+        target.push(Value::String(entry.name.clone()));
+    }
+
+    for (key, values) in [
+        ("author", author),
+        ("translator", translator),
+        ("editor", editor),
+        ("artist", artist),
+        ("illustrator", illustrator),
+        ("letterer", letterer),
+        ("penciler", penciler),
+        ("colorist", colorist),
+        ("inker", inker),
+        ("contributor", contributor),
+    ] {
+        if !values.is_empty() {
+            metadata.insert(key.to_string(), Value::Array(values));
+        }
+    }
 }
 
 pub(super) fn book_detail_payload(book: &BookDetailReadModel, is_admin: bool) -> Value {

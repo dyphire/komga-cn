@@ -29,6 +29,6 @@ pub(super) use settings::{
     post_transient_book_analyze, post_transient_books, put_announcements, put_page_hash,
     update_server_settings,
 };
-pub(super) use sse::sse_events;
+pub(super) use sse::{register_session_expired_event, sse_events};
 pub(super) use webui::{webui_asset, webui_entrypoint};
 pub use webui_assets::WebUiAssets;

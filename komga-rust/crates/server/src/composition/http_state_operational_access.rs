@@ -178,6 +178,18 @@ fn map_sse_snapshot(
                 )
             })
             .collect(),
+        book_imports: value
+            .book_imports
+            .into_iter()
+            .map(|row| InterfacesBookImportSnapshot {
+                event_id: row.event_id,
+                book_id: row.book_id,
+                source_file: row.source_file,
+                success: row.success,
+                message: row.message,
+                timestamp: row.timestamp,
+            })
+            .collect(),
         thumbnails_book: value
             .thumbnails_book
             .into_iter()

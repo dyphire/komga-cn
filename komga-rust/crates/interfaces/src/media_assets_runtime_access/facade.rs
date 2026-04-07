@@ -6,6 +6,7 @@ use komga_application::media_assets::{
 };
 use serde_json::Value;
 
+use super::backend::PersistedMediaFileRecord;
 use super::backend::{RuntimeBookMetadataService, RuntimeMediaImportService, backend};
 
 pub(crate) fn media_import_service(database_file: &Path) -> Box<dyn RuntimeMediaImportService> {
@@ -64,6 +65,14 @@ pub(crate) async fn load_persisted_book_media_files(
     book_id: &str,
 ) -> Result<Vec<String>, String> {
     (backend().load_persisted_book_media_files)(database_file.to_path_buf(), book_id.to_string())
+        .await
+}
+
+pub(crate) async fn load_persisted_media_file_records(
+    database_file: &Path,
+    book_id: &str,
+) -> Result<Vec<PersistedMediaFileRecord>, String> {
+    (backend().load_persisted_media_file_records)(database_file.to_path_buf(), book_id.to_string())
         .await
 }
 

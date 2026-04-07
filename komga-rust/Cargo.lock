@@ -2440,6 +2440,7 @@ dependencies = [
  "axum",
  "base64",
  "bcrypt",
+ "http-body-util",
  "icu",
  "image",
  "komga-application",

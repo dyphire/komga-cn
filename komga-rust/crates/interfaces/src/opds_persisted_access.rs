@@ -19,6 +19,7 @@ pub struct PersistedSeriesRecord {
     pub id: String,
     pub library_id: String,
     pub title: String,
+    pub summary: String,
     pub age_rating: Option<u16>,
     pub sharing_labels: Vec<String>,
     pub last_modified: String,
@@ -26,9 +27,15 @@ pub struct PersistedSeriesRecord {
 
 pub struct PersistedSeriesBookRecord {
     pub id: String,
+    pub series_id: String,
     pub title: String,
+    pub series_title: String,
+    pub number: String,
+    pub number_sort: f64,
     pub summary: String,
-    pub authors: Vec<String>,
+    pub isbn: Option<String>,
+    pub authors: Vec<PersistedBookAuthorRecord>,
+    pub tags: Vec<String>,
     pub file_name: String,
     pub file_size: i64,
     pub media_type: String,
@@ -36,7 +43,11 @@ pub struct PersistedSeriesBookRecord {
     pub epub_divina_compatible: bool,
     pub last_read: Option<i64>,
     pub last_read_date: Option<String>,
+    pub library_id: String,
+    pub age_rating: Option<u16>,
+    pub sharing_labels: Vec<String>,
     pub last_modified: String,
+    pub release_date: Option<String>,
 }
 
 pub struct PersistedReadlistRecord {
@@ -79,13 +90,32 @@ pub struct PersistedSeriesSearchRecord {
     pub id: String,
     pub title: String,
     pub library_id: String,
+    pub age_rating: Option<u16>,
+    pub sharing_labels: Vec<String>,
     pub last_modified: String,
 }
 
 pub struct PersistedBookSearchRecord {
     pub id: String,
+    pub series_id: String,
     pub title: String,
+    pub series_title: String,
+    pub number: String,
+    pub number_sort: f64,
+    pub summary: String,
+    pub isbn: Option<String>,
+    pub authors: Vec<PersistedBookAuthorRecord>,
+    pub tags: Vec<String>,
+    pub file_name: String,
+    pub file_size: i64,
+    pub media_type: String,
+    pub page_count: i64,
+    pub epub_divina_compatible: bool,
     pub library_id: String,
+    pub age_rating: Option<u16>,
+    pub sharing_labels: Vec<String>,
+    pub last_modified: String,
+    pub release_date: Option<String>,
 }
 
 pub struct PersistedNamedRecord {
@@ -136,6 +166,8 @@ pub struct OpdsPersistedAccessBackend {
             + Send
             + Sync,
     >,
+    pub load_series_tags:
+        Arc<dyn Fn(PathBuf, String) -> BoxFuture<Result<Vec<String>, String>> + Send + Sync>,
     pub load_readlist: Arc<
         dyn Fn(PathBuf, String) -> BoxFuture<Result<Option<PersistedReadlistRecord>, String>>
             + Send
@@ -250,6 +282,13 @@ pub async fn load_readlist(
     readlist_id: &str,
 ) -> Result<Option<PersistedReadlistRecord>, String> {
     (backend().load_readlist)(database_file.to_path_buf(), readlist_id.to_string()).await
+}
+
+pub async fn load_series_tags(
+    database_file: &Path,
+    series_id: &str,
+) -> Result<Vec<String>, String> {
+    (backend().load_series_tags)(database_file.to_path_buf(), series_id.to_string()).await
 }
 
 pub async fn load_readlist_books(

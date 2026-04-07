@@ -119,6 +119,15 @@ pub async fn load_persisted_book_detail(
     Ok(model)
 }
 
+pub async fn load_persisted_book_series_id(
+    database_file: &FsPath,
+    book_id: &str,
+) -> Result<Option<String>, String> {
+    Ok(load_persisted_book_detail(database_file, book_id, None)
+        .await?
+        .map(|book| book.series_id))
+}
+
 fn parse_metadata_authors(raw: &str) -> Vec<BookMetadataAuthorReadModel> {
     raw.split('\u{001F}')
         .filter(|entry| !entry.is_empty())

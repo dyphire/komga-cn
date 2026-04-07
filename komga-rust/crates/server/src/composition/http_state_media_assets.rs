@@ -130,6 +130,24 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
                 .await
             })
         }),
+        load_persisted_media_file_records: Arc::new(|database_file, book_id| {
+            Box::pin(async move {
+                infrastructure_filesystem::load_persisted_media_file_records(
+                    database_file.as_path(),
+                    &book_id,
+                )
+                .await
+                .map(|rows| {
+                    rows.into_iter()
+                        .map(|row| PersistedMediaFileRecord {
+                            file_name: row.file_name,
+                            media_type: row.media_type,
+                            sub_type: row.sub_type,
+                        })
+                        .collect()
+                })
+            })
+        }),
         book_media_is_ready_status: Arc::new(|database_file, book_id| {
             Box::pin(async move {
                 infrastructure_filesystem::book_media_is_ready_status(

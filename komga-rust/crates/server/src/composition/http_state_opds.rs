@@ -9,27 +9,6 @@ const OPDS_SEARCH_GROUP_LIMIT: i64 = 20;
 
 pub(super) fn install_opds_access_backends(lucene_data_directory: &std::path::Path) {
     let lucene_data_directory = lucene_data_directory.to_path_buf();
-    install_opds_manifest_access(OpdsManifestAccessBackend {
-        load_manifest_book_record: Arc::new(|database_file, book_id| {
-            Box::pin(async move {
-                infrastructure_opds_manifest::load_manifest_book_record(
-                    database_file.as_path(),
-                    &book_id,
-                )
-                .await
-                .map(|value| {
-                    value.map(|row| InterfacesManifestBookRecord {
-                        title: row.title,
-                        file_name: row.file_name,
-                        media_type: row.media_type,
-                        page_count: row.page_count,
-                    })
-                })
-                .map_err(|error| error.to_string())
-            })
-        }),
-    });
-
     install_opds_catalog_access(OpdsCatalogAccessBackend {
         load_browse_series_navigation_entries: Arc::new(
             |database_file, allowed_library_ids, library_id, publishers, page, size| {
@@ -265,6 +244,13 @@ pub(super) fn install_opds_access_backends(lucene_data_directory: &std::path::Pa
                 .map_err(|error| error.to_string())
             })
         }),
+        load_series_tags: Arc::new(|database_file, series_id| {
+            Box::pin(async move {
+                infrastructure_opds_persisted::load_series_tags(database_file.as_path(), &series_id)
+                    .await
+                    .map_err(|error| error.to_string())
+            })
+        }),
         load_readlist: Arc::new(|database_file, readlist_id| {
             Box::pin(async move {
                 infrastructure_opds_persisted::load_readlist(database_file.as_path(), &readlist_id)
@@ -482,6 +468,7 @@ fn map_persisted_series_record(
         id: row.id,
         library_id: row.library_id,
         title: row.title,
+        summary: row.summary,
         age_rating: row.age_rating,
         sharing_labels: row.sharing_labels,
         last_modified: row.last_modified,
@@ -493,9 +480,19 @@ fn map_persisted_series_book_record(
 ) -> InterfacesPersistedSeriesBookRecord {
     InterfacesPersistedSeriesBookRecord {
         id: row.id,
+        series_id: row.series_id,
         title: row.title,
+        series_title: row.series_title,
+        number: row.number,
+        number_sort: row.number_sort,
         summary: row.summary,
-        authors: row.authors,
+        isbn: row.isbn,
+        authors: row
+            .authors
+            .into_iter()
+            .map(map_persisted_book_author_record)
+            .collect(),
+        tags: row.tags,
         file_name: row.file_name,
         file_size: row.file_size,
         media_type: row.media_type,
@@ -503,7 +500,11 @@ fn map_persisted_series_book_record(
         epub_divina_compatible: row.epub_divina_compatible,
         last_read: row.last_read,
         last_read_date: row.last_read_date,
+        library_id: row.library_id,
+        age_rating: row.age_rating,
+        sharing_labels: row.sharing_labels,
         last_modified: row.last_modified,
+        release_date: row.release_date,
     }
 }
 
@@ -566,6 +567,8 @@ fn map_persisted_series_search_record(
         id: row.id,
         title: row.title,
         library_id: row.library_id,
+        age_rating: row.age_rating,
+        sharing_labels: row.sharing_labels,
         last_modified: row.last_modified,
     }
 }
@@ -575,8 +578,29 @@ fn map_persisted_book_search_record(
 ) -> InterfacesPersistedBookSearchRecord {
     InterfacesPersistedBookSearchRecord {
         id: row.id,
+        series_id: row.series_id,
         title: row.title,
+        series_title: row.series_title,
+        number: row.number,
+        number_sort: row.number_sort,
+        summary: row.summary,
+        isbn: row.isbn,
+        authors: row
+            .authors
+            .into_iter()
+            .map(map_persisted_book_author_record)
+            .collect(),
+        tags: row.tags,
+        file_name: row.file_name,
+        file_size: row.file_size,
+        media_type: row.media_type,
+        page_count: row.page_count,
+        epub_divina_compatible: row.epub_divina_compatible,
         library_id: row.library_id,
+        age_rating: row.age_rating,
+        sharing_labels: row.sharing_labels,
+        last_modified: row.last_modified,
+        release_date: row.release_date,
     }
 }
 

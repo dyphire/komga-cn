@@ -682,7 +682,7 @@ pub(crate) async fn opds_v1_series_detail(
             title: book.title,
             updated,
             content,
-            authors: book.authors,
+            authors: book.authors.into_iter().map(|author| author.name).collect(),
             acquisition_media_type: book.media_type,
             acquisition_href_path: format!(
                 "/opds/v1.2/books/{}/file/{}",

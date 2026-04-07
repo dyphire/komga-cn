@@ -853,6 +853,271 @@ async fn router_opds_v2_collection_returns_empty_feed_when_series_are_filtered_b
 }
 
 #[tokio::test]
+async fn router_opds_v2_series_uses_kotlin_shape_tag_filter_and_facets() {
+    let paths = new_router_fixture("router-opds-v2-series-shape-and-tag-filter").await;
+    seed_router_contract_data(&paths).await;
+    update_router_series_catalog_fields(&paths, "series-1", false, "2024-02-20 01:02:03").await;
+    seed_catalog_book(
+        &paths,
+        "book-untagged",
+        "series-1",
+        "library-1",
+        "Book Untagged",
+        2,
+        "2024-01-16 00:00:00",
+    )
+    .await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("opds v2 series detail db should open");
+    sqlx::query("UPDATE SERIES_METADATA SET SUMMARY = ? WHERE SERIES_ID = ?")
+        .bind("Series detail summary")
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("series summary should be updated for opds series route");
+    sqlx::query("UPDATE BOOK_METADATA SET SUMMARY = ? WHERE BOOK_ID = ?")
+        .bind("Tagged book summary")
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("tagged book summary should be updated for opds series route");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/series/series-1?tag=favorite-tag&size=1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v2 series request should build"),
+        )
+        .await
+        .expect("opds v2 series request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+
+    let metadata = payload
+        .get("metadata")
+        .expect("series metadata should be present");
+    assert_eq!(
+        metadata.get("title").and_then(Value::as_str),
+        Some("Series 1")
+    );
+    assert_eq!(
+        metadata.get("description").and_then(Value::as_str),
+        Some("Series detail summary")
+    );
+    assert_eq!(
+        metadata.get("modified").and_then(Value::as_str),
+        Some("2024-02-20T01:02:03Z")
+    );
+    assert_eq!(
+        metadata.get("itemsPerPage").and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(metadata.get("currentPage").and_then(Value::as_u64), Some(1));
+    assert_eq!(
+        metadata.get("numberOfItems").and_then(Value::as_u64),
+        Some(1)
+    );
+
+    let links = payload
+        .get("links")
+        .and_then(Value::as_array)
+        .expect("series links should be present");
+    let self_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("self"))
+        .expect("series self link should be present");
+    assert_eq!(
+        self_link.get("href").and_then(Value::as_str),
+        Some("http://localhost/opds/v2/series/series-1")
+    );
+    assert!(self_link.get("type").is_none());
+    let search_link = links
+        .iter()
+        .find(|link| link.get("rel").and_then(Value::as_str) == Some("search"))
+        .expect("series search link should be present");
+    assert_eq!(
+        search_link.get("templated").and_then(Value::as_bool),
+        Some(true)
+    );
+
+    let facets = payload
+        .get("facets")
+        .and_then(Value::as_array)
+        .expect("series facets should be present");
+    assert_eq!(facets.len(), 1);
+    assert_eq!(
+        facets[0]
+            .get("metadata")
+            .and_then(|metadata| metadata.get("title"))
+            .and_then(Value::as_str),
+        Some("Tag")
+    );
+    let facet_links = facets[0]
+        .get("links")
+        .and_then(Value::as_array)
+        .expect("series tag facet links should be present");
+    assert!(facet_links.iter().any(|link| {
+        link.get("title").and_then(Value::as_str) == Some("favorite-tag")
+            && link.get("href").and_then(Value::as_str)
+                == Some("http://localhost/opds/v2/series/series-1?tag=favorite-tag")
+            && link.get("rel").and_then(Value::as_str) == Some("self")
+    }));
+
+    let publications = payload
+        .get("publications")
+        .and_then(Value::as_array)
+        .expect("series publications should be present");
+    assert_eq!(publications.len(), 1);
+    let publication = &publications[0];
+    assert_eq!(
+        publication.get("@context").and_then(Value::as_str),
+        Some("https://readium.org/webpub-manifest/context.jsonld")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("title"))
+            .and_then(Value::as_str),
+        Some("Book 1")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("description"))
+            .and_then(Value::as_str),
+        Some("Tagged book summary")
+    );
+    assert_eq!(
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("subject"))
+            .and_then(Value::as_array)
+            .and_then(|subjects| subjects.first())
+            .and_then(Value::as_str),
+        Some("favorite-tag")
+    );
+    let publication_links = publication
+        .get("links")
+        .and_then(Value::as_array)
+        .expect("series publication links should be present");
+    assert!(publication_links.iter().any(|link| {
+        link.get("rel").and_then(Value::as_str) == Some("http://www.cantook.com/api/progression")
+            && link.get("href").and_then(Value::as_str)
+                == Some("http://localhost/opds/v2/books/book-1/progression")
+    }));
+    assert!(publication_links.iter().all(|link| {
+        link.get("properties")
+            .and_then(|properties| properties.get("authenticate"))
+            .and_then(|authenticate| authenticate.get("href"))
+            .and_then(Value::as_str)
+            == Some("http://localhost/opds/v2/auth")
+    }));
+    assert!(
+        publication
+            .get("images")
+            .and_then(Value::as_array)
+            .is_some_and(|images| {
+                images
+                    .first()
+                    .and_then(|image| image.get("href"))
+                    .and_then(Value::as_str)
+                    == Some("http://localhost/opds/v2/books/book-1/thumbnail")
+            })
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_series_facets_keep_tags_from_non_ready_books() {
+    let paths = new_router_fixture("router-opds-v2-series-facets-include-non-ready-tags").await;
+    seed_router_contract_data(&paths).await;
+    seed_catalog_book(
+        &paths,
+        "book-hidden-tag",
+        "series-1",
+        "library-1",
+        "Book Hidden Tag",
+        3,
+        "2024-01-17 00:00:00",
+    )
+    .await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("opds v2 series hidden-tag db should open");
+    sqlx::query("UPDATE MEDIA SET STATUS = ? WHERE BOOK_ID = ?")
+        .bind("ERROR")
+        .bind("book-hidden-tag")
+        .execute(&pool)
+        .await
+        .expect("hidden-tag book media status should be updated");
+    sqlx::query("INSERT INTO BOOK_METADATA_TAG (BOOK_ID, TAG) VALUES (?, ?)")
+        .bind("book-hidden-tag")
+        .bind("hidden-tag")
+        .execute(&pool)
+        .await
+        .expect("hidden-tag book metadata tag should be inserted");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/series/series-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v2 series hidden-tag request should build"),
+        )
+        .await
+        .expect("opds v2 series hidden-tag request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+
+    let facets = payload
+        .get("facets")
+        .and_then(Value::as_array)
+        .expect("series facets should be present");
+    let facet_links = facets[0]
+        .get("links")
+        .and_then(Value::as_array)
+        .expect("series tag facet links should be present");
+    assert!(facet_links.iter().any(|link| {
+        link.get("title").and_then(Value::as_str) == Some("hidden-tag")
+            && link.get("href").and_then(Value::as_str)
+                == Some("http://localhost/opds/v2/series/series-1?tag=hidden-tag")
+    }));
+
+    let publications = payload
+        .get("publications")
+        .and_then(Value::as_array)
+        .expect("series publications should be present");
+    assert!(publications.iter().all(|publication| {
+        publication
+            .get("metadata")
+            .and_then(|metadata| metadata.get("title"))
+            .and_then(Value::as_str)
+            != Some("Book Hidden Tag")
+    }));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_opds_v2_readlists_unauthorized_returns_opds_auth_document() {
     let paths = new_router_fixture("router-opds-v2-readlists-auth-doc").await;
     seed_router_contract_data(&paths).await;

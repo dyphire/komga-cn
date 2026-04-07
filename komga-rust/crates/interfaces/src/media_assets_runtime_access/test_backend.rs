@@ -84,6 +84,7 @@ pub(super) fn default_test_backend() -> MediaAssetsRuntimeAccessBackend {
         load_epub_cover_bytes: Arc::new(|_| None),
         load_persisted_book_media: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         load_persisted_book_media_files: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),
+        load_persisted_media_file_records: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),
         book_media_is_ready_status: Arc::new(|_, _| Box::pin(async { Ok(false) })),
         load_persisted_series_thumbnail_media: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         load_persisted_book_pages: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),

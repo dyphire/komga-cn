@@ -1,7 +1,9 @@
 use std::collections::BTreeSet;
+use std::collections::VecDeque;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -9,6 +11,24 @@ use serde::{Deserialize, Serialize};
 use crate::task_processing::TaskQueueRecord;
 
 static GENERATED_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+const MAX_RUNTIME_BOOK_IMPORT_EVENTS: usize = 256;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RuntimeBookImportEvent {
+    pub id: u64,
+    pub book_id: Option<String>,
+    pub source_file: String,
+    pub success: bool,
+    pub message: Option<String>,
+}
+
+#[derive(Default)]
+struct RuntimeBookImportEventState {
+    last_event_id: u64,
+    events: VecDeque<RuntimeBookImportEvent>,
+}
+
+static RUNTIME_BOOK_IMPORT_EVENTS: OnceLock<Mutex<RuntimeBookImportEventState>> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -151,4 +171,56 @@ pub fn generate_prefixed_id(prefix: &str) -> String {
         .as_nanos();
     let counter = GENERATED_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("{prefix}-{timestamp:032x}{counter:016x}")
+}
+
+fn runtime_book_import_events() -> &'static Mutex<RuntimeBookImportEventState> {
+    RUNTIME_BOOK_IMPORT_EVENTS.get_or_init(|| Mutex::new(RuntimeBookImportEventState::default()))
+}
+
+pub fn current_runtime_book_import_event_cursor() -> u64 {
+    runtime_book_import_events()
+        .lock()
+        .expect("runtime book import event state lock should not be poisoned")
+        .last_event_id
+}
+
+pub fn register_runtime_book_import_event(
+    book_id: Option<String>,
+    source_file: impl Into<String>,
+    success: bool,
+    message: Option<String>,
+) {
+    let mut state = runtime_book_import_events()
+        .lock()
+        .expect("runtime book import event state lock should not be poisoned");
+    state.last_event_id += 1;
+    let event_id = state.last_event_id;
+    state.events.push_back(RuntimeBookImportEvent {
+        id: event_id,
+        book_id,
+        source_file: source_file.into(),
+        success,
+        message,
+    });
+
+    while state.events.len() > MAX_RUNTIME_BOOK_IMPORT_EVENTS {
+        state.events.pop_front();
+    }
+}
+
+pub fn pending_runtime_book_import_events(
+    last_seen_event_id: u64,
+) -> (u64, Vec<RuntimeBookImportEvent>) {
+    let state = runtime_book_import_events()
+        .lock()
+        .expect("runtime book import event state lock should not be poisoned");
+    let current_cursor = state.last_event_id;
+    let events = state
+        .events
+        .iter()
+        .filter(|event| event.id > last_seen_event_id)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    (current_cursor, events)
 }
