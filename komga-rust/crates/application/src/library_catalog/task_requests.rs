@@ -45,14 +45,14 @@ where
         &self,
         library_id: &str,
     ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {
-        let (series_ids, book_ids) = self
+        let (series_ids, books) = self
             .port
             .library_series_and_book_ids(library_id)
             .await
             .map_err(LibraryCatalogMutationError::persistence)?
             .unwrap_or_default();
         Ok(LibraryTaskResult {
-            task_records: metadata_refresh_task_records(series_ids, book_ids),
+            task_records: metadata_refresh_task_records(series_ids, books),
         })
     }
 
@@ -98,6 +98,7 @@ mod tests {
     struct TestPort {
         library: Option<LibraryRecord>,
         library_book_ids: Option<Vec<String>>,
+        library_series_and_book_ids: Option<(Vec<String>, Vec<(String, String)>)>,
     }
 
     impl LibraryCatalogMutationPort for TestPort {
@@ -144,6 +145,13 @@ mod tests {
             ready(Ok(Vec::new()))
         }
 
+        fn library_books_with_mismatched_extensions(
+            &self,
+            _library_id: &str,
+        ) -> impl std::future::Future<Output = Result<Vec<(String, String)>, String>> {
+            ready(Ok(Vec::new()))
+        }
+
         fn library_book_ids(
             &self,
             _library_id: &str,
@@ -154,9 +162,10 @@ mod tests {
         fn library_series_and_book_ids(
             &self,
             _library_id: &str,
-        ) -> impl std::future::Future<Output = Result<Option<(Vec<String>, Vec<String>)>, String>>
-        {
-            ready(Ok(None))
+        ) -> impl std::future::Future<
+            Output = Result<Option<(Vec<String>, Vec<(String, String)>)>, String>,
+        > {
+            ready(Ok(self.library_series_and_book_ids.clone()))
         }
     }
 
@@ -194,6 +203,29 @@ mod tests {
             .expect("missing libraries should still return accepted empty metadata refresh tasks");
 
         assert!(result.task_records.is_empty());
+    }
+
+    #[test]
+    fn refresh_metadata_emits_book_metadata_tasks_grouped_by_series_id() {
+        let service = LibraryTaskService::new(TestPort {
+            library_series_and_book_ids: Some((
+                vec!["series-1".to_string()],
+                vec![("book-1".to_string(), "series-1".to_string())],
+            )),
+            ..TestPort::default()
+        });
+
+        let result = block_on(service.refresh_metadata("library-1"))
+            .expect("existing metadata refresh inputs should enqueue tasks");
+
+        let metadata = result
+            .task_records
+            .iter()
+            .find(|task| task.simple_type == "REFRESH_BOOK_METADATA")
+            .expect("book metadata refresh task should be present");
+
+        assert_eq!(metadata.id, "REFRESH_BOOK_METADATA_book-1");
+        assert_eq!(metadata.group.as_deref(), Some("series-1"));
     }
 
     #[test]

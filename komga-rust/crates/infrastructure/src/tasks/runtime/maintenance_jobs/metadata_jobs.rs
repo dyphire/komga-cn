@@ -1,4 +1,7 @@
 use super::*;
+use std::collections::BTreeSet;
+
+use serde_json::Value;
 
 pub(super) fn try_execute(
     scheduler: &mut TaskQueueScheduler,
@@ -13,11 +16,15 @@ pub(super) fn try_execute(
                     "REFRESH_BOOK_METADATA task must include a book id",
                 )));
             };
-            let series_id =
-                match super::super::metadata_tasks::refresh_book_metadata(runtime, book_id) {
-                    Ok(series_id) => series_id,
-                    Err(error) => return Some(Err(error)),
-                };
+            let capabilities = refresh_book_metadata_capabilities(task);
+            let series_id = match super::super::metadata_tasks::refresh_book_metadata(
+                runtime,
+                book_id,
+                &capabilities,
+            ) {
+                Ok(series_id) => series_id,
+                Err(error) => return Some(Err(error)),
+            };
             if let Some(series_id) = series_id {
                 scheduler.enqueue(TaskQueueRecord::new(
                     format!("REFRESH_SERIES_METADATA:{series_id}"),
@@ -81,4 +88,39 @@ pub(super) fn try_execute(
     };
 
     Some(result)
+}
+
+fn refresh_book_metadata_capabilities(task: &TaskQueueRecord) -> BTreeSet<String> {
+    task.payload
+        .as_deref()
+        .and_then(|payload| serde_json::from_str::<Value>(payload).ok())
+        .and_then(|payload| payload.get("capabilities").cloned())
+        .and_then(|capabilities| capabilities.as_array().cloned())
+        .map(|capabilities| {
+            capabilities
+                .into_iter()
+                .filter_map(|value| value.as_str().map(str::to_string))
+                .collect::<BTreeSet<_>>()
+        })
+        .filter(|capabilities| !capabilities.is_empty())
+        .unwrap_or_else(default_refresh_book_metadata_capabilities)
+}
+
+fn default_refresh_book_metadata_capabilities() -> BTreeSet<String> {
+    [
+        "TITLE",
+        "SUMMARY",
+        "NUMBER",
+        "NUMBER_SORT",
+        "RELEASE_DATE",
+        "AUTHORS",
+        "TAGS",
+        "ISBN",
+        "READ_LISTS",
+        "THUMBNAILS",
+        "LINKS",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
 }

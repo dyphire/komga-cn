@@ -291,7 +291,7 @@ pub async fn library_book_ids(
 pub async fn library_series_and_book_ids(
     database_file: &Path,
     library_id: &str,
-) -> Result<Option<(Vec<String>, Vec<String>)>, sqlx::Error> {
+) -> Result<Option<(Vec<String>, Vec<(String, String)>)>, sqlx::Error> {
     let Some(_) = load_persisted_library_write_model(database_file, library_id).await? else {
         return Ok(None);
     };
@@ -307,7 +307,7 @@ pub async fn library_series_and_book_ids(
     .fetch_all(&pool)
     .await?;
     let book_rows = sqlx::query(
-        "SELECT ID \
+        "SELECT ID, SERIES_ID \
          FROM BOOK \
          WHERE LIBRARY_ID = ? \
          ORDER BY ID ASC",
@@ -323,7 +323,12 @@ pub async fn library_series_and_book_ids(
             .collect(),
         book_rows
             .into_iter()
-            .map(|row| row.get::<String, _>("ID"))
+            .map(|row| {
+                (
+                    row.get::<String, _>("ID"),
+                    row.get::<String, _>("SERIES_ID"),
+                )
+            })
             .collect(),
     )))
 }

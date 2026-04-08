@@ -1,19 +1,32 @@
 use super::*;
+use crate::tasks::adjust_analyzed_book_read_progress;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::task_queue) struct AnalyzeBookOutcome {
+    pub(in crate::task_queue) series_id: String,
+    pub(in crate::task_queue) media_status: String,
+}
 
 pub(in crate::task_queue) fn analyze_book(
     runtime: &RuntimeConfig,
     book_id: &str,
-) -> Result<(), TaskExecutionError> {
+) -> Result<AnalyzeBookOutcome, TaskExecutionError> {
     let book_id = book_id.to_string();
     let runtime = runtime.task_runtime_context();
     if !runtime.owns_main_database {
-        return Ok(());
+        return Ok(AnalyzeBookOutcome {
+            series_id: String::new(),
+            media_status: String::new(),
+        });
     }
 
     let Some(input) = analyze_book_input(runtime.database_file.as_path(), &book_id)
         .map_err(TaskExecutionError::runtime)?
     else {
-        return Ok(());
+        return Ok(AnalyzeBookOutcome {
+            series_id: String::new(),
+            media_status: String::new(),
+        });
     };
 
     let file_path = PathBuf::from(&input.root).join(&input.url);
@@ -37,6 +50,7 @@ pub(in crate::task_queue) fn analyze_book(
             })
             .collect(),
     };
+    let current_page_count = persisted.pages.len() as i64;
 
     persist_book_analysis(
         runtime.database_file.as_path(),
@@ -47,5 +61,18 @@ pub(in crate::task_queue) fn analyze_book(
     )
     .map_err(TaskExecutionError::runtime)?;
 
-    Ok(())
+    adjust_analyzed_book_read_progress(
+        runtime.database_file.as_path(),
+        &book_id,
+        &input.series_id,
+        &input.previous_media_status,
+        input.previous_page_count,
+        current_page_count,
+    )
+    .map_err(TaskExecutionError::runtime)?;
+
+    Ok(AnalyzeBookOutcome {
+        series_id: input.series_id,
+        media_status: persisted.status,
+    })
 }

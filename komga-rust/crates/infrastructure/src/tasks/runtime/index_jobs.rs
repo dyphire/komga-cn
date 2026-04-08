@@ -1,5 +1,6 @@
 use super::{RuntimeConfig, TaskExecutionError, TaskQueueRecord, TaskQueueScheduler};
 use crate::operational_settings_access::load_server_settings;
+use crate::search::SearchEntityType;
 use crate::sqlite::write_models::ServerSettingsStore;
 use serde_json::Value;
 
@@ -25,19 +26,48 @@ pub(super) fn try_execute(
                     "ANALYZE_BOOK task must include a book id",
                 )));
             };
-            super::index_tasks::analyze_book(runtime, book_id)
+            let outcome = match super::index_tasks::analyze_book(runtime, book_id) {
+                Ok(outcome) => outcome,
+                Err(error) => return Some(Err(error)),
+            };
+            if outcome.media_status.eq_ignore_ascii_case("READY") && !outcome.series_id.is_empty() {
+                let follow_up_priority = task.priority.saturating_add(1);
+                scheduler.enqueue(
+                    TaskQueueRecord::new(
+                        format!("GENERATE_BOOK_THUMBNAIL_{book_id}"),
+                        follow_up_priority,
+                        None,
+                    )
+                    .with_simple_type("GENERATE_BOOK_THUMBNAIL"),
+                );
+                scheduler.enqueue(
+                    TaskQueueRecord::new(
+                        format!("REFRESH_BOOK_METADATA_{book_id}"),
+                        follow_up_priority,
+                        Some(outcome.series_id),
+                    )
+                    .with_simple_type("REFRESH_BOOK_METADATA"),
+                );
+            }
+            Ok(())
         }
-        "REBUILD_INDEX" => super::index_tasks::rebuild_index(runtime),
+        "REBUILD_INDEX" => {
+            let entity_types = match parse_rebuild_index_entities(task.payload.as_deref()) {
+                Ok(entity_types) => entity_types,
+                Err(error) => return Some(Err(error)),
+            };
+            super::index_tasks::rebuild_index(runtime, entity_types.as_deref())
+        }
+        "UPGRADE_INDEX" | "UpgradeIndex" => {
+            // Rust-owned search indexes are always created and rebuilt by the current runtime,
+            // so there is no Lucene-era on-disk index lineage that still needs an in-place
+            // upgrade step. We still accept legacy UpgradeIndex task ids/types here so old
+            // persisted task rows or manual compatibility probes are consumed cleanly instead of
+            // surfacing an unsupported-task error to operators.
+            Ok(())
+        }
         "FIND_BOOK_THUMBNAILS_TO_REGENERATE" => {
-            let payload = task
-                .payload
-                .as_deref()
-                .and_then(|payload| serde_json::from_str::<Value>(payload).ok());
-            let for_bigger_result_only = payload
-                .as_ref()
-                .and_then(|payload| payload.get("for_bigger_result_only"))
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
+            let for_bigger_result_only = parse_for_bigger_result_only(task.payload.as_deref());
             let book_ids = if for_bigger_result_only {
                 let runtime_context = runtime.task_runtime_context();
                 let settings_store =
@@ -68,7 +98,7 @@ pub(super) fn try_execute(
                     Err(error) => return Some(Err(error)),
                 }
             } else {
-                match super::find_books_without_selected_thumbnails(runtime) {
+                match super::find_books_for_thumbnail_regeneration(runtime) {
                     Ok(ids) => ids,
                     Err(error) => return Some(Err(error)),
                 }
@@ -78,7 +108,7 @@ pub(super) fn try_execute(
                     TaskQueueRecord::new(
                         format!("GENERATE_BOOK_THUMBNAIL_{book_id}"),
                         task.priority.saturating_sub(5),
-                        Some(book_id),
+                        None,
                     )
                     .with_simple_type("GENERATE_BOOK_THUMBNAIL"),
                 );
@@ -91,12 +121,75 @@ pub(super) fn try_execute(
     Some(result)
 }
 
+fn parse_rebuild_index_entities(
+    payload: Option<&str>,
+) -> Result<Option<Vec<SearchEntityType>>, TaskExecutionError> {
+    let Some(payload) = payload else {
+        return Ok(None);
+    };
+    let payload = serde_json::from_str::<Value>(payload).map_err(|error| {
+        TaskExecutionError::runtime(format!("REBUILD_INDEX payload must be valid JSON: {error}"))
+    })?;
+    let Some(entities) = payload.get("entities") else {
+        return Ok(None);
+    };
+    if entities.is_null() {
+        return Ok(None);
+    }
+    let entity_values = entities.as_array().ok_or_else(|| {
+        TaskExecutionError::invalid_task("REBUILD_INDEX payload field 'entities' must be an array")
+    })?;
+
+    let mut parsed = Vec::new();
+    for entity in entity_values {
+        let entity_type = parse_rebuild_index_entity(entity).ok_or_else(|| {
+            TaskExecutionError::runtime(format!(
+                "REBUILD_INDEX payload contains unsupported entity selector: {entity}"
+            ))
+        })?;
+        if !parsed.contains(&entity_type) {
+            parsed.push(entity_type);
+        }
+    }
+
+    Ok(Some(parsed))
+}
+
+fn parse_rebuild_index_entity(value: &Value) -> Option<SearchEntityType> {
+    let raw = match value {
+        Value::String(value) => Some(value.as_str()),
+        Value::Object(value) => value.get("type").and_then(Value::as_str),
+        _ => None,
+    }?;
+
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "book" => Some(SearchEntityType::Book),
+        "series" => Some(SearchEntityType::Series),
+        "collection" => Some(SearchEntityType::Collection),
+        "readlist" => Some(SearchEntityType::ReadList),
+        _ => None,
+    }
+}
+
+fn parse_for_bigger_result_only(payload: Option<&str>) -> bool {
+    payload
+        .and_then(|payload| serde_json::from_str::<Value>(payload).ok())
+        .and_then(|payload| {
+            payload
+                .get("for_bigger_result_only")
+                .or_else(|| payload.get("forBiggerResultOnly"))
+                .and_then(Value::as_bool)
+        })
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::sqlite::connect_pool;
     use komga_application::task_processing::TaskQueueAdminPort;
     use komga_application::task_processing::TaskRuntimeContext;
+    use sqlx::Row;
 
     fn unique_temp_path(prefix: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
@@ -107,6 +200,22 @@ mod tests {
                 .expect("clock should be after unix epoch")
                 .as_nanos()
         ))
+    }
+
+    fn archive_fixture_path(file_name: &str) -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../komga/src/test/resources/archives")
+            .join(file_name)
+    }
+
+    fn analyzed_fixture_page_count(file_name: &str, book_url: &str) -> i64 {
+        super::super::media_helpers::analyze_book_media_file(
+            &archive_fixture_path(file_name),
+            book_url,
+        )
+        .expect("analyze-book fixture should be analyzable")
+        .pages
+        .len() as i64
     }
 
     #[tokio::test]
@@ -162,8 +271,630 @@ mod tests {
 
         assert_eq!(generated.id, "GENERATE_BOOK_THUMBNAIL_book-1");
         assert_eq!(generated.simple_type, "GENERATE_BOOK_THUMBNAIL");
-        assert_eq!(generated.group, Some("book-1".to_string()));
+        assert_eq!(generated.group, None);
 
         let _ = std::fs::remove_file(database_file);
+    }
+
+    #[tokio::test]
+    async fn thumbnail_finder_full_regeneration_targets_all_non_deleted_books() {
+        let database_file = unique_temp_path("komga-thumbnail-finder-all-books-main");
+        let tasks_db_file = unique_temp_path("komga-thumbnail-finder-all-books-tasks");
+        let lucene_dir = unique_temp_path("komga-thumbnail-finder-all-books-lucene");
+
+        let pool = connect_pool(database_file.as_path(), 1)
+            .await
+            .expect("full thumbnail finder test db should open");
+        sqlx::query(
+            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, DELETED_DATE timestamp NULL)",
+        )
+        .execute(&pool)
+        .await
+        .expect("book table should be created");
+        sqlx::query(
+            "CREATE TABLE THUMBNAIL_BOOK (ID varchar NOT NULL PRIMARY KEY, BOOK_ID varchar NOT NULL, SELECTED integer NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .expect("thumbnail book table should be created");
+        for (book_id, deleted_date) in [
+            ("book-1", Option::<String>::None),
+            ("book-2", Option::<String>::None),
+            ("book-3", Some("2025-01-01 00:00:00".to_string())),
+        ] {
+            sqlx::query("INSERT INTO BOOK (ID, DELETED_DATE) VALUES (?, ?)")
+                .bind(book_id)
+                .bind(deleted_date)
+                .execute(&pool)
+                .await
+                .expect("book row should be inserted for full thumbnail finder test");
+        }
+        sqlx::query("INSERT INTO THUMBNAIL_BOOK (ID, BOOK_ID, SELECTED) VALUES (?, ?, ?)")
+            .bind("thumb-book-1")
+            .bind("book-1")
+            .bind(true)
+            .execute(&pool)
+            .await
+            .expect("selected thumbnail row should be inserted for book-1");
+        pool.close().await;
+
+        let runtime = TaskRuntimeContext {
+            database_file: database_file.clone(),
+            tasks_db_file,
+            lucene_data_directory: lucene_dir,
+            consumes_queue: false,
+            owns_main_database: true,
+            owns_filesystem_scan_output: true,
+            owns_sidecar_output: true,
+            owns_search_index: true,
+        };
+        let mut scheduler =
+            TaskQueueScheduler::for_runtime(runtime.clone(), "thumbnail-finder-all-books-test");
+        let finder_task = TaskQueueRecord::new("FIND_BOOK_THUMBNAILS_TO_REGENERATE", 0, None)
+            .with_payload(serde_json::json!({ "for_bigger_result_only": false }).to_string());
+
+        let result = try_execute(&mut scheduler, &runtime, &finder_task, None);
+        assert!(matches!(result, Some(Ok(()))));
+
+        let mut generated_ids = Vec::new();
+        while let Some(task) = scheduler
+            .admin_mut()
+            .take_available("thumbnail-finder-all-books-assert")
+        {
+            generated_ids.push(task.id);
+        }
+        generated_ids.sort();
+
+        assert_eq!(
+            generated_ids,
+            vec![
+                "GENERATE_BOOK_THUMBNAIL_book-1".to_string(),
+                "GENERATE_BOOK_THUMBNAIL_book-2".to_string(),
+            ],
+            "full thumbnail regeneration should target every non-deleted book, even if one already has a selected thumbnail",
+        );
+
+        let _ = std::fs::remove_file(database_file);
+    }
+
+    #[tokio::test]
+    async fn analyze_book_enqueues_thumbnail_and_metadata_follow_ups_when_ready() {
+        let database_file = unique_temp_path("komga-analyze-book-follow-up-main");
+        let tasks_db_file = unique_temp_path("komga-analyze-book-follow-up-tasks");
+        let lucene_dir = unique_temp_path("komga-analyze-book-follow-up-lucene");
+        let library_root = unique_temp_path("komga-analyze-book-follow-up-root");
+        std::fs::create_dir_all(library_root.join("books"))
+            .expect("analyze-book follow-up library root should be created");
+        std::fs::copy(
+            archive_fixture_path("rar4.rar"),
+            library_root.join("books/book-1.cbr"),
+        )
+        .expect("analyze-book follow-up source fixture should be copied");
+
+        let pool = connect_pool(database_file.as_path(), 1)
+            .await
+            .expect("analyze-book follow-up db should open");
+        for ddl in [
+            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL)",
+            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, NAME varchar NOT NULL, URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL, CREATED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE TABLE BOOK_METADATA (BOOK_ID varchar NOT NULL PRIMARY KEY, TITLE varchar NULL)",
+            "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, STATUS varchar NOT NULL, MEDIA_TYPE varchar NOT NULL, PAGE_COUNT int NOT NULL DEFAULT 0, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE TABLE MEDIA_PAGE (FILE_NAME varchar NOT NULL, MEDIA_TYPE varchar NOT NULL, NUMBER int NOT NULL, BOOK_ID varchar NOT NULL, width int NULL, height int NULL, FILE_HASH varchar NOT NULL DEFAULT '', FILE_SIZE int NOT NULL DEFAULT 0)",
+            "CREATE TABLE READ_PROGRESS (BOOK_ID varchar NOT NULL, USER_ID varchar NOT NULL, PAGE int NOT NULL DEFAULT 0, COMPLETED integer NOT NULL DEFAULT 0, READ_DATE datetime NULL, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (BOOK_ID, USER_ID))",
+            "CREATE TABLE READ_PROGRESS_SERIES (SERIES_ID varchar NOT NULL, USER_ID varchar NOT NULL, READ_COUNT int NOT NULL DEFAULT 0, IN_PROGRESS_COUNT int NOT NULL DEFAULT 0, MOST_RECENT_READ_DATE datetime NULL, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (SERIES_ID, USER_ID))",
+        ] {
+            sqlx::query(ddl)
+                .execute(&pool)
+                .await
+                .expect("analyze-book follow-up fixture schema should be created");
+        }
+        sqlx::query("INSERT INTO LIBRARY (ID, ROOT) VALUES (?, ?)")
+            .bind("library-1")
+            .bind(library_root.to_string_lossy().to_string())
+            .execute(&pool)
+            .await
+            .expect("analyze-book follow-up library row should be inserted");
+        sqlx::query(
+            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, CREATED_DATE, LAST_MODIFIED_DATE) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind("book-1")
+        .bind("book-1")
+        .bind("books/book-1.cbr")
+        .bind("library-1")
+        .bind("series-1")
+        .bind("2000-01-01 00:00:00")
+        .bind("2000-01-01 00:00:00")
+        .execute(&pool)
+        .await
+        .expect("analyze-book follow-up book row should be inserted");
+        pool.close().await;
+
+        let runtime = TaskRuntimeContext {
+            database_file: database_file.clone(),
+            tasks_db_file,
+            lucene_data_directory: lucene_dir,
+            consumes_queue: false,
+            owns_main_database: true,
+            owns_filesystem_scan_output: true,
+            owns_sidecar_output: true,
+            owns_search_index: false,
+        };
+        let mut scheduler =
+            TaskQueueScheduler::for_runtime(runtime.clone(), "analyze-book-follow-up-test");
+        let task = TaskQueueRecord::new("ANALYZE_BOOK_book-1", 90, Some("series-1".to_string()))
+            .with_simple_type("ANALYZE_BOOK");
+
+        let result = try_execute(&mut scheduler, &runtime, &task, Some("book-1"));
+        assert!(matches!(result, Some(Ok(()))));
+
+        let verify_pool = connect_pool(database_file.as_path(), 1)
+            .await
+            .expect("analyze-book follow-up verify db should open");
+        let media_row =
+            sqlx::query("SELECT STATUS, PAGE_COUNT FROM MEDIA WHERE BOOK_ID = ? LIMIT 1")
+                .bind("book-1")
+                .fetch_one(&verify_pool)
+                .await
+                .expect("analyze-book follow-up media row should be queryable");
+        let book_row = sqlx::query("SELECT LAST_MODIFIED_DATE FROM BOOK WHERE ID = ? LIMIT 1")
+            .bind("book-1")
+            .fetch_one(&verify_pool)
+            .await
+            .expect("analyze-book follow-up book row should be queryable");
+        verify_pool.close().await;
+        assert_eq!(media_row.get::<String, _>("STATUS"), "READY");
+        assert!(media_row.get::<i64, _>("PAGE_COUNT") > 0);
+        assert!(
+            book_row.get::<String, _>("LAST_MODIFIED_DATE") != "2000-01-01 00:00:00",
+            "ready analyze-book should refresh BOOK last-modified for downstream SSE visibility",
+        );
+
+        let mut queued = Vec::new();
+        while let Some(task) = scheduler
+            .admin_mut()
+            .take_available("analyze-book-follow-up-assert")
+        {
+            queued.push((task.id, task.simple_type, task.priority, task.group));
+        }
+        queued.sort_by(|left, right| left.0.cmp(&right.0));
+
+        assert_eq!(
+            queued,
+            vec![
+                (
+                    "GENERATE_BOOK_THUMBNAIL_book-1".to_string(),
+                    "GENERATE_BOOK_THUMBNAIL".to_string(),
+                    91,
+                    None,
+                ),
+                (
+                    "REFRESH_BOOK_METADATA_book-1".to_string(),
+                    "REFRESH_BOOK_METADATA".to_string(),
+                    91,
+                    Some("series-1".to_string()),
+                ),
+            ],
+            "ready analyze-book must enqueue Kotlin-style thumbnail and metadata follow-up tasks",
+        );
+
+        let _ = std::fs::remove_file(database_file);
+        let _ = std::fs::remove_dir_all(library_root);
+    }
+
+    #[tokio::test]
+    async fn analyze_book_adjusts_existing_read_progress_when_outdated_page_count_changes() {
+        let database_file = unique_temp_path("komga-analyze-book-read-progress-adjust-main");
+        let tasks_db_file = unique_temp_path("komga-analyze-book-read-progress-adjust-tasks");
+        let lucene_dir = unique_temp_path("komga-analyze-book-read-progress-adjust-lucene");
+        let library_root = unique_temp_path("komga-analyze-book-read-progress-adjust-root");
+        std::fs::create_dir_all(library_root.join("books"))
+            .expect("analyze-book read-progress adjust root should be created");
+        std::fs::copy(
+            archive_fixture_path("rar4.rar"),
+            library_root.join("books/book-1.cbr"),
+        )
+        .expect("analyze-book read-progress adjust source fixture should be copied");
+
+        let pool = connect_pool(database_file.as_path(), 1)
+            .await
+            .expect("analyze-book read-progress adjust db should open");
+        for ddl in [
+            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL)",
+            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, NAME varchar NOT NULL, URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL, CREATED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, DELETED_DATE datetime NULL)",
+            "CREATE TABLE BOOK_METADATA (BOOK_ID varchar NOT NULL PRIMARY KEY, TITLE varchar NULL)",
+            "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, STATUS varchar NOT NULL, MEDIA_TYPE varchar NOT NULL, PAGE_COUNT int NOT NULL DEFAULT 0, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE TABLE MEDIA_PAGE (FILE_NAME varchar NOT NULL, MEDIA_TYPE varchar NOT NULL, NUMBER int NOT NULL, BOOK_ID varchar NOT NULL, width int NULL, height int NULL, FILE_HASH varchar NOT NULL DEFAULT '', FILE_SIZE int NOT NULL DEFAULT 0)",
+            "CREATE TABLE READ_PROGRESS (BOOK_ID varchar NOT NULL, USER_ID varchar NOT NULL, PAGE int NOT NULL DEFAULT 0, COMPLETED integer NOT NULL DEFAULT 0, READ_DATE datetime NULL, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (BOOK_ID, USER_ID))",
+            "CREATE TABLE READ_PROGRESS_SERIES (SERIES_ID varchar NOT NULL, USER_ID varchar NOT NULL, READ_COUNT int NOT NULL DEFAULT 0, IN_PROGRESS_COUNT int NOT NULL DEFAULT 0, MOST_RECENT_READ_DATE datetime NULL, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (SERIES_ID, USER_ID))",
+        ] {
+            sqlx::query(ddl)
+                .execute(&pool)
+                .await
+                .expect("analyze-book read-progress adjust schema should be created");
+        }
+        sqlx::query("INSERT INTO LIBRARY (ID, ROOT) VALUES (?, ?)")
+            .bind("library-1")
+            .bind(library_root.to_string_lossy().to_string())
+            .execute(&pool)
+            .await
+            .expect("analyze-book read-progress adjust library row should be inserted");
+        sqlx::query(
+            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind("book-1")
+        .bind("book-1")
+        .bind("books/book-1.cbr")
+        .bind("library-1")
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("analyze-book read-progress adjust book row should be inserted");
+        sqlx::query(
+            "INSERT INTO MEDIA (BOOK_ID, STATUS, MEDIA_TYPE, PAGE_COUNT) VALUES (?, ?, ?, ?)",
+        )
+        .bind("book-1")
+        .bind("OUTDATED")
+        .bind("application/x-rar-compressed; version=4")
+        .bind(10_i64)
+        .execute(&pool)
+        .await
+        .expect("analyze-book read-progress adjust media row should be inserted");
+        sqlx::query(
+            "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, READ_DATE, LAST_MODIFIED_DATE) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind("book-1")
+        .bind("user-completed")
+        .bind(10_i64)
+        .bind(true)
+        .bind("2001-01-01 00:00:00")
+        .bind("2001-01-01 00:00:00")
+        .execute(&pool)
+        .await
+        .expect("completed read progress row should be inserted");
+        sqlx::query(
+            "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, READ_DATE, LAST_MODIFIED_DATE) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind("book-1")
+        .bind("user-incomplete")
+        .bind(4_i64)
+        .bind(false)
+        .bind("2001-01-02 00:00:00")
+        .bind("2001-01-02 00:00:00")
+        .execute(&pool)
+        .await
+        .expect("incomplete read progress row should be inserted");
+        for (user_id, read_count, in_progress_count, most_recent_read_date) in [
+            ("user-completed", 1_i64, 0_i64, Some("2001-01-01 00:00:00")),
+            ("user-incomplete", 0_i64, 1_i64, Some("2001-01-02 00:00:00")),
+        ] {
+            sqlx::query(
+                "INSERT INTO READ_PROGRESS_SERIES (SERIES_ID, USER_ID, READ_COUNT, IN_PROGRESS_COUNT, MOST_RECENT_READ_DATE, LAST_MODIFIED_DATE) VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind("series-1")
+            .bind(user_id)
+            .bind(read_count)
+            .bind(in_progress_count)
+            .bind(most_recent_read_date)
+            .bind("2000-01-01 00:00:00")
+            .execute(&pool)
+            .await
+            .expect("series read progress row should be inserted");
+        }
+        pool.close().await;
+
+        let runtime = TaskRuntimeContext {
+            database_file: database_file.clone(),
+            tasks_db_file,
+            lucene_data_directory: lucene_dir,
+            consumes_queue: false,
+            owns_main_database: true,
+            owns_filesystem_scan_output: true,
+            owns_sidecar_output: true,
+            owns_search_index: false,
+        };
+        let mut scheduler = TaskQueueScheduler::for_runtime(
+            runtime.clone(),
+            "analyze-book-read-progress-adjust-test",
+        );
+        let task = TaskQueueRecord::new("ANALYZE_BOOK_book-1", 90, Some("series-1".to_string()))
+            .with_simple_type("ANALYZE_BOOK");
+
+        let result = try_execute(&mut scheduler, &runtime, &task, Some("book-1"));
+        assert!(matches!(result, Some(Ok(()))));
+
+        let verify_pool = connect_pool(database_file.as_path(), 1)
+            .await
+            .expect("analyze-book read-progress adjust verify db should open");
+        let page_count = sqlx::query("SELECT PAGE_COUNT FROM MEDIA WHERE BOOK_ID = ? LIMIT 1")
+            .bind("book-1")
+            .fetch_one(&verify_pool)
+            .await
+            .expect("adjusted media row should be queryable")
+            .get::<i64, _>("PAGE_COUNT");
+        let progress_rows = sqlx::query(
+            "SELECT USER_ID, PAGE, COMPLETED FROM READ_PROGRESS WHERE BOOK_ID = ? ORDER BY USER_ID ASC",
+        )
+        .bind("book-1")
+        .fetch_all(&verify_pool)
+        .await
+        .expect("adjusted read progress rows should be queryable");
+        let series_rows = sqlx::query(
+            "SELECT USER_ID, READ_COUNT, IN_PROGRESS_COUNT, LAST_MODIFIED_DATE FROM READ_PROGRESS_SERIES WHERE SERIES_ID = ? ORDER BY USER_ID ASC",
+        )
+        .bind("series-1")
+        .fetch_all(&verify_pool)
+        .await
+        .expect("adjusted series read progress rows should be queryable");
+        verify_pool.close().await;
+
+        let persisted_progress = progress_rows
+            .into_iter()
+            .map(|row| {
+                (
+                    row.get::<String, _>("USER_ID"),
+                    row.get::<i64, _>("PAGE"),
+                    row.get::<i64, _>("COMPLETED"),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            persisted_progress,
+            vec![
+                ("user-completed".to_string(), page_count, 1_i64),
+                ("user-incomplete".to_string(), 1_i64, 0_i64),
+            ],
+            "outdated analyze-book should realign completed progress to the new page count and reset incomplete progress to page 1",
+        );
+
+        let persisted_series = series_rows
+            .into_iter()
+            .map(|row| {
+                (
+                    row.get::<String, _>("USER_ID"),
+                    row.get::<i64, _>("READ_COUNT"),
+                    row.get::<i64, _>("IN_PROGRESS_COUNT"),
+                    row.get::<String, _>("LAST_MODIFIED_DATE"),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(persisted_series[0].0, "user-completed".to_string());
+        assert_eq!(persisted_series[0].1, 1_i64);
+        assert_eq!(persisted_series[0].2, 0_i64);
+        assert_ne!(persisted_series[0].3, "2000-01-01 00:00:00");
+        assert_eq!(persisted_series[1].0, "user-incomplete".to_string());
+        assert_eq!(persisted_series[1].1, 0_i64);
+        assert_eq!(persisted_series[1].2, 1_i64);
+        assert_ne!(persisted_series[1].3, "2000-01-01 00:00:00");
+
+        let _ = std::fs::remove_file(database_file);
+        let _ = std::fs::remove_dir_all(library_root);
+    }
+
+    #[tokio::test]
+    async fn analyze_book_keeps_existing_read_progress_when_outdated_page_count_is_unchanged() {
+        let database_file = unique_temp_path("komga-analyze-book-read-progress-keep-main");
+        let tasks_db_file = unique_temp_path("komga-analyze-book-read-progress-keep-tasks");
+        let lucene_dir = unique_temp_path("komga-analyze-book-read-progress-keep-lucene");
+        let library_root = unique_temp_path("komga-analyze-book-read-progress-keep-root");
+        std::fs::create_dir_all(library_root.join("books"))
+            .expect("analyze-book read-progress keep root should be created");
+        std::fs::copy(
+            archive_fixture_path("rar4.rar"),
+            library_root.join("books/book-1.cbr"),
+        )
+        .expect("analyze-book read-progress keep source fixture should be copied");
+        let actual_page_count = analyzed_fixture_page_count("rar4.rar", "books/book-1.cbr");
+
+        let pool = connect_pool(database_file.as_path(), 1)
+            .await
+            .expect("analyze-book read-progress keep db should open");
+        for ddl in [
+            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL)",
+            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, NAME varchar NOT NULL, URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL, CREATED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, DELETED_DATE datetime NULL)",
+            "CREATE TABLE BOOK_METADATA (BOOK_ID varchar NOT NULL PRIMARY KEY, TITLE varchar NULL)",
+            "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, STATUS varchar NOT NULL, MEDIA_TYPE varchar NOT NULL, PAGE_COUNT int NOT NULL DEFAULT 0, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE TABLE MEDIA_PAGE (FILE_NAME varchar NOT NULL, MEDIA_TYPE varchar NOT NULL, NUMBER int NOT NULL, BOOK_ID varchar NOT NULL, width int NULL, height int NULL, FILE_HASH varchar NOT NULL DEFAULT '', FILE_SIZE int NOT NULL DEFAULT 0)",
+            "CREATE TABLE READ_PROGRESS (BOOK_ID varchar NOT NULL, USER_ID varchar NOT NULL, PAGE int NOT NULL DEFAULT 0, COMPLETED integer NOT NULL DEFAULT 0, READ_DATE datetime NULL, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (BOOK_ID, USER_ID))",
+            "CREATE TABLE READ_PROGRESS_SERIES (SERIES_ID varchar NOT NULL, USER_ID varchar NOT NULL, READ_COUNT int NOT NULL DEFAULT 0, IN_PROGRESS_COUNT int NOT NULL DEFAULT 0, MOST_RECENT_READ_DATE datetime NULL, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (SERIES_ID, USER_ID))",
+        ] {
+            sqlx::query(ddl)
+                .execute(&pool)
+                .await
+                .expect("analyze-book read-progress keep schema should be created");
+        }
+        sqlx::query("INSERT INTO LIBRARY (ID, ROOT) VALUES (?, ?)")
+            .bind("library-1")
+            .bind(library_root.to_string_lossy().to_string())
+            .execute(&pool)
+            .await
+            .expect("analyze-book read-progress keep library row should be inserted");
+        sqlx::query(
+            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind("book-1")
+        .bind("book-1")
+        .bind("books/book-1.cbr")
+        .bind("library-1")
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("analyze-book read-progress keep book row should be inserted");
+        sqlx::query(
+            "INSERT INTO MEDIA (BOOK_ID, STATUS, MEDIA_TYPE, PAGE_COUNT) VALUES (?, ?, ?, ?)",
+        )
+        .bind("book-1")
+        .bind("OUTDATED")
+        .bind("application/x-rar-compressed; version=4")
+        .bind(actual_page_count)
+        .execute(&pool)
+        .await
+        .expect("analyze-book read-progress keep media row should be inserted");
+        sqlx::query(
+            "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, READ_DATE, LAST_MODIFIED_DATE) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind("book-1")
+        .bind("user-completed")
+        .bind(actual_page_count)
+        .bind(true)
+        .bind("2001-01-01 00:00:00")
+        .bind("2001-01-01 00:00:00")
+        .execute(&pool)
+        .await
+        .expect("same-count completed read progress row should be inserted");
+        sqlx::query(
+            "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, READ_DATE, LAST_MODIFIED_DATE) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind("book-1")
+        .bind("user-incomplete")
+        .bind(0_i64)
+        .bind(false)
+        .bind("2001-01-02 00:00:00")
+        .bind("2001-01-02 00:00:00")
+        .execute(&pool)
+        .await
+        .expect("same-count incomplete read progress row should be inserted");
+        sqlx::query(
+            "INSERT INTO READ_PROGRESS_SERIES (SERIES_ID, USER_ID, READ_COUNT, IN_PROGRESS_COUNT, MOST_RECENT_READ_DATE, LAST_MODIFIED_DATE) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind("series-1")
+        .bind("user-completed")
+        .bind(1_i64)
+        .bind(0_i64)
+        .bind("2001-01-01 00:00:00")
+        .bind("2000-01-01 00:00:00")
+        .execute(&pool)
+        .await
+        .expect("same-count completed series row should be inserted");
+        sqlx::query(
+            "INSERT INTO READ_PROGRESS_SERIES (SERIES_ID, USER_ID, READ_COUNT, IN_PROGRESS_COUNT, MOST_RECENT_READ_DATE, LAST_MODIFIED_DATE) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind("series-1")
+        .bind("user-incomplete")
+        .bind(0_i64)
+        .bind(1_i64)
+        .bind("2001-01-02 00:00:00")
+        .bind("2000-01-01 00:00:00")
+        .execute(&pool)
+        .await
+        .expect("same-count incomplete series row should be inserted");
+        pool.close().await;
+
+        let runtime = TaskRuntimeContext {
+            database_file: database_file.clone(),
+            tasks_db_file,
+            lucene_data_directory: lucene_dir,
+            consumes_queue: false,
+            owns_main_database: true,
+            owns_filesystem_scan_output: true,
+            owns_sidecar_output: true,
+            owns_search_index: false,
+        };
+        let mut scheduler = TaskQueueScheduler::for_runtime(
+            runtime.clone(),
+            "analyze-book-read-progress-keep-test",
+        );
+        let task = TaskQueueRecord::new("ANALYZE_BOOK_book-1", 90, Some("series-1".to_string()))
+            .with_simple_type("ANALYZE_BOOK");
+
+        let result = try_execute(&mut scheduler, &runtime, &task, Some("book-1"));
+        assert!(matches!(result, Some(Ok(()))));
+
+        let verify_pool = connect_pool(database_file.as_path(), 1)
+            .await
+            .expect("analyze-book read-progress keep verify db should open");
+        let progress_rows = sqlx::query(
+            "SELECT USER_ID, PAGE, COMPLETED, LAST_MODIFIED_DATE FROM READ_PROGRESS WHERE BOOK_ID = ? ORDER BY USER_ID ASC",
+        )
+        .bind("book-1")
+        .fetch_all(&verify_pool)
+        .await
+        .expect("same-count read progress rows should be queryable");
+        let series_rows = sqlx::query(
+            "SELECT USER_ID, READ_COUNT, IN_PROGRESS_COUNT, LAST_MODIFIED_DATE FROM READ_PROGRESS_SERIES WHERE SERIES_ID = ? ORDER BY USER_ID ASC",
+        )
+        .bind("series-1")
+        .fetch_all(&verify_pool)
+        .await
+        .expect("same-count series read progress rows should be queryable");
+        verify_pool.close().await;
+
+        let persisted_progress = progress_rows
+            .into_iter()
+            .map(|row| {
+                (
+                    row.get::<String, _>("USER_ID"),
+                    row.get::<i64, _>("PAGE"),
+                    row.get::<i64, _>("COMPLETED"),
+                    row.get::<String, _>("LAST_MODIFIED_DATE"),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            persisted_progress,
+            vec![
+                (
+                    "user-completed".to_string(),
+                    actual_page_count,
+                    1_i64,
+                    "2001-01-01 00:00:00".to_string(),
+                ),
+                (
+                    "user-incomplete".to_string(),
+                    0_i64,
+                    0_i64,
+                    "2001-01-02 00:00:00".to_string(),
+                ),
+            ],
+            "outdated analyze-book must keep read progress untouched when the page count is unchanged",
+        );
+
+        let persisted_series = series_rows
+            .into_iter()
+            .map(|row| {
+                (
+                    row.get::<String, _>("USER_ID"),
+                    row.get::<i64, _>("READ_COUNT"),
+                    row.get::<i64, _>("IN_PROGRESS_COUNT"),
+                    row.get::<String, _>("LAST_MODIFIED_DATE"),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            persisted_series,
+            vec![
+                (
+                    "user-completed".to_string(),
+                    1_i64,
+                    0_i64,
+                    "2000-01-01 00:00:00".to_string(),
+                ),
+                (
+                    "user-incomplete".to_string(),
+                    0_i64,
+                    1_i64,
+                    "2000-01-01 00:00:00".to_string(),
+                ),
+            ],
+            "unchanged page counts must not refresh series read-progress aggregates",
+        );
+
+        let _ = std::fs::remove_file(database_file);
+        let _ = std::fs::remove_dir_all(library_root);
+    }
+
+    #[test]
+    fn thumbnail_finder_payload_accepts_kotlin_camel_case_flag() {
+        assert!(parse_for_bigger_result_only(Some(
+            r#"{"forBiggerResultOnly":true}"#
+        )));
+    }
+
+    #[test]
+    fn rebuild_index_payload_accepts_kotlin_entity_names() {
+        assert_eq!(
+            parse_rebuild_index_entities(Some(r#"{"entities":["Collection","Series"]}"#))
+                .expect("rebuild index payload should parse"),
+            Some(vec![SearchEntityType::Collection, SearchEntityType::Series])
+        );
     }
 }

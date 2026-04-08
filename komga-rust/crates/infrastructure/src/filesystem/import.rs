@@ -60,9 +60,13 @@ async fn import_book_impl(
     copy_mode: ImportCopyMode,
     entry: BooksImportEntry,
 ) -> Result<Option<ImportBookOutcome>, String> {
+    if !entry.source_file.exists() {
+        return Err("source file does not exist".to_string());
+    }
+
     let library_roots = load_library_roots(database_file).await.unwrap_or_default();
     if source_inside_library_roots(entry.source_file.as_path(), &library_roots) {
-        return Ok(None);
+        return Err("cannot import file that is part of an existing library".to_string());
     }
 
     let target = match load_import_series_target(database_file, &entry.series_id).await {
@@ -76,9 +80,14 @@ async fn import_book_impl(
         Err(error) => return Err(error),
     };
 
-    let mut upgrade_destination_name: Option<String> = None;
+    if target.oneshot && entry.upgrade_book_id.is_none() {
+        return Err("destination series is oneshot but upgradeBookId is missing".to_string());
+    }
+
+    let mut upgrade_file: Option<PathBuf> = None;
+    let mut upgrade_sidecars: Vec<PathBuf> = Vec::new();
     if let Some(upgrade_book_id) = entry.upgrade_book_id.as_deref() {
-        let upgrade_target =
+        let loaded_upgrade_target =
             match load_import_upgrade_book_target(database_file, upgrade_book_id).await {
                 Ok(Some(target)) => target,
                 Ok(None) => {
@@ -89,25 +98,22 @@ async fn import_book_impl(
                 Err(error) => return Err(error),
             };
 
-        if upgrade_target.series_id != entry.series_id {
+        if loaded_upgrade_target.series_id != entry.series_id {
             return Err(format!(
                 "upgrade target series mismatch for import: expected {}, got {}",
-                entry.series_id, upgrade_target.series_id
+                entry.series_id, loaded_upgrade_target.series_id
             ));
         }
 
-        upgrade_destination_name = Some(upgrade_target.file_name.clone());
-        let upgrade_file = PathBuf::from(upgrade_target.library_root)
-            .join(upgrade_target.series_url)
-            .join(upgrade_target.file_name);
-        let _ = fs::remove_file(upgrade_file);
+        let loaded_upgrade_file = PathBuf::from(&loaded_upgrade_target.library_root)
+            .join(&loaded_upgrade_target.book_url);
+        upgrade_sidecars = collect_book_sidecar_paths(&loaded_upgrade_file)?;
+        upgrade_file = Some(loaded_upgrade_file);
     }
 
     let Some(destination_name) = resolve_import_destination_name(
         entry.source_file.as_path(),
-        upgrade_destination_name
-            .as_deref()
-            .or(entry.destination_name.as_deref()),
+        entry.destination_name.as_deref(),
     ) else {
         return Err(format!(
             "destination name for import is invalid: {}",
@@ -115,16 +121,43 @@ async fn import_book_impl(
         ));
     };
 
-    let destination_dir = PathBuf::from(&target.library_root).join(&target.series_url);
+    let destination_dir = resolve_import_destination_dir(&target);
     fs::create_dir_all(&destination_dir)
         .map_err(|error| format!("create destination directory for import: {error}"))?;
 
     let destination_file = destination_dir.join(destination_name);
-    apply_import_copy_mode(copy_mode, entry.source_file.as_path(), &destination_file)?;
+    let imported_sidecars =
+        collect_import_book_sidecars(entry.source_file.as_path(), &destination_file)?;
+    if let Some(upgrade_file) = upgrade_file.as_ref() {
+        if destination_file == *upgrade_file {
+            let _ = fs::remove_file(upgrade_file);
+        }
+    }
+    for upgrade_sidecar in &upgrade_sidecars {
+        let _ = fs::remove_file(upgrade_sidecar);
+    }
 
-    let sidecar_imported =
-        import_book_sidecars(copy_mode, entry.source_file.as_path(), &destination_file)
-            .unwrap_or(false);
+    if destination_file.exists() {
+        return Err(format!(
+            "destination file already exists: {}",
+            destination_file.display()
+        ));
+    }
+
+    apply_import_copy_mode(
+        copy_mode,
+        entry.source_file.as_path(),
+        &destination_file,
+        false,
+    )?;
+
+    let sidecar_result = import_book_sidecars(copy_mode, &imported_sidecars)?;
+
+    if let Some(upgrade_file) = upgrade_file.as_ref() {
+        if destination_file != *upgrade_file {
+            let _ = fs::remove_file(upgrade_file);
+        }
+    }
 
     let imported_book_id = scanner_book_id_for_path(&destination_file);
     if let Some(upgrade_book_id) = entry.upgrade_book_id.as_deref() {
@@ -150,7 +183,8 @@ async fn import_book_impl(
     Ok(Some(ImportBookOutcome {
         library_id: target.library_id,
         imported_book_id,
-        sidecar_imported,
+        sidecar_imported: sidecar_result.metadata_imported,
+        artwork_sidecar_imported: sidecar_result.artwork_imported,
     }))
 }
 
@@ -159,13 +193,32 @@ struct ImportSeriesTarget {
     library_id: String,
     library_root: String,
     series_url: String,
+    oneshot: bool,
 }
 
 struct ImportUpgradeBookTarget {
     series_id: String,
     library_root: String,
-    series_url: String,
-    file_name: String,
+    book_url: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ImportBookSidecarType {
+    Metadata,
+    Artwork,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ImportBookSidecarTransfer {
+    source_path: PathBuf,
+    destination_path: PathBuf,
+    sidecar_type: ImportBookSidecarType,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct ImportBookSidecarResult {
+    metadata_imported: bool,
+    artwork_imported: bool,
 }
 
 async fn load_import_series_target(
@@ -182,7 +235,7 @@ async fn load_import_series_target(
 
     let row = sqlx::query(
         "SELECT s.ID AS SERIES_ID, s.LIBRARY_ID AS LIBRARY_ID, s.URL AS SERIES_URL, \
-                l.ROOT AS LIBRARY_ROOT \
+                l.ROOT AS LIBRARY_ROOT, COALESCE(s.oneshot, 0) AS ONESHOT \
          FROM SERIES s \
          JOIN LIBRARY l ON l.ID = s.LIBRARY_ID \
          WHERE s.ID = ? \
@@ -198,6 +251,7 @@ async fn load_import_series_target(
         library_id: row.get::<String, _>("LIBRARY_ID"),
         library_root: row.get::<String, _>("LIBRARY_ROOT"),
         series_url: row.get::<String, _>("SERIES_URL"),
+        oneshot: row.get::<i64, _>("ONESHOT") != 0,
     }))
 }
 
@@ -214,10 +268,9 @@ async fn load_import_upgrade_book_target(
         .map_err(|error| format!("open upgrade book target db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT b.SERIES_ID AS SERIES_ID, b.NAME AS FILE_NAME, s.URL AS SERIES_URL, \
+        "SELECT b.SERIES_ID AS SERIES_ID, b.URL AS BOOK_URL, \
                 l.ROOT AS LIBRARY_ROOT \
          FROM BOOK b \
-         JOIN SERIES s ON s.ID = b.SERIES_ID \
          JOIN LIBRARY l ON l.ID = b.LIBRARY_ID \
          WHERE b.ID = ? \
          LIMIT 1",
@@ -230,9 +283,22 @@ async fn load_import_upgrade_book_target(
     Ok(row.map(|row| ImportUpgradeBookTarget {
         series_id: row.get::<String, _>("SERIES_ID"),
         library_root: row.get::<String, _>("LIBRARY_ROOT"),
-        series_url: row.get::<String, _>("SERIES_URL"),
-        file_name: row.get::<String, _>("FILE_NAME"),
+        book_url: row.get::<String, _>("BOOK_URL"),
     }))
+}
+
+fn resolve_import_destination_dir(target: &ImportSeriesTarget) -> PathBuf {
+    let mut destination_dir = PathBuf::from(&target.library_root);
+    if target.oneshot {
+        if let Some(parent) = Path::new(&target.series_url).parent() {
+            if !parent.as_os_str().is_empty() {
+                destination_dir.push(parent);
+            }
+        }
+    } else {
+        destination_dir.push(&target.series_url);
+    }
+    destination_dir
 }
 
 async fn load_library_roots(database_file: &Path) -> Result<Vec<PathBuf>, String> {
@@ -271,7 +337,12 @@ fn resolve_import_destination_name(
         if destination_name.contains('/') || destination_name.contains('\\') {
             return None;
         }
-        return Some(destination_name.to_string());
+        return match source_file.extension().and_then(|value| value.to_str()) {
+            Some(extension) if !extension.is_empty() => {
+                Some(format!("{destination_name}.{extension}"))
+            }
+            _ => Some(destination_name.to_string()),
+        };
     }
 
     source_file
@@ -284,14 +355,20 @@ fn apply_import_copy_mode(
     copy_mode: ImportCopyMode,
     source_file: &Path,
     destination_file: &Path,
+    replace_existing: bool,
 ) -> Result<(), String> {
     if !source_file.exists() {
         return Err("source file does not exist".to_string());
     }
 
-    if destination_file.exists() {
+    if replace_existing && destination_file.exists() {
         fs::remove_file(destination_file)
             .map_err(|error| format!("remove existing destination file: {error}"))?;
+    } else if destination_file.exists() {
+        return Err(format!(
+            "destination file already exists: {}",
+            destination_file.display()
+        ));
     }
 
     match copy_mode {
@@ -323,23 +400,137 @@ fn apply_import_copy_mode(
     }
 }
 
-fn import_book_sidecars(
-    copy_mode: ImportCopyMode,
+fn collect_book_sidecar_paths(book_file: &Path) -> Result<Vec<PathBuf>, String> {
+    let Some(book_dir) = book_file.parent() else {
+        return Ok(Vec::new());
+    };
+    let Some(book_base_name) = book_file.file_stem().and_then(|value| value.to_str()) else {
+        return Ok(Vec::new());
+    };
+
+    let entries = fs::read_dir(book_dir).map_err(|error| {
+        format!(
+            "read book sidecar directory '{}' for import: {error}",
+            book_dir.display()
+        )
+    })?;
+
+    let mut sidecar_paths = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path == book_file || !path.is_file() {
+            continue;
+        }
+
+        if classify_import_book_sidecar(path.as_path(), book_base_name).is_some() {
+            sidecar_paths.push(path);
+        }
+    }
+    sidecar_paths.sort();
+    Ok(sidecar_paths)
+}
+
+fn collect_import_book_sidecars(
     source_file: &Path,
     destination_file: &Path,
-) -> Result<bool, String> {
-    let source_sidecar = source_file.with_extension("xml");
-    if !source_sidecar.exists() {
-        return Ok(false);
+) -> Result<Vec<ImportBookSidecarTransfer>, String> {
+    let Some(destination_dir) = destination_file.parent() else {
+        return Ok(Vec::new());
+    };
+    let Some(source_base_name) = source_file.file_stem().and_then(|value| value.to_str()) else {
+        return Ok(Vec::new());
+    };
+    let Some(destination_base_name) = destination_file
+        .file_stem()
+        .and_then(|value| value.to_str())
+    else {
+        return Ok(Vec::new());
+    };
+
+    let mut transfers = Vec::new();
+    for source_path in collect_book_sidecar_paths(source_file)? {
+        let Some((sidecar_type, suffix, extension)) =
+            classify_import_book_sidecar(source_path.as_path(), source_base_name)
+        else {
+            continue;
+        };
+
+        let destination_name = format!("{destination_base_name}{suffix}.{extension}");
+        transfers.push(ImportBookSidecarTransfer {
+            source_path,
+            destination_path: destination_dir.join(destination_name),
+            sidecar_type,
+        });
+    }
+    transfers.sort_by(|left, right| left.source_path.cmp(&right.source_path));
+    Ok(transfers)
+}
+
+fn classify_import_book_sidecar(
+    sidecar_path: &Path,
+    book_base_name: &str,
+) -> Option<(ImportBookSidecarType, String, String)> {
+    let extension = sidecar_path.extension().and_then(|value| value.to_str())?;
+    let extension_lower = extension.to_ascii_lowercase();
+    let sidecar_stem = sidecar_path.file_stem().and_then(|value| value.to_str())?;
+
+    if extension_lower == "xml" && sidecar_stem.eq_ignore_ascii_case(book_base_name) {
+        return Some((
+            ImportBookSidecarType::Metadata,
+            String::new(),
+            extension.to_string(),
+        ));
     }
 
-    let destination_sidecar = destination_file.with_extension("xml");
-    apply_import_copy_mode(
-        copy_mode,
-        source_sidecar.as_path(),
-        destination_sidecar.as_path(),
-    )?;
-    Ok(true)
+    if !is_supported_book_artwork_extension(extension_lower.as_str()) {
+        return None;
+    }
+
+    import_book_artwork_suffix(sidecar_stem, book_base_name).map(|suffix| {
+        (
+            ImportBookSidecarType::Artwork,
+            suffix,
+            extension.to_string(),
+        )
+    })
+}
+
+fn import_book_artwork_suffix(candidate_stem: &str, book_base_name: &str) -> Option<String> {
+    if candidate_stem.eq_ignore_ascii_case(book_base_name) {
+        return Some(String::new());
+    }
+
+    let lower_candidate = candidate_stem.to_ascii_lowercase();
+    let lower_book_base_name = book_base_name.to_ascii_lowercase();
+    lower_candidate
+        .strip_prefix(&format!("{lower_book_base_name}-"))
+        .filter(|suffix| !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit()))
+        .and_then(|_| candidate_stem.get(book_base_name.len()..))
+        .map(str::to_string)
+}
+
+fn is_supported_book_artwork_extension(extension: &str) -> bool {
+    matches!(extension, "png" | "jpeg" | "jpg" | "tbn" | "webp" | "gif")
+}
+
+fn import_book_sidecars(
+    copy_mode: ImportCopyMode,
+    sidecars: &[ImportBookSidecarTransfer],
+) -> Result<ImportBookSidecarResult, String> {
+    let mut result = ImportBookSidecarResult::default();
+    for sidecar in sidecars {
+        apply_import_copy_mode(
+            copy_mode,
+            sidecar.source_path.as_path(),
+            sidecar.destination_path.as_path(),
+            true,
+        )?;
+        match sidecar.sidecar_type {
+            ImportBookSidecarType::Metadata => result.metadata_imported = true,
+            ImportBookSidecarType::Artwork => result.artwork_imported = true,
+        }
+    }
+    Ok(result)
 }
 
 fn scanner_book_id_for_path(path: &Path) -> String {
@@ -629,13 +820,13 @@ mod tests {
         .await
         .expect("library table should be created");
         sqlx::query(
-            "CREATE TABLE IF NOT EXISTS SERIES (ID varchar NOT NULL PRIMARY KEY, LIBRARY_ID varchar NOT NULL, URL varchar NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS SERIES (ID varchar NOT NULL PRIMARY KEY, LIBRARY_ID varchar NOT NULL, URL varchar NOT NULL, oneshot integer NOT NULL DEFAULT 0)",
         )
         .execute(&pool)
         .await
         .expect("series table should be created");
         sqlx::query(
-            "CREATE TABLE IF NOT EXISTS BOOK (ID varchar NOT NULL PRIMARY KEY, SERIES_ID varchar NOT NULL, LIBRARY_ID varchar NOT NULL, NAME varchar NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS BOOK (ID varchar NOT NULL PRIMARY KEY, SERIES_ID varchar NOT NULL, LIBRARY_ID varchar NOT NULL, NAME varchar NOT NULL, URL varchar NOT NULL)",
         )
         .execute(&pool)
         .await
@@ -649,17 +840,19 @@ mod tests {
             .execute(&pool)
             .await
             .expect("library row should be inserted");
-        sqlx::query("INSERT INTO SERIES (ID, LIBRARY_ID, URL) VALUES (?, ?, ?)")
+        sqlx::query("INSERT INTO SERIES (ID, LIBRARY_ID, URL, oneshot) VALUES (?, ?, ?, ?)")
             .bind("series-1")
             .bind("library-1")
             .bind("series-one")
+            .bind(0)
             .execute(&pool)
             .await
             .expect("series row should be inserted");
-        sqlx::query("INSERT INTO SERIES (ID, LIBRARY_ID, URL) VALUES (?, ?, ?)")
+        sqlx::query("INSERT INTO SERIES (ID, LIBRARY_ID, URL, oneshot) VALUES (?, ?, ?, ?)")
             .bind("series-2")
             .bind("library-1")
             .bind("series-two")
+            .bind(0)
             .execute(&pool)
             .await
             .expect("second series row should be inserted");
@@ -756,14 +949,17 @@ mod tests {
         let source_path = root.join("book.cbz");
         fs::write(&source_path, b"fixture").expect("source fixture should be written");
 
-        sqlx::query("INSERT INTO BOOK (ID, SERIES_ID, LIBRARY_ID, NAME) VALUES (?, ?, ?, ?)")
-            .bind("book-upgrade")
-            .bind("series-2")
-            .bind("library-1")
-            .bind("existing.cbz")
-            .execute(&pool)
-            .await
-            .expect("upgrade book row should be inserted");
+        sqlx::query(
+            "INSERT INTO BOOK (ID, SERIES_ID, LIBRARY_ID, NAME, URL) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind("book-upgrade")
+        .bind("series-2")
+        .bind("library-1")
+        .bind("existing.cbz")
+        .bind("series-two/existing.cbz")
+        .execute(&pool)
+        .await
+        .expect("upgrade book row should be inserted");
 
         let result = port
             .import_book(
@@ -809,6 +1005,182 @@ mod tests {
         assert!(
             error.contains("upgrade") || error.contains("missing-upgrade-book"),
             "unexpected import error: {error}"
+        );
+
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn import_book_returns_error_when_source_file_is_inside_library_root() {
+        let (db_path, pool, root) = create_test_db("source-inside-library-root").await;
+        let port = FilesystemImportPort::new(&db_path);
+        let library_root = root.join("library-root");
+        let source_path = library_root.join("incoming/book.cbz");
+        fs::create_dir_all(source_path.parent().expect("source parent should exist"))
+            .expect("source parent should be created");
+        fs::write(&source_path, b"fixture").expect("source fixture should be written");
+
+        let result = port
+            .import_book(
+                ImportCopyMode::Copy,
+                BooksImportEntry {
+                    source_file: source_path,
+                    series_id: "series-1".to_string(),
+                    destination_name: None,
+                    upgrade_book_id: None,
+                },
+            )
+            .await;
+
+        let error = result.expect_err("library-contained import should return an error");
+        assert!(
+            error.contains("existing library") || error.contains("part of an existing library"),
+            "unexpected import error: {error}"
+        );
+
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn import_book_returns_error_when_oneshot_series_missing_upgrade_book_id() {
+        let (db_path, pool, root) = create_test_db("oneshot-missing-upgrade-book-id").await;
+        let port = FilesystemImportPort::new(&db_path);
+        let source_path = root.join("book.cbz");
+        fs::write(&source_path, b"fixture").expect("source fixture should be written");
+
+        sqlx::query("UPDATE SERIES SET URL = ?, oneshot = 1 WHERE ID = ?")
+            .bind("oneshots/existing.cbz")
+            .bind("series-1")
+            .execute(&pool)
+            .await
+            .expect("oneshot series row should be updated");
+
+        let result = port
+            .import_book(
+                ImportCopyMode::Copy,
+                BooksImportEntry {
+                    source_file: source_path,
+                    series_id: "series-1".to_string(),
+                    destination_name: None,
+                    upgrade_book_id: None,
+                },
+            )
+            .await;
+
+        let error = result.expect_err("oneshot import without upgrade book should return an error");
+        assert!(
+            error.contains("oneshot") || error.contains("upgradeBookId"),
+            "unexpected import error: {error}"
+        );
+
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn import_book_uses_oneshot_parent_directory_and_destination_basename() {
+        let (db_path, pool, root) = create_test_db("oneshot-parent-directory-destination").await;
+        let port = FilesystemImportPort::new(&db_path);
+        let source_path = root.join("incoming.cbz");
+        fs::write(&source_path, b"fixture").expect("source fixture should be written");
+        fs::write(source_path.with_extension("xml"), b"metadata-fixture")
+            .expect("source metadata sidecar should be written");
+        fs::write(root.join("incoming.png"), b"artwork-fixture")
+            .expect("source artwork sidecar should be written");
+        fs::write(root.join("incoming-1.jpg"), b"secondary-artwork-fixture")
+            .expect("source numbered artwork sidecar should be written");
+
+        sqlx::query("UPDATE SERIES SET URL = ?, oneshot = 1 WHERE ID = ?")
+            .bind("oneshots/existing.cbz")
+            .bind("series-1")
+            .execute(&pool)
+            .await
+            .expect("oneshot series row should be updated");
+        sqlx::query(
+            "INSERT INTO BOOK (ID, SERIES_ID, LIBRARY_ID, NAME, URL) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind("book-upgrade")
+        .bind("series-1")
+        .bind("library-1")
+        .bind("existing.cbz")
+        .bind("oneshots/existing.cbz")
+        .execute(&pool)
+        .await
+        .expect("upgrade book row should be inserted");
+
+        let oneshot_dir = root.join("library-root/oneshots");
+        fs::create_dir_all(&oneshot_dir).expect("oneshot directory should be created");
+        let existing_file = oneshot_dir.join("existing.cbz");
+        fs::write(&existing_file, b"old-fixture").expect("existing upgraded file should exist");
+        fs::write(oneshot_dir.join("existing.xml"), b"old-sidecar")
+            .expect("existing upgraded sidecar should exist");
+        fs::write(oneshot_dir.join("existing.png"), b"old-artwork")
+            .expect("existing upgraded artwork sidecar should exist");
+        fs::write(oneshot_dir.join("existing-1.jpg"), b"old-secondary-artwork")
+            .expect("existing numbered artwork sidecar should exist");
+
+        let result = port
+            .import_book(
+                ImportCopyMode::Copy,
+                BooksImportEntry {
+                    source_file: source_path,
+                    series_id: "series-1".to_string(),
+                    destination_name: Some("renamed".to_string()),
+                    upgrade_book_id: Some("book-upgrade".to_string()),
+                },
+            )
+            .await;
+
+        let outcome = result.expect("oneshot import should succeed");
+        let outcome = outcome.expect("oneshot import should return an outcome");
+        assert!(
+            outcome.sidecar_imported,
+            "metadata sidecar import should be reported for follow-up task scheduling"
+        );
+        assert!(
+            outcome.artwork_sidecar_imported,
+            "artwork sidecar import should be reported for follow-up task scheduling"
+        );
+
+        let expected_file = oneshot_dir.join("renamed.cbz");
+        let expected_metadata_sidecar = oneshot_dir.join("renamed.xml");
+        let expected_artwork_sidecar = oneshot_dir.join("renamed.png");
+        let expected_numbered_artwork_sidecar = oneshot_dir.join("renamed-1.jpg");
+        assert!(
+            expected_file.exists(),
+            "oneshot import should target parent directory with source extension: {}",
+            expected_file.display()
+        );
+        assert!(
+            expected_metadata_sidecar.exists(),
+            "metadata sidecar should be renamed alongside imported book"
+        );
+        assert!(
+            expected_artwork_sidecar.exists(),
+            "artwork sidecar should be renamed alongside imported book"
+        );
+        assert!(
+            expected_numbered_artwork_sidecar.exists(),
+            "numbered artwork sidecars should preserve their numeric suffix on import"
+        );
+        assert!(
+            !oneshot_dir.join("existing.cbz/renamed.cbz").exists(),
+            "oneshot import must not treat existing book file path as a directory"
+        );
+        assert!(
+            !existing_file.exists(),
+            "upgrade import should remove the previous oneshot file when destination differs"
+        );
+        assert!(
+            !oneshot_dir.join("existing.xml").exists(),
+            "upgrade import should remove the previous metadata sidecar when destination differs"
+        );
+        assert!(
+            !oneshot_dir.join("existing.png").exists(),
+            "upgrade import should remove the previous artwork sidecar when destination differs"
+        );
+        assert!(
+            !oneshot_dir.join("existing-1.jpg").exists(),
+            "upgrade import should remove the previous numbered artwork sidecar when destination differs"
         );
 
         pool.close().await;

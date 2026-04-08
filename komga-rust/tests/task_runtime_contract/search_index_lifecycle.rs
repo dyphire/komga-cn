@@ -36,25 +36,20 @@ async fn isolated_runtime_keeps_search_index_external_owned() {
 }
 
 #[tokio::test]
-async fn runtime_rejects_legacy_upgrade_index_task_contract() {
-    let paths = new_router_fixture("runtime-rejects-legacy-upgrade-index-task").await;
+async fn runtime_executes_legacy_upgrade_index_task_as_compatibility_noop() {
+    let paths = new_router_fixture("runtime-executes-legacy-upgrade-index-task-noop").await;
     seed_router_contract_data(&paths).await;
 
     let runtime = runtime_task_context(&paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler.enqueue(TaskQueueRecord::new("UPGRADE_INDEX", 1_000, None));
 
-    let error = scheduler
+    let processed = scheduler
         .process_available(&runtime)
-        .expect_err("legacy upgrade index task should no longer be executable");
-
-    assert!(
-        error.is_unsupported_task(),
-        "legacy upgrade index task must fail as unsupported instead of aliasing rebuild",
-    );
+        .expect("legacy upgrade index task should be consumed as a compatibility no-op");
     assert_eq!(
-        error.to_string(),
-        "unsupported runtime task type: UPGRADE_INDEX",
+        processed, 1,
+        "legacy upgrade index task should still be consumed once so persisted compatibility rows do not get stuck in the queue",
     );
 
     cleanup_router_fixture(paths);
@@ -365,6 +360,197 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
     assert!(
         search_hits("Task6 ReadList Updated", SearchEntityType::ReadList).is_empty(),
         "readlist delete should remove search document",
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn runtime_refresh_book_metadata_upserts_readlist_search_document_after_comicinfo_import() {
+    let paths = new_router_fixture("runtime-refresh-book-metadata-readlist-search-sync").await;
+    seed_router_contract_data(&paths).await;
+
+    let config = runtime_config_for_paths(&paths);
+    let mut scheduler = TaskQueueScheduler::for_runtime(config.clone(), "rust-main");
+    scheduler.enqueue(TaskQueueRecord::new("REBUILD_INDEX", 1_000, None));
+    scheduler
+        .process_available(&config)
+        .expect("initial rebuild index task should succeed for readlist search sync fixture");
+
+    let search_hits = |query: &str, entity_type: SearchEntityType| -> Vec<String> {
+        SearchIndexLifecycle::bootstrap(config.lucene_data_directory.as_path())
+            .expect("search index should bootstrap for readlist search sync fixture")
+            .search_ids(query, entity_type, 10)
+            .expect("search lookup should succeed for readlist search sync fixture")
+    };
+
+    assert!(
+        search_hits("Task Runtime Indexed ReadList", SearchEntityType::ReadList).is_empty(),
+        "fixture sanity: readlist should not exist in search before ComicInfo import",
+    );
+
+    let sidecar_dir = paths.config_dir.join("books");
+    fs::create_dir_all(&sidecar_dir).expect("book metadata sidecar directory should exist");
+    fs::write(
+        sidecar_dir.join("book-1.xml"),
+        br#"<ComicInfo><AlternateSeries>Task Runtime Indexed ReadList</AlternateSeries></ComicInfo>"#,
+    )
+    .expect("book metadata sidecar fixture for readlist search sync should be written");
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for readlist search sync fixture setup");
+    sqlx::query("DELETE FROM SIDECAR WHERE PARENT_URL = ?")
+        .bind("books/book-1.epub")
+        .execute(&pool)
+        .await
+        .expect(
+            "existing book metadata sidecars should be cleared before readlist search sync test",
+        );
+    sqlx::query("DELETE FROM READLIST_BOOK")
+        .execute(&pool)
+        .await
+        .expect("existing readlist memberships should be cleared before readlist search sync test");
+    sqlx::query("DELETE FROM READLIST")
+        .execute(&pool)
+        .await
+        .expect("existing readlists should be cleared before readlist search sync test");
+    sqlx::query(
+        "UPDATE LIBRARY SET IMPORT_COMICINFO_BOOK = 0, IMPORT_COMICINFO_READLIST = 1 WHERE ID = ?",
+    )
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("library ComicInfo import flags should isolate readlist search sync behavior");
+    sqlx::query(
+        "INSERT INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID) VALUES (?, ?, ?, ?)",
+    )
+    .bind("books/book-1.xml")
+    .bind("books/book-1.epub")
+    .bind(1_i64)
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("book metadata sidecar row should be inserted for readlist search sync test");
+    pool.close().await;
+
+    scheduler.enqueue(
+        TaskQueueRecord::new(
+            "REFRESH_BOOK_METADATA:book-1",
+            1_000,
+            Some("series-1".to_string()),
+        )
+        .with_payload(
+            json!({
+                "bookId": "book-1",
+                "capabilities": ["READ_LISTS"],
+                "priority": 80,
+                "groupId": "series-1",
+                "uniqueId": "REFRESH_BOOK_METADATA_book-1"
+            })
+            .to_string(),
+        ),
+    );
+    scheduler
+        .process_available(&config)
+        .expect("readlist-only metadata refresh should sync readlist search document");
+
+    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for readlist search sync verification");
+    let readlist_id = sqlx::query("SELECT ID FROM READLIST WHERE NAME = ? LIMIT 1")
+        .bind("Task Runtime Indexed ReadList")
+        .fetch_one(&verify_pool)
+        .await
+        .expect("ComicInfo readlist should exist after metadata refresh")
+        .get::<String, _>("ID");
+    verify_pool.close().await;
+
+    assert_eq!(
+        search_hits("Task Runtime Indexed ReadList", SearchEntityType::ReadList),
+        vec![readlist_id],
+        "ComicInfo readlist import should upsert the readlist search document like normal readlist mutations",
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn runtime_rebuild_index_payload_can_scope_rebuild_to_selected_entities() {
+    let paths = new_router_fixture("runtime-rebuild-index-scoped-entities").await;
+    seed_router_contract_data(&paths).await;
+
+    let config = runtime_config_for_paths(&paths);
+    let mut scheduler = TaskQueueScheduler::for_runtime(config.clone(), "rust-main");
+    scheduler.enqueue(TaskQueueRecord::new("REBUILD_INDEX", 1_000, None));
+    scheduler
+        .process_available(&config)
+        .expect("initial rebuild index task should succeed for scoped rebuild fixture");
+
+    let search_hits = |query: &str, entity_type: SearchEntityType| -> Vec<String> {
+        SearchIndexLifecycle::bootstrap(config.lucene_data_directory.as_path())
+            .expect("search index should bootstrap for scoped rebuild fixture")
+            .search_ids(query, entity_type, 10)
+            .expect("search lookup should succeed for scoped rebuild fixture")
+    };
+
+    assert_eq!(
+        search_hits("Book 1", SearchEntityType::Book),
+        vec!["book-1".to_string()],
+        "fixture sanity: initial rebuild should index seeded book documents",
+    );
+    assert_eq!(
+        search_hits("Collection 1", SearchEntityType::Collection),
+        vec!["collection-1".to_string()],
+        "fixture sanity: initial rebuild should index seeded collection documents",
+    );
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for scoped rebuild fixture updates");
+    sqlx::query("UPDATE BOOK_METADATA SET TITLE = ? WHERE BOOK_ID = ?")
+        .bind("Scoped Book Updated")
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("book title should be updated for scoped rebuild fixture");
+    sqlx::query("UPDATE COLLECTION SET NAME = ? WHERE ID = ?")
+        .bind("Scoped Collection Updated")
+        .bind("collection-1")
+        .execute(&pool)
+        .await
+        .expect("collection name should be updated for scoped rebuild fixture");
+    pool.close().await;
+
+    scheduler.enqueue(
+        TaskQueueRecord::new("REBUILD_INDEX", 1_000, None).with_payload(
+            json!({
+                "entities": ["Collection"]
+            })
+            .to_string(),
+        ),
+    );
+    scheduler
+        .process_available(&config)
+        .expect("scoped rebuild index task should succeed");
+
+    assert_eq!(
+        search_hits("Scoped Collection Updated", SearchEntityType::Collection),
+        vec!["collection-1".to_string()],
+        "collection-scoped rebuild should refresh targeted collection documents",
+    );
+    assert!(
+        search_hits("Collection 1", SearchEntityType::Collection).is_empty(),
+        "collection-scoped rebuild should replace stale collection documents",
+    );
+    assert_eq!(
+        search_hits("Book 1", SearchEntityType::Book),
+        vec!["book-1".to_string()],
+        "collection-scoped rebuild must keep untargeted book documents unchanged",
+    );
+    assert!(
+        search_hits("Scoped Book Updated", SearchEntityType::Book).is_empty(),
+        "collection-scoped rebuild must not behave like a full rebuild for book documents",
     );
 
     cleanup_router_fixture(paths);

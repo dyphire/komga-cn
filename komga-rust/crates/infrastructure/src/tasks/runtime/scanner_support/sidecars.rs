@@ -20,6 +20,12 @@ pub(in crate::task_queue) fn enqueue_sidecar_refresh_tasks(
     let mut seen_series_artwork: HashSet<String> = HashSet::new();
     let mut seen_books_metadata: HashSet<String> = HashSet::new();
     let mut seen_books_artwork: HashSet<String> = HashSet::new();
+    let mut book_series_by_url = HashMap::new();
+    for series in &scanned.series_rows {
+        for book in &series.books {
+            book_series_by_url.insert(book.book_url.clone(), series.series_id.clone());
+        }
+    }
     for sidecar in &scanned.sidecars {
         if !changed_sidecar_urls.contains(&sidecar.url) {
             continue;
@@ -55,22 +61,29 @@ pub(in crate::task_queue) fn enqueue_sidecar_refresh_tasks(
                 if let Some(book_id) = book_by_url.get(&sidecar.parent_url)
                     && seen_books_metadata.insert(book_id.clone())
                 {
-                    scheduler.enqueue(TaskQueueRecord::new(
-                        format!("REFRESH_BOOK_METADATA:{book_id}"),
-                        priority,
-                        Some(book_id.clone()),
-                    ));
+                    let group_id = book_series_by_url.get(&sidecar.parent_url).cloned();
+                    scheduler.enqueue(
+                        TaskQueueRecord::new(
+                            format!("REFRESH_BOOK_METADATA_{book_id}"),
+                            priority,
+                            group_id,
+                        )
+                        .with_simple_type("REFRESH_BOOK_METADATA"),
+                    );
                 }
             }
             (ScannedSidecarSource::Book, ScannedSidecarType::Artwork) => {
                 if let Some(book_id) = book_by_url.get(&sidecar.parent_url)
                     && seen_books_artwork.insert(book_id.clone())
                 {
-                    scheduler.enqueue(TaskQueueRecord::new(
-                        format!("REFRESH_BOOK_LOCAL_ARTWORK:{book_id}"),
-                        priority,
-                        Some(book_id.clone()),
-                    ));
+                    scheduler.enqueue(
+                        TaskQueueRecord::new(
+                            format!("REFRESH_BOOK_LOCAL_ARTWORK_{book_id}"),
+                            priority,
+                            None,
+                        )
+                        .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK"),
+                    );
                 }
             }
         }

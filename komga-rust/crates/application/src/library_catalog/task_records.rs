@@ -33,20 +33,22 @@ pub(super) fn analyze_library_task_records(book_ids: Vec<String>) -> Vec<TaskQue
 
 pub(super) fn metadata_refresh_task_records(
     series_ids: Vec<String>,
-    book_ids: Vec<String>,
+    books: Vec<(String, String)>,
 ) -> Vec<TaskQueueRecord> {
-    let mut task_records = Vec::with_capacity((book_ids.len() * 2) + series_ids.len());
-    for book_id in book_ids {
-        task_records.push(TaskQueueRecord::new(
-            format!("REFRESH_BOOK_METADATA:{book_id}"),
-            80,
-            Some(book_id.clone()),
-        ));
-        task_records.push(TaskQueueRecord::new(
-            format!("REFRESH_BOOK_LOCAL_ARTWORK:{book_id}"),
-            80,
-            Some(book_id),
-        ));
+    let mut task_records = Vec::with_capacity((books.len() * 2) + series_ids.len());
+    for (book_id, series_id) in books {
+        task_records.push(
+            TaskQueueRecord::new(
+                format!("REFRESH_BOOK_METADATA_{book_id}"),
+                80,
+                Some(series_id),
+            )
+            .with_simple_type("REFRESH_BOOK_METADATA"),
+        );
+        task_records.push(
+            TaskQueueRecord::new(format!("REFRESH_BOOK_LOCAL_ARTWORK_{book_id}"), 80, None)
+                .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK"),
+        );
     }
     for series_id in series_ids {
         task_records.push(TaskQueueRecord::new(
@@ -64,4 +66,43 @@ pub(super) fn empty_trash_task_records(library_id: &str) -> Vec<TaskQueueRecord>
         70,
         Some(library_id.to_string()),
     )]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metadata_refresh_task_records_emit_kotlin_style_refresh_book_metadata_task() {
+        let task_records = metadata_refresh_task_records(
+            vec!["series-1".to_string()],
+            vec![("book-1".to_string(), "series-1".to_string())],
+        );
+
+        let metadata = task_records
+            .iter()
+            .find(|task| task.id.starts_with("REFRESH_BOOK_METADATA"))
+            .expect("book metadata task should be emitted");
+
+        assert_eq!(metadata.id, "REFRESH_BOOK_METADATA_book-1");
+        assert_eq!(metadata.simple_type, "REFRESH_BOOK_METADATA");
+        assert_eq!(metadata.group.as_deref(), Some("series-1"));
+    }
+
+    #[test]
+    fn metadata_refresh_task_records_emit_kotlin_style_refresh_book_local_artwork_task() {
+        let task_records = metadata_refresh_task_records(
+            vec!["series-1".to_string()],
+            vec![("book-1".to_string(), "series-1".to_string())],
+        );
+
+        let local_artwork = task_records
+            .iter()
+            .find(|task| task.simple_type == "REFRESH_BOOK_LOCAL_ARTWORK")
+            .expect("book local artwork task should be emitted");
+
+        assert_eq!(local_artwork.id, "REFRESH_BOOK_LOCAL_ARTWORK_book-1");
+        assert_eq!(local_artwork.priority, 80);
+        assert_eq!(local_artwork.group, None);
+    }
 }

@@ -71,11 +71,13 @@ pub async fn book_metadata_refresh(
         &state,
         vec![
             TaskQueueRecord::new(
-                format!("REFRESH_BOOK_METADATA:{book_id}"),
+                format!("REFRESH_BOOK_METADATA_{book_id}"),
                 80,
                 Some(book.series_id.clone()),
-            ),
-            TaskQueueRecord::new(format!("REFRESH_BOOK_LOCAL_ARTWORK:{book_id}"), 80, None),
+            )
+            .with_simple_type("REFRESH_BOOK_METADATA"),
+            TaskQueueRecord::new(format!("REFRESH_BOOK_LOCAL_ARTWORK_{book_id}"), 80, None)
+                .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK"),
         ],
     )
 }
@@ -535,16 +537,18 @@ pub async fn series_metadata_refresh(
 
     let mut task_records = vec![];
     for book_id in book_ids {
-        task_records.push(TaskQueueRecord::new(
-            format!("REFRESH_BOOK_METADATA:{book_id}"),
-            80,
-            Some(series_id.clone()),
-        ));
-        task_records.push(TaskQueueRecord::new(
-            format!("REFRESH_BOOK_LOCAL_ARTWORK:{book_id}"),
-            80,
-            None,
-        ));
+        task_records.push(
+            TaskQueueRecord::new(
+                format!("REFRESH_BOOK_METADATA_{book_id}"),
+                80,
+                Some(series_id.clone()),
+            )
+            .with_simple_type("REFRESH_BOOK_METADATA"),
+        );
+        task_records.push(
+            TaskQueueRecord::new(format!("REFRESH_BOOK_LOCAL_ARTWORK_{book_id}"), 80, None)
+                .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK"),
+        );
     }
     task_records.push(TaskQueueRecord::new(
         format!("REFRESH_SERIES_LOCAL_ARTWORK:{series_id}"),

@@ -1,17 +1,31 @@
 use super::hashed_pages::HashedPageToDelete;
 use super::*;
 use crate::tasks::{
-    load_book_file_path, load_books_requiring_analysis as load_persisted_books_requiring_analysis,
+    load_book_file_path, load_book_hash_runtime_state, load_book_library_id,
+    load_books_requiring_analysis as load_persisted_books_requiring_analysis,
     load_books_with_missing_page_hash as load_persisted_books_with_missing_page_hash,
     load_books_with_undersized_generated_thumbnails,
-    load_books_without_selected_thumbnails as load_persisted_books_without_selected_thumbnails,
-    load_duplicate_pages_to_delete as load_persisted_duplicate_pages_to_delete, persist_book_hash,
+    load_duplicate_pages_to_delete as load_persisted_duplicate_pages_to_delete,
+    load_non_deleted_book_ids as load_persisted_non_deleted_book_ids, persist_book_hash,
 };
 
 pub(in crate::task_queue) fn hash_book_pages(
     runtime: &RuntimeConfig,
     book_id: &str,
 ) -> Result<(), TaskExecutionError> {
+    let Some(library_id) = load_book_library_id(
+        runtime.task_runtime_context().database_file.as_path(),
+        book_id,
+    )
+    .map_err(TaskExecutionError::runtime)?
+    else {
+        return Ok(());
+    };
+    let hashing_flags = load_library_hashing_flags(runtime, &library_id)?;
+    if !hashing_flags.hash_pages {
+        return Ok(());
+    }
+
     let runtime = runtime.task_runtime_context();
     let database_file = runtime.database_file.clone();
     let book_id = book_id.to_string();
@@ -49,6 +63,36 @@ pub(in crate::task_queue) fn hash_book(
         return Ok(());
     }
 
+    let Some(state) = load_book_hash_runtime_state(runtime.database_file.as_path(), book_id)
+        .map_err(TaskExecutionError::runtime)?
+    else {
+        return Ok(());
+    };
+    let hashing_flags = load_library_hashing_flags(&runtime, &state.library_id)?;
+    if koreader {
+        if !hashing_flags.hash_koreader {
+            return Ok(());
+        }
+        if state
+            .file_hash_koreader
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+        {
+            return Ok(());
+        }
+    } else {
+        if !hashing_flags.hash_files {
+            return Ok(());
+        }
+        if state
+            .file_hash
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+        {
+            return Ok(());
+        }
+    }
+
     let Some(file_path) = load_book_file_path(runtime.database_file.as_path(), book_id)
         .map_err(TaskExecutionError::runtime)?
     else {
@@ -74,11 +118,11 @@ pub(in crate::task_queue) fn hash_book(
         .map_err(TaskExecutionError::runtime)
 }
 
-pub(in crate::task_queue) fn find_books_without_selected_thumbnails(
+pub(in crate::task_queue) fn find_books_for_thumbnail_regeneration(
     runtime: &RuntimeConfig,
 ) -> Result<Vec<String>, TaskExecutionError> {
     let runtime = runtime.task_runtime_context();
-    load_persisted_books_without_selected_thumbnails(runtime.database_file.as_path())
+    load_persisted_non_deleted_book_ids(runtime.database_file.as_path())
         .map_err(TaskExecutionError::runtime)
 }
 

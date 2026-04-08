@@ -14,5 +14,7 @@ mod extension_repair;
 mod file_hash_queries;
 
 pub(in crate::task_queue) use conversion_pipeline::{convert_book, find_books_to_convert};
-pub(in crate::task_queue) use extension_repair::repair_extensions;
+pub(in crate::task_queue) use extension_repair::{
+    find_books_for_extension_repair, repair_extension,
+};
 pub(in crate::task_queue) use file_hash_queries::find_books_with_missing_file_hash;

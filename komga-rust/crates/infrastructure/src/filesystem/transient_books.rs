@@ -11,7 +11,7 @@ use sqlx::Row;
 use zip::ZipArchive;
 
 use crate::load_pdfium;
-use crate::rar_support::{list_rar_entries, read_rar_entry_bytes};
+use crate::rar_support::{detect_rar_media_type, list_rar_entries, read_rar_entry_bytes};
 use crate::sqlite::connect_pool;
 
 #[derive(Clone, Debug)]
@@ -163,7 +163,13 @@ pub fn analyze_transient_book(path: &str) -> TransientBookAnalysis {
                 "ERR_1008"
             }
         })
-    } else if media_type == "application/vnd.comicbook-rar" {
+    } else if matches!(
+        media_type.as_str(),
+        "application/vnd.comicbook-rar"
+            | "application/x-rar-compressed"
+            | "application/x-rar-compressed; version=4"
+            | "application/x-rar-compressed; version=5"
+    ) {
         analyze_transient_rar_archive(path).map_err(|_| "ERR_1008")
     } else if media_type == "application/pdf" {
         analyze_transient_pdf(path).map_err(|_| "ERR_1005")
@@ -246,7 +252,13 @@ pub fn transient_book_page_content(
         return Some((page.media_type, bytes));
     }
 
-    if content_type == "application/vnd.comicbook-rar" {
+    if matches!(
+        content_type,
+        "application/vnd.comicbook-rar"
+            | "application/x-rar-compressed"
+            | "application/x-rar-compressed; version=4"
+            | "application/x-rar-compressed; version=5"
+    ) {
         let bytes = read_rar_entry_bytes(Path::new(path), page.file_name.as_str())
             .ok()
             .flatten()?;
@@ -273,6 +285,9 @@ pub fn transient_book_content_type(path: &str, media_type: &str) -> &'static str
             "application/epub+zip" => "application/epub+zip",
             "application/zip" => "application/zip",
             "application/vnd.comicbook-rar" => "application/vnd.comicbook-rar",
+            "application/x-rar-compressed" => "application/x-rar-compressed",
+            "application/x-rar-compressed; version=4" => "application/x-rar-compressed; version=4",
+            "application/x-rar-compressed; version=5" => "application/x-rar-compressed; version=5",
             _ => "application/octet-stream",
         };
     }
@@ -291,7 +306,7 @@ pub fn transient_book_content_type(path: &str, media_type: &str) -> &'static str
         Some("pdf") => "application/pdf",
         Some("epub") => detect_epub_media_type(path),
         Some("cbz") | Some("zip") => "application/zip",
-        Some("cbr") | Some("rar") => "application/vnd.comicbook-rar",
+        Some("cbr") | Some("rar") => detect_rar_media_type(Path::new(path)),
         _ => "application/octet-stream",
     }
 }
@@ -817,6 +832,10 @@ mod tests {
         let analysis = analyze_transient_book(path.to_string_lossy().as_ref());
 
         assert_eq!(analysis.status, "READY");
+        assert_eq!(
+            analysis.media_type,
+            "application/x-rar-compressed; version=4"
+        );
         assert!(
             !analysis.pages.is_empty(),
             "rar transient pages should not be empty"

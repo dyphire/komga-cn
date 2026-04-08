@@ -1,17 +1,22 @@
 use super::*;
+use std::collections::BTreeSet;
 
 pub(super) fn refresh_book_metadata(
     runtime: &RuntimeConfig,
     book_id: &str,
+    capabilities: &BTreeSet<String>,
 ) -> Result<Option<String>, TaskExecutionError> {
     let runtime = runtime.task_runtime_context();
     if !runtime.owns_sidecar_output {
         return Ok(None);
     }
 
-    let series_id =
-        crate::metadata::refresh_book_metadata(runtime.database_file.as_path(), book_id)
-            .map_err(TaskExecutionError::runtime)?;
+    let outcome = crate::metadata::refresh_book_metadata(
+        runtime.database_file.as_path(),
+        book_id,
+        capabilities,
+    )
+    .map_err(TaskExecutionError::runtime)?;
 
     if runtime.owns_search_index {
         crate::search::sync_entity_upsert_from_database(
@@ -21,9 +26,18 @@ pub(super) fn refresh_book_metadata(
             book_id,
         )
         .map_err(TaskExecutionError::runtime)?;
+        for readlist_id in &outcome.changed_readlist_ids {
+            crate::search::sync_entity_upsert_from_database(
+                runtime.database_file.as_path(),
+                runtime.lucene_data_directory.as_path(),
+                crate::search::SearchEntityType::ReadList,
+                readlist_id,
+            )
+            .map_err(TaskExecutionError::runtime)?;
+        }
     }
 
-    Ok(series_id)
+    Ok(outcome.series_id)
 }
 
 pub(super) fn refresh_series_metadata(

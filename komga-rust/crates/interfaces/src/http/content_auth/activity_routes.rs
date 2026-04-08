@@ -1,5 +1,7 @@
 use super::*;
 
+const REDACTED_API_KEY_VALUE: &str = "******";
+
 pub(crate) async fn users_me_api_keys_create(
     headers: HeaderMap,
     body: Value,
@@ -74,7 +76,7 @@ pub(crate) async fn users_me_api_keys_list(
                 serde_json::json!({
                     "id": api_key.id(),
                     "userId": api_key.user_id(),
-                    "key": api_key.key(),
+                    "key": REDACTED_API_KEY_VALUE,
                     "comment": api_key.comment(),
                     "createdDate": api_key.created_date().map(sqlite_datetime_to_utc),
                     "lastModifiedDate": api_key.created_date().map(sqlite_datetime_to_utc),

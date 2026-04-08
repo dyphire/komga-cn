@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use crate::search::{
     AnalyzedBookMedia, AnalyzedBookPage, analyze_book_input, persist_book_analysis,
-    rebuild_index_from_database,
+    rebuild_index_from_database_for_entities,
 };
 use crate::tasks::{PersistedTaskStoreRecord, SqliteTaskQueueStore, scan_library};
 use komga_application::task_processing::{

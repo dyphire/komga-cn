@@ -1,5 +1,5 @@
 use super::*;
-use crate::rar_support::list_rar_entries;
+use crate::rar_support::{detect_rar_media_type, list_rar_entries};
 use std::path::Path;
 
 pub(in crate::task_queue) fn media_type_from_path(path: &str) -> String {
@@ -37,7 +37,10 @@ pub(in crate::task_queue) fn analyze_book_media_file(
     file_path: &PathBuf,
     book_url: &str,
 ) -> Result<BookMediaAnalysis, String> {
-    let media_type = media_type_from_path(book_url);
+    let media_type = match media_type_from_path(book_url).as_str() {
+        "application/vnd.comicbook-rar" => detect_rar_media_type(file_path).to_string(),
+        other => other.to_string(),
+    };
 
     if !file_path.exists() {
         return Ok(BookMediaAnalysis {
@@ -50,7 +53,10 @@ pub(in crate::task_queue) fn analyze_book_media_file(
     let pages = match media_type.as_str() {
         "application/zip" => analyze_zip_media_pages(file_path, false).unwrap_or_default(),
         "application/epub+zip" => analyze_zip_media_pages(file_path, true).unwrap_or_default(),
-        "application/vnd.comicbook-rar" | "application/x-rar-compressed" => {
+        "application/vnd.comicbook-rar"
+        | "application/x-rar-compressed"
+        | "application/x-rar-compressed; version=4"
+        | "application/x-rar-compressed; version=5" => {
             analyze_rar_media_pages(file_path).unwrap_or_default()
         }
         "application/pdf" => analyze_pdf_media_pages(file_path).unwrap_or_default(),
@@ -188,7 +194,10 @@ pub(in crate::task_queue) fn expected_extension_for_media_type(
     media_type: &str,
 ) -> Option<&'static str> {
     match media_type {
-        "application/vnd.comicbook-rar" | "application/x-rar-compressed" => Some("cbr"),
+        "application/vnd.comicbook-rar"
+        | "application/x-rar-compressed"
+        | "application/x-rar-compressed; version=4"
+        | "application/x-rar-compressed; version=5" => Some("cbr"),
         "application/zip" => Some("cbz"),
         "application/pdf" => Some("pdf"),
         "application/epub+zip" => Some("epub"),
@@ -199,7 +208,7 @@ pub(in crate::task_queue) fn expected_extension_for_media_type(
 pub(in crate::task_queue) fn is_rar_media_type(media_type: &str) -> bool {
     matches!(
         media_type,
-        "application/vnd.comicbook-rar" | "application/x-rar-compressed"
+        "application/x-rar-compressed; version=4" | "application/x-rar-compressed; version=5"
     )
 }
 
@@ -226,5 +235,29 @@ mod tests {
         assert!(analysis.pages.is_empty());
 
         let _ = fs::remove_file(fixture_path);
+    }
+
+    #[test]
+    fn analyze_book_media_file_detects_rar4_versioned_media_type() {
+        let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../komga/src/test/resources/archives/rar4.rar");
+
+        let analysis = analyze_book_media_file(&fixture_path, "archives/rar4.cbr")
+            .expect("rar4 fixture analysis should succeed");
+
+        assert_eq!(analysis.status, "READY");
+        assert_eq!(
+            analysis.media_type,
+            "application/x-rar-compressed; version=4"
+        );
+        assert!(!analysis.pages.is_empty());
+    }
+
+    #[test]
+    fn is_rar_media_type_accepts_kotlin_versioned_rar_media_types() {
+        assert!(is_rar_media_type("application/x-rar-compressed; version=4"));
+        assert!(is_rar_media_type("application/x-rar-compressed; version=5"));
+        assert!(!is_rar_media_type("application/vnd.comicbook-rar"));
+        assert!(!is_rar_media_type("application/x-rar-compressed"));
     }
 }

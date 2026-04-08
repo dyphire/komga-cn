@@ -2,8 +2,9 @@ use super::archive_utils::{build_stored_zip_archive, metadata_updated_unix_secon
 use super::media_analysis::{is_supported_page_image_file_name, media_type_from_entry_name};
 use super::*;
 use crate::tasks::{
-    load_book_archive_source as load_persisted_book_archive_source,
-    load_book_hashed_pages as load_persisted_book_hashed_pages, persist_removed_hashed_pages,
+    PersistedHashedPageToDelete, load_book_archive_source as load_persisted_book_archive_source,
+    load_book_hashed_pages as load_persisted_book_hashed_pages,
+    persist_duplicate_page_deleted_events, persist_removed_hashed_pages,
 };
 use serde::{Deserialize, Serialize};
 
@@ -46,6 +47,7 @@ pub(in crate::task_queue) struct HashedPageToDelete {
 
 pub(in crate::task_queue) struct BookArchiveSource {
     pub(in crate::task_queue) file_path: PathBuf,
+    pub(in crate::task_queue) series_id: String,
     pub(in crate::task_queue) file_last_modified: i64,
     pub(in crate::task_queue) media_type: String,
     pub(in crate::task_queue) media_status: String,
@@ -69,15 +71,36 @@ pub(in crate::task_queue) fn remove_hashed_pages(
         return Ok(false);
     };
 
-    if !source.media_type.eq_ignore_ascii_case("application/zip")
-        || !source.media_status.eq_ignore_ascii_case("READY")
-    {
-        return Ok(false);
+    if !source.file_path.exists() {
+        return Err(TaskExecutionError::runtime(format!(
+            "file not found for hashed-page removal '{}': {}",
+            book_id,
+            source.file_path.display(),
+        )));
     }
 
-    let Ok(metadata) = fs::metadata(&source.file_path) else {
-        return Ok(false);
+    let metadata = fs::metadata(&source.file_path).map_err(|error| {
+        TaskExecutionError::runtime(format!(
+            "failed to read source metadata for hashed-page removal '{}' ('{}'): {error}",
+            book_id,
+            source.file_path.display(),
+        ))
+    })?;
+
+    if !source.media_type.eq_ignore_ascii_case("application/zip") {
+        return Err(TaskExecutionError::runtime(format!(
+            "unsupported media type for hashed-page removal '{}': {}",
+            book_id, source.media_type,
+        )));
+    }
+
+    if !source.media_status.eq_ignore_ascii_case("READY") {
+        return Err(TaskExecutionError::runtime(format!(
+            "media not ready for hashed-page removal '{}': {}",
+            book_id, source.media_status,
+        )));
     };
+
     if metadata_updated_unix_seconds(&metadata) != source.file_last_modified {
         return Ok(false);
     }
@@ -112,6 +135,16 @@ pub(in crate::task_queue) fn remove_hashed_pages(
     let database_file = runtime_context.database_file.clone();
     let book_id = book_id.to_string();
     let analyze_book_id = book_id.clone();
+    let removed_page_events = removed_pages
+        .iter()
+        .map(|page| PersistedHashedPageToDelete {
+            file_hash: page.file_hash.clone(),
+            file_size: page.file_size,
+            file_name: page.file_name.clone(),
+            media_type: page.media_type.clone(),
+            page_number: page.page_number,
+        })
+        .collect::<Vec<_>>();
 
     persist_removed_hashed_pages(
         database_file.as_path(),
@@ -123,6 +156,15 @@ pub(in crate::task_queue) fn remove_hashed_pages(
     .map_err(TaskExecutionError::runtime)?;
 
     super::index_tasks::analyze_book(runtime, analyze_book_id.as_str())?;
+
+    persist_duplicate_page_deleted_events(
+        database_file.as_path(),
+        &book_id,
+        &source.series_id,
+        &source.file_path,
+        &removed_page_events,
+    )
+    .map_err(TaskExecutionError::runtime)?;
 
     Ok(removed_pages.iter().any(|page| page.page_number == 1))
 }
@@ -137,6 +179,7 @@ pub(in crate::task_queue) fn load_book_archive_source(
             .map_err(TaskExecutionError::runtime)?
             .map(|source| BookArchiveSource {
                 file_path: source.file_path,
+                series_id: source.series_id,
                 file_last_modified: source.file_last_modified,
                 media_type: source.media_type,
                 media_status: source.media_status,

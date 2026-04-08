@@ -183,6 +183,19 @@ pub fn load_epub_cover_bytes(media: &BookMediaRecord) -> Option<(Vec<u8>, String
     Some((bytes, cover_item.media_type))
 }
 
+pub fn load_epub_package_document(media: &BookMediaRecord) -> Option<Vec<u8>> {
+    if !book_media_is_epub(media) {
+        return None;
+    }
+
+    let file = fs::File::open(&media.file_path).ok()?;
+    let mut archive = ZipArchive::new(file).ok()?;
+    let container_xml = read_zip_entry_bytes_normalized(&mut archive, "META-INF/container.xml")?;
+    let rootfile_path = parse_epub_rootfile_path(&container_xml)?;
+
+    read_zip_entry_bytes_normalized(&mut archive, &rootfile_path)
+}
+
 fn read_zip_entry_bytes<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     entry_name: &str,

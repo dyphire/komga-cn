@@ -15,6 +15,30 @@ pub(super) async fn load_rebuild_search_documents(
     Ok(docs)
 }
 
+pub(super) async fn load_rebuild_search_documents_for_entities(
+    pool: sqlx::SqlitePool,
+    entity_types: &[SearchEntityType],
+) -> Result<Vec<SearchDocument>, String> {
+    let mut docs = Vec::new();
+    for entity_type in entity_types {
+        match entity_type {
+            SearchEntityType::Book => {
+                docs.extend(load_all_book_search_documents(pool.clone()).await?)
+            }
+            SearchEntityType::Series => {
+                docs.extend(load_all_series_search_documents(pool.clone()).await?)
+            }
+            SearchEntityType::Collection => {
+                docs.extend(load_all_collection_search_documents(pool.clone()).await?)
+            }
+            SearchEntityType::ReadList => {
+                docs.extend(load_all_readlist_search_documents(pool.clone()).await?)
+            }
+        }
+    }
+    Ok(docs)
+}
+
 pub(super) async fn load_book_search_document(
     pool: sqlx::SqlitePool,
     book_id: &str,

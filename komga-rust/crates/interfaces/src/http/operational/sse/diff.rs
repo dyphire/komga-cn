@@ -531,6 +531,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn append_books_events_emits_book_changed_when_last_modified_changes() {
+        let previous = HashMap::from([(
+            "book-1".to_string(),
+            BookSnapshot {
+                series_id: "series-1".to_string(),
+                library_id: "library-1".to_string(),
+                last_modified: "2024-01-01 00:00:00.000".to_string(),
+            },
+        )]);
+        let current = HashMap::from([(
+            "book-1".to_string(),
+            BookSnapshot {
+                series_id: "series-1".to_string(),
+                library_id: "library-1".to_string(),
+                last_modified: "2024-01-01 00:00:01.000".to_string(),
+            },
+        )]);
+        let mut events = Vec::new();
+
+        append_books_events(&mut events, &previous, &current);
+
+        assert_single_event_contains(
+            events,
+            &[
+                "BookChanged",
+                "bookId",
+                "book-1",
+                "seriesId",
+                "series-1",
+                "libraryId",
+                "library-1",
+            ],
+        )
+        .await;
+    }
+
+    #[tokio::test]
     async fn append_thumbnail_readlist_events_suppresses_added_when_delete_housekeeping_reselects_sibling()
      {
         let previous = HashMap::from([

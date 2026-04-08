@@ -1,4 +1,4 @@
-use std::collections::{HashSet, hash_map::DefaultHasher};
+use std::collections::{HashMap, HashSet, hash_map::DefaultHasher};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -24,8 +24,21 @@ pub struct ScannedLibrary {
     pub series_rows: Vec<ScannedSeriesRow>,
     pub sidecars: Vec<ScannedSidecarRow>,
     pub book_ids: Vec<String>,
+    pub changed_existing_book_ids: HashSet<String>,
     pub discovered_series_ids: HashSet<String>,
     pub discovered_book_ids: HashSet<String>,
+}
+
+#[derive(Clone, Debug)]
+struct ExistingScannedBookRow {
+    book_id: String,
+    series_id: String,
+    file_last_modified_unix_seconds: i64,
+}
+
+#[derive(Clone, Debug)]
+struct ExistingScannedSeriesRow {
+    file_last_modified_unix_seconds: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -125,11 +138,18 @@ pub fn load_library_scan_config(
 pub fn scan_library(
     database_file: &Path,
     library_id: &str,
-    _deep_scan: bool,
+    deep_scan: bool,
 ) -> Result<ScannedLibrary, String> {
     let Some(scan_config) = load_library_scan_config(database_file, library_id)? else {
         return Ok(unavailable_scanned_library());
     };
+
+    let existing_books_by_url = load_existing_scanned_books_by_url(database_file, library_id)?;
+    let existing_series_by_url = load_existing_scanned_series_by_url(database_file, library_id)?;
+    let oneshots_directory: Option<String> = scan_config
+        .oneshots_directory
+        .as_ref()
+        .map(|value| value.to_ascii_lowercase());
 
     let root = PathBuf::from(&scan_config.root);
     if !root.exists() {
@@ -147,11 +167,17 @@ pub fn scan_library(
     let mut sidecars = Vec::new();
     let mut series_rows = Vec::new();
     let mut book_ids = Vec::new();
+    let mut changed_existing_book_ids = HashSet::new();
+    let mut changed_book_candidates_by_series_id = HashMap::<String, Vec<String>>::new();
     let mut discovered_series_ids = HashSet::new();
     let mut discovered_book_ids = HashSet::new();
 
     for series_dir in discovered {
         let series_url = series_dir.to_string_lossy().to_string();
+        let regular_series_id = route_safe_scanner_id("series", series_dir.as_path());
+        let series_is_oneshot = oneshots_directory
+            .as_ref()
+            .is_some_and(|value| series_url.to_ascii_lowercase().contains(value));
         let series_dir_last_modified_unix_seconds = fs::metadata(&series_dir)
             .ok()
             .map(|value| metadata_updated_unix_seconds(&value))
@@ -162,6 +188,7 @@ pub fn scan_library(
         };
 
         let mut books = Vec::new();
+        let mut changed_book_candidates = Vec::new();
         let mut sidecar_candidates = Vec::new();
         for entry in entries.flatten() {
             let path = entry.path();
@@ -176,6 +203,7 @@ pub fn scan_library(
             if is_supported_book_file(path.as_path(), &scan_config) {
                 let book_id = route_safe_scanner_id("book", path.as_path());
                 let book_url = path.to_string_lossy().to_string();
+                let file_last_modified_unix_seconds = metadata_updated_unix_seconds(&metadata);
                 let book_name = path
                     .file_stem()
                     .and_then(|value| value.to_str())
@@ -187,13 +215,28 @@ pub fn scan_library(
                     .unwrap_or_default()
                     .to_string();
 
+                if let Some(existing) = existing_books_by_url.get(&book_url)
+                    && existing.file_last_modified_unix_seconds != file_last_modified_unix_seconds
+                {
+                    let candidate_series_id = if series_is_oneshot {
+                        resolve_oneshot_series_id(&existing_books_by_url, &book_url)
+                    } else {
+                        regular_series_id.clone()
+                    };
+                    changed_book_candidates.push(existing.book_id.clone());
+                    changed_book_candidates_by_series_id
+                        .entry(candidate_series_id)
+                        .or_default()
+                        .push(existing.book_id.clone());
+                }
+
                 books.push(ScannedBookRow {
                     book_id: book_id.clone(),
                     book_name,
                     book_url,
                     file_name,
                     file_size: metadata.len() as i64,
-                    file_last_modified_unix_seconds: metadata_updated_unix_seconds(&metadata),
+                    file_last_modified_unix_seconds,
                     oneshot: false,
                 });
                 book_ids.push(book_id);
@@ -217,23 +260,22 @@ pub fn scan_library(
         } else {
             series_dir_last_modified_unix_seconds
         };
+        let series_changed = existing_series_by_url
+            .get(&series_url)
+            .is_some_and(|existing| {
+                existing.file_last_modified_unix_seconds != series_last_modified_unix_seconds
+            });
+        if deep_scan || series_changed {
+            changed_existing_book_ids.extend(changed_book_candidates);
+        }
 
         for book in &books {
             discovered_book_ids.insert(book.book_id.clone());
         }
 
-        let oneshots_directory: Option<String> = scan_config
-            .oneshots_directory
-            .as_ref()
-            .map(|value| value.to_ascii_lowercase());
-        if let Some(oneshots_directory) = oneshots_directory
-            && series_url
-                .to_ascii_lowercase()
-                .contains(&oneshots_directory)
-        {
+        if series_is_oneshot {
             for book in &books {
-                let series_id =
-                    route_safe_scanner_id("series", PathBuf::from(&book.book_url).as_path());
+                let series_id = resolve_oneshot_series_id(&existing_books_by_url, &book.book_url);
                 discovered_series_ids.insert(series_id.clone());
                 series_rows.push(ScannedSeriesRow {
                     series_id,
@@ -250,7 +292,7 @@ pub fn scan_library(
             continue;
         }
 
-        let series_id = route_safe_scanner_id("series", series_dir.as_path());
+        let series_id = regular_series_id;
         discovered_series_ids.insert(series_id.clone());
         let series_name = series_dir
             .file_name()
@@ -274,11 +316,23 @@ pub fn scan_library(
         });
     }
 
+    let series_ids_with_deleted_books = existing_books_by_url
+        .values()
+        .filter(|existing| !discovered_book_ids.contains(&existing.book_id))
+        .map(|existing| existing.series_id.clone())
+        .collect::<HashSet<_>>();
+    for series_id in series_ids_with_deleted_books {
+        if let Some(book_ids) = changed_book_candidates_by_series_id.get(&series_id) {
+            changed_existing_book_ids.extend(book_ids.iter().cloned());
+        }
+    }
+
     Ok(ScannedLibrary {
         root_available: true,
         series_rows,
         sidecars,
         book_ids,
+        changed_existing_book_ids,
         discovered_series_ids,
         discovered_book_ids,
     })
@@ -453,6 +507,22 @@ pub fn persist_scanned_library(
                 }
             }
 
+            for book_id in &scanned.changed_existing_book_ids {
+                sqlx::query(
+                    "UPDATE MEDIA \
+                     SET STATUS = 'OUTDATED' \
+                     WHERE BOOK_ID = ?",
+                )
+                .bind(book_id)
+                .execute(&pool)
+                .await
+                .map_err(|error| {
+                    format!(
+                        "failed to mark MEDIA rows outdated after deep scan for '{book_id}': {error}"
+                    )
+                })?;
+            }
+
             for sidecar in &scanned.sidecars {
                 let sidecar_updated = sqlx::query(
                     "UPDATE SIDECAR \
@@ -624,9 +694,92 @@ fn unavailable_scanned_library() -> ScannedLibrary {
         series_rows: Vec::new(),
         sidecars: Vec::new(),
         book_ids: Vec::new(),
+        changed_existing_book_ids: HashSet::new(),
         discovered_series_ids: HashSet::new(),
         discovered_book_ids: HashSet::new(),
     }
+}
+
+fn load_existing_scanned_books_by_url(
+    database_file: &Path,
+    library_id: &str,
+) -> Result<HashMap<String, ExistingScannedBookRow>, String> {
+    let database_file = database_file.to_path_buf();
+    let library_id = library_id.to_string();
+
+    run_database_query(database_file, move |pool| {
+        let library_id = library_id.clone();
+        Box::pin(async move {
+            let rows = sqlx::query(
+                "SELECT ID, URL, SERIES_ID, FILE_LAST_MODIFIED \
+                 FROM BOOK \
+                 WHERE LIBRARY_ID = ? \
+                   AND DELETED_DATE IS NULL",
+            )
+            .bind(&library_id)
+            .fetch_all(&pool)
+            .await
+            .map_err(|error| {
+                format!(
+                    "failed to load existing BOOK rows for deep scan in '{library_id}': {error}"
+                )
+            })?;
+
+            Ok(rows
+                .into_iter()
+                .map(|row| {
+                    (
+                        row.get::<String, _>("URL"),
+                        ExistingScannedBookRow {
+                            book_id: row.get::<String, _>("ID"),
+                            series_id: row.get::<String, _>("SERIES_ID"),
+                            file_last_modified_unix_seconds: row
+                                .get::<i64, _>("FILE_LAST_MODIFIED"),
+                        },
+                    )
+                })
+                .collect())
+        })
+    })
+}
+
+fn load_existing_scanned_series_by_url(
+    database_file: &Path,
+    library_id: &str,
+) -> Result<HashMap<String, ExistingScannedSeriesRow>, String> {
+    let database_file = database_file.to_path_buf();
+    let library_id = library_id.to_string();
+
+    run_database_query(database_file, move |pool| {
+        let library_id = library_id.clone();
+        Box::pin(async move {
+            let rows = sqlx::query(
+                "SELECT URL, FILE_LAST_MODIFIED \
+                 FROM SERIES \
+                 WHERE LIBRARY_ID = ? \
+                   AND DELETED_DATE IS NULL",
+            )
+            .bind(&library_id)
+            .fetch_all(&pool)
+            .await
+            .map_err(|error| {
+                format!("failed to load existing SERIES rows for scan in '{library_id}': {error}")
+            })?;
+
+            Ok(rows
+                .into_iter()
+                .map(|row| {
+                    (
+                        row.get::<String, _>("URL"),
+                        ExistingScannedSeriesRow {
+                            file_last_modified_unix_seconds: row
+                                .get::<i64, _>("FILE_LAST_MODIFIED"),
+                        },
+                    )
+                })
+                .collect())
+        })
+    })
 }
 
 fn collect_series_directories(
@@ -712,6 +865,16 @@ fn is_library_path_excluded(path: &Path, root: &Path, exclusions: &[String]) -> 
             || relative.starts_with(&(exclusion.clone() + "/"))
             || relative.contains(&("/".to_string() + &exclusion + "/"))
     })
+}
+
+fn resolve_oneshot_series_id(
+    existing_books_by_url: &HashMap<String, ExistingScannedBookRow>,
+    book_url: &str,
+) -> String {
+    existing_books_by_url
+        .get(book_url)
+        .map(|existing| existing.series_id.clone())
+        .unwrap_or_else(|| route_safe_scanner_id("series", PathBuf::from(book_url).as_path()))
 }
 
 fn route_safe_scanner_id(prefix: &str, path: &Path) -> String {

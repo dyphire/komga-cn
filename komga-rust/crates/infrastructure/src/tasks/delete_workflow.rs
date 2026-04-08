@@ -17,12 +17,15 @@ pub struct PersistedDeleteBookDecision {
 pub struct PersistedDeleteBookWork {
     pub series_id: String,
     pub book_path: PathBuf,
+    pub sidecar_thumbnail_paths: Vec<PathBuf>,
 }
 
 #[derive(Clone, Debug)]
 pub struct PersistedDeleteSeriesWork {
     pub book_ids: Vec<String>,
     pub book_paths: Vec<PathBuf>,
+    pub series_path: Option<PathBuf>,
+    pub sidecar_thumbnail_paths: Vec<PathBuf>,
 }
 
 pub fn load_book_delete_decision(
@@ -85,11 +88,99 @@ pub fn load_book_delete_work(
                 format!("failed to load book delete target for '{book_id}': {error}")
             })?;
 
+            let sidecar_rows = sqlx::query(
+                r#"
+                SELECT tb.URL AS URL,
+                       l.ROOT AS LIBRARY_ROOT
+                FROM THUMBNAIL_BOOK tb
+                JOIN BOOK b ON b.ID = tb.BOOK_ID
+                JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+                WHERE tb.BOOK_ID = ?
+                  AND tb.TYPE = 'SIDECAR'
+                  AND tb.URL IS NOT NULL
+                ORDER BY tb.ID ASC
+                "#,
+            )
+            .bind(&book_id)
+            .fetch_all(&pool)
+            .await
+            .map_err(|error| {
+                format!("failed to load sidecar thumbnails for '{book_id}': {error}")
+            })?;
+
             Ok(row.map(|row| PersistedDeleteBookWork {
                 series_id: row.get::<String, _>("SERIES_ID"),
                 book_path: PathBuf::from(row.get::<String, _>("LIBRARY_ROOT"))
                     .join(row.get::<String, _>("BOOK_URL")),
+                sidecar_thumbnail_paths: sidecar_rows
+                    .iter()
+                    .map(|sidecar| {
+                        PathBuf::from(sidecar.get::<String, _>("LIBRARY_ROOT"))
+                            .join(sidecar.get::<String, _>("URL"))
+                    })
+                    .collect(),
             }))
+        })
+    })
+}
+
+pub fn soft_delete_book_rows(
+    database_file: &Path,
+    book_id: &str,
+    series_id: &str,
+) -> Result<(), String> {
+    let database_file = database_file.to_path_buf();
+    let book_id = book_id.to_string();
+    let series_id = series_id.to_string();
+
+    run_database_query(database_file, move |pool| {
+        let book_id = book_id.clone();
+        let series_id = series_id.clone();
+        Box::pin(async move {
+            let mut tx = pool.begin().await.map_err(|error| {
+                format!("failed to start soft-delete-book transaction for '{book_id}': {error}")
+            })?;
+
+            sqlx::query(
+                r#"
+                UPDATE BOOK
+                SET DELETED_DATE = CURRENT_TIMESTAMP,
+                    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+                WHERE ID = ?
+                "#,
+            )
+            .bind(&book_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| format!("failed to soft-delete BOOK row for '{book_id}': {error}"))?;
+
+            sqlx::query(
+                r#"
+                UPDATE SERIES
+                SET BOOK_COUNT = (
+                    SELECT COUNT(*)
+                    FROM BOOK
+                    WHERE BOOK.SERIES_ID = SERIES.ID
+                      AND BOOK.DELETED_DATE IS NULL
+                ),
+                    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+                WHERE ID = ?
+                "#,
+            )
+            .bind(&series_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| {
+                format!(
+                    "failed to refresh active series count for '{series_id}' while soft-deleting book '{book_id}': {error}"
+                )
+            })?;
+
+            tx.commit().await.map_err(|error| {
+                format!("failed to commit soft-delete-book transaction for '{book_id}': {error}")
+            })?;
+
+            Ok(())
         })
     })
 }
@@ -182,6 +273,43 @@ pub fn load_series_delete_work(
                 format!("failed to load series books for delete '{series_id}': {error}")
             })?;
 
+            let series_row = sqlx::query(
+                r#"
+                SELECT s.URL AS SERIES_URL,
+                       l.ROOT AS LIBRARY_ROOT
+                FROM SERIES s
+                JOIN LIBRARY l ON l.ID = s.LIBRARY_ID
+                WHERE s.ID = ?
+                LIMIT 1
+                "#,
+            )
+            .bind(&series_id)
+            .fetch_optional(&pool)
+            .await
+            .map_err(|error| {
+                format!("failed to load series path for delete '{series_id}': {error}")
+            })?;
+
+            let sidecar_rows = sqlx::query(
+                r#"
+                SELECT ts.URL AS URL,
+                       l.ROOT AS LIBRARY_ROOT
+                FROM THUMBNAIL_SERIES ts
+                JOIN SERIES s ON s.ID = ts.SERIES_ID
+                JOIN LIBRARY l ON l.ID = s.LIBRARY_ID
+                WHERE ts.SERIES_ID = ?
+                  AND ts.TYPE = 'SIDECAR'
+                  AND ts.URL IS NOT NULL
+                ORDER BY ts.ID ASC
+                "#,
+            )
+            .bind(&series_id)
+            .fetch_all(&pool)
+            .await
+            .map_err(|error| {
+                format!("failed to load series sidecar thumbnails for '{series_id}': {error}")
+            })?;
+
             Ok(PersistedDeleteSeriesWork {
                 book_ids: rows
                     .iter()
@@ -194,7 +322,55 @@ pub fn load_series_delete_work(
                             .join(row.get::<String, _>("BOOK_URL"))
                     })
                     .collect(),
+                series_path: series_row.map(|row| {
+                    PathBuf::from(row.get::<String, _>("LIBRARY_ROOT"))
+                        .join(row.get::<String, _>("SERIES_URL"))
+                }),
+                sidecar_thumbnail_paths: sidecar_rows
+                    .iter()
+                    .map(|row| {
+                        PathBuf::from(row.get::<String, _>("LIBRARY_ROOT"))
+                            .join(row.get::<String, _>("URL"))
+                    })
+                    .collect(),
             })
+        })
+    })
+}
+
+pub fn soft_delete_series_rows(database_file: &Path, series_id: &str) -> Result<(), String> {
+    let database_file = database_file.to_path_buf();
+    let series_id = series_id.to_string();
+
+    run_database_query(database_file, move |pool| {
+        let series_id = series_id.clone();
+        Box::pin(async move {
+            let mut tx = pool.begin().await.map_err(|error| {
+                format!("failed to start soft-delete-series transaction for '{series_id}': {error}")
+            })?;
+
+            sqlx::query(
+                r#"
+                UPDATE SERIES
+                SET DELETED_DATE = CURRENT_TIMESTAMP,
+                    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+                WHERE ID = ?
+                "#,
+            )
+            .bind(&series_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| {
+                format!("failed to soft-delete SERIES row for '{series_id}': {error}")
+            })?;
+
+            tx.commit().await.map_err(|error| {
+                format!(
+                    "failed to commit soft-delete-series transaction for '{series_id}': {error}"
+                )
+            })?;
+
+            Ok(())
         })
     })
 }

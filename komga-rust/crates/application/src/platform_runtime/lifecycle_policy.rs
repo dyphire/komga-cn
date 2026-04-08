@@ -25,7 +25,7 @@ pub struct RuntimeLifecyclePolicy;
 impl RuntimeLifecyclePolicy {
     pub fn startup_task_for_existing_index(has_existing_index: bool) -> Option<StartupSearchTask> {
         if has_existing_index {
-            Some(StartupSearchTask::UpgradeIndex)
+            None
         } else {
             Some(StartupSearchTask::RebuildIndex)
         }
@@ -44,5 +44,22 @@ impl RuntimeLifecyclePolicy {
                 Ok(Some(StartupSearchTask::RebuildIndex))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn existing_index_startup_no_longer_requests_upgrade_task() {
+        assert_eq!(
+            RuntimeLifecyclePolicy::startup_task_for_existing_index(true),
+            None,
+        );
+        assert_eq!(
+            RuntimeLifecyclePolicy::startup_task_for_existing_index(false),
+            Some(StartupSearchTask::RebuildIndex),
+        );
     }
 }

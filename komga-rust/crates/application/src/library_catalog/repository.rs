@@ -6,7 +6,7 @@ use crate::task_processing::TaskQueueRecord;
 
 use super::LibraryRecord;
 
-type LibrarySeriesAndBookIds = Option<(Vec<String>, Vec<String>)>;
+type LibrarySeriesAndBookIds = Option<(Vec<String>, Vec<(String, String)>)>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LibraryCatalogMutationError {
@@ -66,6 +66,11 @@ pub trait LibraryCatalogMutationPort {
         library_id: &str,
         koreader: bool,
     ) -> impl Future<Output = Result<Vec<String>, String>>;
+
+    fn library_books_with_mismatched_extensions(
+        &self,
+        library_id: &str,
+    ) -> impl Future<Output = Result<Vec<(String, String)>, String>>;
 
     fn library_book_ids(
         &self,

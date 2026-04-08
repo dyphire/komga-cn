@@ -71,45 +71,38 @@ fn handle_scan_library(
     if hashing_flags.hash_files {
         let book_ids = find_books_with_missing_file_hash(runtime, &library_id, false)?;
         for book_id in book_ids {
-            scheduler.enqueue(TaskQueueRecord::new(
-                format!("HASH_BOOK:{book_id}"),
-                task.priority.saturating_sub(15),
-                Some(book_id),
-            ));
+            scheduler.enqueue(hash_book_task(&book_id, 0));
         }
     }
 
     if hashing_flags.hash_koreader {
         let book_ids = find_books_with_missing_file_hash(runtime, &library_id, true)?;
         for book_id in book_ids {
-            scheduler.enqueue(TaskQueueRecord::new(
-                format!("HASH_BOOK_KOREADER:{book_id}"),
-                task.priority.saturating_sub(15),
-                Some(book_id),
-            ));
+            scheduler.enqueue(hash_book_koreader_task(&book_id, 0));
         }
     }
 
     if hashing_flags.hash_pages {
-        scheduler.enqueue(TaskQueueRecord::new(
-            format!("FIND_BOOKS_WITH_MISSING_PAGE_HASH:{library_id}"),
+        scheduler.enqueue(find_books_with_missing_page_hash_task(
+            &library_id,
             task.priority.saturating_sub(15),
-            Some(library_id.clone()),
         ));
     }
-    scheduler.enqueue(TaskQueueRecord::new(
-        format!("FIND_DUPLICATE_PAGES_TO_DELETE:{library_id}"),
+    scheduler.enqueue(find_duplicate_pages_to_delete_task(
+        &library_id,
         task.priority.saturating_sub(15),
-        Some(library_id.clone()),
     ));
 
     let maintenance_flags = load_library_maintenance_flags(runtime, &library_id)?;
     if maintenance_flags.repair_extensions {
-        scheduler.enqueue(TaskQueueRecord::new(
-            format!("REPAIR_EXTENSIONS:{library_id}"),
-            task.priority.saturating_sub(20),
-            Some(library_id.clone()),
-        ));
+        let books = find_books_for_extension_repair(runtime, &library_id)?;
+        for book in books {
+            scheduler.enqueue(repair_extension_task(
+                &book.book_id,
+                &book.series_id,
+                task.priority.saturating_sub(20),
+            ));
+        }
     }
     if maintenance_flags.convert_to_cbz {
         scheduler.enqueue(TaskQueueRecord::new(
@@ -126,4 +119,164 @@ fn handle_scan_library(
         task.priority.saturating_sub(12),
     );
     Ok(())
+}
+
+fn find_duplicate_pages_to_delete_task(library_id: &str, priority: i32) -> TaskQueueRecord {
+    TaskQueueRecord::new(
+        format!("FIND_DUPLICATE_PAGES_TO_DELETE_{library_id}"),
+        priority,
+        None,
+    )
+    .with_simple_type("FIND_DUPLICATE_PAGES_TO_DELETE")
+}
+
+fn hash_book_task(book_id: &str, priority: i32) -> TaskQueueRecord {
+    let task_id = format!("HASH_BOOK_{book_id}");
+    TaskQueueRecord::new(task_id.clone(), priority, None)
+        .with_simple_type("HASH_BOOK")
+        .with_payload(
+            serde_json::json!({
+                "bookId": book_id,
+                "priority": priority,
+                "groupId": serde_json::Value::Null,
+                "uniqueId": task_id,
+            })
+            .to_string(),
+        )
+}
+
+fn hash_book_koreader_task(book_id: &str, priority: i32) -> TaskQueueRecord {
+    let task_id = format!("HASH_BOOK_KOREADER_{book_id}");
+    TaskQueueRecord::new(task_id.clone(), priority, None)
+        .with_simple_type("HASH_BOOK_KOREADER")
+        .with_payload(
+            serde_json::json!({
+                "bookId": book_id,
+                "priority": priority,
+                "groupId": serde_json::Value::Null,
+                "uniqueId": task_id,
+            })
+            .to_string(),
+        )
+}
+
+fn find_books_with_missing_page_hash_task(library_id: &str, _priority: i32) -> TaskQueueRecord {
+    let task_id = format!("FIND_BOOKS_WITH_MISSING_PAGE_HASH_{library_id}");
+    TaskQueueRecord::new(task_id.clone(), 0, None)
+        .with_simple_type("FIND_BOOKS_WITH_MISSING_PAGE_HASH")
+        .with_payload(
+            serde_json::json!({
+                "libraryId": library_id,
+                "priority": 0,
+                "groupId": serde_json::Value::Null,
+                "uniqueId": task_id,
+            })
+            .to_string(),
+        )
+}
+
+fn repair_extension_task(book_id: &str, series_id: &str, priority: i32) -> TaskQueueRecord {
+    let task_id = format!("REPAIR_EXTENSION_{book_id}");
+    TaskQueueRecord::new(task_id.clone(), priority, Some(series_id.to_string()))
+        .with_simple_type("REPAIR_EXTENSION")
+        .with_payload(
+            serde_json::json!({
+                "bookId": book_id,
+                "priority": priority,
+                "groupId": series_id,
+                "uniqueId": task_id,
+            })
+            .to_string(),
+        )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn find_duplicate_pages_to_delete_task_uses_kotlin_compatible_unique_id() {
+        let task = find_duplicate_pages_to_delete_task("library-1", 85);
+
+        assert_eq!(
+            task.id,
+            "FIND_DUPLICATE_PAGES_TO_DELETE_library-1".to_string()
+        );
+        assert_eq!(
+            task.simple_type,
+            "FIND_DUPLICATE_PAGES_TO_DELETE".to_string()
+        );
+        assert_eq!(task.priority, 85);
+        assert_eq!(task.group, None);
+        assert!(task.payload.is_none());
+    }
+
+    #[test]
+    fn hash_book_task_uses_kotlin_compatible_unique_id() {
+        let task = hash_book_task("book-1", 0);
+
+        assert_eq!(task.id, "HASH_BOOK_book-1".to_string());
+        assert_eq!(task.simple_type, "HASH_BOOK".to_string());
+        assert_eq!(task.priority, 0);
+        assert_eq!(task.group, None);
+        assert_eq!(
+            task.payload.as_deref(),
+            Some(
+                r#"{"bookId":"book-1","groupId":null,"priority":0,"uniqueId":"HASH_BOOK_book-1"}"#
+            ),
+        );
+    }
+
+    #[test]
+    fn hash_book_koreader_task_uses_kotlin_compatible_unique_id() {
+        let task = hash_book_koreader_task("book-1", 0);
+
+        assert_eq!(task.id, "HASH_BOOK_KOREADER_book-1".to_string());
+        assert_eq!(task.simple_type, "HASH_BOOK_KOREADER".to_string());
+        assert_eq!(task.priority, 0);
+        assert_eq!(task.group, None);
+        assert_eq!(
+            task.payload.as_deref(),
+            Some(
+                r#"{"bookId":"book-1","groupId":null,"priority":0,"uniqueId":"HASH_BOOK_KOREADER_book-1"}"#
+            ),
+        );
+    }
+
+    #[test]
+    fn find_books_with_missing_page_hash_task_uses_kotlin_compatible_unique_id() {
+        let task = find_books_with_missing_page_hash_task("library-1", 10);
+
+        assert_eq!(
+            task.id,
+            "FIND_BOOKS_WITH_MISSING_PAGE_HASH_library-1".to_string()
+        );
+        assert_eq!(
+            task.simple_type,
+            "FIND_BOOKS_WITH_MISSING_PAGE_HASH".to_string()
+        );
+        assert_eq!(task.group, None);
+        assert_eq!(
+            task.payload.as_deref(),
+            Some(
+                r#"{"groupId":null,"libraryId":"library-1","priority":0,"uniqueId":"FIND_BOOKS_WITH_MISSING_PAGE_HASH_library-1"}"#
+            ),
+        );
+    }
+
+    #[test]
+    fn repair_extension_task_uses_kotlin_compatible_unique_id() {
+        let task = repair_extension_task("book-1", "series-1", 12);
+
+        assert_eq!(task.id, "REPAIR_EXTENSION_book-1".to_string());
+        assert_eq!(task.simple_type, "REPAIR_EXTENSION".to_string());
+        assert_eq!(task.priority, 12);
+        assert_eq!(task.group.as_deref(), Some("series-1"));
+        assert_eq!(
+            task.payload.as_deref(),
+            Some(
+                r#"{"bookId":"book-1","groupId":"series-1","priority":12,"uniqueId":"REPAIR_EXTENSION_book-1"}"#
+            ),
+        );
+    }
 }

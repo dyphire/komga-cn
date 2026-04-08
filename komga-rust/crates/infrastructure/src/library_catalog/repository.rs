@@ -84,6 +84,19 @@ impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
         library_book_ids_with_empty_hash(self.database_file.as_path(), library_id, koreader).await
     }
 
+    async fn library_books_with_mismatched_extensions(
+        &self,
+        library_id: &str,
+    ) -> Result<Vec<(String, String)>, String> {
+        crate::tasks::load_books_for_extension_repair(self.database_file.as_path(), library_id)
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|row| (row.book_id, row.series_id))
+                    .collect()
+            })
+            .map_err(|error| format!("load library mismatched extension books: {error}"))
+    }
+
     async fn library_book_ids(&self, library_id: &str) -> Result<Option<Vec<String>>, String> {
         library_book_ids(self.database_file.as_path(), library_id)
             .await
@@ -93,7 +106,7 @@ impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
     async fn library_series_and_book_ids(
         &self,
         library_id: &str,
-    ) -> Result<Option<(Vec<String>, Vec<String>)>, String> {
+    ) -> Result<Option<(Vec<String>, Vec<(String, String)>)>, String> {
         library_series_and_book_ids(self.database_file.as_path(), library_id)
             .await
             .map_err(|error| format!("load library series and book ids: {error}"))

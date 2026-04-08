@@ -1,7 +1,9 @@
+use std::path::Path;
+
 use super::*;
 use crate::tasks::{
-    delete_book_rows, delete_series_rows, load_book_delete_decision, load_book_delete_work,
-    load_series_delete_work,
+    load_book_delete_decision, load_book_delete_work, load_series_delete_work,
+    soft_delete_book_rows, soft_delete_series_rows,
 };
 
 pub(super) fn delete_book_task(
@@ -18,7 +20,7 @@ pub(super) fn delete_book_task(
     };
 
     if oneshot {
-        delete_series(runtime, &series_id)
+        delete_oneshot_series(runtime, book_id, &series_id)
     } else {
         delete_book(runtime, book_id)
     }
@@ -44,9 +46,17 @@ fn delete_book(runtime: &RuntimeConfig, book_id: &str) -> Result<(), TaskExecuti
         return Ok(());
     };
 
-    let _ = fs::remove_file(&work.book_path);
+    if !deletion_prerequisites_met(&work.book_path) {
+        return Ok(());
+    }
 
-    delete_book_rows(runtime.database_file.as_path(), book_id, &work.series_id)
+    let _ = fs::remove_file(&work.book_path);
+    for sidecar_thumbnail_path in &work.sidecar_thumbnail_paths {
+        let _ = fs::remove_file(sidecar_thumbnail_path);
+    }
+    remove_empty_parent_directory(&work.book_path);
+
+    soft_delete_book_rows(runtime.database_file.as_path(), book_id, &work.series_id)
         .map_err(TaskExecutionError::runtime)?;
 
     if runtime.owns_search_index {
@@ -61,6 +71,64 @@ fn delete_book(runtime: &RuntimeConfig, book_id: &str) -> Result<(), TaskExecuti
     Ok(())
 }
 
+fn delete_oneshot_series(
+    runtime: &RuntimeConfig,
+    book_id: &str,
+    series_id: &str,
+) -> Result<(), TaskExecutionError> {
+    let runtime_context = runtime.task_runtime_context();
+    let work = load_series_delete_work(runtime_context.database_file.as_path(), series_id)
+        .map_err(TaskExecutionError::runtime)?;
+
+    let Some(series_path) = &work.series_path else {
+        return Ok(());
+    };
+    if !deletion_prerequisites_met(series_path) {
+        return Ok(());
+    }
+
+    delete_book(runtime, book_id)?;
+
+    for sidecar_thumbnail_path in &work.sidecar_thumbnail_paths {
+        let _ = fs::remove_file(sidecar_thumbnail_path);
+    }
+    remove_empty_directory(series_path);
+
+    soft_delete_series_rows(runtime_context.database_file.as_path(), series_id)
+        .map_err(TaskExecutionError::runtime)?;
+
+    if runtime_context.owns_search_index {
+        crate::search::sync_entity_delete_from_index(
+            runtime_context.lucene_data_directory.as_path(),
+            crate::search::SearchEntityType::Series,
+            series_id,
+        )
+        .map_err(TaskExecutionError::runtime)?;
+    }
+
+    Ok(())
+}
+
+fn remove_empty_parent_directory(target_path: &Path) {
+    let Some(parent_directory) = target_path.parent() else {
+        return;
+    };
+    remove_empty_directory(parent_directory);
+}
+
+fn remove_empty_directory(target_directory: &Path) {
+    let Ok(mut entries) = fs::read_dir(target_directory) else {
+        return;
+    };
+    if entries.next().is_none() {
+        let _ = fs::remove_dir(target_directory);
+    }
+}
+
+fn deletion_prerequisites_met(target_path: &Path) -> bool {
+    fs::metadata(target_path).is_ok_and(|metadata| !metadata.permissions().readonly())
+}
+
 pub(super) fn delete_series(
     runtime: &RuntimeConfig,
     series_id: &str,
@@ -69,28 +137,32 @@ pub(super) fn delete_series(
         return Ok(());
     }
 
-    let runtime = runtime.task_runtime_context();
-    let work = load_series_delete_work(runtime.database_file.as_path(), series_id)
+    let runtime_context = runtime.task_runtime_context();
+    let work = load_series_delete_work(runtime_context.database_file.as_path(), series_id)
         .map_err(TaskExecutionError::runtime)?;
 
-    for book_path in &work.book_paths {
-        let _ = fs::remove_file(book_path);
+    let Some(series_path) = &work.series_path else {
+        return Ok(());
+    };
+    if !deletion_prerequisites_met(series_path) {
+        return Ok(());
     }
 
-    delete_series_rows(runtime.database_file.as_path(), series_id, &work.book_ids)
+    for book_id in &work.book_ids {
+        delete_book(runtime, book_id)?;
+    }
+
+    for sidecar_thumbnail_path in &work.sidecar_thumbnail_paths {
+        let _ = fs::remove_file(sidecar_thumbnail_path);
+    }
+    remove_empty_directory(series_path);
+
+    soft_delete_series_rows(runtime_context.database_file.as_path(), series_id)
         .map_err(TaskExecutionError::runtime)?;
 
-    if runtime.owns_search_index {
-        for book_id in &work.book_ids {
-            crate::search::sync_entity_delete_from_index(
-                runtime.lucene_data_directory.as_path(),
-                crate::search::SearchEntityType::Book,
-                book_id,
-            )
-            .map_err(TaskExecutionError::runtime)?;
-        }
+    if runtime_context.owns_search_index {
         crate::search::sync_entity_delete_from_index(
-            runtime.lucene_data_directory.as_path(),
+            runtime_context.lucene_data_directory.as_path(),
             crate::search::SearchEntityType::Series,
             series_id,
         )

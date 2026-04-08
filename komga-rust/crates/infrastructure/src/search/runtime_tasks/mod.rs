@@ -19,6 +19,9 @@ pub struct BookAnalysisInput {
     pub title: String,
     pub url: String,
     pub root: String,
+    pub series_id: String,
+    pub previous_media_status: String,
+    pub previous_page_count: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -62,6 +65,15 @@ pub fn rebuild_index_from_database(database_file: &Path, index_dir: &Path) -> Re
     rebuild::rebuild_index_from_database(database_file, index_dir)
 }
 
+pub fn rebuild_index_from_database_for_entities(
+    database_file: &Path,
+    index_dir: &Path,
+    entity_types: Option<&[SearchEntityType]>,
+) -> Result<(), String> {
+    register_runtime_owned_index_database(database_file, index_dir);
+    rebuild::rebuild_index_from_database_for_entities(database_file, index_dir, entity_types)
+}
+
 fn bootstrap_runtime_owned_index_for_sync(
     database_file: &Path,
     index_dir: &Path,
@@ -92,13 +104,17 @@ pub fn analyze_book_input(
                 r#"SELECT
                      COALESCE(bm.TITLE, b.NAME) AS TITLE,
                      b.URL AS URL,
+                     b.SERIES_ID AS SERIES_ID,
+                     COALESCE(m.STATUS, '') AS PREVIOUS_MEDIA_STATUS,
+                     COALESCE(m.PAGE_COUNT, 0) AS PREVIOUS_PAGE_COUNT,
                      l.ROOT AS ROOT
-                  FROM BOOK b
-                  JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
-                  LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
-                  WHERE b.ID = ?
-                  LIMIT 1
-                 "#,
+                   FROM BOOK b
+                   JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+                   LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
+                   LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
+                   WHERE b.ID = ?
+                   LIMIT 1
+                  "#,
             )
             .bind(&book_id)
             .fetch_optional(&pool)
@@ -109,6 +125,9 @@ pub fn analyze_book_input(
                 title: sqlx::Row::get::<String, _>(&row, "TITLE"),
                 url: sqlx::Row::get::<String, _>(&row, "URL"),
                 root: sqlx::Row::get::<String, _>(&row, "ROOT"),
+                series_id: sqlx::Row::get::<String, _>(&row, "SERIES_ID"),
+                previous_media_status: sqlx::Row::get::<String, _>(&row, "PREVIOUS_MEDIA_STATUS"),
+                previous_page_count: sqlx::Row::get::<i64, _>(&row, "PREVIOUS_PAGE_COUNT"),
             }))
         })
     })
@@ -175,6 +194,16 @@ pub fn persist_book_analysis(
             .execute(&mut *tx)
             .await
             .map_err(|error| format!("failed to persist MEDIA analyze state: {error}"))?;
+
+            sqlx::query(
+                "UPDATE BOOK SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP WHERE ID = ?",
+            )
+            .bind(&book_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| {
+                format!("failed to refresh BOOK last-modified during analyze for '{book_id}': {error}")
+            })?;
 
             tx.commit().await.map_err(|error| {
                 format!("failed to commit analyze-book transaction for '{book_id}': {error}")

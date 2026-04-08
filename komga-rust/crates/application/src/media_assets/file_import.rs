@@ -63,6 +63,7 @@ pub struct ImportBookOutcome {
     pub library_id: String,
     pub imported_book_id: String,
     pub sidecar_imported: bool,
+    pub artwork_sidecar_imported: bool,
 }
 
 pub trait MediaImportPort {
@@ -115,16 +116,31 @@ where
         let mut deferred_tasks = Vec::new();
 
         for book in payload.books {
+            let series_id = book.series_id.clone();
             let Some(outcome) = self.port.import_book(payload.copy_mode, book).await? else {
                 continue;
             };
 
             if outcome.sidecar_imported {
-                deferred_tasks.push(TaskQueueRecord::new(
-                    format!("REFRESH_BOOK_METADATA:{}", outcome.imported_book_id),
-                    80,
-                    Some(outcome.imported_book_id.clone()),
-                ));
+                deferred_tasks.push(
+                    TaskQueueRecord::new(
+                        format!("REFRESH_BOOK_METADATA_{}", outcome.imported_book_id),
+                        80,
+                        Some(series_id),
+                    )
+                    .with_simple_type("REFRESH_BOOK_METADATA"),
+                );
+            }
+
+            if outcome.artwork_sidecar_imported {
+                deferred_tasks.push(
+                    TaskQueueRecord::new(
+                        format!("REFRESH_BOOK_LOCAL_ARTWORK_{}", outcome.imported_book_id),
+                        80,
+                        None,
+                    )
+                    .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK"),
+                );
             }
 
             library_ids.insert(outcome.library_id);
@@ -223,4 +239,85 @@ pub fn pending_runtime_book_import_events(
         .collect::<Vec<_>>();
 
     (current_cursor, events)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+
+    fn test_waker() -> Waker {
+        fn noop(_: *const ()) {}
+        fn clone(_: *const ()) -> RawWaker {
+            RawWaker::new(std::ptr::null(), &VTABLE)
+        }
+
+        static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, noop, noop, noop);
+        let raw = RawWaker::new(std::ptr::null(), &VTABLE);
+        unsafe { Waker::from_raw(raw) }
+    }
+
+    fn block_on_ready<F: Future>(future: F) -> F::Output {
+        let waker = test_waker();
+        let mut context = Context::from_waker(&waker);
+        let mut future = std::pin::pin!(future);
+        match future.as_mut().poll(&mut context) {
+            Poll::Ready(output) => output,
+            Poll::Pending => panic!("test future unexpectedly yielded pending"),
+        }
+    }
+
+    #[derive(Clone)]
+    struct StubImportPort {
+        outcome: Option<ImportBookOutcome>,
+    }
+
+    impl MediaImportPort for StubImportPort {
+        async fn import_book(
+            &self,
+            _copy_mode: ImportCopyMode,
+            _book: BooksImportEntry,
+        ) -> Result<Option<ImportBookOutcome>, String> {
+            Ok(self.outcome.clone())
+        }
+    }
+
+    #[test]
+    fn process_books_payload_enqueues_local_artwork_refresh_for_imported_artwork_sidecars() {
+        let service = MediaImportService::new(StubImportPort {
+            outcome: Some(ImportBookOutcome {
+                library_id: "library-1".to_string(),
+                imported_book_id: "book-1".to_string(),
+                sidecar_imported: false,
+                artwork_sidecar_imported: true,
+            }),
+        });
+
+        let tasks = block_on_ready(service.process_books_payload(BooksImportPayload {
+            copy_mode: ImportCopyMode::Copy,
+            books: vec![BooksImportEntry {
+                source_file: PathBuf::from("/tmp/book.cbz"),
+                series_id: "series-1".to_string(),
+                destination_name: None,
+                upgrade_book_id: None,
+            }],
+        }))
+        .expect("artwork sidecar import should enqueue follow-up tasks");
+
+        assert_eq!(
+            tasks.len(),
+            2,
+            "scan and artwork refresh should both be queued"
+        );
+        assert!(tasks.iter().any(|task| {
+            task.id == "SCAN_LIBRARY:library-1"
+                && task.group == Some("library-1".to_string())
+                && task.simple_type == "SCAN_LIBRARY"
+        }));
+        assert!(tasks.iter().any(|task| {
+            task.id == "REFRESH_BOOK_LOCAL_ARTWORK_book-1"
+                && task.simple_type == "REFRESH_BOOK_LOCAL_ARTWORK"
+                && task.group.is_none()
+        }));
+    }
 }

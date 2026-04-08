@@ -18,9 +18,16 @@ pub struct PersistedLibraryMaintenanceFlags {
     pub convert_to_cbz: bool,
 }
 
+pub struct PersistedBookHashRuntimeState {
+    pub library_id: String,
+    pub file_hash: Option<String>,
+    pub file_hash_koreader: Option<String>,
+}
+
 #[derive(Clone, Debug)]
 pub struct PersistedBookArchiveSource {
     pub file_path: PathBuf,
+    pub series_id: String,
     pub file_last_modified: i64,
     pub media_type: String,
     pub media_status: String,
@@ -29,6 +36,8 @@ pub struct PersistedBookArchiveSource {
 #[derive(Clone, Debug)]
 pub struct PersistedExtensionRepairTarget {
     pub book_id: String,
+    pub series_id: String,
+    pub library_id: String,
     pub book_url: String,
     pub library_root: String,
     pub media_type: String,
@@ -37,11 +46,31 @@ pub struct PersistedExtensionRepairTarget {
 #[derive(Clone, Debug)]
 pub struct PersistedConversionTarget {
     pub book_url: String,
+    pub series_id: String,
     pub library_id: String,
     pub library_root: String,
+    pub file_last_modified: i64,
     pub convert_to_cbz: bool,
     pub media_type: String,
     pub media_status: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PersistedBookToConvert {
+    pub book_id: String,
+    pub series_id: String,
+}
+
+fn expected_extension_for_extension_repair(media_type: &str) -> Option<&'static str> {
+    match media_type {
+        "application/x-rar-compressed; version=4" | "application/x-rar-compressed; version=5" => {
+            Some("cbr")
+        }
+        "application/zip" => Some("cbz"),
+        "application/pdf" => Some("pdf"),
+        "application/epub+zip" => Some("epub"),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -229,6 +258,67 @@ pub fn load_library_maintenance_flags(
     })
 }
 
+pub fn load_book_library_id(database_file: &Path, book_id: &str) -> Result<Option<String>, String> {
+    let database_file = database_file.to_path_buf();
+    let book_id = book_id.to_string();
+
+    run_database_query(database_file, move |pool| {
+        let book_id = book_id.clone();
+        Box::pin(async move {
+            let row = sqlx::query(
+                r#"
+                SELECT LIBRARY_ID
+                FROM BOOK
+                WHERE ID = ?
+                LIMIT 1
+                "#,
+            )
+            .bind(&book_id)
+            .fetch_optional(&pool)
+            .await
+            .map_err(|error| format!("failed to load book library for '{book_id}': {error}"))?;
+
+            Ok(row.map(|row| row.get::<String, _>("LIBRARY_ID")))
+        })
+    })
+}
+
+pub fn load_book_hash_runtime_state(
+    database_file: &Path,
+    book_id: &str,
+) -> Result<Option<PersistedBookHashRuntimeState>, String> {
+    let database_file = database_file.to_path_buf();
+    let book_id = book_id.to_string();
+
+    run_database_query(database_file, move |pool| {
+        let book_id = book_id.clone();
+        Box::pin(async move {
+            let row = sqlx::query(
+                r#"
+                SELECT LIBRARY_ID,
+                       FILE_HASH,
+                       FILE_HASH_KOREADER
+                FROM BOOK
+                WHERE ID = ?
+                LIMIT 1
+                "#,
+            )
+            .bind(&book_id)
+            .fetch_optional(&pool)
+            .await
+            .map_err(|error| {
+                format!("failed to load book hash runtime state for '{book_id}': {error}")
+            })?;
+
+            Ok(row.map(|row| PersistedBookHashRuntimeState {
+                library_id: row.get::<String, _>("LIBRARY_ID"),
+                file_hash: row.get::<Option<String>, _>("FILE_HASH"),
+                file_hash_koreader: row.get::<Option<String>, _>("FILE_HASH_KOREADER"),
+            }))
+        })
+    })
+}
+
 pub fn load_book_file_path(database_file: &Path, book_id: &str) -> Result<Option<PathBuf>, String> {
     let database_file = database_file.to_path_buf();
     let book_id = book_id.to_string();
@@ -261,7 +351,7 @@ pub fn load_book_file_path(database_file: &Path, book_id: &str) -> Result<Option
     })
 }
 
-pub fn load_books_without_selected_thumbnails(database_file: &Path) -> Result<Vec<String>, String> {
+pub fn load_non_deleted_book_ids(database_file: &Path) -> Result<Vec<String>, String> {
     let database_file = database_file.to_path_buf();
 
     run_database_query(database_file, move |pool| {
@@ -270,17 +360,14 @@ pub fn load_books_without_selected_thumbnails(database_file: &Path) -> Result<Ve
                 r#"
                 SELECT b.ID
                 FROM BOOK b
-                LEFT JOIN THUMBNAIL_BOOK tb
-                ON tb.BOOK_ID = b.ID
-                AND tb.SELECTED = 1
-                WHERE tb.ID IS NULL
-                AND b.DELETED_DATE IS NULL
+                WHERE b.DELETED_DATE IS NULL
+                ORDER BY b.ID ASC
                 "#,
             )
             .fetch_all(&pool)
             .await
             .map_err(|error| {
-                format!("failed to query books without selected thumbnails: {error}")
+                format!("failed to query non-deleted books for thumbnail regeneration: {error}")
             })?;
 
             Ok(rows
@@ -534,7 +621,7 @@ pub fn load_books_with_missing_file_hash(
 pub fn load_books_to_convert(
     database_file: &Path,
     library_id: &str,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<PersistedBookToConvert>, String> {
     let database_file = database_file.to_path_buf();
     let library_id = library_id.to_string();
 
@@ -543,14 +630,14 @@ pub fn load_books_to_convert(
         Box::pin(async move {
             let rows = sqlx::query(
                 r#"
-                SELECT ID
+                SELECT ID, SERIES_ID
                 FROM BOOK
                 JOIN MEDIA ON MEDIA.BOOK_ID = BOOK.ID
                 WHERE LIBRARY_ID = ?
                 AND DELETED_DATE IS NULL
                 AND LOWER(MEDIA.MEDIA_TYPE) IN (
-                    'application/vnd.comicbook-rar',
-                    'application/x-rar-compressed'
+                    'application/x-rar-compressed; version=4',
+                    'application/x-rar-compressed; version=5'
                 )
                 "#,
             )
@@ -563,7 +650,10 @@ pub fn load_books_to_convert(
 
             Ok(rows
                 .into_iter()
-                .map(|row| row.get::<String, _>("ID"))
+                .map(|row| PersistedBookToConvert {
+                    book_id: row.get::<String, _>("ID"),
+                    series_id: row.get::<String, _>("SERIES_ID"),
+                })
                 .collect())
         })
     })
@@ -582,9 +672,11 @@ pub fn load_book_conversion_target(
             let row = sqlx::query(
                 r#"
                 SELECT
-                b.URL AS BOOK_URL,
-                b.LIBRARY_ID AS LIBRARY_ID,
-                l.ROOT AS LIBRARY_ROOT,
+                 b.URL AS BOOK_URL,
+                 b.SERIES_ID AS SERIES_ID,
+                 b.LIBRARY_ID AS LIBRARY_ID,
+                 l.ROOT AS LIBRARY_ROOT,
+                 b.FILE_LAST_MODIFIED AS FILE_LAST_MODIFIED,
                 COALESCE(l.CONVERT_TO_CBZ, 0) AS CONVERT_TO_CBZ,
                 COALESCE(m.MEDIA_TYPE, '') AS MEDIA_TYPE,
                 COALESCE(m.STATUS, '') AS MEDIA_STATUS
@@ -604,8 +696,10 @@ pub fn load_book_conversion_target(
 
             Ok(row.map(|row| PersistedConversionTarget {
                 book_url: row.get::<String, _>("BOOK_URL"),
+                series_id: row.get::<String, _>("SERIES_ID"),
                 library_id: row.get::<String, _>("LIBRARY_ID"),
                 library_root: row.get::<String, _>("LIBRARY_ROOT"),
+                file_last_modified: row.get::<i64, _>("FILE_LAST_MODIFIED"),
                 convert_to_cbz: row.get::<i64, _>("CONVERT_TO_CBZ") != 0,
                 media_type: row.get::<String, _>("MEDIA_TYPE"),
                 media_status: row.get::<String, _>("MEDIA_STATUS"),
@@ -628,6 +722,8 @@ pub fn load_books_for_extension_repair(
                 r#"
                 SELECT
                 b.ID AS BOOK_ID,
+                b.SERIES_ID AS SERIES_ID,
+                b.LIBRARY_ID AS LIBRARY_ID,
                 b.URL AS BOOK_URL,
                 l.ROOT AS LIBRARY_ROOT,
                 m.MEDIA_TYPE AS MEDIA_TYPE
@@ -647,13 +743,73 @@ pub fn load_books_for_extension_repair(
 
             Ok(rows
                 .into_iter()
-                .map(|row| PersistedExtensionRepairTarget {
-                    book_id: row.get::<String, _>("BOOK_ID"),
-                    book_url: row.get::<String, _>("BOOK_URL"),
-                    library_root: row.get::<String, _>("LIBRARY_ROOT"),
-                    media_type: row.get::<String, _>("MEDIA_TYPE"),
+                .filter_map(|row| {
+                    let media_type = row.get::<String, _>("MEDIA_TYPE");
+                    let expected_extension = expected_extension_for_extension_repair(&media_type)?;
+                    let book_url = row.get::<String, _>("BOOK_URL");
+                    let current_extension = PathBuf::from(&book_url)
+                        .extension()
+                        .and_then(|value| value.to_str())
+                        .map(|value| value.to_ascii_lowercase())
+                        .unwrap_or_default();
+                    (current_extension != expected_extension).then(|| {
+                        PersistedExtensionRepairTarget {
+                            book_id: row.get::<String, _>("BOOK_ID"),
+                            series_id: row.get::<String, _>("SERIES_ID"),
+                            library_id: row.get::<String, _>("LIBRARY_ID"),
+                            book_url,
+                            library_root: row.get::<String, _>("LIBRARY_ROOT"),
+                            media_type,
+                        }
+                    })
                 })
                 .collect())
+        })
+    })
+}
+
+pub fn load_book_for_extension_repair(
+    database_file: &Path,
+    book_id: &str,
+) -> Result<Option<PersistedExtensionRepairTarget>, String> {
+    let database_file = database_file.to_path_buf();
+    let book_id = book_id.to_string();
+
+    run_database_query(database_file, move |pool| {
+        let book_id = book_id.clone();
+        Box::pin(async move {
+            let row = sqlx::query(
+                r#"
+                SELECT
+                b.ID AS BOOK_ID,
+                b.SERIES_ID AS SERIES_ID,
+                b.LIBRARY_ID AS LIBRARY_ID,
+                b.URL AS BOOK_URL,
+                l.ROOT AS LIBRARY_ROOT,
+                COALESCE(m.MEDIA_TYPE, '') AS MEDIA_TYPE
+                FROM BOOK b
+                JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+                LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
+                WHERE b.ID = ?
+                AND b.DELETED_DATE IS NULL
+                LIMIT 1
+                "#,
+            )
+            .bind(&book_id)
+            .fetch_optional(&pool)
+            .await
+            .map_err(|error| {
+                format!("failed to load repair-extension source row for '{book_id}': {error}")
+            })?;
+
+            Ok(row.map(|row| PersistedExtensionRepairTarget {
+                book_id: row.get::<String, _>("BOOK_ID"),
+                series_id: row.get::<String, _>("SERIES_ID"),
+                library_id: row.get::<String, _>("LIBRARY_ID"),
+                book_url: row.get::<String, _>("BOOK_URL"),
+                library_root: row.get::<String, _>("LIBRARY_ROOT"),
+                media_type: row.get::<String, _>("MEDIA_TYPE"),
+            }))
         })
     })
 }
@@ -672,6 +828,7 @@ pub fn load_book_archive_source(
                 r#"
                 SELECT
                 b.URL AS BOOK_URL,
+                b.SERIES_ID AS SERIES_ID,
                 b.FILE_LAST_MODIFIED AS FILE_LAST_MODIFIED,
                 l.ROOT AS LIBRARY_ROOT,
                 COALESCE(m.MEDIA_TYPE, '') AS MEDIA_TYPE,
@@ -691,6 +848,7 @@ pub fn load_book_archive_source(
             Ok(row.map(|row| PersistedBookArchiveSource {
                 file_path: PathBuf::from(row.get::<String, _>("LIBRARY_ROOT"))
                     .join(row.get::<String, _>("BOOK_URL")),
+                series_id: row.get::<String, _>("SERIES_ID"),
                 file_last_modified: row.get::<i64, _>("FILE_LAST_MODIFIED"),
                 media_type: row.get::<String, _>("MEDIA_TYPE"),
                 media_status: row.get::<String, _>("MEDIA_STATUS"),

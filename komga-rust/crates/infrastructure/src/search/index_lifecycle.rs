@@ -415,6 +415,29 @@ impl SearchIndexLifecycle {
         Ok(())
     }
 
+    pub fn rebuild_entities(
+        &self,
+        entity_types: &[SearchEntityType],
+        docs: &[SearchDocument],
+    ) -> Result<(), SearchError> {
+        let mut writer = self
+            .writer
+            .lock()
+            .map_err(|_| SearchError::WriterPoisoned)?;
+        for entity_type in entity_types {
+            writer.delete_term(Term::from_field_text(
+                self.fields.entity_type,
+                entity_type.as_str(),
+            ));
+        }
+        for document in docs {
+            add_doc(&mut writer, &self.fields, document)?;
+        }
+        writer.commit()?;
+        self.reader.reload()?;
+        Ok(())
+    }
+
     pub fn apply_event(&self, event: SearchEvent) -> Result<(), SearchError> {
         let mut writer = self
             .writer

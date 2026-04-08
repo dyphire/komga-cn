@@ -1,6 +1,28 @@
+use std::fs;
 use std::path::Path;
 
 use unrar::Archive;
+
+const RAR_SIGNATURE_PREFIX: &[u8] = b"Rar!\x1A\x07";
+const RAR4_SIGNATURE: &[u8] = b"Rar!\x1A\x07\x00";
+const RAR5_SIGNATURE: &[u8] = b"Rar!\x1A\x07\x01\x00";
+
+pub(crate) fn detect_rar_media_type(path: &Path) -> &'static str {
+    let Ok(header) = fs::read(path).map(|bytes| bytes.into_iter().take(8).collect::<Vec<_>>())
+    else {
+        return "application/x-rar-compressed";
+    };
+
+    if header.starts_with(RAR5_SIGNATURE) {
+        "application/x-rar-compressed; version=5"
+    } else if header.starts_with(RAR4_SIGNATURE) {
+        "application/x-rar-compressed; version=4"
+    } else if header.starts_with(RAR_SIGNATURE_PREFIX) {
+        "application/x-rar-compressed"
+    } else {
+        "application/x-rar-compressed"
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RarEntryRecord {
@@ -62,4 +84,40 @@ pub(crate) fn read_rar_entry_bytes(
     }
 
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unique_temp_path(prefix: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "{prefix}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock should be after unix epoch")
+                .as_nanos()
+        ))
+    }
+
+    #[test]
+    fn detect_rar_media_type_recognizes_versioned_headers() {
+        let rar4 = unique_temp_path("komga-rar4-signature");
+        let rar5 = unique_temp_path("komga-rar5-signature");
+        fs::write(&rar4, RAR4_SIGNATURE).expect("rar4 signature fixture should be written");
+        fs::write(&rar5, RAR5_SIGNATURE).expect("rar5 signature fixture should be written");
+
+        assert_eq!(
+            detect_rar_media_type(&rar4),
+            "application/x-rar-compressed; version=4"
+        );
+        assert_eq!(
+            detect_rar_media_type(&rar5),
+            "application/x-rar-compressed; version=5"
+        );
+
+        let _ = fs::remove_file(rar4);
+        let _ = fs::remove_file(rar5);
+    }
 }
