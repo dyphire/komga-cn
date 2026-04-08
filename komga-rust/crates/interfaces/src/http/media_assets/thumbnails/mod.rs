@@ -1,0 +1,27 @@
+use super::*;
+use crate::discovery_detail_access::collections::load_persisted_collection_series_ids;
+use crate::discovery_detail_access::readlists::load_persisted_readlist_book_rows;
+use axum_extra::extract::Multipart;
+
+mod books;
+mod collections;
+mod readlists;
+mod series;
+mod shared;
+
+pub use books::{
+    book_thumbnail, book_thumbnail_by_id, book_thumbnail_delete, book_thumbnail_opds,
+    book_thumbnail_opds_small, book_thumbnail_select, book_thumbnail_upload, book_thumbnails,
+};
+pub use collections::{
+    collection_thumbnail, collection_thumbnail_by_id, collection_thumbnail_delete,
+    collection_thumbnail_select, collection_thumbnail_upload, collection_thumbnails,
+};
+pub use readlists::{
+    readlist_thumbnail, readlist_thumbnail_by_id, readlist_thumbnail_delete,
+    readlist_thumbnail_select, readlist_thumbnail_upload, readlist_thumbnails,
+};
+pub use series::{
+    series_thumbnail, series_thumbnail_by_id, series_thumbnail_delete, series_thumbnail_select,
+    series_thumbnail_upload, series_thumbnails,
+};

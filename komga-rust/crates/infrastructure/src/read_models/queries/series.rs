@@ -154,10 +154,9 @@ fn series_ordering_from_sorts(sorts: &[String]) -> SeriesOrdering {
         "createdDate,desc" | "created,desc" | "createdDate" | "created" => {
             SeriesOrdering::CreatedDateDesc
         }
-        "lastModifiedDate,desc"
-        | "lastModified,desc"
-        | "lastModifiedDate"
-        | "lastModified" => SeriesOrdering::LastModifiedDateDesc,
+        "lastModifiedDate,desc" | "lastModified,desc" | "lastModifiedDate" | "lastModified" => {
+            SeriesOrdering::LastModifiedDateDesc
+        }
         "booksMetadata.releaseDate,desc" | "booksMetadata.releaseDate" => {
             SeriesOrdering::BooksMetadataReleaseDateDesc
         }
@@ -170,9 +169,7 @@ fn series_order_sql(ordering: SeriesOrdering) -> &'static str {
     match ordering {
         SeriesOrdering::TitleAsc => "s.title COLLATE NOCASE ASC",
         SeriesOrdering::CreatedDateDesc => "s.created DESC, s.title COLLATE NOCASE ASC",
-        SeriesOrdering::LastModifiedDateDesc => {
-            "s.last_modified DESC, s.title COLLATE NOCASE ASC"
-        }
+        SeriesOrdering::LastModifiedDateDesc => "s.last_modified DESC, s.title COLLATE NOCASE ASC",
         SeriesOrdering::BooksMetadataReleaseDateDesc => {
             "s.release_date DESC, s.title COLLATE NOCASE ASC"
         }

@@ -4,7 +4,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use sqlx::SqlitePool;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 
 use crate::context::SqlitePersistenceContext;
 use crate::sqlite::setup;
@@ -102,6 +102,7 @@ pub fn file_backed_connect_options(path: impl AsRef<Path>) -> SqliteConnectOptio
     SqliteConnectOptions::new()
         .filename(path)
         .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Wal)
 }
 
 pub async fn connect_pool(
@@ -205,11 +206,27 @@ impl SqliteTempPool {
 
     pub async fn cleanup(self) {
         self.pool.close().await;
-        if self.db_path.exists()
-            && let Err(error) = std::fs::remove_file(&self.db_path)
-            && error.kind() != std::io::ErrorKind::NotFound
-        {}
+        for path in sqlite_sidecar_paths(&self.db_path) {
+            remove_sqlite_artifact_if_present(&path);
+        }
     }
+}
+
+fn sqlite_sidecar_paths(db_path: &Path) -> [PathBuf; 4] {
+    let base_name = db_path.to_string_lossy().to_string();
+    [
+        db_path.to_path_buf(),
+        PathBuf::from(format!("{base_name}-wal")),
+        PathBuf::from(format!("{base_name}-shm")),
+        PathBuf::from(format!("{base_name}-journal")),
+    ]
+}
+
+fn remove_sqlite_artifact_if_present(path: &Path) {
+    if path.exists()
+        && let Err(error) = std::fs::remove_file(path)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {}
 }
 
 fn deterministic_temp_db_path(case_id: &str) -> PathBuf {
@@ -219,4 +236,48 @@ fn deterministic_temp_db_path(case_id: &str) -> PathBuf {
         .as_nanos();
     let pid = std::process::id();
     std::env::temp_dir().join(format!("komga-sqlite-topology-{case_id}-{pid}-{nanos}.db"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn sqlite_temp_pool_cleanup_removes_wal_sidecars() {
+        let temp_pool = SqliteTempPool::new("cleanup-removes-wal-sidecars")
+            .await
+            .expect("temp pool should open");
+        let db_path = temp_pool.db_path().to_path_buf();
+        let wal_path = PathBuf::from(format!("{}-wal", db_path.display()));
+        let shm_path = PathBuf::from(format!("{}-shm", db_path.display()));
+
+        sqlx::query("CREATE TABLE cleanup_probe (id INTEGER PRIMARY KEY, value TEXT NOT NULL)")
+            .execute(temp_pool.pool())
+            .await
+            .expect("probe table should be created");
+        sqlx::query("INSERT INTO cleanup_probe (value) VALUES ('probe')")
+            .execute(temp_pool.pool())
+            .await
+            .expect("probe row should be inserted");
+
+        assert!(
+            wal_path.exists() || shm_path.exists(),
+            "WAL-backed temp pool should materialize sidecar files before cleanup",
+        );
+
+        temp_pool.cleanup().await;
+
+        assert!(
+            !db_path.exists(),
+            "temp pool cleanup should remove the sqlite database file",
+        );
+        assert!(
+            !wal_path.exists(),
+            "temp pool cleanup should remove the WAL sidecar file",
+        );
+        assert!(
+            !shm_path.exists(),
+            "temp pool cleanup should remove the shared-memory sidecar file",
+        );
+    }
 }

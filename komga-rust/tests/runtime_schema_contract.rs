@@ -526,6 +526,26 @@ async fn sqlite_connect_layer_bootstraps_main_and_tasks_databases() {
         "tasks connect-layer bootstrap must provision Kotlin-compatible TASK table",
     );
 
+    let main_journal_mode: String = sqlx::query_scalar("PRAGMA journal_mode;")
+        .fetch_one(main_context.pool())
+        .await
+        .expect("main journal mode probe should succeed");
+    assert_eq!(
+        main_journal_mode.to_ascii_lowercase(),
+        "wal",
+        "main connect-layer should align with Kotlin's WAL-backed SQLite design",
+    );
+
+    let tasks_journal_mode: String = sqlx::query_scalar("PRAGMA journal_mode;")
+        .fetch_one(&tasks_pool)
+        .await
+        .expect("tasks journal mode probe should succeed");
+    assert_eq!(
+        tasks_journal_mode.to_ascii_lowercase(),
+        "wal",
+        "tasks connect-layer should align with Kotlin's WAL-backed SQLite design",
+    );
+
     main_context.pool().close().await;
     tasks_pool.close().await;
     persistence_contract_fixture::cleanup(paths);

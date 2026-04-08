@@ -522,7 +522,8 @@ async fn router_discovery_series_list_applies_default_sort_for_unknown_sort_mode
 }
 
 #[tokio::test]
-async fn router_discovery_series_list_sorts_runtime_owned_results_by_release_date_books_count_and_alias_dates() {
+async fn router_discovery_series_list_sorts_runtime_owned_results_by_release_date_books_count_and_alias_dates()
+ {
     let paths = new_router_fixture("router-discovery-series-list-runtime-sort-order").await;
     seed_router_contract_data(&paths).await;
     seed_router_custom_series(&paths, "series-2", "Series 2", "library-1").await;
@@ -530,22 +531,18 @@ async fn router_discovery_series_list_sorts_runtime_owned_results_by_release_dat
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series runtime sort db should open");
-    sqlx::query(
-        "UPDATE SERIES_METADATA SET TITLE_SORT = ? WHERE SERIES_ID = ?",
-    )
-    .bind("Zulu Series")
-    .bind("series-1")
-    .execute(&pool)
-    .await
-    .expect("series-1 title sort should update");
-    sqlx::query(
-        "UPDATE SERIES_METADATA SET TITLE_SORT = ? WHERE SERIES_ID = ?",
-    )
-    .bind("Alpha Series")
-    .bind("series-2")
-    .execute(&pool)
-    .await
-    .expect("series-2 title sort should update");
+    sqlx::query("UPDATE SERIES_METADATA SET TITLE_SORT = ? WHERE SERIES_ID = ?")
+        .bind("Zulu Series")
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("series-1 title sort should update");
+    sqlx::query("UPDATE SERIES_METADATA SET TITLE_SORT = ? WHERE SERIES_ID = ?")
+        .bind("Alpha Series")
+        .bind("series-2")
+        .execute(&pool)
+        .await
+        .expect("series-2 title sort should update");
     for (series_id, created, last_modified, book_count) in [
         (
             "series-1",
@@ -604,7 +601,10 @@ async fn router_discovery_series_list_sorts_runtime_owned_results_by_release_dat
         ("titleSort,asc", vec!["series-2", "series-1"]),
         ("created,desc", vec!["series-2", "series-1"]),
         ("lastModified,desc", vec!["series-2", "series-1"]),
-        ("booksMetadata.releaseDate,desc", vec!["series-2", "series-1"]),
+        (
+            "booksMetadata.releaseDate,desc",
+            vec!["series-2", "series-1"],
+        ),
         ("booksCount,desc", vec!["series-2", "series-1"]),
     ] {
         let response = app

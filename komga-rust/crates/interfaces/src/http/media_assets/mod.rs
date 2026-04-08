@@ -59,9 +59,9 @@ mod media_helpers;
 mod operations;
 #[path = "pages.rs"]
 mod pages;
-#[path = "read_progress.rs"]
+#[path = "read_progress/mod.rs"]
 mod read_progress;
-#[path = "thumbnails.rs"]
+#[path = "thumbnails/mod.rs"]
 mod thumbnails;
 #[path = "types.rs"]
 mod types;

@@ -25,7 +25,7 @@ mod manifest;
 mod persisted;
 #[path = "content_opds/types.rs"]
 mod types;
-#[path = "content_opds/v1.rs"]
+#[path = "content_opds/v1/mod.rs"]
 mod v1;
 #[path = "content_opds/v2.rs"]
 mod v2;

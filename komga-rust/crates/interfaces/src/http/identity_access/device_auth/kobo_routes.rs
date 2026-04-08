@@ -5,6 +5,17 @@ use crate::http::media_assets::{
 };
 use crate::runtime_identity_access::persisted_api_key_metadata;
 
+#[path = "kobo_routes/common.rs"]
+mod common;
+#[path = "kobo_routes/metadata_helpers.rs"]
+mod metadata_helpers;
+#[path = "kobo_routes/proxy.rs"]
+mod proxy;
+
+use common::*;
+use metadata_helpers::*;
+use proxy::proxied_missing_kobo_book_response;
+
 fn encode_kobo_thumbnail_as_jpeg(bytes: &[u8]) -> Option<Vec<u8>> {
     let image = image::load_from_memory(bytes).ok()?;
     let mut output = std::io::Cursor::new(Vec::new());
@@ -69,36 +80,14 @@ async fn kobo_book_thumbnail_response(
     }
 }
 
-fn kobo_description(summary: &str) -> Value {
-    if summary.trim().is_empty() {
-        Value::String(" ".to_string())
-    } else {
-        Value::String(summary.to_string())
-    }
-}
-
-fn kobo_language(language: &str) -> String {
-    let language = language.trim();
-    if language.is_empty() {
-        "en".to_string()
-    } else {
-        language
-            .chars()
-            .take(2)
-            .collect::<String>()
-            .to_ascii_lowercase()
-    }
-}
-
-fn kobo_publication_date_value(value: &str) -> Option<Value> {
-    let value = value.trim();
-    if value.is_empty() {
-        None
-    } else if value.len() == 10 && value.as_bytes().get(4) == Some(&b'-') {
-        Some(Value::String(format!("{value}T00:00:00Z")))
-    } else {
-        Some(Value::String(value.to_string()))
-    }
+pub(super) async fn proxy_kobo_catch_all_request(
+    method: &axum::http::Method,
+    path: &str,
+    query: Option<&str>,
+    headers: &HeaderMap,
+    body: &Bytes,
+) -> Result<Response, StatusCode> {
+    proxy::execute_kobo_proxy_request(method, path, query, headers, body).await
 }
 
 pub async fn kobo_library_sync(
@@ -340,156 +329,6 @@ pub async fn kobo_library_sync(
         );
     }
     response
-}
-
-async fn kobo_path_api_key_id(auth_token: &str, database_file: &FsPath) -> Option<String> {
-    kobo_path_api_key_metadata(auth_token, database_file)
-        .await
-        .map(|(id, _)| id)
-}
-
-async fn kobo_path_api_key_metadata(
-    auth_token: &str,
-    database_file: &FsPath,
-) -> Option<(String, String)> {
-    if !valid_kobo_path_token(auth_token) {
-        return None;
-    }
-
-    let mut metadata_headers = HeaderMap::new();
-    metadata_headers.insert("x-api-key", HeaderValue::from_str(auth_token).ok()?);
-    persisted_api_key_metadata(&metadata_headers, database_file)
-        .await
-        .map(|metadata| (metadata.id, metadata.comment))
-}
-
-async fn proxied_missing_kobo_book_response(
-    state: &OperationalState,
-    method: &axum::http::Method,
-    proxy_path: &str,
-    query: Option<&str>,
-    headers: &HeaderMap,
-    body: &Bytes,
-) -> Option<Response> {
-    if !load_kobo_proxy_enabled(state).await {
-        return None;
-    }
-
-    Some(
-        match proxy_kobo_catch_all_request(method, proxy_path, query, headers, body).await {
-            Ok(response) => response,
-            Err(status) => status.into_response(),
-        },
-    )
-}
-
-async fn built_in_kepub_conversion_available(state: &OperationalState) -> bool {
-    let persisted = state.settings_store.load_map().await.ok();
-    let configured_path = persisted
-        .as_ref()
-        .and_then(|settings| settings.get("KEPUBIFY_PATH"))
-        .and_then(|value| value.as_deref())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
-
-    let fallback_path = state.runtime.config_dir.as_ref().and_then(|config_dir| {
-        config_kepubify_path(config_dir.join("application.yml").as_path())
-            .or_else(|| config_kepubify_path(config_dir.join("application.yaml").as_path()))
-            .or_else(|| {
-                properties_kepubify_path(config_dir.join("application.properties").as_path())
-            })
-    });
-
-    if let Some(path) = configured_path {
-        if kepubify_path_is_available(path.as_str()) {
-            return true;
-        }
-        return fallback_path
-            .as_deref()
-            .is_some_and(kepubify_path_is_available);
-    }
-
-    fallback_path
-        .as_deref()
-        .is_some_and(kepubify_path_is_available)
-}
-
-fn config_kepubify_path(path: &FsPath) -> Option<String> {
-    std::fs::read_to_string(path).ok().and_then(|content| {
-        content.lines().find_map(|line| {
-            let trimmed = line.trim();
-            if !trimmed.starts_with("kepubify-path:") {
-                return None;
-            }
-            trimmed
-                .split_once(':')
-                .map(|(_, value)| {
-                    value
-                        .trim()
-                        .trim_matches(|character| character == '"' || character == '\'')
-                        .to_string()
-                })
-                .filter(|value| !value.is_empty())
-        })
-    })
-}
-
-fn properties_kepubify_path(path: &FsPath) -> Option<String> {
-    std::fs::read_to_string(path).ok().and_then(|content| {
-        content.lines().find_map(|line| {
-            let trimmed = line.trim();
-            if !trimmed.starts_with("komga.kobo.kepubify-path=") {
-                return None;
-            }
-            trimmed
-                .split_once('=')
-                .map(|(_, value)| {
-                    value
-                        .trim()
-                        .trim_matches(|character| character == '"' || character == '\'')
-                        .to_string()
-                })
-                .filter(|value| !value.is_empty())
-        })
-    })
-}
-
-fn kepubify_path_is_available(path: &str) -> bool {
-    let candidate = std::path::Path::new(path);
-    if (candidate.is_absolute() || path.contains(std::path::MAIN_SEPARATOR))
-        && let Ok(metadata) = std::fs::metadata(candidate)
-    {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            return metadata.is_file() && metadata.permissions().mode() & 0o111 != 0;
-        }
-        #[cfg(not(unix))]
-        {
-            return metadata.is_file();
-        }
-    }
-
-    let Some(paths) = std::env::var_os("PATH") else {
-        return false;
-    };
-
-    std::env::split_paths(&paths)
-        .map(|directory| directory.join(path))
-        .any(|candidate| {
-            std::fs::metadata(&candidate).ok().is_some_and(|metadata| {
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
-                }
-                #[cfg(not(unix))]
-                {
-                    metadata.is_file()
-                }
-            })
-        })
 }
 
 pub async fn kobo_library_book_metadata(
@@ -1036,158 +875,4 @@ pub async fn kobo_catch_all(
         Ok(response) => response,
         Err(status) => status.into_response(),
     }
-}
-
-pub(super) async fn proxy_kobo_catch_all_request(
-    method: &axum::http::Method,
-    path: &str,
-    query: Option<&str>,
-    headers: &HeaderMap,
-    body: &Bytes,
-) -> Result<Response, StatusCode> {
-    let base_url = std::env::var("KOMGA_RUST_KOBO_PROXY_URL")
-        .unwrap_or_else(|_| "https://storeapi.kobo.com".to_string());
-    let mut target = format!(
-        "{}/{}",
-        base_url.trim_end_matches('/'),
-        path.trim_start_matches('/')
-    );
-    if let Some(query) = query.map(str::trim).filter(|query| !query.is_empty()) {
-        target.push('?');
-        target.push_str(query);
-    }
-
-    let client = Client::builder()
-        .build()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let request_method = reqwest::Method::from_bytes(method.as_str().as_bytes())
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let mut request = client.request(request_method, target);
-
-    for (name, value) in headers {
-        let header_name = name.as_str();
-        let lower = header_name.to_ascii_lowercase();
-        let should_forward = matches!(
-            lower.as_str(),
-            "authorization" | "user-agent" | "accept" | "accept-language" | "content-type"
-        ) || lower.starts_with("x-kobo-");
-        if !should_forward || lower == "x-kobo-synctoken" {
-            continue;
-        }
-        let Ok(value) = value.to_str() else {
-            continue;
-        };
-        request = request.header(header_name, value);
-    }
-
-    if let Some(prepared_body) = prepare_kobo_proxy_request_body(headers, body)? {
-        request = request.body(prepared_body);
-    }
-
-    let response = request
-        .send()
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let status = StatusCode::from_u16(response.status().as_u16())
-        .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-    let response_headers = response.headers().clone();
-    let response_bytes = response
-        .bytes()
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    if status.is_client_error() || status.is_server_error() {
-        return Ok(status.into_response());
-    }
-    if response_bytes.is_empty() {
-        let mut proxied = status.into_response();
-        for (name, value) in &response_headers {
-            if name.as_str().to_ascii_lowercase().starts_with("x-kobo-") {
-                proxied.headers_mut().append(name.clone(), value.clone());
-            }
-        }
-        return Ok(proxied);
-    }
-
-    let (mut proxied, include_kobo_headers) = match serde_json::from_slice::<Value>(&response_bytes)
-    {
-        Ok(response_body) => {
-            let mut response = Json(response_body).into_response();
-            *response.status_mut() = status;
-            (response, true)
-        }
-        Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
-    };
-
-    if include_kobo_headers {
-        for (name, value) in &response_headers {
-            if name.as_str().to_ascii_lowercase().starts_with("x-kobo-") {
-                proxied.headers_mut().append(name.clone(), value.clone());
-            }
-        }
-    }
-    Ok(proxied)
-}
-
-fn prepare_kobo_proxy_request_body(
-    headers: &HeaderMap,
-    body: &Bytes,
-) -> Result<Option<Vec<u8>>, StatusCode> {
-    if body.is_empty() {
-        return Ok(None);
-    }
-
-    let content_type = headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .map(|value| value.to_ascii_lowercase());
-    let is_json = content_type
-        .as_deref()
-        .is_some_and(|value| value.starts_with("application/json") || value.contains("+json"));
-    let is_xml = content_type.as_deref().is_some_and(|value| {
-        value.starts_with("application/xml")
-            || value.starts_with("text/xml")
-            || value.contains("+xml")
-    });
-
-    if is_xml {
-        validate_kobo_xml_request_body(body)?;
-        return Ok(Some(body.to_vec()));
-    }
-
-    if !is_json {
-        return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE);
-    }
-
-    let value = serde_json::from_slice::<Value>(body).map_err(|_| StatusCode::BAD_REQUEST)?;
-    Ok(Some(value.to_string().into_bytes()))
-}
-
-fn validate_kobo_xml_request_body(body: &Bytes) -> Result<(), StatusCode> {
-    let mut reader = quick_xml::Reader::from_reader(body.as_ref());
-    let mut buffer = Vec::new();
-
-    loop {
-        match reader.read_event_into(&mut buffer) {
-            Ok(quick_xml::events::Event::Eof) => return Ok(()),
-            Ok(_) => buffer.clear(),
-            Err(_) => return Err(StatusCode::BAD_REQUEST),
-        }
-    }
-}
-
-fn random_uuid_like() -> String {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let hex = format!("{nanos:032x}");
-    format!(
-        "{}-{}-{}-{}-{}",
-        &hex[0..8],
-        &hex[8..12],
-        &hex[12..16],
-        &hex[16..20],
-        &hex[20..32],
-    )
 }

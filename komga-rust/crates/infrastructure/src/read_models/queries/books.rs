@@ -322,16 +322,13 @@ fn book_ordering_from_sorts(sorts: &[String]) -> BookOrdering {
     };
 
     match sort.as_str() {
-        "metadata.title,asc" | "metadata.title" | "title,asc" | "title" => {
-            BookOrdering::TitleAsc
-        }
+        "metadata.title,asc" | "metadata.title" | "title,asc" | "title" => BookOrdering::TitleAsc,
         "createdDate,desc" | "created,desc" | "createdDate" | "created" => {
             BookOrdering::CreatedDateDesc
         }
-        "lastModifiedDate,desc"
-        | "lastModified,desc"
-        | "lastModifiedDate"
-        | "lastModified" => BookOrdering::LastModifiedDesc,
+        "lastModifiedDate,desc" | "lastModified,desc" | "lastModifiedDate" | "lastModified" => {
+            BookOrdering::LastModifiedDesc
+        }
         "metadata.releaseDate,desc" | "metadata.releaseDate" => {
             BookOrdering::MetadataReleaseDateDesc
         }

@@ -18,9 +18,7 @@ use super::super::super::OperationalState;
 #[folder = "../../../komga/src/main/resources/embeddedFonts"]
 struct EmbeddedFonts;
 
-pub(crate) async fn get_fonts_families(
-    Extension(state): Extension<OperationalState>,
-) -> Response {
+pub(crate) async fn get_fonts_families(Extension(state): Extension<OperationalState>) -> Response {
     let families = merged_font_families(state.runtime.fonts_data_directory.as_path());
     Json(Value::Array(
         families.into_iter().map(Value::String).collect(),

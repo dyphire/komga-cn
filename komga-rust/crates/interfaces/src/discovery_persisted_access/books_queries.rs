@@ -739,18 +739,14 @@ pub fn parse_persisted_books_sort_modes(
     let mut modes = sorts
         .iter()
         .filter_map(|sort| match sort.as_str() {
-            "series,metadata.numberSort,asc" => {
-                Some(PersistedBooksSortMode::NumberSortAsc)
-            }
+            "series,metadata.numberSort,asc" => Some(PersistedBooksSortMode::NumberSortAsc),
             "metadata.title,asc" | "title,asc" => Some(PersistedBooksSortMode::TitleAsc),
             "createdDate,desc" | "created,desc" => Some(PersistedBooksSortMode::CreatedDateDesc),
             "lastModifiedDate,desc" | "lastModified,desc" => {
                 Some(PersistedBooksSortMode::LastModifiedDateDesc)
             }
             "metadata.releaseDate,desc" => Some(PersistedBooksSortMode::ReleaseDateDesc),
-            "metadata.numberSort,asc" | "number,asc" => {
-                Some(PersistedBooksSortMode::NumberSortAsc)
-            }
+            "metadata.numberSort,asc" | "number,asc" => Some(PersistedBooksSortMode::NumberSortAsc),
             "seriesId,asc" => Some(PersistedBooksSortMode::SeriesIdAsc),
             "relevance,asc" if has_full_text_search => Some(PersistedBooksSortMode::RelevanceAsc),
             "relevance,desc" if has_full_text_search => Some(PersistedBooksSortMode::RelevanceDesc),
