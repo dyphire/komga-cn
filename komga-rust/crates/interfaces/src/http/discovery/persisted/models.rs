@@ -221,7 +221,9 @@ impl DerefMut for PersistedSeriesBrowseQuery {
 pub(crate) enum PersistedSeriesSortMode {
     TitleAsc,
     CreatedDesc,
-    Latest,
+    LastModifiedDesc,
+    ReleaseDateDesc,
+    BooksCountDesc,
     RelevanceAsc,
     RelevanceDesc,
 }
@@ -441,6 +443,8 @@ pub(crate) enum PersistedBooksSortMode {
     CreatedDateDesc,
     LastModifiedDateDesc,
     ReleaseDateDesc,
+    NumberSortAsc,
+    SeriesIdAsc,
     RelevanceAsc,
     RelevanceDesc,
 }

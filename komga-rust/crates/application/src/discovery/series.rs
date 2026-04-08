@@ -1,10 +1,9 @@
-use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext, PageEnvelope, SeriesSort};
+use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext, PageEnvelope};
 
 use super::query_service::{DiscoveryQueries, DiscoveryQueryRepository};
 use super::read_models::{
     CollectionReadModel, SeriesDetailReadModel, SeriesReadModel, SeriesResourceReadModel,
 };
-use super::request_shape::classify_series_sorts;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SeriesListQuery {
@@ -56,7 +55,7 @@ pub struct RuntimeSeriesListQuery {
     pub series_statuses: Option<Vec<String>>,
     pub complete: Option<bool>,
     pub authors: Option<Vec<String>>,
-    pub sort: Vec<SeriesSort>,
+    pub sort: Vec<String>,
     pub search: Option<String>,
 }
 
@@ -69,7 +68,6 @@ where
         context: &DiscoveryQueryContext,
         query: SeriesListQuery,
     ) -> Result<PageEnvelope<SeriesReadModel>, DiscoveryError> {
-        let sort = classify_series_sorts(&query.sort)?;
         self.repository
             .list_series(
                 context,
@@ -90,7 +88,7 @@ where
                     series_statuses: query.series_statuses,
                     complete: query.complete,
                     authors: query.authors,
-                    sort,
+                    sort: query.sort,
                     search: query.search,
                 },
             )

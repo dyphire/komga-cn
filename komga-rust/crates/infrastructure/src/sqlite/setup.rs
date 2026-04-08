@@ -1200,6 +1200,6 @@ async fn table_columns(
 
 fn outdated_schema_error(detail: String) -> sqlx::Error {
     sqlx::Error::Protocol(format!(
-        "unsupported SQLite schema detected {detail}: run Kotlin Komga once to upgrade the database schema before starting Rust runtime",
+        "unsupported SQLite schema detected {detail}: database schema is damaged, incomplete, or unrecognized and cannot be migrated automatically by the Rust runtime",
     ))
 }

@@ -1,14 +1,13 @@
 use axum::Json;
 use axum::extract::Extension;
 use axum::extract::Path as AxumPath;
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use rust_embed::Embed;
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use crate::http::identity_access::auth::require_auth;
 use crate::operational_settings_access::fonts::{
     list_font_families, load_font_family_css, load_font_file,
 };
@@ -20,13 +19,8 @@ use super::super::super::OperationalState;
 struct EmbeddedFonts;
 
 pub(crate) async fn get_fonts_families(
-    headers: HeaderMap,
     Extension(state): Extension<OperationalState>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
-        return response;
-    }
-
     let families = merged_font_families(state.runtime.fonts_data_directory.as_path());
     Json(Value::Array(
         families.into_iter().map(Value::String).collect(),

@@ -129,60 +129,45 @@ async fn router_opds_v2_book_thumbnail_unauthorized_returns_opds_auth_document()
 }
 
 #[tokio::test]
-async fn router_opds_v1_book_thumbnail_unauthorized_includes_basic_challenge() {
+async fn router_opds_v1_book_thumbnail_routes_unauthorized_include_basic_challenge() {
     let paths = new_router_fixture("router-opds-v1-book-thumbnail-basic-challenge").await;
     seed_router_contract_data(&paths).await;
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
 
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/opds/v1.2/books/book-1/thumbnail")
-                .body(Body::empty())
-                .expect("opds v1 book thumbnail unauthorized request should build"),
-        )
-        .await
-        .expect("opds v1 book thumbnail unauthorized request should complete");
+    for route in [
+        "/opds/v1.2/books/book-1/thumbnail",
+        "/opds/v1.2/books/book-1/thumbnail/small",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .body(Body::empty())
+                    .expect("opds v1 book thumbnail unauthorized request should build"),
+            )
+            .await
+            .expect("opds v1 book thumbnail unauthorized request should complete");
 
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(
-        response
-            .headers()
-            .get(header::WWW_AUTHENTICATE)
-            .and_then(|value| value.to_str().ok()),
-        Some("Basic realm=\"Realm\"")
-    );
-    assert!(response.headers().get(header::LINK).is_none());
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_opds_v1_book_thumbnail_small_unauthorized_includes_basic_challenge() {
-    let paths = new_router_fixture("router-opds-v1-book-thumbnail-small-basic-challenge").await;
-    seed_router_contract_data(&paths).await;
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/opds/v1.2/books/book-1/thumbnail/small")
-                .body(Body::empty())
-                .expect("opds v1 book thumbnail small unauthorized request should build"),
-        )
-        .await
-        .expect("opds v1 book thumbnail small unauthorized request should complete");
-
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(
-        response
-            .headers()
-            .get(header::WWW_AUTHENTICATE)
-            .and_then(|value| value.to_str().ok()),
-        Some("Basic realm=\"Realm\"")
-    );
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "route: {route}"
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(header::WWW_AUTHENTICATE)
+                .and_then(|value| value.to_str().ok()),
+            Some("Basic realm=\"Realm\""),
+            "route: {route}"
+        );
+        assert!(
+            response.headers().get(header::LINK).is_none(),
+            "route: {route}"
+        );
+    }
 
     cleanup_router_fixture(paths);
 }
@@ -387,166 +372,116 @@ async fn router_opds_v1_book_thumbnail_small_falls_back_to_original_bytes_when_r
 }
 
 #[tokio::test]
-async fn router_opds_v2_book_thumbnail_ignores_mutated_generated_epub_thumbnail_bytes() {
-    let paths = new_router_fixture("router-opds-v2-book-thumbnail-epub-generated-source").await;
-    seed_router_contract_data(&paths).await;
-    write_router_epub_with_cover(&paths, "books/book-1.epub");
+async fn router_opds_v2_book_thumbnail_ignores_mutated_generated_thumbnail_bytes() {
+    for source in ["epub", "pdf"] {
+        let (fixture_name, book_id, route) = match source {
+            "epub" => (
+                "router-opds-v2-book-thumbnail-epub-generated-source",
+                "book-1",
+                "/opds/v2/books/book-1/thumbnail",
+            ),
+            "pdf" => (
+                "router-opds-v2-book-thumbnail-pdf-generated-source",
+                "book-pdf-1",
+                "/opds/v2/books/book-pdf-1/thumbnail",
+            ),
+            _ => unreachable!("unsupported source case"),
+        };
 
-    let cleanup_pool = connect_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("main db should open for epub generated thumbnail cleanup");
-    sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ?")
-        .bind("book-1")
-        .execute(&cleanup_pool)
-        .await
-        .expect("existing epub thumbnails should be deleted before generated-source test");
-    cleanup_pool.close().await;
+        let paths = new_router_fixture(fixture_name).await;
+        seed_router_contract_data(&paths).await;
 
-    generate_book_thumbnail(paths.main_db.as_path(), "book-1")
-        .expect("generate_book_thumbnail should succeed before opds epub source test");
+        match source {
+            "epub" => write_router_epub_with_cover(&paths, "books/book-1.epub"),
+            "pdf" => {
+                seed_router_pdf_book(
+                    &paths,
+                    "book-pdf-1",
+                    "series-1",
+                    "fixture-page.pdf",
+                    "Fixture PDF",
+                )
+                .await;
+            }
+            _ => unreachable!("unsupported source case"),
+        }
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+        let cleanup_pool = connect_pool(paths.main_db.as_path(), 1)
+            .await
+            .expect("main db should open for generated thumbnail cleanup");
+        sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ?")
+            .bind(book_id)
+            .execute(&cleanup_pool)
+            .await
+            .expect("existing thumbnails should be deleted before generated-source test");
+        cleanup_pool.close().await;
 
-    let before = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/opds/v2/books/book-1/thumbnail")
-                .header("x-auth-token", &auth_token)
-                .body(Body::empty())
-                .expect("opds v2 epub thumbnail baseline request should build"),
+        generate_book_thumbnail(paths.main_db.as_path(), book_id)
+            .expect("generate_book_thumbnail should succeed before generated-source test");
+
+        let app = build_router_with_config(&runtime_config_for_paths(&paths));
+        let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+        let before = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header("x-auth-token", &auth_token)
+                    .body(Body::empty())
+                    .expect("opds v2 generated thumbnail baseline request should build"),
+            )
+            .await
+            .expect("opds v2 generated thumbnail baseline request should complete");
+        assert_eq!(before.status(), StatusCode::OK, "source: {source}");
+        let before_body = to_bytes(before.into_body(), usize::MAX)
+            .await
+            .expect("opds v2 generated thumbnail baseline body should be readable")
+            .to_vec();
+
+        let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+            .await
+            .expect("main db should open for generated thumbnail lookup");
+        let generated_thumbnail_id = sqlx::query(
+            "SELECT ID FROM THUMBNAIL_BOOK WHERE BOOK_ID = ? AND TYPE = 'GENERATED' LIMIT 1",
         )
+        .bind(book_id)
+        .fetch_one(&verify_pool)
         .await
-        .expect("opds v2 epub thumbnail baseline request should complete");
-    assert_eq!(before.status(), StatusCode::OK);
-    let before_body = to_bytes(before.into_body(), usize::MAX)
-        .await
-        .expect("opds v2 epub thumbnail baseline body should be readable")
-        .to_vec();
+        .expect("generated thumbnail row should be queryable")
+        .get::<String, _>("ID");
+        verify_pool.close().await;
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("main db should open for epub generated thumbnail lookup");
-    let generated_thumbnail_id = sqlx::query(
-        "SELECT ID FROM THUMBNAIL_BOOK WHERE BOOK_ID = ? AND TYPE = 'GENERATED' LIMIT 1",
-    )
-    .bind("book-1")
-    .fetch_one(&verify_pool)
-    .await
-    .expect("generated epub thumbnail row should be queryable")
-    .get::<String, _>("ID");
-    verify_pool.close().await;
+        let tampered_png = match source {
+            "epub" => distinct_png_bytes(3, 2, 0, 255, 0),
+            "pdf" => distinct_png_bytes(4, 3, 255, 0, 0),
+            _ => unreachable!("unsupported source case"),
+        };
+        seed_book_thumbnail_bytes(&paths, &generated_thumbnail_id, "image/png", &tampered_png)
+            .await;
 
-    let tampered_png = distinct_png_bytes(3, 2, 0, 255, 0);
-    seed_book_thumbnail_bytes(&paths, &generated_thumbnail_id, "image/png", &tampered_png).await;
+        let after = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header("x-auth-token", &auth_token)
+                    .body(Body::empty())
+                    .expect("opds v2 generated thumbnail request should build after tampering"),
+            )
+            .await
+            .expect("opds v2 generated thumbnail request should complete after tampering");
+        assert_eq!(after.status(), StatusCode::OK, "source: {source}");
+        let after_body = to_bytes(after.into_body(), usize::MAX)
+            .await
+            .expect("opds v2 generated thumbnail response body should be readable after tampering")
+            .to_vec();
 
-    let after = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/opds/v2/books/book-1/thumbnail")
-                .header("x-auth-token", &auth_token)
-                .body(Body::empty())
-                .expect("opds v2 epub thumbnail request should build after tampering"),
-        )
-        .await
-        .expect("opds v2 epub thumbnail request should complete after tampering");
-    assert_eq!(after.status(), StatusCode::OK);
-    let after_body = to_bytes(after.into_body(), usize::MAX)
-        .await
-        .expect("opds v2 epub thumbnail response body should be readable after tampering")
-        .to_vec();
+        assert_eq!(after_body, before_body, "source: {source}");
 
-    assert_eq!(after_body, before_body);
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_opds_v2_book_thumbnail_ignores_mutated_generated_pdf_thumbnail_bytes() {
-    let paths = new_router_fixture("router-opds-v2-book-thumbnail-pdf-generated-source").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_pdf_book(
-        &paths,
-        "book-pdf-1",
-        "series-1",
-        "fixture-page.pdf",
-        "Fixture PDF",
-    )
-    .await;
-
-    let cleanup_pool = connect_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("main db should open for pdf generated thumbnail cleanup");
-    sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ?")
-        .bind("book-pdf-1")
-        .execute(&cleanup_pool)
-        .await
-        .expect("existing pdf thumbnails should be deleted before generated-source test");
-    cleanup_pool.close().await;
-
-    generate_book_thumbnail(paths.main_db.as_path(), "book-pdf-1")
-        .expect("generate_book_thumbnail should succeed before opds pdf source test");
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let before = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/opds/v2/books/book-pdf-1/thumbnail")
-                .header("x-auth-token", &auth_token)
-                .body(Body::empty())
-                .expect("opds v2 pdf thumbnail baseline request should build"),
-        )
-        .await
-        .expect("opds v2 pdf thumbnail baseline request should complete");
-    assert_eq!(before.status(), StatusCode::OK);
-    let before_body = to_bytes(before.into_body(), usize::MAX)
-        .await
-        .expect("opds v2 pdf thumbnail baseline body should be readable")
-        .to_vec();
-
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("main db should open for pdf generated thumbnail lookup");
-    let generated_thumbnail_id = sqlx::query(
-        "SELECT ID FROM THUMBNAIL_BOOK WHERE BOOK_ID = ? AND TYPE = 'GENERATED' LIMIT 1",
-    )
-    .bind("book-pdf-1")
-    .fetch_one(&verify_pool)
-    .await
-    .expect("generated pdf thumbnail row should be queryable")
-    .get::<String, _>("ID");
-    verify_pool.close().await;
-
-    let tampered_png = distinct_png_bytes(4, 3, 255, 0, 0);
-    seed_book_thumbnail_bytes(&paths, &generated_thumbnail_id, "image/png", &tampered_png).await;
-
-    let after = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/opds/v2/books/book-pdf-1/thumbnail")
-                .header("x-auth-token", &auth_token)
-                .body(Body::empty())
-                .expect("opds v2 pdf thumbnail request should build after tampering"),
-        )
-        .await
-        .expect("opds v2 pdf thumbnail request should complete after tampering");
-    assert_eq!(after.status(), StatusCode::OK);
-    let after_body = to_bytes(after.into_body(), usize::MAX)
-        .await
-        .expect("opds v2 pdf thumbnail response body should be readable after tampering")
-        .to_vec();
-
-    assert_eq!(after_body, before_body);
-
-    cleanup_router_fixture(paths);
+        cleanup_router_fixture(paths);
+    }
 }
 
 #[tokio::test]

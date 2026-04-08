@@ -313,6 +313,10 @@ async fn router_transient_books_scan_and_analyze_returns_non_placeholder_payload
         scanned_book.get("url"),
         Some(&Value::String(candidate_file.to_string_lossy().to_string())),
     );
+    assert_eq!(
+        scanned_book.get("status"),
+        Some(&Value::String("UNKNOWN".to_string())),
+    );
     assert!(
         scanned_book
             .get("size")

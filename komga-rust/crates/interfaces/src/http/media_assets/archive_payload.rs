@@ -7,8 +7,7 @@ use zip::write::SimpleFileOptions;
 pub(super) fn build_stored_zip_archive(entries: Vec<(String, Vec<u8>)>) -> Result<Vec<u8>, String> {
     let cursor = Cursor::new(Vec::new());
     let mut writer = ZipWriter::new(cursor);
-    #[allow(deprecated)]
-    let _ = writer.set_zip64_comment(Some(""));
+    writer.set_raw_zip64_extensible_data_sector(Vec::new().into_boxed_slice());
 
     for (file_name, bytes) in entries {
         let options = SimpleFileOptions::default()

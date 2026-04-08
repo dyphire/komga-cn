@@ -12,6 +12,15 @@ use super::super::filters::{
 };
 use super::map_sqlx_error;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SeriesOrdering {
+    TitleAsc,
+    CreatedDateDesc,
+    LastModifiedDateDesc,
+    BooksMetadataReleaseDateDesc,
+    BooksCountDesc,
+}
+
 #[derive(sqlx::FromRow)]
 struct SqlxSeriesResourceRow {
     id: String,
@@ -95,6 +104,8 @@ pub(in crate::read_models) async fn list_series_sqlx(
 
     let mut select_builder = QueryBuilder::<Sqlite>::new(
         "SELECT s.id AS id, s.library_id AS library_id, s.title AS title, \
+                s.created AS created, s.last_modified AS last_modified, \
+                s.release_date AS release_date, s.book_count AS book_count, \
                 COALESCE(GROUP_CONCAT(DISTINCT sl.label), '') AS labels \
          FROM series s \
          LEFT \
@@ -108,8 +119,11 @@ pub(in crate::read_models) async fn list_series_sqlx(
         query,
         allowed.as_ref(),
     );
-    select_builder
-        .push(" GROUP BY s.id, s.library_id, s.title ORDER BY s.title COLLATE NOCASE ASC LIMIT ");
+    select_builder.push(
+        " GROUP BY s.id, s.library_id, s.title, s.created, s.last_modified, s.release_date, s.book_count ORDER BY ",
+    );
+    select_builder.push(series_order_sql(series_ordering_from_sorts(&query.sort)));
+    select_builder.push(" LIMIT ");
     select_builder.push_bind(safe_size as i64);
     select_builder.push(" OFFSET ");
     select_builder.push_bind(offset as i64);
@@ -126,6 +140,44 @@ pub(in crate::read_models) async fn list_series_sqlx(
         safe_size,
         total_elements,
     ))
+}
+
+fn series_ordering_from_sorts(sorts: &[String]) -> SeriesOrdering {
+    let Some(sort) = sorts.first() else {
+        return SeriesOrdering::TitleAsc;
+    };
+
+    match sort.as_str() {
+        "metadata.titleSort,asc" | "titleSort,asc" | "metadata.titleSort" | "titleSort" => {
+            SeriesOrdering::TitleAsc
+        }
+        "createdDate,desc" | "created,desc" | "createdDate" | "created" => {
+            SeriesOrdering::CreatedDateDesc
+        }
+        "lastModifiedDate,desc"
+        | "lastModified,desc"
+        | "lastModifiedDate"
+        | "lastModified" => SeriesOrdering::LastModifiedDateDesc,
+        "booksMetadata.releaseDate,desc" | "booksMetadata.releaseDate" => {
+            SeriesOrdering::BooksMetadataReleaseDateDesc
+        }
+        "booksCount,desc" | "booksCount" => SeriesOrdering::BooksCountDesc,
+        _ => SeriesOrdering::TitleAsc,
+    }
+}
+
+fn series_order_sql(ordering: SeriesOrdering) -> &'static str {
+    match ordering {
+        SeriesOrdering::TitleAsc => "s.title COLLATE NOCASE ASC",
+        SeriesOrdering::CreatedDateDesc => "s.created DESC, s.title COLLATE NOCASE ASC",
+        SeriesOrdering::LastModifiedDateDesc => {
+            "s.last_modified DESC, s.title COLLATE NOCASE ASC"
+        }
+        SeriesOrdering::BooksMetadataReleaseDateDesc => {
+            "s.release_date DESC, s.title COLLATE NOCASE ASC"
+        }
+        SeriesOrdering::BooksCountDesc => "s.book_count DESC, s.title COLLATE NOCASE ASC",
+    }
 }
 
 pub(in crate::read_models) async fn get_series_detail_sqlx(
@@ -313,4 +365,37 @@ fn append_bool_sqlx_filter<'args>(
     append_clause_sqlx(prefix.as_str(), builder, state);
     builder.push_bind(i64::from(value));
     state.params.push(SqlValue::Integer(i64::from(value)));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn series_ordering_from_sorts_supports_runtime_aliases() {
+        assert_eq!(
+            series_ordering_from_sorts(&["metadata.titleSort,asc".to_string()]),
+            SeriesOrdering::TitleAsc
+        );
+        assert_eq!(
+            series_ordering_from_sorts(&["titleSort,asc".to_string()]),
+            SeriesOrdering::TitleAsc
+        );
+        assert_eq!(
+            series_ordering_from_sorts(&["created,desc".to_string()]),
+            SeriesOrdering::CreatedDateDesc
+        );
+        assert_eq!(
+            series_ordering_from_sorts(&["lastModified,desc".to_string()]),
+            SeriesOrdering::LastModifiedDateDesc
+        );
+        assert_eq!(
+            series_ordering_from_sorts(&["booksMetadata.releaseDate,desc".to_string()]),
+            SeriesOrdering::BooksMetadataReleaseDateDesc
+        );
+        assert_eq!(
+            series_ordering_from_sorts(&["booksCount,desc".to_string()]),
+            SeriesOrdering::BooksCountDesc
+        );
+    }
 }

@@ -456,8 +456,11 @@ async fn router_discovery_series_list_applies_default_sort_for_unknown_sort_mode
     for sort in [
         "metadata.titleSort,asc",
         "createdDate,desc",
+        "created,desc",
         "lastModifiedDate,desc",
+        "lastModified,desc",
         "booksMetadata.releaseDate,desc",
+        "booksCount,desc",
     ] {
         let response = app
             .clone()
@@ -514,6 +517,130 @@ async fn router_discovery_series_list_applies_default_sort_for_unknown_sort_mode
         .and_then(Value::as_array)
         .expect("strict series unsupported sort payload should expose content array");
     assert_eq!(unsupported_content.len(), 1);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_list_sorts_runtime_owned_results_by_release_date_books_count_and_alias_dates() {
+    let paths = new_router_fixture("router-discovery-series-list-runtime-sort-order").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_custom_series(&paths, "series-2", "Series 2", "library-1").await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("series runtime sort db should open");
+    sqlx::query(
+        "UPDATE SERIES_METADATA SET TITLE_SORT = ? WHERE SERIES_ID = ?",
+    )
+    .bind("Zulu Series")
+    .bind("series-1")
+    .execute(&pool)
+    .await
+    .expect("series-1 title sort should update");
+    sqlx::query(
+        "UPDATE SERIES_METADATA SET TITLE_SORT = ? WHERE SERIES_ID = ?",
+    )
+    .bind("Alpha Series")
+    .bind("series-2")
+    .execute(&pool)
+    .await
+    .expect("series-2 title sort should update");
+    for (series_id, created, last_modified, book_count) in [
+        (
+            "series-1",
+            "2024-01-01 00:00:00",
+            "2024-01-10 00:00:00",
+            1_i64,
+        ),
+        (
+            "series-2",
+            "2024-02-01 00:00:00",
+            "2024-02-10 00:00:00",
+            3_i64,
+        ),
+    ] {
+        sqlx::query(
+            "UPDATE SERIES \
+             SET CREATED_DATE = ?, LAST_MODIFIED_DATE = ?, BOOK_COUNT = ? \
+             WHERE ID = ?",
+        )
+        .bind(created)
+        .bind(last_modified)
+        .bind(book_count)
+        .bind(series_id)
+        .execute(&pool)
+        .await
+        .expect("series runtime sort fixture should update series timestamps and counts");
+    }
+    sqlx::query(
+        "UPDATE BOOK_METADATA_AGGREGATION \
+         SET RELEASE_DATE = ? \
+         WHERE SERIES_ID = ?",
+    )
+    .bind("2024-01-15")
+    .bind("series-1")
+    .execute(&pool)
+    .await
+    .expect("series-1 aggregation release date should update");
+    sqlx::query(
+        "INSERT INTO BOOK_METADATA_AGGREGATION (RELEASE_DATE, SUMMARY, SUMMARY_NUMBER, SERIES_ID) \
+         VALUES (?, ?, ?, ?)",
+    )
+    .bind("2024-02-15")
+    .bind("")
+    .bind("")
+    .bind("series-2")
+    .execute(&pool)
+    .await
+    .expect("series-2 aggregation release date should insert");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    for (sort, expected_ids) in [
+        ("metadata.titleSort,asc", vec!["series-2", "series-1"]),
+        ("titleSort,asc", vec!["series-2", "series-1"]),
+        ("created,desc", vec!["series-2", "series-1"]),
+        ("lastModified,desc", vec!["series-2", "series-1"]),
+        ("booksMetadata.releaseDate,desc", vec!["series-2", "series-1"]),
+        ("booksCount,desc", vec!["series-2", "series-1"]),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/series/list?page=0&size=20&sort={sort}"))
+                    .header("x-auth-token", &auth_token)
+                    .header("x-komga-runtime-search-ownership", "runtime-rust-owned")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({
+                            "condition": {
+                                "type": "LibraryId",
+                                "operator": "is",
+                                "value": "library-1"
+                            }
+                        })
+                        .to_string(),
+                    ))
+                    .expect("series runtime sort request should build"),
+            )
+            .await
+            .expect("series runtime sort request should complete");
+        assert_eq!(response.status(), StatusCode::OK, "sort: {sort}");
+        let payload = response_json(response).await;
+        let ids = payload
+            .get("content")
+            .and_then(Value::as_array)
+            .expect("series runtime sort payload should expose content array")
+            .iter()
+            .filter_map(|entry| entry.get("id").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        assert_eq!(ids, expected_ids, "sort: {sort}");
+    }
 
     cleanup_router_fixture(paths);
 }

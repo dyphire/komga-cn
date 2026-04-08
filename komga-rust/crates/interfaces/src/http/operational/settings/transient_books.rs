@@ -97,7 +97,7 @@ pub(crate) async fn post_transient_books(
         let status = existing
             .as_ref()
             .map(|record| record.status.clone())
-            .unwrap_or_else(|| "UNPROCESSED".to_string());
+            .unwrap_or_else(|| "UNKNOWN".to_string());
         let media_type = existing
             .as_ref()
             .map(|record| record.media_type.clone())

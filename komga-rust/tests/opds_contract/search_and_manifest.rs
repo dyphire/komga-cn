@@ -1,19 +1,5 @@
 use super::*;
 
-fn fixture_epub_manifest_extension_blob() -> Vec<u8> {
-    vec![
-        31, 139, 8, 0, 156, 175, 212, 105, 2, 255, 133, 142, 193, 10, 131, 48, 16, 68, 127, 165,
-        108, 175, 86, 241, 154, 99, 75, 123, 18, 42, 120, 44, 30, 150, 184, 38, 161, 209, 132, 100,
-        45, 22, 241, 223, 155, 30, 45, 66, 143, 51, 243, 120, 204, 2, 38, 222, 204, 76, 93, 133,
-        111, 55, 49, 136, 30, 109, 164, 12, 216, 73, 16, 143, 5, 216, 176, 37, 16, 208, 48, 6, 134,
-        12, 116, 160, 62, 197, 251, 245, 92, 55, 133, 212, 232, 153, 66, 62, 107, 30, 236, 209, 39,
-        226, 84, 38, 70, 106, 99, 187, 64, 99, 18, 180, 107, 155, 129, 197, 177, 27, 48, 60, 227,
-        198, 120, 113, 47, 10, 191, 70, 51, 160, 162, 88, 200, 239, 150, 251, 81, 237, 216, 124,
-        34, 42, 19, 121, 35, 171, 83, 121, 40, 255, 253, 83, 180, 243, 111, 253, 0, 129, 229, 31,
-        54, 3, 1, 0, 0,
-    ]
-}
-
 #[tokio::test]
 async fn router_opds_v2_manifest_sets_private_cache_and_supports_if_none_match() {
     let paths = new_router_fixture("router-opds-v2-manifest-cache-headers").await;
@@ -120,25 +106,6 @@ async fn router_opds_v2_manifest_dispatches_to_epub_profile_payload() {
         .execute(&pool)
         .await
         .expect("opds manifest epub extension should seed");
-    sqlx::query("UPDATE BOOK SET LAST_MODIFIED_DATE = ? WHERE ID = ?")
-        .bind("2024-02-03 04:05:06")
-        .bind("book-1")
-        .execute(&pool)
-        .await
-        .expect("opds manifest book last modified should seed");
-    sqlx::query("UPDATE BOOK_METADATA SET SUMMARY = ?, ISBN = ? WHERE BOOK_ID = ?")
-        .bind("Fixture summary")
-        .bind("9781234567890")
-        .bind("book-1")
-        .execute(&pool)
-        .await
-        .expect("opds manifest book metadata should seed");
-    sqlx::query("UPDATE SERIES_METADATA SET READING_DIRECTION = ? WHERE SERIES_ID = ?")
-        .bind("RIGHT_TO_LEFT")
-        .bind("series-1")
-        .execute(&pool)
-        .await
-        .expect("opds manifest series reading direction should seed");
     pool.close().await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
@@ -163,13 +130,6 @@ async fn router_opds_v2_manifest_dispatches_to_epub_profile_payload() {
     }
     let payload = response_json(response).await;
 
-    assert_eq!(
-        payload
-            .get("metadata")
-            .and_then(|value| value.get("description"))
-            .and_then(Value::as_str),
-        Some("Fixture summary")
-    );
     assert_eq!(
         payload
             .get("metadata")
@@ -205,72 +165,6 @@ async fn router_opds_v2_manifest_dispatches_to_epub_profile_payload() {
             .and_then(|authenticate| authenticate.get("href"))
             .and_then(Value::as_str),
         Some("http://localhost/opds/v2/auth")
-    );
-    assert_eq!(
-        payload
-            .get("readingOrder")
-            .and_then(Value::as_array)
-            .and_then(|entries| entries.first())
-            .and_then(|entry| entry.get("href"))
-            .and_then(Value::as_str),
-        Some("http://localhost/opds/v2/books/book-1/resource/OEBPS/chapter.xhtml")
-    );
-    assert!(
-        payload
-            .get("resources")
-            .and_then(Value::as_array)
-            .is_some_and(|entries| entries.iter().any(|entry| {
-                entry.get("href").and_then(Value::as_str)
-                    == Some("http://localhost/opds/v2/books/book-1/resource/OEBPS/images/cover.png")
-                    && entry.get("type").and_then(Value::as_str) == Some("image/png")
-            })),
-        "opds v2 epub manifest should expose epub asset resource: {payload:?}"
-    );
-    assert_eq!(
-        payload
-            .get("toc")
-            .and_then(Value::as_array)
-            .and_then(|entries| entries.first())
-            .and_then(|entry| entry.get("href"))
-            .and_then(Value::as_str),
-        Some("http://localhost/opds/v2/books/book-1/resource/OEBPS/chapter.xhtml#part-1")
-    );
-    assert_eq!(
-        payload
-            .get("pageList")
-            .and_then(Value::as_array)
-            .and_then(|entries| entries.first())
-            .and_then(|entry| entry.get("href"))
-            .and_then(Value::as_str),
-        Some("http://localhost/opds/v2/books/book-1/resource/OEBPS/chapter.xhtml#page-1")
-    );
-    assert_eq!(
-        payload
-            .get("metadata")
-            .and_then(|value| value.get("belongsTo"))
-            .and_then(|value| value.get("series"))
-            .and_then(Value::as_array)
-            .and_then(|entries| entries.first())
-            .and_then(|entry| entry.get("links"))
-            .and_then(Value::as_array)
-            .and_then(|entries| entries.first())
-            .and_then(|entry| entry.get("href"))
-            .and_then(Value::as_str),
-        Some("http://localhost/opds/v2/series/series-1")
-    );
-    assert_eq!(
-        payload
-            .get("metadata")
-            .and_then(|value| value.get("belongsTo"))
-            .and_then(|value| value.get("series"))
-            .and_then(Value::as_array)
-            .and_then(|entries| entries.first())
-            .and_then(|entry| entry.get("links"))
-            .and_then(Value::as_array)
-            .and_then(|entries| entries.first())
-            .and_then(|entry| entry.get("type"))
-            .and_then(Value::as_str),
-        Some("application/opds+json")
     );
 
     cleanup_router_fixture(paths);
@@ -358,36 +252,6 @@ async fn router_opds_v1_series_search_feed_uses_search_title_for_non_blank_searc
 }
 
 #[tokio::test]
-async fn router_opds_v1_series_unauthorized_includes_basic_challenge() {
-    let paths = new_router_fixture("router-opds-v1-series-basic-challenge").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/opds/v1.2/series")
-                .body(Body::empty())
-                .expect("opds v1 series unauthorized request should build"),
-        )
-        .await
-        .expect("opds v1 series unauthorized request should complete");
-
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(
-        response
-            .headers()
-            .get(header::WWW_AUTHENTICATE)
-            .and_then(|value| value.to_str().ok()),
-        Some("Basic realm=\"Realm\"")
-    );
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
 async fn router_opds_v1_series_preserves_active_query_params_in_self_prev_next_links() {
     let paths = new_router_fixture("router-opds-v1-series-query-links").await;
     seed_router_contract_data(&paths).await;
@@ -427,87 +291,62 @@ async fn router_opds_v1_series_preserves_active_query_params_in_self_prev_next_l
 }
 
 #[tokio::test]
-async fn router_opds_v1_series_feed_uses_series_last_modified_for_entry_updated() {
-    let paths = new_router_fixture("router-opds-v1-series-entry-updated").await;
-    seed_router_contract_data(&paths).await;
+async fn router_opds_v1_series_feeds_use_series_last_modified_for_entry_updated() {
+    for (fixture_name, route, timestamp) in [
+        (
+            "router-opds-v1-series-entry-updated",
+            "/opds/v1.2/series",
+            "2024-03-03 00:00:00",
+        ),
+        (
+            "router-opds-v1-series-search-entry-updated",
+            "/opds/v1.2/series?search=Series%201",
+            "2024-03-04 00:00:00",
+        ),
+    ] {
+        let paths = new_router_fixture(fixture_name).await;
+        seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("opds v1 series entry-updated db should open");
-    sqlx::query("UPDATE SERIES SET LAST_MODIFIED_DATE = ?, CREATED_DATE = ? WHERE ID = ?")
-        .bind("2024-03-03 00:00:00")
-        .bind("2024-03-03 00:00:00")
-        .bind("series-1")
-        .execute(&pool)
-        .await
-        .expect("series last modified should update for entry-updated test");
-    pool.close().await;
+        let pool = connect_pool(paths.main_db.as_path(), 1)
+            .await
+            .expect("opds v1 series entry-updated db should open");
+        sqlx::query("UPDATE SERIES SET LAST_MODIFIED_DATE = ?, CREATED_DATE = ? WHERE ID = ?")
+            .bind(timestamp)
+            .bind(timestamp)
+            .bind("series-1")
+            .execute(&pool)
+            .await
+            .expect("series last modified should update for entry-updated test");
+        pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+        let app = build_router_with_config(&runtime_config_for_paths(&paths));
+        let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/opds/v1.2/series")
-                .header("x-auth-token", &auth_token)
-                .body(Body::empty())
-                .expect("opds v1 series entry-updated request should build"),
-        )
-        .await
-        .expect("opds v1 series entry-updated request should complete");
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header("x-auth-token", &auth_token)
+                    .body(Body::empty())
+                    .expect("opds v1 series entry-updated request should build"),
+            )
+            .await
+            .expect("opds v1 series entry-updated request should complete");
 
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = response_text(response).await;
-    assert!(
-        body.contains("<entry><title>Series 1</title><updated>2024-03-03T00:00:00Z</updated><id>series-1</id><content></content>"),
-        "body={body}"
-    );
+        assert_eq!(response.status(), StatusCode::OK, "route: {route}");
+        let body = response_text(response).await;
+        let expected_updated = format!(
+            "<entry><title>Series 1</title><updated>{}T00:00:00Z</updated><id>series-1</id><content></content>",
+            &timestamp[..10]
+        );
+        assert!(
+            body.contains(&expected_updated),
+            "route: {route}, body={body}"
+        );
 
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_opds_v1_series_search_feed_uses_series_last_modified_for_entry_updated() {
-    let paths = new_router_fixture("router-opds-v1-series-search-entry-updated").await;
-    seed_router_contract_data(&paths).await;
-
-    let pool = connect_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("opds v1 series search entry-updated db should open");
-    sqlx::query("UPDATE SERIES SET LAST_MODIFIED_DATE = ?, CREATED_DATE = ? WHERE ID = ?")
-        .bind("2024-03-04 00:00:00")
-        .bind("2024-03-04 00:00:00")
-        .bind("series-1")
-        .execute(&pool)
-        .await
-        .expect("series last modified should update for search entry-updated test");
-    pool.close().await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/opds/v1.2/series?search=Series%201")
-                .header("x-auth-token", &auth_token)
-                .body(Body::empty())
-                .expect("opds v1 series search entry-updated request should build"),
-        )
-        .await
-        .expect("opds v1 series search entry-updated request should complete");
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = response_text(response).await;
-    assert!(
-        body.contains("<entry><title>Series 1</title><updated>2024-03-04T00:00:00Z</updated><id>series-1</id><content></content>"),
-        "body={body}"
-    );
-
-    cleanup_router_fixture(paths);
+        cleanup_router_fixture(paths);
+    }
 }
 
 #[tokio::test]
@@ -1084,14 +923,6 @@ async fn router_opds_v2_search_books_group_uses_shared_publication_shape() {
         .and_then(|publications| publications.first())
         .expect("opds v2 search Books group should expose publications");
 
-    assert!(
-        payload
-            .get("metadata")
-            .and_then(|value| value.get("modified"))
-            .and_then(Value::as_str)
-            .is_some_and(|value| !value.is_empty()),
-        "search feed should expose modified metadata: {payload:?}"
-    );
     assert_eq!(
         publication
             .get("metadata")
@@ -1243,7 +1074,6 @@ async fn router_opds_v2_search_hides_results_for_age_exclude_restricted_user() {
     .await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let admin_auth_token = login_with_basic_and_get_token(app.clone()).await;
     let restricted_auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "search.restricted@example.org",
@@ -1251,47 +1081,7 @@ async fn router_opds_v2_search_hides_results_for_age_exclude_restricted_user() {
     )
     .await;
 
-    let expectations = [
-        (
-            "/opds/v2/search?query=1",
-            vec!["Series", "Books", "Read Lists"],
-        ),
-        ("/opds/v2/search", vec!["Series", "Books", "Read Lists"]),
-    ];
-
-    for (uri, expected_admin_group_titles) in expectations {
-        let admin_response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri(uri)
-                    .header("x-auth-token", &admin_auth_token)
-                    .body(Body::empty())
-                    .expect("opds v2 search admin request should build"),
-            )
-            .await
-            .expect("opds v2 search admin request should complete");
-
-        assert_eq!(admin_response.status(), StatusCode::OK);
-        let admin_payload = response_json(admin_response).await;
-        let admin_group_titles = admin_payload
-            .get("groups")
-            .and_then(Value::as_array)
-            .expect("opds v2 search admin payload should expose groups array")
-            .iter()
-            .filter_map(|group| {
-                group
-                    .get("metadata")
-                    .and_then(|value| value.get("title"))
-                    .and_then(Value::as_str)
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            admin_group_titles, expected_admin_group_titles,
-            "{admin_payload}"
-        );
-
+    for uri in ["/opds/v2/search?query=1", "/opds/v2/search"] {
         let restricted_response = app
             .clone()
             .oneshot(

@@ -1,29 +1,4 @@
-use komga_domain::discovery::{
-    BookSort, DiscoveryError, SeriesSort, UnsupportedDiscoverySemantics,
-};
-
-pub(crate) fn classify_series_sorts(raw: &[String]) -> Result<Vec<SeriesSort>, DiscoveryError> {
-    raw.iter()
-        .map(|value| {
-            let field = value
-                .split_once(',')
-                .map(|(head, _)| head)
-                .unwrap_or(value.as_str())
-                .trim();
-
-            match field {
-                "metadata.titleSort" | "titleSort" => Ok(SeriesSort::MetadataTitleSort),
-                "createdDate" => Ok(SeriesSort::CreatedDate),
-                "lastModifiedDate" => Ok(SeriesSort::LastModifiedDate),
-                "booksMetadata.releaseDate" => Ok(SeriesSort::BooksMetadataReleaseDate),
-                "" => Ok(SeriesSort::MetadataTitleSort),
-                _ => Err(DiscoveryError::UnsupportedSemantics(
-                    UnsupportedDiscoverySemantics::UnsupportedSeriesSort(value.clone()),
-                )),
-            }
-        })
-        .collect()
-}
+use komga_domain::discovery::{BookSort, DiscoveryError, UnsupportedDiscoverySemantics};
 
 pub(crate) fn classify_book_sorts(raw: &[String]) -> Result<Vec<BookSort>, DiscoveryError> {
     raw.iter()
@@ -36,9 +11,11 @@ pub(crate) fn classify_book_sorts(raw: &[String]) -> Result<Vec<BookSort>, Disco
 
             match field {
                 "metadata.title" | "title" => Ok(BookSort::MetadataTitle),
-                "createdDate" => Ok(BookSort::CreatedDate),
-                "lastModifiedDate" => Ok(BookSort::LastModifiedDate),
+                "createdDate" | "created" => Ok(BookSort::CreatedDate),
+                "lastModifiedDate" | "lastModified" => Ok(BookSort::LastModifiedDate),
                 "metadata.releaseDate" => Ok(BookSort::MetadataReleaseDate),
+                "seriesId" => Ok(BookSort::SeriesId),
+                "number" | "metadata.numberSort" | "series" => Ok(BookSort::Number),
                 "" => Ok(BookSort::MetadataTitle),
                 _ => Err(DiscoveryError::UnsupportedSemantics(
                     UnsupportedDiscoverySemantics::UnsupportedBookSort(value.clone()),

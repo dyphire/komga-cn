@@ -4,6 +4,7 @@ pub enum SeriesSort {
     CreatedDate,
     LastModifiedDate,
     BooksMetadataReleaseDate,
+    BooksCount,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -12,4 +13,6 @@ pub enum BookSort {
     CreatedDate,
     LastModifiedDate,
     MetadataReleaseDate,
+    SeriesId,
+    Number,
 }

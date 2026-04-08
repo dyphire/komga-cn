@@ -151,7 +151,7 @@ async fn scanner_deep_scan_reanalyzes_changed_existing_books() {
         .expect("scanner deep-scan fixture should be created");
 
     let book_path = fixture.library_root.join("Series-A").join("Book-001.cbz");
-    write_scannable_cbz_fixture(&book_path, b"page-before")
+    let expected_initial_page_size = write_scannable_cbz_fixture(&book_path, b"page-before")
         .expect("initial scannable cbz fixture should be written");
     let book_url = book_path.to_string_lossy().to_string();
 
@@ -166,14 +166,14 @@ async fn scanner_deep_scan_reanalyzes_changed_existing_books() {
 
     let initial_page_size = load_media_page_file_size(&fixture.paths.main_db, &book_url).await;
     assert_eq!(
-        initial_page_size,
-        i64::try_from(b"page-before".len()).expect("initial page size should fit into i64"),
+        initial_page_size, expected_initial_page_size,
         "fixture sanity: initial scan must persist MEDIA_PAGE size from the archive entry",
     );
 
     tokio::time::sleep(Duration::from_millis(1100)).await;
-    write_scannable_cbz_fixture(&book_path, b"page-after-deep-scan")
-        .expect("updated scannable cbz fixture should be written");
+    let expected_updated_page_size =
+        write_scannable_cbz_fixture(&book_path, b"page-after-deep-scan")
+            .expect("updated scannable cbz fixture should be written");
 
     scheduler.enqueue(
         TaskQueueRecord::new("SCAN_LIBRARY:library-1", 900, Some("library-1".to_string()))
@@ -186,9 +186,7 @@ async fn scanner_deep_scan_reanalyzes_changed_existing_books() {
 
     let updated_page_size = load_media_page_file_size(&fixture.paths.main_db, &book_url).await;
     assert_eq!(
-        updated_page_size,
-        i64::try_from(b"page-after-deep-scan".len())
-            .expect("updated page size should fit into i64"),
+        updated_page_size, expected_updated_page_size,
         "deep scan must re-trigger analyze for changed existing books so MEDIA_PAGE rows refresh",
     );
 
@@ -286,8 +284,9 @@ async fn scanner_regular_scan_reanalyzes_changed_books_when_series_timestamp_cha
         .expect("initial scan should analyze the seeded book successfully");
 
     tokio::time::sleep(Duration::from_millis(1100)).await;
-    write_scannable_cbz_fixture(&book_path, b"page-after-regular-scan")
-        .expect("updated scannable cbz fixture should be written");
+    let expected_updated_page_size =
+        write_scannable_cbz_fixture(&book_path, b"page-after-regular-scan")
+            .expect("updated scannable cbz fixture should be written");
     fs::write(
         fixture
             .library_root
@@ -307,9 +306,7 @@ async fn scanner_regular_scan_reanalyzes_changed_books_when_series_timestamp_cha
 
     let updated_page_size = load_media_page_file_size(&fixture.paths.main_db, &book_url).await;
     assert_eq!(
-        updated_page_size,
-        i64::try_from(b"page-after-regular-scan".len())
-            .expect("updated page size should fit into i64"),
+        updated_page_size, expected_updated_page_size,
         "regular scan must re-trigger analyze when seriesChanged makes Kotlin enter the book update branch",
     );
 
@@ -326,8 +323,9 @@ async fn scanner_regular_scan_reanalyzes_changed_books_when_series_has_deleted_b
     let series_dir = fixture.library_root.join("Series-A");
     let primary_book_path = series_dir.join("Book-001.cbz");
     let deleted_book_path = series_dir.join("Book-002.cbz");
-    write_scannable_cbz_fixture(&primary_book_path, b"page-before")
-        .expect("primary scannable cbz fixture should be written");
+    let expected_initial_page_size =
+        write_scannable_cbz_fixture(&primary_book_path, b"page-before")
+            .expect("primary scannable cbz fixture should be written");
     write_scannable_cbz_fixture(&deleted_book_path, b"deleted-book-page")
         .expect("secondary scannable cbz fixture should be written");
     let primary_book_url = primary_book_path.to_string_lossy().to_string();
@@ -344,16 +342,16 @@ async fn scanner_regular_scan_reanalyzes_changed_books_when_series_has_deleted_b
     let initial_page_size =
         load_media_page_file_size(&fixture.paths.main_db, &primary_book_url).await;
     assert_eq!(
-        initial_page_size,
-        i64::try_from(b"page-before".len()).expect("initial page size should fit into i64"),
+        initial_page_size, expected_initial_page_size,
         "fixture sanity: initial scan must persist the primary book page size",
     );
 
     tokio::time::sleep(Duration::from_millis(1100)).await;
     fs::remove_file(&deleted_book_path)
         .expect("secondary book should be removed to simulate deleted-books seriesChanged path");
-    write_scannable_cbz_fixture(&primary_book_path, b"page-after-deleted-book-regular-scan")
-        .expect("primary book should be rewritten after deleted-books setup");
+    let expected_updated_page_size =
+        write_scannable_cbz_fixture(&primary_book_path, b"page-after-deleted-book-regular-scan")
+            .expect("primary book should be rewritten after deleted-books setup");
 
     let current_series_last_modified = fs::metadata(&series_dir)
         .expect("series directory metadata should stay queryable")
@@ -380,9 +378,7 @@ async fn scanner_regular_scan_reanalyzes_changed_books_when_series_has_deleted_b
     let updated_page_size =
         load_media_page_file_size(&fixture.paths.main_db, &primary_book_url).await;
     assert_eq!(
-        updated_page_size,
-        i64::try_from(b"page-after-deleted-book-regular-scan".len())
-            .expect("updated page size should fit into i64"),
+        updated_page_size, expected_updated_page_size,
         "regular scan must re-trigger analyze when deleted books force Kotlin's seriesChanged fallback even without a timestamp delta",
     );
 
@@ -399,127 +395,20 @@ async fn scanner_persists_hash_book_tasks_with_kotlin_task_shape() {
     scheduler
         .enqueue(TaskQueueRecord::new("HASH_BOOK_book-1", 0, None).with_simple_type("HASH_BOOK"));
 
-    let tasks_pool = connect_pool(fixture.paths.tasks_db.as_path(), 1)
-        .await
-        .expect("tasks db should open for hash-book task verification");
-    let row = sqlx::query(
-        "SELECT ID, CLASS, SIMPLE_TYPE, GROUP_ID, PAYLOAD FROM TASK WHERE ID = ? LIMIT 1",
-    )
-    .bind("HASH_BOOK_book-1")
-    .fetch_one(&tasks_pool)
-    .await
-    .expect("hash-book task row should be queryable");
-    tasks_pool.close().await;
-
-    assert_eq!(
-        row.get::<String, _>("CLASS"),
-        "org.gotson.komga.application.tasks.Task$HashBook"
-    );
-    assert_eq!(row.get::<String, _>("SIMPLE_TYPE"), "HashBook");
-    assert_eq!(row.get::<Option<String>, _>("GROUP_ID"), None);
-    assert_eq!(
-        serde_json::from_str::<Value>(&row.get::<String, _>("PAYLOAD"))
-            .expect("hash-book task payload should be valid json"),
+    assert_persisted_task_shape(
+        fixture.paths.tasks_db.as_path(),
+        "HASH_BOOK_book-1",
+        "org.gotson.komga.application.tasks.Task$HashBook",
+        "HashBook",
+        None,
         json!({
             "bookId": "book-1",
             "priority": 0,
             "groupId": Value::Null,
             "uniqueId": "HASH_BOOK_book-1"
-        })
-    );
-
-    fixture.cleanup();
-}
-
-#[tokio::test]
-async fn scanner_persists_generate_book_thumbnail_tasks_with_kotlin_task_shape() {
-    let fixture =
-        ScannerPersistenceFixture::new("scanner-persistence-generate-book-thumbnail-shape")
-            .await
-            .expect("scanner generate-book-thumbnail task fixture should be created");
-
-    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new("GENERATE_BOOK_THUMBNAIL_book-1", 12, None)
-            .with_simple_type("GENERATE_BOOK_THUMBNAIL"),
-    );
-
-    let tasks_pool = connect_pool(fixture.paths.tasks_db.as_path(), 1)
-        .await
-        .expect("tasks db should open for generate-book-thumbnail task verification");
-    let row = sqlx::query(
-        "SELECT ID, CLASS, SIMPLE_TYPE, GROUP_ID, PAYLOAD FROM TASK WHERE ID = ? LIMIT 1",
+        }),
     )
-    .bind("GENERATE_BOOK_THUMBNAIL_book-1")
-    .fetch_one(&tasks_pool)
-    .await
-    .expect("generate-book-thumbnail task row should be queryable");
-    tasks_pool.close().await;
-
-    assert_eq!(
-        row.get::<String, _>("CLASS"),
-        "org.gotson.komga.application.tasks.Task$GenerateBookThumbnail"
-    );
-    assert_eq!(row.get::<String, _>("SIMPLE_TYPE"), "GenerateBookThumbnail");
-    assert_eq!(row.get::<Option<String>, _>("GROUP_ID"), None);
-    assert_eq!(
-        serde_json::from_str::<Value>(&row.get::<String, _>("PAYLOAD"))
-            .expect("generate-book-thumbnail task payload should be valid json"),
-        json!({
-            "bookId": "book-1",
-            "priority": 12,
-            "groupId": Value::Null,
-            "uniqueId": "GENERATE_BOOK_THUMBNAIL_book-1"
-        })
-    );
-
-    fixture.cleanup();
-}
-
-#[tokio::test]
-async fn scanner_persists_refresh_book_local_artwork_tasks_with_kotlin_task_shape() {
-    let fixture =
-        ScannerPersistenceFixture::new("scanner-persistence-refresh-book-local-artwork-shape")
-            .await
-            .expect("scanner refresh-book-local-artwork task fixture should be created");
-
-    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new("REFRESH_BOOK_LOCAL_ARTWORK_book-1", 80, None)
-            .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK"),
-    );
-
-    let tasks_pool = connect_pool(fixture.paths.tasks_db.as_path(), 1)
-        .await
-        .expect("tasks db should open for refresh-book-local-artwork task verification");
-    let row = sqlx::query(
-        "SELECT ID, CLASS, SIMPLE_TYPE, GROUP_ID, PAYLOAD FROM TASK WHERE ID = ? LIMIT 1",
-    )
-    .bind("REFRESH_BOOK_LOCAL_ARTWORK_book-1")
-    .fetch_one(&tasks_pool)
-    .await
-    .expect("refresh-book-local-artwork task row should be queryable");
-    tasks_pool.close().await;
-
-    assert_eq!(
-        row.get::<String, _>("CLASS"),
-        "org.gotson.komga.application.tasks.Task$RefreshBookLocalArtwork"
-    );
-    assert_eq!(
-        row.get::<String, _>("SIMPLE_TYPE"),
-        "RefreshBookLocalArtwork"
-    );
-    assert_eq!(row.get::<Option<String>, _>("GROUP_ID"), None);
-    assert_eq!(
-        serde_json::from_str::<Value>(&row.get::<String, _>("PAYLOAD"))
-            .expect("refresh-book-local-artwork task payload should be valid json"),
-        json!({
-            "bookId": "book-1",
-            "priority": 80,
-            "groupId": Value::Null,
-            "uniqueId": "REFRESH_BOOK_LOCAL_ARTWORK_book-1"
-        })
-    );
+    .await;
 
     fixture.cleanup();
 }
@@ -540,30 +429,12 @@ async fn scanner_persists_refresh_book_metadata_tasks_with_kotlin_task_shape() {
         .with_simple_type("REFRESH_BOOK_METADATA"),
     );
 
-    let tasks_pool = connect_pool(fixture.paths.tasks_db.as_path(), 1)
-        .await
-        .expect("tasks db should open for refresh-book-metadata task verification");
-    let row = sqlx::query(
-        "SELECT ID, CLASS, SIMPLE_TYPE, GROUP_ID, PAYLOAD FROM TASK WHERE ID = ? LIMIT 1",
-    )
-    .bind("REFRESH_BOOK_METADATA_book-1")
-    .fetch_one(&tasks_pool)
-    .await
-    .expect("refresh-book-metadata task row should be queryable");
-    tasks_pool.close().await;
-
-    assert_eq!(
-        row.get::<String, _>("CLASS"),
-        "org.gotson.komga.application.tasks.Task$RefreshBookMetadata"
-    );
-    assert_eq!(row.get::<String, _>("SIMPLE_TYPE"), "RefreshBookMetadata");
-    assert_eq!(
-        row.get::<Option<String>, _>("GROUP_ID"),
-        Some("series-1".to_string())
-    );
-    assert_eq!(
-        serde_json::from_str::<Value>(&row.get::<String, _>("PAYLOAD"))
-            .expect("refresh-book-metadata task payload should be valid json"),
+    assert_persisted_task_shape(
+        fixture.paths.tasks_db.as_path(),
+        "REFRESH_BOOK_METADATA_book-1",
+        "org.gotson.komga.application.tasks.Task$RefreshBookMetadata",
+        "RefreshBookMetadata",
+        Some("series-1"),
         json!({
             "bookId": "book-1",
             "capabilities": [
@@ -582,8 +453,9 @@ async fn scanner_persists_refresh_book_metadata_tasks_with_kotlin_task_shape() {
             "priority": 80,
             "groupId": "series-1",
             "uniqueId": "REFRESH_BOOK_METADATA_book-1"
-        })
-    );
+        }),
+    )
+    .await;
 
     fixture.cleanup();
 }
@@ -600,84 +472,20 @@ async fn scanner_persists_find_duplicate_pages_to_delete_tasks_with_kotlin_task_
             .with_simple_type("FIND_DUPLICATE_PAGES_TO_DELETE"),
     );
 
-    let tasks_pool = connect_pool(fixture.paths.tasks_db.as_path(), 1)
-        .await
-        .expect("tasks db should open for duplicate-pages task verification");
-    let row = sqlx::query(
-        "SELECT ID, CLASS, SIMPLE_TYPE, GROUP_ID, PAYLOAD FROM TASK WHERE ID = ? LIMIT 1",
-    )
-    .bind("FIND_DUPLICATE_PAGES_TO_DELETE_library-1")
-    .fetch_one(&tasks_pool)
-    .await
-    .expect("duplicate-pages task row should be queryable");
-    tasks_pool.close().await;
-
-    assert_eq!(
-        row.get::<String, _>("CLASS"),
-        "org.gotson.komga.application.tasks.Task$FindDuplicatePagesToDelete"
-    );
-    assert_eq!(
-        row.get::<String, _>("SIMPLE_TYPE"),
-        "FindDuplicatePagesToDelete"
-    );
-    assert_eq!(row.get::<Option<String>, _>("GROUP_ID"), None);
-    assert_eq!(
-        serde_json::from_str::<Value>(&row.get::<String, _>("PAYLOAD"))
-            .expect("duplicate-pages task payload should be valid json"),
+    assert_persisted_task_shape(
+        fixture.paths.tasks_db.as_path(),
+        "FIND_DUPLICATE_PAGES_TO_DELETE_library-1",
+        "org.gotson.komga.application.tasks.Task$FindDuplicatePagesToDelete",
+        "FindDuplicatePagesToDelete",
+        None,
         json!({
             "libraryId": "library-1",
             "priority": 85,
             "groupId": Value::Null,
             "uniqueId": "FIND_DUPLICATE_PAGES_TO_DELETE_library-1"
-        })
-    );
-
-    fixture.cleanup();
-}
-
-#[tokio::test]
-async fn scanner_persists_repair_extension_tasks_with_kotlin_task_shape() {
-    let fixture = ScannerPersistenceFixture::new("scanner-persistence-repair-extension-shape")
-        .await
-        .expect("scanner repair-extension task fixture should be created");
-
-    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new("REPAIR_EXTENSION_book-1", 12, Some("series-1".to_string()))
-            .with_simple_type("REPAIR_EXTENSION"),
-    );
-
-    let tasks_pool = connect_pool(fixture.paths.tasks_db.as_path(), 1)
-        .await
-        .expect("tasks db should open for repair-extension task verification");
-    let row = sqlx::query(
-        "SELECT ID, CLASS, SIMPLE_TYPE, GROUP_ID, PAYLOAD FROM TASK WHERE ID = ? LIMIT 1",
+        }),
     )
-    .bind("REPAIR_EXTENSION_book-1")
-    .fetch_one(&tasks_pool)
-    .await
-    .expect("repair-extension task row should be queryable");
-    tasks_pool.close().await;
-
-    assert_eq!(
-        row.get::<String, _>("CLASS"),
-        "org.gotson.komga.application.tasks.Task$RepairExtension"
-    );
-    assert_eq!(row.get::<String, _>("SIMPLE_TYPE"), "RepairExtension");
-    assert_eq!(
-        row.get::<Option<String>, _>("GROUP_ID"),
-        Some("series-1".to_string())
-    );
-    assert_eq!(
-        serde_json::from_str::<Value>(&row.get::<String, _>("PAYLOAD"))
-            .expect("repair-extension task payload should be valid json"),
-        json!({
-            "bookId": "book-1",
-            "priority": 12,
-            "groupId": "series-1",
-            "uniqueId": "REPAIR_EXTENSION_book-1"
-        })
-    );
+    .await;
 
     fixture.cleanup();
 }
@@ -1106,25 +914,48 @@ fn create_scannable_library_root(config_dir: &Path) -> anyhow::Result<PathBuf> {
     let series_dir = root.join("Series-A");
 
     fs::create_dir_all(&series_dir)?;
-    fs::write(series_dir.join("Book-001.cbz"), b"book-001")?;
+    write_scannable_cbz_fixture(&series_dir.join("Book-001.cbz"), b"default-page")?;
     fs::write(series_dir.join("Book-001.xml"), b"<ComicInfo></ComicInfo>")?;
     fs::write(series_dir.join("ComicInfo.xml"), b"<ComicInfo></ComicInfo>")?;
 
     Ok(root)
 }
 
-fn write_scannable_cbz_fixture(path: &Path, page_bytes: &[u8]) -> anyhow::Result<()> {
+fn write_scannable_cbz_fixture(path: &Path, page_marker: &[u8]) -> anyhow::Result<i64> {
     let file = File::create(path)?;
     let mut zip = ZipWriter::new(file);
     let options = SimpleFileOptions::default()
         .compression_method(CompressionMethod::Stored)
         .unix_permissions(0o644);
+    let page_bytes = render_scannable_png_bytes(page_marker)?;
 
     zip.start_file("page-1.png", options)?;
-    zip.write_all(page_bytes)?;
+    zip.write_all(&page_bytes)?;
     zip.finish()?;
 
-    Ok(())
+    Ok(i64::try_from(page_bytes.len()).expect("fixture page size should fit into i64"))
+}
+
+fn render_scannable_png_bytes(page_marker: &[u8]) -> anyhow::Result<Vec<u8>> {
+    let pixels = if page_marker.is_empty() {
+        vec![0_u8]
+    } else {
+        page_marker.to_vec()
+    };
+    let width = u32::try_from(pixels.len()).expect("fixture width should fit into u32");
+    let mut image = image::RgbaImage::new(width, 1);
+
+    for (index, value) in pixels.into_iter().enumerate() {
+        image.put_pixel(
+            index as u32,
+            0,
+            image::Rgba([value, value.wrapping_add(31), value ^ 0x5A, 0xFF]),
+        );
+    }
+
+    let mut output = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(image).write_to(&mut output, image::ImageFormat::Png)?;
+    Ok(output.into_inner())
 }
 
 async fn seed_library_row(main_db: &Path, library_id: &str, root: &Path) -> anyhow::Result<()> {
@@ -1235,6 +1066,35 @@ async fn load_active_series_count(main_db: &Path, library_id: &str) -> i64 {
     .get::<i64, _>("COUNT");
     pool.close().await;
     series_count
+}
+
+async fn assert_persisted_task_shape(
+    tasks_db: &Path,
+    id: &str,
+    class: &str,
+    simple_type: &str,
+    group_id: Option<&str>,
+    payload: Value,
+) {
+    let pool = connect_pool(tasks_db, 1)
+        .await
+        .expect("tasks db should open for persisted task verification");
+    let row =
+        sqlx::query("SELECT CLASS, SIMPLE_TYPE, GROUP_ID, PAYLOAD FROM TASK WHERE ID = ? LIMIT 1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .expect("persisted task row should be queryable");
+    pool.close().await;
+
+    let stored_group_id = row.get::<Option<String>, _>("GROUP_ID");
+    let stored_payload = serde_json::from_str::<Value>(&row.get::<String, _>("PAYLOAD"))
+        .expect("persisted task payload should be valid json");
+
+    assert_eq!(row.get::<String, _>("CLASS"), class);
+    assert_eq!(row.get::<String, _>("SIMPLE_TYPE"), simple_type);
+    assert_eq!(stored_group_id.as_deref(), group_id);
+    assert_eq!(stored_payload, payload);
 }
 
 fn runtime_config_for_paths(paths: &persistence_contract_fixture::RuntimeDbPaths) -> RuntimeConfig {

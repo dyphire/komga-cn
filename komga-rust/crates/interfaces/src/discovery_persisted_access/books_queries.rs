@@ -613,6 +613,11 @@ pub async fn load_persisted_books_page(
                     PersistedBooksSortMode::ReleaseDateDesc => {
                         right.metadata_release_date.cmp(&left.metadata_release_date)
                     }
+                    PersistedBooksSortMode::NumberSortAsc => left
+                        .metadata_number_sort
+                        .partial_cmp(&right.metadata_number_sort)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                    PersistedBooksSortMode::SeriesIdAsc => left.series_id.cmp(&right.series_id),
                     PersistedBooksSortMode::RelevanceAsc => {
                         compare_relevance_ranks(&relevance_ranks, &left.id, &right.id, false)
                     }
@@ -734,12 +739,19 @@ pub fn parse_persisted_books_sort_modes(
     let mut modes = sorts
         .iter()
         .filter_map(|sort| match sort.as_str() {
-            "metadata.title,asc" | "series,metadata.numberSort,asc" => {
-                Some(PersistedBooksSortMode::TitleAsc)
+            "series,metadata.numberSort,asc" => {
+                Some(PersistedBooksSortMode::NumberSortAsc)
             }
-            "createdDate,desc" => Some(PersistedBooksSortMode::CreatedDateDesc),
-            "lastModifiedDate,desc" => Some(PersistedBooksSortMode::LastModifiedDateDesc),
+            "metadata.title,asc" | "title,asc" => Some(PersistedBooksSortMode::TitleAsc),
+            "createdDate,desc" | "created,desc" => Some(PersistedBooksSortMode::CreatedDateDesc),
+            "lastModifiedDate,desc" | "lastModified,desc" => {
+                Some(PersistedBooksSortMode::LastModifiedDateDesc)
+            }
             "metadata.releaseDate,desc" => Some(PersistedBooksSortMode::ReleaseDateDesc),
+            "metadata.numberSort,asc" | "number,asc" => {
+                Some(PersistedBooksSortMode::NumberSortAsc)
+            }
+            "seriesId,asc" => Some(PersistedBooksSortMode::SeriesIdAsc),
             "relevance,asc" if has_full_text_search => Some(PersistedBooksSortMode::RelevanceAsc),
             "relevance,desc" if has_full_text_search => Some(PersistedBooksSortMode::RelevanceDesc),
             _ => None,

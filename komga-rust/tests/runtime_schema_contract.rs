@@ -315,9 +315,7 @@ async fn reject_outdated_schema() {
         "schema gate should identify missing table in deterministic text, got: {message}",
     );
     assert!(
-        message.contains(
-            "run Kotlin Komga once to upgrade the database schema before starting Rust runtime"
-        ),
+        message.contains("database schema is damaged, incomplete, or unrecognized and cannot be migrated automatically by the Rust runtime"),
         "schema gate should provide explicit operator guidance, got: {message}",
     );
 

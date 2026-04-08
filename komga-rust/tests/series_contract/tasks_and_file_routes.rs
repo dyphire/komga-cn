@@ -680,7 +680,7 @@ async fn router_series_metadata_refresh_enqueues_kotlin_style_task_groups() {
     let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for series metadata refresh verification");
-    let rows = sqlx::query("SELECT ID, SIMPLE_TYPE, GROUP_ID, PAYLOAD FROM TASK ORDER BY ID ASC")
+    let rows = sqlx::query("SELECT ID, GROUP_ID, PAYLOAD FROM TASK ORDER BY ID ASC")
         .fetch_all(&tasks_pool)
         .await
         .expect("series metadata refresh task rows should be queryable");
@@ -688,26 +688,21 @@ async fn router_series_metadata_refresh_enqueues_kotlin_style_task_groups() {
 
     assert_eq!(rows.len(), 3);
     assert_eq!(
-        rows[0].get::<String, _>("ID"),
-        "REFRESH_BOOK_LOCAL_ARTWORK_book-1"
-    );
-    assert_eq!(
-        rows[0].get::<String, _>("SIMPLE_TYPE"),
-        "RefreshBookLocalArtwork"
+        rows.iter()
+            .map(|row| row.get::<String, _>("ID"))
+            .collect::<Vec<_>>(),
+        vec![
+            "REFRESH_BOOK_LOCAL_ARTWORK_book-1".to_string(),
+            "REFRESH_BOOK_METADATA_book-1".to_string(),
+            "REFRESH_SERIES_LOCAL_ARTWORK:series-1".to_string(),
+        ]
     );
     assert_eq!(rows[0].get::<Option<String>, _>("GROUP_ID"), None);
-    assert_eq!(
-        rows[1].get::<String, _>("ID"),
-        "REFRESH_BOOK_METADATA_book-1"
-    );
-    assert_eq!(
-        rows[1].get::<String, _>("SIMPLE_TYPE"),
-        "RefreshBookMetadata"
-    );
     assert_eq!(
         rows[1].get::<Option<String>, _>("GROUP_ID"),
         Some("series-1".to_string())
     );
+    assert_eq!(rows[2].get::<Option<String>, _>("GROUP_ID"), None);
     assert_eq!(
         serde_json::from_str::<Value>(&rows[1].get::<String, _>("PAYLOAD"))
             .expect("refresh-book-metadata route payload should be valid json"),
@@ -730,10 +725,6 @@ async fn router_series_metadata_refresh_enqueues_kotlin_style_task_groups() {
             "groupId": "series-1",
             "uniqueId": "REFRESH_BOOK_METADATA_book-1"
         })
-    );
-    assert_eq!(
-        rows[2].get::<String, _>("SIMPLE_TYPE"),
-        "REFRESH_SERIES_LOCAL_ARTWORK"
     );
 
     cleanup_router_fixture(paths);

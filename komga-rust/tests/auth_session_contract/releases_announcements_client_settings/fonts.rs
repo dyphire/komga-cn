@@ -176,7 +176,7 @@ async fn router_get_font_file_downloads_filesystem_font_without_auth_like_kotlin
 }
 
 #[tokio::test]
-async fn router_get_fonts_families_returns_unauthorized_for_anonymous_user_like_kotlin() {
+async fn router_get_fonts_families_returns_embedded_families_without_auth_like_kotlin() {
     let paths = new_router_fixture("router-get-fonts-families-anonymous").await;
     seed_router_contract_data(&paths).await;
 
@@ -193,7 +193,15 @@ async fn router_get_fonts_families_returns_unauthorized_for_anonymous_user_like_
         .await
         .expect("get fonts families anonymous request should complete");
 
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let families = payload
+        .as_array()
+        .expect("anonymous fonts families payload should be an array")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    assert!(families.contains(&"OpenDyslexic"));
 
     cleanup_router_fixture(paths);
 }

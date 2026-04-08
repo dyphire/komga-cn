@@ -113,7 +113,7 @@ pub async fn series_latest(
         uri,
         auth_state,
         database_file,
-        PersistedSeriesSortMode::Latest,
+        PersistedSeriesSortMode::LastModifiedDesc,
         false,
         false,
     )
@@ -249,7 +249,7 @@ pub async fn series_updated(
         uri,
         auth_state,
         database_file,
-        PersistedSeriesSortMode::Latest,
+        PersistedSeriesSortMode::LastModifiedDesc,
         true,
         true,
     )

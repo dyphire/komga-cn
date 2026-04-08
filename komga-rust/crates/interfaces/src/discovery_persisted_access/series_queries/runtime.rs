@@ -50,9 +50,13 @@ pub fn parse_persisted_series_sort_modes(
         .iter()
         .filter_map(|sort| match sort.as_str() {
             "metadata.titleSort,asc" => Some(PersistedSeriesSortMode::TitleAsc),
-            "createdDate,desc" | "lastModifiedDate,desc" | "booksMetadata.releaseDate,desc" => {
-                Some(PersistedSeriesSortMode::Latest)
+            "titleSort,asc" => Some(PersistedSeriesSortMode::TitleAsc),
+            "createdDate,desc" | "created,desc" => Some(PersistedSeriesSortMode::CreatedDesc),
+            "lastModifiedDate,desc" | "lastModified,desc" => {
+                Some(PersistedSeriesSortMode::LastModifiedDesc)
             }
+            "booksMetadata.releaseDate,desc" => Some(PersistedSeriesSortMode::ReleaseDateDesc),
+            "booksCount,desc" => Some(PersistedSeriesSortMode::BooksCountDesc),
             "relevance,asc" => Some(PersistedSeriesSortMode::RelevanceAsc),
             "relevance,desc" => Some(PersistedSeriesSortMode::RelevanceDesc),
             _ => None,

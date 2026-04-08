@@ -45,193 +45,67 @@ async fn router_readlist_patch_preserves_unspecified_fields() {
 }
 
 #[tokio::test]
-async fn router_readlist_create_rejects_missing_name_like_kotlin() {
-    let paths = new_router_fixture("router-readlist-create-missing-name").await;
-    seed_router_contract_data(&paths).await;
+async fn router_readlist_create_rejects_invalid_requests_like_kotlin() {
+    for (fixture_suffix, payload) in [
+        ("missing-name", json!({ "bookIds": ["book-1"] })),
+        ("missing-book-ids", json!({ "name": "New ReadList" })),
+        (
+            "blank-name",
+            json!({
+                "name": "   ",
+                "bookIds": ["book-1"]
+            }),
+        ),
+        (
+            "empty-book-ids",
+            json!({
+                "name": "Empty BookIds",
+                "bookIds": []
+            }),
+        ),
+        (
+            "duplicate-book-ids",
+            json!({
+                "name": "Duplicate BookIds",
+                "bookIds": ["book-1", "book-1"]
+            }),
+        ),
+        (
+            "duplicate-name",
+            json!({
+                "name": "ReadList 1",
+                "bookIds": ["book-1"]
+            }),
+        ),
+    ] {
+        let fixture_name = format!("router-readlist-create-{fixture_suffix}");
+        let paths = new_router_fixture(&fixture_name).await;
+        seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+        let app = build_router_with_config(&runtime_config_for_paths(&paths));
+        let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/readlists")
-                .header("x-auth-token", &auth_token)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "bookIds": ["book-1"]
-                    })
-                    .to_string(),
-                ))
-                .expect("readlist create missing-name request should build"),
-        )
-        .await
-        .expect("readlist create missing-name request should complete");
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/readlists")
+                    .header("x-auth-token", &auth_token)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(payload.to_string()))
+                    .expect("readlist create invalid request should build"),
+            )
+            .await
+            .expect("readlist create invalid request should complete");
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "fixture: {fixture_suffix}"
+        );
 
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_readlist_create_rejects_missing_book_ids_like_kotlin() {
-    let paths = new_router_fixture("router-readlist-create-missing-book-ids").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/readlists")
-                .header("x-auth-token", &auth_token)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "name": "New ReadList"
-                    })
-                    .to_string(),
-                ))
-                .expect("readlist create missing-bookIds request should build"),
-        )
-        .await
-        .expect("readlist create missing-bookIds request should complete");
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_readlist_create_rejects_blank_name_like_kotlin() {
-    let paths = new_router_fixture("router-readlist-create-blank-name").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/readlists")
-                .header("x-auth-token", &auth_token)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "name": "   ",
-                        "bookIds": ["book-1"]
-                    })
-                    .to_string(),
-                ))
-                .expect("readlist create blank-name request should build"),
-        )
-        .await
-        .expect("readlist create blank-name request should complete");
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_readlist_create_rejects_empty_book_ids_like_kotlin() {
-    let paths = new_router_fixture("router-readlist-create-empty-book-ids").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/readlists")
-                .header("x-auth-token", &auth_token)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "name": "Empty BookIds",
-                        "bookIds": []
-                    })
-                    .to_string(),
-                ))
-                .expect("readlist create empty-bookIds request should build"),
-        )
-        .await
-        .expect("readlist create empty-bookIds request should complete");
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_readlist_create_rejects_duplicate_book_ids_like_kotlin() {
-    let paths = new_router_fixture("router-readlist-create-duplicate-book-ids").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/readlists")
-                .header("x-auth-token", &auth_token)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "name": "Duplicate BookIds",
-                        "bookIds": ["book-1", "book-1"]
-                    })
-                    .to_string(),
-                ))
-                .expect("readlist create duplicate-bookIds request should build"),
-        )
-        .await
-        .expect("readlist create duplicate-bookIds request should complete");
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_readlist_create_rejects_duplicate_name_like_kotlin() {
-    let paths = new_router_fixture("router-readlist-create-duplicate-name").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/readlists")
-                .header("x-auth-token", &auth_token)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "name": "ReadList 1",
-                        "bookIds": ["book-1"]
-                    })
-                    .to_string(),
-                ))
-                .expect("readlist create duplicate-name request should build"),
-        )
-        .await
-        .expect("readlist create duplicate-name request should complete");
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-    cleanup_router_fixture(paths);
+        cleanup_router_fixture(paths);
+    }
 }
 
 #[tokio::test]

@@ -615,7 +615,15 @@ pub async fn load_persisted_series_page(
                         .to_ascii_lowercase()
                         .cmp(&right.title_sort.to_ascii_lowercase()),
                     PersistedSeriesSortMode::CreatedDesc => right.created.cmp(&left.created),
-                    PersistedSeriesSortMode::Latest => right.last_modified.cmp(&left.last_modified),
+                    PersistedSeriesSortMode::LastModifiedDesc => {
+                        right.last_modified.cmp(&left.last_modified)
+                    }
+                    PersistedSeriesSortMode::ReleaseDateDesc => right
+                        .books_metadata_release_date
+                        .cmp(&left.books_metadata_release_date),
+                    PersistedSeriesSortMode::BooksCountDesc => {
+                        right.books_count.cmp(&left.books_count)
+                    }
                     PersistedSeriesSortMode::RelevanceAsc => {
                         compare_relevance_scores(&relevance_scores, &left.id, &right.id, false)
                     }

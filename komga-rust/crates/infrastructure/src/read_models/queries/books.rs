@@ -15,6 +15,7 @@ enum BookOrdering {
     CreatedDateDesc,
     MetadataReleaseDateDesc,
     NumberSortAsc,
+    SeriesIdAsc,
     LastModifiedDesc,
 }
 
@@ -320,13 +321,26 @@ fn book_ordering_from_sorts(sorts: &[String]) -> BookOrdering {
         return BookOrdering::NumberSortAsc;
     };
 
-    let property = sort.split(',').next().unwrap_or(sort).trim();
-    match property {
-        "metadata.title" => BookOrdering::TitleAsc,
-        "createdDate" => BookOrdering::CreatedDateDesc,
-        "lastModifiedDate" => BookOrdering::LastModifiedDesc,
-        "metadata.releaseDate" => BookOrdering::MetadataReleaseDateDesc,
-        "metadata.numberSort" => BookOrdering::NumberSortAsc,
+    match sort.as_str() {
+        "metadata.title,asc" | "metadata.title" | "title,asc" | "title" => {
+            BookOrdering::TitleAsc
+        }
+        "createdDate,desc" | "created,desc" | "createdDate" | "created" => {
+            BookOrdering::CreatedDateDesc
+        }
+        "lastModifiedDate,desc"
+        | "lastModified,desc"
+        | "lastModifiedDate"
+        | "lastModified" => BookOrdering::LastModifiedDesc,
+        "metadata.releaseDate,desc" | "metadata.releaseDate" => {
+            BookOrdering::MetadataReleaseDateDesc
+        }
+        "series,metadata.numberSort,asc"
+        | "metadata.numberSort,asc"
+        | "metadata.numberSort"
+        | "number,asc"
+        | "number" => BookOrdering::NumberSortAsc,
+        "seriesId,asc" | "seriesId" => BookOrdering::SeriesIdAsc,
         _ => BookOrdering::NumberSortAsc,
     }
 }
@@ -339,6 +353,50 @@ fn book_order_sql(ordering: BookOrdering) -> &'static str {
             "b.metadata_release_date DESC, b.title COLLATE NOCASE ASC"
         }
         BookOrdering::NumberSortAsc => "b.number_sort ASC, b.title COLLATE NOCASE ASC",
+        BookOrdering::SeriesIdAsc => {
+            "b.series_id ASC, b.number_sort ASC, b.title COLLATE NOCASE ASC"
+        }
         BookOrdering::LastModifiedDesc => "b.last_modified DESC, b.title COLLATE NOCASE ASC",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn book_ordering_from_sorts_supports_runtime_aliases() {
+        assert_eq!(
+            book_ordering_from_sorts(&["metadata.title,asc".to_string()]),
+            BookOrdering::TitleAsc
+        );
+        assert_eq!(
+            book_ordering_from_sorts(&["created,desc".to_string()]),
+            BookOrdering::CreatedDateDesc
+        );
+        assert_eq!(
+            book_ordering_from_sorts(&["lastModified,desc".to_string()]),
+            BookOrdering::LastModifiedDesc
+        );
+        assert_eq!(
+            book_ordering_from_sorts(&["metadata.releaseDate,desc".to_string()]),
+            BookOrdering::MetadataReleaseDateDesc
+        );
+        assert_eq!(
+            book_ordering_from_sorts(&["series,metadata.numberSort,asc".to_string()]),
+            BookOrdering::NumberSortAsc
+        );
+        assert_eq!(
+            book_ordering_from_sorts(&["metadata.numberSort,asc".to_string()]),
+            BookOrdering::NumberSortAsc
+        );
+        assert_eq!(
+            book_ordering_from_sorts(&["number,asc".to_string()]),
+            BookOrdering::NumberSortAsc
+        );
+        assert_eq!(
+            book_ordering_from_sorts(&["seriesId,asc".to_string()]),
+            BookOrdering::SeriesIdAsc
+        );
     }
 }

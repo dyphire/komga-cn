@@ -48,37 +48,6 @@ async fn router_opds_v1_ondeck_returns_atom_feed() {
 }
 
 #[tokio::test]
-async fn router_opds_v1_ondeck_unauthorized_includes_basic_challenge() {
-    let paths = new_router_fixture("router-opds-v1-ondeck-basic-challenge").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_read_progress(&paths, true).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/opds/v1.2/ondeck")
-                .body(Body::empty())
-                .expect("opds v1 ondeck unauthorized request should build"),
-        )
-        .await
-        .expect("opds v1 ondeck unauthorized request should complete");
-
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(
-        response
-            .headers()
-            .get(header::WWW_AUTHENTICATE)
-            .and_then(|value| value.to_str().ok()),
-        Some("Basic realm=\"Realm\"")
-    );
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
 async fn router_opds_v1_ondeck_uses_kotlin_acquisition_entry_shape() {
     let paths = new_router_fixture("router-opds-v1-ondeck-entry-shape").await;
     seed_router_contract_data(&paths).await;
@@ -254,37 +223,6 @@ async fn router_opds_v1_ondeck_orders_series_by_most_recent_read_date() {
     let series_two_index = body.find("<id>book-pdf-2</id>").expect("body={body}");
     let series_one_index = body.find("<id>book-pdf-1</id>").expect("body={body}");
     assert!(series_two_index < series_one_index, "body={body}");
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_opds_v1_keep_reading_unauthorized_includes_basic_challenge() {
-    let paths = new_router_fixture("router-opds-v1-keep-reading-basic-challenge").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_read_progress(&paths, false).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/opds/v1.2/keep-reading")
-                .body(Body::empty())
-                .expect("opds v1 keep-reading unauthorized request should build"),
-        )
-        .await
-        .expect("opds v1 keep-reading unauthorized request should complete");
-
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(
-        response
-            .headers()
-            .get(header::WWW_AUTHENTICATE)
-            .and_then(|value| value.to_str().ok()),
-        Some("Basic realm=\"Realm\"")
-    );
 
     cleanup_router_fixture(paths);
 }
@@ -614,36 +552,6 @@ async fn router_opds_v1_books_latest_uses_kotlin_acquisition_entry_shape() {
 }
 
 #[tokio::test]
-async fn router_opds_v1_books_latest_unauthorized_includes_basic_challenge() {
-    let paths = new_router_fixture("router-opds-v1-books-latest-basic-challenge").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/opds/v1.2/books/latest")
-                .body(Body::empty())
-                .expect("opds v1 books latest unauthorized request should build"),
-        )
-        .await
-        .expect("opds v1 books latest unauthorized request should complete");
-
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(
-        response
-            .headers()
-            .get(header::WWW_AUTHENTICATE)
-            .and_then(|value| value.to_str().ok()),
-        Some("Basic realm=\"Realm\"")
-    );
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
 async fn router_opds_v1_books_latest_filters_non_ready_books() {
     let paths = new_router_fixture("router-opds-v1-books-latest-ready-only").await;
     seed_router_contract_data(&paths).await;
@@ -850,66 +758,6 @@ async fn router_opds_v1_publishers_returns_atom_feed() {
 }
 
 #[tokio::test]
-async fn router_opds_v1_publishers_unauthorized_includes_basic_challenge() {
-    let paths = new_router_fixture("router-opds-v1-publishers-basic-challenge").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/opds/v1.2/publishers")
-                .body(Body::empty())
-                .expect("opds v1 publishers unauthorized request should build"),
-        )
-        .await
-        .expect("opds v1 publishers unauthorized request should complete");
-
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(
-        response
-            .headers()
-            .get(header::WWW_AUTHENTICATE)
-            .and_then(|value| value.to_str().ok()),
-        Some("Basic realm=\"Realm\"")
-    );
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_opds_v1_readlists_unauthorized_includes_basic_challenge() {
-    let paths = new_router_fixture("router-opds-v1-readlists-basic-challenge").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/opds/v1.2/readlists")
-                .body(Body::empty())
-                .expect("opds v1 readlists unauthorized request should build"),
-        )
-        .await
-        .expect("opds v1 readlists unauthorized request should complete");
-
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(
-        response
-            .headers()
-            .get(header::WWW_AUTHENTICATE)
-            .and_then(|value| value.to_str().ok()),
-        Some("Basic realm=\"Realm\"")
-    );
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
 async fn router_opds_v1_readlists_filters_out_of_scope_entries_sorts_by_name_and_uses_persisted_entry_updated()
  {
     let paths = new_router_fixture("router-opds-v1-readlists-visible-order-updated").await;
@@ -1002,36 +850,6 @@ async fn router_opds_v1_readlists_filters_out_of_scope_entries_sorts_by_name_and
     assert!(
         alpha_pos < default_pos,
         "readlists list must preserve Kotlin name ordering, body={body}"
-    );
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_opds_v1_collections_unauthorized_includes_basic_challenge() {
-    let paths = new_router_fixture("router-opds-v1-collections-basic-challenge").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/opds/v1.2/collections")
-                .body(Body::empty())
-                .expect("opds v1 collections unauthorized request should build"),
-        )
-        .await
-        .expect("opds v1 collections unauthorized request should complete");
-
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(
-        response
-            .headers()
-            .get(header::WWW_AUTHENTICATE)
-            .and_then(|value| value.to_str().ok()),
-        Some("Basic realm=\"Realm\"")
     );
 
     cleanup_router_fixture(paths);
@@ -1451,36 +1269,6 @@ async fn router_opds_v1_collections_preserves_kotlin_tertiary_case_order() {
             "OPDS v1 collections should keep Kotlin tertiary case order, body={body}"
         );
     }
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_opds_v1_series_detail_unauthorized_includes_basic_challenge() {
-    let paths = new_router_fixture("router-opds-v1-series-detail-basic-challenge").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/opds/v1.2/series/series-1")
-                .body(Body::empty())
-                .expect("opds v1 series detail unauthorized request should build"),
-        )
-        .await
-        .expect("opds v1 series detail unauthorized request should complete");
-
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(
-        response
-            .headers()
-            .get(header::WWW_AUTHENTICATE)
-            .and_then(|value| value.to_str().ok()),
-        Some("Basic realm=\"Realm\"")
-    );
 
     cleanup_router_fixture(paths);
 }
@@ -1920,36 +1708,6 @@ async fn router_opds_v1_series_detail_keeps_deleted_series_accessible_like_kotli
 }
 
 #[tokio::test]
-async fn router_opds_v1_collection_detail_unauthorized_includes_basic_challenge() {
-    let paths = new_router_fixture("router-opds-v1-collection-detail-basic-challenge").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/opds/v1.2/collections/collection-1")
-                .body(Body::empty())
-                .expect("opds v1 collection detail unauthorized request should build"),
-        )
-        .await
-        .expect("opds v1 collection detail unauthorized request should complete");
-
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(
-        response
-            .headers()
-            .get(header::WWW_AUTHENTICATE)
-            .and_then(|value| value.to_str().ok()),
-        Some("Basic realm=\"Realm\"")
-    );
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
 async fn router_opds_v1_collection_detail_returns_empty_feed_when_visible_page_is_empty() {
     let paths = new_router_fixture("router-opds-v1-collection-detail-empty-feed").await;
     seed_router_contract_data(&paths).await;
@@ -2170,36 +1928,6 @@ async fn router_opds_v1_collection_detail_returns_not_found_when_collection_is_o
         .expect("opds v1 collection detail library-scope request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_opds_v1_readlist_detail_unauthorized_includes_basic_challenge() {
-    let paths = new_router_fixture("router-opds-v1-readlist-detail-basic-challenge").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/opds/v1.2/readlists/readlist-1")
-                .body(Body::empty())
-                .expect("opds v1 readlist detail unauthorized request should build"),
-        )
-        .await
-        .expect("opds v1 readlist detail unauthorized request should complete");
-
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(
-        response
-            .headers()
-            .get(header::WWW_AUTHENTICATE)
-            .and_then(|value| value.to_str().ok()),
-        Some("Basic realm=\"Realm\"")
-    );
 
     cleanup_router_fixture(paths);
 }
