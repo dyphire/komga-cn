@@ -29,7 +29,9 @@ fn runtime_worker_spawns_log_started_and_shutdown_with_span_context() {
                 komga_rust::infrastructure::task_queue::spawn_runtime_workers(
                     background.task_queue,
                     runtime,
+                    background.task_wakeup,
                     background.scheduled_scans,
+                    None,
                 );
                 tokio::time::sleep(Duration::from_millis(25)).await;
             }
@@ -65,6 +67,90 @@ fn runtime_worker_spawns_log_started_and_shutdown_with_span_context() {
     assert_eq!(
         field_str(auth_shutdown, "worker_id"),
         Some("authentication_activity_cleanup")
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[test]
+fn runtime_workers_observe_shutdown_signal_before_runtime_teardown() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("worker shutdown signal test runtime should build");
+    let paths = runtime.block_on(async {
+        let paths = new_router_fixture("worker-shutdown-signal").await;
+        seed_router_contract_data(&paths).await;
+        paths
+    });
+    let config = runtime_config_for_paths(&paths);
+    let runtime = runtime_task_context(&paths);
+
+    let logs = capture_router_logs_async_result(&config, {
+        let config = config.clone();
+        let runtime = runtime.clone();
+        async move {
+            async move {
+                let background = komga_rust::infrastructure::task_queue::prepare_task_queue(
+                    config.clone(),
+                    None,
+                );
+                let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+                komga_rust::infrastructure::task_queue::spawn_runtime_workers(
+                    background.task_queue,
+                    runtime,
+                    background.task_wakeup,
+                    background.scheduled_scans,
+                    Some(shutdown_rx),
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                shutdown_tx
+                    .send(true)
+                    .expect("worker shutdown signal should send");
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                tracing::info!(
+                    event = "worker_shutdown_signal_marker",
+                    "worker shutdown marker"
+                );
+            }
+            .instrument(tracing::info_span!(
+                "worker_shutdown_signal_contract_parent"
+            ))
+            .await;
+        }
+    })
+    .0;
+
+    let events = parse_json_log_lines(&logs);
+    let periodic_shutdown_index = event_index(
+        &events,
+        "worker_shutdown",
+        "periodic_library_scan",
+        "shutdown",
+    );
+    let background_shutdown_index =
+        event_index(&events, "worker_shutdown", "background_task", "shutdown");
+    let auth_shutdown_index = event_index(
+        &events,
+        "worker_shutdown",
+        "authentication_activity_cleanup",
+        "shutdown",
+    );
+    let marker_index = event_index(&events, "worker_shutdown_signal_marker", "", "");
+
+    println!("runtime_worker_shutdown_signal_logs {logs}");
+
+    assert!(
+        periodic_shutdown_index < marker_index,
+        "periodic worker should stop before marker: {events:?}"
+    );
+    assert!(
+        background_shutdown_index < marker_index,
+        "background worker should stop before marker: {events:?}"
+    );
+    assert!(
+        auth_shutdown_index < marker_index,
+        "auth cleanup worker should stop before marker: {events:?}"
     );
 
     cleanup_router_fixture(paths);
@@ -427,4 +513,22 @@ fn worker_event<'a>(
 
 fn field_bool(fields: &serde_json::Map<String, Value>, field: &str) -> Option<bool> {
     fields.get(field).and_then(Value::as_bool)
+}
+
+fn event_index(events: &[Value], event: &str, worker: &str, outcome: &str) -> usize {
+    events
+        .iter()
+        .enumerate()
+        .find_map(|(index, entry)| {
+            let fields = entry.get("fields")?.as_object()?;
+            let matches_event = field_str(fields, "event") == Some(event);
+            let matches_worker = worker.is_empty() || field_str(fields, "worker_id") == Some(worker);
+            let matches_outcome = outcome.is_empty() || field_str(fields, "outcome") == Some(outcome);
+            (matches_event && matches_worker && matches_outcome).then_some(index)
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "expected event {event:?} worker {worker:?} outcome {outcome:?} in captured logs: {events:?}"
+            )
+        })
 }

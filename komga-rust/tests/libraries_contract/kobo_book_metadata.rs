@@ -85,20 +85,6 @@ async fn upsert_server_setting(paths: &RuntimeDbPaths, key: &str, value: &str) {
     pool.close().await;
 }
 
-fn write_executable_fixture(paths: &RuntimeDbPaths, file_name: &str) -> String {
-    let path = paths.config_dir.join(file_name);
-    fs::write(&path, "#!/bin/sh\nexit 0\n").expect("kepubify fixture should be written");
-    #[cfg(unix)]
-    {
-        let mut permissions = fs::metadata(&path)
-            .expect("kepubify fixture metadata should load")
-            .permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&path, permissions).expect("kepubify fixture should be executable");
-    }
-    path.to_string_lossy().to_string()
-}
-
 #[tokio::test]
 async fn router_kobo_book_metadata_route_sets_etag_and_supports_if_none_match() {
     let paths = new_router_fixture("router-kobo-book-metadata-cache-headers").await;
@@ -151,8 +137,6 @@ async fn router_kobo_book_metadata_route_sets_etag_and_supports_if_none_match() 
 async fn router_kobo_book_metadata_uses_persisted_fields_instead_of_placeholders() {
     let paths = new_router_fixture("router-kobo-book-metadata-parity").await;
     seed_router_contract_data(&paths).await;
-    let kepubify_path = write_executable_fixture(&paths, "kepubify-ok.sh");
-    upsert_server_setting(&paths, "KEPUBIFY_PATH", &kepubify_path).await;
 
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await
@@ -267,48 +251,6 @@ async fn router_kobo_book_metadata_uses_epub3fl_for_fixed_layout_books() {
     assert_eq!(
         metadata.pointer("/DownloadUrls/0/Format"),
         Some(&json!("EPUB3FL"))
-    );
-    assert_eq!(
-        metadata.pointer("/DownloadUrls/0/Url"),
-        Some(&json!(format!(
-            "http://localhost:{}/kobo/any-token/v1/books/book-1/file/epub?convert_kepub=false",
-            runtime_config_for_paths(&paths).bind_address.port()
-        )))
-    );
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_kobo_book_metadata_uses_epub3_when_kepub_conversion_is_not_available() {
-    let paths = new_router_fixture("router-kobo-book-metadata-epub3-fallback").await;
-    seed_router_contract_data(&paths).await;
-    upsert_server_setting(&paths, "KEPUBIFY_PATH", "/definitely/missing/kepubify").await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/kobo/any-token/v1/library/book-1/metadata")
-                .header("x-auth-token", &auth_token)
-                .body(Body::empty())
-                .expect("kobo epub3 fallback metadata request should build"),
-        )
-        .await
-        .expect("kobo epub3 fallback metadata request should complete");
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let payload = response_json(response).await;
-    let metadata = payload
-        .as_array()
-        .and_then(|items| items.first())
-        .expect("epub3 fallback metadata response should contain one item");
-    assert_eq!(
-        metadata.pointer("/DownloadUrls/0/Format"),
-        Some(&json!("EPUB3"))
     );
     assert_eq!(
         metadata.pointer("/DownloadUrls/0/Url"),

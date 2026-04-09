@@ -175,13 +175,8 @@ pub(super) fn webui_bridge_books_filters_from_payload(
     filters
 }
 
-pub(super) fn restrict_series_filters_to_persisted_shape(filters: &mut RuntimeSeriesFilters) {
-    filters.criteria.restrict_for_persisted_webui_shape();
-}
-
 pub(super) fn restrict_books_filters_to_persisted_shape(filters: &mut RuntimeBooksFilters) {
     filters.direct_browse_family = None;
-    filters.criteria.restrict_for_persisted_webui_shape();
 }
 
 pub(super) fn collect_webui_string_condition_values(

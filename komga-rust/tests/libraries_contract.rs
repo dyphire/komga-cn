@@ -7,9 +7,6 @@ use komga_server::app::build_router_with_config;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha512};
 use sqlx::Row;
-use std::fs;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::sync::{Mutex, OnceLock};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;

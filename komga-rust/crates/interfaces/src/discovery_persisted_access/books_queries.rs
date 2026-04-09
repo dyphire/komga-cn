@@ -708,7 +708,7 @@ pub async fn runtime_owned_persisted_books_page(
         Err(error) => return Some(Err(error)),
     };
     if !has_persisted_rows {
-        return None;
+        return Some(Ok(PageEnvelope::from_slice(vec![], page, size, 0)));
     }
 
     Some(

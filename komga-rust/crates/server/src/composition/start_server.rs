@@ -1,11 +1,13 @@
 use axum::Router;
 use komga_infrastructure::sqlite::close_all_shared_pools;
 use komga_infrastructure::{SearchStartupLifecycle, decide_startup_lifecycle, prepare_for_rebuild};
+use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::signal;
+use tokio::sync::oneshot;
 use tokio::sync::watch;
 
-use crate::composition::http_state::compose_http_runtime;
+use crate::composition::http_state::{HttpRuntimeState, compose_http_runtime};
 use crate::config::{RuntimeConfig, WriterKind};
 use crate::runtime::background_workers::{prepare_task_queue, spawn_runtime_workers};
 
@@ -16,6 +18,8 @@ struct StartupSearchPlan {
     startup_task: Option<&'static str>,
 }
 
+const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(5);
+
 pub(crate) fn prepare_startup_search_task(
     config: &RuntimeConfig,
 ) -> std::io::Result<Option<&'static str>> {
@@ -24,10 +28,7 @@ pub(crate) fn prepare_startup_search_task(
 
 fn plan_startup_search_task(config: &RuntimeConfig) -> std::io::Result<StartupSearchPlan> {
     let writer_decision = config.writer_decision(WriterKind::SearchIndex);
-    if !config
-        .writer_decision(WriterKind::SearchIndex)
-        .allows_write()
-    {
+    if !writer_decision.allows_write() {
         return Ok(StartupSearchPlan {
             writer_decision,
             lifecycle: "skipped_writer_blocked",
@@ -64,16 +65,11 @@ pub fn build_router_with_config(config: &RuntimeConfig) -> Router {
     spawn_runtime_workers(
         background.task_queue.clone(),
         config.clone(),
+        background.task_wakeup.clone(),
         background.scheduled_scans.clone(),
+        None,
     );
-    let runtime = compose_http_runtime(config, background, None);
-    komga_interfaces::http::router::build_router(
-        runtime.profile,
-        runtime.read_progress,
-        runtime.discovery_auth,
-        runtime.auth_db,
-        runtime.operational,
-    )
+    build_http_router(compose_http_runtime(config, background, None))
 }
 
 pub async fn serve_with_config(
@@ -87,26 +83,72 @@ pub async fn serve_with_config(
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let background = prepare_task_queue(&config, startup_search_task);
+    let worker_shutdown_rx = shutdown_rx.clone();
     spawn_runtime_workers(
         background.task_queue.clone(),
         config.clone(),
+        background.task_wakeup.clone(),
         background.scheduled_scans.clone(),
+        Some(worker_shutdown_rx),
     );
-    let runtime = compose_http_runtime(&config, background, Some(shutdown_tx));
-    let router = komga_interfaces::http::router::build_router(
+    let router = build_http_router(compose_http_runtime(
+        &config,
+        background,
+        Some(shutdown_tx.clone()),
+    ));
+
+    serve_router_with_shutdown_timeout(
+        listener,
+        router,
+        shutdown_tx,
+        shutdown_rx,
+        SHUTDOWN_GRACE_PERIOD,
+    )
+    .await
+}
+
+async fn serve_router_with_shutdown_timeout(
+    listener: TcpListener,
+    router: Router,
+    shutdown_tx: watch::Sender<bool>,
+    shutdown_rx: watch::Receiver<bool>,
+    shutdown_grace_period: Duration,
+) -> std::io::Result<()> {
+    let (shutdown_lifecycle_tx, mut shutdown_lifecycle_rx) = oneshot::channel();
+    let mut server = tokio::spawn(async move {
+        axum::serve(listener, router)
+            .with_graceful_shutdown(shutdown_signal(
+                shutdown_tx,
+                shutdown_rx,
+                shutdown_lifecycle_tx,
+            ))
+            .await
+    });
+
+    tokio::select! {
+        result = &mut server => flatten_server_task_result(result),
+        _ = &mut shutdown_lifecycle_rx => wait_for_server_shutdown_completion(
+            &mut server,
+            shutdown_grace_period,
+        ).await,
+    }
+}
+
+fn build_http_router(runtime: HttpRuntimeState) -> Router {
+    komga_interfaces::http::router::build_router(
         runtime.profile,
         runtime.read_progress,
         runtime.discovery_auth,
         runtime.auth_db,
         runtime.operational,
-    );
-
-    axum::serve(listener, router)
-        .with_graceful_shutdown(shutdown_signal(shutdown_rx))
-        .await
+    )
 }
 
-async fn shutdown_signal(mut shutdown_rx: watch::Receiver<bool>) {
+async fn shutdown_signal(
+    shutdown_tx: watch::Sender<bool>,
+    mut shutdown_rx: watch::Receiver<bool>,
+    shutdown_lifecycle_tx: oneshot::Sender<()>,
+) {
     let ctrl_c = async {
         let _ = signal::ctrl_c().await;
     };
@@ -140,7 +182,45 @@ async fn shutdown_signal(mut shutdown_rx: watch::Receiver<bool>) {
         _ = shutdown_request => {},
     }
 
+    let _ = shutdown_tx.send(true);
     complete_shutdown_lifecycle().await;
+    let _ = shutdown_lifecycle_tx.send(());
+}
+
+async fn wait_for_server_shutdown_completion(
+    server: &mut tokio::task::JoinHandle<std::io::Result<()>>,
+    shutdown_grace_period: Duration,
+) -> std::io::Result<()> {
+    match tokio::time::timeout(shutdown_grace_period, &mut *server).await {
+        Ok(result) => flatten_server_task_result(result),
+        Err(_) => {
+            tracing::warn!(
+                event = "server_shutdown_timeout",
+                outcome = "forced",
+                shutdown_grace_period_ms = shutdown_grace_period.as_millis() as u64,
+                "Server graceful shutdown exceeded deadline; aborting lingering connections",
+            );
+            server.abort();
+            match server.await {
+                Ok(result) => result,
+                Err(error) if error.is_cancelled() => Ok(()),
+                Err(error) => Err(std::io::Error::other(format!(
+                    "server shutdown task failed after abort: {error}"
+                ))),
+            }
+        }
+    }
+}
+
+fn flatten_server_task_result(
+    result: Result<std::io::Result<()>, tokio::task::JoinError>,
+) -> std::io::Result<()> {
+    match result {
+        Ok(result) => result,
+        Err(error) => Err(std::io::Error::other(format!(
+            "server task failed to join: {error}"
+        ))),
+    }
 }
 
 pub(crate) async fn shutdown_runtime_for_contract() {
@@ -260,5 +340,63 @@ fn search_startup_outcome(
         "rebuild_required" => "rebuild_required",
         "skipped_writer_blocked" => "skipped",
         _ => "ready",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::routing::get;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
+    use tokio::time::{Duration, timeout};
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn graceful_shutdown_exits_even_when_keep_alive_connection_lingers() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("test listener should expose local addr");
+        let router = Router::new().route("/hold", get(|| async { "ok" }));
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+        let server = tokio::spawn(serve_router_with_shutdown_timeout(
+            listener,
+            router,
+            shutdown_tx.clone(),
+            shutdown_rx,
+            Duration::from_millis(100),
+        ));
+
+        let mut stream = TcpStream::connect(address)
+            .await
+            .expect("test client should connect");
+        stream
+            .write_all(b"GET /hold HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: keep-alive\r\n\r\n")
+            .await
+            .expect("test client should write request");
+
+        let mut response = Vec::new();
+        let mut buffer = [0_u8; 256];
+        while !response.ends_with(b"ok") {
+            let read = timeout(Duration::from_secs(1), stream.read(&mut buffer))
+                .await
+                .expect("response read should not time out")
+                .expect("response read should succeed");
+            assert!(read > 0, "response should include the keep-alive payload");
+            response.extend_from_slice(&buffer[..read]);
+        }
+
+        shutdown_tx
+            .send(true)
+            .expect("shutdown signal should be sent");
+
+        timeout(Duration::from_secs(1), server)
+            .await
+            .expect("server should stop within the shutdown deadline")
+            .expect("server task should join")
+            .expect("server shutdown should succeed");
     }
 }

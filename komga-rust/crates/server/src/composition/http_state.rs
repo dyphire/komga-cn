@@ -94,7 +94,7 @@ use komga_interfaces::{
 use tokio::sync::watch;
 
 use crate::config::{RuntimeConfig, RuntimeProfile as ConfigRuntimeProfile};
-use crate::runtime::background_workers::{RuntimeBackgroundState, SharedTaskQueue};
+use crate::runtime::background_workers::RuntimeBackgroundState;
 
 mod http_state_discovery;
 mod http_state_media_assets;
@@ -160,6 +160,7 @@ pub fn compose_http_runtime(
     let operational = http_state_operational_state::compose_operational_state(
         config,
         background.task_queue,
+        background.task_wakeup,
         shutdown_trigger,
     );
 

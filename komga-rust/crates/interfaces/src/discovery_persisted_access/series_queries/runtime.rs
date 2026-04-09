@@ -22,7 +22,7 @@ pub async fn runtime_owned_persisted_series_page(
         Err(error) => return Some(Err(error)),
     };
     if !has_persisted_rows {
-        return None;
+        return Some(Ok(PageEnvelope::from_slice(vec![], page, size, 0)));
     }
 
     Some(
@@ -124,7 +124,6 @@ pub async fn runtime_owned_series_list_response(
     };
 
     if !strict_runtime_shape {
-        restrict_series_filters_to_persisted_shape(&mut filters);
         filters.criteria.library_ids = remap_requested_library_ids_for_persisted(
             database_file,
             filters.criteria.library_ids.as_ref(),

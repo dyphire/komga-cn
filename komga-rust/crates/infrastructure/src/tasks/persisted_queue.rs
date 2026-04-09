@@ -1,10 +1,10 @@
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
+use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::{Row, SqlitePool};
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::file_backed_connect_options;
 
 #[derive(Clone, Debug)]
 pub struct PersistedTaskStoreRecord {
@@ -19,7 +19,6 @@ pub struct PersistedTaskStoreRecord {
 #[derive(Clone, Debug)]
 pub struct SqliteTaskQueueStore {
     tasks_db_file: PathBuf,
-    pool: Arc<Mutex<SqlitePool>>,
 }
 
 impl SqliteTaskQueueStore {
@@ -28,11 +27,7 @@ impl SqliteTaskQueueStore {
             return None;
         }
 
-        let pool = open_sqlite_pool_blocking(tasks_db_file.clone())?;
-        Some(Self {
-            tasks_db_file,
-            pool: Arc::new(Mutex::new(pool)),
-        })
+        Some(Self { tasks_db_file })
     }
 
     pub fn load_records(&self) -> Vec<PersistedTaskStoreRecord> {
@@ -169,30 +164,27 @@ impl SqliteTaskQueueStore {
         })
     }
 
-    fn shared_pool(&self) -> SqlitePool {
-        let mut pool = self
-            .pool
-            .lock()
-            .expect("persisted task pool lock should not be poisoned");
-        if pool.is_closed() {
-            *pool = open_sqlite_pool_blocking(self.tasks_db_file.clone())
-                .expect("tasks sqlite pool should reopen for task persistence");
-        }
-        pool.clone()
-    }
-
     fn run<T>(&self, operation: impl FnOnce(SqlitePool) -> BoxFuture<T> + Send + 'static) -> T
     where
         T: Send + 'static,
     {
-        let pool = self.shared_pool();
+        let tasks_db_file = self.tasks_db_file.clone();
         std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .expect("persisted task runtime should build");
 
-            runtime.block_on(async move { operation(pool).await })
+            runtime.block_on(async move {
+                let pool = SqlitePoolOptions::new()
+                    .max_connections(1)
+                    .connect_with(file_backed_connect_options(&tasks_db_file))
+                    .await
+                    .expect("tasks sqlite pool should open for task persistence");
+                let result = operation(pool.clone()).await;
+                pool.close().await;
+                result
+            })
         })
         .join()
         .expect("persisted task worker thread should complete")
@@ -200,20 +192,6 @@ impl SqliteTaskQueueStore {
 }
 
 type BoxFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
-
-fn open_sqlite_pool_blocking(database_file: PathBuf) -> Option<SqlitePool> {
-    std::thread::spawn(move || {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .ok()?;
-
-        runtime.block_on(async move { connect_pool(&database_file, 1).await.ok() })
-    })
-    .join()
-    .ok()
-    .flatten()
-}
 
 #[derive(Debug)]
 struct PersistedTaskRow {

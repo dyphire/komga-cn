@@ -7,6 +7,7 @@ use komga_application::task_processing::{
     build_scheduled_library_scans, build_startup_library_scan_tasks, library_scan_due_periods,
 };
 use tokio::runtime::Handle;
+use tokio::sync::{Notify, watch};
 use tokio::time::interval;
 use tracing::{Instrument, Span, error, info};
 
@@ -14,10 +15,12 @@ use super::{ScheduledLibraryScan, TaskQueueRecord, TaskQueueScheduler};
 use crate::tasks::{load_persisted_library_ids, load_persisted_library_scan_profiles};
 
 pub type SharedTaskQueue = Arc<Mutex<TaskQueueScheduler>>;
+pub type TaskQueueWakeSignal = Arc<Notify>;
 
 pub struct RuntimeBackgroundState {
     pub task_queue: SharedTaskQueue,
     pub scheduled_scans: Vec<ScheduledLibraryScan>,
+    pub task_wakeup: TaskQueueWakeSignal,
 }
 
 const WORKER_BOOTSTRAP_EVENT: &str = "worker_bootstrap";
@@ -135,17 +138,30 @@ pub fn prepare_task_queue(
     RuntimeBackgroundState {
         task_queue: Arc::new(Mutex::new(task_queue)),
         scheduled_scans,
+        task_wakeup: Arc::new(Notify::new()),
     }
 }
 
 pub fn spawn_runtime_workers(
     task_queue: SharedTaskQueue,
     runtime: TaskRuntimeContext,
+    task_wakeup: TaskQueueWakeSignal,
     scheduled_scans: Vec<ScheduledLibraryScan>,
+    shutdown_rx: Option<watch::Receiver<bool>>,
 ) {
-    spawn_periodic_library_scan_workers(task_queue.clone(), runtime.clone(), scheduled_scans);
-    spawn_background_task_worker(task_queue, runtime.clone());
-    spawn_authentication_activity_cleanup_worker(runtime);
+    spawn_periodic_library_scan_workers(
+        task_queue.clone(),
+        runtime.clone(),
+        scheduled_scans,
+        shutdown_rx.clone(),
+    );
+    spawn_background_task_worker(
+        task_queue,
+        runtime.clone(),
+        task_wakeup,
+        shutdown_rx.clone(),
+    );
+    spawn_authentication_activity_cleanup_worker(runtime, shutdown_rx);
 }
 
 pub fn bootstrap_startup_search_task(
@@ -233,6 +249,7 @@ fn spawn_periodic_library_scan_workers(
     task_queue: SharedTaskQueue,
     runtime: TaskRuntimeContext,
     _scheduled_scans: Vec<ScheduledLibraryScan>,
+    shutdown_rx: Option<watch::Receiver<bool>>,
 ) {
     if !runtime.consumes_queue || !runtime.owns_main_database {
         log_worker_event(
@@ -261,9 +278,12 @@ fn spawn_periodic_library_scan_workers(
             let mut ticker = interval(Duration::from_secs(60));
             ticker.tick().await;
             let mut last_run_by_library: HashMap<String, tokio::time::Instant> = HashMap::new();
+            let mut shutdown_rx = shutdown_rx;
 
             loop {
-                ticker.tick().await;
+                if wait_for_tick_or_shutdown(&mut ticker, &mut shutdown_rx).await {
+                    break;
+                }
 
                 let _ = run_periodic_library_scan_iteration(
                     task_queue.clone(),
@@ -313,7 +333,12 @@ pub fn run_periodic_library_scan_iteration(
     }
 }
 
-fn spawn_background_task_worker(task_queue: SharedTaskQueue, runtime: TaskRuntimeContext) {
+fn spawn_background_task_worker(
+    task_queue: SharedTaskQueue,
+    runtime: TaskRuntimeContext,
+    task_wakeup: TaskQueueWakeSignal,
+    shutdown_rx: Option<watch::Receiver<bool>>,
+) {
     if !runtime.consumes_queue {
         log_worker_event(
             BACKGROUND_TASK_WORKER,
@@ -334,10 +359,25 @@ fn spawn_background_task_worker(task_queue: SharedTaskQueue, runtime: TaskRuntim
             let _guard = WorkerLifecycleGuard::new(BACKGROUND_TASK_WORKER, &runtime);
             let mut ticker = interval(Duration::from_secs(300));
             ticker.tick().await;
+            let task_wakeup = task_wakeup;
+            let mut shutdown_rx = shutdown_rx;
 
             loop {
-                ticker.tick().await;
-                let _ = run_background_task_iteration(task_queue.clone(), runtime.clone());
+                if wait_for_background_task_wakeup_or_shutdown(
+                    &mut ticker,
+                    task_wakeup.as_ref(),
+                    &mut shutdown_rx,
+                )
+                .await
+                {
+                    break;
+                }
+                let iteration_task_queue = task_queue.clone();
+                let iteration_runtime = runtime.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    run_background_task_iteration(iteration_task_queue, iteration_runtime)
+                })
+                .await;
             }
         }
         .instrument(worker_span.or_current()),
@@ -398,7 +438,10 @@ pub fn run_background_task_iteration(
     Ok(processed)
 }
 
-fn spawn_authentication_activity_cleanup_worker(runtime: TaskRuntimeContext) {
+fn spawn_authentication_activity_cleanup_worker(
+    runtime: TaskRuntimeContext,
+    shutdown_rx: Option<watch::Receiver<bool>>,
+) {
     if !runtime.owns_main_database {
         log_worker_event(
             AUTHENTICATION_ACTIVITY_CLEANUP_WORKER,
@@ -425,14 +468,68 @@ fn spawn_authentication_activity_cleanup_worker(runtime: TaskRuntimeContext) {
                 WorkerLifecycleGuard::new(AUTHENTICATION_ACTIVITY_CLEANUP_WORKER, &runtime);
             let mut ticker = interval(Duration::from_secs(86_400));
             ticker.tick().await;
+            let mut shutdown_rx = shutdown_rx;
 
             loop {
-                ticker.tick().await;
+                if wait_for_tick_or_shutdown(&mut ticker, &mut shutdown_rx).await {
+                    break;
+                }
                 let _ = cleanup_authentication_activity_once(&runtime).await;
             }
         }
         .instrument(worker_span.or_current()),
     );
+}
+
+async fn wait_for_tick_or_shutdown(
+    ticker: &mut tokio::time::Interval,
+    shutdown_rx: &mut Option<watch::Receiver<bool>>,
+) -> bool {
+    match shutdown_rx {
+        Some(shutdown_rx) => {
+            tokio::select! {
+                _ = ticker.tick() => false,
+                _ = wait_for_worker_shutdown(shutdown_rx) => true,
+            }
+        }
+        None => {
+            ticker.tick().await;
+            false
+        }
+    }
+}
+
+async fn wait_for_background_task_wakeup_or_shutdown(
+    ticker: &mut tokio::time::Interval,
+    task_wakeup: &Notify,
+    shutdown_rx: &mut Option<watch::Receiver<bool>>,
+) -> bool {
+    match shutdown_rx {
+        Some(shutdown_rx) => {
+            tokio::select! {
+                _ = ticker.tick() => false,
+                _ = task_wakeup.notified() => false,
+                _ = wait_for_worker_shutdown(shutdown_rx) => true,
+            }
+        }
+        None => {
+            tokio::select! {
+                _ = ticker.tick() => false,
+                _ = task_wakeup.notified() => false,
+            }
+        }
+    }
+}
+
+async fn wait_for_worker_shutdown(shutdown_rx: &mut watch::Receiver<bool>) {
+    loop {
+        if *shutdown_rx.borrow() {
+            break;
+        }
+        if shutdown_rx.changed().await.is_err() {
+            break;
+        }
+    }
 }
 
 pub async fn cleanup_authentication_activity_once(

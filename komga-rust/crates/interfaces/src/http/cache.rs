@@ -176,7 +176,10 @@ fn is_conditional_scope(path: &str) -> bool {
 fn is_etag_excluded_path(path: &str) -> bool {
     matches!(
         path,
-        "/api/v1/series/{series_id}/file"
+        "/api/v2/users/me"
+            | "/kobo/{auth_token}/v1/initialization"
+            | "/kobo/{auth_token}/v1/library/sync"
+            | "/api/v1/series/{series_id}/file"
             | "/api/v1/series/{series_id}/thumbnails/{thumbnail_id}"
             | "/api/v1/readlists/{readlist_id}/file"
             | "/api/v1/books/{book_id}/file"
@@ -241,6 +244,11 @@ mod tests {
 
     #[test]
     fn excluded_paths_match_expected_templates() {
+        assert!(is_etag_excluded_path("/api/v2/users/me"));
+        assert!(is_etag_excluded_path(
+            "/kobo/{auth_token}/v1/initialization"
+        ));
+        assert!(is_etag_excluded_path("/kobo/{auth_token}/v1/library/sync"));
         assert!(is_etag_excluded_path(
             "/api/v1/books/{book_id}/file/{*file_name}"
         ));

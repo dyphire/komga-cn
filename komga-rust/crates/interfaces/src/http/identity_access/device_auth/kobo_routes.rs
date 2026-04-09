@@ -382,10 +382,8 @@ pub async fn kobo_library_book_metadata(
     );
     let (format, convert_kepub) = if metadata.is_pre_paginated {
         ("EPUB3FL", false)
-    } else if metadata.is_kepub || built_in_kepub_conversion_available(&state).await {
-        ("KEPUB", !metadata.is_kepub)
     } else {
-        ("EPUB3", false)
+        ("KEPUB", !metadata.is_kepub)
     };
     let contributor_roles = metadata
         .contributor_names

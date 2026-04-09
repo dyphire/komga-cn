@@ -72,10 +72,6 @@ pub(super) fn webui_bridge_books_filters_from_payload(
     request_mapping::webui_bridge_books_filters_from_payload(payload)
 }
 
-pub(super) fn restrict_series_filters_to_persisted_shape(filters: &mut RuntimeSeriesFilters) {
-    request_mapping::restrict_series_filters_to_persisted_shape(filters)
-}
-
 pub(super) fn restrict_books_filters_to_persisted_shape(filters: &mut RuntimeBooksFilters) {
     request_mapping::restrict_books_filters_to_persisted_shape(filters)
 }

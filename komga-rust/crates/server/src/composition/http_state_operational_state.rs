@@ -1,10 +1,12 @@
 use super::*;
 
 use crate::build_metadata::current_build_metadata;
+use crate::runtime::background_workers::{SharedTaskQueue, TaskQueueWakeSignal};
 
 pub(super) fn compose_operational_state(
     config: &RuntimeConfig,
     task_queue: SharedTaskQueue,
+    task_wakeup: TaskQueueWakeSignal,
     shutdown_trigger: Option<watch::Sender<bool>>,
 ) -> OperationalState {
     let runtime_for_apply = config.clone();
@@ -13,6 +15,7 @@ pub(super) fn compose_operational_state(
     let count_task_queue = task_queue.clone();
     let apply_task_queue = task_queue.clone();
     let build_metadata = current_build_metadata();
+    let transient_books_state_file = http_state_runtime_config::transient_books_state_file(config);
 
     OperationalState {
         runtime: RuntimeState {
@@ -40,12 +43,17 @@ pub(super) fn compose_operational_state(
         oauth2_clients: Arc::new(oauth2_clients(config)),
         oauth2_account_creation: config.oauth2_account_creation,
         oidc_email_verification: config.oidc_email_verification,
-        enqueue_task_records: Arc::new(move |task_records, _urgent| {
-            let mut queue = enqueue_task_queue
-                .lock()
-                .map_err(|_| String::from("task queue lock poisoned"))?;
-            for task_record in task_records {
-                queue.enqueue(task_record);
+        enqueue_task_records: Arc::new(move |task_records, urgent| {
+            {
+                let mut queue = enqueue_task_queue
+                    .lock()
+                    .map_err(|_| String::from("task queue lock poisoned"))?;
+                for task_record in task_records {
+                    queue.enqueue(task_record);
+                }
+            }
+            if urgent {
+                task_wakeup.notify_one();
             }
             Ok(())
         }),
@@ -81,11 +89,11 @@ pub(super) fn compose_operational_state(
         announcements_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
         releases_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
         load_transient_books_records: Arc::new({
-            let state_file = http_state_runtime_config::transient_books_state_file(config);
+            let state_file = transient_books_state_file.clone();
             move || http_state_runtime_config::load_transient_books_records(state_file.as_path())
         }),
         persist_transient_books_records: Arc::new({
-            let state_file = http_state_runtime_config::transient_books_state_file(config);
+            let state_file = transient_books_state_file.clone();
             move |records| {
                 http_state_runtime_config::persist_transient_books_records(
                     state_file.as_path(),
@@ -95,7 +103,7 @@ pub(super) fn compose_operational_state(
         }),
         transient_books: Arc::new(Mutex::new(TransientBooksStore::with_records(
             http_state_runtime_config::load_transient_books_records(
-                http_state_runtime_config::transient_books_state_file(config).as_path(),
+                transient_books_state_file.as_path(),
             )
             .unwrap_or_default(),
         ))),
@@ -211,4 +219,81 @@ fn oauth2_clients(config: &RuntimeConfig) -> Vec<OAuth2ClientConfig> {
             scopes: client.scopes.clone(),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use komga_application::task_processing::TaskQueueRecord;
+    use komga_application::task_processing::TaskRuntimeConfig;
+    use komga_infrastructure::task_queue::TaskQueueScheduler;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn urgent_enqueue_notifies_background_worker_and_records_task() {
+        let config = RuntimeConfig::for_runtime_profile(crate::config::RuntimeProfile::LiveLocaldb);
+        let task_queue = Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
+            config.task_runtime_context(),
+            "rust-main",
+        )));
+        let task_wakeup = Arc::new(tokio::sync::Notify::new());
+        let state =
+            compose_operational_state(&config, task_queue.clone(), task_wakeup.clone(), None);
+
+        (state.enqueue_task_records)(
+            vec![
+                TaskQueueRecord::new("SCAN_LIBRARY:library-1", 100, Some("library-1".to_string()))
+                    .with_simple_type("SCAN_LIBRARY"),
+            ],
+            true,
+        )
+        .expect("urgent task enqueue should succeed");
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), task_wakeup.notified())
+                .await
+                .is_ok(),
+            "urgent task enqueue should wake the background worker"
+        );
+
+        let queued_tasks = task_queue
+            .lock()
+            .expect("task queue lock should not be poisoned")
+            .count_by_simple_type();
+        assert_eq!(queued_tasks.get("SCAN_LIBRARY"), Some(&1));
+    }
+
+    #[tokio::test]
+    async fn non_urgent_enqueue_only_records_task_without_waking_worker() {
+        let config = RuntimeConfig::for_runtime_profile(crate::config::RuntimeProfile::LiveLocaldb);
+        let task_queue = Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
+            config.task_runtime_context(),
+            "rust-main",
+        )));
+        let task_wakeup = Arc::new(tokio::sync::Notify::new());
+        let state =
+            compose_operational_state(&config, task_queue.clone(), task_wakeup.clone(), None);
+
+        (state.enqueue_task_records)(
+            vec![
+                TaskQueueRecord::new("SCAN_LIBRARY:library-1", 100, Some("library-1".to_string()))
+                    .with_simple_type("SCAN_LIBRARY"),
+            ],
+            false,
+        )
+        .expect("non-urgent task enqueue should succeed");
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), task_wakeup.notified())
+                .await
+                .is_err(),
+            "non-urgent enqueue should not wake the background worker"
+        );
+
+        let queued_tasks = task_queue
+            .lock()
+            .expect("task queue lock should not be poisoned")
+            .count_by_simple_type();
+        assert_eq!(queued_tasks.get("SCAN_LIBRARY"), Some(&1));
+    }
 }

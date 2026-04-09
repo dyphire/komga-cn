@@ -94,67 +94,6 @@ pub(crate) struct SeriesFilterCriteria {
     pub(crate) authors_excluded: Option<Vec<String>>,
 }
 
-impl SeriesFilterCriteria {
-    pub(crate) fn restrict_for_persisted_webui_shape(&mut self) {
-        self.collection_ids = None;
-        self.titles = None;
-        self.titles_excluded = None;
-        self.titles_contains = None;
-        self.titles_contains_excluded = None;
-        self.titles_begins_with = None;
-        self.titles_begins_with_excluded = None;
-        self.titles_ends_with = None;
-        self.titles_ends_with_excluded = None;
-        self.title_sorts = None;
-        self.title_sorts_excluded = None;
-        self.title_sorts_contains = None;
-        self.title_sorts_contains_excluded = None;
-        self.title_sorts_begins_with = None;
-        self.title_sorts_begins_with_excluded = None;
-        self.title_sorts_ends_with = None;
-        self.title_sorts_ends_with_excluded = None;
-        self.deleted = None;
-        self.oneshot = None;
-        self.read_statuses = None;
-        self.read_statuses_excluded = None;
-        self.genres = None;
-        self.genres_excluded = None;
-        self.genres_null = None;
-        self.languages = None;
-        self.languages_excluded = None;
-        self.publishers = None;
-        self.publishers_excluded = None;
-        self.age_ratings = None;
-        self.age_ratings_excluded = None;
-        self.age_ratings_null = None;
-        self.age_rating_gt = None;
-        self.age_rating_lt = None;
-        self.tags = None;
-        self.tags_excluded = None;
-        self.tags_null = None;
-        self.release_dates = None;
-        self.release_dates_excluded = None;
-        self.release_dates_null = None;
-        self.release_date_gt = None;
-        self.release_date_lt = None;
-        self.release_date_begins_with = None;
-        self.release_date_ends_with = None;
-        self.release_date_contains_excluded = None;
-        self.release_date_begins_with_excluded = None;
-        self.release_date_ends_with_excluded = None;
-        self.release_date_in_last_days = None;
-        self.release_date_not_in_last_days = None;
-        self.sharing_labels = None;
-        self.sharing_labels_excluded = None;
-        self.sharing_labels_null = None;
-        self.series_statuses = None;
-        self.series_statuses_excluded = None;
-        self.complete = None;
-        self.authors = None;
-        self.authors_excluded = None;
-    }
-}
-
 #[derive(Clone)]
 pub(crate) struct PersistedSeriesBrowseQuery {
     pub(crate) filters: SeriesFilterCriteria,
@@ -353,59 +292,6 @@ pub(crate) struct BooksFilterCriteria {
     pub(crate) number_sorts_excluded: Option<Vec<f64>>,
     pub(crate) number_sort_gt: Option<f64>,
     pub(crate) number_sort_lt: Option<f64>,
-}
-
-impl BooksFilterCriteria {
-    pub(crate) fn restrict_for_persisted_webui_shape(&mut self) {
-        self.series_ids = None;
-        self.series_ids_excluded = None;
-        self.read_list_ids = None;
-        self.read_list_ids_excluded = None;
-        self.titles = None;
-        self.titles_excluded = None;
-        self.titles_contains = None;
-        self.titles_contains_excluded = None;
-        self.titles_begins_with = None;
-        self.titles_begins_with_excluded = None;
-        self.titles_ends_with = None;
-        self.titles_ends_with_excluded = None;
-        self.deleted = None;
-        self.oneshot = None;
-        self.genres = None;
-        self.genres_excluded = None;
-        self.genres_null = None;
-        self.tags = None;
-        self.tags_excluded = None;
-        self.tags_null = None;
-        self.read_statuses = None;
-        self.read_statuses_excluded = None;
-        self.media_profiles = None;
-        self.media_profiles_excluded = None;
-        self.media_statuses = None;
-        self.media_statuses_excluded = None;
-        self.authors = None;
-        self.authors_excluded = None;
-        self.poster_types = None;
-        self.poster_types_excluded = None;
-        self.poster_selected = None;
-        self.poster_selected_excluded = None;
-        self.release_dates = None;
-        self.release_dates_excluded = None;
-        self.release_dates_null = None;
-        self.release_date_gt = None;
-        self.release_date_lt = None;
-        self.release_date_begins_with = None;
-        self.release_date_ends_with = None;
-        self.release_date_contains_excluded = None;
-        self.release_date_begins_with_excluded = None;
-        self.release_date_ends_with_excluded = None;
-        self.release_date_in_last_days = None;
-        self.release_date_not_in_last_days = None;
-        self.number_sorts = None;
-        self.number_sorts_excluded = None;
-        self.number_sort_gt = None;
-        self.number_sort_lt = None;
-    }
 }
 
 #[derive(Clone, Debug, Default)]

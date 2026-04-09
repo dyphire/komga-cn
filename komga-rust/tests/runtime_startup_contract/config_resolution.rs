@@ -28,8 +28,6 @@ komga:
     data-directory: __FILE_ROOT__/lucene
   fonts:
     data-directory: __FILE_ROOT__/fonts
-  kobo:
-    kepubify-path: __FILE_ROOT__/kepubify
 "#
         .replace("__FILE_ROOT__", &file_root.to_string_lossy()),
     )
