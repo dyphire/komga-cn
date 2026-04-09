@@ -155,7 +155,7 @@ pub async fn insert_book_thumbnail(
     let selected = if selected {
         true
     } else {
-        !sqlx::query(
+        sqlx::query(
             "SELECT 1 AS FOUND \
              FROM THUMBNAIL_BOOK \
              WHERE BOOK_ID = ? AND SELECTED = 1 \
@@ -165,7 +165,7 @@ pub async fn insert_book_thumbnail(
         .fetch_optional(&mut *tx)
         .await
         .map_err(|error| format!("query selected book thumbnails for housekeeping: {error}"))?
-        .is_some()
+        .is_none()
     };
 
     let id = generated_thumbnail_id("thumbnail-book");

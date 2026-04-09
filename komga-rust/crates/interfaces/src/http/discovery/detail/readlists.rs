@@ -358,6 +358,7 @@ pub async fn readlist_create(
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn parse_readlist_create_input(payload: &Value) -> Result<PersistedReadlistWriteInput, Response> {
     let Some(payload) = payload.as_object() else {
         return Err(readlist_create_bad_request(

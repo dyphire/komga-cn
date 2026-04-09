@@ -1,7 +1,9 @@
 use axum::Router;
 use axum::middleware;
 use axum::routing::{delete, get, patch, post, put};
+use tower_http::trace::TraceLayer;
 
+use crate::http::access_log;
 use crate::http::cache;
 use crate::http::discovery_auth::DiscoveryAuthState;
 use crate::http::{discovery, identity_access, library_catalog, media_assets, opds, operational};
@@ -679,6 +681,9 @@ pub fn build_router(
     };
 
     let router = router.route_layer(middleware::from_fn(cache::cache_workflow_middleware));
+    let router = router.route_layer(middleware::from_fn(
+        access_log::prepare_access_log_middleware,
+    ));
 
     #[allow(clippy::let_and_return)]
     router
@@ -687,6 +692,13 @@ pub fn build_router(
         .layer(axum::extract::Extension(discovery_auth))
         .layer(axum::extract::Extension(operational))
         .layer(axum::extract::Extension(profile))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(access_log::make_request_span)
+                .on_request(access_log::on_request)
+                .on_response(access_log::on_response)
+                .on_failure(access_log::on_failure),
+        )
 }
 
 fn should_expose_actuator_default_contract() -> bool {

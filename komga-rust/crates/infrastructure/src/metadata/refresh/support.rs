@@ -142,7 +142,7 @@ pub(super) fn normalize_optional_bcp47_language(value: Option<String>) -> Option
             .bytes()
             .any(|byte| !byte.is_ascii_alphabetic())
         || tag.validate().is_err()
-        || (primary_language >= "qaa" && primary_language <= "qtz")
+        || ("qaa"..="qtz").contains(&primary_language)
     {
         return None;
     }

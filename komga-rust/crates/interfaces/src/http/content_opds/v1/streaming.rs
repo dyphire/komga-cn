@@ -100,6 +100,7 @@ async fn book_feed_page_streaming_links(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn opds_book_page_streaming_links(
     database_file: &Path,
     headers: &HeaderMap,

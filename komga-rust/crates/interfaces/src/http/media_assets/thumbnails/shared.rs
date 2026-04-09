@@ -127,10 +127,10 @@ pub(super) async fn load_book_thumbnail_source_bytes(
     book_id: &str,
     media: &PersistedBookMedia,
 ) -> Option<Vec<u8>> {
-    if let Ok(Some(thumbnail)) = load_selected_book_thumbnail(database_file, book_id).await {
-        if thumbnail.thumbnail_type != "GENERATED" {
-            return Some(thumbnail.thumbnail);
-        }
+    if let Ok(Some(thumbnail)) = load_selected_book_thumbnail(database_file, book_id).await
+        && thumbnail.thumbnail_type != "GENERATED"
+    {
+        return Some(thumbnail.thumbnail);
     }
 
     if book_media_is_epub(media) {

@@ -94,11 +94,13 @@ mod tests {
     use super::*;
     use crate::library_catalog::LibraryRecord;
 
+    type SeriesAndBookIds = (Vec<String>, Vec<(String, String)>);
+
     #[derive(Clone, Default)]
     struct TestPort {
         library: Option<LibraryRecord>,
         library_book_ids: Option<Vec<String>>,
-        library_series_and_book_ids: Option<(Vec<String>, Vec<(String, String)>)>,
+        library_series_and_book_ids: Option<SeriesAndBookIds>,
     }
 
     impl LibraryCatalogMutationPort for TestPort {

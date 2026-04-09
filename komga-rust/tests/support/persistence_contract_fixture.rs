@@ -4,7 +4,10 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
-use komga_rust::infrastructure::{SqlitePersistenceContext, sqlite::connect_pool};
+use komga_rust::infrastructure::{
+    SqlitePersistenceContext,
+    sqlite::{connect_pool, evict_shared_pools_for_paths},
+};
 
 pub struct RuntimeDbPaths {
     pub config_dir: PathBuf,
@@ -50,9 +53,14 @@ pub async fn seed_tasks_db_from_flyway(path: &Path) -> anyhow::Result<()> {
 }
 
 pub fn cleanup(paths: RuntimeDbPaths) {
+    close_fixture_shared_pools(&paths);
     let _ = std::fs::remove_file(paths.main_db);
     let _ = std::fs::remove_file(paths.tasks_db);
     let _ = std::fs::remove_dir_all(paths.config_dir);
+}
+
+fn close_fixture_shared_pools(paths: &RuntimeDbPaths) {
+    evict_shared_pools_for_paths(&[paths.main_db.clone(), paths.tasks_db.clone()]);
 }
 
 async fn execute_sql_files(
@@ -226,4 +234,53 @@ fn combine_trigger_blocks(statements: Vec<String>) -> Vec<String> {
     }
 
     combined
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cleanup_closes_cached_shared_pools_for_fixture_databases() {
+        let paths = new_runtime_db_paths("cleanup-closes-cached-shared-pools")
+            .expect("fixture paths should be created");
+        let main_db = paths.main_db.clone();
+        let tasks_db = paths.tasks_db.clone();
+        let config_dir = paths.config_dir.clone();
+
+        let stale_pool = connect_pool(&main_db, 1)
+            .await
+            .expect("fixture main db should open");
+        sqlx::query("CREATE TABLE leak_probe (value TEXT NOT NULL)")
+            .execute(&stale_pool)
+            .await
+            .expect("probe table should be created in stale database");
+        sqlx::query("INSERT INTO leak_probe (value) VALUES ('stale-row')")
+            .execute(&stale_pool)
+            .await
+            .expect("probe row should be inserted in stale database");
+        drop(stale_pool);
+
+        cleanup(paths);
+
+        fs::create_dir_all(&config_dir).expect("fixture root should be recreated after cleanup");
+        let fresh_pool = connect_pool(&main_db, 1)
+            .await
+            .expect("fresh fixture main db should open after cleanup");
+        let leaked_rows = sqlx::query_scalar::<_, String>("SELECT value FROM leak_probe")
+            .fetch_all(&fresh_pool)
+            .await;
+
+        assert!(
+            leaked_rows.is_err(),
+            "fixture cleanup must not reuse a cached pool pointing at a deleted sqlite file",
+        );
+
+        fresh_pool.close().await;
+        cleanup(RuntimeDbPaths {
+            config_dir,
+            main_db,
+            tasks_db,
+        });
+    }
 }

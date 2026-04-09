@@ -737,6 +737,10 @@ fn series_detail_payload(series: &SeriesDetailReadModel, is_admin: bool) -> Valu
     Value::Object(payload)
 }
 
+fn series_collections_payload(collections: &[CollectionReadModel]) -> Value {
+    Value::Array(collections.iter().map(collection_payload).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -820,8 +824,4 @@ mod tests {
             Some(1)
         );
     }
-}
-
-fn series_collections_payload(collections: &[CollectionReadModel]) -> Value {
-    Value::Array(collections.iter().map(collection_payload).collect())
 }

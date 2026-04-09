@@ -83,7 +83,7 @@ pub(crate) async fn actuator_info(
     let commit_time = std::env::var("GIT_COMMIT_TIME").ok();
     let commit_id = std::env::var("GIT_COMMIT_ID").ok();
     let branch = std::env::var("GIT_BRANCH").ok();
-    let version = std::env::var("KOMGA_VERSION").ok();
+    let version = std::env::var("CARGO_PKG_VERSION").ok();
 
     let mut payload = serde_json::Map::new();
     payload.insert(
@@ -153,13 +153,7 @@ fn os_info_json() -> Value {
 }
 
 fn product_version() -> String {
-    include_str!("../../../../../../gradle.properties")
-        .lines()
-        .find_map(|line: &str| line.strip_prefix("version="))
-        .map(str::trim)
-        .filter(|value: &&str| !value.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
+    env!("CARGO_PKG_VERSION").to_string()
 }
 
 fn normalized_os_name(os: &str) -> String {

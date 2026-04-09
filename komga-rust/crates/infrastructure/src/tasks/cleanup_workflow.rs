@@ -246,7 +246,6 @@ fn compare_empty_trash_book_names(left: &str, right: &str) -> std::cmp::Ordering
 
 fn normalized_empty_trash_sort_key(value: &str) -> String {
     value
-        .trim()
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")

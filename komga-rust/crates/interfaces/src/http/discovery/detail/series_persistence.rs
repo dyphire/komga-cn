@@ -224,23 +224,6 @@ fn parse_aggregated_series_authors(raw: &[String]) -> Vec<BookMetadataAuthorRead
         .collect()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::parse_aggregated_series_authors;
-
-    #[test]
-    fn parse_aggregated_series_authors_preserves_optional_roles() {
-        let authors =
-            parse_aggregated_series_authors(&["Alice::Writer".to_string(), "Bob".to_string()]);
-
-        assert_eq!(authors.len(), 2);
-        assert_eq!(authors[0].name, "Alice");
-        assert_eq!(authors[0].role, "Writer");
-        assert_eq!(authors[1].name, "Bob");
-        assert_eq!(authors[1].role, "");
-    }
-}
-
 pub async fn load_persisted_series_collections(
     database_file: &FsPath,
     series_id: &str,
@@ -319,4 +302,21 @@ pub async fn sync_series_search_documents_after_metadata_update(
         series_id,
     )
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_aggregated_series_authors;
+
+    #[test]
+    fn parse_aggregated_series_authors_preserves_optional_roles() {
+        let authors =
+            parse_aggregated_series_authors(&["Alice::Writer".to_string(), "Bob".to_string()]);
+
+        assert_eq!(authors.len(), 2);
+        assert_eq!(authors[0].name, "Alice");
+        assert_eq!(authors[0].role, "Writer");
+        assert_eq!(authors[1].name, "Bob");
+        assert_eq!(authors[1].role, "");
+    }
 }

@@ -158,24 +158,6 @@ fn parse_metadata_links(raw: &str) -> Vec<BookMetadataLinkReadModel> {
         .collect()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::parse_metadata_links;
-
-    #[test]
-    fn parse_metadata_links_decodes_separator_encoded_rows() {
-        let links = parse_metadata_links(
-            "Wiki\u{001E}https://example.com\u{001F}Store\u{001E}https://shop.example.com",
-        );
-
-        assert_eq!(links.len(), 2);
-        assert_eq!(links[0].label, "Wiki");
-        assert_eq!(links[0].url, "https://example.com");
-        assert_eq!(links[1].label, "Store");
-        assert_eq!(links[1].url, "https://shop.example.com");
-    }
-}
-
 pub async fn load_persisted_book_sibling_detail(
     database_file: &FsPath,
     book_id: &str,
@@ -198,4 +180,22 @@ pub async fn load_persisted_book_sibling_detail(
     };
 
     load_persisted_book_detail(database_file, &sibling_id, user_id).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_metadata_links;
+
+    #[test]
+    fn parse_metadata_links_decodes_separator_encoded_rows() {
+        let links = parse_metadata_links(
+            "Wiki\u{001E}https://example.com\u{001F}Store\u{001E}https://shop.example.com",
+        );
+
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].label, "Wiki");
+        assert_eq!(links[0].url, "https://example.com");
+        assert_eq!(links[1].label, "Store");
+        assert_eq!(links[1].url, "https://shop.example.com");
+    }
 }

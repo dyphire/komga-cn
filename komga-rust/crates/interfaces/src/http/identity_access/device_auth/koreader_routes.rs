@@ -30,11 +30,10 @@ pub async fn koreader_user_auth(
         return StatusCode::FORBIDDEN.into_response();
     };
 
-    let authorized =
-        match persisted_api_key_user_by_token(header_user, auth_db.database_file.as_path()).await {
-            Some(AuthOutcome::Valid(_)) => true,
-            _ => false,
-        };
+    let authorized = matches!(
+        persisted_api_key_user_by_token(header_user, auth_db.database_file.as_path()).await,
+        Some(AuthOutcome::Valid(_))
+    );
     if !authorized {
         return StatusCode::UNAUTHORIZED.into_response();
     }

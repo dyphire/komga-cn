@@ -157,6 +157,7 @@ async fn seed_ondeck_progress(
     .await;
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn seed_ondeck_user(
     paths: &RuntimeDbPaths,
     user_id: &str,
@@ -285,8 +286,7 @@ async fn books_ondeck_response(
     auth_token: Option<&str>,
     uri: &str,
 ) -> axum::response::Response {
-    let response = app
-        .clone()
+    app.clone()
         .oneshot({
             let mut builder = Request::builder().method("GET").uri(uri);
             if let Some(auth_token) = auth_token {
@@ -297,9 +297,7 @@ async fn books_ondeck_response(
                 .expect("books/ondeck request should build")
         })
         .await
-        .expect("books/ondeck request should complete");
-
-    response
+        .expect("books/ondeck request should complete")
 }
 
 async fn books_ondeck_ids(app: &axum::Router, auth_token: &str, uri: &str) -> Vec<String> {

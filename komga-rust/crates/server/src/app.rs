@@ -54,6 +54,16 @@ pub async fn serve_with_config(
     start_server::serve_with_config(listener, config).await
 }
 
+pub async fn validate_startup_schema_gate_for_contract(
+    config: &RuntimeConfig,
+) -> std::io::Result<()> {
+    crate::bootstrap::validate_startup_schema_gate(config).await
+}
+
+pub async fn shutdown_runtime_for_contract() {
+    start_server::shutdown_runtime_for_contract().await;
+}
+
 pub fn invalidate_sessions_for_user(user_id: &str) {
     komga_interfaces::http::identity_access::auth::invalidate_user_sessions(user_id)
 }

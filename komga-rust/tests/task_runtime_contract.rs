@@ -19,12 +19,16 @@ use runtime_router_contract_support::*;
 
 #[path = "task_runtime_contract/import_and_transient.rs"]
 mod import_and_transient;
+#[path = "task_runtime_contract/lifecycle_logging.rs"]
+mod lifecycle_logging;
 #[path = "task_runtime_contract/metadata_aggregation.rs"]
 mod metadata_aggregation;
 #[path = "task_runtime_contract/ownership_guards.rs"]
 mod ownership_guards;
 #[path = "task_runtime_contract/search_index_lifecycle.rs"]
 mod search_index_lifecycle;
+#[path = "task_runtime_contract/worker_lifecycle_logging.rs"]
+mod worker_lifecycle_logging;
 
 const ANALYZER_VERSION_MARKER_FILE: &str = ".komga-search-analyzer-version";
 

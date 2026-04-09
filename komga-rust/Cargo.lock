@@ -2466,6 +2466,7 @@ dependencies = [
  "tantivy",
  "tar",
  "tokio",
+ "tracing",
  "unicode-normalization",
  "unrar",
  "zip",
@@ -2481,6 +2482,7 @@ dependencies = [
  "bcrypt",
  "flate2",
  "futures-util",
+ "http-body",
  "icu",
  "image",
  "komga-application",
@@ -2500,6 +2502,8 @@ dependencies = [
  "time",
  "tokio",
  "tokio-stream",
+ "tower-http",
+ "tracing",
  "unicode-normalization",
  "zip",
 ]
@@ -2520,6 +2524,7 @@ dependencies = [
  "axum",
  "base64",
  "bcrypt",
+ "http-body",
  "http-body-util",
  "icu",
  "image",
@@ -2543,6 +2548,8 @@ dependencies = [
  "tokio",
  "toml 1.1.2+spec-1.1.0",
  "tower",
+ "tower-http",
+ "tracing",
  "tracing-subscriber",
  "zip",
 ]
@@ -2577,6 +2584,9 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tower-sessions",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
  "zip",
 ]
 
@@ -5084,9 +5094,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.51.0"
+version = "1.51.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bd1c4c0fc4a7ab90fc15ef6daaa3ec3b893f004f915f2392557ed23237820cd"
+checksum = "f66bf9585cda4b724d3e78ab34b73fb2bbaba9011b9bfdf69dc836382ea13b8c"
 dependencies = [
  "bytes",
  "libc",
@@ -5251,6 +5261,7 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -5329,6 +5340,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-appender"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "786d480bce6247ab75f005b14ae1624ad978d3029d9113f0a22fa1ac773faeaf"
+dependencies = [
+ "crossbeam-channel",
+ "thiserror 2.0.18",
+ "time",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "tracing-attributes"
 version = "0.1.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5361,6 +5384,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-serde"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "704b1aeb7be0d0a84fc9828cae51dab5970fee5088f83d1dd7ee6f6246fc6ff1"
+dependencies = [
+ "serde",
+ "tracing-core",
+]
+
+[[package]]
 name = "tracing-subscriber"
 version = "0.3.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5370,12 +5403,16 @@ dependencies = [
  "nu-ansi-term",
  "once_cell",
  "regex-automata",
+ "serde",
+ "serde_json",
  "sharded-slab",
  "smallvec",
  "thread_local",
+ "time",
  "tracing",
  "tracing-core",
  "tracing-log",
+ "tracing-serde",
 ]
 
 [[package]]

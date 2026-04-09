@@ -632,6 +632,7 @@ pub(crate) async fn load_book_page_count(
     (backend().load_book_page_count)(database_file.to_path_buf(), book_id.to_string()).await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn persist_book_progression(
     database_file: &Path,
     book_id: &str,

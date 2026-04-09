@@ -267,6 +267,7 @@ fn epub_nav_links(
         .unwrap_or_default()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn persisted_epub_manifest_payload(
     headers: &HeaderMap,
     book_id: &str,
@@ -305,19 +306,18 @@ fn persisted_epub_manifest_payload(
     );
 
     enrich_manifest_metadata(&mut payload, metadata_additions, ManifestProfile::Epub);
-    if let Some(metadata) = payload.get_mut("metadata").and_then(Value::as_object_mut) {
-        if let Some(is_fixed_layout) = extension_payload
+    if let Some(metadata) = payload.get_mut("metadata").and_then(Value::as_object_mut)
+        && let Some(is_fixed_layout) = extension_payload
             .as_ref()
             .and_then(|payload| payload.get("isFixedLayout"))
             .and_then(Value::as_bool)
-        {
-            metadata.insert(
-                "rendition".to_string(),
-                json!({
-                    "layout": if is_fixed_layout { "fixed" } else { "reflowable" },
-                }),
-            );
-        }
+    {
+        metadata.insert(
+            "rendition".to_string(),
+            json!({
+                "layout": if is_fixed_layout { "fixed" } else { "reflowable" },
+            }),
+        );
     }
 
     if let Some(resource_entries) = payload.get_mut("resources").and_then(Value::as_array_mut) {

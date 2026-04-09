@@ -361,6 +361,13 @@ fn apply_announcement_read_projection(feed: Value, read_ids: &[String]) -> Value
     projected
 }
 
+fn now_epoch_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{load_remote_cache_entry_on_access, parse_announcement_ids};
@@ -398,11 +405,4 @@ mod tests {
             150
         );
     }
-}
-
-fn now_epoch_seconds() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
 }

@@ -14,7 +14,7 @@ pub(super) async fn resolved_kobo_user(
         }
     }
 
-    auth_token_user(headers)
+    resolved_auth_user(headers)
 }
 
 pub(super) fn valid_kobo_path_token(token: &str) -> bool {
@@ -25,7 +25,7 @@ pub(super) fn valid_kobo_path_token(token: &str) -> bool {
 }
 
 pub(super) fn resolved_koreader_user_id(headers: &HeaderMap) -> Option<String> {
-    let auth_user = auth_token_user(headers);
+    let auth_user = resolved_auth_user(headers);
     let header_user = headers
         .get("X-Auth-User")
         .or_else(|| headers.get("x-auth-user"))
@@ -42,7 +42,7 @@ pub(super) fn resolved_koreader_user_id(headers: &HeaderMap) -> Option<String> {
 }
 
 pub(super) fn koreader_authorized(headers: &HeaderMap) -> bool {
-    let auth_user = auth_token_user(headers);
+    let auth_user = resolved_auth_user(headers);
     let header_user = headers
         .get("X-Auth-User")
         .or_else(|| headers.get("x-auth-user"))

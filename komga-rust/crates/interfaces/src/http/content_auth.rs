@@ -11,19 +11,18 @@ use std::collections::BTreeSet;
 use super::super::AuthDatabaseState;
 use crate::http::discovery_auth::{DiscoveryAuthState, principal_from_user_payload};
 use crate::http::identity_access::auth::{
-    AuthOutcome, AuthUser, PersistedAuthenticationActivity, auth_token_user,
-    bootstrap_api_key_user, bootstrap_user, bootstrap_user_with_remember_me_cookies,
-    bootstrap_user_with_remember_me_token, empty_auth_token_supplied, expired_remember_me_cookie,
-    expired_session_cookie, invalidate_remember_me_token, invalidate_session_token,
-    invalidate_user_sessions, persisted_api_key_comment_exists, persisted_api_key_metadata,
-    persisted_api_key_user, persisted_basic_user, persisted_create_api_key,
-    persisted_delete_api_key_by_id, persisted_list_api_keys,
-    persisted_list_authentication_activity, persisted_record_successful_authentication_activity,
-    persisted_update_password_by_user_id, persisted_users, remember_me_requested,
-    remember_me_token_for_user_with_namespace, remember_me_token_from_headers, require_admin,
-    require_auth, resolved_token, session_token_for_user_with_namespace,
-    session_token_from_headers, unauthorized_json_response, user_id, user_is_admin,
-    user_payload_json,
+    AuthOutcome, AuthUser, PersistedAuthenticationActivity, bootstrap_api_key_user, bootstrap_user,
+    bootstrap_user_with_remember_me_cookies, bootstrap_user_with_remember_me_token,
+    empty_auth_token_supplied, expired_remember_me_cookie, expired_session_cookie,
+    invalidate_remember_me_token, invalidate_session_token, invalidate_user_sessions,
+    persisted_api_key_comment_exists, persisted_api_key_metadata, persisted_api_key_user,
+    persisted_basic_user, persisted_create_api_key, persisted_delete_api_key_by_id,
+    persisted_list_api_keys, persisted_list_authentication_activity,
+    persisted_record_successful_authentication_activity, persisted_update_password_by_user_id,
+    persisted_users, remember_me_requested, remember_me_token_for_user_with_namespace,
+    remember_me_token_from_headers, require_admin, require_auth, resolved_auth_user,
+    resolved_token, session_token_for_user_with_namespace, session_token_from_headers,
+    unauthorized_json_response, user_id, user_is_admin, user_payload_json,
 };
 use crate::http::operational::register_session_expired_event;
 use crate::http::state::OperationalState;
@@ -85,7 +84,7 @@ pub(super) async fn users_me(
         AuthOutcome::Missing => {}
     }
 
-    if let Some(user) = auth_token_user(&headers) {
+    if let Some(user) = resolved_auth_user(&headers) {
         let token = session_token_from_headers(&headers).unwrap_or_else(|| {
             session_token_for_user_with_namespace(&user, auth_db.remember_me_namespace.as_str())
         });

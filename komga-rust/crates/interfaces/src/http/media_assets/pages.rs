@@ -41,7 +41,7 @@ async fn book_page_response(
     page_number: u32,
     query: BookPageQuery,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_auth(headers) {
         return response;
     }
 
@@ -71,7 +71,7 @@ async fn book_page_response(
     {
         let last_modified = file_last_modified_header_value(media.file_path.as_path());
         if let Some(last_modified) = last_modified.as_deref()
-            && if_modified_since_matches(&headers, last_modified)
+            && if_modified_since_matches(headers, last_modified)
         {
             return asset_not_modified_response(None, Some(last_modified));
         }
@@ -239,17 +239,16 @@ pub async fn book_page_raw(
 
         let book_display_name = media.file_name.clone();
 
-        if let Some(user) = auth_user.as_ref() {
-            if !user_can_access_book_media(
+        if let Some(user) = auth_user.as_ref()
+            && !user_can_access_book_media(
                 auth_db.database_file.as_path(),
                 &resolved_book_id,
                 user,
                 &media,
             )
             .await
-            {
-                return StatusCode::FORBIDDEN.into_response();
-            }
+        {
+            return StatusCode::FORBIDDEN.into_response();
         }
 
         if !book_media_is_ready_status(auth_db.database_file.as_path(), &resolved_book_id)
@@ -791,9 +790,9 @@ pub async fn book_positions(
                         .expect("positions last-modified header should be valid"),
                 );
             }
-            return response;
+            response
         }
-        Ok(_) => return StatusCode::NOT_FOUND.into_response(),
-        Err(error) => return internal_error_response(error),
+        Ok(_) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => internal_error_response(error),
     }
 }

@@ -202,13 +202,12 @@ async fn load_series_book_metadata_aggregate(
             summary_number = row.get::<String, _>("NUMBER");
         }
 
-        if let Some(row_release_date) = row.get::<Option<String>, _>("RELEASE_DATE") {
-            if release_date
+        if let Some(row_release_date) = row.get::<Option<String>, _>("RELEASE_DATE")
+            && release_date
                 .as_ref()
                 .is_none_or(|current| row_release_date < *current)
-            {
-                release_date = Some(row_release_date);
-            }
+        {
+            release_date = Some(row_release_date);
         }
     }
 

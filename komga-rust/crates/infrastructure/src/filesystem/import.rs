@@ -128,10 +128,10 @@ async fn import_book_impl(
     let destination_file = destination_dir.join(destination_name);
     let imported_sidecars =
         collect_import_book_sidecars(entry.source_file.as_path(), &destination_file)?;
-    if let Some(upgrade_file) = upgrade_file.as_ref() {
-        if destination_file == *upgrade_file {
-            let _ = fs::remove_file(upgrade_file);
-        }
+    if let Some(upgrade_file) = upgrade_file.as_ref()
+        && destination_file == *upgrade_file
+    {
+        let _ = fs::remove_file(upgrade_file);
     }
     for upgrade_sidecar in &upgrade_sidecars {
         let _ = fs::remove_file(upgrade_sidecar);
@@ -153,10 +153,10 @@ async fn import_book_impl(
 
     let sidecar_result = import_book_sidecars(copy_mode, &imported_sidecars)?;
 
-    if let Some(upgrade_file) = upgrade_file.as_ref() {
-        if destination_file != *upgrade_file {
-            let _ = fs::remove_file(upgrade_file);
-        }
+    if let Some(upgrade_file) = upgrade_file.as_ref()
+        && destination_file != *upgrade_file
+    {
+        let _ = fs::remove_file(upgrade_file);
     }
 
     let imported_book_id = scanner_book_id_for_path(&destination_file);
@@ -290,10 +290,10 @@ async fn load_import_upgrade_book_target(
 fn resolve_import_destination_dir(target: &ImportSeriesTarget) -> PathBuf {
     let mut destination_dir = PathBuf::from(&target.library_root);
     if target.oneshot {
-        if let Some(parent) = Path::new(&target.series_url).parent() {
-            if !parent.as_os_str().is_empty() {
-                destination_dir.push(parent);
-            }
+        if let Some(parent) = Path::new(&target.series_url).parent()
+            && !parent.as_os_str().is_empty()
+        {
+            destination_dir.push(parent);
         }
     } else {
         destination_dir.push(&target.series_url);

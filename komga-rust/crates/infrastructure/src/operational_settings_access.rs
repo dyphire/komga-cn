@@ -512,12 +512,19 @@ mod tests {
             .await
             .expect("test db should open");
 
-        sqlx::query(
+        for ddl in [
             "CREATE TABLE IF NOT EXISTS SYNC_POINT (ID varchar NOT NULL PRIMARY KEY, USER_ID varchar NOT NULL, API_KEY_ID varchar NOT NULL)",
-        )
-        .execute(&pool)
-        .await
-        .expect("sync point table should be created");
+            "CREATE TABLE IF NOT EXISTS SYNC_POINT_BOOK (SYNC_POINT_ID varchar NOT NULL, BOOK_ID varchar NOT NULL, BOOK_CREATED_DATE datetime NOT NULL, BOOK_LAST_MODIFIED_DATE datetime NOT NULL, BOOK_FILE_LAST_MODIFIED datetime NOT NULL, BOOK_FILE_SIZE integer NOT NULL, BOOK_FILE_HASH varchar NOT NULL, BOOK_METADATA_LAST_MODIFIED_DATE datetime NOT NULL, SYNCED integer NOT NULL DEFAULT 0)",
+            "CREATE TABLE IF NOT EXISTS SYNC_POINT_BOOK_REMOVED_SYNCED (SYNC_POINT_ID varchar NOT NULL, BOOK_ID varchar NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS SYNC_POINT_READLIST (SYNC_POINT_ID varchar NOT NULL, READLIST_ID varchar NOT NULL, READLIST_NAME varchar NOT NULL, READLIST_CREATED_DATE datetime NOT NULL, READLIST_LAST_MODIFIED_DATE datetime NOT NULL, SYNCED integer NOT NULL DEFAULT 0)",
+            "CREATE TABLE IF NOT EXISTS SYNC_POINT_READLIST_BOOK (SYNC_POINT_ID varchar NOT NULL, READLIST_ID varchar NOT NULL, BOOK_ID varchar NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS SYNC_POINT_READLIST_REMOVED_SYNCED (SYNC_POINT_ID varchar NOT NULL, READLIST_ID varchar NOT NULL)",
+        ] {
+            sqlx::query(ddl)
+                .execute(&pool)
+                .await
+                .expect("sync point fixture tables should be created");
+        }
 
         (db_path, pool)
     }

@@ -1,3 +1,5 @@
+#![allow(clippy::await_holding_lock)]
+
 use super::*;
 
 async fn seed_kobo_state_epub_extension(paths: &RuntimeDbPaths, blob: Vec<u8>) {

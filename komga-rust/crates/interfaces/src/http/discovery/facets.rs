@@ -16,6 +16,7 @@ fn decoded_collection_id(query: &str) -> Option<String> {
         .map(decode_query_component)
 }
 
+#[allow(clippy::result_large_err)]
 fn resolve_query_context_or_unauthorized(
     auth_state: &DiscoveryAuthState,
     headers: &HeaderMap,
@@ -41,6 +42,7 @@ impl CollectionFacetScope {
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn resolve_collection_facet_scope(
     auth_state: &DiscoveryAuthState,
     headers: &HeaderMap,

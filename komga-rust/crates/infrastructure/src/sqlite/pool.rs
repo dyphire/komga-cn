@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -51,6 +51,29 @@ pub async fn close_all_shared_pools() {
 
     for pool in pools {
         pool.close().await;
+    }
+}
+
+pub fn evict_shared_pools_for_paths(paths: &[PathBuf]) {
+    if paths.is_empty() {
+        return;
+    }
+
+    let target_paths = paths
+        .iter()
+        .map(|path| absolute_pool_path(path.as_path()))
+        .collect::<HashSet<_>>();
+    let mut pools = shared_pools()
+        .lock()
+        .expect("shared sqlite pool map lock should not be poisoned");
+    let matching_keys = pools
+        .keys()
+        .filter(|pool_key| target_paths.contains(&pool_key.path))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    for pool_key in matching_keys {
+        pools.remove(&pool_key);
     }
 }
 

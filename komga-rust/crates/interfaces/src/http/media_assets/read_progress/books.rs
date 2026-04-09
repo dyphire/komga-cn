@@ -4,6 +4,7 @@ use super::epub::{
 };
 use super::*;
 
+#[allow(clippy::too_many_arguments)]
 async fn persist_and_record_read_progress(
     database_file: &FsPath,
     state: &ReadProgressState,

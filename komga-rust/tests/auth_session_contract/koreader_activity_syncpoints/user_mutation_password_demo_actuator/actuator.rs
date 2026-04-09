@@ -1,4 +1,7 @@
 use super::*;
+use std::io::Write;
+
+use time::OffsetDateTime;
 
 #[tokio::test]
 async fn router_actuator_root_exposed_by_default_without_beans_link() {
@@ -272,6 +275,206 @@ async fn router_actuator_logfile_returns_plaintext_body_for_admin() {
         .await
         .expect("actuator logfile response body should be readable");
     assert_eq!(String::from_utf8_lossy(&body), "first line\nsecond line\n");
+
+    cleanup_router_fixture(paths);
+}
+
+#[test]
+fn router_access_log_skips_actuator_embedded_asset_and_sse_noise_routes() {
+    let paths = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("noise access log test runtime should build")
+        .block_on(async {
+            let paths = new_router_fixture("router-access-log-skip-noise-routes").await;
+            seed_router_contract_data(&paths).await;
+            paths
+        });
+    let config = runtime_config_for_paths(&paths);
+    std::fs::create_dir_all(
+        config
+            .log_file
+            .parent()
+            .expect("actuator logfile noise fixture should have parent directory"),
+    )
+    .expect("actuator logfile noise parent directory should be created");
+    std::fs::write(&config.log_file, b"noise line\n")
+        .expect("actuator logfile noise fixture should be writable");
+
+    let auth_token = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("noise auth runtime should build")
+        .block_on(async {
+            let app = build_router_with_config(&config);
+            login_with_basic_and_get_token(app).await
+        });
+
+    let (logs, statuses) = capture_router_logs_async_result(&config, {
+        let config = config.clone();
+        let auth_token = auth_token.clone();
+        async move {
+            let app = build_router_with_config(&config);
+
+            let health = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/actuator/health")
+                        .body(Body::empty())
+                        .expect("actuator health noise request should build"),
+                )
+                .await
+                .expect("actuator health noise request should complete")
+                .status();
+            let logfile = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/actuator/logfile")
+                        .header("x-auth-token", &auth_token)
+                        .body(Body::empty())
+                        .expect("actuator logfile noise request should build"),
+                )
+                .await
+                .expect("actuator logfile noise request should complete")
+                .status();
+            let asset = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/manifest.json")
+                        .body(Body::empty())
+                        .expect("embedded asset noise request should build"),
+                )
+                .await
+                .expect("embedded asset noise request should complete")
+                .status();
+            let sse = app
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/sse/v1/events")
+                        .header("x-auth-token", &auth_token)
+                        .body(Body::empty())
+                        .expect("sse noise request should build"),
+                )
+                .await
+                .expect("sse noise request should complete")
+                .status();
+
+            (health, logfile, asset, sse)
+        }
+    });
+
+    assert_eq!(statuses.0, StatusCode::OK);
+    assert_eq!(statuses.1, StatusCode::OK);
+    assert_eq!(statuses.2, StatusCode::OK);
+    assert_eq!(statuses.3, StatusCode::OK);
+    let events = parse_json_log_lines(&logs);
+    let access_events = matching_event_fields(&events, "http_access");
+    assert!(
+        access_events.is_empty(),
+        "actuator, embedded assets, and SSE should be skipped by access logging noise policy: {logs}"
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_actuator_logfile_reads_current_active_file_after_rotation_compatible_writes() {
+    let paths = new_router_fixture("router-actuator-logfile-admin-active-after-rotation").await;
+    seed_router_contract_data(&paths).await;
+
+    let config = runtime_config_for_paths(&paths);
+    let initial_period = OffsetDateTime::parse(
+        "2026-04-08T10:15:00Z",
+        &time::format_description::well_known::Rfc3339,
+    )
+    .expect("initial test timestamp should parse");
+    let rotated_period = OffsetDateTime::parse(
+        "2026-04-08T10:16:00Z",
+        &time::format_description::well_known::Rfc3339,
+    )
+    .expect("rotated test timestamp should parse");
+    let clock = {
+        let remaining = std::sync::Arc::new(std::sync::Mutex::new(
+            vec![
+                initial_period,
+                initial_period,
+                rotated_period,
+                rotated_period,
+            ]
+            .into_iter(),
+        ));
+        move || {
+            remaining
+                .lock()
+                .expect("test clock state should not be poisoned")
+                .next()
+                .expect("test clock should have another timestamp ready")
+        }
+    };
+    let mut writer = komga_server::logging::StableFileAppender::new_with_clock(
+        config.log_file.clone(),
+        komga_server::logging::FileRotation::Minutely,
+        clock,
+    )
+    .expect("stable rotating file appender should be created");
+    writer
+        .write_all(b"archived line\n")
+        .expect("first period write should succeed");
+    writer.flush().expect("first period flush should succeed");
+    writer
+        .write_all(b"active line\n")
+        .expect("second period write should succeed");
+    writer.flush().expect("second period flush should succeed");
+
+    let app = build_router_with_config(&config);
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/actuator/logfile")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("admin actuator logfile request should build"),
+        )
+        .await
+        .expect("admin actuator logfile request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("actuator logfile response body should be readable");
+    assert_eq!(String::from_utf8_lossy(&body), "active line\n");
+
+    let archive_path = std::fs::read_dir(
+        config
+            .log_file
+            .parent()
+            .expect("configured logfile should have a parent directory"),
+    )
+    .expect("log archive directory should be readable")
+    .filter_map(Result::ok)
+    .map(|entry| entry.path())
+    .find(|path| {
+        path != &config.log_file
+            && path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .is_some_and(|value| value.starts_with("komga.log."))
+    })
+    .expect("rotation-compatible write should keep one sibling archive beside the active file");
+    assert_eq!(
+        std::fs::read_to_string(&archive_path).expect("archive logfile should be readable"),
+        "archived line\n",
+    );
 
     cleanup_router_fixture(paths);
 }

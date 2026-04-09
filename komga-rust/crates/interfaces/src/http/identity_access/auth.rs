@@ -9,6 +9,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use std::path::Path;
 
+use crate::http::access_log;
 use crate::runtime_identity_access::{
     configure_remember_me_store as configure_session_store,
     invalidate_remember_me_token as invalidate_remember_me_session_token,
@@ -66,7 +67,9 @@ pub fn require_file_download(headers: &HeaderMap) -> Option<Response> {
 }
 
 pub fn resolved_auth_user(headers: &HeaderMap) -> Option<AuthUser> {
-    auth_token_user(headers)
+    let auth_user = auth_token_user(headers);
+    access_log::record_resolved_auth_user_id(auth_user.as_ref().map(user_id));
+    auth_user
 }
 
 pub fn configure_remember_me_store(store_root: &Path) -> String {

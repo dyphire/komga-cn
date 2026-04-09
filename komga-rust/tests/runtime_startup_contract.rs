@@ -8,7 +8,13 @@ use tantivy::schema::{STORED, STRING, Schema};
 
 #[path = "runtime_startup_contract/config_resolution.rs"]
 mod config_resolution;
+#[path = "runtime_startup_contract/lifecycle_logging.rs"]
+mod lifecycle_logging;
+#[path = "runtime_startup_contract/logging_foundation.rs"]
+mod logging_foundation;
 #[path = "runtime_startup_contract/search_lifecycle.rs"]
 mod search_lifecycle;
 #[path = "runtime_startup_contract/support.rs"]
 mod support;
+#[path = "runtime_startup_contract/worker_lifecycle.rs"]
+mod worker_lifecycle;

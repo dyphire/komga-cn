@@ -26,6 +26,7 @@ sha2.workspace = true
 sqlx.workspace = true
 tantivy.workspace = true
 tokio.workspace = true
+tracing.workspace = true
 unrar.workspace = true
 unicode-normalization.workspace = true
 zip.workspace = true

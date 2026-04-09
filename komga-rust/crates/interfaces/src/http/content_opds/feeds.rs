@@ -451,56 +451,6 @@ fn format_opds_timestamp(now_utc: OffsetDateTime, offset: UtcOffset) -> String {
         .unwrap_or_else(|_| "2000-01-01T00:00:00Z".to_string())
 }
 
-#[cfg(test)]
-mod tests {
-    use axum::body::to_bytes;
-    use axum::http::HeaderMap;
-    use time::{Month, OffsetDateTime, UtcOffset};
-
-    use super::{OpdsV1NavigationEntry, format_opds_timestamp, opds_v1_navigation_feed_response};
-
-    #[tokio::test]
-    async fn navigation_feed_uses_entry_specific_updated_timestamp() {
-        let response = opds_v1_navigation_feed_response(
-            &HeaderMap::new(),
-            "feed",
-            "Feed",
-            "/opds/v1.2/feed",
-            vec![OpdsV1NavigationEntry {
-                id: "entry-1".to_string(),
-                title: "Entry".to_string(),
-                content: "".to_string(),
-                href_path: "/opds/v1.2/entry-1".to_string(),
-                updated: Some("2024-01-02T03:04:05Z".to_string()),
-            }],
-            None,
-        );
-
-        let bytes = to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("response body should be readable");
-        let body = String::from_utf8(bytes.to_vec()).expect("feed body should be utf-8");
-
-        assert!(body.contains("<updated>2024-01-02T03:04:05Z</updated>"));
-    }
-
-    #[test]
-    fn parse_page_size_does_not_cap_large_requested_size() {
-        assert_eq!(super::parse_page_size("page=2&size=250"), (2, 250));
-    }
-
-    #[test]
-    fn opds_now_timestamp_uses_local_offset_format() {
-        let base = OffsetDateTime::from_unix_timestamp(0)
-            .expect("unix epoch should be valid")
-            .replace_date(time::Date::from_calendar_date(2024, Month::March, 3).expect("date"))
-            .replace_time(time::Time::from_hms(0, 0, 0).expect("time"));
-        let utc = base.to_offset(UtcOffset::UTC);
-        let formatted = format_opds_timestamp(utc, UtcOffset::from_hms(9, 0, 0).expect("offset"));
-        assert_eq!(formatted, "2024-03-03T09:00:00+09:00");
-    }
-}
-
 pub(super) fn opds_subsection_navigation_link(
     headers: &HeaderMap,
     title: &str,
@@ -871,5 +821,55 @@ fn extend_metadata_with_role_authors(
         if !values.is_empty() {
             metadata.insert(key.to_string(), Value::Array(values));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::body::to_bytes;
+    use axum::http::HeaderMap;
+    use time::{Month, OffsetDateTime, UtcOffset};
+
+    use super::{OpdsV1NavigationEntry, format_opds_timestamp, opds_v1_navigation_feed_response};
+
+    #[tokio::test]
+    async fn navigation_feed_uses_entry_specific_updated_timestamp() {
+        let response = opds_v1_navigation_feed_response(
+            &HeaderMap::new(),
+            "feed",
+            "Feed",
+            "/opds/v1.2/feed",
+            vec![OpdsV1NavigationEntry {
+                id: "entry-1".to_string(),
+                title: "Entry".to_string(),
+                content: "".to_string(),
+                href_path: "/opds/v1.2/entry-1".to_string(),
+                updated: Some("2024-01-02T03:04:05Z".to_string()),
+            }],
+            None,
+        );
+
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body should be readable");
+        let body = String::from_utf8(bytes.to_vec()).expect("feed body should be utf-8");
+
+        assert!(body.contains("<updated>2024-01-02T03:04:05Z</updated>"));
+    }
+
+    #[test]
+    fn parse_page_size_does_not_cap_large_requested_size() {
+        assert_eq!(super::parse_page_size("page=2&size=250"), (2, 250));
+    }
+
+    #[test]
+    fn opds_now_timestamp_uses_local_offset_format() {
+        let base = OffsetDateTime::from_unix_timestamp(0)
+            .expect("unix epoch should be valid")
+            .replace_date(time::Date::from_calendar_date(2024, Month::March, 3).expect("date"))
+            .replace_time(time::Time::from_hms(0, 0, 0).expect("time"));
+        let utc = base.to_offset(UtcOffset::UTC);
+        let formatted = format_opds_timestamp(utc, UtcOffset::from_hms(9, 0, 0).expect("offset"));
+        assert_eq!(formatted, "2024-03-03T09:00:00+09:00");
     }
 }

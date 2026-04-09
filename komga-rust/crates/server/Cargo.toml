@@ -26,6 +26,9 @@ quick-xml.workspace = true
 time.workspace = true
 futures-util.workspace = true
 image.workspace = true
+tracing.workspace = true
+tracing-appender.workspace = true
+tracing-subscriber.workspace = true
 komga-domain = { path = "../domain" }
 komga-application = { path = "../application" }
 komga-infrastructure = { path = "../infrastructure" }

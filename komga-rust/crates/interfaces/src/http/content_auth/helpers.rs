@@ -271,7 +271,7 @@ pub(super) async fn authenticated_user(
         AuthOutcome::Missing => {}
     }
 
-    if let Some(user) = auth_token_user(headers) {
+    if let Some(user) = resolved_auth_user(headers) {
         return Some(user);
     }
 

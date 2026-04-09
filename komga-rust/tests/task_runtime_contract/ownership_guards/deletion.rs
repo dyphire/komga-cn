@@ -533,7 +533,16 @@ async fn runtime_delete_book_oneshot_skips_soft_delete_when_series_directory_is_
     let mut cleanup_permissions = std::fs::metadata(&series_dir)
         .expect("delete-book oneshot readonly series metadata should still be readable")
         .permissions();
-    cleanup_permissions.set_readonly(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        cleanup_permissions.set_mode(0o755);
+    }
+    #[cfg(not(unix))]
+    {
+        cleanup_permissions.set_readonly(false);
+    }
     std::fs::set_permissions(&series_dir, cleanup_permissions).expect(
         "delete-book oneshot readonly series directory permissions should reset for cleanup",
     );

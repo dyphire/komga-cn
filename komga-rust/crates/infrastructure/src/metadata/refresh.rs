@@ -131,13 +131,13 @@ pub fn refresh_book_metadata(
                     }
                 }
 
-                if import_epub_book && epub_provider_matches_capabilities(&capabilities) {
-                    if let Some(media) = load_book_media_for_refresh(&pool, &book_id).await? {
-                        if let Some(package_document) = load_epub_package_document(&media) {
-                            let patch = extract_epub_book_patch(&package_document);
-                            apply_book_metadata_import_patch(&pool, &book_id, patch).await?;
-                        }
-                    }
+                if import_epub_book
+                    && epub_provider_matches_capabilities(&capabilities)
+                    && let Some(media) = load_book_media_for_refresh(&pool, &book_id).await?
+                    && let Some(package_document) = load_epub_package_document(&media)
+                {
+                    let patch = extract_epub_book_patch(&package_document);
+                    apply_book_metadata_import_patch(&pool, &book_id, patch).await?;
                 }
 
                 if import_barcode_isbn && barcode_provider_matches_capabilities(&capabilities) {
@@ -389,9 +389,11 @@ fn render_pdf_page_image_for_barcode(
 }
 
 fn decode_ean13_isbn(image_bytes: &[u8]) -> Option<String> {
-    let mut hints = DecodeHints::default();
-    hints.TryHarder = Some(true);
-    hints.AlsoInverted = Some(true);
+    let mut hints = DecodeHints {
+        TryHarder: Some(true),
+        AlsoInverted: Some(true),
+        ..Default::default()
+    };
 
     let result = rxing_helpers::detect_in_buffer_with_hints(
         image_bytes,
@@ -399,7 +401,7 @@ fn decode_ean13_isbn(image_bytes: &[u8]) -> Option<String> {
         &mut hints,
     )
     .ok()?;
-    normalize_isbn13(&result.getText().to_string())
+    normalize_isbn13(result.getText())
 }
 
 async fn apply_book_metadata_import_patch(

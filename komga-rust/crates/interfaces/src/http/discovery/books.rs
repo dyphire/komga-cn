@@ -75,10 +75,7 @@ fn parse_duplicate_books_sort_modes(sorts: &[String]) -> Vec<DuplicateBooksSortM
     sorts
         .iter()
         .filter_map(|sort| {
-            let (field, direction) = sort
-                .split_once(',')
-                .map(|(field, direction)| (field, direction))
-                .unwrap_or((sort.as_str(), "asc"));
+            let (field, direction) = sort.split_once(',').unwrap_or((sort.as_str(), "asc"));
             let field = match field {
                 "name" => DuplicateBooksSortField::Name,
                 "series" => DuplicateBooksSortField::Series,
@@ -125,10 +122,10 @@ fn duplicate_books_sort_modes(query: &str, unpaged: bool) -> Vec<DuplicateBooksS
     }
 }
 
-fn duplicate_books_sort_value<'a>(
-    book: &'a DuplicateBookPayload,
+fn duplicate_books_sort_value(
+    book: &DuplicateBookPayload,
     field: DuplicateBooksSortField,
-) -> Option<&'a Value> {
+) -> Option<&Value> {
     match field {
         DuplicateBooksSortField::Name => book.payload.get("name"),
         DuplicateBooksSortField::Series => None,

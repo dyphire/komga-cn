@@ -39,7 +39,8 @@ pub use queue_scheduler::TaskQueueScheduler;
 pub use worker_runtime::{
     RuntimeBackgroundState, SharedTaskQueue, bootstrap_startup_library_scans,
     bootstrap_startup_search_task, cleanup_authentication_activity_once, prepare_task_queue,
-    process_startup_library_scans, spawn_runtime_workers,
+    process_startup_library_scans, run_background_task_iteration,
+    run_periodic_library_scan_iteration, spawn_runtime_workers,
 };
 
 type RuntimeConfig = dyn TaskRuntimeConfig;

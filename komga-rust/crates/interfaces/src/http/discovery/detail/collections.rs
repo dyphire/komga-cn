@@ -553,6 +553,7 @@ pub async fn collection_create(
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn parse_collection_create_input(
     payload: &Value,
 ) -> Result<PersistedCollectionWriteInput, Response> {
@@ -670,6 +671,7 @@ fn collection_bad_request(path: &str, message: &str) -> Response {
         .into_response()
 }
 
+#[allow(clippy::result_large_err)]
 fn parse_collection_update_input(
     payload: &Value,
     request_path: &str,

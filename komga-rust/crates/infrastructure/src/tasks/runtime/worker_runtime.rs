@@ -8,6 +8,7 @@ use komga_application::task_processing::{
 };
 use tokio::runtime::Handle;
 use tokio::time::interval;
+use tracing::{Instrument, Span, error, info};
 
 use super::{ScheduledLibraryScan, TaskQueueRecord, TaskQueueScheduler};
 use crate::tasks::{load_persisted_library_ids, load_persisted_library_scan_profiles};
@@ -19,18 +20,116 @@ pub struct RuntimeBackgroundState {
     pub scheduled_scans: Vec<ScheduledLibraryScan>,
 }
 
+const WORKER_BOOTSTRAP_EVENT: &str = "worker_bootstrap";
+const WORKER_SHUTDOWN_EVENT: &str = "worker_shutdown";
+const STARTUP_LIBRARY_SCANS_COMPONENT: &str = "startup_library_scans";
+const STARTUP_SEARCH_TASK_COMPONENT: &str = "startup_search_task";
+const STARTUP_LIBRARY_SCAN_PROCESSING_COMPONENT: &str = "startup_library_scan_processing";
+const PERIODIC_LIBRARY_SCAN_WORKER: &str = "periodic_library_scan";
+const BACKGROUND_TASK_WORKER: &str = "background_task";
+const AUTHENTICATION_ACTIVITY_CLEANUP_WORKER: &str = "authentication_activity_cleanup";
+
 pub fn prepare_task_queue(
     config: impl TaskRuntimeConfig,
     startup_search_task: Option<&'static str>,
 ) -> RuntimeBackgroundState {
     let runtime = config.task_runtime_context();
+    let startup_task = startup_search_task.unwrap_or("");
     let mut task_queue = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-runtime-http");
     if runtime.consumes_queue {
         let _ = task_queue.disown_all();
     }
-    let scheduled_scans = bootstrap_startup_library_scans(&mut task_queue, &runtime);
-    if runtime.consumes_queue {
-        bootstrap_startup_search_task(&mut task_queue, &runtime, startup_search_task);
+
+    let scheduled_scans = if !runtime.owns_main_database {
+        log_runtime_bootstrap(
+            STARTUP_LIBRARY_SCANS_COMPONENT,
+            "skipped",
+            &runtime,
+            RuntimeLifecycleFields::default().with_skip_reason("main_database_not_owned"),
+        );
+        Vec::new()
+    } else {
+        log_runtime_bootstrap(
+            STARTUP_LIBRARY_SCANS_COMPONENT,
+            "started",
+            &runtime,
+            RuntimeLifecycleFields::default(),
+        );
+        let (scheduled_scans, enqueued) =
+            bootstrap_startup_library_scans_inner(&mut task_queue, &runtime).unwrap_or_else(
+                |error| {
+                    log_runtime_bootstrap(
+                        STARTUP_LIBRARY_SCANS_COMPONENT,
+                        "failed",
+                        &runtime,
+                        RuntimeLifecycleFields::default().with_error(&error),
+                    );
+                    panic!("bootstrap startup library scans: {error}");
+                },
+            );
+
+        if enqueued == 0 && scheduled_scans.is_empty() {
+            log_runtime_bootstrap(
+                STARTUP_LIBRARY_SCANS_COMPONENT,
+                "skipped",
+                &runtime,
+                RuntimeLifecycleFields::default().with_skip_reason("no_startup_library_scans"),
+            );
+        } else {
+            log_runtime_bootstrap(
+                STARTUP_LIBRARY_SCANS_COMPONENT,
+                "completed",
+                &runtime,
+                RuntimeLifecycleFields::default()
+                    .with_enqueued(enqueued)
+                    .with_scheduled_scans(scheduled_scans.len()),
+            );
+        }
+        scheduled_scans
+    };
+
+    if !runtime.consumes_queue {
+        log_runtime_bootstrap(
+            STARTUP_SEARCH_TASK_COMPONENT,
+            "skipped",
+            &runtime,
+            RuntimeLifecycleFields::default().with_skip_reason("queue_consumption_disabled"),
+        );
+    } else if startup_search_task.is_none() {
+        log_runtime_bootstrap(
+            STARTUP_SEARCH_TASK_COMPONENT,
+            "skipped",
+            &runtime,
+            RuntimeLifecycleFields::default().with_skip_reason("startup_task_not_requested"),
+        );
+    } else {
+        log_runtime_bootstrap(
+            STARTUP_SEARCH_TASK_COMPONENT,
+            "started",
+            &runtime,
+            RuntimeLifecycleFields::default().with_startup_task(startup_task),
+        );
+        match bootstrap_startup_search_task_inner(&mut task_queue, &runtime, startup_search_task) {
+            Ok(processed) => log_runtime_bootstrap(
+                STARTUP_SEARCH_TASK_COMPONENT,
+                "completed",
+                &runtime,
+                RuntimeLifecycleFields::default()
+                    .with_startup_task(startup_task)
+                    .with_processed(processed),
+            ),
+            Err(error) => {
+                log_runtime_bootstrap(
+                    STARTUP_SEARCH_TASK_COMPONENT,
+                    "failed",
+                    &runtime,
+                    RuntimeLifecycleFields::default()
+                        .with_startup_task(startup_task)
+                        .with_error(&error),
+                );
+                panic!("bootstrap startup search task: {error}");
+            }
+        }
     }
 
     RuntimeBackgroundState {
@@ -54,53 +153,55 @@ pub fn bootstrap_startup_search_task(
     runtime: &TaskRuntimeContext,
     startup_search_task: Option<&'static str>,
 ) {
-    let Some(task_name) = startup_search_task else {
-        return;
-    };
-
-    task_queue.enqueue(TaskQueueRecord::new(task_name.to_string(), 1_000, None));
-    drop(task_queue.process_available(runtime));
+    bootstrap_startup_search_task_inner(task_queue, runtime, startup_search_task)
+        .unwrap_or_else(|error| panic!("bootstrap startup search task: {error}"));
 }
 
 pub fn bootstrap_startup_library_scans(
     task_queue: &mut TaskQueueScheduler,
     runtime: &TaskRuntimeContext,
 ) -> Vec<ScheduledLibraryScan> {
-    if !runtime.owns_main_database {
-        return Vec::new();
-    }
-
-    let profiles = load_persisted_library_scan_profiles(runtime.database_file.as_path())
-        .unwrap_or_else(|error| panic!("load startup library scan profiles: {error}"))
-        .into_iter()
-        .map(|profile| LibraryScanProfile {
-            library_id: profile.library_id,
-            scan_startup: profile.scan_startup,
-            scan_interval: profile.scan_interval,
-        })
-        .collect::<Vec<_>>();
-
-    if profiles.is_empty() {
-        return Vec::new();
-    }
-
-    for task in build_startup_library_scan_tasks(&profiles) {
-        task_queue.enqueue(TaskQueueRecord::new(task.id, task.priority, task.group));
-    }
-
-    build_scheduled_library_scans(&profiles)
-        .unwrap_or_else(|error| panic!("build scheduled library scans: {error}"))
+    bootstrap_startup_library_scans_inner(task_queue, runtime)
+        .map(|(scheduled_scans, _)| scheduled_scans)
+        .unwrap_or_else(|error| panic!("bootstrap startup library scans: {error}"))
 }
 
 pub fn process_startup_library_scans(config: impl TaskRuntimeConfig) {
     let runtime = config.task_runtime_context();
     if !runtime.owns_main_database {
+        log_runtime_bootstrap(
+            STARTUP_LIBRARY_SCAN_PROCESSING_COMPONENT,
+            "skipped",
+            &runtime,
+            RuntimeLifecycleFields::default().with_skip_reason("main_database_not_owned"),
+        );
         return;
     }
 
-    let library_ids = load_persisted_library_ids(runtime.database_file.as_path())
-        .unwrap_or_else(|error| panic!("load startup library ids: {error}"));
+    log_runtime_bootstrap(
+        STARTUP_LIBRARY_SCAN_PROCESSING_COMPONENT,
+        "started",
+        &runtime,
+        RuntimeLifecycleFields::default(),
+    );
+
+    let library_ids = load_library_ids(runtime.database_file.as_path(), "load startup library ids")
+        .unwrap_or_else(|error| {
+            log_runtime_bootstrap(
+                STARTUP_LIBRARY_SCAN_PROCESSING_COMPONENT,
+                "failed",
+                &runtime,
+                RuntimeLifecycleFields::default().with_error(&error),
+            );
+            panic!("load startup library ids: {error}");
+        });
     if library_ids.is_empty() {
+        log_runtime_bootstrap(
+            STARTUP_LIBRARY_SCAN_PROCESSING_COMPONENT,
+            "skipped",
+            &runtime,
+            RuntimeLifecycleFields::default().with_skip_reason("no_libraries"),
+        );
         return;
     }
 
@@ -108,7 +209,24 @@ pub fn process_startup_library_scans(config: impl TaskRuntimeConfig) {
     for task in build_library_scan_tasks(&library_ids) {
         task_queue.enqueue(task);
     }
-    drop(task_queue.process_available(&runtime));
+    match task_queue.process_available(&runtime) {
+        Ok(_) => log_runtime_bootstrap(
+            STARTUP_LIBRARY_SCAN_PROCESSING_COMPONENT,
+            "completed",
+            &runtime,
+            RuntimeLifecycleFields::default().with_processed(library_ids.len()),
+        ),
+        Err(error) => {
+            let error_message = error.to_string();
+            log_runtime_bootstrap(
+                STARTUP_LIBRARY_SCAN_PROCESSING_COMPONENT,
+                "failed",
+                &runtime,
+                RuntimeLifecycleFields::default().with_error(&error_message),
+            );
+            panic!("process startup library scans: {error_message}");
+        }
+    }
 }
 
 fn spawn_periodic_library_scan_workers(
@@ -116,96 +234,597 @@ fn spawn_periodic_library_scan_workers(
     runtime: TaskRuntimeContext,
     _scheduled_scans: Vec<ScheduledLibraryScan>,
 ) {
-    let Ok(handle) = Handle::try_current() else {
+    if !runtime.consumes_queue || !runtime.owns_main_database {
+        log_worker_event(
+            PERIODIC_LIBRARY_SCAN_WORKER,
+            "skipped",
+            &runtime,
+            RuntimeLifecycleFields::default().with_skip_reason(if !runtime.consumes_queue {
+                "queue_consumption_disabled"
+            } else {
+                "main_database_not_owned"
+            }),
+        );
+        return;
+    }
+
+    let Some(handle) = current_runtime_handle_or_log_skip(PERIODIC_LIBRARY_SCAN_WORKER, &runtime)
+    else {
         return;
     };
 
-    handle.spawn(async move {
-        let mut ticker = interval(Duration::from_secs(60));
-        ticker.tick().await;
-        let mut last_run_by_library: HashMap<String, tokio::time::Instant> = HashMap::new();
+    let worker_span =
+        tracing::info_span!("runtime_worker", worker_id = PERIODIC_LIBRARY_SCAN_WORKER);
+    handle.spawn(
+        async move {
+            let _guard = WorkerLifecycleGuard::new(PERIODIC_LIBRARY_SCAN_WORKER, &runtime);
+            let mut ticker = interval(Duration::from_secs(60));
+            ticker.tick().await;
+            let mut last_run_by_library: HashMap<String, tokio::time::Instant> = HashMap::new();
 
-        loop {
+            loop {
+                ticker.tick().await;
+
+                let _ = run_periodic_library_scan_iteration(
+                    task_queue.clone(),
+                    runtime.clone(),
+                    &mut last_run_by_library,
+                );
+            }
+        }
+        .instrument(worker_span.or_current()),
+    );
+}
+
+pub fn run_periodic_library_scan_iteration(
+    task_queue: SharedTaskQueue,
+    runtime: TaskRuntimeContext,
+    last_run_by_library: &mut HashMap<String, tokio::time::Instant>,
+) -> Result<usize, String> {
+    match run_periodic_library_scan_iteration_inner(task_queue, &runtime, last_run_by_library) {
+        Ok((scheduler_processed, due_libraries)) => {
+            if due_libraries.is_empty() {
+                return Ok(0);
+            }
+
+            log_worker_event(
+                PERIODIC_LIBRARY_SCAN_WORKER,
+                "completed",
+                &runtime,
+                RuntimeLifecycleFields::default()
+                    .with_library_id(single_value_or_empty(&due_libraries))
+                    .with_enqueued(due_libraries.len())
+                    .with_processed(scheduler_processed),
+            );
+            Ok(scheduler_processed)
+        }
+        Err((error, due_libraries)) => {
+            log_worker_event(
+                PERIODIC_LIBRARY_SCAN_WORKER,
+                "failed",
+                &runtime,
+                RuntimeLifecycleFields::default()
+                    .with_library_id(single_value_or_empty(&due_libraries))
+                    .with_enqueued(due_libraries.len())
+                    .with_error(&error),
+            );
+            Err(error)
+        }
+    }
+}
+
+fn spawn_background_task_worker(task_queue: SharedTaskQueue, runtime: TaskRuntimeContext) {
+    if !runtime.consumes_queue {
+        log_worker_event(
+            BACKGROUND_TASK_WORKER,
+            "skipped",
+            &runtime,
+            RuntimeLifecycleFields::default().with_skip_reason("queue_consumption_disabled"),
+        );
+        return;
+    }
+
+    let Some(handle) = current_runtime_handle_or_log_skip(BACKGROUND_TASK_WORKER, &runtime) else {
+        return;
+    };
+
+    let worker_span = tracing::info_span!("runtime_worker", worker_id = BACKGROUND_TASK_WORKER);
+    handle.spawn(
+        async move {
+            let _guard = WorkerLifecycleGuard::new(BACKGROUND_TASK_WORKER, &runtime);
+            let mut ticker = interval(Duration::from_secs(300));
             ticker.tick().await;
 
-            let profiles = load_persisted_library_scan_profiles(runtime.database_file.as_path())
-                .unwrap_or_else(|error| panic!("load periodic library scan profiles: {error}"))
+            loop {
+                ticker.tick().await;
+                let _ = run_background_task_iteration(task_queue.clone(), runtime.clone());
+            }
+        }
+        .instrument(worker_span.or_current()),
+    );
+}
+
+pub fn run_background_task_iteration(
+    task_queue: SharedTaskQueue,
+    runtime: TaskRuntimeContext,
+) -> Result<usize, String> {
+    let queued_tasks = {
+        let task_queue = task_queue
+            .lock()
+            .expect("task queue state lock should not be poisoned");
+        task_queue.count_by_simple_type().values().sum::<usize>()
+    };
+
+    if queued_tasks == 0 {
+        return Ok(0);
+    }
+
+    log_worker_event(
+        BACKGROUND_TASK_WORKER,
+        "running",
+        &runtime,
+        RuntimeLifecycleFields::default().with_queued_tasks(queued_tasks),
+    );
+
+    let processed = {
+        let mut task_queue = task_queue
+            .lock()
+            .expect("task queue state lock should not be poisoned");
+        match task_queue.process_available(&runtime) {
+            Ok(processed) => processed,
+            Err(error) => {
+                let error_message = error.to_string();
+                log_worker_event(
+                    BACKGROUND_TASK_WORKER,
+                    "failed",
+                    &runtime,
+                    RuntimeLifecycleFields::default()
+                        .with_queued_tasks(queued_tasks)
+                        .with_error(&error_message),
+                );
+                return Err(error_message);
+            }
+        }
+    };
+
+    log_worker_event(
+        BACKGROUND_TASK_WORKER,
+        "completed",
+        &runtime,
+        RuntimeLifecycleFields::default()
+            .with_queued_tasks(queued_tasks)
+            .with_processed(processed),
+    );
+    Ok(processed)
+}
+
+fn spawn_authentication_activity_cleanup_worker(runtime: TaskRuntimeContext) {
+    if !runtime.owns_main_database {
+        log_worker_event(
+            AUTHENTICATION_ACTIVITY_CLEANUP_WORKER,
+            "skipped",
+            &runtime,
+            RuntimeLifecycleFields::default().with_skip_reason("main_database_not_owned"),
+        );
+        return;
+    }
+
+    let Some(handle) =
+        current_runtime_handle_or_log_skip(AUTHENTICATION_ACTIVITY_CLEANUP_WORKER, &runtime)
+    else {
+        return;
+    };
+
+    let worker_span = tracing::info_span!(
+        "runtime_worker",
+        worker_id = AUTHENTICATION_ACTIVITY_CLEANUP_WORKER
+    );
+    handle.spawn(
+        async move {
+            let _guard =
+                WorkerLifecycleGuard::new(AUTHENTICATION_ACTIVITY_CLEANUP_WORKER, &runtime);
+            let mut ticker = interval(Duration::from_secs(86_400));
+            ticker.tick().await;
+
+            loop {
+                ticker.tick().await;
+                let _ = cleanup_authentication_activity_once(&runtime).await;
+            }
+        }
+        .instrument(worker_span.or_current()),
+    );
+}
+
+pub async fn cleanup_authentication_activity_once(
+    runtime: &TaskRuntimeContext,
+) -> Result<(), String> {
+    if !runtime.owns_main_database {
+        log_worker_event(
+            AUTHENTICATION_ACTIVITY_CLEANUP_WORKER,
+            "skipped",
+            runtime,
+            RuntimeLifecycleFields::default().with_skip_reason("main_database_not_owned"),
+        );
+        return Ok(());
+    }
+
+    log_worker_event(
+        AUTHENTICATION_ACTIVITY_CLEANUP_WORKER,
+        "running",
+        runtime,
+        RuntimeLifecycleFields::default(),
+    );
+
+    if runtime.database_file.is_dir() {
+        let error_message = format!(
+            "failed to open sqlite database at {}: path is a directory",
+            runtime.database_file.display()
+        );
+        log_worker_event(
+            AUTHENTICATION_ACTIVITY_CLEANUP_WORKER,
+            "failed",
+            runtime,
+            RuntimeLifecycleFields::default().with_error(&error_message),
+        );
+        return Err(error_message);
+    }
+
+    crate::auth::persisted_cleanup_authentication_activity(runtime.database_file.as_path())
+        .await
+        .ok_or_else(|| {
+            let error_message = format!(
+                "failed to clean up authentication activity using {}",
+                runtime.database_file.display()
+            );
+            log_worker_event(
+                AUTHENTICATION_ACTIVITY_CLEANUP_WORKER,
+                "failed",
+                runtime,
+                RuntimeLifecycleFields::default().with_error(&error_message),
+            );
+            error_message
+        })?;
+
+    log_worker_event(
+        AUTHENTICATION_ACTIVITY_CLEANUP_WORKER,
+        "completed",
+        runtime,
+        RuntimeLifecycleFields::default(),
+    );
+    Ok(())
+}
+
+fn bootstrap_startup_search_task_inner(
+    task_queue: &mut TaskQueueScheduler,
+    runtime: &TaskRuntimeContext,
+    startup_search_task: Option<&'static str>,
+) -> Result<usize, String> {
+    let Some(task_name) = startup_search_task else {
+        return Ok(0);
+    };
+
+    task_queue.enqueue(TaskQueueRecord::new(task_name.to_string(), 1_000, None));
+    task_queue
+        .process_available(runtime)
+        .map_err(|error| error.to_string())
+}
+
+fn current_runtime_handle_or_log_skip(
+    worker_id: &str,
+    runtime: &TaskRuntimeContext,
+) -> Option<Handle> {
+    let Ok(handle) = Handle::try_current() else {
+        log_worker_event(
+            worker_id,
+            "skipped",
+            runtime,
+            RuntimeLifecycleFields::default().with_skip_reason("runtime_handle_unavailable"),
+        );
+        return None;
+    };
+
+    Some(handle)
+}
+
+fn run_periodic_library_scan_iteration_inner(
+    task_queue: SharedTaskQueue,
+    runtime: &TaskRuntimeContext,
+    last_run_by_library: &mut HashMap<String, tokio::time::Instant>,
+) -> Result<(usize, Vec<String>), (String, Vec<String>)> {
+    let profiles = load_scan_profiles(
+        runtime.database_file.as_path(),
+        "load periodic library scan profiles",
+    )
+    .map_err(|error| (error, Vec::new()))?;
+    let active_libraries = library_scan_due_periods(&profiles).map_err(|error| {
+        (
+            format!("build periodic library scan periods: {error}"),
+            Vec::new(),
+        )
+    })?;
+
+    let mut due_libraries = Vec::new();
+    for (library_id, period) in &active_libraries {
+        let next_due = last_run_by_library
+            .entry(library_id.clone())
+            .or_insert_with(tokio::time::Instant::now);
+
+        if next_due.elapsed() < *period {
+            continue;
+        }
+
+        due_libraries.push(library_id.clone());
+    }
+
+    if due_libraries.is_empty() {
+        last_run_by_library.retain(|library_id, _| active_libraries.contains_key(library_id));
+        return Ok((0, due_libraries));
+    }
+
+    log_worker_event(
+        PERIODIC_LIBRARY_SCAN_WORKER,
+        "running",
+        runtime,
+        RuntimeLifecycleFields::default()
+            .with_library_id(single_value_or_empty(&due_libraries))
+            .with_enqueued(due_libraries.len()),
+    );
+
+    let mut scheduler_processed = 0;
+    for library_id in &due_libraries {
+        let mut queue = task_queue
+            .lock()
+            .expect("task queue state lock should not be poisoned");
+        queue.enqueue(TaskQueueRecord::new(
+            format!("SCAN_LIBRARY:{library_id}"),
+            100,
+            Some(library_id.clone()),
+        ));
+        scheduler_processed += queue
+            .process_available(runtime)
+            .map_err(|error| (error.to_string(), due_libraries.clone()))?;
+        if let Some(next_due) = last_run_by_library.get_mut(library_id) {
+            *next_due = tokio::time::Instant::now();
+        }
+    }
+
+    last_run_by_library.retain(|library_id, _| active_libraries.contains_key(library_id));
+    Ok((scheduler_processed, due_libraries))
+}
+
+fn bootstrap_startup_library_scans_inner(
+    task_queue: &mut TaskQueueScheduler,
+    runtime: &TaskRuntimeContext,
+) -> Result<(Vec<ScheduledLibraryScan>, usize), String> {
+    if !runtime.owns_main_database {
+        return Ok((Vec::new(), 0));
+    }
+
+    let profiles = load_scan_profiles(
+        runtime.database_file.as_path(),
+        "load startup library scan profiles",
+    )?;
+    if profiles.is_empty() {
+        return Ok((Vec::new(), 0));
+    }
+
+    let startup_tasks = build_startup_library_scan_tasks(&profiles);
+    let enqueued = startup_tasks.len();
+    for task in startup_tasks {
+        task_queue.enqueue(TaskQueueRecord::new(task.id, task.priority, task.group));
+    }
+
+    let scheduled_scans = build_scheduled_library_scans(&profiles)
+        .map_err(|error| format!("build scheduled library scans: {error}"))?;
+
+    Ok((scheduled_scans, enqueued))
+}
+
+fn load_scan_profiles(
+    database_file: &std::path::Path,
+    action: &str,
+) -> Result<Vec<LibraryScanProfile>, String> {
+    load_persisted_library_scan_profiles(database_file)
+        .map_err(|error| format!("{action}: {error}"))
+        .map(|profiles| {
+            profiles
                 .into_iter()
                 .map(|profile| LibraryScanProfile {
                     library_id: profile.library_id,
                     scan_startup: profile.scan_startup,
                     scan_interval: profile.scan_interval,
                 })
-                .collect::<Vec<_>>();
-            let active_libraries = library_scan_due_periods(&profiles)
-                .unwrap_or_else(|error| panic!("build periodic library scan periods: {error}"));
-
-            for (library_id, period) in active_libraries.clone() {
-                let next_due = last_run_by_library
-                    .entry(library_id.clone())
-                    .or_insert_with(tokio::time::Instant::now);
-
-                if next_due.elapsed() < period {
-                    continue;
-                }
-
-                let mut queue = task_queue
-                    .lock()
-                    .expect("task queue state lock should not be poisoned");
-                queue.enqueue(TaskQueueRecord::new(
-                    format!("SCAN_LIBRARY:{library_id}"),
-                    100,
-                    Some(library_id),
-                ));
-                drop(queue.process_available(&runtime));
-                *next_due = tokio::time::Instant::now();
-            }
-
-            last_run_by_library.retain(|library_id, _| active_libraries.contains_key(library_id));
-        }
-    });
+                .collect::<Vec<_>>()
+        })
 }
 
-fn spawn_background_task_worker(task_queue: SharedTaskQueue, runtime: TaskRuntimeContext) {
-    let Ok(handle) = Handle::try_current() else {
-        return;
-    };
-
-    handle.spawn(async move {
-        let mut ticker = interval(Duration::from_secs(300));
-        ticker.tick().await;
-
-        loop {
-            ticker.tick().await;
-            let mut task_queue = task_queue
-                .lock()
-                .expect("task queue state lock should not be poisoned");
-            drop(task_queue.process_available(&runtime));
-        }
-    });
+fn load_library_ids(database_file: &std::path::Path, action: &str) -> Result<Vec<String>, String> {
+    load_persisted_library_ids(database_file).map_err(|error| format!("{action}: {error}"))
 }
 
-fn spawn_authentication_activity_cleanup_worker(runtime: TaskRuntimeContext) {
-    let Ok(handle) = Handle::try_current() else {
-        return;
-    };
-
-    handle.spawn(async move {
-        let mut ticker = interval(Duration::from_secs(86_400));
-        ticker.tick().await;
-
-        loop {
-            ticker.tick().await;
-            cleanup_authentication_activity_once(&runtime).await;
-        }
-    });
+fn single_value_or_empty(values: &[String]) -> &str {
+    if values.len() == 1 {
+        values[0].as_str()
+    } else {
+        ""
+    }
 }
 
-pub async fn cleanup_authentication_activity_once(runtime: &TaskRuntimeContext) {
-    if !runtime.owns_main_database {
-        return;
+#[derive(Default)]
+struct RuntimeLifecycleFields<'a> {
+    skip_reason: &'a str,
+    error: &'a str,
+    startup_task: &'a str,
+    library_id: &'a str,
+    enqueued: usize,
+    processed: usize,
+    scheduled_scans: usize,
+    queued_tasks: usize,
+}
+
+impl<'a> RuntimeLifecycleFields<'a> {
+    fn with_skip_reason(mut self, skip_reason: &'a str) -> Self {
+        self.skip_reason = skip_reason;
+        self
     }
 
-    let _ = crate::auth::persisted_cleanup_authentication_activity(runtime.database_file.as_path())
-        .await;
+    fn with_error(mut self, error: &'a str) -> Self {
+        self.error = error;
+        self
+    }
+
+    fn with_startup_task(mut self, startup_task: &'a str) -> Self {
+        self.startup_task = startup_task;
+        self
+    }
+
+    fn with_library_id(mut self, library_id: &'a str) -> Self {
+        self.library_id = library_id;
+        self
+    }
+
+    fn with_enqueued(mut self, enqueued: usize) -> Self {
+        self.enqueued = enqueued;
+        self
+    }
+
+    fn with_processed(mut self, processed: usize) -> Self {
+        self.processed = processed;
+        self
+    }
+
+    fn with_scheduled_scans(mut self, scheduled_scans: usize) -> Self {
+        self.scheduled_scans = scheduled_scans;
+        self
+    }
+
+    fn with_queued_tasks(mut self, queued_tasks: usize) -> Self {
+        self.queued_tasks = queued_tasks;
+        self
+    }
+}
+
+fn log_runtime_bootstrap(
+    component: &str,
+    outcome: &str,
+    runtime: &TaskRuntimeContext,
+    fields: RuntimeLifecycleFields<'_>,
+) {
+    if outcome == "failed" {
+        error!(
+            event = WORKER_BOOTSTRAP_EVENT,
+            component,
+            outcome,
+            consumes_queue = runtime.consumes_queue,
+            owns_main_database = runtime.owns_main_database,
+            owns_search_index = runtime.owns_search_index,
+            skip_reason = fields.skip_reason,
+            startup_task = fields.startup_task,
+            library_id = fields.library_id,
+            enqueued = fields.enqueued,
+            processed = fields.processed,
+            scheduled_scans = fields.scheduled_scans,
+            queued_tasks = fields.queued_tasks,
+            error = fields.error,
+            "runtime bootstrap lifecycle"
+        );
+    } else {
+        info!(
+            event = WORKER_BOOTSTRAP_EVENT,
+            component,
+            outcome,
+            consumes_queue = runtime.consumes_queue,
+            owns_main_database = runtime.owns_main_database,
+            owns_search_index = runtime.owns_search_index,
+            skip_reason = fields.skip_reason,
+            startup_task = fields.startup_task,
+            library_id = fields.library_id,
+            enqueued = fields.enqueued,
+            processed = fields.processed,
+            scheduled_scans = fields.scheduled_scans,
+            queued_tasks = fields.queued_tasks,
+            error = fields.error,
+            "runtime bootstrap lifecycle"
+        );
+    }
+}
+
+fn log_worker_event(
+    worker_id: &str,
+    outcome: &str,
+    runtime: &TaskRuntimeContext,
+    fields: RuntimeLifecycleFields<'_>,
+) {
+    let event = if outcome == "shutdown" {
+        WORKER_SHUTDOWN_EVENT
+    } else {
+        WORKER_BOOTSTRAP_EVENT
+    };
+
+    if outcome == "failed" {
+        error!(
+            event,
+            worker_id,
+            outcome,
+            consumes_queue = runtime.consumes_queue,
+            owns_main_database = runtime.owns_main_database,
+            owns_search_index = runtime.owns_search_index,
+            in_span = Span::current().id().is_some(),
+            skip_reason = fields.skip_reason,
+            library_id = fields.library_id,
+            enqueued = fields.enqueued,
+            processed = fields.processed,
+            queued_tasks = fields.queued_tasks,
+            error = fields.error,
+            "runtime worker lifecycle"
+        );
+    } else {
+        info!(
+            event,
+            worker_id,
+            outcome,
+            consumes_queue = runtime.consumes_queue,
+            owns_main_database = runtime.owns_main_database,
+            owns_search_index = runtime.owns_search_index,
+            in_span = Span::current().id().is_some(),
+            skip_reason = fields.skip_reason,
+            library_id = fields.library_id,
+            enqueued = fields.enqueued,
+            processed = fields.processed,
+            queued_tasks = fields.queued_tasks,
+            error = fields.error,
+            "runtime worker lifecycle"
+        );
+    }
+}
+
+struct WorkerLifecycleGuard {
+    worker: &'static str,
+    runtime: TaskRuntimeContext,
+}
+
+impl WorkerLifecycleGuard {
+    fn new(worker: &'static str, runtime: &TaskRuntimeContext) -> Self {
+        log_worker_event(
+            worker,
+            "started",
+            runtime,
+            RuntimeLifecycleFields::default(),
+        );
+        Self {
+            worker,
+            runtime: runtime.clone(),
+        }
+    }
+}
+
+impl Drop for WorkerLifecycleGuard {
+    fn drop(&mut self) {
+        log_worker_event(
+            self.worker,
+            "shutdown",
+            &self.runtime,
+            RuntimeLifecycleFields::default(),
+        );
+    }
 }

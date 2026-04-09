@@ -474,7 +474,7 @@ async fn router_opds_v1_collections_preserves_kotlin_tertiary_case_order() {
     seed_router_contract_data(&paths).await;
 
     let collator = kotlin_unicode_3_collator();
-    let mut names = vec![
+    let mut names = [
         "eclair Collection".to_string(),
         "Eclair Collection".to_string(),
         "ECLAIR Collection".to_string(),
@@ -550,7 +550,7 @@ async fn router_opds_v1_collections_preserves_kotlin_tertiary_case_order() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_text(response).await;
 
-    let expected_ids = vec![
+    let expected_ids = [
         "/opds/v1.2/collections/collection-b",
         "/opds/v1.2/collections/collection-a",
         "/opds/v1.2/collections/collection-1",

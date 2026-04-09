@@ -168,13 +168,11 @@ pub async fn book_thumbnail_by_id(
 
     if let Ok(Some(media)) =
         load_persisted_book_media(auth_db.database_file.as_path(), &book_id).await
+        && let Some(user) = resolved_auth_user(&headers)
+        && !user_can_access_book_media(auth_db.database_file.as_path(), &book_id, &user, &media)
+            .await
     {
-        if let Some(user) = resolved_auth_user(&headers)
-            && !user_can_access_book_media(auth_db.database_file.as_path(), &book_id, &user, &media)
-                .await
-        {
-            return StatusCode::FORBIDDEN.into_response();
-        }
+        return StatusCode::FORBIDDEN.into_response();
     }
 
     match load_book_thumbnail_by_id(auth_db.database_file.as_path(), &thumbnail_id).await {

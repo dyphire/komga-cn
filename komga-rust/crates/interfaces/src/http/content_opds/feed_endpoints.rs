@@ -594,7 +594,7 @@ pub(super) async fn opds_v2_collections_feed(
         .map(|library| library.last_modified.as_str())
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-        .unwrap_or_else(|| super::feeds::opds_now_timestamp());
+        .unwrap_or_else(super::feeds::opds_now_timestamp);
 
     (
         StatusCode::OK,

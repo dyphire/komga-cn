@@ -100,9 +100,7 @@ fn syncpoint_delete_scope(query: &str) -> SyncpointDeleteScope {
                 .split(',')
                 .map(|value| value.trim().to_string())
                 .collect::<Vec<_>>();
-            if split_values.is_empty() {
-                SyncpointDeleteScope::All
-            } else if split_values.len() == 1 && single.is_empty() {
+            if split_values.is_empty() || (split_values.len() == 1 && single.is_empty()) {
                 SyncpointDeleteScope::All
             } else {
                 SyncpointDeleteScope::ApiKeys(split_values)

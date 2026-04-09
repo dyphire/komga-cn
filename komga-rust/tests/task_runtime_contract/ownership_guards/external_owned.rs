@@ -43,7 +43,9 @@ async fn runtime_blocks_authentication_activity_cleanup_when_main_database_is_ex
         owns_main_database: false,
         ..runtime_task_context(&paths)
     };
-    komga_rust::infrastructure::task_queue::cleanup_authentication_activity_once(&runtime).await;
+    komga_rust::infrastructure::task_queue::cleanup_authentication_activity_once(&runtime)
+        .await
+        .expect("auth cleanup should skip cleanly when main database is external-owned");
 
     let verify_pool = connect_pool(paths.main_db.as_path(), 1)
         .await

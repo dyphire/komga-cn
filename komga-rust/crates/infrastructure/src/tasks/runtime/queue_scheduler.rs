@@ -1,5 +1,6 @@
 use super::*;
 use komga_application::task_processing::TaskQueueAdminPort;
+use tracing::{error, info};
 
 #[derive(Clone, Debug)]
 pub struct TaskQueueScheduler {
@@ -38,9 +39,11 @@ impl TaskQueueScheduler {
         if let Some(store) = &self.persisted_store {
             store.persist_task(&store_record(&task));
             self.reload_admin_from_store();
+            self.log_task_event("task_enqueue", &task, "queued", None);
             return;
         }
-        self.admin.enqueue(task);
+        self.admin.enqueue(task.clone());
+        self.log_task_event("task_enqueue", &task, "queued", None);
     }
 
     pub fn take_next(&mut self) -> Option<TaskQueueRecord> {
@@ -55,6 +58,8 @@ impl TaskQueueScheduler {
             store.claim_task(&task.id, &self.consumer_owner);
             self.reload_admin_from_store();
         }
+
+        self.log_task_event("task_claim", &task, "claimed", None);
 
         Some(task)
     }
@@ -78,6 +83,7 @@ impl TaskQueueScheduler {
             if let Some(store) = &self.persisted_store {
                 store.claim_task(&task.id, &self.consumer_owner);
             }
+            self.log_task_event("task_claim", &task, "claimed", None);
             selected.push(task);
         }
         self.reload_admin_from_store();
@@ -85,13 +91,21 @@ impl TaskQueueScheduler {
     }
 
     pub fn complete(&mut self, task_id: &str) -> bool {
+        let task = self.current_task(task_id);
         if let Some(store) = &self.persisted_store {
             let removed = store.delete_task(task_id);
             self.reload_admin_from_store();
+            if removed && let Some(task) = task.as_ref() {
+                self.log_task_event("task_complete", task, "completed", None);
+            }
             return removed;
         }
 
-        self.admin.complete(task_id)
+        let removed = self.admin.complete(task_id);
+        if removed && let Some(task) = task.as_ref() {
+            self.log_task_event("task_complete", task, "completed", None);
+        }
+        removed
     }
 
     pub fn admin(&self) -> &TaskQueueAdmin {
@@ -113,15 +127,25 @@ impl TaskQueueScheduler {
     pub fn disown_all(&mut self) -> usize {
         if self.persisted_store.is_some() {
             self.reload_admin_from_store();
+        }
+        let owned_tasks = self.current_owned_tasks();
+        if self.persisted_store.is_some() {
             let disowned = self.admin.disown_all();
             if let Some(store) = &self.persisted_store {
                 store.disown_all();
             }
             self.reload_admin_from_store();
+            for task in &owned_tasks {
+                self.log_task_event("task_disown", task, "disowned", None);
+            }
             return disowned;
         }
 
-        self.admin.disown_all()
+        let disowned = self.admin.disown_all();
+        for task in &owned_tasks {
+            self.log_task_event("task_disown", task, "disowned", None);
+        }
+        disowned
     }
 
     pub fn clear_unowned(&mut self) -> usize {
@@ -147,24 +171,39 @@ impl TaskQueueScheduler {
         }
 
         let mut processed = 0usize;
+        let mut logged_start = false;
         loop {
             let batch = self.take_available_batch();
             if batch.is_empty() {
+                if logged_start {
+                    self.log_process_available("completed", processed, None);
+                }
                 return Ok(processed);
+            }
+            if !logged_start {
+                self.log_process_available("started", processed, None);
+                logged_start = true;
             }
 
             let mut batch_iter = batch.into_iter();
             while let Some(task) = batch_iter.next() {
+                self.log_task_event("task_start", &task, "started", None);
                 match self.execute_claimed_task(runtime, &task) {
                     Ok(()) => {
                         self.complete(&task.id);
                         processed += 1;
                     }
                     Err(error) => {
-                        self.complete(&task.id);
+                        let error_message = error.to_string();
+                        self.fail_claimed_task(&task, error_message.as_str());
                         for remaining in batch_iter {
-                            self.disown_task(&remaining.id);
+                            self.disown_claimed_task(&remaining);
                         }
+                        self.log_process_available(
+                            "failed",
+                            processed,
+                            Some(error_message.as_str()),
+                        );
                         return Err(error);
                     }
                 }
@@ -176,18 +215,28 @@ impl TaskQueueScheduler {
         &mut self,
         runtime: &RuntimeConfig,
     ) -> Result<usize, TaskExecutionError> {
+        if self.persisted_store.is_some() {
+            self.reload_admin_from_store();
+        }
+        let recovered_tasks = self.current_owned_tasks();
         self.disown_all();
+        for task in &recovered_tasks {
+            self.log_task_event("task_recover", task, "recovered", None);
+        }
         self.process_available(runtime)
     }
 
-    fn disown_task(&mut self, task_id: &str) {
+    fn disown_claimed_task(&mut self, task: &TaskQueueRecord) {
         if let Some(store) = &self.persisted_store {
-            store.disown_task(task_id);
+            store.disown_task(&task.id);
             self.reload_admin_from_store();
+            self.log_task_event("task_disown", task, "disowned", None);
             return;
         }
 
-        let _ = self.admin.disown(task_id);
+        if self.admin.disown(&task.id) {
+            self.log_task_event("task_disown", task, "disowned", None);
+        }
     }
 
     fn reload_admin_from_store(&mut self) {
@@ -218,21 +267,101 @@ impl TaskQueueScheduler {
 
         Err(TaskExecutionError::unsupported_task(&task.simple_type))
     }
+
+    fn fail_claimed_task(&mut self, task: &TaskQueueRecord, error_message: &str) {
+        if let Some(store) = &self.persisted_store {
+            let removed = store.delete_task(&task.id);
+            self.reload_admin_from_store();
+            if removed {
+                self.log_task_event("task_fail", task, "failed", Some(error_message));
+            }
+            return;
+        }
+
+        if self.admin.complete(&task.id) {
+            self.log_task_event("task_fail", task, "failed", Some(error_message));
+        }
+    }
+
+    fn current_task(&self, task_id: &str) -> Option<TaskQueueRecord> {
+        self.persisted_store
+            .as_ref()
+            .and_then(|store| store_record_by_id(store, task_id))
+    }
+
+    fn current_owned_tasks(&self) -> Vec<TaskQueueRecord> {
+        self.persisted_store
+            .as_ref()
+            .map(|store| {
+                store
+                    .load_records()
+                    .into_iter()
+                    .filter(|task| task.owner.as_deref() == Some(self.consumer_owner.as_str()))
+                    .map(record_to_runtime_task)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn log_process_available(&self, outcome: &str, processed: usize, error_message: Option<&str>) {
+        match error_message {
+            Some(error_message) => error!(
+                event = "task_process_available",
+                consumer_owner = %self.consumer_owner,
+                outcome,
+                processed,
+                error = error_message,
+                "task scheduler lifecycle"
+            ),
+            None => info!(
+                event = "task_process_available",
+                consumer_owner = %self.consumer_owner,
+                outcome,
+                processed,
+                "task scheduler lifecycle"
+            ),
+        }
+    }
+
+    fn log_task_event(
+        &self,
+        event_name: &str,
+        task: &TaskQueueRecord,
+        outcome: &str,
+        error_message: Option<&str>,
+    ) {
+        let group = task.group.as_deref().unwrap_or("");
+        match error_message {
+            Some(error_message) => error!(
+                event = event_name,
+                task_id = %task.id,
+                task_type = %task.simple_type,
+                priority = task.priority,
+                group,
+                consumer_owner = %self.consumer_owner,
+                outcome,
+                error = error_message,
+                "task scheduler lifecycle"
+            ),
+            None => info!(
+                event = event_name,
+                task_id = %task.id,
+                task_type = %task.simple_type,
+                priority = task.priority,
+                group,
+                consumer_owner = %self.consumer_owner,
+                outcome,
+                "task scheduler lifecycle"
+            ),
+        }
+    }
 }
 
 fn load_admin_from_store(store: &SqliteTaskQueueStore) -> TaskQueueAdmin {
     let mut admin = TaskQueueOrchestrator::new("runtime-store", true);
     for record in store.load_records() {
         let owner = record.owner.clone();
-        let task = TaskQueueRecord {
-            id: record.id,
-            simple_type: record.simple_type,
-            priority: record.priority,
-            group: record.group,
-            payload: record.payload,
-            owner: None,
-            order: 0,
-        };
+        let task = record_to_runtime_task(record);
         let id = task.id.clone();
         admin.enqueue(task);
         if let Some(owner) = owner {
@@ -251,4 +380,24 @@ fn store_record(task: &TaskQueueRecord) -> PersistedTaskStoreRecord {
         payload: task.payload.clone(),
         owner: task.owner.clone(),
     }
+}
+
+fn record_to_runtime_task(record: PersistedTaskStoreRecord) -> TaskQueueRecord {
+    TaskQueueRecord {
+        id: record.id,
+        simple_type: record.simple_type,
+        priority: record.priority,
+        group: record.group,
+        payload: record.payload,
+        owner: record.owner,
+        order: 0,
+    }
+}
+
+fn store_record_by_id(store: &SqliteTaskQueueStore, task_id: &str) -> Option<TaskQueueRecord> {
+    store
+        .load_records()
+        .into_iter()
+        .find(|record| record.id == task_id)
+        .map(record_to_runtime_task)
 }

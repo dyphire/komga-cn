@@ -3,7 +3,6 @@ use std::path::Path;
 
 use unrar::Archive;
 
-const RAR_SIGNATURE_PREFIX: &[u8] = b"Rar!\x1A\x07";
 const RAR4_SIGNATURE: &[u8] = b"Rar!\x1A\x07\x00";
 const RAR5_SIGNATURE: &[u8] = b"Rar!\x1A\x07\x01\x00";
 
@@ -17,8 +16,6 @@ pub(crate) fn detect_rar_media_type(path: &Path) -> &'static str {
         "application/x-rar-compressed; version=5"
     } else if header.starts_with(RAR4_SIGNATURE) {
         "application/x-rar-compressed; version=4"
-    } else if header.starts_with(RAR_SIGNATURE_PREFIX) {
-        "application/x-rar-compressed"
     } else {
         "application/x-rar-compressed"
     }

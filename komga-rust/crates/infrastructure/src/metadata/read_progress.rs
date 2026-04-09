@@ -75,6 +75,7 @@ pub async fn persist_read_progress(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn persist_book_progression(
     database_file: &Path,
     book_id: &str,

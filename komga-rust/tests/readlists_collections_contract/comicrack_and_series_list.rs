@@ -26,9 +26,7 @@ async fn router_readlist_match_comicrack_rejects_invalid_xml_and_reports_matches
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
-    let missing_file_part_body = format!(
-        "--komga-rust-comicrack-boundary\r\nContent-Disposition: form-data; name=\"upload\"; filename=\"list.cbl\"\r\nContent-Type: application/xml\r\n\r\n<ReadingList />\r\n--komga-rust-comicrack-boundary--\r\n"
-    );
+    let missing_file_part_body = "--komga-rust-comicrack-boundary\r\nContent-Disposition: form-data; name=\"upload\"; filename=\"list.cbl\"\r\nContent-Type: application/xml\r\n\r\n<ReadingList />\r\n--komga-rust-comicrack-boundary--\r\n".to_string();
     let missing_file_part = app
         .clone()
         .oneshot(

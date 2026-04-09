@@ -21,7 +21,7 @@ use std::path::Path as FsPath;
 
 use crate::OperationalState;
 use crate::http::identity_access::auth::{
-    auth_token_user, persisted_api_key_user_by_token, session_token_for_user_with_namespace,
+    persisted_api_key_user_by_token, resolved_auth_user, session_token_for_user_with_namespace,
     user_has_role, user_is_admin,
 };
 use crate::http::request_urls::{
