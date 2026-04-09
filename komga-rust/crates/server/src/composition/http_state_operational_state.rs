@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::build_metadata::current_build_metadata;
+
 pub(super) fn compose_operational_state(
     config: &RuntimeConfig,
     task_queue: SharedTaskQueue,
@@ -10,6 +12,7 @@ pub(super) fn compose_operational_state(
     let clear_task_queue = task_queue.clone();
     let count_task_queue = task_queue.clone();
     let apply_task_queue = task_queue.clone();
+    let build_metadata = current_build_metadata();
 
     OperationalState {
         runtime: RuntimeState {
@@ -21,6 +24,13 @@ pub(super) fn compose_operational_state(
             config_dir: config.config_dir.clone(),
             bind_address: config.bind_address,
             server_context_path: config.server_context_path.clone(),
+        },
+        build_metadata: OperationalBuildMetadata {
+            version: build_metadata.version,
+            build_time: build_metadata.build_time,
+            git_branch: build_metadata.git_branch,
+            git_commit_id: build_metadata.git_commit_id,
+            git_commit_time: build_metadata.git_commit_time,
         },
         settings_store: Arc::new(
             http_state_operational_access::compose_server_settings_store(

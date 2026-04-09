@@ -41,8 +41,8 @@ use komga_interfaces::http::discovery_auth::DiscoveryAuthState;
 use komga_interfaces::http::identity_access::auth::configure_remember_me_store;
 use komga_interfaces::http::state::{
     AuthDatabaseState, BookImportSseEvent, LibraryCatalogOperations, OAuth2ClientConfig,
-    OperationalState, ReadProgressState, RemoteCacheEntry, RuntimeProfile, RuntimeState,
-    SseOperationalState, TransientBooksStore,
+    OperationalBuildMetadata, OperationalState, ReadProgressState, RemoteCacheEntry,
+    RuntimeProfile, RuntimeState, SseOperationalState, TransientBooksStore,
 };
 use komga_interfaces::{
     BookImportSnapshot as InterfacesBookImportSnapshot, BookSnapshot as InterfacesBookSnapshot,

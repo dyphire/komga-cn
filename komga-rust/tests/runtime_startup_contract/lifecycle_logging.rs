@@ -52,6 +52,10 @@ fn runtime_startup_real_server_path_emits_banner_runtime_search_and_bind_events(
         field_str(banner, "version").is_some_and(|value| !value.is_empty()),
         "startup banner should expose a non-empty product version: {banner:?}",
     );
+    assert!(
+        field_str(banner, "build_time").is_some_and(|value| !value.is_empty()),
+        "startup banner should expose a non-empty build time: {banner:?}",
+    );
     assert_eq!(field_str(runtime, "runtime_mode"), Some("snapshot"));
     assert_eq!(
         field_str(runtime, "runtime_profile"),

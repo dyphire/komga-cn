@@ -34,3 +34,6 @@ komga-application = { path = "../application" }
 komga-infrastructure = { path = "../infrastructure" }
 komga-interfaces = { path = "../interfaces" }
 komga-kepubify = { path = "../kepubify" }
+
+[build-dependencies]
+time.workspace = true

@@ -42,6 +42,15 @@ pub struct RuntimeState {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OperationalBuildMetadata {
+    pub version: String,
+    pub build_time: String,
+    pub git_branch: Option<String>,
+    pub git_commit_id: Option<String>,
+    pub git_commit_time: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OAuth2ClientConfig {
     pub registration_id: String,
     pub client_name: String,
@@ -134,6 +143,7 @@ pub struct LibraryCatalogOperations {
 #[derive(Clone)]
 pub struct OperationalState {
     pub runtime: RuntimeState,
+    pub build_metadata: OperationalBuildMetadata,
     pub settings_store: Arc<ServerSettingsStore>,
     pub oauth2_clients: Arc<Vec<OAuth2ClientConfig>>,
     pub oauth2_account_creation: bool,

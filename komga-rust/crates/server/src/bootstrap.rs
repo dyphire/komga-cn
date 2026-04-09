@@ -2,6 +2,7 @@ use tokio::net::TcpListener;
 
 use komga_application::task_processing::TaskRuntimeConfig;
 
+use crate::build_metadata::current_build_metadata;
 use crate::composition::start_server;
 use crate::config::{RuntimeConfig, RuntimeMode, RuntimeProfile, WriterDecision, WriterKind};
 
@@ -16,7 +17,7 @@ const STARTUP_BANNER_TEMPLATE: &str =
 const APPLICATION_VERSION_PLACEHOLDER: &str = "${application.version}";
 
 pub(crate) fn emit_startup_banner_and_runtime_event(config: &RuntimeConfig) {
-    let build = build_metadata();
+    let build = current_build_metadata();
     let rendered_banner = render_startup_banner(build.version.as_str());
     let _ = crate::logging::emit_display(rendered_banner.as_str());
     let task_runtime = config.task_runtime_context();
@@ -36,9 +37,9 @@ pub(crate) fn emit_startup_banner_and_runtime_event(config: &RuntimeConfig) {
         product = PRODUCT_NAME,
         version = build.version.as_str(),
         build_time = build.build_time.as_str(),
-        git_branch = build.git_branch.as_str(),
-        git_commit_id = build.git_commit_id.as_str(),
-        git_commit_time = build.git_commit_time.as_str(),
+        git_branch = build.git_branch.as_deref().unwrap_or_default(),
+        git_commit_id = build.git_commit_id.as_deref().unwrap_or_default(),
+        git_commit_time = build.git_commit_time.as_deref().unwrap_or_default(),
         runtime_mode = runtime_mode_label(config.mode),
         runtime_profile = runtime_profile_label(config.runtime_profile),
         bind_address = %config.bind_address,
@@ -209,30 +210,6 @@ fn schema_gate_failure(
         "Startup schema gate failed",
     );
     std::io::Error::other(error_message)
-}
-
-struct BuildMetadata {
-    version: String,
-    build_time: String,
-    git_branch: String,
-    git_commit_id: String,
-    git_commit_time: String,
-}
-
-fn build_metadata() -> BuildMetadata {
-    BuildMetadata {
-        version: env_value("CARGO_PKG_VERSION").unwrap_or_default(),
-        build_time: env_value("BUILD_TIME").unwrap_or_default(),
-        git_branch: env_value("GIT_BRANCH").unwrap_or_default(),
-        git_commit_id: env_value("GIT_COMMIT_ID").unwrap_or_default(),
-        git_commit_time: env_value("GIT_COMMIT_TIME").unwrap_or_default(),
-    }
-}
-
-fn env_value(name: &str) -> Option<String> {
-    std::env::var(name)
-        .ok()
-        .filter(|value| !value.trim().is_empty())
 }
 
 fn render_startup_banner(version: &str) -> String {

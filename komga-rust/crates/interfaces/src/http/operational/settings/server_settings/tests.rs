@@ -16,8 +16,8 @@ use crate::http::identity_access::auth::{
     configure_remember_me_store, session_token_for_user_with_namespace,
 };
 use crate::http::state::{
-    BookImportSseEvent, LibraryCatalogOperations, OAuth2ClientConfig, RemoteCacheEntry,
-    RuntimeState, SseOperationalState, TransientBooksStore,
+    BookImportSseEvent, LibraryCatalogOperations, OAuth2ClientConfig, OperationalBuildMetadata,
+    RemoteCacheEntry, RuntimeState, SseOperationalState, TransientBooksStore,
 };
 use crate::operational_runtime_access::ServerSettingsStore;
 
@@ -102,6 +102,13 @@ where
             config_dir: Some(fixture_root.clone()),
             bind_address: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)),
             server_context_path: None,
+        },
+        build_metadata: OperationalBuildMetadata {
+            version: "0.1.0".to_string(),
+            build_time: "2026-04-09T00:00:00Z".to_string(),
+            git_branch: Some("main".to_string()),
+            git_commit_id: Some("deadbeef".to_string()),
+            git_commit_time: Some("2026-04-09T00:00:00Z".to_string()),
         },
         settings_store,
         oauth2_clients: Arc::new(Vec::<OAuth2ClientConfig>::new()),

@@ -24,12 +24,17 @@ FROM --platform=$TARGETPLATFORM rust:1-alpine AS rust-builder
 ARG TARGETOS
 ARG TARGETARCH
 ARG TARGETVARIANT
+ARG BUILD_TIME
+ARG GIT_BRANCH
+ARG GIT_COMMIT_ID
+ARG GIT_COMMIT_TIME
 WORKDIR /workspace
 COPY komga-rust ./komga-rust
 COPY --from=webui-builder /workspace/komga-webui/dist ./komga-webui/dist
 RUN --mount=type=cache,id=komga-rust-cargo-registry-${TARGETOS}-${TARGETARCH}${TARGETVARIANT},target=/usr/local/cargo/registry \
     --mount=type=cache,id=komga-rust-cargo-git-${TARGETOS}-${TARGETARCH}${TARGETVARIANT},target=/usr/local/cargo/git \
     --mount=type=cache,id=komga-rust-target-${TARGETOS}-${TARGETARCH}${TARGETVARIANT},target=/workspace/komga-rust/target \
+    BUILD_TIME="$BUILD_TIME" GIT_BRANCH="$GIT_BRANCH" GIT_COMMIT_ID="$GIT_COMMIT_ID" GIT_COMMIT_TIME="$GIT_COMMIT_TIME" \
     cargo build --manifest-path /workspace/komga-rust/Cargo.toml --locked --release --bin komga-rust
 
 FROM --platform=$TARGETPLATFORM alpine:3.23 AS runner

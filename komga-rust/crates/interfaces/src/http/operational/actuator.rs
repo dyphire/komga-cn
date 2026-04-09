@@ -72,24 +72,22 @@ pub(crate) async fn actuator_health(
 }
 
 pub(crate) async fn actuator_info(
-    Extension(_state): Extension<OperationalState>,
+    Extension(state): Extension<OperationalState>,
     headers: HeaderMap,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
         return response;
     }
 
-    let build_time = std::env::var("BUILD_TIME").ok();
-    let commit_time = std::env::var("GIT_COMMIT_TIME").ok();
-    let commit_id = std::env::var("GIT_COMMIT_ID").ok();
-    let branch = std::env::var("GIT_BRANCH").ok();
-    let version = std::env::var("CARGO_PKG_VERSION").ok();
+    let build_time =
+        Some(state.build_metadata.build_time.as_str()).filter(|value| !value.is_empty());
+    let commit_time = state.build_metadata.git_commit_time.as_deref();
+    let commit_id = state.build_metadata.git_commit_id.as_deref();
+    let branch = state.build_metadata.git_branch.as_deref();
+    let version = Some(state.build_metadata.version.as_str()).filter(|value| !value.is_empty());
 
     let mut payload = serde_json::Map::new();
-    payload.insert(
-        "build".to_string(),
-        build_info_json(version.as_deref(), build_time.as_deref()),
-    );
+    payload.insert("build".to_string(), build_info_json(version, build_time));
     payload.insert("os".to_string(), os_info_json());
 
     if branch.is_some() || commit_id.is_some() || commit_time.is_some() {
