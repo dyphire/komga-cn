@@ -1,4 +1,7 @@
-use komga_application::discovery::BookReadModel;
+use komga_application::discovery::{
+    BookMetadataAuthorReadModel, BookMetadataLinkReadModel, BookReadModel,
+    BookReadProgressReadModel,
+};
 use komga_application::discovery::{RuntimeBooksLatestQuery, RuntimeBooksListQuery};
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext, PageEnvelope};
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
@@ -23,15 +26,108 @@ enum BookOrdering {
 struct SqlxBookListRow {
     id: String,
     series_id: String,
+    series_title: String,
+    library_id: String,
     title: String,
+    url: String,
+    number: i64,
+    created: String,
+    last_modified: String,
+    file_last_modified: String,
+    size_bytes: i64,
+    media_status: String,
+    media_type: String,
+    media_pages_count: i64,
+    media_comment: String,
+    media_epub_divina_compatible: bool,
+    media_epub_is_kepub: bool,
+    metadata_release_date: Option<String>,
+    metadata_title_lock: bool,
+    metadata_summary: String,
+    metadata_summary_lock: bool,
+    metadata_number: String,
+    metadata_number_lock: bool,
+    metadata_number_sort: f64,
+    metadata_number_sort_lock: bool,
+    metadata_release_date_lock: bool,
+    metadata_authors: String,
+    metadata_authors_lock: bool,
+    metadata_tags: String,
+    metadata_tags_lock: bool,
+    metadata_isbn: String,
+    metadata_isbn_lock: bool,
+    metadata_links: String,
+    metadata_links_lock: bool,
+    metadata_created: String,
+    metadata_last_modified: String,
+    read_progress_page: Option<i64>,
+    read_progress_completed: Option<bool>,
+    read_progress_read_date: Option<String>,
+    read_progress_created: Option<String>,
+    read_progress_last_modified: Option<String>,
+    read_progress_device_id: Option<String>,
+    read_progress_device_name: Option<String>,
+    deleted: bool,
+    file_hash: String,
+    oneshot: bool,
 }
 
 impl From<SqlxBookListRow> for BookReadModel {
     fn from(value: SqlxBookListRow) -> Self {
+        let metadata_title = value.title.clone();
+
         Self {
             id: value.id,
             series_id: value.series_id,
+            series_title: value.series_title,
+            library_id: value.library_id,
             name: value.title,
+            url: value.url,
+            number: value.number as i32,
+            created: value.created,
+            last_modified: value.last_modified,
+            file_last_modified: value.file_last_modified,
+            size_bytes: value.size_bytes.max(0) as u64,
+            media_status: value.media_status,
+            media_type: value.media_type,
+            media_pages_count: value.media_pages_count.max(0) as u32,
+            media_comment: value.media_comment,
+            media_epub_divina_compatible: value.media_epub_divina_compatible,
+            media_epub_is_kepub: value.media_epub_is_kepub,
+            metadata_title,
+            metadata_title_lock: value.metadata_title_lock,
+            metadata_summary: value.metadata_summary,
+            metadata_summary_lock: value.metadata_summary_lock,
+            metadata_number: value.metadata_number,
+            metadata_number_lock: value.metadata_number_lock,
+            metadata_number_sort: value.metadata_number_sort,
+            metadata_number_sort_lock: value.metadata_number_sort_lock,
+            metadata_release_date: value.metadata_release_date,
+            metadata_release_date_lock: value.metadata_release_date_lock,
+            metadata_authors: parse_metadata_authors(&value.metadata_authors),
+            metadata_authors_lock: value.metadata_authors_lock,
+            metadata_tags: parse_csv_values(&value.metadata_tags),
+            metadata_tags_lock: value.metadata_tags_lock,
+            metadata_isbn: value.metadata_isbn,
+            metadata_isbn_lock: value.metadata_isbn_lock,
+            metadata_links: parse_metadata_links(&value.metadata_links),
+            metadata_links_lock: value.metadata_links_lock,
+            metadata_created: value.metadata_created,
+            metadata_last_modified: value.metadata_last_modified,
+            read_progress: value
+                .read_progress_page
+                .map(|page| BookReadProgressReadModel {
+                    page: page as i32,
+                    completed: value.read_progress_completed.unwrap_or(false),
+                    read_date: value.read_progress_read_date,
+                    created: value.read_progress_created.unwrap_or_default(),
+                    last_modified: value.read_progress_last_modified.unwrap_or_default(),
+                    device_id: value.read_progress_device_id.unwrap_or_default(),
+                    device_name: value.read_progress_device_name.unwrap_or_default(),
+                }),
+            deleted: value.deleted,
+            file_hash: value.file_hash,
+            oneshot: value.oneshot,
         }
     }
 }
@@ -148,18 +244,40 @@ async fn list_books_sqlx_common(
 
     let mut select_builder = QueryBuilder::<Sqlite>::new(
         "SELECT b.id AS id, b.series_id AS series_id, b.library_id AS library_id, \
-                b.title AS title, b.url AS url, b.created AS created, \
-                b.last_modified AS last_modified, b.file_last_modified AS file_last_modified, \
-                b.size_bytes AS size_bytes, b.media_status AS media_status, \
-                b.media_type AS media_type, b.media_pages_count AS media_pages_count, \
-                b.metadata_release_date AS metadata_release_date, b.deleted AS deleted, \
-                b.oneshot AS oneshot, s.title AS series_title, \
-                COALESCE(GROUP_CONCAT(DISTINCT sl.label), '') AS labels \
+                b.title AS title, b.url AS url, CAST(b.number_sort AS INTEGER) AS number, \
+                b.created AS created, b.last_modified AS last_modified, \
+                b.file_last_modified AS file_last_modified, b.size_bytes AS size_bytes, \
+                COALESCE(b.media_status, 'UNKNOWN') AS media_status, \
+                COALESCE(b.media_type, '') AS media_type, \
+                COALESCE(b.media_pages_count, 0) AS media_pages_count, \
+                '' AS media_comment, 0 AS media_epub_divina_compatible, 0 AS media_epub_is_kepub, \
+                COALESCE(b.metadata_release_date, NULL) AS metadata_release_date, \
+                0 AS metadata_title_lock, '' AS metadata_summary, 0 AS metadata_summary_lock, \
+                CAST(b.number_sort AS TEXT) AS metadata_number, 0 AS metadata_number_lock, \
+                CAST(b.number_sort AS REAL) AS metadata_number_sort, 0 AS metadata_number_sort_lock, \
+                0 AS metadata_release_date_lock, \
+                COALESCE((SELECT GROUP_CONCAT(ba.author, X'1F') FROM book_authors ba WHERE ba.book_id = b.id), '') AS metadata_authors, \
+                0 AS metadata_authors_lock, \
+                COALESCE((SELECT GROUP_CONCAT(bt.tag) FROM book_tags bt WHERE bt.book_id = b.id), '') AS metadata_tags, \
+                0 AS metadata_tags_lock, '' AS metadata_isbn, 0 AS metadata_isbn_lock, \
+                '' AS metadata_links, 0 AS metadata_links_lock, \
+                b.created AS metadata_created, b.last_modified AS metadata_last_modified, \
+                rp.page AS read_progress_page, rp.completed AS read_progress_completed, \
+                rp.read_date AS read_progress_read_date, rp.created AS read_progress_created, \
+                rp.last_modified AS read_progress_last_modified, rp.device_id AS read_progress_device_id, \
+                rp.device_name AS read_progress_device_name, \
+                b.deleted AS deleted, '' AS file_hash, b.oneshot AS oneshot, s.title AS series_title \
          FROM books b \
          JOIN series s ON s.id = b.series_id \
-         LEFT \
-         JOIN series_labels sl ON sl.series_id = s.id",
+         LEFT JOIN read_progress rp ON rp.book_id = b.id AND rp.user_id = ",
     );
+    let user_id = context
+        .user_id
+        .as_ref()
+        .map(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    select_builder.push_bind(user_id);
     let mut select_state = SqlxWhereState::default();
     apply_books_filters_sqlx(
         &mut select_builder,
@@ -178,12 +296,7 @@ async fn list_books_sqlx_common(
         release_dates,
         search,
     );
-    select_builder.push(
-        " GROUP BY b.id, b.series_id, b.library_id, b.title, b.url, b.created, b.last_modified, b.file_last_modified, \
-            b.size_bytes, b.media_status, b.media_type, b.media_pages_count, \
-            b.metadata_release_date, b.deleted, b.oneshot, s.title \
-          ORDER BY ",
-    );
+    select_builder.push(" ORDER BY ");
     select_builder.push(book_order_sql(ordering));
 
     let (envelope_page, envelope_size) = if unpaged {
@@ -210,6 +323,43 @@ async fn list_books_sqlx_common(
         envelope_size,
         total_elements,
     ))
+}
+
+pub(super) fn parse_csv_values(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| entry.to_string())
+        .collect()
+}
+
+pub(super) fn parse_metadata_authors(raw: &str) -> Vec<BookMetadataAuthorReadModel> {
+    raw.split('\u{001F}')
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| match entry.split_once('\u{001E}') {
+            Some((name, role)) => BookMetadataAuthorReadModel {
+                name: name.to_string(),
+                role: role.to_string(),
+            },
+            None => BookMetadataAuthorReadModel {
+                name: entry.to_string(),
+                role: String::new(),
+            },
+        })
+        .collect()
+}
+
+pub(super) fn parse_metadata_links(raw: &str) -> Vec<BookMetadataLinkReadModel> {
+    raw.split('\u{001F}')
+        .filter(|entry| !entry.is_empty())
+        .filter_map(|entry| {
+            entry
+                .split_once('\u{001E}')
+                .map(|(label, url)| BookMetadataLinkReadModel {
+                    label: label.to_string(),
+                    url: url.to_string(),
+                })
+        })
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]

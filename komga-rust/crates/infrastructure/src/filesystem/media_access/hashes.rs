@@ -4,7 +4,10 @@ use sha2::{Digest, Sha256};
 
 use crate::sqlite::connect_pool;
 
-use super::{load_persisted_book_media, load_persisted_book_pages, resolve_book_page_bytes};
+use super::{
+    load_persisted_book_media, load_persisted_book_pages, public_page_number_to_persisted,
+    resolve_book_page_bytes,
+};
 
 pub async fn persist_book_page_hashes_from_media_content(
     database_file: &Path,
@@ -20,6 +23,9 @@ pub async fn persist_book_page_hashes_from_media_content(
         let Some(bytes) = resolve_book_page_bytes(&media, &page, page.number) else {
             continue;
         };
+        let Some(persisted_page_number) = public_page_number_to_persisted(page.number) else {
+            continue;
+        };
         let mut hasher = Sha256::new();
         hasher.update(&bytes);
         let hash = hasher
@@ -27,7 +33,7 @@ pub async fn persist_book_page_hashes_from_media_content(
             .iter()
             .map(|value| format!("{value:02x}"))
             .collect::<String>();
-        hashes.push((page.number as i64, hash));
+        hashes.push((persisted_page_number, hash));
     }
 
     if hashes.is_empty() {

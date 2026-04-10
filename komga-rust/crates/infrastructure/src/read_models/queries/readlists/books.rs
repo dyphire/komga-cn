@@ -74,19 +74,41 @@ pub(super) async fn list_readlist_books_sqlx(
 
     let mut select_builder = QueryBuilder::<Sqlite>::new(
         "SELECT b.id AS id, b.series_id AS series_id, b.library_id AS library_id, \
-                b.title AS title, b.url AS url, b.created AS created, \
-                b.last_modified AS last_modified, b.file_last_modified AS file_last_modified, \
-                b.size_bytes AS size_bytes, b.media_status AS media_status, \
-                b.media_type AS media_type, b.media_pages_count AS media_pages_count, \
-                b.metadata_release_date AS metadata_release_date, b.deleted AS deleted, \
-                b.oneshot AS oneshot, s.title AS series_title, \
-                COALESCE(GROUP_CONCAT(DISTINCT sl.label), '') AS labels \
+                b.title AS title, b.url AS url, CAST(b.number_sort AS INTEGER) AS number, \
+                b.created AS created, b.last_modified AS last_modified, \
+                b.file_last_modified AS file_last_modified, b.size_bytes AS size_bytes, \
+                COALESCE(b.media_status, 'UNKNOWN') AS media_status, \
+                COALESCE(b.media_type, '') AS media_type, \
+                COALESCE(b.media_pages_count, 0) AS media_pages_count, \
+                '' AS media_comment, 0 AS media_epub_divina_compatible, 0 AS media_epub_is_kepub, \
+                b.metadata_release_date AS metadata_release_date, \
+                0 AS metadata_title_lock, '' AS metadata_summary, 0 AS metadata_summary_lock, \
+                CAST(b.number_sort AS TEXT) AS metadata_number, 0 AS metadata_number_lock, \
+                CAST(b.number_sort AS REAL) AS metadata_number_sort, 0 AS metadata_number_sort_lock, \
+                0 AS metadata_release_date_lock, \
+                COALESCE((SELECT GROUP_CONCAT(ba.author, X'1F') FROM book_authors ba WHERE ba.book_id = b.id), '') AS metadata_authors, \
+                0 AS metadata_authors_lock, \
+                COALESCE((SELECT GROUP_CONCAT(bt.tag) FROM book_tags bt WHERE bt.book_id = b.id), '') AS metadata_tags, \
+                0 AS metadata_tags_lock, '' AS metadata_isbn, 0 AS metadata_isbn_lock, \
+                '' AS metadata_links, 0 AS metadata_links_lock, \
+                b.created AS metadata_created, b.last_modified AS metadata_last_modified, \
+                rp.page AS read_progress_page, rp.completed AS read_progress_completed, \
+                rp.read_date AS read_progress_read_date, rp.created AS read_progress_created, \
+                rp.last_modified AS read_progress_last_modified, rp.device_id AS read_progress_device_id, \
+                rp.device_name AS read_progress_device_name, \
+                b.deleted AS deleted, '' AS file_hash, b.oneshot AS oneshot, s.title AS series_title \
          FROM readlist_books rlb \
          JOIN books b ON b.id = rlb.book_id \
          JOIN series s ON s.id = b.series_id \
-         LEFT \
-         JOIN series_labels sl ON sl.series_id = s.id",
+         LEFT JOIN read_progress rp ON rp.book_id = b.id AND rp.user_id = ",
     );
+    let user_id = context
+        .user_id
+        .as_ref()
+        .map(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    select_builder.push_bind(user_id);
     let mut select_state = SqlxWhereState::default();
     apply_books_filters_sqlx(
         &mut select_builder,
@@ -107,12 +129,7 @@ pub(super) async fn list_readlist_books_sqlx(
     );
     append_clause_sqlx("rlb.readlist_id = ", &mut select_builder, &mut select_state);
     select_builder.push_bind(query.readlist_id.clone());
-    select_builder.push(
-        " GROUP BY b.id, b.series_id, b.library_id, b.title, b.url, b.created, b.last_modified, b.file_last_modified, \
-            b.size_bytes, b.media_status, b.media_type, b.media_pages_count, \
-            b.metadata_release_date, b.deleted, b.oneshot, s.title \
-          ORDER BY ",
-    );
+    select_builder.push(" ORDER BY ");
     select_builder.push(readlist_book_order_sql(ordered));
 
     let (envelope_page, envelope_size) = if query.unpaged {

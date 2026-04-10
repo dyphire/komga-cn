@@ -19,7 +19,12 @@ fn handle_scan_library(
     task: &TaskQueueRecord,
     task_target: Option<&str>,
 ) -> Result<(), TaskExecutionError> {
-    let Some(library_id) = task_target else {
+    let library_id = task
+        .payload
+        .as_deref()
+        .and_then(parse_scan_library_payload_library_id)
+        .or_else(|| task_target.map(strip_scan_library_deep_suffix));
+    let Some(library_id) = library_id else {
         return Err(TaskExecutionError::invalid_task(
             "SCAN_LIBRARY task must include a library id",
         ));
@@ -58,14 +63,24 @@ fn handle_scan_library(
     }
     super::super::cleanup_tasks::cleanup_empty_sets(runtime)?;
 
+    const DEFAULT_PRIORITY: i32 = 4;
+    const LOW_PRIORITY: i32 = 2;
+    const LOWEST_PRIORITY: i32 = 0;
+
     let hashing_flags = load_library_hashing_flags(runtime, &library_id)?;
-    let analyzable_book_ids = find_books_requiring_analysis(runtime, &scan.book_ids)?;
-    for book_id in &analyzable_book_ids {
-        scheduler.enqueue(TaskQueueRecord::new(
-            format!("ANALYZE_BOOK:{book_id}"),
-            task.priority.saturating_sub(10),
-            Some(book_id.clone()),
-        ));
+    let analyzable_book_ids = find_books_requiring_analysis(runtime, &scan.book_ids)?
+        .into_iter()
+        .collect::<HashSet<_>>();
+    for series in &scan.series_rows {
+        for book in &series.books {
+            if analyzable_book_ids.contains(&book.book_id) {
+                scheduler.enqueue(TaskQueueRecord::new(
+                    format!("ANALYZE_BOOK:{}", book.book_id),
+                    DEFAULT_PRIORITY,
+                    Some(series.series_id.clone()),
+                ));
+            }
+        }
     }
 
     if hashing_flags.hash_files {
@@ -83,14 +98,13 @@ fn handle_scan_library(
     }
 
     if hashing_flags.hash_pages {
-        scheduler.enqueue(find_books_with_missing_page_hash_task(
-            &library_id,
-            task.priority.saturating_sub(15),
-        ));
+        // Kotlin deliberately leaves the library-wide page-hash sweep at lowest priority so scan
+        // completion can unblock analyze/metadata follow-ups before the longer hash backlog runs.
+        scheduler.enqueue(find_books_with_missing_page_hash_task(&library_id));
     }
     scheduler.enqueue(find_duplicate_pages_to_delete_task(
         &library_id,
-        task.priority.saturating_sub(15),
+        LOWEST_PRIORITY,
     ));
 
     let maintenance_flags = load_library_maintenance_flags(runtime, &library_id)?;
@@ -100,25 +114,33 @@ fn handle_scan_library(
             scheduler.enqueue(repair_extension_task(
                 &book.book_id,
                 &book.series_id,
-                task.priority.saturating_sub(20),
+                LOW_PRIORITY,
             ));
         }
     }
     if maintenance_flags.convert_to_cbz {
         scheduler.enqueue(TaskQueueRecord::new(
             format!("FIND_BOOKS_TO_CONVERT:{library_id}"),
-            task.priority.saturating_sub(20),
-            Some(library_id.clone()),
+            LOWEST_PRIORITY,
+            None,
         ));
     }
 
-    enqueue_sidecar_refresh_tasks(
-        scheduler,
-        &scan,
-        &changed_sidecars,
-        task.priority.saturating_sub(12),
-    );
+    enqueue_sidecar_refresh_tasks(scheduler, &scan, &changed_sidecars, DEFAULT_PRIORITY);
     Ok(())
+}
+
+fn parse_scan_library_payload_library_id(payload: &str) -> Option<String> {
+    let payload = serde_json::from_str::<serde_json::Value>(payload).ok()?;
+    payload.get("libraryId")?.as_str().map(str::to_string)
+}
+
+fn strip_scan_library_deep_suffix(task_target: &str) -> String {
+    task_target
+        .split_once(":DEEP:")
+        .map(|(id, _)| id)
+        .unwrap_or(task_target)
+        .to_string()
 }
 
 fn find_duplicate_pages_to_delete_task(library_id: &str, priority: i32) -> TaskQueueRecord {
@@ -160,7 +182,7 @@ fn hash_book_koreader_task(book_id: &str, priority: i32) -> TaskQueueRecord {
         )
 }
 
-fn find_books_with_missing_page_hash_task(library_id: &str, _priority: i32) -> TaskQueueRecord {
+fn find_books_with_missing_page_hash_task(library_id: &str) -> TaskQueueRecord {
     let task_id = format!("FIND_BOOKS_WITH_MISSING_PAGE_HASH_{library_id}");
     TaskQueueRecord::new(task_id.clone(), 0, None)
         .with_simple_type("FIND_BOOKS_WITH_MISSING_PAGE_HASH")
@@ -245,7 +267,7 @@ mod tests {
 
     #[test]
     fn find_books_with_missing_page_hash_task_uses_kotlin_compatible_unique_id() {
-        let task = find_books_with_missing_page_hash_task("library-1", 10);
+        let task = find_books_with_missing_page_hash_task("library-1");
 
         assert_eq!(
             task.id,

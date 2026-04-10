@@ -18,21 +18,31 @@ impl RuntimeMediaImportService for ComposedMediaImportService {
     fn process_queued_books_payload<'a>(
         &'a self,
         task_payload: &'a str,
+        import_priority: i32,
     ) -> futures_util::future::BoxFuture<
         'a,
         Result<Vec<komga_application::task_processing::TaskQueueRecord>, String>,
     > {
-        Box::pin(async move { self.inner.process_queued_books_payload(task_payload).await })
+        Box::pin(async move {
+            self.inner
+                .process_queued_books_payload(task_payload, import_priority)
+                .await
+        })
     }
 
     fn process_queued_book_payload<'a>(
         &'a self,
         task_payload: &'a str,
+        import_priority: i32,
     ) -> futures_util::future::BoxFuture<
         'a,
         Result<Vec<komga_application::task_processing::TaskQueueRecord>, String>,
     > {
-        Box::pin(async move { self.inner.process_queued_book_payload(task_payload).await })
+        Box::pin(async move {
+            self.inner
+                .process_queued_book_payload(task_payload, import_priority)
+                .await
+        })
     }
 }
 
@@ -153,15 +163,6 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
                 infrastructure_filesystem::book_media_is_ready_status(
                     database_file.as_path(),
                     &book_id,
-                )
-                .await
-            })
-        }),
-        load_persisted_series_thumbnail_media: Arc::new(|database_file, series_id| {
-            Box::pin(async move {
-                infrastructure_filesystem::load_persisted_series_thumbnail_media(
-                    database_file.as_path(),
-                    &series_id,
                 )
                 .await
             })

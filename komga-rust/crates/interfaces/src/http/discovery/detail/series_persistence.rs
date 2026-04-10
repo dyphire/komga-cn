@@ -94,7 +94,7 @@ pub async fn load_persisted_series_detail(
     };
     let metadata = load_existing_series_metadata(database_file, series_id)
         .await?
-        .ok_or_else(|| format!("persisted series metadata missing for {series_id}"))?;
+        .unwrap_or_else(|| fallback_existing_series_metadata(&row));
 
     let persisted_summary = series_access::load_persisted_series_summaries(database_file)
         .await?
@@ -207,6 +207,41 @@ pub async fn load_persisted_series_detail(
     });
 
     Ok(model)
+}
+
+fn fallback_existing_series_metadata(
+    row: &series_access::PersistedSeriesDetailRecord,
+) -> ExistingSeriesMetadata {
+    ExistingSeriesMetadata {
+        status: row.status.clone(),
+        status_lock: false,
+        title: row.title.clone(),
+        title_lock: false,
+        title_sort: row.title_sort.clone(),
+        title_sort_lock: false,
+        summary: row.summary.clone(),
+        summary_lock: false,
+        reading_direction: Some(row.reading_direction.clone()).filter(|value| !value.is_empty()),
+        reading_direction_lock: false,
+        publisher: row.publisher.clone(),
+        publisher_lock: false,
+        age_rating: row.age_rating,
+        age_rating_lock: false,
+        language: row.language.clone(),
+        language_lock: false,
+        genres: vec![],
+        genres_lock: false,
+        tags: vec![],
+        tags_lock: false,
+        total_book_count: None,
+        total_book_count_lock: false,
+        sharing_labels: parse_csv_values(&row.sharing_labels),
+        sharing_labels_lock: false,
+        links: vec![],
+        links_lock: false,
+        alternate_titles: vec![],
+        alternate_titles_lock: false,
+    }
 }
 
 fn parse_aggregated_series_authors(raw: &[String]) -> Vec<BookMetadataAuthorReadModel> {

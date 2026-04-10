@@ -1,5 +1,113 @@
 use super::*;
 
+fn solid_png_bytes(rgb: [u8; 3]) -> Vec<u8> {
+    let image = image::RgbaImage::from_pixel(8, 8, image::Rgba([rgb[0], rgb[1], rgb[2], 255]));
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(image)
+        .write_to(&mut cursor, image::ImageFormat::Png)
+        .expect("solid png fixture should encode");
+    cursor.into_inner()
+}
+
+async fn seed_router_persisted_two_page_cbz_book(
+    paths: &RuntimeDbPaths,
+    book_id: &str,
+    series_id: &str,
+    file_name: &str,
+    title: &str,
+) -> (Vec<u8>, Vec<u8>) {
+    let first_page = solid_png_bytes([255, 0, 0]);
+    let second_page = solid_png_bytes([0, 255, 0]);
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("persisted cbz book seed db should open");
+
+    let relative_path = format!("books/{file_name}");
+    sqlx::query(
+        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(book_id)
+    .bind(0_i64)
+    .bind(file_name)
+    .bind(&relative_path)
+    .bind(series_id)
+    .bind(8_192_i64)
+    .bind(98_i64)
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("persisted cbz book row should be inserted");
+
+    sqlx::query("INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("application/vnd.comicbook+zip")
+        .bind("READY")
+        .bind(book_id)
+        .bind(2_i64)
+        .execute(&pool)
+        .await
+        .expect("persisted cbz media row should be inserted");
+
+    sqlx::query(
+        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("98")
+    .bind(98.0_f64)
+    .bind(title)
+    .bind("2024-02-02")
+    .bind(book_id)
+    .execute(&pool)
+    .await
+    .expect("persisted cbz metadata row should be inserted");
+
+    for (number, file_name, bytes) in [
+        (0_i64, "page-1.png", first_page.as_slice()),
+        (1_i64, "page-2.png", second_page.as_slice()),
+    ] {
+        sqlx::query(
+            "INSERT INTO MEDIA_PAGE (BOOK_ID, NUMBER, FILE_HASH, FILE_NAME, MEDIA_TYPE, WIDTH, HEIGHT, FILE_SIZE) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(book_id)
+        .bind(number)
+        .bind("")
+        .bind(file_name)
+        .bind("image/png")
+        .bind(8_i64)
+        .bind(8_i64)
+        .bind(i64::try_from(bytes.len()).expect("fixture page length should fit in i64"))
+        .execute(&pool)
+        .await
+        .expect("persisted cbz media page row should be inserted");
+    }
+
+    pool.close().await;
+
+    let archive_path = paths.config_dir.join(relative_path);
+    if let Some(parent) = archive_path.parent() {
+        std::fs::create_dir_all(parent).expect("persisted cbz parent directory should be created");
+    }
+    let file = File::create(&archive_path).expect("persisted cbz fixture file should be created");
+    let mut zip = ZipWriter::new(file);
+    let options = SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Stored)
+        .unix_permissions(0o644);
+    for (entry_name, bytes) in [
+        ("page-1.png", first_page.as_slice()),
+        ("page-2.png", second_page.as_slice()),
+    ] {
+        zip.start_file(entry_name, options)
+            .expect("persisted cbz page entry should be created");
+        zip.write_all(bytes)
+            .expect("persisted cbz page payload should be written");
+    }
+    zip.finish()
+        .expect("persisted cbz fixture should finish successfully");
+
+    (first_page, second_page)
+}
+
 #[tokio::test]
 async fn router_book_pages_and_raw_pages_include_inline_content_disposition() {
     let paths = new_router_fixture("router-book-pages-inline-disposition").await;
@@ -49,6 +157,92 @@ async fn router_book_pages_and_raw_pages_include_inline_content_disposition() {
             "route: {route}, disposition: {disposition}"
         );
     }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_persisted_cbz_pages_follow_kotlin_one_based_numbering() {
+    let paths = new_router_fixture("router-persisted-cbz-pages-one-based").await;
+    seed_router_contract_data(&paths).await;
+    let (first_page, second_page) = seed_router_persisted_two_page_cbz_book(
+        &paths,
+        "book-cbz-persisted-1",
+        "series-1",
+        "persisted-pages.cbz",
+        "Persisted Pages Book",
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let pages_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-cbz-persisted-1/pages")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("persisted cbz pages request should build"),
+        )
+        .await
+        .expect("persisted cbz pages request should complete");
+    assert_eq!(pages_response.status(), StatusCode::OK);
+    let pages_payload = response_json(pages_response).await;
+    let rows = pages_payload
+        .as_array()
+        .expect("persisted cbz pages payload should be an array");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].get("number"), Some(&json!(1)));
+    assert_eq!(rows[1].get("number"), Some(&json!(2)));
+
+    for (page_number, expected_bytes) in [(1_u64, first_page), (2_u64, second_page)] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!(
+                        "/api/v1/books/book-cbz-persisted-1/pages/{page_number}"
+                    ))
+                    .header("x-auth-token", &auth_token)
+                    .body(Body::empty())
+                    .expect("persisted cbz page request should build"),
+            )
+            .await
+            .expect("persisted cbz page request should complete");
+
+        assert_eq!(response.status(), StatusCode::OK, "page: {page_number}");
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("persisted cbz page body should read");
+        assert_eq!(
+            body.as_ref(),
+            expected_bytes.as_slice(),
+            "page: {page_number}"
+        );
+    }
+
+    let invalid_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-cbz-persisted-1/pages/0")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("persisted cbz invalid page request should build"),
+        )
+        .await
+        .expect("persisted cbz invalid page request should complete");
+    assert_eq!(invalid_response.status(), StatusCode::BAD_REQUEST);
+    let invalid_payload = response_json(invalid_response).await;
+    assert_eq!(
+        invalid_payload.get("error"),
+        Some(&Value::String("Page number does not exist".to_string()))
+    );
 
     cleanup_router_fixture(paths);
 }

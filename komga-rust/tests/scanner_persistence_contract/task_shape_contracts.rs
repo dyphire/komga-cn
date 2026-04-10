@@ -105,3 +105,34 @@ async fn scanner_persists_find_duplicate_pages_to_delete_tasks_with_kotlin_task_
 
     fixture.cleanup();
 }
+
+#[tokio::test]
+async fn scanner_persists_find_books_with_missing_page_hash_tasks_with_kotlin_task_shape() {
+    let fixture =
+        ScannerPersistenceFixture::new("scanner-persistence-find-missing-page-hash-shape")
+            .await
+            .expect("scanner missing-page-hash task fixture should be created");
+
+    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    scheduler.enqueue(
+        TaskQueueRecord::new("FIND_BOOKS_WITH_MISSING_PAGE_HASH_library-1", 0, None)
+            .with_simple_type("FIND_BOOKS_WITH_MISSING_PAGE_HASH"),
+    );
+
+    assert_persisted_task_shape(
+        fixture.paths.tasks_db.as_path(),
+        "FIND_BOOKS_WITH_MISSING_PAGE_HASH_library-1",
+        "org.gotson.komga.application.tasks.Task$FindBooksWithMissingPageHash",
+        "FindBooksWithMissingPageHash",
+        None,
+        json!({
+            "libraryId": "library-1",
+            "priority": 0,
+            "groupId": Value::Null,
+            "uniqueId": "FIND_BOOKS_WITH_MISSING_PAGE_HASH_library-1"
+        }),
+    )
+    .await;
+
+    fixture.cleanup();
+}

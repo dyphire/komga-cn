@@ -602,14 +602,15 @@ async fn router_series_file_delete_enqueues_delete_series_without_group_id() {
     let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for series delete verification");
-    let rows = sqlx::query("SELECT SIMPLE_TYPE FROM TASK ORDER BY ID ASC")
+    let rows = sqlx::query("SELECT SIMPLE_TYPE, PRIORITY FROM TASK ORDER BY ID ASC")
         .fetch_all(&tasks_pool)
         .await
         .expect("series delete task rows should be queryable");
     tasks_pool.close().await;
 
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].get::<String, _>("SIMPLE_TYPE"), "DELETE_SERIES");
+    assert_eq!(rows[0].get::<String, _>("SIMPLE_TYPE"), "DeleteSeries");
+    assert_eq!(rows[0].get::<i32, _>("PRIORITY"), 100);
 
     cleanup_router_fixture(paths);
 }
@@ -646,7 +647,7 @@ async fn router_series_analyze_enqueues_book_tasks_grouped_by_series_id() {
     tasks_pool.close().await;
 
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].get::<String, _>("SIMPLE_TYPE"), "ANALYZE_BOOK");
+    assert_eq!(rows[0].get::<String, _>("SIMPLE_TYPE"), "AnalyzeBook");
     assert_eq!(
         rows[0].get::<Option<String>, _>("GROUP_ID"),
         Some("series-1".to_string())
@@ -769,7 +770,7 @@ async fn router_series_metadata_refresh_does_not_canonicalize_series_id() {
     );
     assert_eq!(
         rows[0].get::<String, _>("SIMPLE_TYPE"),
-        "REFRESH_SERIES_LOCAL_ARTWORK"
+        "RefreshSeriesLocalArtwork"
     );
     assert_eq!(rows[0].get::<Option<String>, _>("GROUP_ID"), None);
 

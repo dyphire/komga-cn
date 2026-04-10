@@ -58,6 +58,17 @@ async fn runtime_blocks_import_book_when_main_database_is_external_owned() {
             .get::<i64, _>("COUNT");
     verify_pool.close().await;
 
+    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+        .await
+        .expect("tasks db should open for blocked import follow-up verification");
+    let analyze_follow_ups =
+        sqlx::query("SELECT COUNT(*) AS COUNT FROM TASK WHERE SIMPLE_TYPE = 'ANALYZE_BOOK'")
+            .fetch_one(&tasks_pool)
+            .await
+            .expect("blocked import follow-up rows should be queryable")
+            .get::<i64, _>("COUNT");
+    tasks_pool.close().await;
+
     assert_eq!(
         historical_events, 0,
         "runtime must not persist import historical events when main database is external-owned",
@@ -68,6 +79,10 @@ async fn runtime_blocks_import_book_when_main_database_is_external_owned() {
             .join("series/series-1/blocked-import.cbz")
             .exists(),
         "runtime must not copy imported files into the library root when main database is external-owned",
+    );
+    assert_eq!(
+        analyze_follow_ups, 0,
+        "blocked import must not enqueue analyze-book follow-up tasks when main database is external-owned",
     );
 
     let _ = std::fs::remove_file(&source_file);

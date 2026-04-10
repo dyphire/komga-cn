@@ -1,7 +1,7 @@
 use std::io::Read;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::task_records::scan_library_task_record;
+use super::task_records::background_scan_library_task_record;
 use super::{
     CreateLibraryResult, LibraryCatalogMutationError, LibraryCatalogMutationPort, LibraryChangeSet,
     LibraryRecord,
@@ -36,7 +36,7 @@ where
             .map_err(LibraryCatalogMutationError::persistence)?;
 
         Ok(CreateLibraryResult {
-            task_records: vec![scan_library_task_record(&library.id, false)],
+            task_records: vec![background_scan_library_task_record(&library.id, false)],
             library,
         })
     }

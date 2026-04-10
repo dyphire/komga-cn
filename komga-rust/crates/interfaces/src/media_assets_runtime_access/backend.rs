@@ -21,11 +21,13 @@ pub trait RuntimeMediaImportService: Send + Sync {
     fn process_queued_books_payload<'a>(
         &'a self,
         task_payload: &'a str,
+        import_priority: i32,
     ) -> futures_util::future::BoxFuture<'a, Result<Vec<TaskQueueRecord>, String>>;
 
     fn process_queued_book_payload<'a>(
         &'a self,
         task_payload: &'a str,
+        import_priority: i32,
     ) -> futures_util::future::BoxFuture<'a, Result<Vec<TaskQueueRecord>, String>>;
 }
 
@@ -105,15 +107,6 @@ pub struct MediaAssetsRuntimeAccessBackend {
     >,
     pub book_media_is_ready_status: Arc<
         dyn Fn(PathBuf, String) -> futures_util::future::BoxFuture<'static, Result<bool, String>>
-            + Send
-            + Sync,
-    >,
-    pub load_persisted_series_thumbnail_media: Arc<
-        dyn Fn(
-                PathBuf,
-                String,
-            )
-                -> futures_util::future::BoxFuture<'static, Result<Option<BookMediaRecord>, String>>
             + Send
             + Sync,
     >,

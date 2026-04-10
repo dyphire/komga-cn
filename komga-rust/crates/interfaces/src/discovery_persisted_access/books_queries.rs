@@ -1,6 +1,35 @@
 #![allow(clippy::too_many_arguments)]
 
 use super::*;
+use komga_application::discovery::{
+    BookMetadataAuthorReadModel, BookMetadataLinkReadModel, BookReadProgressReadModel,
+};
+
+fn normalized_author_filter_value(name: &str, role: &str) -> String {
+    if role.is_empty() {
+        name.to_ascii_lowercase()
+    } else {
+        format!("{name}::{role}").to_ascii_lowercase()
+    }
+}
+
+fn author_matches_filter(name: &str, role: &str, values: &[String]) -> bool {
+    let normalized = normalized_author_filter_value(name, role);
+    values
+        .iter()
+        .any(|value| author_value_matches(&normalized, value))
+}
+
+fn matches_optional_release_date(
+    release_date: Option<&str>,
+    missing_result: bool,
+    predicate: impl FnOnce(&str) -> bool,
+) -> bool {
+    match release_date {
+        Some(release_date) => predicate(release_date),
+        None => missing_result,
+    }
+}
 
 fn normalize_books_latest_unpaged_page_shape<T>(mut page: PageEnvelope<T>) -> PageEnvelope<T> {
     const KOTLIN_PAGE_SIZE: usize = 20;
@@ -309,23 +338,17 @@ pub async fn load_persisted_books_page(
 
     if let Some(authors) = filters.authors.as_ref() {
         books = filter_rows(books, |row| {
-            row.metadata_authors.iter().any(|author| {
-                let normalized = author.to_ascii_lowercase();
-                authors
-                    .iter()
-                    .any(|value| author_value_matches(&normalized, value))
-            })
+            row.metadata_authors
+                .iter()
+                .any(|author| author_matches_filter(&author.name, &author.role, authors))
         });
     }
 
     if let Some(authors_excluded) = filters.authors_excluded.as_ref() {
         books = filter_rows(books, |row| {
-            !row.metadata_authors.iter().any(|author| {
-                let normalized = author.to_ascii_lowercase();
-                authors_excluded
-                    .iter()
-                    .any(|value| author_value_matches(&normalized, value))
-            })
+            !row.metadata_authors
+                .iter()
+                .any(|author| author_matches_filter(&author.name, &author.role, authors_excluded))
         });
     }
 
@@ -389,42 +412,26 @@ pub async fn load_persisted_books_page(
 
     if let Some(number_sorts) = filters.number_sorts.as_ref() {
         books = filter_rows(books, |row| {
-            row.metadata_number_sort
-                .map(|number_sort| {
-                    number_sorts
-                        .iter()
-                        .any(|value| (number_sort - *value).abs() <= f64::EPSILON)
-                })
-                .unwrap_or(false)
+            number_sorts
+                .iter()
+                .any(|value| (row.metadata_number_sort - *value).abs() <= f64::EPSILON)
         });
     }
 
     if let Some(number_sorts_excluded) = filters.number_sorts_excluded.as_ref() {
         books = filter_rows(books, |row| {
-            row.metadata_number_sort
-                .map(|number_sort| {
-                    !number_sorts_excluded
-                        .iter()
-                        .any(|value| (number_sort - *value).abs() <= f64::EPSILON)
-                })
-                .unwrap_or(false)
+            !number_sorts_excluded
+                .iter()
+                .any(|value| (row.metadata_number_sort - *value).abs() <= f64::EPSILON)
         });
     }
 
     if let Some(number_sort_gt) = filters.number_sort_gt {
-        books = filter_rows(books, |row| {
-            row.metadata_number_sort
-                .map(|number_sort| number_sort > number_sort_gt)
-                .unwrap_or(false)
-        });
+        books = filter_rows(books, |row| row.metadata_number_sort > number_sort_gt);
     }
 
     if let Some(number_sort_lt) = filters.number_sort_lt {
-        books = filter_rows(books, |row| {
-            row.metadata_number_sort
-                .map(|number_sort| number_sort < number_sort_lt)
-                .unwrap_or(false)
-        });
+        books = filter_rows(books, |row| row.metadata_number_sort < number_sort_lt);
     }
 
     if let Some(media_statuses) = filters.media_statuses.as_ref() {
@@ -469,21 +476,25 @@ pub async fn load_persisted_books_page(
 
     if let Some(release_dates) = filters.release_dates.as_ref() {
         books = filter_rows(books, |row| {
-            let Some(release_date) = row.metadata_release_date.as_ref() else {
-                return false;
-            };
-            release_dates.iter().any(|value| value == release_date)
+            matches_optional_release_date(
+                row.metadata_release_date.as_deref(),
+                false,
+                |release_date| release_dates.iter().any(|value| value == release_date),
+            )
         });
     }
 
     if let Some(release_dates_excluded) = filters.release_dates_excluded.as_ref() {
         books = filter_rows(books, |row| {
-            let Some(release_date) = row.metadata_release_date.as_ref() else {
-                return true;
-            };
-            !release_dates_excluded
-                .iter()
-                .any(|value| value == release_date)
+            matches_optional_release_date(
+                row.metadata_release_date.as_deref(),
+                true,
+                |release_date| {
+                    !release_dates_excluded
+                        .iter()
+                        .any(|value| value == release_date)
+                },
+            )
         });
     }
 
@@ -495,19 +506,21 @@ pub async fn load_persisted_books_page(
 
     if let Some(release_date_gt) = filters.release_date_gt.as_ref() {
         books = filter_rows(books, |row| {
-            let Some(release_date) = row.metadata_release_date.as_ref() else {
-                return false;
-            };
-            release_date > release_date_gt
+            matches_optional_release_date(
+                row.metadata_release_date.as_deref(),
+                false,
+                |release_date| release_date > release_date_gt.as_str(),
+            )
         });
     }
 
     if let Some(release_date_lt) = filters.release_date_lt.as_ref() {
         books = filter_rows(books, |row| {
-            let Some(release_date) = row.metadata_release_date.as_ref() else {
-                return false;
-            };
-            release_date < release_date_lt
+            matches_optional_release_date(
+                row.metadata_release_date.as_deref(),
+                false,
+                |release_date| release_date < release_date_lt.as_str(),
+            )
         });
     }
 
@@ -516,10 +529,11 @@ pub async fn load_persisted_books_page(
             persisted_utc_date_minus_days(database_file, release_date_in_last_days).await?
     {
         books = filter_rows(books, |row| {
-            let Some(release_date) = row.metadata_release_date.as_ref() else {
-                return false;
-            };
-            release_date > &cutoff
+            matches_optional_release_date(
+                row.metadata_release_date.as_deref(),
+                false,
+                |release_date| release_date > cutoff.as_str(),
+            )
         });
     }
 
@@ -528,34 +542,41 @@ pub async fn load_persisted_books_page(
             persisted_utc_date_minus_days(database_file, release_date_not_in_last_days).await?
     {
         books = filter_rows(books, |row| {
-            let Some(release_date) = row.metadata_release_date.as_ref() else {
-                return false;
-            };
-            release_date < &cutoff
+            matches_optional_release_date(
+                row.metadata_release_date.as_deref(),
+                false,
+                |release_date| release_date < cutoff.as_str(),
+            )
         });
     }
 
     if let Some(release_date_begins_with) = filters.release_date_begins_with.as_ref() {
         books = filter_rows(books, |row| {
-            let Some(release_date) = row.metadata_release_date.as_ref() else {
-                return false;
-            };
-            let normalized = release_date.to_ascii_lowercase();
-            release_date_begins_with
-                .iter()
-                .any(|value| normalized.starts_with(value))
+            matches_optional_release_date(
+                row.metadata_release_date.as_deref(),
+                false,
+                |release_date| {
+                    let normalized = release_date.to_ascii_lowercase();
+                    release_date_begins_with
+                        .iter()
+                        .any(|value| normalized.starts_with(value))
+                },
+            )
         });
     }
 
     if let Some(release_date_ends_with) = filters.release_date_ends_with.as_ref() {
         books = filter_rows(books, |row| {
-            let Some(release_date) = row.metadata_release_date.as_ref() else {
-                return false;
-            };
-            let normalized = release_date.to_ascii_lowercase();
-            release_date_ends_with
-                .iter()
-                .any(|value| normalized.ends_with(value))
+            matches_optional_release_date(
+                row.metadata_release_date.as_deref(),
+                false,
+                |release_date| {
+                    let normalized = release_date.to_ascii_lowercase();
+                    release_date_ends_with
+                        .iter()
+                        .any(|value| normalized.ends_with(value))
+                },
+            )
         });
     }
 
@@ -563,38 +584,47 @@ pub async fn load_persisted_books_page(
         filters.release_date_begins_with_excluded.as_ref()
     {
         books = filter_rows(books, |row| {
-            let Some(release_date) = row.metadata_release_date.as_ref() else {
-                return true;
-            };
-            let normalized = release_date.to_ascii_lowercase();
-            !release_date_begins_with_excluded
-                .iter()
-                .any(|value| normalized.starts_with(value))
+            matches_optional_release_date(
+                row.metadata_release_date.as_deref(),
+                true,
+                |release_date| {
+                    let normalized = release_date.to_ascii_lowercase();
+                    !release_date_begins_with_excluded
+                        .iter()
+                        .any(|value| normalized.starts_with(value))
+                },
+            )
         });
     }
 
     if let Some(release_date_ends_with_excluded) = filters.release_date_ends_with_excluded.as_ref()
     {
         books = filter_rows(books, |row| {
-            let Some(release_date) = row.metadata_release_date.as_ref() else {
-                return true;
-            };
-            let normalized = release_date.to_ascii_lowercase();
-            !release_date_ends_with_excluded
-                .iter()
-                .any(|value| normalized.ends_with(value))
+            matches_optional_release_date(
+                row.metadata_release_date.as_deref(),
+                true,
+                |release_date| {
+                    let normalized = release_date.to_ascii_lowercase();
+                    !release_date_ends_with_excluded
+                        .iter()
+                        .any(|value| normalized.ends_with(value))
+                },
+            )
         });
     }
 
     if let Some(release_date_contains_excluded) = filters.release_date_contains_excluded.as_ref() {
         books = filter_rows(books, |row| {
-            let Some(release_date) = row.metadata_release_date.as_ref() else {
-                return true;
-            };
-            let normalized = release_date.to_ascii_lowercase();
-            !release_date_contains_excluded
-                .iter()
-                .any(|value| normalized.contains(value))
+            matches_optional_release_date(
+                row.metadata_release_date.as_deref(),
+                true,
+                |release_date| {
+                    let normalized = release_date.to_ascii_lowercase();
+                    !release_date_contains_excluded
+                        .iter()
+                        .any(|value| normalized.contains(value))
+                },
+            )
         });
     }
 
@@ -657,7 +687,67 @@ pub async fn load_persisted_books_page(
             .map(|row| BookReadModel {
                 id: row.id,
                 series_id: row.series_id,
-                name: row.title,
+                series_title: row.series_title,
+                library_id: row.library_id,
+                name: row.title.clone(),
+                url: row.url,
+                number: row.number,
+                created: row.created,
+                last_modified: row.last_modified,
+                file_last_modified: row.file_last_modified,
+                size_bytes: row.size_bytes,
+                media_status: row.media_status,
+                media_type: row.media_type,
+                media_pages_count: row.media_pages_count,
+                media_comment: row.media_comment,
+                media_epub_divina_compatible: row.media_epub_divina_compatible,
+                media_epub_is_kepub: row.media_epub_is_kepub,
+                metadata_title: row.title,
+                metadata_title_lock: row.metadata_title_lock,
+                metadata_summary: row.metadata_summary,
+                metadata_summary_lock: row.metadata_summary_lock,
+                metadata_number: row.metadata_number,
+                metadata_number_lock: row.metadata_number_lock,
+                metadata_number_sort: row.metadata_number_sort,
+                metadata_number_sort_lock: row.metadata_number_sort_lock,
+                metadata_release_date: row.metadata_release_date,
+                metadata_release_date_lock: row.metadata_release_date_lock,
+                metadata_authors: row
+                    .metadata_authors
+                    .into_iter()
+                    .map(|author| BookMetadataAuthorReadModel {
+                        name: author.name,
+                        role: author.role,
+                    })
+                    .collect(),
+                metadata_authors_lock: row.metadata_authors_lock,
+                metadata_tags: row.metadata_tags,
+                metadata_tags_lock: row.metadata_tags_lock,
+                metadata_isbn: row.metadata_isbn,
+                metadata_isbn_lock: row.metadata_isbn_lock,
+                metadata_links: row
+                    .metadata_links
+                    .into_iter()
+                    .map(|link| BookMetadataLinkReadModel {
+                        label: link.label,
+                        url: link.url,
+                    })
+                    .collect(),
+                metadata_links_lock: row.metadata_links_lock,
+                metadata_created: row.metadata_created,
+                metadata_last_modified: row.metadata_last_modified,
+                read_progress: row.read_progress.map(|progress| BookReadProgressReadModel {
+                    page: progress.page,
+                    completed: progress.completed,
+                    read_date: progress.read_date,
+                    created: progress.created,
+                    last_modified: progress.last_modified,
+                    device_id: progress.device_id,
+                    device_name: progress.device_name,
+                }),
+                deleted: row.deleted,
+                file_hash: row.file_hash,
+                oneshot: row.oneshot,
             })
             .collect(),
         page,

@@ -4,6 +4,7 @@ use komga_application::media_assets::{
     BookMediaRecord, BookPageRecord, content_type_from_filename,
 };
 use sqlx::Row;
+use sqlx::sqlite::SqliteRow;
 
 use crate::sqlite::connect_pool;
 
@@ -12,6 +13,27 @@ pub struct PersistedMediaFileRow {
     pub file_name: String,
     pub media_type: String,
     pub sub_type: Option<String>,
+}
+
+fn persisted_page_number_to_public(number: i64) -> u64 {
+    number.max(0) as u64 + 1
+}
+
+pub(crate) fn public_page_number_to_persisted(page_number: u64) -> Option<i64> {
+    page_number
+        .checked_sub(1)
+        .and_then(|value| i64::try_from(value).ok())
+}
+
+fn map_persisted_book_page_row(row: SqliteRow) -> BookPageRecord {
+    BookPageRecord {
+        number: persisted_page_number_to_public(row.get::<i64, _>("NUMBER")),
+        file_name: row.get::<String, _>("FILE_NAME"),
+        media_type: row.get::<String, _>("MEDIA_TYPE"),
+        width: row.get::<Option<i64>, _>("width"),
+        height: row.get::<Option<i64>, _>("height"),
+        file_size: row.get::<i64, _>("FILE_SIZE"),
+    }
 }
 
 pub async fn load_persisted_book_media(
@@ -184,17 +206,7 @@ pub async fn load_persisted_book_pages(
     .fetch_all(&pool)
     .await
     .map_err(|error| format!("query persisted book pages: {error}"))?;
-    Ok(rows
-        .into_iter()
-        .map(|row| BookPageRecord {
-            number: row.get::<i64, _>("NUMBER") as u64,
-            file_name: row.get::<String, _>("FILE_NAME"),
-            media_type: row.get::<String, _>("MEDIA_TYPE"),
-            width: row.get::<Option<i64>, _>("width"),
-            height: row.get::<Option<i64>, _>("height"),
-            file_size: row.get::<i64, _>("FILE_SIZE"),
-        })
-        .collect())
+    Ok(rows.into_iter().map(map_persisted_book_page_row).collect())
 }
 
 pub async fn load_persisted_book_page_row(
@@ -208,23 +220,21 @@ pub async fn load_persisted_book_page_row(
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(|error| format!("open single book page db: {error}"))?;
+
+    let Some(persisted_page_number) = public_page_number_to_persisted(page_number) else {
+        return Ok(None);
+    };
+
     let row = sqlx::query(
         "SELECT NUMBER, FILE_NAME, MEDIA_TYPE, WIDTH, HEIGHT, CASE WHEN FILE_SIZE IS NULL THEN -1 ELSE FILE_SIZE END AS FILE_SIZE \
          FROM MEDIA_PAGE WHERE BOOK_ID = ? AND NUMBER = ? LIMIT 1",
     )
     .bind(book_id)
-    .bind(page_number as i64)
+    .bind(persisted_page_number)
     .fetch_optional(&pool)
     .await
     .map_err(|error| format!("query single persisted book page: {error}"))?;
-    Ok(row.map(|row| BookPageRecord {
-        number: row.get::<i64, _>("NUMBER") as u64,
-        file_name: row.get::<String, _>("FILE_NAME"),
-        media_type: row.get::<String, _>("MEDIA_TYPE"),
-        width: row.get::<Option<i64>, _>("width"),
-        height: row.get::<Option<i64>, _>("height"),
-        file_size: row.get::<i64, _>("FILE_SIZE"),
-    }))
+    Ok(row.map(map_persisted_book_page_row))
 }
 
 pub async fn resolve_series_id_for_persisted(

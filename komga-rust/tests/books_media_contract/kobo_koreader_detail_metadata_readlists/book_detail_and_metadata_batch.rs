@@ -67,6 +67,50 @@ async fn router_discovery_book_detail_includes_persisted_authors_tags_and_read_p
 }
 
 #[tokio::test]
+async fn router_discovery_book_detail_exposes_oneshot_flag_from_persisted_book_rows() {
+    let paths = new_router_fixture("router-discovery-book-detail-oneshot-flag").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("book detail oneshot db should open");
+    sqlx::query("UPDATE BOOK SET ONESHOT = ? WHERE ID = ?")
+        .bind(1_i64)
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("book oneshot flag should update for detail contract");
+    sqlx::query("UPDATE SERIES SET ONESHOT = ? WHERE ID = ?")
+        .bind(1_i64)
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("series oneshot flag should update for detail contract consistency");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book detail oneshot request should build"),
+        )
+        .await
+        .expect("book detail oneshot request should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let payload = response_json(response).await;
+    assert_eq!(payload.get("oneshot"), Some(&Value::Bool(true)));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_discovery_book_detail_preserves_empty_read_progress_device_fields() {
     let paths = new_router_fixture("router-discovery-book-detail-empty-read-progress-device").await;
     seed_router_contract_data(&paths).await;

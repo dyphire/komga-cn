@@ -5,9 +5,10 @@ use crate::tasks::{
 };
 
 pub(in crate::task_queue) fn parse_scan_library_payload_deep(payload: &str) -> Option<bool> {
-    serde_json::from_str::<serde_json::Value>(payload)
-        .ok()?
-        .get("deep")
+    let payload = serde_json::from_str::<serde_json::Value>(payload).ok()?;
+    payload
+        .get("scanDeep")
+        .or_else(|| payload.get("deep"))
         .and_then(|value| value.as_bool())
 }
 

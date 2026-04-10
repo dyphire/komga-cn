@@ -39,8 +39,20 @@ async fn scanner_scan_output_is_persisted_into_kotlin_compatible_library_series_
         "scanner contract requires scan output to persist SERIES rows compatible with Kotlin readers",
     );
     assert!(
+        snapshot.series_metadata_rows >= 1,
+        "scanner contract requires scan output to persist SERIES_METADATA rows compatible with Kotlin readers",
+    );
+    assert!(
+        snapshot.book_metadata_aggregation_rows >= 1,
+        "scanner contract requires scan output to persist BOOK_METADATA_AGGREGATION rows compatible with Kotlin readers",
+    );
+    assert!(
         snapshot.book_rows >= 1,
         "scanner contract requires scan output to persist BOOK rows compatible with Kotlin readers",
+    );
+    assert!(
+        snapshot.book_metadata_rows >= 1,
+        "scanner contract requires scan output to persist BOOK_METADATA rows compatible with Kotlin readers",
     );
     assert!(
         snapshot.media_file_rows >= 1,

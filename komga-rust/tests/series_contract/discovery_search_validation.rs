@@ -206,68 +206,44 @@ async fn router_discovery_series_alphabetical_groups_rejects_empty_untyped_condi
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/series/list/alphabetical-groups")
-                .header("x-auth-token", &auth_token)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(json!({ "condition": {} }).to_string()))
-                .expect("empty-condition alphabetical-groups request should build"),
-        )
-        .await
-        .expect("empty-condition alphabetical-groups request should complete");
+    for (case, body) in [
+        ("empty-condition", json!({ "condition": {} })),
+        (
+            "unknown-webui-leaf",
+            json!({
+                "condition": {
+                    "unknownField": {
+                        "operator": "isTrue"
+                    }
+                }
+            }),
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/series/list/alphabetical-groups")
+                    .header("x-auth-token", &auth_token)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body.to_string()))
+                    .expect("alphabetical-groups invalid condition request should build"),
+            )
+            .await
+            .expect("alphabetical-groups invalid condition request should complete");
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let payload = response_json(response).await;
-    let error = payload
-        .get("error")
-        .and_then(Value::as_str)
-        .expect("empty-condition response should expose error string");
-    assert!(error.starts_with("invalid series alphabetical-groups request:"));
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_discovery_series_alphabetical_groups_rejects_unknown_webui_condition_leaf() {
-    let paths =
-        new_router_fixture("router-discovery-series-alphabetical-groups-unknown-webui-leaf").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/series/list/alphabetical-groups")
-                .header("x-auth-token", &auth_token)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "condition": {
-                            "unknownField": {
-                                "operator": "isTrue"
-                            }
-                        }
-                    })
-                    .to_string(),
-                ))
-                .expect("unknown-webui-leaf alphabetical-groups request should build"),
-        )
-        .await
-        .expect("unknown-webui-leaf alphabetical-groups request should complete");
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let payload = response_json(response).await;
-    let error = payload
-        .get("error")
-        .and_then(Value::as_str)
-        .expect("unknown-webui-leaf response should expose error string");
-    assert!(error.starts_with("invalid series alphabetical-groups request:"));
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "case: {case}");
+        let payload = response_json(response).await;
+        let error = payload
+            .get("error")
+            .and_then(Value::as_str)
+            .expect("invalid condition response should expose error string");
+        assert!(
+            error.starts_with("invalid series alphabetical-groups request:"),
+            "case: {case}"
+        );
+    }
 
     cleanup_router_fixture(paths);
 }

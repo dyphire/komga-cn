@@ -1,5 +1,24 @@
 use super::*;
 
+async fn seed_book_thumbnail_bytes(
+    paths: &RuntimeDbPaths,
+    thumbnail_id: &str,
+    media_type: &str,
+    bytes: &[u8],
+) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("series contract db should open for book thumbnail seed");
+    sqlx::query("UPDATE THUMBNAIL_BOOK SET MEDIA_TYPE = ?, THUMBNAIL = ? WHERE ID = ?")
+        .bind(media_type)
+        .bind(bytes)
+        .bind(thumbnail_id)
+        .execute(&pool)
+        .await
+        .expect("book thumbnail row should be updated for series contract");
+    pool.close().await;
+}
+
 #[tokio::test]
 async fn router_series_thumbnail_upload_parses_multipart_image_and_selected_flag() {
     let paths = new_router_fixture("router-series-thumbnail-upload-multipart").await;
@@ -200,80 +219,34 @@ async fn router_series_thumbnail_select_marks_uploaded_thumbnail_selected() {
 }
 
 #[tokio::test]
-async fn router_series_thumbnail_fallback_reencodes_source_image_as_jpeg() {
-    let paths = new_router_fixture("router-series-thumbnail-fallback-jpeg").await;
+async fn router_oneshot_series_thumbnail_falls_back_to_book_thumbnail() {
+    let paths = new_router_fixture("router-oneshot-series-thumbnail-fallback-book-thumbnail").await;
     seed_router_contract_data(&paths).await;
 
     let png_bytes = fixture_png_bytes();
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await
-        .expect("router contract db should open");
-
-    sqlx::query(
-        "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID) \
-         VALUES (?, ?, ?, ?, ?)",
-    )
-    .bind("series-image")
-    .bind(0_i64)
-    .bind("Series Image")
-    .bind("series/series-image")
-    .bind("library-1")
-    .execute(&pool)
-    .await
-    .expect("image series row should be inserted");
-
-    sqlx::query(
-        "INSERT INTO SERIES_METADATA (STATUS, TITLE, TITLE_SORT, PUBLISHER, LANGUAGE, AGE_RATING, \
-           SERIES_ID) \
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind("ONGOING")
-    .bind("Series Image")
-    .bind("Series Image")
-    .bind("PubHouse")
-    .bind("EN")
-    .bind(0_i64)
-    .bind("series-image")
-    .execute(&pool)
-    .await
-    .expect("image series metadata row should be inserted");
-
-    sqlx::query(
-        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, \
-           LIBRARY_ID) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind("book-image")
-    .bind(0_i64)
-    .bind("cover.png")
-    .bind("books/cover.png")
-    .bind("series-image")
-    .bind(png_bytes.len() as i64)
-    .bind(0_i64)
-    .bind("library-1")
-    .execute(&pool)
-    .await
-    .expect("image book row should be inserted");
-
-    sqlx::query(
-        "INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) \
-         VALUES (?, ?, ?, ?)",
-    )
-    .bind("image/png")
-    .bind("READY")
-    .bind("book-image")
-    .bind(1_i64)
-    .execute(&pool)
-    .await
-    .expect("image media row should be inserted");
-
+        .expect("oneshot series thumbnail db should open");
+    sqlx::query("UPDATE SERIES SET ONESHOT = ? WHERE ID = ?")
+        .bind(1_i64)
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("series oneshot flag should update for thumbnail fallback");
+    sqlx::query("UPDATE BOOK SET ONESHOT = ? WHERE ID = ?")
+        .bind(1_i64)
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("book oneshot flag should update for thumbnail fallback");
+    sqlx::query("DELETE FROM THUMBNAIL_SERIES WHERE SERIES_ID = ?")
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("series thumbnails should be removed for oneshot fallback");
     pool.close().await;
 
-    let cover_path = paths.config_dir.join("books/cover.png");
-    if let Some(parent) = cover_path.parent() {
-        std::fs::create_dir_all(parent).expect("image book parent directory should be created");
-    }
-    std::fs::write(&cover_path, &png_bytes).expect("image book file should be written");
+    seed_book_thumbnail_bytes(&paths, "thumb-book-1", "image/png", &png_bytes).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
@@ -281,13 +254,13 @@ async fn router_series_thumbnail_fallback_reencodes_source_image_as_jpeg() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/api/v1/series/series-image/thumbnail")
+                .uri("/api/v1/series/series-1/thumbnail")
                 .header("x-auth-token", &auth_token)
                 .body(Body::empty())
-                .expect("series thumbnail fallback request should build"),
+                .expect("oneshot series thumbnail fallback request should build"),
         )
         .await
-        .expect("series thumbnail fallback request should complete");
+        .expect("oneshot series thumbnail fallback request should complete");
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
@@ -295,13 +268,12 @@ async fn router_series_thumbnail_fallback_reencodes_source_image_as_jpeg() {
             .headers()
             .get(header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok()),
-        Some("image/jpeg")
+        Some("image/png")
     );
     let body = to_bytes(response.into_body(), usize::MAX)
         .await
-        .expect("series thumbnail fallback body should be readable");
-    assert_ne!(body.as_ref(), png_bytes.as_slice());
-    assert_eq!(&body[..3], &[0xFF, 0xD8, 0xFF]);
+        .expect("oneshot series thumbnail fallback body should be readable");
+    assert_eq!(body.as_ref(), png_bytes.as_slice());
 
     cleanup_router_fixture(paths);
 }
@@ -352,6 +324,13 @@ async fn router_series_thumbnail_by_id_reads_sidecar_thumbnail_file() {
         .expect("series sidecar thumbnail by-id request should complete");
 
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("image/png")
+    );
     let body = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("series sidecar thumbnail by-id body should be readable");

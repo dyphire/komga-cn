@@ -53,7 +53,7 @@ pub(in crate::task_queue) fn enqueue_sidecar_refresh_tasks(
                     scheduler.enqueue(TaskQueueRecord::new(
                         format!("REFRESH_SERIES_LOCAL_ARTWORK:{series_id}"),
                         priority,
-                        Some(series_id.clone()),
+                        None,
                     ));
                 }
             }

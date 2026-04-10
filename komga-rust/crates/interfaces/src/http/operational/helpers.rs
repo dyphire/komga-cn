@@ -24,9 +24,9 @@ pub(super) fn multi_source_string(
     effective: Option<String>,
 ) -> Value {
     json!({
-        "configurationSource": configuration,
-        "databaseSource": database,
-        "effectiveValue": effective,
+        "configurationSource": configuration.unwrap_or_default(),
+        "databaseSource": database.unwrap_or_default(),
+        "effectiveValue": effective.unwrap_or_default(),
     })
 }
 

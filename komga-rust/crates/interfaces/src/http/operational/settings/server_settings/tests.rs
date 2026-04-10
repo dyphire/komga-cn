@@ -83,6 +83,45 @@ async fn update_server_settings_does_not_apply_runtime_task_pool_before_persiste
     std::fs::remove_dir_all(&fixture_root).expect("fixture root should be removed");
 }
 
+#[tokio::test]
+async fn get_server_settings_returns_empty_string_placeholders_for_missing_string_sources() {
+    let fixture_root = unique_fixture_root("server-settings-string-placeholders");
+    std::fs::create_dir_all(&fixture_root).expect("fixture root should be created");
+    let database_file = fixture_root.join("main.db");
+    let persisted_settings = Arc::new(Mutex::new(HashMap::new()));
+    let settings_store = Arc::new(fake_settings_store(
+        persisted_settings,
+        Arc::new(AtomicUsize::new(0)),
+    ));
+
+    let state = test_operational_state(
+        database_file,
+        fixture_root.clone(),
+        settings_store,
+        |_value| Ok(()),
+    );
+    let headers = admin_headers(&fixture_root);
+
+    let response = get_server_settings(Extension(state), headers).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("settings response body should be readable");
+    let response_body: Value =
+        serde_json::from_slice(&response_body).expect("settings response should be valid JSON");
+
+    let placeholder = json!({
+        "configurationSource": "",
+        "databaseSource": "",
+        "effectiveValue": "",
+    });
+    assert_eq!(response_body.get("serverContextPath"), Some(&placeholder));
+    assert_eq!(response_body.get("kepubifyPath"), Some(&placeholder));
+
+    std::fs::remove_dir_all(&fixture_root).expect("fixture root should be removed");
+}
+
 fn test_operational_state<F>(
     database_file: PathBuf,
     fixture_root: PathBuf,

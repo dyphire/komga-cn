@@ -126,7 +126,7 @@ async fn runtime_blocks_book_media_analysis_when_main_database_is_external_owned
     scheduler.enqueue(TaskQueueRecord::new(
         "ANALYZE_BOOK:book-1",
         1_000,
-        Some("book-1".to_string()),
+        Some("series-1".to_string()),
     ));
     scheduler
         .process_available(&runtime)

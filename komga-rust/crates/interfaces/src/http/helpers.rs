@@ -12,6 +12,8 @@ use komga_domain::discovery::{
     QueryRestrictions as DomainQueryRestrictions,
 };
 use serde_json::{Value, json};
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 use super::super::{ReadProgress, ReadProgressState, SEARCH_OWNERSHIP_HEADER};
 
@@ -66,57 +68,146 @@ pub(crate) fn books_page_payload(
 }
 
 fn book_payload(book: &BookReadModel, is_admin: bool) -> Value {
-    let url = restricted_book_url(&book.name, is_admin);
+    let url = restricted_book_url(&book.url, is_admin);
+    let media_profile = media_profile_for_media_type(&book.media_type);
 
     json!({
         "id": book.id,
         "seriesId": book.series_id,
-        "seriesTitle": Value::Null,
-        "libraryId": Value::Null,
+        "seriesTitle": book.series_title,
+        "libraryId": book.library_id,
         "name": book.name,
         "url": url,
-        "number": 1,
-        "created": Value::Null,
-        "lastModified": Value::Null,
-        "fileLastModified": Value::Null,
-        "sizeBytes": 0,
-        "size": "0 B",
+        "number": book.number,
+        "created": normalized_date_time(&book.created),
+        "lastModified": normalized_date_time(&book.last_modified),
+        "fileLastModified": normalized_file_last_modified(&book.file_last_modified),
+        "sizeBytes": book.size_bytes,
+        "size": format_size_bytes(book.size_bytes),
         "media": {
-            "status": Value::Null,
-            "mediaType": Value::Null,
-            "pagesCount": 0,
-            "comment": "",
-            "epubDivinaCompatible": false,
-            "epubIsKepub": false,
-            "mediaProfile": ""
+            "status": book.media_status,
+            "mediaType": book.media_type,
+            "pagesCount": book.media_pages_count,
+            "comment": book.media_comment,
+            "epubDivinaCompatible": book.media_epub_divina_compatible,
+            "epubIsKepub": book.media_epub_is_kepub,
+            "mediaProfile": media_profile
         },
         "metadata": {
-            "title": book.name,
-            "titleLock": false,
-            "summary": "",
-            "summaryLock": false,
-            "number": "1",
-            "numberLock": false,
-            "numberSort": 1.0,
-            "numberSortLock": false,
-            "releaseDate": Value::Null,
-            "releaseDateLock": false,
-            "authors": [],
-            "authorsLock": false,
-            "tags": [],
-            "tagsLock": false,
-            "isbn": "",
-            "isbnLock": false,
-            "links": [],
-            "linksLock": false,
-            "created": Value::Null,
-            "lastModified": Value::Null
+            "title": book.metadata_title,
+            "titleLock": book.metadata_title_lock,
+            "summary": book.metadata_summary,
+            "summaryLock": book.metadata_summary_lock,
+            "number": book.metadata_number,
+            "numberLock": book.metadata_number_lock,
+            "numberSort": book.metadata_number_sort,
+            "numberSortLock": book.metadata_number_sort_lock,
+            "releaseDate": book.metadata_release_date,
+            "releaseDateLock": book.metadata_release_date_lock,
+            "authors": book.metadata_authors.iter().map(|author| json!({ "name": author.name, "role": author.role })).collect::<Vec<_>>(),
+            "authorsLock": book.metadata_authors_lock,
+            "tags": book.metadata_tags,
+            "tagsLock": book.metadata_tags_lock,
+            "isbn": book.metadata_isbn,
+            "isbnLock": book.metadata_isbn_lock,
+            "links": book.metadata_links.iter().map(|link| json!({ "label": link.label, "url": link.url })).collect::<Vec<_>>(),
+            "linksLock": book.metadata_links_lock,
+            "created": normalized_date_time(&book.metadata_created),
+            "lastModified": normalized_date_time(&book.metadata_last_modified)
         },
-        "readProgress": Value::Null,
-        "deleted": false,
-        "fileHash": "",
-        "oneshot": false
+        "readProgress": book.read_progress.as_ref().map_or(Value::Null, |progress| json!({
+            "page": progress.page,
+            "completed": progress.completed,
+            "readDate": normalized_optional_read_progress_date(progress.read_date.as_deref(), &progress.last_modified, &progress.created),
+            "created": normalized_date_time(&progress.created),
+            "lastModified": normalized_date_time(&progress.last_modified),
+            "deviceId": progress.device_id,
+            "deviceName": progress.device_name,
+        })),
+        "deleted": book.deleted,
+        "fileHash": book.file_hash,
+        "oneshot": book.oneshot
     })
+}
+
+pub(crate) fn normalized_file_last_modified(value: &str) -> String {
+    if let Ok(epoch_seconds) = value.parse::<i64>()
+        && let Ok(datetime) = OffsetDateTime::from_unix_timestamp(epoch_seconds)
+        && let Ok(formatted) = datetime.format(&Rfc3339)
+    {
+        return formatted;
+    }
+
+    normalized_date_time(value)
+}
+
+pub(crate) fn normalized_date_time(value: &str) -> String {
+    if let Ok(datetime) = OffsetDateTime::parse(value, &Rfc3339)
+        && let Ok(formatted) = datetime.format(&Rfc3339)
+    {
+        return formatted;
+    }
+
+    if !value.is_empty() && !value.contains('T') && value.contains(' ') {
+        let replaced = value.replacen(' ', "T", 1);
+        return format!("{replaced}Z");
+    }
+
+    if !value.is_empty() && value.contains('T') && !value.ends_with('Z') && !value.contains('+') {
+        return format!("{value}Z");
+    }
+
+    value.to_string()
+}
+
+pub(crate) fn normalized_optional_read_progress_date(
+    read_date: Option<&str>,
+    last_modified: &str,
+    created: &str,
+) -> String {
+    let chosen = read_date
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| {
+            if !last_modified.trim().is_empty() {
+                last_modified
+            } else {
+                created
+            }
+        });
+    normalized_date_time(chosen)
+}
+
+fn format_size_bytes(size_bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+
+    if size_bytes < 1024 {
+        return format!("{size_bytes} B");
+    }
+
+    let mut size = size_bytes as f64;
+    let mut unit_index = 0usize;
+    while size >= 1024.0 && unit_index < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit_index += 1;
+    }
+
+    if (size - size.round()).abs() < 0.05 {
+        format!("{} {}", size.round() as u64, UNITS[unit_index])
+    } else {
+        format!("{size:.1} {}", UNITS[unit_index])
+    }
+}
+
+fn media_profile_for_media_type(media_type: &str) -> &'static str {
+    match media_type {
+        "application/zip"
+        | "application/x-rar-compressed"
+        | "application/x-rar-compressed; version=4"
+        | "application/x-rar-compressed; version=5" => "DIVINA",
+        "application/epub+zip" => "EPUB",
+        "application/pdf" => "PDF",
+        _ => "",
+    }
 }
 
 pub(crate) fn restricted_book_url(url: &str, is_admin: bool) -> String {

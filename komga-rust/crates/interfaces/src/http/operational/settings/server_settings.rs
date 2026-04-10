@@ -23,27 +23,17 @@ pub(crate) async fn get_server_settings(
         return response;
     }
 
-    let settings =
-        match server_settings_access::load_server_settings(state.settings_store.as_ref()).await {
-            Ok(settings) => settings,
-            Err(error) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "message": format!("failed to load settings: {error}") })),
-                )
-                    .into_response();
-            }
-        };
-    let settings = operational_settings_from_persisted(settings);
+    let settings = match load_operational_settings(&state).await {
+        Ok(settings) => settings,
+        Err(response) => return response,
+    };
 
-    {
-        if let Err(error) = (state.apply_task_pool_size)(settings.task_pool_size as usize) {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "message": format!("failed to process queued tasks: {error}") })),
-            )
-                .into_response();
-        }
+    if let Err(error) = (state.apply_task_pool_size)(settings.task_pool_size as usize) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "message": format!("failed to process queued tasks: {error}") })),
+        )
+            .into_response();
     }
 
     Json(settings_json(&state.runtime, &settings)).into_response()
@@ -66,18 +56,10 @@ pub(crate) async fn update_server_settings(
         return invalid_settings_payload("invalid settings payload");
     }
 
-    let settings =
-        match server_settings_access::load_server_settings(state.settings_store.as_ref()).await {
-            Ok(settings) => settings,
-            Err(error) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "message": format!("failed to load settings: {error}") })),
-                )
-                    .into_response();
-            }
-        };
-    let mut settings = operational_settings_from_persisted(settings);
+    let mut settings = match load_operational_settings(&state).await {
+        Ok(settings) => settings,
+        Err(response) => return response,
+    };
     let mut persistence_changes: Vec<(String, Option<String>)> = Vec::new();
     let mut task_pool_size_change: Option<u64> = None;
 
@@ -292,6 +274,21 @@ fn operational_settings_from_persisted(
     operational
 }
 
+async fn load_operational_settings(
+    state: &OperationalState,
+) -> Result<OperationalSettings, Response> {
+    server_settings_access::load_server_settings(state.settings_store.as_ref())
+        .await
+        .map(operational_settings_from_persisted)
+        .map_err(|error| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "message": format!("failed to load settings: {error}") })),
+            )
+                .into_response()
+        })
+}
+
 fn settings_json(runtime: &crate::http::RuntimeState, settings: &OperationalSettings) -> Value {
     json!({
         "deleteEmptyCollections": settings.delete_empty_collections,
@@ -309,6 +306,7 @@ fn settings_json(runtime: &crate::http::RuntimeState, settings: &OperationalSett
             settings.server_context_path.as_deref(),
             Some(effective_server_context_path(runtime, settings)),
         ),
+        "kepubifyPath": multi_source_string(None, None, None),
         "koboProxy": settings.kobo_proxy,
         "koboPort": settings.kobo_port,
     })

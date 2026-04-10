@@ -1,6 +1,7 @@
 use super::*;
 
 use crate::discovery_detail_access::readlists as readlists_access;
+use crate::http::helpers::normalized_date_time;
 use quick_xml::Reader as XmlReader;
 use quick_xml::events::Event as XmlEvent;
 
@@ -800,8 +801,8 @@ pub fn readlist_payload(readlist: &ReadListReadModel) -> Value {
         "summary": readlist.summary,
         "ordered": readlist.ordered,
         "bookIds": readlist.book_ids,
-        "createdDate": readlist.created_date,
-        "lastModifiedDate": readlist.last_modified_date,
+        "createdDate": normalized_date_time(&readlist.created_date),
+        "lastModifiedDate": normalized_date_time(&readlist.last_modified_date),
         "filtered": readlist.filtered,
     })
 }
@@ -925,6 +926,29 @@ mod tests {
         assert_eq!(books[0].id, "book-b");
         assert_eq!(books[1].id, "book-a");
         assert_eq!(books[2].id, "book-c");
+    }
+
+    #[test]
+    fn readlist_payload_normalizes_datetime_fields() {
+        let payload = super::readlist_payload(&super::ReadListReadModel {
+            id: "readlist-1".to_string(),
+            name: "ReadList 1".to_string(),
+            summary: "Summary".to_string(),
+            ordered: true,
+            book_ids: vec!["book-1".to_string()],
+            created_date: "2024-01-01 00:00:00".to_string(),
+            last_modified_date: "2024-01-02 00:00:00".to_string(),
+            filtered: false,
+        });
+
+        assert_eq!(
+            payload.get("createdDate"),
+            Some(&json!("2024-01-01T00:00:00Z"))
+        );
+        assert_eq!(
+            payload.get("lastModifiedDate"),
+            Some(&json!("2024-01-02T00:00:00Z"))
+        );
     }
 
     fn sample_readlist_book(

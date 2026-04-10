@@ -4,7 +4,10 @@ use super::*;
 pub(super) struct PersistenceSnapshot {
     pub(super) library_rows: i64,
     pub(super) series_rows: i64,
+    pub(super) series_metadata_rows: i64,
+    pub(super) book_metadata_aggregation_rows: i64,
     pub(super) book_rows: i64,
+    pub(super) book_metadata_rows: i64,
     pub(super) media_file_rows: i64,
     pub(super) sidecar_rows: i64,
 }
@@ -40,6 +43,35 @@ impl ScannerPersistenceFixture {
     pub(super) fn cleanup(self) {
         persistence_contract_fixture::cleanup(self.paths);
     }
+}
+
+pub(super) fn scan_library_task_id(library_id: &str, deep_scan: bool) -> String {
+    format!("SCAN_LIBRARY:{library_id}:DEEP:{deep_scan}")
+}
+
+pub(super) fn scan_library_task_payload(
+    library_id: &str,
+    priority: i32,
+    deep_scan: bool,
+) -> String {
+    json!({
+        "libraryId": library_id,
+        "scanDeep": deep_scan,
+        "priority": priority,
+        "groupId": Value::Null,
+        "uniqueId": scan_library_task_id(library_id, deep_scan),
+    })
+    .to_string()
+}
+
+pub(super) fn scan_library_task(
+    library_id: &str,
+    priority: i32,
+    deep_scan: bool,
+) -> TaskQueueRecord {
+    TaskQueueRecord::new(scan_library_task_id(library_id, deep_scan), priority, None)
+        .with_simple_type("SCAN_LIBRARY")
+        .with_payload(scan_library_task_payload(library_id, priority, deep_scan))
 }
 
 pub(super) fn create_scannable_library_root(config_dir: &Path) -> anyhow::Result<PathBuf> {
@@ -285,6 +317,30 @@ pub(super) async fn load_persistence_snapshot(
     .expect("series row count should be queryable")
     .get::<i64, _>("COUNT");
 
+    let series_metadata_rows = sqlx::query(
+        "SELECT COUNT(*) AS COUNT \
+         FROM SERIES_METADATA sm \
+         JOIN SERIES s ON s.ID = sm.SERIES_ID \
+         WHERE s.LIBRARY_ID = ?",
+    )
+    .bind(library_id)
+    .fetch_one(&pool)
+    .await
+    .expect("series metadata row count should be queryable")
+    .get::<i64, _>("COUNT");
+
+    let book_metadata_aggregation_rows = sqlx::query(
+        "SELECT COUNT(*) AS COUNT \
+         FROM BOOK_METADATA_AGGREGATION bma \
+         JOIN SERIES s ON s.ID = bma.SERIES_ID \
+         WHERE s.LIBRARY_ID = ?",
+    )
+    .bind(library_id)
+    .fetch_one(&pool)
+    .await
+    .expect("book metadata aggregation row count should be queryable")
+    .get::<i64, _>("COUNT");
+
     let book_rows = sqlx::query(
         "SELECT COUNT(*) AS COUNT \
                                  FROM BOOK \
@@ -294,6 +350,18 @@ pub(super) async fn load_persistence_snapshot(
     .fetch_one(&pool)
     .await
     .expect("book row count should be queryable")
+    .get::<i64, _>("COUNT");
+
+    let book_metadata_rows = sqlx::query(
+        "SELECT COUNT(*) AS COUNT \
+         FROM BOOK_METADATA bm \
+         JOIN BOOK b ON b.ID = bm.BOOK_ID \
+         WHERE b.LIBRARY_ID = ?",
+    )
+    .bind(library_id)
+    .fetch_one(&pool)
+    .await
+    .expect("book metadata row count should be queryable")
     .get::<i64, _>("COUNT");
 
     let media_file_rows = sqlx::query(
@@ -325,7 +393,10 @@ pub(super) async fn load_persistence_snapshot(
     PersistenceSnapshot {
         library_rows,
         series_rows,
+        series_metadata_rows,
+        book_metadata_aggregation_rows,
         book_rows,
+        book_metadata_rows,
         media_file_rows,
         sidecar_rows,
     }

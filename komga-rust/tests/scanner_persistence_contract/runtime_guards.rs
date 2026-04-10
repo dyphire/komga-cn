@@ -28,10 +28,7 @@ async fn scanner_runtime_blocks_scan_output_when_filesystem_scan_writer_is_exter
         owns_search_index: true,
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new("SCAN_LIBRARY:library-1", 900, Some("library-1".to_string()))
-            .with_simple_type("SCAN_LIBRARY"),
-    );
+    scheduler.enqueue(scan_library_task("library-1", 900, false));
     scheduler
         .process_available(&runtime)
         .expect("blocked scan-output task should still drain cleanly");
@@ -65,10 +62,7 @@ async fn scanner_unknown_task_type_is_not_completed_or_silently_skipped() {
         1000,
         Some("book-1".to_string()),
     ));
-    scheduler.enqueue(
-        TaskQueueRecord::new("SCAN_LIBRARY:library-1", 900, Some("library-1".to_string()))
-            .with_simple_type("SCAN_LIBRARY"),
-    );
+    scheduler.enqueue(scan_library_task("library-1", 900, false));
 
     let error = scheduler
         .process_available(&fixture.config)
@@ -122,16 +116,18 @@ async fn scanner_startup_releases_previously_claimed_persisted_tasks() {
     let tasks_pool = connect_pool(fixture.paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for startup disown test");
+    let task_id = scan_library_task_id("library-1", false);
+    let task_payload = scan_library_task_payload("library-1", 100, false);
     sqlx::query(
         "INSERT INTO TASK (ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER) \
          VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
-    .bind("SCAN_LIBRARY:library-1")
+    .bind(&task_id)
     .bind(100_i64)
-    .bind("library-1")
-    .bind("org.gotson.komga.domain.task.TaskScanLibrary")
-    .bind("SCAN_LIBRARY")
-    .bind("{}")
+    .bind(Option::<String>::None)
+    .bind("org.gotson.komga.application.tasks.Task$ScanLibrary")
+    .bind("ScanLibrary")
+    .bind(task_payload)
     .bind("stale-owner")
     .execute(&tasks_pool)
     .await
@@ -145,7 +141,7 @@ async fn scanner_startup_releases_previously_claimed_persisted_tasks() {
         .await
         .expect("tasks db should reopen for startup disown verification");
     let owner = sqlx::query("SELECT OWNER FROM TASK WHERE ID = ?")
-        .bind("SCAN_LIBRARY:library-1")
+        .bind(task_id)
         .fetch_one(&verify_pool)
         .await
         .expect("task owner row should be queryable")
@@ -161,7 +157,7 @@ async fn scanner_startup_releases_previously_claimed_persisted_tasks() {
 }
 
 #[tokio::test]
-async fn scanner_startup_does_not_disown_tasks_when_tasks_writer_is_external_owned() {
+async fn scanner_startup_leaves_tasks_untouched_when_tasks_writer_is_external_owned() {
     let fixture = ScannerPersistenceFixture::new("scanner-persistence-blocked-tasks-disown")
         .await
         .expect("scanner blocked tasks-disown fixture should be created");
@@ -169,6 +165,8 @@ async fn scanner_startup_does_not_disown_tasks_when_tasks_writer_is_external_own
     let tasks_pool = connect_pool(fixture.paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for blocked tasks-disown test");
+    let task_id = scan_library_task_id("library-1", false);
+    let task_payload = scan_library_task_payload("library-1", 100, false);
     sqlx::query(
         r#"
         INSERT INTO TASK (
@@ -182,12 +180,12 @@ async fn scanner_startup_does_not_disown_tasks_when_tasks_writer_is_external_own
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
         "#,
     )
-    .bind("SCAN_LIBRARY:library-1")
+    .bind(&task_id)
     .bind(100_i64)
-    .bind("library-1")
-    .bind("org.gotson.komga.domain.task.TaskScanLibrary")
-    .bind("SCAN_LIBRARY")
-    .bind("{}")
+    .bind(Option::<String>::None)
+    .bind("org.gotson.komga.application.tasks.Task$ScanLibrary")
+    .bind("ScanLibrary")
+    .bind(task_payload)
     .bind("stale-owner")
     .execute(&tasks_pool)
     .await
@@ -205,13 +203,19 @@ async fn scanner_startup_does_not_disown_tasks_when_tasks_writer_is_external_own
         owns_search_index: false,
     };
 
-    let _background = komga_rust::infrastructure::task_queue::prepare_task_queue(runtime, None);
+    let background =
+        komga_rust::infrastructure::task_queue::prepare_task_queue(runtime, Some("REBUILD_INDEX"));
 
     let verify_pool = connect_pool(fixture.paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should reopen for blocked tasks-disown verification");
+    let task_rows = sqlx::query("SELECT COUNT(*) AS COUNT FROM TASK")
+        .fetch_one(&verify_pool)
+        .await
+        .expect("task rows should be queryable")
+        .get::<i64, _>("COUNT");
     let owner = sqlx::query("SELECT OWNER FROM TASK WHERE ID = ?")
-        .bind("SCAN_LIBRARY:library-1")
+        .bind(task_id)
         .fetch_one(&verify_pool)
         .await
         .expect("task owner row should be queryable")
@@ -223,34 +227,8 @@ async fn scanner_startup_does_not_disown_tasks_when_tasks_writer_is_external_own
         Some("stale-owner".to_string()),
         "startup must not rewrite persisted task ownership when tasks database writer is external-owned",
     );
-
-    fixture.cleanup();
-}
-
-#[tokio::test]
-async fn scanner_startup_does_not_enqueue_search_tasks_when_tasks_writer_is_external_owned() {
-    let fixture =
-        ScannerPersistenceFixture::new("scanner-persistence-blocked-tasks-search-startup")
-            .await
-            .expect("scanner blocked tasks-search-startup fixture should be created");
-
-    let runtime = TaskRuntimeContext {
-        database_file: fixture.paths.main_db.clone(),
-        tasks_db_file: fixture.paths.tasks_db.clone(),
-        lucene_data_directory: fixture.config.lucene_data_directory.clone(),
-        consumes_queue: false,
-        owns_main_database: false,
-        owns_filesystem_scan_output: false,
-        owns_sidecar_output: false,
-        owns_search_index: false,
-    };
-
-    let background =
-        komga_rust::infrastructure::task_queue::prepare_task_queue(runtime, Some("REBUILD_INDEX"));
-
-    let snapshot = load_task_snapshot(&fixture.paths.tasks_db).await;
     assert_eq!(
-        snapshot.task_rows, 0,
+        task_rows, 1,
         "startup must not enqueue persisted search tasks when tasks database writer is external-owned",
     );
     let queued_tasks = background

@@ -87,17 +87,6 @@ pub(crate) fn load_epub_cover_bytes(media: &BookMediaRecord) -> Option<(Vec<u8>,
     (backend().load_epub_cover_bytes)(media.clone())
 }
 
-pub(crate) async fn load_persisted_series_thumbnail_media(
-    database_file: &Path,
-    series_id: &str,
-) -> Result<Option<BookMediaRecord>, String> {
-    (backend().load_persisted_series_thumbnail_media)(
-        database_file.to_path_buf(),
-        series_id.to_string(),
-    )
-    .await
-}
-
 pub(crate) async fn load_persisted_book_pages(
     database_file: &Path,
     book_id: &str,

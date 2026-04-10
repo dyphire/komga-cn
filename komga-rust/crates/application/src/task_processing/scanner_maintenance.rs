@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use super::{LibraryScanInterval, ScheduledLibraryScan, TaskQueueRecord};
+use serde_json::json;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LibraryScanProfile {
@@ -25,17 +26,21 @@ pub fn library_scan_interval_from_db(value: &str) -> Result<LibraryScanInterval,
 pub fn build_scheduled_library_scans(
     profiles: &[LibraryScanProfile],
 ) -> Result<Vec<ScheduledLibraryScan>, String> {
-    let mut scans = Vec::new();
-    for profile in profiles {
-        let interval = library_scan_interval_from_db(profile.scan_interval.as_str())?;
-        if interval == LibraryScanInterval::Disabled {
-            continue;
-        }
-        scans.push(ScheduledLibraryScan {
-            library_id: profile.library_id.clone(),
-            interval,
-        });
-    }
+    let mut scans = profiles
+        .iter()
+        .map(|profile| {
+            library_scan_interval_from_db(profile.scan_interval.as_str())
+                .map(|interval| (profile.library_id.clone(), interval))
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter_map(|(library_id, interval)| {
+            (interval != LibraryScanInterval::Disabled).then_some(ScheduledLibraryScan {
+                library_id,
+                interval,
+            })
+        })
+        .collect::<Vec<_>>();
 
     scans.sort_by(|left, right| left.library_id.cmp(&right.library_id));
     Ok(scans)
@@ -51,16 +56,31 @@ pub fn build_startup_library_scan_tasks(profiles: &[LibraryScanProfile]) -> Vec<
     build_library_scan_tasks(&library_ids)
 }
 
+fn background_scan_task_id(library_id: &str) -> String {
+    format!("SCAN_LIBRARY:{library_id}:DEEP:false")
+}
+
+fn background_scan_task_payload(library_id: &str, task_id: &str) -> String {
+    json!({
+        "libraryId": library_id,
+        "scanDeep": false,
+        "priority": 4,
+        "groupId": serde_json::Value::Null,
+        "uniqueId": task_id,
+    })
+    .to_string()
+}
+
+fn background_scan_task_record(library_id: &str) -> TaskQueueRecord {
+    let task_id = background_scan_task_id(library_id);
+    TaskQueueRecord::new(task_id.clone(), 4, None)
+        .with_payload(background_scan_task_payload(library_id, &task_id))
+}
+
 pub fn build_library_scan_tasks(library_ids: &[String]) -> Vec<TaskQueueRecord> {
     library_ids
         .iter()
-        .map(|library_id| {
-            TaskQueueRecord::new(
-                format!("SCAN_LIBRARY:{library_id}"),
-                100,
-                Some(library_id.clone()),
-            )
-        })
+        .map(|library_id| background_scan_task_record(library_id))
         .collect()
 }
 
@@ -119,8 +139,9 @@ mod tests {
 
         let tasks = build_startup_library_scan_tasks(&profiles);
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].id, "SCAN_LIBRARY:library-1");
-        assert_eq!(tasks[0].group.as_deref(), Some("library-1"));
+        assert_eq!(tasks[0].id, "SCAN_LIBRARY:library-1:DEEP:false");
+        assert_eq!(tasks[0].priority, 4);
+        assert_eq!(tasks[0].group, None);
     }
 
     #[test]

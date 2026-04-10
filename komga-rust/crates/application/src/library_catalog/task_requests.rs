@@ -1,6 +1,6 @@
 use super::task_records::{
-    analyze_library_task_records, empty_trash_task_records, metadata_refresh_task_records,
-    scan_library_task_record,
+    analyze_library_task_records, empty_trash_task_records, manual_scan_library_task_record,
+    metadata_refresh_task_records,
 };
 use super::{LibraryCatalogMutationError, LibraryCatalogMutationPort, LibraryTaskResult};
 
@@ -21,8 +21,9 @@ where
         library_id: &str,
         deep_scan: bool,
     ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {
+        ensure_library_exists(&self.port, library_id).await?;
         Ok(LibraryTaskResult {
-            task_records: vec![scan_library_task_record(library_id, deep_scan)],
+            task_records: vec![manual_scan_library_task_record(library_id, deep_scan)],
         })
     }
 
@@ -30,14 +31,15 @@ where
         &self,
         library_id: &str,
     ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {
-        let book_ids = self
+        let books = self
             .port
-            .library_book_ids(library_id)
+            .library_series_and_book_ids(library_id)
             .await
             .map_err(LibraryCatalogMutationError::persistence)?
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .1;
         Ok(LibraryTaskResult {
-            task_records: analyze_library_task_records(book_ids),
+            task_records: analyze_library_task_records(books),
         })
     }
 
@@ -182,19 +184,64 @@ mod tests {
     }
 
     #[test]
-    fn scan_library_enqueues_task_even_when_library_is_missing() {
+    fn scan_library_returns_not_found_when_library_is_missing() {
         let service = LibraryTaskService::new(TestPort::default());
 
-        let result = block_on(service.scan_library("missing-library", true))
-            .expect("missing libraries should still enqueue scan tasks");
+        let error = block_on(service.scan_library("missing-library", true))
+            .expect_err("missing libraries should reject scan requests");
+
+        assert!(matches!(error, LibraryCatalogMutationError::NotFound));
+    }
+
+    #[test]
+    fn scan_library_enqueues_kotlin_style_deep_scan_task_for_existing_library() {
+        let service = LibraryTaskService::new(TestPort {
+            library: Some(LibraryRecord::default_record("library-1".to_string())),
+            ..TestPort::default()
+        });
+
+        let result = block_on(service.scan_library("library-1", true))
+            .expect("existing libraries should enqueue scan tasks");
 
         assert_eq!(result.task_records.len(), 1);
-        assert_eq!(result.task_records[0].id, "SCAN_LIBRARY:missing-library");
-        assert_eq!(result.task_records[0].simple_type, "SCAN_LIBRARY");
         assert_eq!(
-            result.task_records[0].payload.as_deref(),
-            Some(r#"{"deep":true}"#)
+            result.task_records[0].id,
+            "SCAN_LIBRARY:library-1:DEEP:true"
         );
+        assert_eq!(result.task_records[0].simple_type, "SCAN_LIBRARY");
+        assert_eq!(result.task_records[0].priority, 100);
+        assert_eq!(result.task_records[0].group, None);
+        assert_eq!(
+            result.task_records[0]
+                .payload
+                .as_deref()
+                .and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok()),
+            Some(serde_json::json!({
+                "libraryId": "library-1",
+                "scanDeep": true,
+                "priority": 100,
+                "groupId": serde_json::Value::Null,
+                "uniqueId": "SCAN_LIBRARY:library-1:DEEP:true"
+            }))
+        );
+    }
+
+    #[test]
+    fn analyze_library_groups_tasks_by_series_id() {
+        let service = LibraryTaskService::new(TestPort {
+            library_series_and_book_ids: Some((
+                vec!["series-1".to_string()],
+                vec![("book-1".to_string(), "series-1".to_string())],
+            )),
+            ..TestPort::default()
+        });
+
+        let result =
+            block_on(service.analyze_library("library-1")).expect("analyze library should work");
+
+        assert_eq!(result.task_records.len(), 1);
+        assert_eq!(result.task_records[0].id, "ANALYZE_BOOK:book-1");
+        assert_eq!(result.task_records[0].group.as_deref(), Some("series-1"));
     }
 
     #[test]
@@ -243,6 +290,7 @@ mod tests {
         assert_eq!(result.task_records.len(), 1);
         assert_eq!(result.task_records[0].id, "EMPTY_TRASH:library-1");
         assert_eq!(result.task_records[0].simple_type, "EMPTY_TRASH");
+        assert_eq!(result.task_records[0].group, None);
     }
 
     fn block_on<F: Future>(future: F) -> F::Output {

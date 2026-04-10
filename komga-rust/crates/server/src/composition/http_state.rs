@@ -31,11 +31,12 @@ use komga_interfaces::http::discovery::{
     PersistedBookSiblingDirectionRecord, PersistedBookSummary, PersistedBookTagsScope,
     PersistedCollectionAccessRecord, PersistedComicrackMatchCandidateRecord,
     PersistedDiscoveryAccessBackend,
-    PersistedReadProgressRecord as PersistedBookReadProgressRecord, PersistedReadlistBookRecord,
-    PersistedReadlistRecord, PersistedSeriesCollectionRecord, PersistedSeriesDetailRecord,
-    PersistedSeriesResourceRecord, PersistedSeriesRestrictionRecord, PersistedSeriesSummary,
-    SeriesAlternateTitleRecord, SeriesMetadataLinkRecord, SeriesSummaryRecord,
-    install_discovery_detail_access_backends, install_persisted_discovery_access,
+    PersistedReadProgressRecord as PersistedBookReadProgressRecord, PersistedReadProgressSummary,
+    PersistedReadlistBookRecord, PersistedReadlistRecord, PersistedSeriesCollectionRecord,
+    PersistedSeriesDetailRecord, PersistedSeriesResourceRecord, PersistedSeriesRestrictionRecord,
+    PersistedSeriesSummary, PersistedWebLinkEntry, SeriesAlternateTitleRecord,
+    SeriesMetadataLinkRecord, SeriesSummaryRecord, install_discovery_detail_access_backends,
+    install_persisted_discovery_access,
 };
 use komga_interfaces::http::discovery_auth::DiscoveryAuthState;
 use komga_interfaces::http::identity_access::auth::configure_remember_me_store;

@@ -69,10 +69,11 @@ fn application_import_payload(payload: BooksImportPayload) -> ApplicationBooksIm
 pub async fn process_queued_books_import_task(
     database_file: &FsPath,
     task_payload: &str,
+    import_priority: i32,
 ) -> Result<Vec<TaskQueueRecord>, String> {
     let service = media_import_service(database_file);
     service
-        .process_queued_books_payload(task_payload)
+        .process_queued_books_payload(task_payload, import_priority)
         .await
         .map(|tasks| tasks.into_iter().map(interface_task_record).collect())
 }
@@ -80,10 +81,11 @@ pub async fn process_queued_books_import_task(
 pub async fn process_queued_book_import_task(
     database_file: &FsPath,
     task_payload: &str,
+    import_priority: i32,
 ) -> Result<Vec<TaskQueueRecord>, String> {
     let service = media_import_service(database_file);
     service
-        .process_queued_book_payload(task_payload)
+        .process_queued_book_payload(task_payload, import_priority)
         .await
         .map(|tasks| tasks.into_iter().map(interface_task_record).collect())
 }

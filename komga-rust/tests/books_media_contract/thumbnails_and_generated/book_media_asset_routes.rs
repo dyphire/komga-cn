@@ -106,7 +106,7 @@ async fn router_book_file_delete_enqueues_delete_book_even_when_book_is_missing(
     let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for missing book file delete verification");
-    let rows = sqlx::query("SELECT ID, SIMPLE_TYPE, GROUP_ID FROM TASK ORDER BY ID ASC")
+    let rows = sqlx::query("SELECT ID, SIMPLE_TYPE, GROUP_ID, PRIORITY FROM TASK ORDER BY ID ASC")
         .fetch_all(&tasks_pool)
         .await
         .expect("missing book delete task rows should be queryable");
@@ -114,11 +114,9 @@ async fn router_book_file_delete_enqueues_delete_book_even_when_book_is_missing(
 
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].get::<String, _>("ID"), "DELETE_BOOK:missing-book");
-    assert_eq!(rows[0].get::<String, _>("SIMPLE_TYPE"), "DELETE_BOOK");
-    assert_eq!(
-        rows[0].get::<Option<String>, _>("GROUP_ID"),
-        Some("missing-book".to_string())
-    );
+    assert_eq!(rows[0].get::<String, _>("SIMPLE_TYPE"), "DeleteBook");
+    assert_eq!(rows[0].get::<Option<String>, _>("GROUP_ID"), None);
+    assert_eq!(rows[0].get::<i32, _>("PRIORITY"), 100);
 
     cleanup_router_fixture(paths);
 }

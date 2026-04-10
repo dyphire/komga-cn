@@ -22,9 +22,9 @@ pub use query_service::{
     requested_library_ids_for_runtime_shape,
 };
 pub use read_models::{
-    BookDetailReadModel, BookReadModel, BookResourceReadModel, CollectionReadModel,
-    LibraryReadModel, ReadListReadModel, SeriesDetailReadModel, SeriesReadModel,
-    SeriesResourceReadModel,
+    BookDetailReadModel, BookMetadataAuthorReadModel, BookMetadataLinkReadModel, BookReadModel,
+    BookReadProgressReadModel, BookResourceReadModel, CollectionReadModel, LibraryReadModel,
+    ReadListReadModel, SeriesDetailReadModel, SeriesReadModel, SeriesResourceReadModel,
 };
 pub use readlists::{
     ReadListBooksOwnership, ReadListBooksQuery, ReadListDetailQuery, ReadListsQuery,

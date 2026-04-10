@@ -14,6 +14,53 @@ async fn count_query_rows(paths: &RuntimeDbPaths, sql: &str, bind: &str) -> i64 
     count
 }
 
+async fn load_task_rows(paths: &RuntimeDbPaths, sql: &str) -> Vec<sqlx::sqlite::SqliteRow> {
+    let pool = connect_pool(paths.tasks_db.as_path(), 1)
+        .await
+        .expect("tasks db should open");
+    let rows = sqlx::query(sql)
+        .fetch_all(&pool)
+        .await
+        .expect("task rows should be queryable");
+    pool.close().await;
+    rows
+}
+
+async fn assert_single_scan_task(
+    paths: &RuntimeDbPaths,
+    expected_id: String,
+    expected_library_id: &str,
+    expected_priority: i32,
+    expected_deep: bool,
+) {
+    let rows = load_task_rows(
+        paths,
+        "SELECT ID, SIMPLE_TYPE, GROUP_ID, PRIORITY, PAYLOAD FROM TASK ORDER BY ID ASC",
+    )
+    .await;
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].get::<String, _>("ID"), expected_id);
+    assert_eq!(rows[0].get::<String, _>("SIMPLE_TYPE"), "ScanLibrary");
+    assert_eq!(rows[0].get::<Option<String>, _>("GROUP_ID"), None);
+    assert_eq!(rows[0].get::<i32, _>("PRIORITY"), expected_priority);
+    assert_eq!(
+        serde_json::from_str::<Value>(
+            &rows[0]
+                .get::<Option<String>, _>("PAYLOAD")
+                .expect("scan task should persist payload metadata"),
+        )
+        .expect("scan task payload should be valid json"),
+        json!({
+            "libraryId": expected_library_id,
+            "scanDeep": expected_deep,
+            "priority": expected_priority,
+            "groupId": Value::Null,
+            "uniqueId": expected_id,
+        })
+    );
+}
+
 #[tokio::test]
 async fn router_api_libraries_route_matches_kotlin_etag_without_extra_cache_headers() {
     let paths = new_router_fixture("router-api-libraries-kotlin-cache-headers").await;
@@ -52,12 +99,13 @@ async fn router_api_libraries_route_matches_kotlin_etag_without_extra_cache_head
         .expect("libraries response should include etag");
 
     let second_response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
                 .uri("/api/v1/libraries")
                 .header("x-auth-token", &auth_token)
-                .header(header::IF_NONE_MATCH, etag)
+                .header(header::IF_NONE_MATCH, etag.as_str())
                 .body(Body::empty())
                 .expect("conditional libraries request should build"),
         )
@@ -73,6 +121,26 @@ async fn router_api_libraries_route_matches_kotlin_etag_without_extra_cache_head
         "Kotlin conditional libraries list does not emit Cache-Control on 304"
     );
     assert!(second_response.headers().contains_key(header::ETAG));
+
+    let head_response = app
+        .oneshot(
+            Request::builder()
+                .method("HEAD")
+                .uri("/api/v1/libraries")
+                .header("x-auth-token", &auth_token)
+                .header(header::IF_NONE_MATCH, etag.as_str())
+                .body(Body::empty())
+                .expect("conditional libraries head request should build"),
+        )
+        .await
+        .expect("conditional libraries head request should complete");
+
+    assert_eq!(head_response.status(), StatusCode::NOT_MODIFIED);
+    assert!(
+        head_response.headers().get(header::CACHE_CONTROL).is_none(),
+        "Kotlin conditional libraries head does not emit Cache-Control on 304"
+    );
+    assert!(head_response.headers().contains_key(header::ETAG));
 
     cleanup_router_fixture(paths);
 }
@@ -138,25 +206,332 @@ async fn router_api_library_patch_accepts_null_scan_directory_exclusions_as_clea
 }
 
 #[tokio::test]
-async fn router_api_library_delete_requires_authentication() {
-    let paths = new_router_fixture("router-api-library-delete-requires-auth").await;
+async fn router_api_library_create_and_scan_enqueue_expected_scan_tasks() {
+    let paths = new_router_fixture("router-api-library-create-enqueues-scan").await;
     seed_router_contract_data(&paths).await;
 
+    let new_root = paths
+        .config_dir
+        .parent()
+        .expect("fixture config dir should have a parent")
+        .join("created-library-root");
+    std::fs::create_dir_all(&new_root).expect("created library root should be creatable");
+
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
     let response = app
         .oneshot(
             Request::builder()
-                .method("DELETE")
-                .uri("/api/v1/libraries/library-1")
-                .body(Body::empty())
-                .expect("library delete unauthenticated request should build"),
+                .method("POST")
+                .uri("/api/v1/libraries")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "Created Library",
+                        "root": new_root.to_string_lossy(),
+                    })
+                    .to_string(),
+                ))
+                .expect("library create request should build"),
         )
         .await
-        .expect("library delete unauthenticated request should complete");
+        .expect("library create request should complete");
 
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let library_id = payload
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("created library response should include id");
+
+    assert_single_scan_task(
+        &paths,
+        format!("SCAN_LIBRARY:{library_id}:DEEP:false"),
+        library_id,
+        4,
+        false,
+    )
+    .await;
 
     cleanup_router_fixture(paths);
+
+    let paths = new_router_fixture("router-api-library-scan-task-shape").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/libraries/library-1/scan?deep=true")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("library scan request should build"),
+        )
+        .await
+        .expect("library scan request should complete");
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+    assert_single_scan_task(
+        &paths,
+        "SCAN_LIBRARY:library-1:DEEP:true".to_string(),
+        "library-1",
+        100,
+        true,
+    )
+    .await;
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_api_library_scan_returns_not_found_for_missing_library() {
+    let paths = new_router_fixture("router-api-library-scan-missing-library").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/libraries/missing-library/scan")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("missing library scan request should build"),
+        )
+        .await
+        .expect("missing library scan request should complete");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    let rows = load_task_rows(&paths, "SELECT COUNT(*) AS COUNT FROM TASK").await;
+    assert_eq!(rows[0].get::<i64, _>("COUNT"), 0);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_api_library_analyze_enqueues_analyze_book_tasks_grouped_by_series_id() {
+    let paths = new_router_fixture("router-api-library-analyze-task-groups").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/libraries/library-1/analyze")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("library analyze request should build"),
+        )
+        .await
+        .expect("library analyze request should complete");
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+    let rows = load_task_rows(
+        &paths,
+        "SELECT ID, SIMPLE_TYPE, GROUP_ID, PRIORITY FROM TASK ORDER BY ID ASC",
+    )
+    .await;
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].get::<String, _>("ID"), "ANALYZE_BOOK:book-1");
+    assert_eq!(rows[0].get::<String, _>("SIMPLE_TYPE"), "AnalyzeBook");
+    assert_eq!(
+        rows[0].get::<Option<String>, _>("GROUP_ID"),
+        Some("series-1".to_string())
+    );
+    assert_eq!(rows[0].get::<i32, _>("PRIORITY"), 90);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_api_library_metadata_refresh_leaves_series_local_artwork_ungrouped() {
+    let paths = new_router_fixture("router-api-library-metadata-refresh-task-shape").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/libraries/library-1/metadata/refresh")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("library metadata refresh request should build"),
+        )
+        .await
+        .expect("library metadata refresh request should complete");
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+    let rows = load_task_rows(
+        &paths,
+        "SELECT ID, SIMPLE_TYPE, GROUP_ID, PRIORITY, PAYLOAD FROM TASK ORDER BY ID ASC",
+    )
+    .await;
+
+    assert_eq!(rows.len(), 3);
+    assert_eq!(
+        rows[0].get::<String, _>("ID"),
+        "REFRESH_BOOK_LOCAL_ARTWORK_book-1"
+    );
+    assert_eq!(rows[0].get::<Option<String>, _>("GROUP_ID"), None);
+    assert_eq!(rows[0].get::<i32, _>("PRIORITY"), 80);
+
+    assert_eq!(
+        rows[1].get::<String, _>("ID"),
+        "REFRESH_BOOK_METADATA_book-1"
+    );
+    assert_eq!(
+        rows[1].get::<Option<String>, _>("GROUP_ID"),
+        Some("series-1".to_string())
+    );
+    assert_eq!(rows[1].get::<i32, _>("PRIORITY"), 80);
+
+    assert_eq!(
+        rows[2].get::<String, _>("ID"),
+        "REFRESH_SERIES_LOCAL_ARTWORK:series-1"
+    );
+    assert_eq!(rows[2].get::<Option<String>, _>("GROUP_ID"), None);
+    assert_eq!(rows[2].get::<i32, _>("PRIORITY"), 80);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_api_library_empty_trash_enqueues_ungrouped_task() {
+    let paths = new_router_fixture("router-api-library-empty-trash-task-shape").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/libraries/library-1/empty-trash")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("library empty-trash request should build"),
+        )
+        .await
+        .expect("library empty-trash request should complete");
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+    let rows = load_task_rows(
+        &paths,
+        "SELECT ID, SIMPLE_TYPE, GROUP_ID, PRIORITY FROM TASK ORDER BY ID ASC",
+    )
+    .await;
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].get::<String, _>("ID"), "EMPTY_TRASH:library-1");
+    assert_eq!(rows[0].get::<String, _>("SIMPLE_TYPE"), "EmptyTrash");
+    assert_eq!(rows[0].get::<Option<String>, _>("GROUP_ID"), None);
+    assert_eq!(rows[0].get::<i32, _>("PRIORITY"), 70);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_api_library_delete_rejects_invalid_access_paths() {
+    #[derive(Clone, Copy)]
+    enum DeleteAuth {
+        None,
+        Admin,
+        NonAdmin,
+    }
+
+    let cases = [
+        (
+            "router-api-library-delete-requires-auth",
+            "/api/v1/libraries/library-1",
+            DeleteAuth::None,
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
+            "router-api-library-delete-forbidden-non-admin",
+            "/api/v1/libraries/library-1",
+            DeleteAuth::NonAdmin,
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            "router-api-library-delete-missing",
+            "/api/v1/libraries/missing-library",
+            DeleteAuth::Admin,
+            StatusCode::NOT_FOUND,
+        ),
+    ];
+
+    for (fixture_name, uri, auth_mode, expected_status) in cases {
+        let paths = new_router_fixture(fixture_name).await;
+        seed_router_contract_data(&paths).await;
+
+        if matches!(auth_mode, DeleteAuth::NonAdmin) {
+            seed_router_age_exclude_user_with_roles(
+                &paths,
+                "non-admin-user",
+                "non-admin@example.org",
+                "router-contract-non-admin-123",
+                18,
+                &["USER"],
+            )
+            .await;
+        }
+
+        let app = build_router_with_config(&runtime_config_for_paths(&paths));
+        let auth_token = match auth_mode {
+            DeleteAuth::None => None,
+            DeleteAuth::Admin => Some(login_with_basic_and_get_token(app.clone()).await),
+            DeleteAuth::NonAdmin => Some(
+                login_with_basic_credentials_and_get_token(
+                    app.clone(),
+                    "non-admin@example.org",
+                    "router-contract-non-admin-123",
+                )
+                .await,
+            ),
+        };
+
+        let mut request = Request::builder().method("DELETE").uri(uri);
+        if let Some(auth_token) = auth_token.as_deref() {
+            request = request.header("x-auth-token", auth_token);
+        }
+
+        let response = app
+            .oneshot(
+                request
+                    .body(Body::empty())
+                    .expect("library delete request should build"),
+            )
+            .await
+            .expect("library delete request should complete");
+
+        assert_eq!(
+            response.status(),
+            expected_status,
+            "unexpected status for {fixture_name}"
+        );
+
+        cleanup_router_fixture(paths);
+    }
 }
 
 #[tokio::test]
@@ -181,70 +556,6 @@ async fn router_api_library_put_route_is_removed() {
         .expect("removed library put request should complete");
 
     assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_api_library_delete_forbids_non_admin_user() {
-    let paths = new_router_fixture("router-api-library-delete-forbidden-non-admin").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_age_exclude_user_with_roles(
-        &paths,
-        "non-admin-user",
-        "non-admin@example.org",
-        "router-contract-non-admin-123",
-        18,
-        &["USER"],
-    )
-    .await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "non-admin@example.org",
-        "router-contract-non-admin-123",
-    )
-    .await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("DELETE")
-                .uri("/api/v1/libraries/library-1")
-                .header("x-auth-token", &auth_token)
-                .body(Body::empty())
-                .expect("library delete forbidden request should build"),
-        )
-        .await
-        .expect("library delete forbidden request should complete");
-
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_api_library_delete_returns_not_found_for_missing_library() {
-    let paths = new_router_fixture("router-api-library-delete-missing").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("DELETE")
-                .uri("/api/v1/libraries/missing-library")
-                .header("x-auth-token", &auth_token)
-                .body(Body::empty())
-                .expect("library delete missing request should build"),
-        )
-        .await
-        .expect("library delete missing request should complete");
-
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
     cleanup_router_fixture(paths);
 }
@@ -416,167 +727,76 @@ async fn router_api_library_delete_cascades_library_rows_like_kotlin() {
 }
 
 #[tokio::test]
-async fn router_api_library_patch_rejects_blank_name() {
-    let paths = new_router_fixture("router-api-library-patch-blank-name").await;
-    seed_router_contract_data(&paths).await;
+async fn router_api_library_patch_rejects_blank_fields_with_kotlin_validation_payload() {
+    for (fixture_name, body, expected_payload) in [
+        (
+            "router-api-library-patch-blank-name",
+            json!({ "name": "   " }),
+            json!({
+                "violations": [
+                    {
+                        "fieldName": "name",
+                        "message": "must not be blank"
+                    }
+                ]
+            }),
+        ),
+        (
+            "router-api-library-patch-blank-root",
+            json!({ "root": "   " }),
+            json!({
+                "violations": [
+                    {
+                        "fieldName": "root",
+                        "message": "must not be blank"
+                    }
+                ]
+            }),
+        ),
+        (
+            "router-api-library-patch-multiple-blank-fields",
+            json!({ "name": "   ", "root": "   " }),
+            json!({
+                "violations": [
+                    {
+                        "fieldName": "root",
+                        "message": "must not be blank"
+                    },
+                    {
+                        "fieldName": "name",
+                        "message": "must not be blank"
+                    }
+                ]
+            }),
+        ),
+    ] {
+        let paths = new_router_fixture(fixture_name).await;
+        seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+        let app = build_router_with_config(&runtime_config_for_paths(&paths));
+        let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
-    let patch_response = app
-        .oneshot(
-            Request::builder()
-                .method("PATCH")
-                .uri("/api/v1/libraries/library-1")
-                .header("x-auth-token", &auth_token)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(json!({ "name": "   " }).to_string()))
-                .expect("library patch blank-name request should build"),
-        )
-        .await
-        .expect("library patch blank-name request should complete");
+        let patch_response = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/api/v1/libraries/library-1")
+                    .header("x-auth-token", &auth_token)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body.to_string()))
+                    .expect("library patch blank-field request should build"),
+            )
+            .await
+            .expect("library patch blank-field request should complete");
 
-    assert_eq!(patch_response.status(), StatusCode::BAD_REQUEST);
-    let payload = response_json(patch_response).await;
-    assert_eq!(
-        payload,
-        json!({
-            "violations": [
-                {
-                    "fieldName": "name",
-                    "message": "must not be blank"
-                }
-            ]
-        })
-    );
+        assert_eq!(
+            patch_response.status(),
+            StatusCode::BAD_REQUEST,
+            "case: {fixture_name}"
+        );
+        let payload = response_json(patch_response).await;
+        assert_eq!(payload, expected_payload, "case: {fixture_name}");
 
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_api_library_patch_rejects_blank_root() {
-    let paths = new_router_fixture("router-api-library-patch-blank-root").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let patch_response = app
-        .oneshot(
-            Request::builder()
-                .method("PATCH")
-                .uri("/api/v1/libraries/library-1")
-                .header("x-auth-token", &auth_token)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(json!({ "root": "   " }).to_string()))
-                .expect("library patch blank-root request should build"),
-        )
-        .await
-        .expect("library patch blank-root request should complete");
-
-    assert_eq!(patch_response.status(), StatusCode::BAD_REQUEST);
-    let payload = response_json(patch_response).await;
-    assert_eq!(
-        payload,
-        json!({
-            "violations": [
-                {
-                    "fieldName": "root",
-                    "message": "must not be blank"
-                }
-            ]
-        })
-    );
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_api_library_patch_rejects_multiple_blank_fields_with_kotlin_validation_payload() {
-    let paths = new_router_fixture("router-api-library-patch-multiple-blank-fields").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let patch_response = app
-        .oneshot(
-            Request::builder()
-                .method("PATCH")
-                .uri("/api/v1/libraries/library-1")
-                .header("x-auth-token", &auth_token)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({ "name": "   ", "root": "   " }).to_string(),
-                ))
-                .expect("library patch multiple-blank-fields request should build"),
-        )
-        .await
-        .expect("library patch multiple-blank-fields request should complete");
-
-    assert_eq!(patch_response.status(), StatusCode::BAD_REQUEST);
-    let payload = response_json(patch_response).await;
-    assert_eq!(
-        payload,
-        json!({
-            "violations": [
-                {
-                    "fieldName": "root",
-                    "message": "must not be blank"
-                },
-                {
-                    "fieldName": "name",
-                    "message": "must not be blank"
-                }
-            ]
-        })
-    );
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_api_libraries_head_reuses_get_etag_for_conditional_requests() {
-    let paths = new_router_fixture("router-api-libraries-head-etag").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let get_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/api/v1/libraries")
-                .header("x-auth-token", &auth_token)
-                .body(Body::empty())
-                .expect("libraries get request should build"),
-        )
-        .await
-        .expect("libraries get request should complete");
-    assert_eq!(get_response.status(), StatusCode::OK);
-    let etag = get_response
-        .headers()
-        .get(header::ETAG)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string)
-        .expect("libraries get response should include etag");
-
-    let head_response = app
-        .oneshot(
-            Request::builder()
-                .method("HEAD")
-                .uri("/api/v1/libraries")
-                .header("x-auth-token", &auth_token)
-                .header(header::IF_NONE_MATCH, etag)
-                .body(Body::empty())
-                .expect("libraries head request should build"),
-        )
-        .await
-        .expect("libraries head request should complete");
-
-    assert_eq!(head_response.status(), StatusCode::NOT_MODIFIED);
-
-    cleanup_router_fixture(paths);
+        cleanup_router_fixture(paths);
+    }
 }

@@ -61,7 +61,8 @@ pub use facets::{
 pub use persisted::{
     PersistedAuthorEntry, PersistedAuthorsScope, PersistedBookBrowseEntry,
     PersistedBookPosterSummary, PersistedBookSummary, PersistedBookTagsScope,
-    PersistedDiscoveryAccessBackend, PersistedSeriesSummary, install_persisted_discovery_access,
+    PersistedDiscoveryAccessBackend, PersistedReadProgressSummary, PersistedSeriesSummary,
+    PersistedWebLinkEntry, install_persisted_discovery_access,
 };
 pub use series::{
     series_alphabetical_groups, series_latest, series_list, series_new, series_updated,

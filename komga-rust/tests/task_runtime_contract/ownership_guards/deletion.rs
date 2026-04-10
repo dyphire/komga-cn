@@ -228,6 +228,16 @@ async fn runtime_delete_book_oneshot_soft_deletes_series_and_removes_series_side
     .execute(&pool)
     .await
     .expect("delete-book oneshot series sidecar row should be inserted");
+    sqlx::query(
+        "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED) VALUES (?, ?, ?, ?)",
+    )
+    .bind("book-1")
+    .bind("admin-user")
+    .bind(3_i64)
+    .bind(false)
+    .execute(&pool)
+    .await
+    .expect("delete-book oneshot read progress row should be inserted");
     let series_old_last_modified = sqlx::query(
         "SELECT COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED FROM SERIES WHERE ID = ? LIMIT 1",
     )
@@ -295,6 +305,13 @@ async fn runtime_delete_book_oneshot_soft_deletes_series_and_removes_series_side
             .await
             .expect("soft-deleted oneshot series thumbnail rows should be queryable")
             .get::<i64, _>("COUNT");
+    let read_progress_count =
+        sqlx::query("SELECT COUNT(*) AS COUNT FROM READ_PROGRESS WHERE BOOK_ID = ?")
+            .bind("book-1")
+            .fetch_one(&verify_pool)
+            .await
+            .expect("soft-deleted oneshot read-progress rows should be queryable")
+            .get::<i64, _>("COUNT");
     verify_pool.close().await;
 
     assert!(
@@ -324,6 +341,10 @@ async fn runtime_delete_book_oneshot_soft_deletes_series_and_removes_series_side
     assert_eq!(
         series_thumbnail_rows, 1,
         "delete-book oneshot runtime should preserve THUMBNAIL_SERIES rows until EmptyTrash performs hard cleanup"
+    );
+    assert_eq!(
+        read_progress_count, 1,
+        "delete-book oneshot runtime should preserve READ_PROGRESS rows until EmptyTrash performs hard cleanup"
     );
 
     cleanup_router_fixture(paths);

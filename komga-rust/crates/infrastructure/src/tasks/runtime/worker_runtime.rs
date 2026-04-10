@@ -32,6 +32,20 @@ const PERIODIC_LIBRARY_SCAN_WORKER: &str = "periodic_library_scan";
 const BACKGROUND_TASK_WORKER: &str = "background_task";
 const AUTHENTICATION_ACTIVITY_CLEANUP_WORKER: &str = "authentication_activity_cleanup";
 
+fn log_and_skip_if_main_db_unowned(component: &str, runtime: &TaskRuntimeContext) -> bool {
+    if runtime.owns_main_database {
+        return false;
+    }
+
+    log_runtime_bootstrap(
+        component,
+        "skipped",
+        runtime,
+        RuntimeLifecycleFields::default().with_skip_reason("main_database_not_owned"),
+    );
+    true
+}
+
 pub fn prepare_task_queue(
     config: impl TaskRuntimeConfig,
     startup_search_task: Option<&'static str>,
@@ -43,53 +57,48 @@ pub fn prepare_task_queue(
         let _ = task_queue.disown_all();
     }
 
-    let scheduled_scans = if !runtime.owns_main_database {
-        log_runtime_bootstrap(
-            STARTUP_LIBRARY_SCANS_COMPONENT,
-            "skipped",
-            &runtime,
-            RuntimeLifecycleFields::default().with_skip_reason("main_database_not_owned"),
-        );
-        Vec::new()
-    } else {
-        log_runtime_bootstrap(
-            STARTUP_LIBRARY_SCANS_COMPONENT,
-            "started",
-            &runtime,
-            RuntimeLifecycleFields::default(),
-        );
-        let (scheduled_scans, enqueued) =
-            bootstrap_startup_library_scans_inner(&mut task_queue, &runtime).unwrap_or_else(
-                |error| {
-                    log_runtime_bootstrap(
-                        STARTUP_LIBRARY_SCANS_COMPONENT,
-                        "failed",
-                        &runtime,
-                        RuntimeLifecycleFields::default().with_error(&error),
-                    );
-                    panic!("bootstrap startup library scans: {error}");
-                },
-            );
-
-        if enqueued == 0 && scheduled_scans.is_empty() {
-            log_runtime_bootstrap(
-                STARTUP_LIBRARY_SCANS_COMPONENT,
-                "skipped",
-                &runtime,
-                RuntimeLifecycleFields::default().with_skip_reason("no_startup_library_scans"),
-            );
+    let scheduled_scans =
+        if log_and_skip_if_main_db_unowned(STARTUP_LIBRARY_SCANS_COMPONENT, &runtime) {
+            Vec::new()
         } else {
             log_runtime_bootstrap(
                 STARTUP_LIBRARY_SCANS_COMPONENT,
-                "completed",
+                "started",
                 &runtime,
-                RuntimeLifecycleFields::default()
-                    .with_enqueued(enqueued)
-                    .with_scheduled_scans(scheduled_scans.len()),
+                RuntimeLifecycleFields::default(),
             );
-        }
-        scheduled_scans
-    };
+            let (scheduled_scans, enqueued) =
+                bootstrap_startup_library_scans_inner(&mut task_queue, &runtime).unwrap_or_else(
+                    |error| {
+                        log_runtime_bootstrap(
+                            STARTUP_LIBRARY_SCANS_COMPONENT,
+                            "failed",
+                            &runtime,
+                            RuntimeLifecycleFields::default().with_error(&error),
+                        );
+                        panic!("bootstrap startup library scans: {error}");
+                    },
+                );
+
+            if enqueued == 0 && scheduled_scans.is_empty() {
+                log_runtime_bootstrap(
+                    STARTUP_LIBRARY_SCANS_COMPONENT,
+                    "skipped",
+                    &runtime,
+                    RuntimeLifecycleFields::default().with_skip_reason("no_startup_library_scans"),
+                );
+            } else {
+                log_runtime_bootstrap(
+                    STARTUP_LIBRARY_SCANS_COMPONENT,
+                    "completed",
+                    &runtime,
+                    RuntimeLifecycleFields::default()
+                        .with_enqueued(enqueued)
+                        .with_scheduled_scans(scheduled_scans.len()),
+                );
+            }
+            scheduled_scans
+        };
 
     if !runtime.consumes_queue {
         log_runtime_bootstrap(
@@ -184,13 +193,7 @@ pub fn bootstrap_startup_library_scans(
 
 pub fn process_startup_library_scans(config: impl TaskRuntimeConfig) {
     let runtime = config.task_runtime_context();
-    if !runtime.owns_main_database {
-        log_runtime_bootstrap(
-            STARTUP_LIBRARY_SCAN_PROCESSING_COMPONENT,
-            "skipped",
-            &runtime,
-            RuntimeLifecycleFields::default().with_skip_reason("main_database_not_owned"),
-        );
+    if log_and_skip_if_main_db_unowned(STARTUP_LIBRARY_SCAN_PROCESSING_COMPONENT, &runtime) {
         return;
     }
 
@@ -668,15 +671,14 @@ fn run_periodic_library_scan_iteration_inner(
     );
 
     let mut scheduler_processed = 0;
-    for library_id in &due_libraries {
+    for (library_id, task) in due_libraries
+        .iter()
+        .zip(build_library_scan_tasks(&due_libraries))
+    {
         let mut queue = task_queue
             .lock()
             .expect("task queue state lock should not be poisoned");
-        queue.enqueue(TaskQueueRecord::new(
-            format!("SCAN_LIBRARY:{library_id}"),
-            100,
-            Some(library_id.clone()),
-        ));
+        queue.enqueue(task);
         scheduler_processed += queue
             .process_available(runtime)
             .map_err(|error| (error.to_string(), due_libraries.clone()))?;

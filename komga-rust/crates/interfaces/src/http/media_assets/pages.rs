@@ -53,6 +53,9 @@ async fn book_page_response(
     } else {
         page_number
     };
+    if requested_page_number == 0 {
+        return page_number_does_not_exist_response();
+    }
     let requested_convert = query
         .convert
         .as_deref()
@@ -110,9 +113,6 @@ async fn book_page_response(
         }
 
         if book_media_is_pdf(&media) && content_negotiation && accept_header_prefers_pdf(headers) {
-            if requested_page_number == 0 {
-                return page_number_does_not_exist_response();
-            }
             let page_count = detect_pdf_page_count(&media).unwrap_or(media.page_count);
             if requested_page_number as u64 > page_count {
                 return page_number_does_not_exist_response();
@@ -531,6 +531,9 @@ pub async fn book_page_thumbnail(
 ) -> Response {
     if let Some(response) = require_auth(&headers) {
         return response;
+    }
+    if page_number == 0 {
+        return page_number_does_not_exist_response();
     }
 
     let resolved_book_id =

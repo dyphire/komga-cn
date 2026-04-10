@@ -110,6 +110,63 @@ async fn router_book_thumbnail_upload_selects_thumbnail_when_none_was_selected()
 }
 
 #[tokio::test]
+async fn router_book_thumbnail_upload_accepts_oneshot_book() {
+    let paths = new_router_fixture("router-book-thumbnail-upload-oneshot-book").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for oneshot book thumbnail setup");
+    sqlx::query("UPDATE BOOK SET ONESHOT = ? WHERE ID = ?")
+        .bind(1_i64)
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("book oneshot flag should update for thumbnail upload contract");
+    sqlx::query("UPDATE SERIES SET ONESHOT = ? WHERE ID = ?")
+        .bind(1_i64)
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("series oneshot flag should update for thumbnail upload contract consistency");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let image_bytes = fixture_png_bytes();
+    let (content_type, body) =
+        multipart_image_upload_body("file", "cover.png", "image/png", false, &image_bytes);
+
+    let upload = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/books/book-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(body))
+                .expect("oneshot book thumbnail upload request should build"),
+        )
+        .await
+        .expect("oneshot book thumbnail upload request should complete");
+
+    assert_eq!(upload.status(), StatusCode::OK);
+    let payload = response_json(upload).await;
+    assert_eq!(
+        payload.get("bookId"),
+        Some(&Value::String("book-1".to_string()))
+    );
+    assert_eq!(
+        payload.get("type"),
+        Some(&Value::String("USER_UPLOADED".to_string()))
+    );
+    assert_eq!(payload.get("selected"), Some(&Value::Bool(false)));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_book_thumbnail_upload_rejects_invalid_selected_flag() {
     let paths = new_router_fixture("router-book-thumbnail-upload-invalid-selected").await;
     seed_router_contract_data(&paths).await;

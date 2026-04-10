@@ -13,10 +13,7 @@ async fn scanner_deep_scan_reanalyzes_changed_existing_books() {
     let book_url = book_path.to_string_lossy().to_string();
 
     let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new("SCAN_LIBRARY:library-1", 900, Some("library-1".to_string()))
-            .with_simple_type("SCAN_LIBRARY"),
-    );
+    scheduler.enqueue(scan_library_task("library-1", 900, false));
     scheduler
         .process_available(&fixture.config)
         .expect("initial scan should analyze the seeded book successfully");
@@ -32,11 +29,7 @@ async fn scanner_deep_scan_reanalyzes_changed_existing_books() {
         write_scannable_cbz_fixture(&book_path, b"page-after-deep-scan")
             .expect("updated scannable cbz fixture should be written");
 
-    scheduler.enqueue(
-        TaskQueueRecord::new("SCAN_LIBRARY:library-1", 900, Some("library-1".to_string()))
-            .with_simple_type("SCAN_LIBRARY")
-            .with_payload(r#"{"deep":true}"#),
-    );
+    scheduler.enqueue(scan_library_task("library-1", 900, true));
     scheduler
         .process_available(&fixture.config)
         .expect("deep scan should complete successfully after the book archive changes");
@@ -68,10 +61,7 @@ async fn scanner_oneshot_rescan_reuses_existing_series_id_when_book_url_changes(
     update_library_oneshots_directory(&fixture.paths.main_db, "library-1", Some("OneShots")).await;
 
     let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new("SCAN_LIBRARY:library-1", 900, Some("library-1".to_string()))
-            .with_simple_type("SCAN_LIBRARY"),
-    );
+    scheduler.enqueue(scan_library_task("library-1", 900, false));
     scheduler
         .process_available(&fixture.config)
         .expect("initial oneshot scan should complete successfully");
@@ -92,10 +82,7 @@ async fn scanner_oneshot_rescan_reuses_existing_series_id_when_book_url_changes(
     )
     .await;
 
-    scheduler.enqueue(
-        TaskQueueRecord::new("SCAN_LIBRARY:library-1", 900, Some("library-1".to_string()))
-            .with_simple_type("SCAN_LIBRARY"),
-    );
+    scheduler.enqueue(scan_library_task("library-1", 900, false));
     scheduler
         .process_available(&fixture.config)
         .expect("oneshot rescan should complete successfully after rename");
@@ -121,125 +108,190 @@ async fn scanner_oneshot_rescan_reuses_existing_series_id_when_book_url_changes(
 }
 
 #[tokio::test]
-async fn scanner_regular_scan_reanalyzes_changed_books_when_series_timestamp_changes() {
-    let fixture = ScannerPersistenceFixture::new("scanner-persistence-series-changed-reanalyzes")
+async fn scanner_scan_splits_configured_oneshots_directories_into_per_book_oneshot_series() {
+    let fixture = ScannerPersistenceFixture::new("scanner-persistence-oneshots-directory-shape")
         .await
-        .expect("scanner series-changed fixture should be created");
+        .expect("scanner oneshots-directory fixture should be created");
 
-    let book_path = fixture.library_root.join("Series-A").join("Book-001.cbz");
-    write_scannable_cbz_fixture(&book_path, b"page-before")
-        .expect("initial scannable cbz fixture should be written");
-    let book_url = book_path.to_string_lossy().to_string();
+    let nested_oneshots_dir = fixture.library_root.join("Series-A").join("_oneshots");
+    fs::create_dir_all(&nested_oneshots_dir).expect("nested oneshots directory should be created");
+    write_scannable_cbz_fixture(
+        &nested_oneshots_dir.join("Nested-001.cbz"),
+        MINIMAL_PNG_BYTES,
+    )
+    .expect("nested oneshot fixture should be written");
+    write_scannable_cbz_fixture(
+        &nested_oneshots_dir.join("Nested-002.cbz"),
+        MINIMAL_PNG_BYTES,
+    )
+    .expect("second nested oneshot fixture should be written");
+
+    let root_oneshots_dir = fixture.library_root.join("_oneshots");
+    fs::create_dir_all(&root_oneshots_dir).expect("root oneshots directory should be created");
+    write_scannable_cbz_fixture(&root_oneshots_dir.join("Root-001.cbz"), MINIMAL_PNG_BYTES)
+        .expect("root oneshot fixture should be written");
+
+    update_library_oneshots_directory(&fixture.paths.main_db, "library-1", Some("_oneshots")).await;
 
     let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new("SCAN_LIBRARY:library-1", 900, Some("library-1".to_string()))
-            .with_simple_type("SCAN_LIBRARY"),
-    );
+    scheduler.enqueue(scan_library_task("library-1", 900, false));
     scheduler
         .process_available(&fixture.config)
-        .expect("initial scan should analyze the seeded book successfully");
+        .expect("scan should treat configured oneshots directories like Kotlin does");
 
-    tokio::time::sleep(Duration::from_millis(1100)).await;
-    let expected_updated_page_size =
-        write_scannable_cbz_fixture(&book_path, b"page-after-regular-scan")
-            .expect("updated scannable cbz fixture should be written");
-    fs::write(
-        fixture
-            .library_root
-            .join("Series-A")
-            .join("scan-marker.tmp"),
-        b"marker",
+    let pool = connect_pool(fixture.paths.main_db.as_path(), 1)
+        .await
+        .expect("sqlite pool should open for oneshots-directory scan contract");
+    let series_rows = sqlx::query(
+        "SELECT NAME, oneshot AS ONESHOT_FLAG \
+         FROM SERIES \
+         WHERE LIBRARY_ID = ? AND DELETED_DATE IS NULL \
+         ORDER BY NAME ASC",
     )
-    .expect("book sidecar rewrite should bump series directory timestamp");
+    .bind("library-1")
+    .fetch_all(&pool)
+    .await
+    .expect("active series rows should be queryable after oneshots-directory scan");
+    let book_rows = sqlx::query(
+        "SELECT NAME, oneshot AS ONESHOT_FLAG \
+         FROM BOOK \
+         WHERE LIBRARY_ID = ? AND DELETED_DATE IS NULL \
+         ORDER BY NAME ASC",
+    )
+    .bind("library-1")
+    .fetch_all(&pool)
+    .await
+    .expect("active book rows should be queryable after oneshots-directory scan");
+    pool.close().await;
 
-    scheduler.enqueue(
-        TaskQueueRecord::new("SCAN_LIBRARY:library-1", 900, Some("library-1".to_string()))
-            .with_simple_type("SCAN_LIBRARY"),
-    );
-    scheduler
-        .process_available(&fixture.config)
-        .expect("regular scan should complete successfully after series timestamp changes");
-
-    let updated_page_size = load_media_page_file_size(&fixture.paths.main_db, &book_url).await;
+    let persisted_series = series_rows
+        .into_iter()
+        .map(|row| {
+            (
+                row.get::<String, _>("NAME"),
+                row.get::<bool, _>("ONESHOT_FLAG"),
+            )
+        })
+        .collect::<Vec<_>>();
     assert_eq!(
-        updated_page_size, expected_updated_page_size,
-        "regular scan must re-trigger analyze when seriesChanged makes Kotlin enter the book update branch",
+        persisted_series,
+        vec![
+            ("Nested-001".to_string(), true),
+            ("Nested-002".to_string(), true),
+            ("Root-001".to_string(), true),
+            ("Series-A".to_string(), false),
+        ],
+        "configured `_oneshots` directories should be flattened into one-shot series while regular directories stay regular",
+    );
+
+    let persisted_books = book_rows
+        .into_iter()
+        .map(|row| {
+            (
+                row.get::<String, _>("NAME"),
+                row.get::<bool, _>("ONESHOT_FLAG"),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        persisted_books,
+        vec![
+            ("Book-001".to_string(), false),
+            ("Nested-001".to_string(), true),
+            ("Nested-002".to_string(), true),
+            ("Root-001".to_string(), true),
+        ],
+        "books discovered under configured `_oneshots` directories must persist with the oneshot flag set",
     );
 
     fixture.cleanup();
 }
 
 #[tokio::test]
-async fn scanner_regular_scan_reanalyzes_changed_books_when_series_has_deleted_books_without_timestamp_change()
- {
-    let fixture = ScannerPersistenceFixture::new("scanner-persistence-deleted-books-reanalyzes")
-        .await
-        .expect("scanner deleted-books fixture should be created");
+async fn scanner_regular_scan_reanalyzes_changed_books_when_series_changed() {
+    for (fixture_name, deleted_sibling) in [
+        ("scanner-persistence-series-changed-reanalyzes", false),
+        ("scanner-persistence-deleted-books-reanalyzes", true),
+    ] {
+        let fixture = ScannerPersistenceFixture::new(fixture_name)
+            .await
+            .expect("scanner seriesChanged fixture should be created");
 
-    let series_dir = fixture.library_root.join("Series-A");
-    let primary_book_path = series_dir.join("Book-001.cbz");
-    let deleted_book_path = series_dir.join("Book-002.cbz");
-    let expected_initial_page_size =
-        write_scannable_cbz_fixture(&primary_book_path, b"page-before")
-            .expect("primary scannable cbz fixture should be written");
-    write_scannable_cbz_fixture(&deleted_book_path, b"deleted-book-page")
-        .expect("secondary scannable cbz fixture should be written");
-    let primary_book_url = primary_book_path.to_string_lossy().to_string();
+        let series_dir = fixture.library_root.join("Series-A");
+        let primary_book_path = series_dir.join("Book-001.cbz");
+        let primary_book_url = primary_book_path.to_string_lossy().to_string();
+        let deleted_book_path = series_dir.join("Book-002.cbz");
 
-    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new("SCAN_LIBRARY:library-1", 900, Some("library-1".to_string()))
-            .with_simple_type("SCAN_LIBRARY"),
-    );
-    scheduler
-        .process_available(&fixture.config)
-        .expect("initial scan should analyze both seeded books successfully");
+        let expected_initial_page_size =
+            write_scannable_cbz_fixture(&primary_book_path, b"page-before")
+                .expect("primary scannable cbz fixture should be written");
+        if deleted_sibling {
+            write_scannable_cbz_fixture(&deleted_book_path, b"deleted-book-page")
+                .expect("secondary scannable cbz fixture should be written");
+        }
 
-    let initial_page_size =
-        load_media_page_file_size(&fixture.paths.main_db, &primary_book_url).await;
-    assert_eq!(
-        initial_page_size, expected_initial_page_size,
-        "fixture sanity: initial scan must persist the primary book page size",
-    );
+        let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+        scheduler.enqueue(scan_library_task("library-1", 900, false));
+        scheduler
+            .process_available(&fixture.config)
+            .expect("initial scan should analyze seeded books successfully");
 
-    tokio::time::sleep(Duration::from_millis(1100)).await;
-    fs::remove_file(&deleted_book_path)
-        .expect("secondary book should be removed to simulate deleted-books seriesChanged path");
-    let expected_updated_page_size =
-        write_scannable_cbz_fixture(&primary_book_path, b"page-after-deleted-book-regular-scan")
-            .expect("primary book should be rewritten after deleted-books setup");
+        if deleted_sibling {
+            let initial_page_size =
+                load_media_page_file_size(&fixture.paths.main_db, &primary_book_url).await;
+            assert_eq!(
+                initial_page_size, expected_initial_page_size,
+                "fixture={fixture_name} should persist the primary book page size before rescan",
+            );
+        }
 
-    let current_series_last_modified = fs::metadata(&series_dir)
-        .expect("series directory metadata should stay queryable")
-        .modified()
-        .expect("series directory modified time should stay queryable")
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("series directory modified time should be after unix epoch")
-        .as_secs() as i64;
-    update_series_file_last_modified(
-        &fixture.paths.main_db,
-        &series_dir.to_string_lossy(),
-        current_series_last_modified,
-    )
-    .await;
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        let expected_updated_page_size = write_scannable_cbz_fixture(
+            &primary_book_path,
+            if deleted_sibling {
+                b"page-after-deleted-book-regular-scan"
+            } else {
+                b"page-after-regular-scan"
+            },
+        )
+        .expect("updated scannable cbz fixture should be written");
 
-    scheduler.enqueue(
-        TaskQueueRecord::new("SCAN_LIBRARY:library-1", 900, Some("library-1".to_string()))
-            .with_simple_type("SCAN_LIBRARY"),
-    );
-    scheduler
-        .process_available(&fixture.config)
-        .expect("regular scan should complete successfully after deleting a sibling book");
+        if deleted_sibling {
+            fs::remove_file(&deleted_book_path).expect(
+                "secondary book should be removed to simulate deleted-books seriesChanged path",
+            );
+            let current_series_last_modified = fs::metadata(&series_dir)
+                .expect("series directory metadata should stay queryable")
+                .modified()
+                .expect("series directory modified time should stay queryable")
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("series directory modified time should be after unix epoch")
+                .as_secs() as i64;
+            update_series_file_last_modified(
+                &fixture.paths.main_db,
+                &series_dir.to_string_lossy(),
+                current_series_last_modified,
+            )
+            .await;
+        } else {
+            fs::write(series_dir.join("scan-marker.tmp"), b"marker")
+                .expect("book sidecar rewrite should bump series directory timestamp");
+        }
 
-    let updated_page_size =
-        load_media_page_file_size(&fixture.paths.main_db, &primary_book_url).await;
-    assert_eq!(
-        updated_page_size, expected_updated_page_size,
-        "regular scan must re-trigger analyze when deleted books force Kotlin's seriesChanged fallback even without a timestamp delta",
-    );
+        scheduler.enqueue(scan_library_task("library-1", 900, false));
+        scheduler
+            .process_available(&fixture.config)
+            .expect("regular scan should complete successfully after seriesChanged trigger");
 
-    fixture.cleanup();
+        let updated_page_size =
+            load_media_page_file_size(&fixture.paths.main_db, &primary_book_url).await;
+        assert_eq!(
+            updated_page_size, expected_updated_page_size,
+            "fixture={fixture_name} should re-trigger analyze when seriesChanged is true",
+        );
+
+        fixture.cleanup();
+    }
 }
 
 #[tokio::test]
@@ -264,10 +316,7 @@ async fn scanner_rescan_updates_existing_persisted_book_file_size_rows() {
         .expect("book payload rewrite should succeed for rescan update contract");
 
     let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new("SCAN_LIBRARY:library-1", 900, Some("library-1".to_string()))
-            .with_simple_type("SCAN_LIBRARY"),
-    );
+    scheduler.enqueue(scan_library_task("library-1", 900, false));
     scheduler
         .process_available(&fixture.config)
         .expect("scanner rescan task should process successfully");
@@ -278,6 +327,58 @@ async fn scanner_rescan_updates_existing_persisted_book_file_size_rows() {
         updated_payload.len() as i64,
         "scanner persistence contract requires rescan to update existing BOOK file size rows instead of leaving stale values",
     );
+
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn scanner_rescan_recreates_missing_metadata_seed_rows() {
+    let fixture = ScannerPersistenceFixture::new("scanner-persistence-recreates-missing-metadata")
+        .await
+        .expect("scanner metadata-repair fixture should be created");
+
+    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .process_available(&fixture.config)
+        .expect("initial scan should create persisted metadata seeds");
+
+    let pool = connect_pool(fixture.paths.main_db.as_path(), 1)
+        .await
+        .expect("scanner metadata-repair db should open");
+    sqlx::query("DELETE FROM SERIES_METADATA WHERE SERIES_ID IN (SELECT ID FROM SERIES WHERE LIBRARY_ID = ?)")
+        .bind("library-1")
+        .execute(&pool)
+        .await
+        .expect("series metadata rows should delete for repair regression");
+    sqlx::query(
+        "DELETE FROM BOOK_METADATA WHERE BOOK_ID IN (SELECT ID FROM BOOK WHERE LIBRARY_ID = ?)",
+    )
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("book metadata rows should delete for repair regression");
+    sqlx::query("DELETE FROM BOOK_METADATA_AGGREGATION WHERE SERIES_ID IN (SELECT ID FROM SERIES WHERE LIBRARY_ID = ?)")
+        .bind("library-1")
+        .execute(&pool)
+        .await
+        .expect("book metadata aggregation rows should delete for repair regression");
+    pool.close().await;
+
+    let broken_snapshot = load_persistence_snapshot(&fixture.paths.main_db, "library-1").await;
+    assert_eq!(broken_snapshot.series_metadata_rows, 0);
+    assert_eq!(broken_snapshot.book_metadata_rows, 0);
+    assert_eq!(broken_snapshot.book_metadata_aggregation_rows, 0);
+
+    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .process_available(&fixture.config)
+        .expect("rescan should recreate missing metadata seed rows");
+
+    let repaired_snapshot = load_persistence_snapshot(&fixture.paths.main_db, "library-1").await;
+    assert!(repaired_snapshot.series_metadata_rows >= 1);
+    assert!(repaired_snapshot.book_metadata_rows >= 1);
+    assert!(repaired_snapshot.book_metadata_aggregation_rows >= 1);
 
     fixture.cleanup();
 }

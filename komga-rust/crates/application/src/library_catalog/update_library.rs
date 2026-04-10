@@ -1,4 +1,4 @@
-use super::task_records::{library_should_rescan, scan_library_task_record};
+use super::task_records::{background_scan_library_task_record, library_should_rescan};
 use super::{
     LibraryCatalogMutationError, LibraryCatalogMutationPort, LibraryChangeSet, LibraryTaskResult,
 };
@@ -46,7 +46,7 @@ where
 
         let mut task_records = Vec::new();
         if library_should_rescan(&previous_library, &library) {
-            task_records.push(scan_library_task_record(&library.id, false));
+            task_records.push(background_scan_library_task_record(&library.id, false));
         }
         if library.hash_files && !previous_library.hash_files {
             let book_ids = self
@@ -73,10 +73,7 @@ where
             );
         }
         if library.hash_pages && !previous_library.hash_pages {
-            task_records.push(find_books_with_missing_page_hash_task_record(
-                &library.id,
-                10,
-            ));
+            task_records.push(find_books_with_missing_page_hash_task_record(&library.id));
         }
         if library.repair_extensions && !previous_library.repair_extensions {
             let book_ids = self
@@ -84,15 +81,17 @@ where
                 .library_books_with_mismatched_extensions(&library.id)
                 .await
                 .map_err(LibraryCatalogMutationError::persistence)?;
-            task_records.extend(book_ids.into_iter().map(|(book_id, series_id)| {
-                repair_extension_task_record(&book_id, &series_id, 10)
-            }));
+            task_records.extend(
+                book_ids.into_iter().map(|(book_id, series_id)| {
+                    repair_extension_task_record(&book_id, &series_id, 0)
+                }),
+            );
         }
         if library.convert_to_cbz && !previous_library.convert_to_cbz {
             task_records.push(TaskQueueRecord::new(
                 format!("FIND_BOOKS_TO_CONVERT:{}", library.id),
-                10,
-                Some(library.id.clone()),
+                0,
+                None,
             ));
         }
 
@@ -130,10 +129,9 @@ fn hash_book_koreader_task_record(book_id: &str, priority: i32) -> TaskQueueReco
         )
 }
 
-fn find_books_with_missing_page_hash_task_record(
-    library_id: &str,
-    _priority: i32,
-) -> TaskQueueRecord {
+fn find_books_with_missing_page_hash_task_record(library_id: &str) -> TaskQueueRecord {
+    // Kotlin keeps the library-wide page-hash sweep at lowest priority so enabling the flag
+    // does not let a long background hashing backlog jump ahead of interactive follow-up work.
     let task_id = format!("FIND_BOOKS_WITH_MISSING_PAGE_HASH_{library_id}");
     TaskQueueRecord::new(task_id.clone(), 0, None)
         .with_simple_type("FIND_BOOKS_WITH_MISSING_PAGE_HASH")
@@ -388,7 +386,7 @@ mod tests {
         assert_eq!(result.task_records.len(), 1);
         assert_eq!(result.task_records[0].id, "REPAIR_EXTENSION_book-1");
         assert_eq!(result.task_records[0].simple_type, "REPAIR_EXTENSION");
-        assert_eq!(result.task_records[0].priority, 10);
+        assert_eq!(result.task_records[0].priority, 0);
         assert_eq!(result.task_records[0].group.as_deref(), Some("series-1"));
         assert_eq!(
             result.task_records[0]
@@ -397,11 +395,34 @@ mod tests {
                 .and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok()),
             Some(json!({
                 "bookId": "book-1",
-                "priority": 10,
+                "priority": 0,
                 "groupId": "series-1",
                 "uniqueId": "REPAIR_EXTENSION_book-1"
             }))
         );
+    }
+
+    #[test]
+    fn enabling_convert_to_cbz_emits_ungrouped_lowest_priority_find_books_to_convert_task() {
+        let service = UpdateLibraryService::new(TestPort {
+            library: Some(LibraryRecord::default_record("library-1".to_string())),
+            ..TestPort::default()
+        });
+
+        let result = block_on(service.update_library(
+            "library-1",
+            LibraryChangeSet {
+                convert_to_cbz: Some(true),
+                ..LibraryChangeSet::default()
+            },
+        ))
+        .expect("enabling convert-to-cbz should succeed");
+
+        assert_eq!(result.task_records.len(), 1);
+        assert_eq!(result.task_records[0].id, "FIND_BOOKS_TO_CONVERT:library-1");
+        assert_eq!(result.task_records[0].simple_type, "FIND_BOOKS_TO_CONVERT");
+        assert_eq!(result.task_records[0].priority, 0);
+        assert_eq!(result.task_records[0].group, None);
     }
 
     fn block_on<F: Future>(future: F) -> F::Output {

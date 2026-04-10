@@ -22,8 +22,9 @@ use crate::http::discovery_auth::{
     DiscoveryQueryContext, QueryRestrictions,
 };
 use crate::http::helpers::{
-    detail_access_denial_response, mark_runtime_owned, query_bool, query_value, query_values,
-    restricted_book_url,
+    detail_access_denial_response, mark_runtime_owned, normalized_date_time,
+    normalized_file_last_modified, normalized_optional_read_progress_date, query_bool, query_value,
+    query_values, restricted_book_url,
 };
 use crate::http::identity_access::auth::{require_admin, require_auth};
 use crate::http::state::AuthDatabaseState;
@@ -447,8 +448,8 @@ pub(super) fn book_detail_payload(book: &BookDetailReadModel, is_admin: bool) ->
         "name": book.name,
         "url": url,
         "number": book.number,
-        "created": book.created,
-        "lastModified": book.last_modified,
+        "created": normalized_date_time(&book.created),
+        "lastModified": normalized_date_time(&book.last_modified),
         "fileLastModified": normalized_file_last_modified(&book.file_last_modified),
         "sizeBytes": book.size_bytes,
         "size": format_size_bytes(book.size_bytes),
@@ -480,15 +481,15 @@ pub(super) fn book_detail_payload(book: &BookDetailReadModel, is_admin: bool) ->
             "isbnLock": book.metadata_isbn_lock,
             "links": book.metadata_links.iter().map(|link| json!({ "label": link.label, "url": link.url })).collect::<Vec<_>>(),
             "linksLock": book.metadata_links_lock,
-            "created": book.metadata_created,
-            "lastModified": book.metadata_last_modified
+            "created": normalized_date_time(&book.metadata_created),
+            "lastModified": normalized_date_time(&book.metadata_last_modified)
         },
         "readProgress": book.read_progress.as_ref().map_or(Value::Null, |progress| json!({
             "page": progress.page,
             "completed": progress.completed,
-            "readDate": progress.read_date,
-            "created": progress.created,
-            "lastModified": progress.last_modified,
+            "readDate": normalized_optional_read_progress_date(progress.read_date.as_deref(), &progress.last_modified, &progress.created),
+            "created": normalized_date_time(&progress.created),
+            "lastModified": normalized_date_time(&progress.last_modified),
             "deviceId": progress.device_id,
             "deviceName": progress.device_name,
         })),
@@ -506,23 +507,6 @@ fn admin_file_url(url: &str) -> String {
             .unwrap_or_else(|_| url.to_string()),
         _ => url.to_string(),
     }
-}
-
-fn normalized_file_last_modified(value: &str) -> String {
-    if let Ok(epoch_seconds) = value.parse::<i64>()
-        && let Ok(datetime) = OffsetDateTime::from_unix_timestamp(epoch_seconds)
-        && let Ok(formatted) = datetime.format(&Rfc3339)
-    {
-        return formatted;
-    }
-
-    if let Ok(datetime) = OffsetDateTime::parse(value, &Rfc3339)
-        && let Ok(formatted) = datetime.format(&Rfc3339)
-    {
-        return formatted;
-    }
-
-    value.to_string()
 }
 
 fn series_detail_payload(series: &SeriesDetailReadModel, is_admin: bool) -> Value {
@@ -643,11 +627,11 @@ fn series_detail_payload(series: &SeriesDetailReadModel, is_admin: bool) -> Valu
     );
     metadata.insert(
         "created".to_string(),
-        Value::String(series.metadata_created.clone()),
+        Value::String(normalized_date_time(&series.metadata_created)),
     );
     metadata.insert(
         "lastModified".to_string(),
-        Value::String(series.metadata_last_modified.clone()),
+        Value::String(normalized_date_time(&series.metadata_last_modified)),
     );
 
     let mut books_metadata = Map::new();
@@ -689,11 +673,11 @@ fn series_detail_payload(series: &SeriesDetailReadModel, is_admin: bool) -> Valu
     );
     books_metadata.insert(
         "created".to_string(),
-        Value::String(series.books_metadata_created.clone()),
+        Value::String(normalized_date_time(&series.books_metadata_created)),
     );
     books_metadata.insert(
         "lastModified".to_string(),
-        Value::String(series.books_metadata_last_modified.clone()),
+        Value::String(normalized_date_time(&series.books_metadata_last_modified)),
     );
 
     let mut payload = Map::new();
@@ -704,14 +688,17 @@ fn series_detail_payload(series: &SeriesDetailReadModel, is_admin: bool) -> Valu
     );
     payload.insert("name".to_string(), Value::String(series.name.clone()));
     payload.insert("url".to_string(), Value::String(url));
-    payload.insert("created".to_string(), Value::String(series.created.clone()));
+    payload.insert(
+        "created".to_string(),
+        Value::String(normalized_date_time(&series.created)),
+    );
     payload.insert(
         "lastModified".to_string(),
-        Value::String(series.last_modified.clone()),
+        Value::String(normalized_date_time(&series.last_modified)),
     );
     payload.insert(
         "fileLastModified".to_string(),
-        Value::String(series.file_last_modified.clone()),
+        Value::String(normalized_file_last_modified(&series.file_last_modified)),
     );
     payload.insert(
         "booksCount".to_string(),
@@ -822,6 +809,114 @@ mod tests {
                 .and_then(Value::as_array)
                 .map(|links| links.len()),
             Some(1)
+        );
+    }
+
+    #[test]
+    fn series_detail_payload_normalizes_datetime_fields() {
+        let payload = series_detail_payload(
+            &SeriesDetailReadModel {
+                id: "series-1".to_string(),
+                library_id: "library-1".to_string(),
+                name: "Series Shelf Name".to_string(),
+                title: "Series Metadata Title".to_string(),
+                title_sort: "Series Sort".to_string(),
+                url: "file:///data/series".to_string(),
+                created: "2024-01-01 00:00:00".to_string(),
+                last_modified: "2024-01-02 00:00:00".to_string(),
+                file_last_modified: "1704240000".to_string(),
+                books_count: 2,
+                books_read_count: 1,
+                books_unread_count: 1,
+                books_in_progress_count: 0,
+                status: "ONGOING".to_string(),
+                status_lock: false,
+                summary: "Summary".to_string(),
+                summary_lock: false,
+                reading_direction: "LEFT_TO_RIGHT".to_string(),
+                reading_direction_lock: false,
+                publisher: "Publisher".to_string(),
+                publisher_lock: false,
+                age_rating: Some(13),
+                age_rating_lock: false,
+                language: "en".to_string(),
+                language_lock: false,
+                genres: vec!["Drama".to_string()],
+                genres_lock: false,
+                tags: vec!["Favorite".to_string()],
+                tags_lock: false,
+                total_book_count: Some(2),
+                total_book_count_lock: false,
+                sharing_labels: vec!["Team".to_string()],
+                sharing_labels_lock: false,
+                links: vec![SeriesMetadataLinkRecord {
+                    label: "Wiki".to_string(),
+                    url: "https://example.com".to_string(),
+                }],
+                links_lock: false,
+                alternate_titles: vec![SeriesAlternateTitleRecord {
+                    label: "en".to_string(),
+                    title: "Alt Title".to_string(),
+                }],
+                alternate_titles_lock: false,
+                title_lock: false,
+                title_sort_lock: false,
+                metadata_created: "2024-01-03 00:00:00".to_string(),
+                metadata_last_modified: "2024-01-04 00:00:00".to_string(),
+                books_metadata_tags: vec!["tag".to_string()],
+                books_metadata_authors: vec![BookMetadataAuthorReadModel {
+                    name: "Author".to_string(),
+                    role: "Writer".to_string(),
+                }],
+                books_metadata_release_date: Some("2024-01-15".to_string()),
+                books_metadata_summary: "Books summary".to_string(),
+                books_metadata_summary_number: "2".to_string(),
+                books_metadata_created: "2024-01-05 00:00:00".to_string(),
+                books_metadata_last_modified: "2024-01-06 00:00:00".to_string(),
+                deleted: false,
+                oneshot: true,
+            },
+            false,
+        );
+
+        assert_eq!(payload.get("created"), Some(&json!("2024-01-01T00:00:00Z")));
+        assert_eq!(
+            payload.get("lastModified"),
+            Some(&json!("2024-01-02T00:00:00Z"))
+        );
+        assert_eq!(
+            payload.get("fileLastModified"),
+            Some(&json!("2024-01-03T00:00:00Z"))
+        );
+        assert_eq!(
+            payload
+                .get("metadata")
+                .and_then(|value| value.get("created")),
+            Some(&json!("2024-01-03T00:00:00Z"))
+        );
+        assert_eq!(
+            payload
+                .get("metadata")
+                .and_then(|value| value.get("lastModified")),
+            Some(&json!("2024-01-04T00:00:00Z"))
+        );
+        assert_eq!(
+            payload
+                .get("booksMetadata")
+                .and_then(|value| value.get("created")),
+            Some(&json!("2024-01-05T00:00:00Z"))
+        );
+        assert_eq!(
+            payload
+                .get("booksMetadata")
+                .and_then(|value| value.get("lastModified")),
+            Some(&json!("2024-01-06T00:00:00Z"))
+        );
+        assert_eq!(
+            payload
+                .get("booksMetadata")
+                .and_then(|value| value.get("releaseDate")),
+            Some(&json!("2024-01-15"))
         );
     }
 }

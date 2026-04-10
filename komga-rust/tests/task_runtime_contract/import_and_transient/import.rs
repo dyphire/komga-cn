@@ -1,4 +1,42 @@
 use super::*;
+use komga_rust::application::media_assets::MediaImportService;
+use komga_rust::infrastructure::filesystem::FilesystemImportPort;
+
+async fn enqueue_books_import(paths: &RuntimeDbPaths, payload: Value, context: &str) {
+    let app = build_router_with_config(&runtime_config_for_paths(paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/books/import")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(payload.to_string()))
+                .expect("books/import request should build"),
+        )
+        .await
+        .expect(context);
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+}
+
+async fn load_import_task_rows(
+    paths: &RuntimeDbPaths,
+    sql: &str,
+    context: &str,
+) -> Vec<sqlx::sqlite::SqliteRow> {
+    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+        .await
+        .expect(context);
+    let rows = sqlx::query(sql)
+        .fetch_all(&tasks_pool)
+        .await
+        .expect(context);
+    tasks_pool.close().await;
+    rows
+}
 
 #[tokio::test]
 async fn router_books_import_enqueues_individual_tasks_in_tasks_db() {
@@ -10,57 +48,38 @@ async fn router_books_import_enqueues_individual_tasks_in_tasks_db() {
     std::fs::write(&source_a, b"import-fixture-a").expect("source_a should be writable");
     std::fs::write(&source_b, b"import-fixture-b").expect("source_b should be writable");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    enqueue_books_import(
+        &paths,
+        json!({
+            "copyMode": "COPY",
+            "books": [
+                {
+                    "sourceFile": source_a.to_string_lossy(),
+                    "seriesId": "series-1"
+                },
+                {
+                    "sourceFile": source_b.to_string_lossy(),
+                    "seriesId": "series-1"
+                }
+            ]
+        }),
+        "books/import request should complete",
+    )
+    .await;
 
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/books/import")
-                .header("x-auth-token", &auth_token)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "copyMode": "COPY",
-                        "books": [
-                            {
-                                "sourceFile": source_a.to_string_lossy(),
-                                "seriesId": "series-1"
-                            },
-                            {
-                                "sourceFile": source_b.to_string_lossy(),
-                                "seriesId": "series-1"
-                            }
-                        ]
-                    })
-                    .to_string(),
-                ))
-                .expect("books/import request should build"),
-        )
-        .await
-        .expect("books/import request should complete");
-
-    assert_eq!(response.status(), StatusCode::ACCEPTED);
-
-    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
-        .await
-        .expect("tasks db should open");
-    let rows = sqlx::query(
+    let rows = load_import_task_rows(
+        &paths,
         "SELECT SIMPLE_TYPE, GROUP_ID, PAYLOAD \
          FROM TASK \
-         WHERE SIMPLE_TYPE = 'IMPORT_BOOK' \
+         WHERE SIMPLE_TYPE = 'ImportBook' \
          ORDER BY ID ASC",
+        "import task rows should be queryable",
     )
-    .fetch_all(&tasks_pool)
-    .await
-    .expect("import task rows should be queryable");
-    tasks_pool.close().await;
+    .await;
 
     assert_eq!(rows.len(), 2);
     for row in rows {
-        assert_eq!(row.get::<String, _>("SIMPLE_TYPE"), "IMPORT_BOOK");
+        assert_eq!(row.get::<String, _>("SIMPLE_TYPE"), "ImportBook");
         assert_eq!(
             row.get::<Option<String>, _>("GROUP_ID"),
             Some("series-1".to_string())
@@ -68,138 +87,157 @@ async fn router_books_import_enqueues_individual_tasks_in_tasks_db() {
         let payload = row.get::<String, _>("PAYLOAD");
         let payload = serde_json::from_str::<Value>(&payload)
             .expect("import task payload should be valid JSON");
-        assert!(payload.get("book").is_some());
+        assert_eq!(
+            payload.get("copyMode"),
+            Some(&Value::String("COPY".to_string()))
+        );
+        assert_eq!(
+            payload.get("seriesId"),
+            Some(&Value::String("series-1".to_string()))
+        );
+        assert!(payload.get("sourceFile").is_some());
+        assert_eq!(payload.get("destinationName"), Some(&Value::Null));
+        assert_eq!(payload.get("upgradeBookId"), Some(&Value::Null));
+        assert!(payload.get("book").is_none());
         assert!(payload.get("books").is_none());
+    }
+
+    enqueue_books_import(
+        &paths,
+        json!({
+            "copyMode": "HARDLINK",
+            "books": [
+                {
+                    "sourceFile": source_a.to_string_lossy(),
+                    "seriesId": "series-1",
+                    "destinationName": "dest-a",
+                    "upgradeBookId": "book-1"
+                },
+                {
+                    "sourceFile": source_b.to_string_lossy(),
+                    "seriesId": "series-2",
+                    "destinationName": "dest-b"
+                }
+            ]
+        }),
+        "books/import payload-shape request should complete",
+    )
+    .await;
+
+    let rows = load_import_task_rows(
+        &paths,
+        "SELECT GROUP_ID, PAYLOAD \
+         FROM TASK \
+         WHERE SIMPLE_TYPE = 'ImportBook' \
+         ORDER BY ID DESC \
+         LIMIT 2",
+        "import task payload-shape rows should be queryable",
+    )
+    .await;
+
+    assert_eq!(rows.len(), 2);
+
+    for (row, expected_group, expected_destination, expected_upgrade) in [
+        (&rows[1], "series-1", Some("dest-a"), Some("book-1")),
+        (&rows[0], "series-2", Some("dest-b"), None),
+    ] {
+        let payload = serde_json::from_str::<Value>(&row.get::<String, _>("PAYLOAD"))
+            .expect("import payload should be valid JSON");
+        assert_eq!(
+            row.get::<Option<String>, _>("GROUP_ID"),
+            Some(expected_group.to_string())
+        );
+        assert_eq!(
+            payload.get("copyMode"),
+            Some(&Value::String("HARDLINK".to_string()))
+        );
+        assert_eq!(
+            payload.get("seriesId").and_then(Value::as_str),
+            Some(expected_group)
+        );
+        assert_eq!(
+            payload.get("destinationName").and_then(Value::as_str),
+            expected_destination
+        );
+        assert_eq!(
+            payload.get("upgradeBookId").and_then(Value::as_str),
+            expected_upgrade
+        );
+        assert!(payload.get("sourceFile").is_some());
     }
 
     cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
-async fn router_books_import_preserves_copy_mode_destination_and_upgrade_fields_per_task() {
-    let paths = new_router_fixture("router-books-import-payload-shape").await;
+async fn router_books_import_runtime_follow_up_enqueues_analyze_book_instead_of_scan_library() {
+    let paths = new_router_fixture("router-books-import-follow-up-shape").await;
     seed_router_contract_data(&paths).await;
 
-    let source_a = paths.config_dir.join("incoming-a.cbz");
-    let source_b = paths.config_dir.join("incoming-b.cbz");
-    std::fs::write(&source_a, b"import-fixture-a").expect("source_a should be writable");
-    std::fs::write(&source_b, b"import-fixture-b").expect("source_b should be writable");
+    let source_root = std::env::temp_dir().join(format!(
+        "komga-import-follow-up-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be after unix epoch")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&source_root).expect("follow-up source root should be created");
+    let source = source_root.join("incoming-follow-up.cbz");
+    std::fs::write(&source, b"import-follow-up-fixture")
+        .expect("follow-up source should be writable");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/books/import")
-                .header("x-auth-token", &auth_token)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "copyMode": "HARDLINK",
-                        "books": [
-                            {
-                                "sourceFile": source_a.to_string_lossy(),
-                                "seriesId": "series-1",
-                                "destinationName": "dest-a",
-                                "upgradeBookId": "book-1"
-                            },
-                            {
-                                "sourceFile": source_b.to_string_lossy(),
-                                "seriesId": "series-2",
-                                "destinationName": "dest-b"
-                            }
-                        ]
-                    })
-                    .to_string(),
-                ))
-                .expect("books/import payload-shape request should build"),
-        )
-        .await
-        .expect("books/import payload-shape request should complete");
-
-    assert_eq!(response.status(), StatusCode::ACCEPTED);
-
-    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
-        .await
-        .expect("tasks db should open for books/import payload-shape verification");
-    let rows = sqlx::query(
-        "SELECT GROUP_ID, PAYLOAD \
-         FROM TASK \
-         WHERE SIMPLE_TYPE = 'IMPORT_BOOK' \
-         ORDER BY ID ASC",
+    enqueue_books_import(
+        &paths,
+        json!({
+            "copyMode": "COPY",
+            "books": [
+                {
+                    "sourceFile": source.to_string_lossy(),
+                    "seriesId": "series-1"
+                }
+            ]
+        }),
+        "books/import follow-up request should complete",
     )
-    .fetch_all(&tasks_pool)
-    .await
-    .expect("import task payload-shape rows should be queryable");
-    tasks_pool.close().await;
+    .await;
 
-    assert_eq!(rows.len(), 2);
+    let mut rows = load_import_task_rows(
+        &paths,
+        "SELECT PRIORITY, PAYLOAD \
+         FROM TASK \
+         WHERE SIMPLE_TYPE = 'ImportBook' \
+         LIMIT 1",
+        "queued import task row should be queryable",
+    )
+    .await;
+    let import_row = rows.pop().expect("queued import task row should exist");
 
-    let first_payload = serde_json::from_str::<Value>(&rows[0].get::<String, _>("PAYLOAD"))
-        .expect("first import payload should be valid JSON");
-    assert_eq!(
-        rows[0].get::<Option<String>, _>("GROUP_ID"),
-        Some("series-1".to_string())
-    );
-    assert_eq!(
-        first_payload.get("copy_mode"),
-        Some(&Value::String("HARDLINK".to_string()))
-    );
-    assert_eq!(
-        first_payload
-            .get("book")
-            .and_then(|value| value.get("series_id"))
-            .and_then(Value::as_str),
-        Some("series-1")
-    );
-    assert_eq!(
-        first_payload
-            .get("book")
-            .and_then(|value| value.get("destination_name"))
-            .and_then(Value::as_str),
-        Some("dest-a")
-    );
-    assert_eq!(
-        first_payload
-            .get("book")
-            .and_then(|value| value.get("upgrade_book_id"))
-            .and_then(Value::as_str),
-        Some("book-1")
-    );
+    let follow_up_tasks =
+        MediaImportService::new(FilesystemImportPort::new(paths.main_db.as_path()))
+            .process_queued_book_payload(
+                &import_row.get::<String, _>("PAYLOAD"),
+                import_row.get::<i64, _>("PRIORITY") as i32,
+            )
+            .await
+            .expect("queued import payload should produce follow-up tasks");
 
-    let second_payload = serde_json::from_str::<Value>(&rows[1].get::<String, _>("PAYLOAD"))
-        .expect("second import payload should be valid JSON");
-    assert_eq!(
-        rows[1].get::<Option<String>, _>("GROUP_ID"),
-        Some("series-2".to_string())
+    assert_eq!(follow_up_tasks.len(), 1);
+    assert!(
+        follow_up_tasks
+            .iter()
+            .all(|task| task.simple_type != "SCAN_LIBRARY"),
+        "import runtime follow-up must not fall back to library scan tasks",
     );
-    assert_eq!(
-        second_payload.get("copy_mode"),
-        Some(&Value::String("HARDLINK".to_string()))
+    assert!(
+        follow_up_tasks[0].id.starts_with("ANALYZE_BOOK:"),
+        "import runtime follow-up should enqueue analyze-book task ids",
     );
-    assert_eq!(
-        second_payload
-            .get("book")
-            .and_then(|value| value.get("series_id"))
-            .and_then(Value::as_str),
-        Some("series-2")
-    );
-    assert_eq!(
-        second_payload
-            .get("book")
-            .and_then(|value| value.get("destination_name"))
-            .and_then(Value::as_str),
-        Some("dest-b")
-    );
-    assert_eq!(
-        second_payload
-            .get("book")
-            .and_then(|value| value.get("upgrade_book_id")),
-        Some(&Value::Null)
-    );
+    assert_eq!(follow_up_tasks[0].simple_type, "ANALYZE_BOOK");
+    assert_eq!(follow_up_tasks[0].priority, 101);
+    assert_eq!(follow_up_tasks[0].group.as_deref(), Some("series-1"));
 
+    let _ = std::fs::remove_file(&source);
+    let _ = std::fs::remove_dir_all(&source_root);
     cleanup_router_fixture(paths);
 }

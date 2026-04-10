@@ -32,6 +32,7 @@ impl RuntimeMediaImportService for DefaultRuntimeMediaImportService {
     fn process_queued_books_payload<'a>(
         &'a self,
         _task_payload: &'a str,
+        _import_priority: i32,
     ) -> futures_util::future::BoxFuture<'a, Result<Vec<TaskQueueRecord>, String>> {
         Box::pin(async { Ok(vec![]) })
     }
@@ -39,6 +40,7 @@ impl RuntimeMediaImportService for DefaultRuntimeMediaImportService {
     fn process_queued_book_payload<'a>(
         &'a self,
         _task_payload: &'a str,
+        _import_priority: i32,
     ) -> futures_util::future::BoxFuture<'a, Result<Vec<TaskQueueRecord>, String>> {
         Box::pin(async { Ok(vec![]) })
     }
@@ -86,7 +88,6 @@ pub(super) fn default_test_backend() -> MediaAssetsRuntimeAccessBackend {
         load_persisted_book_media_files: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),
         load_persisted_media_file_records: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),
         book_media_is_ready_status: Arc::new(|_, _| Box::pin(async { Ok(false) })),
-        load_persisted_series_thumbnail_media: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         load_persisted_book_pages: Arc::new(|_, _| Box::pin(async { Ok(vec![]) })),
         load_persisted_book_page_row: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),
         resolve_book_page_bytes: Arc::new(|media, page, page_number| {

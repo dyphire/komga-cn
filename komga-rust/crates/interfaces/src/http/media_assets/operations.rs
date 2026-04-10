@@ -478,14 +478,7 @@ pub async fn series_file_delete(
         return response;
     }
 
-    enqueue_task_records(
-        &state,
-        vec![TaskQueueRecord::new(
-            format!("DELETE_SERIES:{series_id}"),
-            8,
-            None,
-        )],
-    )
+    enqueue_delete_media_task(&state, format!("DELETE_SERIES:{series_id}"))
 }
 
 pub async fn series_analyze(
@@ -568,12 +561,9 @@ pub async fn book_file_delete(
         return response;
     }
 
-    enqueue_task_records(
-        &state,
-        vec![TaskQueueRecord::new(
-            format!("DELETE_BOOK:{book_id}"),
-            100,
-            Some(book_id),
-        )],
-    )
+    enqueue_delete_media_task(&state, format!("DELETE_BOOK:{book_id}"))
+}
+
+fn enqueue_delete_media_task(state: &OperationalState, task_id: String) -> Response {
+    enqueue_task_records(state, vec![TaskQueueRecord::new(task_id, 100, None)])
 }

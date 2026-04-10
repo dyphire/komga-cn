@@ -1,5 +1,5 @@
 use super::shared::{
-    encode_image_bytes_as_jpeg, parse_thumbnail_upload, response_from_thumbnail_bytes,
+    load_series_thumbnail, parse_thumbnail_upload, response_from_thumbnail_bytes,
     thumbnail_dimensions,
 };
 use super::*;
@@ -35,33 +35,16 @@ pub async fn series_thumbnail(
         Err(error) => return internal_error_response(error),
     }
 
-    match load_selected_series_thumbnail(auth_db.database_file.as_path(), &resolved_series_id).await
-    {
+    match load_series_thumbnail(auth_db.database_file.as_path(), &resolved_series_id).await {
         Ok(Some(thumbnail)) => {
-            return response_from_thumbnail_bytes(&headers, thumbnail.thumbnail, "image/jpeg");
+            return response_from_thumbnail_bytes(
+                &headers,
+                thumbnail.thumbnail,
+                thumbnail.media_type.as_str(),
+            );
         }
         Ok(None) => {}
         Err(error) => return internal_error_response(error),
-    }
-
-    if let Ok(Some(media)) =
-        load_persisted_series_thumbnail_media(auth_db.database_file.as_path(), &resolved_series_id)
-            .await
-        && let Some(bytes) = read_media_file_bytes(&media.file_path)
-        && let Some(jpeg_bytes) = encode_image_bytes_as_jpeg(&bytes)
-    {
-        let etag = asset_etag(jpeg_bytes.as_slice());
-        let last_modified = file_last_modified_header_value(media.file_path.as_path());
-        if if_none_match_matches(&headers, etag.as_str()) {
-            return asset_not_modified_response(Some(etag.as_str()), last_modified.as_deref());
-        }
-
-        return asset_ok_response(
-            "image/jpeg",
-            jpeg_bytes,
-            Some(etag.as_str()),
-            last_modified.as_deref(),
-        );
     }
 
     StatusCode::NOT_FOUND.into_response()
@@ -160,7 +143,12 @@ pub async fn series_thumbnail_by_id(
     }
 
     match load_series_thumbnail_by_id(auth_db.database_file.as_path(), &thumbnail_id).await {
-        Ok(Some(thumbnail)) => asset_ok_response("image/jpeg", thumbnail.thumbnail, None, None),
+        Ok(Some(thumbnail)) => asset_ok_response(
+            thumbnail.media_type.as_str(),
+            thumbnail.thumbnail,
+            None,
+            None,
+        ),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }

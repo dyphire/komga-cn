@@ -1,3 +1,5 @@
+use komga_application::media_assets::EntityThumbnailBinary;
+
 use super::*;
 
 const MOSAIC_HEIGHT: u32 = 300;
@@ -167,20 +169,33 @@ pub(super) async fn load_book_thumbnail_source_bytes(
     resolve_book_page_bytes(media, &page_row, 1)
 }
 
+pub(super) async fn load_series_thumbnail(
+    database_file: &FsPath,
+    series_id: &str,
+) -> Result<Option<EntityThumbnailBinary>, String> {
+    if let Some(thumbnail) = load_selected_series_thumbnail(database_file, series_id).await? {
+        return Ok(Some(thumbnail));
+    }
+
+    let Some(book_id) = load_series_book_ids(database_file, series_id)
+        .await?
+        .into_iter()
+        .next()
+    else {
+        return Ok(None);
+    };
+
+    load_selected_book_thumbnail(database_file, &book_id).await
+}
+
 pub(super) async fn load_series_thumbnail_source_bytes(
     database_file: &FsPath,
     series_id: &str,
 ) -> Option<Vec<u8>> {
-    if let Ok(Some(thumbnail)) = load_selected_series_thumbnail(database_file, series_id).await {
-        return Some(thumbnail.thumbnail);
+    match load_series_thumbnail(database_file, series_id).await {
+        Ok(Some(thumbnail)) => Some(thumbnail.thumbnail),
+        Ok(None) | Err(_) => None,
     }
-
-    let Ok(Some(media)) = load_persisted_series_thumbnail_media(database_file, series_id).await
-    else {
-        return None;
-    };
-
-    read_media_file_bytes(&media.file_path)
 }
 
 pub(super) async fn load_readlist_mosaic_bytes(

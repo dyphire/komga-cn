@@ -440,6 +440,15 @@ pub fn persist_scanned_library(
                     .map_err(|error| format!("failed to insert SERIES rows: {error}"))?;
                 }
 
+                ensure_series_metadata_seed(&pool, series)
+                    .await
+                    .map_err(|error| {
+                        format!(
+                            "failed to ensure SERIES metadata rows for '{}': {error}",
+                            series.series_id
+                        )
+                    })?;
+
                 for book in &series.books {
                     let book_updated = sqlx::query(
                         "UPDATE BOOK \
@@ -477,6 +486,15 @@ pub fn persist_scanned_library(
                         .await
                         .map_err(|error| format!("failed to insert BOOK rows: {error}"))?;
                     }
+
+                    ensure_book_metadata_seed(&pool, book)
+                        .await
+                        .map_err(|error| {
+                            format!(
+                                "failed to ensure BOOK metadata rows for '{}': {error}",
+                                book.book_id
+                            )
+                        })?;
 
                     let media_updated = sqlx::query(
                         "UPDATE MEDIA_FILE \
@@ -698,6 +716,47 @@ fn unavailable_scanned_library() -> ScannedLibrary {
         discovered_series_ids: HashSet::new(),
         discovered_book_ids: HashSet::new(),
     }
+}
+
+async fn ensure_series_metadata_seed(
+    pool: &SqlitePool,
+    series: &ScannedSeriesRow,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT OR IGNORE INTO SERIES_METADATA (STATUS, TITLE, TITLE_SORT, SERIES_ID) \
+         VALUES (?, ?, ?, ?)",
+    )
+    .bind("ONGOING")
+    .bind(&series.series_name)
+    .bind(&series.series_name)
+    .bind(&series.series_id)
+    .execute(pool)
+    .await?;
+
+    sqlx::query("INSERT OR IGNORE INTO BOOK_METADATA_AGGREGATION (SERIES_ID) VALUES (?)")
+        .bind(&series.series_id)
+        .execute(pool)
+        .await?;
+
+    Ok(())
+}
+
+async fn ensure_book_metadata_seed(
+    pool: &SqlitePool,
+    book: &ScannedBookRow,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT OR IGNORE INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, BOOK_ID) \
+         VALUES (?, ?, ?, ?)",
+    )
+    .bind("0")
+    .bind(0.0_f64)
+    .bind(&book.book_name)
+    .bind(&book.book_id)
+    .execute(pool)
+    .await?;
+
+    Ok(())
 }
 
 fn load_existing_scanned_books_by_url(

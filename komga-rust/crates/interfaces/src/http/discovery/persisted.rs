@@ -43,7 +43,7 @@ pub use backend::{PersistedDiscoveryAccessBackend, install_persisted_discovery_a
 pub use models::{
     PersistedAuthorEntry, PersistedAuthorsScope, PersistedBookBrowseEntry,
     PersistedBookPosterSummary, PersistedBookSummary, PersistedBookTagsScope,
-    PersistedSeriesSummary,
+    PersistedReadProgressSummary, PersistedSeriesSummary, PersistedWebLinkEntry,
 };
 
 use backend::{
