@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use komga_rust::config::{RuntimeCli, RuntimeConfig};
+use komga_rust::infrastructure::rebuild_index_from_database;
 
 use super::{RuntimeDbPaths, persistence_contract_fixture};
 
@@ -41,6 +42,16 @@ pub fn runtime_config_for_paths(paths: &RuntimeDbPaths) -> RuntimeConfig {
 
     RuntimeConfig::resolve_with_env(&RuntimeCli::default(), &env)
         .expect("runtime config should resolve fixture paths")
+}
+
+pub fn search_ready_runtime_config_for_paths(paths: &RuntimeDbPaths) -> RuntimeConfig {
+    let config = runtime_config_for_paths(paths);
+    rebuild_index_from_database(
+        paths.main_db.as_path(),
+        config.lucene_data_directory.as_path(),
+    )
+    .expect("search-ready runtime config should rebuild the search index from fixture data");
+    config
 }
 
 pub fn runtime_demo_config_for_paths(paths: &RuntimeDbPaths) -> RuntimeConfig {

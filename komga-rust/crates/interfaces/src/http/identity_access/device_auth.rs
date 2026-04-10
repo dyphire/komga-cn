@@ -17,12 +17,15 @@ use oauth2::{
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::net::SocketAddr;
 use std::path::Path as FsPath;
 
 use crate::OperationalState;
+use crate::http::access_log::RequestConnectionInfo;
 use crate::http::identity_access::auth::{
-    persisted_api_key_user_by_token, resolved_auth_user, session_token_for_user_with_namespace,
-    user_has_role, user_is_admin,
+    persisted_api_key_metadata, persisted_api_key_user_by_token,
+    persisted_record_successful_authentication_activity, resolved_auth_user,
+    session_token_for_user_with_namespace, user_has_role, user_is_admin,
 };
 use crate::http::request_urls::{
     request_base_url, request_base_url_with_port, request_context_path,

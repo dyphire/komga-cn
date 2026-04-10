@@ -3,8 +3,6 @@ use crate::http::media_assets::{
     attachment_disposition, normalize_book_epub_locator, progression_is_older_than_existing,
     user_can_access_book_media,
 };
-use crate::runtime_identity_access::persisted_api_key_metadata;
-
 #[path = "kobo_routes/common.rs"]
 mod common;
 #[path = "kobo_routes/metadata_helpers.rs"]
@@ -27,13 +25,19 @@ async fn kobo_book_thumbnail_response(
     state: &OperationalState,
     auth_token: &str,
     headers: &HeaderMap,
+    remote_addr: Option<SocketAddr>,
     thumbnail_id: &str,
     width: &str,
     height: &str,
 ) -> Response {
-    if resolved_kobo_user(auth_token, headers, state.runtime.database_file.as_path())
-        .await
-        .is_none()
+    if resolved_kobo_user(
+        auth_token,
+        headers,
+        remote_addr,
+        state.runtime.database_file.as_path(),
+    )
+    .await
+    .is_none()
     {
         return StatusCode::UNAUTHORIZED.into_response();
     }
@@ -93,12 +97,14 @@ pub(super) async fn proxy_kobo_catch_all_request(
 pub async fn kobo_library_sync(
     Extension(state): Extension<OperationalState>,
     Path(auth_token): Path<String>,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Response {
     let Some(current_user) = resolved_kobo_user(
         auth_token.as_str(),
         &headers,
+        connection_info.remote_addr(),
         state.runtime.database_file.as_path(),
     )
     .await
@@ -334,12 +340,14 @@ pub async fn kobo_library_sync(
 pub async fn kobo_library_book_metadata(
     Extension(state): Extension<OperationalState>,
     Path((auth_token, book_id)): Path<(String, String)>,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Response {
     if resolved_kobo_user(
         auth_token.as_str(),
         &headers,
+        connection_info.remote_addr(),
         state.runtime.database_file.as_path(),
     )
     .await
@@ -474,12 +482,14 @@ pub async fn kobo_library_book_metadata(
 pub async fn kobo_library_book_state(
     Extension(state): Extension<OperationalState>,
     Path((auth_token, book_id)): Path<(String, String)>,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Response {
     let Some(current_user) = resolved_kobo_user(
         auth_token.as_str(),
         &headers,
+        connection_info.remote_addr(),
         state.runtime.database_file.as_path(),
     )
     .await
@@ -535,6 +545,7 @@ pub async fn kobo_library_book_state(
 pub async fn kobo_library_book_state_update(
     Extension(state): Extension<OperationalState>,
     Path((auth_token, book_id)): Path<(String, String)>,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     uri: axum::http::Uri,
     body: Bytes,
@@ -542,6 +553,7 @@ pub async fn kobo_library_book_state_update(
     let Some(current_user) = resolved_kobo_user(
         auth_token.as_str(),
         &headers,
+        connection_info.remote_addr(),
         state.runtime.database_file.as_path(),
     )
     .await
@@ -716,12 +728,14 @@ fn kobo_state_update_failure(book_id: &str) -> Response {
 pub async fn kobo_book_file_epub(
     Extension(state): Extension<OperationalState>,
     Path((auth_token, book_id)): Path<(String, String)>,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     Query(query): Query<KoboBookFileQuery>,
 ) -> Response {
     let Some(current_user) = resolved_kobo_user(
         auth_token.as_str(),
         &headers,
+        connection_info.remote_addr(),
         state.runtime.database_file.as_path(),
     )
     .await
@@ -810,12 +824,14 @@ pub async fn kobo_book_thumbnail(
         String,
         String,
     )>,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
 ) -> Response {
     kobo_book_thumbnail_response(
         &state,
         auth_token.as_str(),
         &headers,
+        connection_info.remote_addr(),
         thumbnail_id.as_str(),
         width.as_str(),
         height.as_str(),
@@ -833,12 +849,14 @@ pub async fn kobo_book_thumbnail_with_quality(
         String,
         String,
     )>,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
 ) -> Response {
     kobo_book_thumbnail_response(
         &state,
         auth_token.as_str(),
         &headers,
+        connection_info.remote_addr(),
         thumbnail_id.as_str(),
         width.as_str(),
         height.as_str(),
@@ -849,6 +867,7 @@ pub async fn kobo_book_thumbnail_with_quality(
 pub async fn kobo_catch_all(
     Extension(state): Extension<OperationalState>,
     Path((auth_token, path)): Path<(String, String)>,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     method: axum::http::Method,
     uri: axum::http::Uri,
@@ -857,6 +876,7 @@ pub async fn kobo_catch_all(
     if resolved_kobo_user(
         auth_token.as_str(),
         &headers,
+        connection_info.remote_addr(),
         state.runtime.database_file.as_path(),
     )
     .await

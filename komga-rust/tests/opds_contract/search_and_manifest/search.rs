@@ -16,7 +16,7 @@ async fn router_opds_v2_latest_books_feed_hides_books_for_age_exclude_restricted
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -59,7 +59,7 @@ async fn router_opds_v1_series_search_feed_uses_search_title_for_non_blank_searc
     let paths = new_router_fixture("router-opds-v1-series-search-title").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -90,7 +90,7 @@ async fn router_opds_v1_series_preserves_active_query_params_in_self_prev_next_l
     seed_router_contract_data(&paths).await;
     seed_router_authors_scope_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -152,7 +152,7 @@ async fn router_opds_v1_series_feeds_use_series_last_modified_for_entry_updated(
             .expect("series last modified should update for entry-updated test");
         pool.close().await;
 
-        let app = build_router_with_config(&runtime_config_for_paths(&paths));
+        let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
         let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
         let response = app
@@ -187,7 +187,7 @@ async fn router_opds_v1_search_uses_acquisition_type_and_utf8_encodings() {
     let paths = new_router_fixture("router-opds-v1-search-opensearch-shape").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -227,7 +227,7 @@ async fn router_opds_v1_series_blank_search_behaves_as_unfiltered_series_feed() 
     seed_router_custom_series(&paths, "series-alpha", "Alpha Series", "library-1").await;
     seed_router_custom_series(&paths, "series-zeta", "Zeta Series", "library-1").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -271,7 +271,7 @@ async fn router_opds_v1_series_search_hides_unauthorized_library_series() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "library.restricted@example.org",
@@ -314,7 +314,7 @@ async fn router_opds_v1_latest_series_feed_hides_series_for_age_exclude_restrict
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -383,7 +383,7 @@ async fn router_opds_v1_latest_series_feed_paginates_after_restriction_filtering
     }
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -433,7 +433,7 @@ async fn router_opds_v1_latest_series_feed_normalizes_entry_updated_to_utc_z() {
         .expect("latest series updated timestamp should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -464,7 +464,7 @@ async fn router_opds_v1_series_search_supports_fielded_query_candidate_lookup() 
     seed_router_contract_data(&paths).await;
     seed_router_authors_scope_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -504,7 +504,7 @@ async fn router_opds_search_supports_accent_folded_and_cjk_series_queries() {
     seed_router_contract_data(&paths).await;
     seed_router_custom_series(&paths, "series-cafe", "Café 東京 Series", "library-1").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let v1_response = app

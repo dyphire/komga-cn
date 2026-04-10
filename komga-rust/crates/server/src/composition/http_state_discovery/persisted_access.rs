@@ -1,6 +1,38 @@
 use super::index_dirs::{register_discovery_index_dir, resolve_discovery_index_dir};
 use super::*;
 
+use komga_infrastructure::SearchQueryLifecycle;
+
+fn search_ids_or_empty(
+    index_dir: &std::path::Path,
+    query: &str,
+    entity_type: SearchEntityType,
+    limit: usize,
+) -> Vec<String> {
+    let Ok(index) = SearchQueryLifecycle::bootstrap(index_dir) else {
+        return Vec::new();
+    };
+
+    index
+        .search_ids(query, entity_type, limit)
+        .unwrap_or_default()
+}
+
+fn search_scored_ids_or_empty(
+    index_dir: &std::path::Path,
+    query: &str,
+    entity_type: SearchEntityType,
+    limit: usize,
+) -> Vec<(f32, String)> {
+    let Ok(index) = SearchQueryLifecycle::bootstrap(index_dir) else {
+        return Vec::new();
+    };
+
+    index
+        .search_scored_ids(query, entity_type, limit)
+        .unwrap_or_default()
+}
+
 macro_rules! forward_string_facet_loader {
     ($loader:path) => {
         Arc::new(|database_file, library_ids, collection_id| {
@@ -145,19 +177,6 @@ pub(super) fn compose_persisted_discovery_access_backend(
     lucene_data_directory: &std::path::Path,
 ) -> PersistedDiscoveryAccessBackend {
     register_discovery_index_dir(database_file, lucene_data_directory);
-
-    match decide_startup_lifecycle(lucene_data_directory) {
-        Ok(SearchStartupLifecycle::Ready) => {}
-        Ok(SearchStartupLifecycle::RebuildRequired) => {
-            prepare_for_rebuild(lucene_data_directory).unwrap_or_else(|error| {
-                panic!("prepare discovery search index startup rebuild failed: {error}")
-            });
-            rebuild_index_from_database(database_file, lucene_data_directory).unwrap_or_else(
-                |error| panic!("rebuild discovery search index startup path failed: {error}"),
-            );
-        }
-        Err(error) => panic!("discovery search startup lifecycle failed: {error}"),
-    }
 
     let lucene_data_directory = lucene_data_directory.to_path_buf();
     PersistedDiscoveryAccessBackend {
@@ -409,11 +428,12 @@ pub(super) fn compose_persisted_discovery_access_backend(
                         database_file.as_path(),
                         default_index_dir.as_path(),
                     );
-                    let index = SearchIndexLifecycle::bootstrap(index_dir.as_path())
-                        .map_err(|error| format!("bootstrap search index for books: {error}"))?;
-                    index
-                        .search_ids(&query, SearchEntityType::Book, limit)
-                        .map_err(|error| format!("search index books query: {error}"))
+                    Ok(search_ids_or_empty(
+                        index_dir.as_path(),
+                        &query,
+                        SearchEntityType::Book,
+                        limit,
+                    ))
                 })
             }
         }),
@@ -426,13 +446,12 @@ pub(super) fn compose_persisted_discovery_access_backend(
                         database_file.as_path(),
                         default_index_dir.as_path(),
                     );
-                    let index =
-                        SearchIndexLifecycle::bootstrap(index_dir.as_path()).map_err(|error| {
-                            format!("bootstrap search index for collections: {error}")
-                        })?;
-                    index
-                        .search_ids(&query, SearchEntityType::Collection, limit)
-                        .map_err(|error| format!("search index collections query: {error}"))
+                    Ok(search_ids_or_empty(
+                        index_dir.as_path(),
+                        &query,
+                        SearchEntityType::Collection,
+                        limit,
+                    ))
                 })
             }
         }),
@@ -445,13 +464,12 @@ pub(super) fn compose_persisted_discovery_access_backend(
                         database_file.as_path(),
                         default_index_dir.as_path(),
                     );
-                    let index =
-                        SearchIndexLifecycle::bootstrap(index_dir.as_path()).map_err(|error| {
-                            format!("bootstrap search index for readlists: {error}")
-                        })?;
-                    index
-                        .search_scored_ids(&query, SearchEntityType::ReadList, limit)
-                        .map_err(|error| format!("search index readlists query: {error}"))
+                    Ok(search_scored_ids_or_empty(
+                        index_dir.as_path(),
+                        &query,
+                        SearchEntityType::ReadList,
+                        limit,
+                    ))
                 })
             }
         }),
@@ -464,11 +482,12 @@ pub(super) fn compose_persisted_discovery_access_backend(
                         database_file.as_path(),
                         default_index_dir.as_path(),
                     );
-                    let index = SearchIndexLifecycle::bootstrap(index_dir.as_path())
-                        .map_err(|error| format!("bootstrap search index for series: {error}"))?;
-                    index
-                        .search_scored_ids(&query, SearchEntityType::Series, limit)
-                        .map_err(|error| format!("search index series query: {error}"))
+                    Ok(search_scored_ids_or_empty(
+                        index_dir.as_path(),
+                        &query,
+                        SearchEntityType::Series,
+                        limit,
+                    ))
                 })
             }
         }),

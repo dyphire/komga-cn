@@ -107,6 +107,13 @@ pub fn prepare_task_queue(
             &runtime,
             RuntimeLifecycleFields::default().with_skip_reason("queue_consumption_disabled"),
         );
+    } else if !runtime.owns_search_index {
+        log_runtime_bootstrap(
+            STARTUP_SEARCH_TASK_COMPONENT,
+            "skipped",
+            &runtime,
+            RuntimeLifecycleFields::default().with_skip_reason("search_index_not_owned"),
+        );
     } else if startup_search_task.is_none() {
         log_runtime_bootstrap(
             STARTUP_SEARCH_TASK_COMPONENT,
@@ -122,13 +129,13 @@ pub fn prepare_task_queue(
             RuntimeLifecycleFields::default().with_startup_task(startup_task),
         );
         match bootstrap_startup_search_task_inner(&mut task_queue, &runtime, startup_search_task) {
-            Ok(processed) => log_runtime_bootstrap(
+            Ok(enqueued) => log_runtime_bootstrap(
                 STARTUP_SEARCH_TASK_COMPONENT,
                 "completed",
                 &runtime,
                 RuntimeLifecycleFields::default()
                     .with_startup_task(startup_task)
-                    .with_processed(processed),
+                    .with_enqueued(enqueued),
             ),
             Err(error) => {
                 log_runtime_bootstrap(
@@ -360,6 +367,13 @@ fn spawn_background_task_worker(
     handle.spawn(
         async move {
             let _guard = WorkerLifecycleGuard::new(BACKGROUND_TASK_WORKER, &runtime);
+            let startup_task_queue = task_queue.clone();
+            let startup_runtime = runtime.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                run_background_task_iteration(startup_task_queue, startup_runtime)
+            })
+            .await;
+
             let mut ticker = interval(Duration::from_secs(300));
             ticker.tick().await;
             let task_wakeup = task_wakeup;
@@ -599,14 +613,16 @@ fn bootstrap_startup_search_task_inner(
     runtime: &TaskRuntimeContext,
     startup_search_task: Option<&'static str>,
 ) -> Result<usize, String> {
+    if !runtime.owns_search_index {
+        return Ok(0);
+    }
+
     let Some(task_name) = startup_search_task else {
         return Ok(0);
     };
 
     task_queue.enqueue(TaskQueueRecord::new(task_name.to_string(), 1_000, None));
-    task_queue
-        .process_available(runtime)
-        .map_err(|error| error.to_string())
+    Ok(1)
 }
 
 fn current_runtime_handle_or_log_skip(

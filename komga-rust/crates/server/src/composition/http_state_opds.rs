@@ -1,7 +1,7 @@
 use super::*;
 use std::collections::HashMap;
 
-use komga_infrastructure::{SearchEntityType, SearchIndexLifecycle};
+use komga_infrastructure::{SearchEntityType, SearchQueryLifecycle};
 
 use super::http_state_discovery::resolve_discovery_index_dir;
 
@@ -287,35 +287,35 @@ pub(super) fn install_opds_access_backends(lucene_data_directory: &std::path::Pa
                             database_file.as_path(),
                             default_index_dir.as_path(),
                         );
-                        let index = SearchIndexLifecycle::bootstrap(index_dir.as_path())
-                            .map_err(|error| format!("bootstrap OPDS search index: {error}"))?;
-
-                        (
-                            load_ranked_series_search_results(
-                                database_file.as_path(),
-                                &index,
-                                &trimmed_query,
-                            )
-                            .await?,
-                            load_ranked_book_search_results(
-                                database_file.as_path(),
-                                &index,
-                                &trimmed_query,
-                            )
-                            .await?,
-                            load_ranked_collection_search_results(
-                                database_file.as_path(),
-                                &index,
-                                &trimmed_query,
-                            )
-                            .await?,
-                            load_ranked_readlist_search_results(
-                                database_file.as_path(),
-                                &index,
-                                &trimmed_query,
-                            )
-                            .await?,
-                        )
+                        match SearchQueryLifecycle::bootstrap(index_dir.as_path()) {
+                            Ok(index) => (
+                                load_ranked_series_search_results(
+                                    database_file.as_path(),
+                                    &index,
+                                    &trimmed_query,
+                                )
+                                .await?,
+                                load_ranked_book_search_results(
+                                    database_file.as_path(),
+                                    &index,
+                                    &trimmed_query,
+                                )
+                                .await?,
+                                load_ranked_collection_search_results(
+                                    database_file.as_path(),
+                                    &index,
+                                    &trimmed_query,
+                                )
+                                .await?,
+                                load_ranked_readlist_search_results(
+                                    database_file.as_path(),
+                                    &index,
+                                    &trimmed_query,
+                                )
+                                .await?,
+                            ),
+                            Err(_) => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+                        }
                     };
 
                     Ok((
@@ -671,7 +671,7 @@ async fn load_blank_opds_search_results(
 
 async fn load_ranked_series_search_results(
     database_file: &std::path::Path,
-    index: &SearchIndexLifecycle,
+    index: &SearchQueryLifecycle,
     query: &str,
 ) -> Result<Vec<infrastructure_opds_persisted::PersistedSeriesSearchRecord>, String> {
     let limit = infrastructure_opds_persisted::load_series_search_count(database_file)
@@ -680,13 +680,13 @@ async fn load_ranked_series_search_results(
         .max(1);
     let ids = index
         .search_ids(query, SearchEntityType::Series, limit)
-        .map_err(|error| format!("search OPDS series query: {error}"))?;
+        .unwrap_or_default();
     ordered_series_search_rows(database_file, &ids).await
 }
 
 async fn load_ranked_book_search_results(
     database_file: &std::path::Path,
-    index: &SearchIndexLifecycle,
+    index: &SearchQueryLifecycle,
     query: &str,
 ) -> Result<Vec<infrastructure_opds_persisted::PersistedBookSearchRecord>, String> {
     let limit = infrastructure_opds_persisted::load_book_search_count(database_file)
@@ -695,13 +695,13 @@ async fn load_ranked_book_search_results(
         .max(1);
     let ids = index
         .search_ids(query, SearchEntityType::Book, limit)
-        .map_err(|error| format!("search OPDS book query: {error}"))?;
+        .unwrap_or_default();
     ordered_book_search_rows(database_file, &ids).await
 }
 
 async fn load_ranked_collection_search_results(
     database_file: &std::path::Path,
-    index: &SearchIndexLifecycle,
+    index: &SearchQueryLifecycle,
     query: &str,
 ) -> Result<Vec<infrastructure_opds_persisted::PersistedNamedRecord>, String> {
     let limit = infrastructure_opds_persisted::load_collection_search_count(database_file)
@@ -710,13 +710,13 @@ async fn load_ranked_collection_search_results(
         .max(1);
     let ids = index
         .search_ids(query, SearchEntityType::Collection, limit)
-        .map_err(|error| format!("search OPDS collection query: {error}"))?;
+        .unwrap_or_default();
     ordered_collection_search_rows(database_file, &ids).await
 }
 
 async fn load_ranked_readlist_search_results(
     database_file: &std::path::Path,
-    index: &SearchIndexLifecycle,
+    index: &SearchQueryLifecycle,
     query: &str,
 ) -> Result<Vec<infrastructure_opds_persisted::PersistedNamedRecord>, String> {
     let limit = infrastructure_opds_persisted::load_readlist_search_count(database_file)
@@ -725,7 +725,7 @@ async fn load_ranked_readlist_search_results(
         .max(1);
     let ids = index
         .search_ids(query, SearchEntityType::ReadList, limit)
-        .map_err(|error| format!("search OPDS readlist query: {error}"))?;
+        .unwrap_or_default();
     ordered_readlist_search_rows(database_file, &ids).await
 }
 

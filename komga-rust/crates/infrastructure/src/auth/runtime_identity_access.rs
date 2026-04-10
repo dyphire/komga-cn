@@ -402,6 +402,8 @@ pub async fn persisted_record_successful_authentication_activity(
     source: &str,
     api_key_id: Option<&str>,
     api_key_comment: Option<&str>,
+    ip: Option<&str>,
+    user_agent: Option<&str>,
 ) -> Option<()> {
     if !database_file.exists() {
         return None;
@@ -413,8 +415,8 @@ pub async fn persisted_record_successful_authentication_activity(
     )
     .bind(user.id.as_str())
     .bind(user.email.as_str())
-    .bind(Option::<String>::None)
-    .bind(Option::<String>::None)
+    .bind(ip)
+    .bind(user_agent)
     .bind(true)
     .bind(Option::<String>::None)
     .bind(source)
@@ -430,8 +432,8 @@ pub async fn persisted_record_successful_authentication_activity(
         )
         .bind(Option::<String>::None)
         .bind(user.email.as_str())
-        .bind(Option::<String>::None)
-        .bind(Option::<String>::None)
+        .bind(ip)
+        .bind(user_agent)
         .bind(true)
         .bind(Option::<String>::None)
         .bind(source)

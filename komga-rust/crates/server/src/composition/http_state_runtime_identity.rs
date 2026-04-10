@@ -127,14 +127,16 @@ pub(super) fn compose_runtime_identity_access_backend() -> RuntimeIdentityAccess
             },
         ),
         persisted_record_successful_authentication_activity: Arc::new(
-            |database_file, user, source, api_key_id, api_key_comment| {
+            |database_file, user, input| {
                 Box::pin(async move {
                     infrastructure_auth::persisted_record_successful_authentication_activity(
                         database_file.as_path(),
                         &user,
-                        &source,
-                        api_key_id.as_deref(),
-                        api_key_comment.as_deref(),
+                        &input.source,
+                        input.api_key_id.as_deref(),
+                        input.api_key_comment.as_deref(),
+                        input.ip.as_deref(),
+                        input.user_agent.as_deref(),
                     )
                     .await
                 })

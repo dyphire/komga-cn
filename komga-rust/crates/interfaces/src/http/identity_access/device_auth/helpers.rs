@@ -1,4 +1,44 @@
 use super::*;
+pub(super) use crate::http::identity_access::auth::{
+    authentication_activity_headers_metadata_with_remote_addr, authentication_activity_write_input,
+};
+
+pub(super) async fn record_successful_api_key_authentication_by_token(
+    headers: &HeaderMap,
+    remote_addr: Option<SocketAddr>,
+    database_file: &FsPath,
+    user: &AuthUser,
+    api_key: &str,
+) -> Option<()> {
+    let api_key_metadata = api_key_metadata_by_token(api_key, database_file).await;
+    let (api_key_id, api_key_comment) = api_key_metadata
+        .as_ref()
+        .map(|(id, comment)| (Some(id.as_str()), Some(comment.as_str())))
+        .unwrap_or((None, None));
+
+    persisted_record_successful_authentication_activity(
+        database_file,
+        user,
+        authentication_activity_write_input(
+            &authentication_activity_headers_metadata_with_remote_addr(headers, remote_addr),
+            "API_KEY",
+            api_key_id,
+            api_key_comment,
+        ),
+    )
+    .await
+}
+
+pub(super) async fn api_key_metadata_by_token(
+    api_key: &str,
+    database_file: &FsPath,
+) -> Option<(String, String)> {
+    let mut metadata_headers = HeaderMap::new();
+    metadata_headers.insert("x-api-key", HeaderValue::from_str(api_key).ok()?);
+    persisted_api_key_metadata(&metadata_headers, database_file)
+        .await
+        .map(|metadata| (metadata.id, metadata.comment))
+}
 
 pub(super) fn parse_koreader_progress_page(
     progress: &str,

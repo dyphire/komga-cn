@@ -112,6 +112,15 @@ pub enum KoreaderBookLookupError {
     Conflict,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct AuthenticationActivityWriteInput {
+    pub source: String,
+    pub api_key_id: Option<String>,
+    pub api_key_comment: Option<String>,
+    pub ip: Option<String>,
+    pub user_agent: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct RuntimeIdentityAccessBackend {
     pub auth_token_user: Arc<dyn Fn(HeaderMap) -> Option<AuthUser> + Send + Sync>,
@@ -155,7 +164,7 @@ pub struct RuntimeIdentityAccessBackend {
             + Sync,
     >,
     pub persisted_record_successful_authentication_activity: Arc<
-        dyn Fn(PathBuf, AuthUser, String, Option<String>, Option<String>) -> BoxFuture<Option<()>>
+        dyn Fn(PathBuf, AuthUser, AuthenticationActivityWriteInput) -> BoxFuture<Option<()>>
             + Send
             + Sync,
     >,
@@ -357,7 +366,7 @@ fn default_test_backend() -> RuntimeIdentityAccessBackend {
         persisted_latest_authentication_activity_by_user_and_api_key: Arc::new(|_, _, _| {
             Box::pin(async { None })
         }),
-        persisted_record_successful_authentication_activity: Arc::new(|_, _, _, _, _| {
+        persisted_record_successful_authentication_activity: Arc::new(|_, _, _| {
             Box::pin(async { Some(()) })
         }),
         ensure_oauth_user: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),
@@ -573,16 +582,12 @@ pub async fn persisted_latest_authentication_activity_by_user_and_api_key(
 pub async fn persisted_record_successful_authentication_activity(
     database_file: &Path,
     user: &AuthUser,
-    source: &str,
-    api_key_id: Option<&str>,
-    api_key_comment: Option<&str>,
+    input: AuthenticationActivityWriteInput,
 ) -> Option<()> {
     (backend().persisted_record_successful_authentication_activity)(
         database_file.to_path_buf(),
         user.clone(),
-        source.to_string(),
-        api_key_id.map(ToString::to_string),
-        api_key_comment.map(ToString::to_string),
+        input,
     )
     .await
 }

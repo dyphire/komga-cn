@@ -6,7 +6,7 @@ async fn router_collection_series_supports_kotlin_style_query_filters() {
     seed_router_contract_data(&paths).await;
     seed_collection_series_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

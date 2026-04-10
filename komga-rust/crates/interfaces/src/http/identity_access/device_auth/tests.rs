@@ -47,6 +47,7 @@ async fn resolved_kobo_user_returns_none_when_not_authenticated() {
         resolved_kobo_user(
             "",
             &headers,
+            None,
             FsPath::new("/tmp/komga-kobo-user-none.sqlite")
         )
         .await
@@ -513,6 +514,7 @@ async fn kobo_ping_rejects_requests_without_valid_auth() {
     let response = kobo_ping(
         Extension(auth_db),
         Path("invalid-token".to_string()),
+        Extension(RequestConnectionInfo::default()),
         HeaderMap::new(),
     )
     .await;
@@ -526,7 +528,12 @@ async fn koreader_user_auth_rejects_requests_without_auth() {
         demo_mode: false,
         remember_me_namespace: "test".to_string(),
     };
-    let response = koreader_user_auth(Extension(auth_db), HeaderMap::new()).await;
+    let response = koreader_user_auth(
+        Extension(auth_db),
+        Extension(RequestConnectionInfo::default()),
+        HeaderMap::new(),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 

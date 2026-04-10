@@ -1,5 +1,5 @@
 use axum::Json;
-use axum::extract::{Extension, Path};
+use axum::extract::{Extension, Path, Request};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum_extra::extract::cookie::{Cookie, SameSite};
@@ -9,6 +9,7 @@ use serde_json::json;
 use std::collections::BTreeSet;
 
 use super::super::AuthDatabaseState;
+use crate::http::access_log::RequestConnectionInfo;
 use crate::http::discovery_auth::{DiscoveryAuthState, principal_from_user_payload};
 use crate::http::identity_access::auth::{
     AuthOutcome, AuthUser, PersistedAuthenticationActivity, bootstrap_api_key_user, bootstrap_user,
@@ -45,11 +46,14 @@ pub(crate) use activity_routes::{
 use helpers::*;
 
 pub(super) async fn users_me(
-    headers: HeaderMap,
-    uri: Uri,
     auth_state: DiscoveryAuthState,
     auth_db: AuthDatabaseState,
+    request: Request,
 ) -> Response {
+    let uri = request.uri().clone();
+    let headers = request.headers().clone();
+    let request_metadata = authentication_activity_request_metadata(&request);
+
     match persisted_api_key_user(&headers, auth_db.database_file.as_path())
         .await
         .unwrap_or(AuthOutcome::Missing)
@@ -64,9 +68,12 @@ pub(super) async fn users_me(
             let _ = persisted_record_successful_authentication_activity(
                 auth_db.database_file.as_path(),
                 &user,
-                "API_KEY",
-                api_key_id,
-                api_key_comment,
+                authentication_activity_write_input(
+                    &request_metadata,
+                    "API_KEY",
+                    api_key_id,
+                    api_key_comment,
+                ),
             )
             .await;
             let token = session_token_for_user_with_namespace(
@@ -104,9 +111,7 @@ pub(super) async fn users_me(
             let _ = persisted_record_successful_authentication_activity(
                 auth_db.database_file.as_path(),
                 &user,
-                "BASIC",
-                None,
-                None,
+                authentication_activity_write_input(&request_metadata, "BASIC", None, None),
             )
             .await;
             let Some(remember_me_token) = remember_me_token_for_user_with_namespace(
@@ -143,9 +148,7 @@ pub(super) async fn users_me(
             let _ = persisted_record_successful_authentication_activity(
                 auth_db.database_file.as_path(),
                 &user,
-                "BASIC",
-                None,
-                None,
+                authentication_activity_write_input(&request_metadata, "BASIC", None, None),
             )
             .await;
             let token = session_token_for_user_with_namespace(
@@ -206,10 +209,11 @@ pub(super) async fn users_list(headers: HeaderMap, auth_db: AuthDatabaseState) -
 
 pub(super) async fn users_create(
     headers: HeaderMap,
+    connection_info: RequestConnectionInfo,
     body: Value,
     auth_db: AuthDatabaseState,
 ) -> Response {
-    let Some(current_user) = authenticated_user(&headers, &auth_db).await else {
+    let Some(current_user) = authenticated_user(&headers, connection_info, &auth_db).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if !user_is_admin(&current_user) {
@@ -298,11 +302,12 @@ pub(super) async fn users_create(
 
 pub(super) async fn users_delete(
     headers: HeaderMap,
+    connection_info: RequestConnectionInfo,
     Path(target_user_id): Path<String>,
     auth_db: AuthDatabaseState,
     state: OperationalState,
 ) -> Response {
-    let Some(current_user) = authenticated_user(&headers, &auth_db).await else {
+    let Some(current_user) = authenticated_user(&headers, connection_info, &auth_db).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if !user_is_admin(&current_user) && user_id(&current_user) != target_user_id {
@@ -325,12 +330,13 @@ pub(super) async fn users_delete(
 
 pub(super) async fn users_update(
     headers: HeaderMap,
+    connection_info: RequestConnectionInfo,
     Path(target_user_id): Path<String>,
     body: Value,
     auth_db: AuthDatabaseState,
     state: OperationalState,
 ) -> Response {
-    let Some(current_user) = authenticated_user(&headers, &auth_db).await else {
+    let Some(current_user) = authenticated_user(&headers, connection_info, &auth_db).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if !user_is_admin(&current_user) && user_id(&current_user) != target_user_id {
@@ -445,10 +451,11 @@ pub(super) async fn logout(headers: HeaderMap) -> Response {
 
 pub(super) async fn users_me_password(
     headers: HeaderMap,
+    connection_info: RequestConnectionInfo,
     body: Value,
     auth_db: AuthDatabaseState,
 ) -> Response {
-    let Some(current_user) = authenticated_user(&headers, &auth_db).await else {
+    let Some(current_user) = authenticated_user(&headers, connection_info, &auth_db).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
@@ -474,12 +481,13 @@ pub(super) async fn users_me_password(
 
 pub(super) async fn users_by_id_password(
     headers: HeaderMap,
+    connection_info: RequestConnectionInfo,
     Path(target_user_id): Path<String>,
     body: Value,
     auth_db: AuthDatabaseState,
     state: OperationalState,
 ) -> Response {
-    let Some(current_user) = authenticated_user(&headers, &auth_db).await else {
+    let Some(current_user) = authenticated_user(&headers, connection_info, &auth_db).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if !user_is_admin(&current_user) && user_id(&current_user) != target_user_id {
@@ -515,10 +523,9 @@ pub(super) async fn users_by_id_password(
 pub(crate) async fn users_me_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(auth_state): Extension<DiscoveryAuthState>,
-    headers: HeaderMap,
-    uri: Uri,
+    request: Request,
 ) -> Response {
-    users_me(headers, uri, auth_state, auth_db).await
+    users_me(auth_state, auth_db, request).await
 }
 
 pub(crate) async fn users_list_route(
@@ -530,95 +537,106 @@ pub(crate) async fn users_list_route(
 
 pub(crate) async fn users_create_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    users_create(headers, body, auth_db).await
+    users_create(headers, connection_info, body, auth_db).await
 }
 
 pub(crate) async fn users_update_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(state): Extension<OperationalState>,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     path: Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    users_update(headers, path, body, auth_db, state).await
+    users_update(headers, connection_info, path, body, auth_db, state).await
 }
 
 pub(crate) async fn users_delete_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(state): Extension<OperationalState>,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     path: Path<String>,
 ) -> Response {
-    users_delete(headers, path, auth_db, state).await
+    users_delete(headers, connection_info, path, auth_db, state).await
 }
 
 pub(crate) async fn users_me_password_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    users_me_password(headers, body, auth_db).await
+    users_me_password(headers, connection_info, body, auth_db).await
 }
 
 pub(crate) async fn users_by_id_password_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(state): Extension<OperationalState>,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     path: Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    users_by_id_password(headers, path, body, auth_db, state).await
+    users_by_id_password(headers, connection_info, path, body, auth_db, state).await
 }
 
 pub(crate) async fn users_me_api_keys_create_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    users_me_api_keys_create(headers, body, auth_db).await
+    users_me_api_keys_create(headers, connection_info, body, auth_db).await
 }
 
 pub(crate) async fn users_me_api_keys_list_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
 ) -> Response {
-    users_me_api_keys_list(headers, auth_db).await
+    users_me_api_keys_list(headers, connection_info, auth_db).await
 }
 
 pub(crate) async fn users_me_api_keys_delete_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     path: Path<String>,
 ) -> Response {
-    users_me_api_keys_delete(headers, path, auth_db).await
+    users_me_api_keys_delete(headers, connection_info, path, auth_db).await
 }
 
 pub(crate) async fn users_me_authentication_activity_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    users_me_authentication_activity(headers, uri, auth_db).await
+    users_me_authentication_activity(headers, connection_info, uri, auth_db).await
 }
 
 pub(crate) async fn users_authentication_activity_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    users_authentication_activity(headers, uri, auth_db).await
+    users_authentication_activity(headers, connection_info, uri, auth_db).await
 }
 
 pub(crate) async fn users_by_id_authentication_activity_latest_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     path: Path<String>,
     uri: Uri,
 ) -> Response {
-    users_by_id_authentication_activity_latest(headers, path, uri, auth_db).await
+    users_by_id_authentication_activity_latest(headers, connection_info, path, uri, auth_db).await
 }
 
 pub(crate) async fn login_set_cookie_route(headers: HeaderMap) -> Response {

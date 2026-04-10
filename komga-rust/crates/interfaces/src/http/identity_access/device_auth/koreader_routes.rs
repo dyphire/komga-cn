@@ -17,6 +17,7 @@ pub async fn koreader_user_create(headers: HeaderMap) -> Response {
 
 pub async fn koreader_user_auth(
     Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
 ) -> Response {
     let header_user = headers
@@ -30,13 +31,20 @@ pub async fn koreader_user_auth(
         return StatusCode::FORBIDDEN.into_response();
     };
 
-    let authorized = matches!(
-        persisted_api_key_user_by_token(header_user, auth_db.database_file.as_path()).await,
-        Some(AuthOutcome::Valid(_))
-    );
-    if !authorized {
+    let Some(AuthOutcome::Valid(user)) =
+        persisted_api_key_user_by_token(header_user, auth_db.database_file.as_path()).await
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
-    }
+    };
+
+    let _ = record_successful_api_key_authentication_by_token(
+        &headers,
+        connection_info.remote_addr(),
+        auth_db.database_file.as_path(),
+        &user,
+        header_user,
+    )
+    .await;
 
     (
         StatusCode::OK,

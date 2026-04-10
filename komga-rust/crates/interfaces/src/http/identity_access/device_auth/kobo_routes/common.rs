@@ -17,11 +17,7 @@ pub(super) async fn kobo_path_api_key_metadata(
         return None;
     }
 
-    let mut metadata_headers = HeaderMap::new();
-    metadata_headers.insert("x-api-key", HeaderValue::from_str(auth_token).ok()?);
-    persisted_api_key_metadata(&metadata_headers, database_file)
-        .await
-        .map(|metadata| (metadata.id, metadata.comment))
+    api_key_metadata_by_token(auth_token, database_file).await
 }
 
 pub(super) fn random_uuid_like() -> String {

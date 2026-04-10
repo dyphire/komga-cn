@@ -1,4 +1,7 @@
 use super::*;
+use axum::extract::ConnectInfo;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use std::net::SocketAddr;
 
 #[tokio::test]
 async fn router_users_by_id_authentication_activity_latest_treats_blank_apikey_id_as_filter() {
@@ -104,6 +107,94 @@ async fn router_users_by_id_authentication_activity_latest_matches_email_only_ac
 }
 
 #[tokio::test]
+async fn router_users_by_id_authentication_activity_latest_uses_connect_info_for_koreader_api_key_auth()
+ {
+    let paths =
+        new_router_fixture("router-user-latest-auth-activity-koreader-api-key-connect-info").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v2/users/me/api-keys")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "comment": "KOReader connect info" }).to_string(),
+                ))
+                .expect("api key create request should build"),
+        )
+        .await
+        .expect("api key create request should complete");
+
+    assert_eq!(create_response.status(), StatusCode::OK);
+    let created_api_key = response_json(create_response).await;
+    let created_api_key_id = created_api_key
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("api key create response should expose id")
+        .to_string();
+    let created_api_key_secret = created_api_key
+        .get("key")
+        .and_then(Value::as_str)
+        .expect("api key create response should expose raw key")
+        .to_string();
+
+    let connect_info_addr = "198.51.100.77:43123"
+        .parse::<SocketAddr>()
+        .expect("socket address should parse");
+    let koreader_auth_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/koreader/users/auth")
+                .header("x-auth-user", &created_api_key_secret)
+                .header(header::USER_AGENT, "router-contract-koreader-device")
+                .extension(ConnectInfo(connect_info_addr))
+                .body(Body::empty())
+                .expect("koreader users auth request should build"),
+        )
+        .await
+        .expect("koreader users auth request should complete");
+
+    assert_eq!(koreader_auth_response.status(), StatusCode::OK);
+
+    let latest_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/api/v2/users/admin-user/authentication-activity/latest?apikey_id={created_api_key_id}"
+                ))
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("latest auth activity api key request should build"),
+        )
+        .await
+        .expect("latest auth activity api key request should complete");
+
+    assert_eq!(latest_response.status(), StatusCode::OK);
+    let payload = response_json(latest_response).await;
+    assert_eq!(payload["email"], json!("admin@example.org"));
+    assert_eq!(payload["apiKeyId"], json!(created_api_key_id));
+    assert_eq!(payload["apiKeyComment"], json!("KOReader connect info"));
+    assert_eq!(payload["ip"], json!("198.51.100.77"));
+    assert_eq!(
+        payload["userAgent"],
+        json!("router-contract-koreader-device")
+    );
+    assert_eq!(payload["source"], json!("API_KEY"));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_users_me_authentication_activity_honors_page_and_date_time_sort() {
     let paths = new_router_fixture("router-users-me-auth-activity-page-sort").await;
     seed_router_contract_data(&paths).await;
@@ -164,6 +255,73 @@ async fn router_users_me_authentication_activity_honors_page_and_date_time_sort(
         payload["content"][0]["dateTime"],
         json!("2030-01-02T00:00:00Z")
     );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_users_by_id_authentication_activity_latest_returns_successful_kobo_path_api_key_auth()
+ {
+    let paths =
+        new_router_fixture("router-user-latest-auth-activity-kobo-path-api-key-success").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_age_exclude_user_with_roles(
+        &paths,
+        "kobo-user",
+        "kobo@example.org",
+        "router-contract-kobo-123",
+        0,
+        &["USER", "KOBO_SYNC"],
+    )
+    .await;
+    seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-user").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "kobo@example.org",
+        "router-contract-kobo-123",
+    )
+    .await;
+
+    let ping_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/kobo/validkobotoken/ping")
+                .header("x-forwarded-for", "203.0.113.44")
+                .header(header::USER_AGENT, "router-contract-kobo-device")
+                .body(Body::empty())
+                .expect("kobo ping request should build"),
+        )
+        .await
+        .expect("kobo ping request should complete");
+
+    assert_eq!(ping_response.status(), StatusCode::OK);
+
+    let latest_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(
+                    "/api/v2/users/kobo-user/authentication-activity/latest?apikey_id=api-key-validkobotoken",
+                )
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("latest auth activity kobo request should build"),
+        )
+        .await
+        .expect("latest auth activity kobo request should complete");
+
+    assert_eq!(latest_response.status(), StatusCode::OK);
+    let payload = response_json(latest_response).await;
+    assert_eq!(payload["email"], json!("kobo@example.org"));
+    assert_eq!(payload["apiKeyId"], json!("api-key-validkobotoken"));
+    assert_eq!(payload["apiKeyComment"], json!("kobo sync"));
+    assert_eq!(payload["ip"], json!("203.0.113.44"));
+    assert_eq!(payload["userAgent"], json!("router-contract-kobo-device"));
+    assert_eq!(payload["source"], json!("API_KEY"));
 
     cleanup_router_fixture(paths);
 }
@@ -239,6 +397,149 @@ async fn router_users_me_authentication_activity_includes_email_only_rows() {
         payload["content"][0]["dateTime"],
         json!("2030-01-04T00:00:00Z")
     );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_users_me_basic_auth_records_forwarded_ip_and_user_agent() {
+    let paths = new_router_fixture("router-users-me-basic-records-request-metadata").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for auth activity cleanup");
+    sqlx::query("DELETE FROM AUTHENTICATION_ACTIVITY WHERE EMAIL = ?")
+        .bind("admin@example.org")
+        .execute(&pool)
+        .await
+        .expect("existing auth activity rows should delete");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let basic_token = STANDARD.encode("admin@example.org:router-contract-admin-123");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v2/users/me")
+                .header(header::AUTHORIZATION, format!("Basic {basic_token}"))
+                .header("x-auth-token", "")
+                .header("x-forwarded-for", "203.0.113.10, 10.0.0.1")
+                .header(header::USER_AGENT, "router-contract-agent")
+                .body(Body::empty())
+                .expect("users/me metadata request should build"),
+        )
+        .await
+        .expect("users/me metadata request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for auth activity assertion");
+    let (ip, user_agent, source): (Option<String>, Option<String>, Option<String>) =
+        sqlx::query_as(
+            "SELECT IP, USER_AGENT, SOURCE FROM AUTHENTICATION_ACTIVITY WHERE EMAIL = ? ORDER BY DATE_TIME DESC LIMIT 1",
+        )
+        .bind("admin@example.org")
+        .fetch_one(&pool)
+        .await
+        .expect("auth activity row should exist after successful login");
+    pool.close().await;
+
+    assert_eq!(ip.as_deref(), Some("203.0.113.10"));
+    assert_eq!(user_agent.as_deref(), Some("router-contract-agent"));
+    assert_eq!(source.as_deref(), Some("BASIC"));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_users_me_api_keys_list_api_key_auth_uses_connect_info_fallback() {
+    let paths = new_router_fixture("router-users-me-api-keys-list-connect-info").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v2/users/me/api-keys")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "comment": "Helper connect info" }).to_string(),
+                ))
+                .expect("api key create request should build"),
+        )
+        .await
+        .expect("api key create request should complete");
+    assert_eq!(create_response.status(), StatusCode::OK);
+    let created_api_key = response_json(create_response).await;
+    let api_key = created_api_key
+        .get("key")
+        .and_then(Value::as_str)
+        .expect("api key create payload should expose key")
+        .to_string();
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for auth activity cleanup");
+    sqlx::query("DELETE FROM AUTHENTICATION_ACTIVITY WHERE EMAIL = ?")
+        .bind("admin@example.org")
+        .execute(&pool)
+        .await
+        .expect("existing auth activity rows should delete");
+    pool.close().await;
+
+    let connect_info_addr = "203.0.113.92:51234"
+        .parse::<SocketAddr>()
+        .expect("socket address should parse");
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v2/users/me/api-keys")
+                .header("x-api-key", &api_key)
+                .header(header::USER_AGENT, "router-contract-helper-api-key-agent")
+                .extension(ConnectInfo(connect_info_addr))
+                .body(Body::empty())
+                .expect("users me api keys list request should build"),
+        )
+        .await
+        .expect("users me api keys list request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for auth activity assertion");
+    let (ip, user_agent, source, api_key_comment): (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT IP, USER_AGENT, SOURCE, API_KEY_COMMENT FROM AUTHENTICATION_ACTIVITY WHERE EMAIL = ? ORDER BY DATE_TIME DESC LIMIT 1",
+    )
+    .bind("admin@example.org")
+    .fetch_one(&pool)
+    .await
+    .expect("auth activity row should exist after helper api key auth");
+    pool.close().await;
+
+    assert_eq!(ip.as_deref(), Some("203.0.113.92"));
+    assert_eq!(
+        user_agent.as_deref(),
+        Some("router-contract-helper-api-key-agent")
+    );
+    assert_eq!(source.as_deref(), Some("API_KEY"));
+    assert_eq!(api_key_comment.as_deref(), Some("Helper connect info"));
 
     cleanup_router_fixture(paths);
 }

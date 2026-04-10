@@ -1,6 +1,7 @@
 use axum::Router;
 use komga_infrastructure::sqlite::close_all_shared_pools;
 use komga_infrastructure::{SearchStartupLifecycle, decide_startup_lifecycle, prepare_for_rebuild};
+use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::signal;
@@ -116,13 +117,16 @@ async fn serve_router_with_shutdown_timeout(
 ) -> std::io::Result<()> {
     let (shutdown_lifecycle_tx, mut shutdown_lifecycle_rx) = oneshot::channel();
     let mut server = tokio::spawn(async move {
-        axum::serve(listener, router)
-            .with_graceful_shutdown(shutdown_signal(
-                shutdown_tx,
-                shutdown_rx,
-                shutdown_lifecycle_tx,
-            ))
-            .await
+        axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(shutdown_signal(
+            shutdown_tx,
+            shutdown_rx,
+            shutdown_lifecycle_tx,
+        ))
+        .await
     });
 
     tokio::select! {

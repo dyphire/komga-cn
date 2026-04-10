@@ -291,6 +291,12 @@ pub struct SearchIndexLifecycle {
     fields: SearchFields,
 }
 
+pub struct SearchQueryLifecycle {
+    index: Index,
+    reader: IndexReader,
+    fields: SearchFields,
+}
+
 #[derive(Clone)]
 struct SearchFields {
     doc_key: Field,
@@ -380,17 +386,7 @@ pub fn prepare_for_rebuild(index_dir: &Path) -> Result<(), SearchError> {
 
 impl SearchIndexLifecycle {
     pub fn bootstrap(index_dir: &Path) -> Result<Self, SearchError> {
-        prepare_index_directory(index_dir)?;
-
-        let schema = build_schema();
-        let index = open_or_create_index(index_dir, schema.clone())?;
-        register_search_analyzer_profiles(&index);
-        let fields = SearchFields::from_schema(&index.schema())?;
-
-        let reader = index
-            .reader_builder()
-            .reload_policy(ReloadPolicy::Manual)
-            .try_into()?;
+        let (index, reader, fields) = bootstrap_query_state(index_dir)?;
         let writer = index.writer(50_000_000)?;
 
         Ok(Self {
@@ -467,39 +463,14 @@ impl SearchIndexLifecycle {
         entity_type: SearchEntityType,
         limit: usize,
     ) -> Result<Vec<(f32, String)>, SearchError> {
-        let searcher = self.reader.searcher();
-        let parser = self.build_query_parser(entity_type);
-        let normalized_query = normalize_multilingual_width(query);
-        let parsed = match parser.parse_query(normalized_query.as_ref()) {
-            Ok(parsed) => parsed,
-            Err(_) => return Ok(Vec::new()),
-        };
-        let type_query = TermQuery::new(
-            Term::from_field_text(self.fields.entity_type, entity_type.as_str()),
-            IndexRecordOption::Basic,
-        );
-        let query = BooleanQuery::new(vec![
-            (Occur::Must, parsed),
-            (Occur::Must, Box::new(type_query)),
-        ]);
-
-        let mut ranked_ids = Vec::new();
-        let top_docs = searcher.search(&query, &TopDocs::with_limit(limit).order_by_score())?;
-        for (score, address) in top_docs {
-            let document: TantivyDocument = searcher.doc(address)?;
-            let id: &str = document
-                .get_first(self.fields.entity_id)
-                .and_then(|value| value.as_str())
-                .ok_or(SearchError::MissingStoredField("entity_id"))?;
-            ranked_ids.push((score, id.to_string()));
-        }
-
-        ranked_ids.sort_by(|left, right| match right.0.total_cmp(&left.0) {
-            std::cmp::Ordering::Equal => left.1.cmp(&right.1),
-            ordering => ordering,
-        });
-
-        Ok(ranked_ids)
+        search_scored_ids(
+            &self.index,
+            &self.reader,
+            &self.fields,
+            query,
+            entity_type,
+            limit,
+        )
     }
 
     pub fn search_ids(
@@ -508,35 +479,169 @@ impl SearchIndexLifecycle {
         entity_type: SearchEntityType,
         limit: usize,
     ) -> Result<Vec<String>, SearchError> {
-        self.search_scored_ids(query, entity_type, limit)
-            .map(|mut ranked_ids| {
-                ranked_ids.sort_by(|left, right| match right.0.total_cmp(&left.0) {
-                    std::cmp::Ordering::Equal => left.1.cmp(&right.1),
-                    ordering => ordering,
-                });
-                ranked_ids.into_iter().map(|(_, id)| id).collect()
-            })
+        search_ids(
+            &self.index,
+            &self.reader,
+            &self.fields,
+            query,
+            entity_type,
+            limit,
+        )
+    }
+}
+
+impl SearchQueryLifecycle {
+    pub fn bootstrap(index_dir: &Path) -> Result<Self, SearchError> {
+        let (index, reader, fields) = bootstrap_existing_query_state(index_dir)?;
+
+        Ok(Self {
+            index,
+            reader,
+            fields,
+        })
     }
 
-    fn build_query_parser(&self, entity_type: SearchEntityType) -> QueryParser {
-        let default_fields = entity_type
-            .default_fields()
-            .iter()
-            .filter_map(|field_name| {
-                self.fields
-                    .query_fields
-                    .get(translate_public_field_name(field_name))
-                    .copied()
-            })
-            .collect::<Vec<_>>();
-        let mut parser = QueryParser::new(
-            self.index.schema(),
-            default_fields,
-            build_query_tokenizer_manager(),
-        );
-        parser.set_conjunction_by_default();
-        parser
+    pub fn search_scored_ids(
+        &self,
+        query: &str,
+        entity_type: SearchEntityType,
+        limit: usize,
+    ) -> Result<Vec<(f32, String)>, SearchError> {
+        search_scored_ids(
+            &self.index,
+            &self.reader,
+            &self.fields,
+            query,
+            entity_type,
+            limit,
+        )
     }
+
+    pub fn search_ids(
+        &self,
+        query: &str,
+        entity_type: SearchEntityType,
+        limit: usize,
+    ) -> Result<Vec<String>, SearchError> {
+        search_ids(
+            &self.index,
+            &self.reader,
+            &self.fields,
+            query,
+            entity_type,
+            limit,
+        )
+    }
+}
+
+fn bootstrap_query_state(
+    index_dir: &Path,
+) -> Result<(Index, IndexReader, SearchFields), SearchError> {
+    prepare_index_directory(index_dir)?;
+
+    let schema = build_schema();
+    let index = open_or_create_index(index_dir, schema.clone())?;
+    register_search_analyzer_profiles(&index);
+    let fields = SearchFields::from_schema(&index.schema())?;
+
+    let reader = index
+        .reader_builder()
+        .reload_policy(ReloadPolicy::Manual)
+        .try_into()?;
+    Ok((index, reader, fields))
+}
+
+fn bootstrap_existing_query_state(
+    index_dir: &Path,
+) -> Result<(Index, IndexReader, SearchFields), SearchError> {
+    let index = open_existing_runtime_index(index_dir)?;
+    register_search_analyzer_profiles(&index);
+    let fields = SearchFields::from_schema(&index.schema())?;
+
+    let reader = index
+        .reader_builder()
+        .reload_policy(ReloadPolicy::Manual)
+        .try_into()?;
+    Ok((index, reader, fields))
+}
+
+fn search_scored_ids(
+    index: &Index,
+    reader: &IndexReader,
+    fields: &SearchFields,
+    query: &str,
+    entity_type: SearchEntityType,
+    limit: usize,
+) -> Result<Vec<(f32, String)>, SearchError> {
+    let searcher = reader.searcher();
+    let parser = build_query_parser(index, fields, entity_type);
+    let normalized_query = normalize_multilingual_width(query);
+    let parsed = match parser.parse_query(normalized_query.as_ref()) {
+        Ok(parsed) => parsed,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let type_query = TermQuery::new(
+        Term::from_field_text(fields.entity_type, entity_type.as_str()),
+        IndexRecordOption::Basic,
+    );
+    let query = BooleanQuery::new(vec![
+        (Occur::Must, parsed),
+        (Occur::Must, Box::new(type_query)),
+    ]);
+
+    let mut ranked_ids = Vec::new();
+    let top_docs = searcher.search(&query, &TopDocs::with_limit(limit).order_by_score())?;
+    for (score, address) in top_docs {
+        let document: TantivyDocument = searcher.doc(address)?;
+        let id: &str = document
+            .get_first(fields.entity_id)
+            .and_then(|value| value.as_str())
+            .ok_or(SearchError::MissingStoredField("entity_id"))?;
+        ranked_ids.push((score, id.to_string()));
+    }
+
+    ranked_ids.sort_by(|left, right| match right.0.total_cmp(&left.0) {
+        std::cmp::Ordering::Equal => left.1.cmp(&right.1),
+        ordering => ordering,
+    });
+
+    Ok(ranked_ids)
+}
+
+fn search_ids(
+    index: &Index,
+    reader: &IndexReader,
+    fields: &SearchFields,
+    query: &str,
+    entity_type: SearchEntityType,
+    limit: usize,
+) -> Result<Vec<String>, SearchError> {
+    search_scored_ids(index, reader, fields, query, entity_type, limit)
+        .map(|ranked_ids| ranked_ids.into_iter().map(|(_, id)| id).collect())
+}
+
+fn build_query_parser(
+    index: &Index,
+    fields: &SearchFields,
+    entity_type: SearchEntityType,
+) -> QueryParser {
+    let default_fields = entity_type
+        .default_fields()
+        .iter()
+        .filter_map(|field_name| {
+            fields
+                .query_fields
+                .get(translate_public_field_name(field_name))
+                .copied()
+        })
+        .collect::<Vec<_>>();
+    let mut parser = QueryParser::new(
+        index.schema(),
+        default_fields,
+        build_query_tokenizer_manager(),
+    );
+    parser.set_conjunction_by_default();
+    parser
 }
 
 fn build_query_tokenizer_manager() -> TokenizerManager {
@@ -619,6 +724,29 @@ fn open_or_create_index(index_dir: &Path, schema: Schema) -> Result<Index, Searc
 
     let index = Index::create_in_dir(index_dir, schema)?;
     write_current_analyzer_version_marker(index_dir)?;
+    Ok(index)
+}
+
+fn open_existing_runtime_index(index_dir: &Path) -> Result<Index, SearchError> {
+    if !index_dir.exists() || !index_dir.join("meta.json").exists() {
+        return Err(SearchError::CorruptedIndexRequiresExplicitRebuild(
+            index_dir.to_path_buf(),
+            "search index does not exist yet".to_string(),
+        ));
+    }
+    if has_lucene_artifacts(index_dir)? {
+        return Err(SearchError::UnsafeLuceneIndexOwnership(
+            index_dir.to_path_buf(),
+        ));
+    }
+
+    let index = open_existing_index(index_dir)?;
+    validate_existing_runtime_index(index_dir, &index).map_err(|error| {
+        SearchError::CorruptedIndexRequiresExplicitRebuild(
+            index_dir.to_path_buf(),
+            format!("stale search schema/version detected: {error}"),
+        )
+    })?;
     Ok(index)
 }
 

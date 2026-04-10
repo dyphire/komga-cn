@@ -5,7 +5,7 @@ async fn router_opds_v2_search_query_contract_covers_group_presence_and_order() 
     let paths = new_router_fixture("router-opds-v2-search-group-contract").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let expectations = [
@@ -63,7 +63,7 @@ async fn router_opds_v2_search_supports_fielded_query_candidate_lookup() {
     seed_router_contract_data(&paths).await;
     seed_router_authors_scope_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -145,7 +145,7 @@ async fn router_opds_v2_search_excludes_one_shot_series_for_blank_and_ranked_que
         .expect("opds v2 search one-shot series should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let expectations = [
@@ -218,7 +218,7 @@ async fn router_opds_v2_search_books_group_uses_shared_publication_shape() {
         .expect("opds v2 search tag should seed");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -361,7 +361,7 @@ async fn router_opds_v2_search_hides_unauthorized_library_results() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "library.restricted.v2@example.org",
@@ -408,7 +408,7 @@ async fn router_opds_v2_search_hides_results_for_age_exclude_restricted_user() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let restricted_auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "search.restricted@example.org",

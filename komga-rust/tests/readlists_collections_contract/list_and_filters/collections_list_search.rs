@@ -7,7 +7,7 @@ async fn router_collections_supports_search_library_id_and_unpaged() {
     seed_router_contract_data(&paths).await;
     seed_collection_listing_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -79,7 +79,7 @@ async fn router_collections_search_uses_index_relevance_order_like_kotlin() {
     .expect("collection-3 series membership should insert for collections search relevance seed");
     pool.close().await;
 
-    let config = runtime_config_for_paths(&paths);
+    let config = search_ready_runtime_config_for_paths(&paths);
     let app = build_router_with_config(&config);
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
@@ -118,6 +118,48 @@ async fn router_collections_search_uses_index_relevance_order_like_kotlin() {
         })
         .collect::<Vec<_>>();
     assert_eq!(ids, expected_ids);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collections_missing_search_index_returns_empty_results_like_kotlin() {
+    let paths = new_router_fixture("router-collections-search-missing-index-empty").await;
+    seed_router_contract_data(&paths).await;
+    seed_collection_listing_variants(&paths).await;
+
+    let config = search_ready_runtime_config_for_paths(&paths);
+    if config.lucene_data_directory.exists() {
+        std::fs::remove_dir_all(&config.lucene_data_directory)
+            .expect("collections search index fixture should be removable");
+    }
+
+    let app = build_router_with_config(&config);
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/collections?search=collection&unpaged=true")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("collections missing-index search request should build"),
+        )
+        .await
+        .expect("collections missing-index search request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let content = payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("collections missing-index payload should expose content array");
+    assert!(content.is_empty());
+    assert!(
+        !config.lucene_data_directory.exists(),
+        "query-only collection search must not recreate the missing index directory",
+    );
 
     cleanup_router_fixture(paths);
 }
@@ -398,7 +440,7 @@ async fn router_collections_search_does_not_drop_visible_hits_after_hidden_ranke
     );
     pool.close().await;
 
-    let config = runtime_config_for_paths(&paths);
+    let config = search_ready_runtime_config_for_paths(&paths);
     let app = build_router_with_config(&config);
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),

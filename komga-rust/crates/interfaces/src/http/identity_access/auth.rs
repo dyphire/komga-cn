@@ -1,3 +1,5 @@
+#[path = "auth/request_metadata.rs"]
+mod request_metadata;
 #[path = "auth/response.rs"]
 mod response;
 #[path = "auth/token.rs"]
@@ -21,6 +23,10 @@ pub use komga_application::identity_access::{
     AuthOutcome, AuthUser, PersistedApiKey, PersistedApiKeyMetadata,
     PersistedAuthenticationActivity, user_has_role, user_id, user_is_admin, user_payload_json,
     user_shared_all_libraries, user_shared_library_ids,
+};
+pub use request_metadata::{
+    authentication_activity_headers_metadata_with_remote_addr,
+    authentication_activity_request_metadata, authentication_activity_write_input,
 };
 pub use response::{
     bootstrap_api_key_user, bootstrap_user, bootstrap_user_with_remember_me_cookies,

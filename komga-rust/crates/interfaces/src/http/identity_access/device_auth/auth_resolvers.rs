@@ -3,14 +3,23 @@ use super::*;
 pub(super) async fn resolved_kobo_user(
     auth_token: &str,
     headers: &HeaderMap,
+    remote_addr: Option<SocketAddr>,
     database_file: &FsPath,
 ) -> Option<AuthUser> {
-    if valid_kobo_path_token(auth_token) {
-        match persisted_api_key_user_by_token(auth_token, database_file).await {
-            Some(AuthOutcome::Valid(user)) if user.roles.iter().any(|role| role == "KOBO_SYNC") => {
-                return Some(*user);
-            }
-            _ => {}
+    if valid_kobo_path_token(auth_token)
+        && let Some(AuthOutcome::Valid(user)) =
+            persisted_api_key_user_by_token(auth_token, database_file).await
+    {
+        let _ = record_successful_api_key_authentication_by_token(
+            headers,
+            remote_addr,
+            database_file,
+            &user,
+            auth_token,
+        )
+        .await;
+        if user.roles.iter().any(|role| role == "KOBO_SYNC") {
+            return Some(*user);
         }
     }
 

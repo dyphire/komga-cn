@@ -5,9 +5,17 @@ use axum::body::to_bytes;
 pub async fn kobo_ping(
     Extension(auth_db): Extension<super::AuthDatabaseState>,
     Path(auth_token): Path<String>,
-    _: HeaderMap,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
+    headers: HeaderMap,
 ) -> Response {
-    match kobo_path_user_status(auth_token.as_str(), auth_db.database_file.as_path()).await {
+    match kobo_path_user_status(
+        auth_token.as_str(),
+        &headers,
+        connection_info.remote_addr(),
+        auth_db.database_file.as_path(),
+    )
+    .await
+    {
         Ok(_) => {}
         Err(status) => return status.into_response(),
     }
@@ -17,11 +25,13 @@ pub async fn kobo_ping(
 pub async fn kobo_initialization(
     Extension(state): Extension<OperationalState>,
     Path(auth_token): Path<String>,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
 ) -> Response {
     if resolved_kobo_user(
         auth_token.as_str(),
         &headers,
+        connection_info.remote_addr(),
         state.runtime.database_file.as_path(),
     )
     .await
@@ -144,6 +154,7 @@ fn apply_initialization_overrides(resources: &mut Value, auth_token: &str, conte
 pub async fn kobo_auth_device(
     Extension(state): Extension<OperationalState>,
     Path(auth_token): Path<String>,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     uri: axum::http::Uri,
     body: Bytes,
@@ -151,6 +162,7 @@ pub async fn kobo_auth_device(
     if resolved_kobo_user(
         auth_token.as_str(),
         &headers,
+        connection_info.remote_addr(),
         state.runtime.database_file.as_path(),
     )
     .await
@@ -221,6 +233,8 @@ fn validated_kobo_auth_device_user_key(
 
 async fn kobo_path_user_status(
     auth_token: &str,
+    headers: &HeaderMap,
+    remote_addr: Option<SocketAddr>,
     database_file: &FsPath,
 ) -> Result<AuthUser, StatusCode> {
     if !valid_kobo_path_token(auth_token) {
@@ -229,6 +243,14 @@ async fn kobo_path_user_status(
 
     match persisted_api_key_user_by_token(auth_token, database_file).await {
         Some(AuthOutcome::Valid(user)) => {
+            let _ = record_successful_api_key_authentication_by_token(
+                headers,
+                remote_addr,
+                database_file,
+                &user,
+                auth_token,
+            )
+            .await;
             if user.roles.iter().any(|role| role == "KOBO_SYNC") {
                 Ok(*user)
             } else {

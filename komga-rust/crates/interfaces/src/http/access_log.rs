@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::net::SocketAddr;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -6,7 +7,7 @@ use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use axum::body::Body;
-use axum::extract::{MatchedPath, Request};
+use axum::extract::{ConnectInfo, MatchedPath, Request};
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::Response;
@@ -14,6 +15,20 @@ use tracing::Span;
 
 const ANONYMOUS_USER_ID: &str = "anonymous";
 static ACCESS_LOG_REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Clone, Copy, Debug, Default)]
+#[cfg_attr(test, allow(dead_code))]
+pub struct RequestConnectionInfo {
+    #[cfg_attr(test, allow(dead_code))]
+    remote_addr: Option<SocketAddr>,
+}
+
+#[cfg_attr(test, allow(dead_code))]
+impl RequestConnectionInfo {
+    pub fn remote_addr(self) -> Option<SocketAddr> {
+        self.remote_addr
+    }
+}
 
 tokio::task_local! {
     static ACCESS_LOG_USER_ID: RefCell<String>;
@@ -69,6 +84,14 @@ pub(crate) fn record_resolved_auth_user_id(user_id: Option<&str>) {
 pub(crate) async fn prepare_access_log_middleware(request: Request, next: Next) -> Response {
     let started_at = Instant::now();
     let request_id = next_request_id();
+    let mut request = request;
+    let remote_addr = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|connect_info| connect_info.0);
+    request
+        .extensions_mut()
+        .insert(RequestConnectionInfo { remote_addr });
     let metadata = AccessLogRequestMetadata::from_request(&request);
 
     let span = Span::current();

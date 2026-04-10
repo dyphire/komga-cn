@@ -1,9 +1,8 @@
 use super::*;
 
 use komga_infrastructure::{
-    SearchEntityType, SearchIndexLifecycle, SearchStartupLifecycle, decide_startup_lifecycle,
-    prepare_for_rebuild, rebuild_index_from_database, sync_entity_delete_from_index,
-    sync_entity_upsert_from_database, sync_series_and_oneshot_books_after_metadata_update,
+    SearchEntityType, sync_entity_delete_from_index, sync_entity_upsert_from_database,
+    sync_series_and_oneshot_books_after_metadata_update,
 };
 
 mod detail_access;

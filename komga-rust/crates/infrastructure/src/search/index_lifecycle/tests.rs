@@ -7,9 +7,9 @@ use tantivy::schema::{FieldType, IndexRecordOption};
 
 use super::{
     ANALYZER_VERSION_MARKER_FILE, SearchDocument, SearchEntityType, SearchError, SearchFieldClass,
-    SearchFieldEntry, SearchIndexLifecycle, SearchStartupLifecycle, build_query_tokenizer_manager,
-    build_schema, decide_startup_lifecycle, index_tokenizer_profile_name,
-    retained_query_field_contracts, search_analyzer_version,
+    SearchFieldEntry, SearchIndexLifecycle, SearchQueryLifecycle, SearchStartupLifecycle,
+    build_query_tokenizer_manager, build_schema, decide_startup_lifecycle,
+    index_tokenizer_profile_name, retained_query_field_contracts, search_analyzer_version,
 };
 
 #[test]
@@ -116,6 +116,55 @@ fn bootstrap_opens_existing_runtime_index_without_rebuild() {
     );
 
     let _ = std::fs::remove_dir_all(index_dir);
+}
+
+#[test]
+fn query_bootstrap_succeeds_while_writer_lifecycle_is_alive() {
+    let index_dir = temp_index_dir("query-bootstrap-with-live-writer");
+
+    let writer_index = SearchIndexLifecycle::bootstrap(index_dir.as_path())
+        .expect("writer lifecycle bootstrap should create runtime index");
+    writer_index
+        .rebuild(&[SearchDocument {
+            entity_type: SearchEntityType::Collection,
+            id: "collection-1".to_string(),
+            title: "MIKI Shelf".to_string(),
+            fields: vec![SearchFieldEntry {
+                field: "name".to_string(),
+                value: "MIKI Shelf".to_string(),
+            }],
+        }])
+        .expect("writer lifecycle should index collection fixture");
+
+    let query_index = SearchQueryLifecycle::bootstrap(index_dir.as_path())
+        .expect("query lifecycle bootstrap should not compete for writer lock");
+    let ids = query_index
+        .search_ids("MIKI", SearchEntityType::Collection, 10)
+        .expect("query lifecycle should search indexed collections");
+
+    assert_eq!(ids, vec!["collection-1".to_string()]);
+
+    let _ = std::fs::remove_dir_all(index_dir);
+}
+
+#[test]
+fn query_bootstrap_refuses_missing_index_without_creating_state() {
+    let index_dir = temp_index_dir("query-bootstrap-refuses-missing-index");
+    std::fs::remove_dir_all(&index_dir).expect("missing-index fixture should start absent");
+
+    let result = SearchQueryLifecycle::bootstrap(index_dir.as_path());
+
+    assert!(
+        matches!(
+            result,
+            Err(SearchError::CorruptedIndexRequiresExplicitRebuild(path, _)) if path == index_dir
+        ),
+        "query lifecycle must fail-closed when the runtime index is absent instead of creating it on demand",
+    );
+    assert!(
+        !index_dir.exists(),
+        "query lifecycle must not create index directories while serving read-only searches",
+    );
 }
 
 #[test]

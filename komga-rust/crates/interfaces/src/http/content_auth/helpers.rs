@@ -4,6 +4,10 @@ use std::cmp::Ordering;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::*;
+pub(super) use crate::http::identity_access::auth::{
+    authentication_activity_headers_metadata_with_remote_addr,
+    authentication_activity_request_metadata, authentication_activity_write_input,
+};
 use komga_application::identity_access::random_uuid_like;
 
 pub(super) fn register_discovery_principal(
@@ -260,13 +264,38 @@ pub(super) fn api_key_comment_from_request(body: &Value) -> Option<String> {
 
 pub(super) async fn authenticated_user(
     headers: &HeaderMap,
+    connection_info: RequestConnectionInfo,
     auth_db: &AuthDatabaseState,
 ) -> Option<AuthUser> {
+    let request_metadata = authentication_activity_headers_metadata_with_remote_addr(
+        headers,
+        connection_info.remote_addr(),
+    );
+
     match persisted_api_key_user(headers, &auth_db.database_file)
         .await
         .unwrap_or(AuthOutcome::Missing)
     {
-        AuthOutcome::Valid(user) => return Some(*user),
+        AuthOutcome::Valid(user) => {
+            let api_key_metadata =
+                persisted_api_key_metadata(headers, &auth_db.database_file).await;
+            let (api_key_id, api_key_comment) = api_key_metadata
+                .as_ref()
+                .map(|metadata| (Some(metadata.id()), Some(metadata.comment())))
+                .unwrap_or((None, None));
+            let _ = persisted_record_successful_authentication_activity(
+                &auth_db.database_file,
+                &user,
+                authentication_activity_write_input(
+                    &request_metadata,
+                    "API_KEY",
+                    api_key_id,
+                    api_key_comment,
+                ),
+            )
+            .await;
+            return Some(*user);
+        }
         AuthOutcome::Invalid => return None,
         AuthOutcome::Missing => {}
     }
@@ -279,7 +308,15 @@ pub(super) async fn authenticated_user(
         .await
         .unwrap_or(AuthOutcome::Missing)
     {
-        AuthOutcome::Valid(user) => Some(*user),
+        AuthOutcome::Valid(user) => {
+            let _ = persisted_record_successful_authentication_activity(
+                &auth_db.database_file,
+                &user,
+                authentication_activity_write_input(&request_metadata, "BASIC", None, None),
+            )
+            .await;
+            Some(*user)
+        }
         AuthOutcome::Invalid | AuthOutcome::Missing => None,
     }
 }

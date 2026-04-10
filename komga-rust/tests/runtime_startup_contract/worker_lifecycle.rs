@@ -3,7 +3,7 @@ use super::*;
 use komga_rust::infrastructure::sqlite::connect_pool;
 
 #[test]
-fn runtime_startup_prepare_task_queue_logs_search_and_library_bootstrap_boundaries() {
+fn runtime_startup_prepare_task_queue_enqueues_search_rebuild_without_processing_it_inline() {
     let _guard = startup_contract_lock();
     let config = runtime_config_for_logging_contract("komga-runtime-startup-worker-bootstrap");
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -32,13 +32,21 @@ fn runtime_startup_prepare_task_queue_logs_search_and_library_bootstrap_boundari
         pool.close().await;
     });
 
-    let logs = capture_contract_log_async(&config, {
+    let (logs, queued_rebuild_tasks) = capture_contract_log_async_result(&config, {
         let config = config.clone();
         async move {
-            let _background = komga_rust::infrastructure::task_queue::prepare_task_queue(
+            let background = komga_rust::infrastructure::task_queue::prepare_task_queue(
                 config,
                 Some("REBUILD_INDEX"),
             );
+            background
+                .task_queue
+                .lock()
+                .expect("startup worker bootstrap queue lock should not be poisoned")
+                .count_by_simple_type()
+                .get("REBUILD_INDEX")
+                .copied()
+                .unwrap_or(0)
         }
     });
 
@@ -74,14 +82,13 @@ fn runtime_startup_prepare_task_queue_logs_search_and_library_bootstrap_boundari
     assert_eq!(field_bool(search_start, "consumes_queue"), Some(true));
     assert_eq!(field_bool(search_start, "owns_search_index"), Some(true));
     assert_eq!(field_u64(library_complete, "enqueued"), Some(1));
-    assert!(
-        field_u64(search_complete, "processed").is_some_and(|value| value >= 1),
-        "startup search bootstrap should process at least the requested startup task: {search_complete:?}",
-    );
+    assert_eq!(field_u64(search_complete, "enqueued"), Some(1));
+    assert_eq!(field_u64(search_complete, "processed"), Some(0));
     assert_eq!(
         field_str(search_complete, "startup_task"),
         Some("REBUILD_INDEX")
     );
+    assert_eq!(queued_rebuild_tasks, 1);
 }
 
 #[test]
@@ -136,73 +143,56 @@ fn runtime_startup_prepare_task_queue_logs_truthful_skip_boundaries_for_external
 }
 
 #[test]
-fn runtime_startup_prepare_task_queue_logs_failed_search_bootstrap_without_fake_completion() {
+fn runtime_startup_prepare_task_queue_skips_search_rebuild_when_search_index_not_owned() {
     let _guard = startup_contract_lock();
-    let config =
-        runtime_config_for_logging_contract("komga-runtime-startup-worker-bootstrap-failed-search");
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("startup failed search bootstrap test runtime should build");
-    runtime.block_on(async {
-        komga_server::app::validate_startup_schema_gate_for_contract(&config)
-            .await
-            .expect("startup failed search bootstrap schema should initialize");
-    });
+    let root = unique_temp_dir("komga-runtime-startup-worker-bootstrap-search-not-owned");
+    fs::create_dir_all(&root).expect("mixed ownership startup worker root should exist");
+    let runtime = komga_rust::application::task_processing::TaskRuntimeContext {
+        database_file: root.join("database.sqlite"),
+        tasks_db_file: root.join("tasks.sqlite"),
+        lucene_data_directory: root.join("lucene"),
+        consumes_queue: true,
+        owns_main_database: true,
+        owns_filesystem_scan_output: false,
+        owns_sidecar_output: false,
+        owns_search_index: false,
+    };
 
-    let (logs, panic_text) = capture_contract_log_async_result(&config, {
-        let config = config.clone();
-        async move {
-            std::panic::catch_unwind(|| {
-                let _background = komga_rust::infrastructure::task_queue::prepare_task_queue(
-                    config,
-                    Some("UNSUPPORTED_TASK"),
-                );
-            })
-            .expect_err("unsupported startup search task should panic")
-            .downcast::<String>()
-            .map(|message| *message)
-            .or_else(|payload| {
-                payload
-                    .downcast::<&'static str>()
-                    .map(|message| (*message).to_string())
-            })
-            .unwrap_or_else(|_| "non-string panic payload".to_string())
-        }
+    let mut config = runtime_config_for_logging_contract(
+        "komga-runtime-startup-worker-bootstrap-search-not-owned-logs",
+    );
+    config.log_file = root.join("logs").join("komga.log");
+
+    let (logs, queued_rebuild_tasks) = capture_contract_log_async_result(&config, async move {
+        let background = komga_rust::infrastructure::task_queue::prepare_task_queue(
+            runtime,
+            Some("REBUILD_INDEX"),
+        );
+        background
+            .task_queue
+            .lock()
+            .expect("mixed ownership startup queue lock should not be poisoned")
+            .count_by_simple_type()
+            .get("REBUILD_INDEX")
+            .copied()
+            .unwrap_or(0)
     });
 
     let events = parse_json_log_lines(&logs);
-    let search_start = runtime_event_with_component(
+    let search_skip = runtime_event_with_component(
         &events,
         "worker_bootstrap",
         "startup_search_task",
-        "started",
+        "skipped",
     );
-    let search_failed =
-        runtime_event_with_component(&events, "worker_bootstrap", "startup_search_task", "failed");
 
-    println!("runtime_startup_prepare_task_queue_failed_search_logs {logs}");
-
+    assert_eq!(field_bool(search_skip, "consumes_queue"), Some(true));
+    assert_eq!(field_bool(search_skip, "owns_search_index"), Some(false));
     assert_eq!(
-        field_str(search_start, "startup_task"),
-        Some("UNSUPPORTED_TASK")
+        field_str(search_skip, "skip_reason"),
+        Some("search_index_not_owned")
     );
-    assert!(
-        field_str(search_failed, "error")
-            .is_some_and(|value| value.contains("unsupported runtime task type: UNSUPPORTED_TASK")),
-        "startup failed search bootstrap should preserve processing failure details: {search_failed:?}",
-    );
-    assert!(
-        matching_event_fields(&events, "worker_bootstrap")
-            .into_iter()
-            .filter(|fields| field_str(fields, "component") == Some("startup_search_task"))
-            .all(|fields| field_str(fields, "outcome") != Some("completed")),
-        "startup failed search bootstrap must not emit fake completed lifecycle events: {events:?}",
-    );
-    assert!(
-        panic_text.contains("unsupported runtime task type: UNSUPPORTED_TASK"),
-        "startup failed search bootstrap should still surface the real panic reason: {panic_text}",
-    );
+    assert_eq!(queued_rebuild_tasks, 0);
 }
 
 #[test]
