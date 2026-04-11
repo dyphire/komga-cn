@@ -1,13 +1,21 @@
-use std::path::Path;
+use std::borrow::Cow;
 use std::sync::OnceLock;
 
-use sqlx::migrate::Migrator;
+use sqlx::migrate::{Migration, MigrationType, Migrator};
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::{SqliteConnection, SqlitePool};
+
+mod embedded_migrations {
+    include!(concat!(
+        env!("OUT_DIR"),
+        "/sqlx-migrations/embedded_migrations.rs"
+    ));
+}
 
 #[path = "setup/schema_definitions.rs"]
 mod schema_definitions;
 
+use embedded_migrations::{EmbeddedMigration, MAIN_EMBEDDED_MIGRATIONS, TASKS_EMBEDDED_MIGRATIONS};
 use schema_definitions::{
     LEGACY_MAIN_SCHEMA_V20200706141854, LEGACY_MAIN_SCHEMA_V20200706141854_VERSION,
     PrefixSchemaInventory, READ_FIXTURE_SCHEMA_STATEMENTS, REQUIRED_MAIN_SCHEMA,
@@ -40,11 +48,10 @@ pub async fn open_in_memory_tasks_database() -> Result<SqlitePool, sqlx::Error> 
 }
 
 pub async fn bootstrap_pool(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    let migrator = load_main_migrator().await?;
     let mut connection = pool.acquire().await?;
     bootstrap_or_migrate_schema(
         connection.as_mut(),
-        &migrator,
+        main_migrator(),
         REQUIRED_MAIN_SCHEMA,
         SchemaTarget::Main,
     )
@@ -57,11 +64,10 @@ pub async fn bootstrap_read_model_pool(pool: &SqlitePool) -> Result<(), sqlx::Er
 }
 
 pub async fn bootstrap_tasks_pool(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    let migrator = load_tasks_migrator().await?;
     let mut connection = pool.acquire().await?;
     bootstrap_or_migrate_schema(
         connection.as_mut(),
-        &migrator,
+        tasks_migrator(),
         REQUIRED_TASKS_SCHEMA,
         SchemaTarget::Tasks,
     )
@@ -69,10 +75,9 @@ pub async fn bootstrap_tasks_pool(pool: &SqlitePool) -> Result<(), sqlx::Error> 
 }
 
 pub async fn bootstrap_connection(connection: &mut SqliteConnection) -> Result<(), sqlx::Error> {
-    let migrator = load_main_migrator().await?;
     bootstrap_or_migrate_schema(
         connection,
-        &migrator,
+        main_migrator(),
         REQUIRED_MAIN_SCHEMA,
         SchemaTarget::Main,
     )
@@ -91,29 +96,43 @@ pub async fn bootstrap_read_model_connection(
 pub async fn bootstrap_tasks_connection(
     connection: &mut SqliteConnection,
 ) -> Result<(), sqlx::Error> {
-    let migrator = load_tasks_migrator().await?;
     bootstrap_or_migrate_schema(
         connection,
-        &migrator,
+        tasks_migrator(),
         REQUIRED_TASKS_SCHEMA,
         SchemaTarget::Tasks,
     )
     .await
 }
 
-async fn load_main_migrator() -> Result<Migrator, sqlx::Error> {
-    Migrator::new(Path::new(concat!(env!("OUT_DIR"), "/sqlx-migrations/main")))
-        .await
-        .map_err(map_migrate_error)
+fn main_migrator() -> &'static Migrator {
+    static MIGRATOR: OnceLock<Migrator> = OnceLock::new();
+    MIGRATOR.get_or_init(|| build_migrator(MAIN_EMBEDDED_MIGRATIONS))
 }
 
-async fn load_tasks_migrator() -> Result<Migrator, sqlx::Error> {
-    Migrator::new(Path::new(concat!(
-        env!("OUT_DIR"),
-        "/sqlx-migrations/tasks"
-    )))
-    .await
-    .map_err(map_migrate_error)
+fn tasks_migrator() -> &'static Migrator {
+    static MIGRATOR: OnceLock<Migrator> = OnceLock::new();
+    MIGRATOR.get_or_init(|| build_migrator(TASKS_EMBEDDED_MIGRATIONS))
+}
+
+fn build_migrator(migrations: &[EmbeddedMigration]) -> Migrator {
+    Migrator {
+        migrations: Cow::Owned(
+            migrations
+                .iter()
+                .map(|migration| {
+                    Migration::new(
+                        migration.version,
+                        Cow::Borrowed(migration.description),
+                        MigrationType::Simple,
+                        Cow::Borrowed(migration.sql),
+                        false,
+                    )
+                })
+                .collect(),
+        ),
+        ..Migrator::DEFAULT
+    }
 }
 
 async fn bootstrap_or_migrate_schema(

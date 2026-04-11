@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::env;
+use std::fmt::Write;
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
@@ -9,6 +10,12 @@ use reqwest::blocking::Client;
 use rusqlite::Connection;
 use serde_json::json;
 use tar::Archive;
+
+struct NormalizedMigration {
+    version: i64,
+    description: String,
+    sql: String,
+}
 
 fn main() {
     let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest dir"));
@@ -20,8 +27,14 @@ fn main() {
     println!("cargo:rerun-if-changed={}", main_dir.display());
     println!("cargo:rerun-if-changed={}", tasks_dir.display());
 
-    write_sqlx_migration_dir(&main_dir, &target_root.join("main"));
-    write_sqlx_migration_dir(&tasks_dir, &target_root.join("tasks"));
+    fs::create_dir_all(&target_root)
+        .unwrap_or_else(|error| panic!("failed to create {}: {error}", target_root.display()));
+
+    write_embedded_migrations_module(
+        &main_dir,
+        &tasks_dir,
+        &target_root.join("embedded_migrations.rs"),
+    );
     write_prefix_schema_inventories(
         &main_dir,
         &target_root.join("main-prefix-schema-inventories.json"),
@@ -170,28 +183,72 @@ fn extract_pdfium_archive(archive_bytes: &[u8], extract_dir: &Path) {
     });
 }
 
-fn write_sqlx_migration_dir(source_dir: &Path, target_dir: &Path) {
-    if target_dir.exists() {
-        fs::remove_dir_all(target_dir)
-            .unwrap_or_else(|error| panic!("failed to clear {}: {error}", target_dir.display()));
-    }
-    fs::create_dir_all(target_dir)
-        .unwrap_or_else(|error| panic!("failed to create {}: {error}", target_dir.display()));
+fn write_embedded_migrations_module(main_dir: &Path, tasks_dir: &Path, target_file: &Path) {
+    let main_migrations = normalized_migrations(main_dir);
+    let tasks_migrations = normalized_migrations(tasks_dir);
+    let mut contents = String::new();
 
-    for path in sorted_sql_files(source_dir) {
-        let file_name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or_else(|| panic!("invalid migration filename: {}", path.display()));
-        let (version, description) = parse_flyway_name(file_name);
-        let sql = replace_flyway_placeholders(
-            &fs::read_to_string(&path)
-                .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display())),
-        );
-        let target_file = target_dir.join(format!("{version}_{description}.sql"));
-        fs::write(&target_file, sql)
-            .unwrap_or_else(|error| panic!("failed to write {}: {error}", target_file.display()));
+    contents.push_str("pub(super) struct EmbeddedMigration {\n");
+    contents.push_str("    pub(super) version: i64,\n");
+    contents.push_str("    pub(super) description: &'static str,\n");
+    contents.push_str("    pub(super) sql: &'static str,\n");
+    contents.push_str("}\n\n");
+
+    write_embedded_migration_array(&mut contents, "MAIN_EMBEDDED_MIGRATIONS", &main_migrations);
+    contents.push('\n');
+    write_embedded_migration_array(
+        &mut contents,
+        "TASKS_EMBEDDED_MIGRATIONS",
+        &tasks_migrations,
+    );
+
+    fs::write(target_file, contents)
+        .unwrap_or_else(|error| panic!("failed to write {}: {error}", target_file.display()));
+}
+
+fn normalized_migrations(source_dir: &Path) -> Vec<NormalizedMigration> {
+    sorted_sql_files(source_dir)
+        .into_iter()
+        .map(|path| {
+            let file_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_else(|| panic!("invalid migration filename: {}", path.display()));
+            let (version, description) = parse_flyway_name(file_name);
+            let sql = replace_flyway_placeholders(
+                &fs::read_to_string(&path)
+                    .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display())),
+            );
+            NormalizedMigration {
+                version,
+                description,
+                sql,
+            }
+        })
+        .collect()
+}
+
+fn write_embedded_migration_array(
+    contents: &mut String,
+    const_name: &str,
+    migrations: &[NormalizedMigration],
+) {
+    writeln!(
+        contents,
+        "pub(super) const {const_name}: &[EmbeddedMigration] = &["
+    )
+    .expect("embedded migration array header should write");
+
+    for migration in migrations {
+        writeln!(
+            contents,
+            "    EmbeddedMigration {{ version: {}, description: {:?}, sql: {:?} }},",
+            migration.version, migration.description, migration.sql,
+        )
+        .expect("embedded migration entry should write");
     }
+
+    contents.push_str("];\n");
 }
 
 fn write_prefix_schema_inventories(source_dir: &Path, target_file: &Path) {
@@ -211,30 +268,20 @@ fn write_prefix_schema_inventories(source_dir: &Path, target_file: &Path) {
         .unwrap_or_else(|error| panic!("failed to open {}: {error}", temp_db.display()));
     let mut inventories = Vec::new();
 
-    for path in sorted_sql_files(source_dir) {
-        let file_name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or_else(|| panic!("invalid migration filename: {}", path.display()));
-        let (version, _) = parse_flyway_name(file_name);
-        let sql = replace_flyway_placeholders(
-            &fs::read_to_string(&path)
-                .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display())),
-        );
-
-        for statement in split_statements(&sql) {
+    for migration in normalized_migrations(source_dir) {
+        for statement in split_statements(&migration.sql) {
             connection
                 .execute_batch(&statement)
                 .unwrap_or_else(|error| {
                     panic!(
-                        "failed to apply {} while building prefix schema inventories: {error}",
-                        path.display()
+                        "failed to apply schema migration v{} while building prefix schema inventories: {error}",
+                        migration.version,
                     )
                 });
         }
 
         inventories.push(json!({
-            "version": version,
+            "version": migration.version,
             "objects": schema_inventory(&connection),
         }));
     }

@@ -62,13 +62,14 @@ pub(crate) fn read_rar_entry_bytes(
     {
         let current_name = header.entry().filename.to_string_lossy().replace('\\', "/");
         if current_name == entry_name {
-            let (data, _rest) = header.read().map_err(|error| {
+            let (data, next_archive) = header.read().map_err(|error| {
                 format!(
                     "read rar entry '{}' from '{}': {error}",
                     entry_name,
                     path.display()
                 )
             })?;
+            drop(next_archive);
             return Ok(Some(data));
         }
         archive = header.skip().map_err(|error| {

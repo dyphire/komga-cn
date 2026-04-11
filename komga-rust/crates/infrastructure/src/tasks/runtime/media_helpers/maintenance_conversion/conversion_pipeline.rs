@@ -112,14 +112,16 @@ pub(in crate::task_queue) fn convert_book(
     }
 
     let prepared_conversion: Result<(String, i64, i64), TaskExecutionError> = (|| {
-        let archive_entries = load_rar_entries_for_conversion(&source_path)?;
-        if archive_entries.is_empty() {
-            return Err(TaskExecutionError::runtime(format!(
-                "failed to convert book '{book_id}' to CBZ: no archive entries extracted",
-            )));
-        }
+        let payload = {
+            let archive_entries = load_rar_entries_for_conversion(&source_path)?;
+            if archive_entries.is_empty() {
+                return Err(TaskExecutionError::runtime(format!(
+                    "failed to convert book '{book_id}' to CBZ: no archive entries extracted",
+                )));
+            }
 
-        let payload = build_stored_zip_archive(archive_entries)?;
+            build_stored_zip_archive(archive_entries)?
+        };
         fs::write(&destination_path, payload).map_err(|error| {
             TaskExecutionError::runtime(format!(
                 "failed to write converted CBZ file for '{book_id}' to '{}': {error}",
@@ -127,17 +129,19 @@ pub(in crate::task_queue) fn convert_book(
             ))
         })?;
 
-        let destination_file = fs::File::open(&destination_path).map_err(|error| {
-            TaskExecutionError::runtime(format!(
-                "failed to open converted file for '{book_id}' ('{}'): {error}",
-                destination_path.display(),
-            ))
-        })?;
-        ZipArchive::new(destination_file).map_err(|error| {
-            TaskExecutionError::runtime(format!(
-                "failed to validate converted CBZ for '{book_id}': {error}",
-            ))
-        })?;
+        {
+            let destination_file = fs::File::open(&destination_path).map_err(|error| {
+                TaskExecutionError::runtime(format!(
+                    "failed to open converted file for '{book_id}' ('{}'): {error}",
+                    destination_path.display(),
+                ))
+            })?;
+            let _validated_archive = ZipArchive::new(destination_file).map_err(|error| {
+                TaskExecutionError::runtime(format!(
+                    "failed to validate converted CBZ for '{book_id}': {error}",
+                ))
+            })?;
+        }
 
         let destination_url = normalize_library_relative_url(
             &PathBuf::from(&source.library_root),

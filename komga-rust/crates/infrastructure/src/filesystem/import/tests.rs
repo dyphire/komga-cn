@@ -514,11 +514,25 @@ async fn import_book_upgrade_preserves_epub_extension_blob() {
             },
         )
         .await
-        .expect("upgrade import should succeed");
-
-    result.expect("upgrade import should return an outcome");
+        .expect("upgrade import should succeed")
+        .expect("upgrade import should return an outcome");
     let expected_file = root.join("library-root/series-one/restored.epub");
-    let imported_book_id = scanner_book_id_for_path(&expected_file);
+    let imported_book_id = result.imported_book_id;
+
+    let imported_book = sqlx::query("SELECT URL FROM BOOK WHERE ID = ? LIMIT 1")
+        .bind(&imported_book_id)
+        .fetch_one(&pool)
+        .await
+        .expect("migrated book row should be queryable");
+    assert_eq!(
+        imported_book.get::<String, _>("URL"),
+        "series-one/restored.epub",
+        "upgrade migration should persist library-relative book urls for imported files",
+    );
+    assert!(
+        expected_file.exists(),
+        "upgrade import should materialize the imported EPUB at the destination path",
+    );
 
     let migrated_media = sqlx::query(
         "SELECT EXTENSION_CLASS, EXTENSION_VALUE_BLOB FROM MEDIA WHERE BOOK_ID = ? LIMIT 1",

@@ -165,6 +165,7 @@ async fn import_book_impl(
             database_file,
             upgrade_book_id,
             imported_book_id.as_str(),
+            Path::new(&target.library_root),
             &destination_file,
         )
         .await?;
@@ -543,6 +544,7 @@ async fn migrate_upgraded_book_identity(
     database_file: &Path,
     old_book_id: &str,
     new_book_id: &str,
+    library_root: &Path,
     destination_file: &Path,
 ) -> Result<(), String> {
     if old_book_id == new_book_id || !database_file.exists() {
@@ -554,7 +556,7 @@ async fn migrate_upgraded_book_identity(
         .and_then(|value| value.to_str())
         .unwrap_or_default()
         .to_string();
-    let destination_url = destination_file.to_string_lossy().to_string();
+    let destination_url = import_book_url_for_library_root(library_root, destination_file)?;
 
     let pool = connect_pool(database_file, 1)
         .await
@@ -706,6 +708,22 @@ async fn migrate_upgraded_book_identity(
         .await
         .map_err(|error| format!("commit import-upgrade migration tx: {error}"))?;
     Ok(())
+}
+
+fn import_book_url_for_library_root(
+    library_root: &Path,
+    destination_file: &Path,
+) -> Result<String, String> {
+    destination_file
+        .strip_prefix(library_root)
+        .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+        .map_err(|error| {
+            format!(
+                "derive imported book url '{}' from library root '{}': {error}",
+                destination_file.display(),
+                library_root.display()
+            )
+        })
 }
 
 async fn persist_book_imported_event(

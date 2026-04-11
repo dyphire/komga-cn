@@ -4,7 +4,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
-use std::path::{MAIN_SEPARATOR, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use crate::http::identity_access::auth::require_admin;
 use crate::operational_settings_access::filesystem as filesystem_access;
@@ -119,5 +119,5 @@ fn current_root_directories() -> Vec<String> {
 
 #[cfg(not(windows))]
 fn current_root_directories() -> Vec<String> {
-    vec![MAIN_SEPARATOR.to_string()]
+    vec![std::path::MAIN_SEPARATOR.to_string()]
 }

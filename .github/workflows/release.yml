@@ -55,10 +55,226 @@ jobs:
           echo "version_current=$(svu current)" >> "$GITHUB_OUTPUT"
           echo "version_next=${{ env.VERSION_NEXT }}" >> "$GITHUB_OUTPUT"
 
-  release:
-    name: Release
+  webui_dist:
+    name: Build web UI dist
     runs-on: ubuntu-latest
-    needs: version
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+          cache-dependency-path: komga-webui/package-lock.json
+
+      - name: Build web UI
+        working-directory: komga-webui
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+        run: |
+          npm ci
+          npm run build
+
+      - name: Upload web UI dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: webui-dist
+          path: komga-webui/dist/**
+          if-no-files-found: error
+
+  binary_release:
+    name: Release binary (${{ matrix.arch }}-${{ matrix.libc }})
+    runs-on: ubuntu-latest
+    needs:
+      - version
+      - webui_dist
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            libc: gnu
+            target: x86_64-unknown-linux-gnu
+            pdfium_platform_key: linux-x86_64-gnu
+            pdfium_asset_dir: pdfium-linux-x64
+            docker_runtime: false
+          - arch: arm64
+            libc: gnu
+            target: aarch64-unknown-linux-gnu
+            pdfium_platform_key: linux-aarch64-gnu
+            pdfium_asset_dir: pdfium-linux-arm64
+            docker_runtime: false
+          - arch: amd64
+            libc: musl
+            target: x86_64-unknown-linux-musl
+            pdfium_platform_key: linux-x86_64-musl
+            pdfium_asset_dir: pdfium-linux-musl-x64
+            docker_runtime: true
+          - arch: arm64
+            libc: musl
+            target: aarch64-unknown-linux-musl
+            pdfium_platform_key: linux-aarch64-musl
+            pdfium_asset_dir: pdfium-linux-musl-arm64
+            docker_runtime: true
+    env:
+      VERSION: ${{ needs.version.outputs.version_next }}
+    steps:
+      - name: Remove unnecessary files
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Display versions
+        run: |
+          echo "Current version: ${{ needs.version.outputs.version_current }}"
+          echo "Release version: ${VERSION}"
+
+      - name: Download web UI dist
+        uses: actions/download-artifact@v4
+        with:
+          name: webui-dist
+          path: komga-webui/dist
+
+      - name: Verify cross build inputs
+        run: |
+          set -euo pipefail
+          test -d komga-webui/dist
+          test -f komga/src/main/resources/banner.txt
+          test -d komga/src/main/resources/embeddedFonts
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cross
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross --locked
+
+      - name: Build Rust release binary
+        run: |
+          cross build --manifest-path komga-rust/Cargo.toml --locked --release --bin komga-rust --target ${{ matrix.target }}
+
+      - name: Package release artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          release_dir="dist/komga-riir-${VERSION}-linux-${{ matrix.arch }}-${{ matrix.libc }}"
+          release_artifact="${release_dir}.tar.gz"
+          rm -rf "$release_dir"
+          mkdir -p "$release_dir/licenses/pdfium"
+          cp "komga-rust/target/${{ matrix.target }}/release/komga-rust" "$release_dir/komga-riir"
+          chmod +x "$release_dir/komga-riir"
+          pdfium_lib="komga-rust/vendor/pdfium-binaries/${{ matrix.pdfium_platform_key }}/${{ matrix.pdfium_asset_dir }}/lib/libpdfium.so"
+          test -f "$pdfium_lib"
+          cp "$pdfium_lib" "$release_dir/libpdfium.so"
+          pdfium_license_dir=$(dirname "$pdfium_lib")/../licenses
+          if [[ -d "$pdfium_license_dir" ]]; then
+            cp -R "$pdfium_license_dir/." "$release_dir/licenses/pdfium/"
+          fi
+          tar -czf "$release_artifact" -C dist "$(basename "$release_dir")"
+          if [[ "${{ matrix.docker_runtime }}" == 'true' ]]; then
+            docker_artifact_dir="docker-artifacts/linux-musl/${{ matrix.arch }}"
+            rm -rf "$docker_artifact_dir"
+            mkdir -p "$docker_artifact_dir"
+            cp "komga-rust/target/${{ matrix.target }}/release/komga-rust" "$docker_artifact_dir/komga-rust"
+            chmod +x "$docker_artifact_dir/komga-rust"
+            cp "$pdfium_lib" "$docker_artifact_dir/libpdfium.so"
+          fi
+
+      - name: Verify packaged artifacts
+        run: |
+          set -euo pipefail
+          test -f "dist/komga-riir-${VERSION}-linux-${{ matrix.arch }}-${{ matrix.libc }}.tar.gz"
+          if [[ "${{ matrix.docker_runtime }}" == 'true' ]]; then
+            test -f "docker-artifacts/linux-musl/${{ matrix.arch }}/komga-rust"
+            test -f "docker-artifacts/linux-musl/${{ matrix.arch }}/libpdfium.so"
+          fi
+
+      - name: Upload release package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-package-${{ matrix.arch }}-${{ matrix.libc }}
+          path: dist/komga-riir-${{ env.VERSION }}-linux-${{ matrix.arch }}-${{ matrix.libc }}.tar.gz
+          if-no-files-found: error
+
+      - name: Upload Docker runtime artifact
+        if: matrix.docker_runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-artifacts-${{ matrix.arch }}
+          path: |
+            docker-artifacts/linux-musl/${{ matrix.arch }}/komga-rust
+            docker-artifacts/linux-musl/${{ matrix.arch }}/libpdfium.so
+          if-no-files-found: error
+
+  github_release:
+    name: Publish GitHub release
+    if: inputs.github_release
+    runs-on: ubuntu-latest
+    needs:
+      - version
+      - binary_release
+    env:
+      VERSION: ${{ needs.version.outputs.version_next }}
+    steps:
+      - name: Download release package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-package-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create release notes
+        env:
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          set -euo pipefail
+          mkdir -p release_notes
+          printf '%b\n' "$RELEASE_NOTES" > release_notes/release_notes.md
+          mapfile -t release_artifacts < <(find dist -maxdepth 1 -type f -name 'komga-riir-*.tar.gz' | sort)
+          if [[ ${#release_artifacts[@]} -eq 0 ]]; then
+            echo "No release artifacts were downloaded" >&2
+            exit 1
+          fi
+          {
+            echo ""
+            echo "## Checksums"
+            echo ""
+            for artifact in "${release_artifacts[@]}"; do
+              artifact_name=$(basename "$artifact")
+              artifact_sha256=$(sha256sum "$artifact" | cut -d' ' -f1)
+              printf -- '- `%s`: `%s`\n' "$artifact_name" "$artifact_sha256"
+            done
+          } >> release_notes/release_notes.md
+          echo "Release notes:"
+          cat release_notes/release_notes.md
+          echo ""
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mapfile -t release_artifacts < <(find dist -maxdepth 1 -type f -name 'komga-riir-*.tar.gz' | sort)
+          if gh release view "${VERSION}" >/dev/null 2>&1; then
+            gh release edit "${VERSION}" --title "${VERSION}" --notes-file release_notes/release_notes.md
+            gh release upload "${VERSION}" "${release_artifacts[@]}" --clobber
+          else
+            gh release create "${VERSION}" "${release_artifacts[@]}" --target "${GITHUB_SHA}" --title "${VERSION}" --notes-file release_notes/release_notes.md
+          fi
+
+  docker_release:
+    name: Release Docker image
+    if: inputs.docker_release
+    runs-on: ubuntu-latest
+    needs:
+      - version
+      - binary_release
     env:
       VERSION: ${{ needs.version.outputs.version_next }}
       IMAGE_NAME: ghcr.io/${{ github.repository }}
@@ -77,76 +293,33 @@ jobs:
           echo "Current version: ${{ needs.version.outputs.version_current }}"
           echo "Release version: ${VERSION}"
 
-      - uses: actions/setup-node@v6
+      - name: Download amd64 Docker runtime artifacts
+        uses: actions/download-artifact@v4
         with:
-          node-version-file: '.nvmrc'
-          cache: 'npm'
-          cache-dependency-path: komga-webui/package-lock.json
+          name: docker-artifacts-amd64
+          path: docker-artifacts/linux-musl/amd64
 
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Download arm64 Docker runtime artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-artifacts-arm64
+          path: docker-artifacts/linux-musl/arm64
 
-      - name: Build web UI
-        working-directory: komga-webui
-        run: |
-          npm ci
-          npm run build
-
-      - name: Build Rust release binary
-        working-directory: komga-rust
-        run: cargo build --locked --release --bin komga-rust
-
-      - name: Package release artifacts
+      - name: Verify Docker runtime artifacts
         run: |
           set -euo pipefail
-          mkdir -p dist
-          release_binary="dist/komga-riir-${VERSION}-linux-amd64.gz"
-          gzip -c "komga-rust/target/release/komga-rust" > "$release_binary"
-          release_sha256=$(sha256sum "$release_binary" | cut -d' ' -f1)
-          echo "RELEASE_BINARY=$release_binary" >> "$GITHUB_ENV"
-          echo "RELEASE_SHA256=$release_sha256" >> "$GITHUB_ENV"
-
-      - name: Create release notes
-        env:
-          RELEASE_NOTES: ${{ inputs.release_notes }}
-        run: |
-          set -euo pipefail
-          mkdir -p release_notes
-          printf '%b\n' "$RELEASE_NOTES" > release_notes/release_notes.md
-          release_binary_name=$(basename "$RELEASE_BINARY")
-          {
-            echo ""
-            echo "## Checksums"
-            echo ""
-            printf -- '- `%s`: `%s`\n' "$release_binary_name" "$RELEASE_SHA256"
-          } >> release_notes/release_notes.md
-          echo "Release notes:"
-          cat release_notes/release_notes.md
-          echo ""
-
-      - name: Create or update GitHub Release
-        if: inputs.github_release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          if gh release view "${VERSION}" >/dev/null 2>&1; then
-            gh release edit "${VERSION}" --title "${VERSION}" --notes-file release_notes/release_notes.md
-            gh release upload "${VERSION}" "$RELEASE_BINARY" --clobber
-          else
-            gh release create "${VERSION}" "$RELEASE_BINARY" --target "${GITHUB_SHA}" --title "${VERSION}" --notes-file release_notes/release_notes.md
-          fi
+          test -f docker-artifacts/linux-musl/amd64/komga-rust
+          test -f docker-artifacts/linux-musl/amd64/libpdfium.so
+          test -f docker-artifacts/linux-musl/arm64/komga-rust
+          test -f docker-artifacts/linux-musl/arm64/libpdfium.so
 
       - name: Set up QEMU
-        if: inputs.docker_release
         uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
-        if: inputs.docker_release
         uses: docker/setup-buildx-action@v4
 
       - name: Login to GitHub Container Registry
-        if: inputs.docker_release
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -154,7 +327,6 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Prepare image metadata
-        if: inputs.docker_release
         id: image
         run: |
           set -euo pipefail
@@ -166,11 +338,8 @@ jobs:
             fi
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-          echo "build_time=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
-          echo "git_commit_time=$(git log -1 --format=%cI)" >> "$GITHUB_OUTPUT"
 
       - name: Build and push Docker image
-        if: inputs.docker_release
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -178,10 +347,5 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.image.outputs.tags }}
-          build-args: |
-            BUILD_TIME=${{ steps.image.outputs.build_time }}
-            GIT_BRANCH=${{ github.ref_name }}
-            GIT_COMMIT_ID=${{ github.sha }}
-            GIT_COMMIT_TIME=${{ steps.image.outputs.git_commit_time }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

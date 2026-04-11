@@ -228,8 +228,12 @@ impl SqliteTempPool {
     }
 
     pub async fn cleanup(self) {
-        self.pool.close().await;
-        for path in sqlite_sidecar_paths(&self.db_path) {
+        let Self { pool, db_path } = self;
+        evict_shared_pools_for_paths(std::slice::from_ref(&db_path));
+        pool.close().await;
+        drop(pool);
+
+        for path in sqlite_sidecar_paths(&db_path) {
             remove_sqlite_artifact_if_present(&path);
         }
     }
