@@ -109,14 +109,7 @@ impl AdminActionConfig {
     pub(crate) fn from_env() -> Result<Self, ConfigError> {
         let cli = super::cli_args::RuntimeCli::default();
         let env = env::vars().collect::<BTreeMap<_, _>>();
-        let config = Self::resolve_with_env(&cli, &env)?;
-        if let Some(parent) = config.database_file.parent() {
-            std::fs::create_dir_all(parent).map_err(|source| ConfigError::DirectoryCreate {
-                path: parent.to_path_buf(),
-                source,
-            })?;
-        }
-        Ok(config)
+        Self::resolve_with_env(&cli, &env)
     }
 
     pub(crate) fn resolve_with_env(

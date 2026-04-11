@@ -95,6 +95,11 @@ async fn run_admin_action(commands: admin_cli::AdminCliCommands) {
         std::process::exit(1);
     });
 
+    ensure_existing_admin_database(config.database_file.as_path()).unwrap_or_else(|error| {
+        eprintln!("{error}");
+        std::process::exit(1);
+    });
+
     validate_main_startup_schema_gate(config.database_file.as_path())
         .await
         .unwrap_or_else(|error| {
@@ -108,6 +113,33 @@ async fn run_admin_action(commands: admin_cli::AdminCliCommands) {
             eprintln!("{error}");
             std::process::exit(1);
         });
+}
+
+fn ensure_existing_admin_database(database_file: &std::path::Path) -> std::io::Result<()> {
+    match std::fs::metadata(database_file) {
+        Ok(metadata) if metadata.is_file() => Ok(()),
+        Ok(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "admin action requires an existing main database file at {}",
+                database_file.display()
+            ),
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!(
+                "admin action requires an existing main database at {}",
+                database_file.display()
+            ),
+        )),
+        Err(error) => Err(std::io::Error::new(
+            error.kind(),
+            format!(
+                "failed to inspect admin action database {}: {error}",
+                database_file.display()
+            ),
+        )),
+    }
 }
 
 async fn run_server() {
@@ -162,16 +194,16 @@ async fn validate_main_startup_schema_gate(database_file: &std::path::Path) -> s
                 error,
             )
         })?;
-    let main_schema_result = komga_infrastructure::sqlite::setup::bootstrap_pool(&main_pool).await;
-    main_pool.close().await;
-    main_schema_result.map_err(|error| {
-        schema_gate_failure(
-            "main",
-            database_file,
-            "main sqlite schema gate failed",
-            error,
-        )
-    })?;
+    komga_infrastructure::sqlite::setup::bootstrap_pool(&main_pool)
+        .await
+        .map_err(|error| {
+            schema_gate_failure(
+                "main",
+                database_file,
+                "main sqlite schema gate failed",
+                error,
+            )
+        })?;
 
     tracing::info!(
         event = "startup_schema_gate",
@@ -203,17 +235,16 @@ async fn validate_tasks_startup_schema_gate(config: &RuntimeConfig) -> std::io::
                 error,
             )
         })?;
-    let tasks_schema_result =
-        komga_infrastructure::sqlite::setup::bootstrap_tasks_pool(&tasks_pool).await;
-    tasks_pool.close().await;
-    tasks_schema_result.map_err(|error| {
-        schema_gate_failure(
-            "tasks",
-            &config.tasks_db_file,
-            "tasks sqlite schema gate failed",
-            error,
-        )
-    })?;
+    komga_infrastructure::sqlite::setup::bootstrap_tasks_pool(&tasks_pool)
+        .await
+        .map_err(|error| {
+            schema_gate_failure(
+                "tasks",
+                &config.tasks_db_file,
+                "tasks sqlite schema gate failed",
+                error,
+            )
+        })?;
 
     tracing::info!(
         event = "startup_schema_gate",

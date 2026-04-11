@@ -9,7 +9,7 @@ mod server_settings;
 pub use announcements::save_announcements_read;
 pub use bootstrap_users::{
     InitialBootstrapUserWriteModel, PersistedBootstrapUser, list_persisted_user_emails,
-    load_persisted_user_by_email, persist_initial_bootstrap_users, update_persisted_user_password,
+    load_persisted_user_by_email, persist_initial_bootstrap_users, update_persisted_user_passwords,
 };
 pub use claims::{CreatedClaimedUser, load_persisted_user_count, persist_initial_admin_user};
 pub use client_settings::{

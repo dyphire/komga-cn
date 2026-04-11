@@ -188,7 +188,7 @@ async fn resort_empty_trash_affected_series(
             })
             .collect::<Vec<_>>();
         books.sort_by(|left, right| {
-            compare_empty_trash_book_names(&left.name, &right.name)
+            compare_book_names_kotlin_like(&left.name, &right.name)
                 .then_with(|| left.id.cmp(&right.id))
         });
 
@@ -238,7 +238,7 @@ struct EmptyTrashSortableBook {
     number: i64,
 }
 
-fn compare_empty_trash_book_names(left: &str, right: &str) -> std::cmp::Ordering {
+pub(crate) fn compare_book_names_kotlin_like(left: &str, right: &str) -> std::cmp::Ordering {
     let left = normalized_empty_trash_sort_key(left);
     let right = normalized_empty_trash_sort_key(right);
     natural_cmp(left.as_str(), right.as_str())

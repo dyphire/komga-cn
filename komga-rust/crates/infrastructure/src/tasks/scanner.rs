@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use sqlx::{Row, SqlitePool};
 
+use super::cleanup_workflow::compare_book_names_kotlin_like;
 use crate::sqlite::connect_pool;
 
 #[derive(Clone, Debug)]
@@ -39,6 +40,17 @@ struct ExistingScannedBookRow {
 #[derive(Clone, Debug)]
 struct ExistingScannedSeriesRow {
     file_last_modified_unix_seconds: i64,
+}
+
+#[derive(Clone, Debug)]
+struct PersistedScannedSeriesBookRow {
+    book_id: String,
+    book_name: String,
+    book_number: i64,
+    metadata_number: String,
+    metadata_number_sort: f64,
+    metadata_number_lock: bool,
+    metadata_number_sort_lock: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -371,7 +383,7 @@ pub fn persist_scanned_library(
     database_file: &Path,
     library_id: &str,
     scanned: &ScannedLibrary,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     let database_file = database_file.to_path_buf();
     let library_id = library_id.to_string();
     let scanned = scanned.clone();
@@ -388,7 +400,7 @@ pub fn persist_scanned_library(
                 .execute(&pool)
                 .await
                 .map_err(|error| format!("failed to mark library unavailable for '{library_id}': {error}"))?;
-                return Ok(());
+                return Ok(Vec::new());
             }
 
             sqlx::query(
@@ -647,9 +659,102 @@ pub fn persist_scanned_library(
                 )
             })?;
 
-            Ok(())
+            let renumbered_book_ids =
+                resort_scanned_series_books(&pool, &discovered_series_ids).await.map_err(
+                    |error| {
+                        format!(
+                            "failed to apply Kotlin-like series numbering after scan for '{library_id}': {error}"
+                        )
+                    },
+                )?;
+
+            Ok(renumbered_book_ids)
         })
     })
+}
+
+async fn resort_scanned_series_books(
+    pool: &SqlitePool,
+    discovered_series_ids: &HashSet<String>,
+) -> Result<Vec<String>, sqlx::Error> {
+    let mut series_ids = discovered_series_ids.iter().cloned().collect::<Vec<_>>();
+    series_ids.sort();
+
+    let mut renumbered_book_ids = Vec::new();
+    for series_id in series_ids {
+        let book_rows = sqlx::query(
+            "SELECT b.ID AS BOOK_ID, b.NAME AS BOOK_NAME, b.NUMBER AS BOOK_NUMBER, \
+                    COALESCE(bm.NUMBER, '') AS METADATA_NUMBER, \
+                    COALESCE(bm.NUMBER_SORT, CAST(0 AS REAL)) AS METADATA_NUMBER_SORT, \
+                    COALESCE(bm.NUMBER_LOCK, 0) AS METADATA_NUMBER_LOCK, \
+                    COALESCE(bm.NUMBER_SORT_LOCK, 0) AS METADATA_NUMBER_SORT_LOCK \
+             FROM BOOK b \
+             LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
+             WHERE b.SERIES_ID = ? \
+               AND b.DELETED_DATE IS NULL \
+             ORDER BY b.ID ASC",
+        )
+        .bind(&series_id)
+        .fetch_all(pool)
+        .await?;
+
+        let mut books = book_rows
+            .into_iter()
+            .map(|row| PersistedScannedSeriesBookRow {
+                book_id: row.get::<String, _>("BOOK_ID"),
+                book_name: row.get::<String, _>("BOOK_NAME"),
+                book_number: row.get::<i64, _>("BOOK_NUMBER"),
+                metadata_number: row.get::<String, _>("METADATA_NUMBER"),
+                metadata_number_sort: row.get::<f64, _>("METADATA_NUMBER_SORT"),
+                metadata_number_lock: row.get::<bool, _>("METADATA_NUMBER_LOCK"),
+                metadata_number_sort_lock: row.get::<bool, _>("METADATA_NUMBER_SORT_LOCK"),
+            })
+            .collect::<Vec<_>>();
+        books.sort_by(|left, right| {
+            compare_book_names_kotlin_like(&left.book_name, &right.book_name)
+                .then_with(|| left.book_id.cmp(&right.book_id))
+        });
+
+        for (index, book) in books.iter().enumerate() {
+            let new_number = index as i64 + 1;
+            let new_metadata_number = new_number.to_string();
+            let new_metadata_number_sort = new_number as f64;
+
+            if book.book_number != new_number {
+                sqlx::query(
+                    "UPDATE BOOK \
+                     SET NUMBER = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
+                     WHERE ID = ?",
+                )
+                .bind(new_number)
+                .bind(&book.book_id)
+                .execute(pool)
+                .await?;
+            }
+
+            let metadata_number_changed =
+                !book.metadata_number_lock && book.metadata_number != new_metadata_number;
+            let metadata_number_sort_changed = !book.metadata_number_sort_lock
+                && (book.metadata_number_sort - new_metadata_number_sort).abs() > f64::EPSILON;
+            if metadata_number_changed || metadata_number_sort_changed {
+                sqlx::query(
+                    "UPDATE BOOK_METADATA \
+                     SET NUMBER = CASE WHEN NUMBER_LOCK = 0 THEN ? ELSE NUMBER END, \
+                         NUMBER_SORT = CASE WHEN NUMBER_SORT_LOCK = 0 THEN ? ELSE NUMBER_SORT END, \
+                         LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
+                     WHERE BOOK_ID = ?",
+                )
+                .bind(&new_metadata_number)
+                .bind(new_metadata_number_sort)
+                .bind(&book.book_id)
+                .execute(pool)
+                .await?;
+                renumbered_book_ids.push(book.book_id.clone());
+            }
+        }
+    }
+
+    Ok(renumbered_book_ids)
 }
 
 pub fn load_changed_sidecars(

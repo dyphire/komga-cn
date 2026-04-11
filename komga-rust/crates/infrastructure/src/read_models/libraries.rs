@@ -50,9 +50,7 @@ pub async fn list_persisted_libraries(
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(map_sqlx_error)?;
-    let result = queries::libraries::list_persisted_libraries_sqlx(pool.clone(), context).await;
-    pool.close().await;
-    result
+    queries::libraries::list_persisted_libraries_sqlx(pool, context).await
 }
 
 pub async fn get_persisted_library(
@@ -67,10 +65,7 @@ pub async fn get_persisted_library(
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(map_sqlx_error)?;
-    let result =
-        queries::libraries::get_persisted_library_sqlx(pool.clone(), context, library_id).await;
-    pool.close().await;
-    result
+    queries::libraries::get_persisted_library_sqlx(pool, context, library_id).await
 }
 
 fn map_sqlx_error(error: sqlx::Error) -> DiscoveryError {

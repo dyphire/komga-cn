@@ -225,9 +225,8 @@ pub async fn load_persisted_series_page(
         });
     }
 
-    if let Some(deleted) = filters.deleted {
-        series = filter_rows(series, |row| row.deleted == deleted);
-    }
+    let deleted = filters.deleted.unwrap_or_default();
+    series = filter_rows(series, |row| row.deleted == deleted);
 
     if let Some(oneshot) = filters.oneshot {
         series = filter_rows(series, |row| row.oneshot == oneshot);

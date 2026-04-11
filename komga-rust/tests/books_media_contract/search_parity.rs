@@ -28,7 +28,7 @@ async fn router_discovery_books_list_locks_main_search_parity_for_retained_input
     seed_router_authors_scope_variants(&paths).await;
     update_book_search_fixture_title(&paths, "book-2", "Book Book 2").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
 
     let blank_ids = books_list_ids(&app, &admin_token, Some("relevance,desc"), Some("   ")).await;
@@ -91,7 +91,7 @@ async fn router_discovery_books_list_retains_accent_folded_and_cjk_recall() {
     seed_router_contract_data(&paths).await;
     update_book_search_fixture_title(&paths, "book-1", "Café 東京 Book 1").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
 
     let accent_cjk_ids = books_list_ids(

@@ -53,8 +53,9 @@ fn handle_scan_library(
         &scan.sidecars,
     )
     .map_err(TaskExecutionError::runtime)?;
-    persist_scanned_library(runtime_context.database_file.as_path(), &library_id, &scan)
-        .map_err(TaskExecutionError::runtime)?;
+    let renumbered_book_ids =
+        persist_scanned_library(runtime_context.database_file.as_path(), &library_id, &scan)
+            .map_err(TaskExecutionError::runtime)?;
 
     if library_empty_trash_after_scan(runtime_context.database_file.as_path(), &library_id)
         .map_err(TaskExecutionError::runtime)?
@@ -124,6 +125,27 @@ fn handle_scan_library(
             LOWEST_PRIORITY,
             None,
         ));
+    }
+
+    let book_series_ids = scan
+        .series_rows
+        .iter()
+        .flat_map(|series| {
+            series
+                .books
+                .iter()
+                .map(|book| (book.book_id.clone(), series.series_id.clone()))
+        })
+        .collect::<HashMap<_, _>>();
+    for book_id in renumbered_book_ids {
+        scheduler.enqueue(
+            TaskQueueRecord::new(
+                format!("REFRESH_BOOK_METADATA_{book_id}"),
+                DEFAULT_PRIORITY,
+                book_series_ids.get(&book_id).cloned(),
+            )
+            .with_simple_type("REFRESH_BOOK_METADATA"),
+        );
     }
 
     enqueue_sidecar_refresh_tasks(scheduler, &scan, &changed_sidecars, DEFAULT_PRIORITY);

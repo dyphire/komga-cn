@@ -1,9 +1,78 @@
 use super::*;
 
+async fn soft_delete_series(paths: &RuntimeDbPaths, series_ids: &[&str]) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("series deleted fixture db should open");
+
+    for series_id in series_ids {
+        sqlx::query("UPDATE SERIES SET DELETED_DATE = ? WHERE ID = ?")
+            .bind("2025-01-01 00:00:00")
+            .bind(series_id)
+            .execute(&pool)
+            .await
+            .expect("series deleted date should update");
+    }
+
+    pool.close().await;
+}
+
+fn series_page_ids(payload: &Value) -> Vec<String> {
+    payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("series page payload should expose content array")
+        .iter()
+        .filter_map(|entry| entry.get("id").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect()
+}
+
+#[tokio::test]
+async fn router_discovery_series_list_excludes_soft_deleted_series_by_default() {
+    let paths = new_router_fixture("router-discovery-series-list-default-deleted-hidden").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_custom_series(&paths, "series-deleted", "Deleted Series", "library-1").await;
+    soft_delete_series(&paths, &["series-deleted"]).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/series/list?page=0&size=20")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "condition": {
+                            "type": "LibraryId",
+                            "operator": "is",
+                            "value": "library-1"
+                        }
+                    })
+                    .to_string(),
+                ))
+                .expect("default series/list request should build"),
+        )
+        .await
+        .expect("default series/list request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(series_page_ids(&payload), vec!["series-1"]);
+
+    cleanup_router_fixture(paths);
+}
+
 #[tokio::test]
 async fn router_discovery_series_list_supports_deleted_filter_in_runtime_owned_mode() {
     let paths = new_router_fixture("router-discovery-series-list-strict-deleted").await;
     seed_router_contract_data(&paths).await;
+    seed_router_custom_series(&paths, "series-deleted", "Deleted Series", "library-1").await;
+    soft_delete_series(&paths, &["series-deleted"]).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
@@ -32,11 +101,7 @@ async fn router_discovery_series_list_supports_deleted_filter_in_runtime_owned_m
         .expect("strict series/list deleted=false request should complete");
     assert_eq!(not_deleted_response.status(), StatusCode::OK);
     let not_deleted_payload = response_json(not_deleted_response).await;
-    let not_deleted_content = not_deleted_payload
-        .get("content")
-        .and_then(Value::as_array)
-        .expect("strict series deleted=false payload should expose content array");
-    assert_eq!(not_deleted_content.len(), 1);
+    assert_eq!(series_page_ids(&not_deleted_payload), vec!["series-1"]);
 
     let deleted_response = app
         .clone()
@@ -62,11 +127,46 @@ async fn router_discovery_series_list_supports_deleted_filter_in_runtime_owned_m
         .expect("strict series/list deleted=true request should complete");
     assert_eq!(deleted_response.status(), StatusCode::OK);
     let deleted_payload = response_json(deleted_response).await;
-    let deleted_content = deleted_payload
-        .get("content")
-        .and_then(Value::as_array)
-        .expect("strict series deleted=true payload should expose content array");
-    assert_eq!(deleted_content.len(), 0);
+    assert_eq!(series_page_ids(&deleted_payload), vec!["series-deleted"]);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_list_deleted_filter_handles_deleted_only_library() {
+    let paths =
+        new_router_fixture("router-discovery-series-list-runtime-only-deleted-visible").await;
+    seed_router_contract_data(&paths).await;
+    soft_delete_series(&paths, &["series-1"]).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/series/list?page=0&size=20")
+                .header("x-auth-token", &auth_token)
+                .header("x-komga-runtime-search-ownership", "runtime-rust-owned")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "condition": {
+                            "type": "Deleted",
+                            "operator": "isTrue"
+                        }
+                    })
+                    .to_string(),
+                ))
+                .expect("runtime-owned only deleted series/list request should build"),
+        )
+        .await
+        .expect("runtime-owned only deleted series/list request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(series_page_ids(&payload), vec!["series-1"]);
 
     cleanup_router_fixture(paths);
 }

@@ -55,24 +55,32 @@ pub async fn load_persisted_user_by_email(
     }))
 }
 
-pub async fn update_persisted_user_password(
+pub async fn update_persisted_user_passwords(
     database_file: &Path,
-    user_id: &str,
-    hashed_password: &str,
-) -> Result<bool, sqlx::Error> {
+    updates: &[(String, String)],
+) -> Result<(), sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
-    let rows_affected = sqlx::query(
-        "UPDATE USER \
-             SET PASSWORD = ? \
-             WHERE ID = ?",
-    )
-    .bind(hashed_password)
-    .bind(user_id)
-    .execute(&pool)
-    .await?
-    .rows_affected();
+    let mut tx = pool.begin().await?;
 
-    Ok(rows_affected > 0)
+    for (user_id, hashed_password) in updates {
+        let rows_affected = sqlx::query(
+            "UPDATE USER \
+                 SET PASSWORD = ? \
+                 WHERE ID = ?",
+        )
+        .bind(hashed_password)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+
+        if rows_affected == 0 {
+            return Err(sqlx::Error::RowNotFound);
+        }
+    }
+
+    tx.commit().await?;
+    Ok(())
 }
 
 pub async fn persist_initial_bootstrap_users(

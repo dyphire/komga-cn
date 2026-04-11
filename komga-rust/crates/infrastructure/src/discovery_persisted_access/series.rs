@@ -189,13 +189,9 @@ pub async fn persisted_series_exist(database_file: &FsPath) -> Result<bool, Stri
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(|error| format!("open persisted series db: {error}"))?;
-    let row = sqlx::query(
-        "SELECT COUNT(*) AS COUNT \
-         FROM SERIES \
-         WHERE DELETED_DATE IS NULL",
-    )
-    .fetch_one(&pool)
-    .await
-    .map_err(|error| format!("query persisted series count: {error}"))?;
+    let row = sqlx::query("SELECT COUNT(*) AS COUNT FROM SERIES")
+        .fetch_one(&pool)
+        .await
+        .map_err(|error| format!("query persisted series count: {error}"))?;
     Ok(row.get::<i64, _>("COUNT") > 0)
 }

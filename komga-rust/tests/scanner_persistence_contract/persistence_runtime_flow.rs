@@ -195,3 +195,81 @@ async fn scanner_persisted_rows_remain_visible_after_runtime_rebuild() {
 
     fixture.cleanup();
 }
+
+#[tokio::test]
+async fn scanner_runtime_assigns_kotlin_like_natural_book_numbers_for_unmanaged_series_names() {
+    let fixture = ScannerPersistenceFixture::new("scanner-persistence-natural-book-numbering")
+        .await
+        .expect("scanner natural-numbering fixture should be created");
+
+    let natural_series_dir = fixture.library_root.join("Series-Natural");
+    fs::create_dir_all(&natural_series_dir)
+        .expect("natural-numbering series directory should be created");
+    for file_name in [
+        "[飛田漱][女神異聞錄Q 迷宮闇影 Side P3(第10集)][東立電子版].cbz",
+        "[飛田漱][女神異聞錄Q 迷宮闇影 Side P3(第2集)][東立電子版].cbz",
+        "[飛田漱][女神異聞錄Q 迷宮闇影 Side P3(第1集)][東立電子版].cbz",
+    ] {
+        write_scannable_cbz_fixture(&natural_series_dir.join(file_name), file_name.as_bytes())
+            .expect("natural-numbering cbz fixture should be written");
+    }
+
+    let _app = komga_server::app::build_router_with_config(&fixture.config);
+
+    let pool = connect_pool(fixture.paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for natural-numbering verification");
+    let rows = sqlx::query(
+        "SELECT b.NAME AS BOOK_NAME, b.NUMBER AS BOOK_NUMBER, bm.NUMBER AS METADATA_NUMBER, \
+         bm.NUMBER_SORT AS METADATA_NUMBER_SORT \
+         FROM BOOK b \
+         JOIN SERIES s ON s.ID = b.SERIES_ID \
+         JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
+         WHERE s.NAME = ? AND b.DELETED_DATE IS NULL \
+         ORDER BY b.NUMBER ASC, b.ID ASC",
+    )
+    .bind("Series-Natural")
+    .fetch_all(&pool)
+    .await
+    .expect("natural-numbering rows should be queryable");
+    pool.close().await;
+
+    let ordered = rows
+        .into_iter()
+        .map(|row| {
+            (
+                row.get::<String, _>("BOOK_NAME"),
+                row.get::<i64, _>("BOOK_NUMBER"),
+                row.get::<String, _>("METADATA_NUMBER"),
+                row.get::<f64, _>("METADATA_NUMBER_SORT"),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        ordered,
+        vec![
+            (
+                "[飛田漱][女神異聞錄Q 迷宮闇影 Side P3(第1集)][東立電子版]".to_string(),
+                1,
+                "1".to_string(),
+                1.0_f64,
+            ),
+            (
+                "[飛田漱][女神異聞錄Q 迷宮闇影 Side P3(第2集)][東立電子版]".to_string(),
+                2,
+                "2".to_string(),
+                2.0_f64,
+            ),
+            (
+                "[飛田漱][女神異聞錄Q 迷宮闇影 Side P3(第10集)][東立電子版]".to_string(),
+                3,
+                "3".to_string(),
+                3.0_f64,
+            ),
+        ],
+        "scanner should assign Kotlin-like natural ordering numbers when no provider metadata supplies book numbering",
+    );
+
+    fixture.cleanup();
+}

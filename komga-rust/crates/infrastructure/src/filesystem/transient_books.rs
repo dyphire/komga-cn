@@ -104,7 +104,6 @@ pub async fn validate_transient_scan_root(database_file: &Path, root: &Path) -> 
         .into_iter()
         .map(|row| PathBuf::from(row.get::<String, _>("ROOT")))
         .collect::<Vec<_>>();
-    pool.close().await;
 
     for library_root in library_roots {
         if root.starts_with(&library_root) {

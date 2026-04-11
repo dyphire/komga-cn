@@ -33,6 +33,10 @@ fn run_async<T>(future: impl Future<Output = T>) -> T {
 }
 
 fn prepare_action_fixture(config_dir: &Path, email: &str, password: &str) {
+    prepare_action_fixture_with_users(config_dir, &[(email, password)]);
+}
+
+fn prepare_action_fixture_with_users(config_dir: &Path, users: &[(&str, &str)]) {
     fs::create_dir_all(config_dir).expect("CLI action config dir should be created");
 
     run_async(async {
@@ -55,22 +59,46 @@ fn prepare_action_fixture(config_dir: &Path, email: &str, password: &str) {
             .expect("CLI action tasks schema should bootstrap");
         tasks_pool.close().await;
 
-        let hashed_password = hash_bcrypt_password(password, DEFAULT_COST)
-            .expect("CLI action fixture password hash should be created");
-        komga_rust::infrastructure::sqlite::write_models::persist_initial_bootstrap_users(
-            &database_file,
-            &[
+        let user_write_models = users
+            .iter()
+            .enumerate()
+            .map(|(index, (email, password))| {
+                let hashed_password = hash_bcrypt_password(password, DEFAULT_COST)
+                    .expect("CLI action fixture password hash should be created");
+
                 komga_rust::infrastructure::sqlite::write_models::InitialBootstrapUserWriteModel {
-                    id: "cli-user-1".to_string(),
-                    email: email.to_string(),
+                    id: format!("cli-user-{index}"),
+                    email: (*email).to_string(),
                     hashed_password,
                     roles: vec!["ROLE_ADMIN".to_string()],
-                },
-            ],
+                }
+            })
+            .collect::<Vec<_>>();
+
+        komga_rust::infrastructure::sqlite::write_models::persist_initial_bootstrap_users(
+            &database_file,
+            &user_write_models,
         )
         .await
         .expect("CLI action fixture user should persist");
     });
+}
+
+fn load_password_hash(config_dir: &Path, email: &str) -> String {
+    run_async(async {
+        let database_file = config_dir.join("database.sqlite");
+        let pool = komga_rust::infrastructure::sqlite::connect_pool(&database_file, 1)
+            .await
+            .expect("password verification pool should open");
+        let password = sqlx::query("SELECT PASSWORD FROM USER WHERE EMAIL = ? LIMIT 1")
+            .bind(email)
+            .fetch_one(&pool)
+            .await
+            .expect("expected user row should exist")
+            .get::<String, _>("PASSWORD");
+        pool.close().await;
+        password
+    })
 }
 
 fn run_cli_action(args: &[&str], config_dir: &Path) -> std::process::Output {
@@ -216,20 +244,7 @@ fn reset_action_updates_password_and_exits_without_starting_http_server() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.is_empty(), "stderr was: {stderr}");
 
-    let updated_password_hash = run_async(async {
-        let database_file = config_dir.join("database.sqlite");
-        let pool = komga_rust::infrastructure::sqlite::connect_pool(&database_file, 1)
-            .await
-            .expect("password verification pool should open");
-        let password = sqlx::query("SELECT PASSWORD FROM USER WHERE EMAIL = ? LIMIT 1")
-            .bind("alice@example.org")
-            .fetch_one(&pool)
-            .await
-            .expect("updated CLI action user should exist")
-            .get::<String, _>("PASSWORD");
-        pool.close().await;
-        password
-    });
+    let updated_password_hash = load_password_hash(&config_dir, "alice@example.org");
 
     assert!(
         verify_bcrypt_password("new-secret", &updated_password_hash)
@@ -268,5 +283,83 @@ fn reset_action_failures_return_non_zero_exit_code() {
     assert!(
         !stderr.contains("invalid KOMGA_RUST_ADDR"),
         "stderr should not mention unrelated HTTP config: {stderr}"
+    );
+}
+
+#[test]
+fn admin_actions_fail_fast_when_main_database_is_missing() {
+    let config_dir = unique_cli_config_dir("komga-cli-missing-main-db");
+    fs::create_dir_all(&config_dir).expect("missing-db config dir should exist for test");
+
+    let database_file = config_dir.join("database.sqlite");
+    assert!(
+        !database_file.exists(),
+        "test fixture should begin without a main database file"
+    );
+
+    let output = run_cli_action(&["--list-users"], &config_dir);
+
+    assert!(
+        !output.status.success(),
+        "expected missing main db to fail, stdout was: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(output.status.code(), Some(1));
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("admin action requires an existing main database"),
+        "stderr was: {stderr}"
+    );
+    assert!(
+        !database_file.exists(),
+        "missing-db admin action should not bootstrap a brand-new main database"
+    );
+}
+
+#[test]
+fn mixed_batch_reset_does_not_partially_update_existing_users() {
+    let config_dir = unique_cli_config_dir("komga-cli-reset-mixed-batch");
+    prepare_action_fixture_with_users(
+        &config_dir,
+        &[
+            ("alice@example.org", "old-secret"),
+            ("bob@example.org", "older-secret"),
+        ],
+    );
+
+    let alice_password_before = load_password_hash(&config_dir, "alice@example.org");
+
+    let output = run_cli_action(
+        &[
+            "--reset",
+            "alice@example.org",
+            "--reset",
+            "missing@example.org",
+            "--newpassword",
+            "new-secret",
+        ],
+        &config_dir,
+    );
+
+    assert!(
+        !output.status.success(),
+        "expected mixed batch reset to fail, stdout was: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(output.status.code(), Some(1));
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("User does not exist: missing@example.org"),
+        "stderr was: {stderr}"
+    );
+
+    let alice_password_after = load_password_hash(&config_dir, "alice@example.org");
+    assert_eq!(alice_password_after, alice_password_before);
+    assert!(
+        verify_bcrypt_password("old-secret", &alice_password_after)
+            .expect("original alice password hash should still verify"),
+        "mixed batch reset failure should leave existing user passwords unchanged"
     );
 }

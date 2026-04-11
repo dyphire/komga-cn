@@ -295,6 +295,69 @@ async fn scanner_regular_scan_reanalyzes_changed_books_when_series_changed() {
 }
 
 #[tokio::test]
+async fn scanner_rescan_reapplies_provider_numbering_after_kotlin_like_resort() {
+    let fixture = ScannerPersistenceFixture::new("scanner-persistence-rescan-provider-numbering")
+        .await
+        .expect("scanner rescan provider-numbering fixture should be created");
+
+    fs::write(
+        fixture.library_root.join("Series-A").join("Book-001.xml"),
+        br#"<ComicInfo><Number>7</Number></ComicInfo>"#,
+    )
+    .expect("book sidecar with provider number should be written for rescan fixture");
+
+    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .process_available(&fixture.config)
+        .expect("initial scan should apply provider numbering successfully");
+
+    let initial_pool = connect_pool(fixture.paths.main_db.as_path(), 1)
+        .await
+        .expect("sqlite pool should open for provider numbering verification");
+    let initial = sqlx::query(
+        "SELECT b.NUMBER AS BOOK_NUMBER, bm.NUMBER AS METADATA_NUMBER, bm.NUMBER_SORT AS METADATA_NUMBER_SORT \
+         FROM BOOK b \
+         JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
+         WHERE b.NAME = ? LIMIT 1",
+    )
+    .bind("Book-001")
+    .fetch_one(&initial_pool)
+    .await
+    .expect("provider-numbered book row should be queryable after initial scan");
+    assert_eq!(initial.get::<i64, _>("BOOK_NUMBER"), 1);
+    assert_eq!(initial.get::<String, _>("METADATA_NUMBER"), "7");
+    assert_eq!(initial.get::<f64, _>("METADATA_NUMBER_SORT"), 7.0_f64);
+    initial_pool.close().await;
+
+    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .process_available(&fixture.config)
+        .expect("rescan should preserve provider numbering after Kotlin-like resort");
+
+    let verify_pool = connect_pool(fixture.paths.main_db.as_path(), 1)
+        .await
+        .expect("sqlite pool should reopen for provider numbering rescan verification");
+    let rescanned = sqlx::query(
+        "SELECT b.NUMBER AS BOOK_NUMBER, bm.NUMBER AS METADATA_NUMBER, bm.NUMBER_SORT AS METADATA_NUMBER_SORT \
+         FROM BOOK b \
+         JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
+         WHERE b.NAME = ? LIMIT 1",
+    )
+    .bind("Book-001")
+    .fetch_one(&verify_pool)
+    .await
+    .expect("provider-numbered book row should be queryable after rescan");
+    verify_pool.close().await;
+
+    assert_eq!(rescanned.get::<i64, _>("BOOK_NUMBER"), 1);
+    assert_eq!(rescanned.get::<String, _>("METADATA_NUMBER"), "7");
+    assert_eq!(rescanned.get::<f64, _>("METADATA_NUMBER_SORT"), 7.0_f64);
+
+    fixture.cleanup();
+}
+
+#[tokio::test]
 async fn scanner_rescan_updates_existing_persisted_book_file_size_rows() {
     let fixture = ScannerPersistenceFixture::new("scanner-persistence-rescan-updates")
         .await

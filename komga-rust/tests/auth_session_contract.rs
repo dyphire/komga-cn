@@ -179,6 +179,31 @@ fn restore_env_var(key: &str, value: Option<String>) {
     }
 }
 
+struct EnvVarGuard {
+    key: &'static str,
+    previous_value: Option<String>,
+}
+
+impl EnvVarGuard {
+    fn set(key: &'static str, value: &str) -> Self {
+        let previous_value = std::env::var(key).ok();
+        unsafe {
+            std::env::set_var(key, value);
+        }
+
+        Self {
+            key,
+            previous_value,
+        }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        restore_env_var(self.key, self.previous_value.take());
+    }
+}
+
 struct SingleResponseServer {
     url: String,
     join: tokio::task::JoinHandle<()>,

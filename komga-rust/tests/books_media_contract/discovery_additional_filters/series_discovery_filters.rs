@@ -1,6 +1,52 @@
 use super::*;
 
 #[tokio::test]
+async fn router_series_latest_excludes_deleted_series_by_default() {
+    let paths = new_router_fixture("router-series-latest-default-deleted-hidden").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_custom_series(&paths, "series-deleted", "Deleted Series", "library-1").await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("series latest default deleted db should open");
+    sqlx::query("UPDATE SERIES SET DELETED_DATE = ? WHERE ID = ?")
+        .bind("2025-01-01 00:00:00")
+        .bind("series-deleted")
+        .execute(&pool)
+        .await
+        .expect("series latest default deleted date should update");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/series/latest")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("series latest default request should build"),
+        )
+        .await
+        .expect("series latest default request should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let content = payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("series latest default payload should expose content array");
+    let ids = content
+        .iter()
+        .filter_map(|entry| entry.get("id").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec!["series-1"]);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_series_latest_supports_deleted_filter() {
     let paths = new_router_fixture("router-series-latest-deleted-filter").await;
     seed_router_contract_data(&paths).await;

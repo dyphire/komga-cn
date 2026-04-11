@@ -201,14 +201,10 @@ pub async fn run_admin_cli_commands(
         .as_deref()
         .ok_or_else(|| AdminCliActionError::new(PASSWORD_RESET_PAIRING_ERROR))?;
 
+    let mut users = Vec::with_capacity(commands.reset_emails.len());
     let mut failures = Vec::new();
 
     for email in &commands.reset_emails {
-        let hashed_password =
-            hash_bcrypt_password(new_password, DEFAULT_COST).map_err(|error| {
-                AdminCliActionError::new(format!("failed to hash reset password: {error}"))
-            })?;
-
         let user = komga_infrastructure::sqlite::write_models::load_persisted_user_by_email(
             database_file,
             email,
@@ -227,32 +223,39 @@ pub async fn run_admin_cli_commands(
             failures.push(format!("User does not exist: {email}"));
             continue;
         };
-
-        let update_result =
-            komga_infrastructure::sqlite::write_models::update_persisted_user_password(
-                database_file,
-                &user.id,
-                &hashed_password,
-            )
-            .await;
-
-        match update_result {
-            Ok(true) => {
-                komga_infrastructure::auth::invalidate_user_sessions(user.id.as_str());
-                println!("Reset password for user: {}", user.email)
-            }
-            Ok(false) => failures.push(format!("User does not exist: {email}")),
-            Err(error) => failures.push(format!(
-                "failed to reset password for user {email}: {error}"
-            )),
-        }
+        users.push(user);
     }
 
-    if failures.is_empty() {
-        Ok(())
-    } else {
-        Err(AdminCliActionError::new(failures.join("\n")))
+    if !failures.is_empty() {
+        return Err(AdminCliActionError::new(failures.join("\n")));
     }
+
+    let password_updates = users
+        .iter()
+        .map(|user| {
+            hash_bcrypt_password(new_password, DEFAULT_COST)
+                .map(|hashed_password| (user.id.clone(), hashed_password))
+                .map_err(|error| {
+                    AdminCliActionError::new(format!("failed to hash reset password: {error}"))
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    komga_infrastructure::sqlite::write_models::update_persisted_user_passwords(
+        database_file,
+        &password_updates,
+    )
+    .await
+    .map_err(|error| {
+        AdminCliActionError::new(format!("failed to reset password batch: {error}"))
+    })?;
+
+    for user in users {
+        komga_infrastructure::auth::invalidate_user_sessions(user.id.as_str());
+        println!("Reset password for user: {}", user.email);
+    }
+
+    Ok(())
 }
 
 async fn print_user_list(database_file: &Path) -> Result<(), AdminCliActionError> {

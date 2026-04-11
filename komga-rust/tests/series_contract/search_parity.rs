@@ -9,7 +9,7 @@ async fn router_discovery_series_list_locks_main_search_parity_for_retained_inpu
     seed_router_series_title_sort(&paths, "series-3", "Zeta Filing Title").await;
     seed_router_series_alternate_title(&paths, "series-1", "alt-1", "Hidden Alias").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
 
     let blank_ids = series_list_ids(&app, &admin_token, Some("relevance,desc"), Some("   ")).await;
@@ -103,7 +103,7 @@ async fn router_discovery_series_list_defaults_to_relevance_sort_when_full_text_
     update_series_search_fixture_title(&paths, "series-2", "Café 東京 Series Series 2").await;
     seed_router_series_title_sort(&paths, "series-3", "Zeta Filing Title").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
 
     let default_relevance_ids = series_list_ids(&app, &admin_token, None, Some("series")).await;

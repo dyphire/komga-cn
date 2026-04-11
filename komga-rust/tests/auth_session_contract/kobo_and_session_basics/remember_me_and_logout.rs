@@ -123,10 +123,7 @@ async fn basic_login_with_remember_me_true_issues_session_and_remember_me_cookie
 
 pub(crate) async fn verify_remember_me_reauthenticates_after_session_expiry() {
     let _guard = lock_remember_me_contract().await;
-    let previous_timeout = std::env::var("KOMGA_SESSION_MAX_INACTIVE_SECONDS").ok();
-    unsafe {
-        std::env::set_var("KOMGA_SESSION_MAX_INACTIVE_SECONDS", "1");
-    }
+    let _session_timeout = EnvVarGuard::set("KOMGA_SESSION_MAX_INACTIVE_SECONDS", "1");
 
     let paths = new_router_fixture("router-remember-me-session-expiry-reauth").await;
     seed_router_contract_data(&paths).await;
@@ -155,8 +152,6 @@ pub(crate) async fn verify_remember_me_reauthenticates_after_session_expiry() {
     let remember_only_response =
         users_me_with_cookie(app, &format!("komga-remember-me={remember_me_cookie}")).await;
 
-    restore_env_var("KOMGA_SESSION_MAX_INACTIVE_SECONDS", previous_timeout);
-
     assert_eq!(remember_only_response.status(), StatusCode::OK);
     let remember_payload = response_json(remember_only_response).await;
     assert_eq!(
@@ -174,10 +169,7 @@ async fn remember_me_reauthenticates_after_session_expiry() {
 
 pub(crate) async fn verify_remember_me_auto_login_records_remember_me_source() {
     let _guard = lock_remember_me_contract().await;
-    let previous_timeout = std::env::var("KOMGA_SESSION_MAX_INACTIVE_SECONDS").ok();
-    unsafe {
-        std::env::set_var("KOMGA_SESSION_MAX_INACTIVE_SECONDS", "1");
-    }
+    let _session_timeout = EnvVarGuard::set("KOMGA_SESSION_MAX_INACTIVE_SECONDS", "1");
 
     let paths = new_router_fixture("router-remember-me-auto-login-records-source").await;
     seed_router_contract_data(&paths).await;
@@ -209,8 +201,6 @@ pub(crate) async fn verify_remember_me_auto_login_records_remember_me_source() {
 
     let remember_only_response =
         users_me_with_cookie(app, &format!("komga-remember-me={remember_me_cookie}")).await;
-
-    restore_env_var("KOMGA_SESSION_MAX_INACTIVE_SECONDS", previous_timeout);
 
     assert_eq!(remember_only_response.status(), StatusCode::OK);
 
