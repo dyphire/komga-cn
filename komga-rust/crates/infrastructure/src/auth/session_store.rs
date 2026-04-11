@@ -1,17 +1,17 @@
-use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::hash::{Hash, Hasher};
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use komga_application::identity_access::{
-    AuthUser, AuthUserSessionSnapshot, SessionTokenStore, user_from_session_snapshot,
-    user_session_snapshot,
+    AuthUser, AuthUserSessionSnapshot, RememberMeRuntime, SessionRuntime,
+    user_from_session_snapshot, user_session_snapshot,
 };
-use serde::{Deserialize, Serialize};
+use rusqlite::{Connection, OptionalExtension, Row, params};
+use sha2::{Digest, Sha256};
 
 pub fn session_token_store() -> &'static SessionRegistry {
     &SESSION_REGISTRY
@@ -22,126 +22,154 @@ static SESSION_REGISTRY: LazyLock<SessionRegistry> = LazyLock::new(SessionRegist
 pub struct SessionRegistry {
     counter: AtomicU64,
     sessions: Mutex<HashMap<String, SessionTokenRecord>>,
-    session_store_paths_by_namespace: Mutex<HashMap<String, PathBuf>>,
-    remember_me_tokens: Mutex<HashMap<String, RememberMeTokenRecord>>,
-    remember_me_store_paths_by_namespace: Mutex<HashMap<String, PathBuf>>,
+    remember_me_settings_by_runtime_key: Mutex<HashMap<String, RememberMeRuntimeSettings>>,
+    remember_me_database_paths_by_runtime_key: Mutex<HashMap<String, PathBuf>>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone)]
+pub struct RememberMeRuntimeSettings {
+    pub key: String,
+    pub duration_days: u64,
+}
+
+#[derive(Clone)]
 struct SessionTokenRecord {
     user: AuthUserSessionSnapshot,
     issued_at_epoch_seconds: u64,
-    #[serde(default = "default_session_last_accessed_epoch_seconds")]
     last_accessed_epoch_seconds: u64,
-    #[serde(default)]
-    namespace: String,
+    runtime_key: String,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-struct RememberMeTokenRecord {
-    user: AuthUserSessionSnapshot,
-    expires_at_epoch_seconds: u64,
-    namespace: String,
-}
-
-const REMEMBER_ME_MAX_AGE_SECONDS: u64 = 30 * 24 * 60 * 60;
+const DEFAULT_REMEMBER_ME_DURATION_DAYS: u64 = 365;
 const SESSION_MAX_INACTIVE_SECONDS: u64 = 30 * 24 * 60 * 60;
-const SESSION_STORE_FILE_NAME: &str = "session-tokens.json";
-const REMEMBER_ME_STORE_FILE_NAME: &str = "remember-me-tokens.json";
+const REMEMBER_ME_SIGNATURE_ALGORITHM: &str = "SHA256";
 
 impl SessionRegistry {
     fn new() -> Self {
         Self {
             counter: AtomicU64::new(1),
             sessions: Mutex::new(HashMap::new()),
-            session_store_paths_by_namespace: Mutex::new(HashMap::new()),
-            remember_me_tokens: Mutex::new(HashMap::new()),
-            remember_me_store_paths_by_namespace: Mutex::new(HashMap::new()),
+            remember_me_settings_by_runtime_key: Mutex::new(HashMap::new()),
+            remember_me_database_paths_by_runtime_key: Mutex::new(HashMap::new()),
         }
     }
 
-    fn remember_me_store_path_for_namespace(&self, namespace: &str) -> Option<PathBuf> {
-        self.remember_me_store_paths_by_namespace
+    fn remember_me_database_path_for_runtime_key(&self, runtime_key: &str) -> Option<PathBuf> {
+        self.remember_me_database_paths_by_runtime_key
             .lock()
-            .expect("remember-me store paths lock should not be poisoned")
-            .get(namespace)
+            .expect("remember-me database paths lock should not be poisoned")
+            .get(runtime_key)
             .cloned()
     }
 
-    fn session_store_path_for_namespace(&self, namespace: &str) -> Option<PathBuf> {
-        self.session_store_paths_by_namespace
+    fn remember_me_settings_for_runtime_key(&self, runtime_key: &str) -> RememberMeRuntimeSettings {
+        self.remember_me_settings_by_runtime_key
             .lock()
-            .expect("session store paths lock should not be poisoned")
-            .get(namespace)
+            .expect("remember-me settings lock should not be poisoned")
+            .get(runtime_key)
             .cloned()
+            .unwrap_or_else(|| default_remember_me_settings(runtime_key))
+    }
+
+    pub fn sync_remember_me_settings(&self, runtime_key: &str, key: &str, duration_days: u64) {
+        let runtime_key = normalized_runtime_key(runtime_key);
+        self.remember_me_settings_by_runtime_key
+            .lock()
+            .expect("remember-me settings lock should not be poisoned")
+            .insert(
+                runtime_key,
+                RememberMeRuntimeSettings {
+                    key: normalized_remember_me_key(key),
+                    duration_days: normalized_remember_me_duration_days(duration_days),
+                },
+            );
+    }
+
+    pub fn remember_me_max_age_seconds(&self, runtime_key: &str) -> u64 {
+        let runtime_key = normalized_runtime_key(runtime_key);
+        remember_me_duration_days_to_seconds(
+            self.remember_me_settings_for_runtime_key(runtime_key.as_str())
+                .duration_days,
+        )
+    }
+
+    pub fn sync_remember_me_database_path(&self, runtime_key: &str, database_file: &Path) {
+        let runtime_key = normalized_runtime_key(runtime_key);
+        self.remember_me_database_paths_by_runtime_key
+            .lock()
+            .expect("remember-me database paths lock should not be poisoned")
+            .insert(runtime_key, database_file.to_path_buf());
+    }
+
+    pub fn invalidate_user_sessions_for_runtime_key(
+        &self,
+        runtime_key: &str,
+        target_user_id: &str,
+    ) {
+        let runtime_key = normalized_runtime_key(runtime_key);
+        let mut sessions = self
+            .sessions
+            .lock()
+            .expect("session registry lock should not be poisoned");
+        sessions.retain(|_, entry| {
+            !(entry.runtime_key == runtime_key && entry.user.id == target_user_id)
+        });
     }
 }
 
-impl SessionTokenStore for SessionRegistry {
-    fn configure_remember_me_store(&self, store_root: &Path) -> String {
-        let session_store_file = store_root.join(SESSION_STORE_FILE_NAME);
-        let session_namespace = session_namespace_for_path(&session_store_file);
-        {
-            let mut paths = self
-                .session_store_paths_by_namespace
-                .lock()
-                .expect("session store paths lock should not be poisoned");
-            paths.insert(session_namespace.clone(), session_store_file.clone());
-        }
-        {
-            let mut sessions = self
-                .sessions
-                .lock()
-                .expect("session registry lock should not be poisoned");
-            sessions.retain(|_, record| record.namespace != session_namespace);
-            sessions.extend(
-                load_session_tokens(Some(session_store_file.as_path()))
-                    .into_iter()
-                    .map(|(token, mut record)| {
-                        if record.namespace.is_empty() {
-                            record.namespace = session_namespace.clone();
-                        }
-                        (token, record)
-                    }),
-            );
-            persist_session_tokens_for_namespace(
-                &session_namespace,
-                &sessions,
-                &session_store_file,
-            );
-        }
-
-        let store_file = store_root.join(REMEMBER_ME_STORE_FILE_NAME);
-        let namespace = remember_me_namespace_for_path(&store_file);
-        {
-            let mut paths = self
-                .remember_me_store_paths_by_namespace
-                .lock()
-                .expect("remember-me store paths lock should not be poisoned");
-            paths.insert(namespace.clone(), store_file.clone());
-        }
-
-        let mut token_guard = self
-            .remember_me_tokens
-            .lock()
-            .expect("remember-me registry lock should not be poisoned");
-        token_guard.retain(|_, record| record.namespace != namespace);
-        let loaded = load_remember_me_tokens(Some(store_file.as_path()));
-        token_guard.extend(loaded);
-        prune_expired_tokens(&mut token_guard);
-        persist_remember_me_tokens_for_namespace(&namespace, &token_guard, &store_file);
-        namespace
+impl RememberMeRuntime for SessionRegistry {
+    fn issue_remember_me_token(&self, user: &AuthUser, runtime_key: &str) -> Option<String> {
+        let _next = self.counter.fetch_add(1, Ordering::Relaxed);
+        let runtime_key = normalized_runtime_key(runtime_key);
+        let settings = self.remember_me_settings_for_runtime_key(runtime_key.as_str());
+        let expiry_epoch_millis = now_epoch_millis().saturating_add(
+            remember_me_duration_days_to_seconds(settings.duration_days).saturating_mul(1000),
+        );
+        Some(build_remember_me_cookie_value(
+            runtime_key.as_str(),
+            &user.email,
+            expiry_epoch_millis,
+            &user.password,
+            settings.key.as_str(),
+        ))
     }
 
-    fn issue_session_token(&self, user: &AuthUser, namespace: &str) -> String {
-        let namespace = namespace.trim();
-        let namespace = if namespace.is_empty() {
-            "default"
-        } else {
-            namespace
-        };
+    fn resolve_remember_me_user(&self, token: &str) -> Option<AuthUser> {
+        let parsed_token = parse_remember_me_token(token)?;
+        if parsed_token.algorithm != REMEMBER_ME_SIGNATURE_ALGORITHM {
+            return None;
+        }
+        if parsed_token.expiry_epoch_millis <= now_epoch_millis() {
+            return None;
+        }
+        let database_file =
+            self.remember_me_database_path_for_runtime_key(parsed_token.runtime_key())?;
+        let user = load_persisted_user_by_login_identifier(
+            database_file.as_path(),
+            parsed_token.login_identifier.as_str(),
+        )?;
+        let expected_signature = remember_me_signature(
+            parsed_token.login_identifier.as_str(),
+            parsed_token.expiry_epoch_millis,
+            user.password.as_str(),
+            self.remember_me_settings_for_runtime_key(parsed_token.runtime_key())
+                .key
+                .as_str(),
+        );
+        if parsed_token.signature != expected_signature {
+            return None;
+        }
+        Some(user)
+    }
+
+    fn invalidate_remember_me_token(&self, _token: &str) {}
+}
+
+impl SessionRuntime for SessionRegistry {
+    fn issue_session_token(&self, user: &AuthUser, runtime_key: &str) -> String {
+        let runtime_key = normalized_runtime_key(runtime_key);
         let next = self.counter.fetch_add(1, Ordering::Relaxed);
-        let token = format!("komga-session-{namespace}-{next}-{}", random_hex_token(24));
+        let token = format!("komga-session-{next}-{}", random_hex_token(24));
         let mut sessions = self
             .sessions
             .lock()
@@ -152,73 +180,22 @@ impl SessionTokenStore for SessionRegistry {
                 user: user_session_snapshot(user),
                 issued_at_epoch_seconds: now_epoch_seconds(),
                 last_accessed_epoch_seconds: now_epoch_seconds(),
-                namespace: namespace.to_string(),
+                runtime_key,
             },
         );
-        if let Some(store_file) = self.session_store_path_for_namespace(namespace) {
-            persist_session_tokens_for_namespace(namespace, &sessions, &store_file);
-        }
         token
     }
 
-    fn issue_remember_me_token(&self, user: &AuthUser, namespace: &str) -> Option<String> {
-        let store_file = self.remember_me_store_path_for_namespace(namespace)?;
-        let next = self.counter.fetch_add(1, Ordering::Relaxed);
-        let issued_at = now_epoch_seconds();
-        let expires_at = issued_at.saturating_add(REMEMBER_ME_MAX_AGE_SECONDS);
-        let token = format!(
-            "komga-remember-me-{namespace}-{next}-{expires_at}-{}",
-            random_hex_token(24),
-        );
-
-        let mut guard = self
-            .remember_me_tokens
-            .lock()
-            .expect("remember-me registry lock should not be poisoned");
-        guard.insert(
-            token.clone(),
-            RememberMeTokenRecord {
-                user: user_session_snapshot(user),
-                expires_at_epoch_seconds: expires_at,
-                namespace: namespace.to_string(),
-            },
-        );
-
-        if persist_remember_me_tokens_for_namespace(namespace, &guard, &store_file) {
-            Some(token)
-        } else {
-            guard.remove(&token);
-            None
-        }
-    }
-
     fn resolve_session_user(&self, token: &str) -> Option<AuthUser> {
-        let namespace = session_namespace_from_token(token)?;
         let now = now_epoch_seconds();
         let mut sessions = self
             .sessions
             .lock()
             .expect("session registry lock should not be poisoned");
-        if !sessions.contains_key(token)
-            && let Some(store_file) = self.session_store_path_for_namespace(namespace.as_str())
-        {
-            sessions.extend(
-                load_session_tokens(Some(store_file.as_path()))
-                    .into_iter()
-                    .map(|(loaded_token, mut record)| {
-                        if record.namespace.is_empty() {
-                            record.namespace = namespace.clone();
-                        }
-                        (loaded_token, record)
-                    }),
-            );
-        }
 
         let mut resolved_user = None;
         let mut should_remove = false;
-        if let Some(entry) = sessions.get_mut(token)
-            && entry.namespace == namespace
-        {
+        if let Some(entry) = sessions.get_mut(token) {
             let last_seen = entry
                 .last_accessed_epoch_seconds
                 .max(entry.issued_at_epoch_seconds);
@@ -235,116 +212,23 @@ impl SessionTokenStore for SessionRegistry {
             sessions.remove(token);
         }
 
-        if (resolved_user.is_some() || should_remove)
-            && let Some(store_file) = self.session_store_path_for_namespace(namespace.as_str())
-        {
-            persist_session_tokens_for_namespace(namespace.as_str(), &sessions, &store_file);
-        }
-
         resolved_user
     }
 
-    fn resolve_remember_me_user(&self, token: &str) -> Option<AuthUser> {
-        let namespace = remember_me_namespace_from_token(token)?;
-        let store_file = self.remember_me_store_path_for_namespace(namespace.as_str())?;
-        let now = now_epoch_seconds();
-        let mut guard = self
-            .remember_me_tokens
-            .lock()
-            .expect("remember-me registry lock should not be poisoned");
-
-        if !guard.contains_key(token) {
-            guard.extend(load_remember_me_tokens(Some(store_file.as_path())));
-        }
-
-        let is_expired = guard
-            .get(token)
-            .is_some_and(|entry| entry.expires_at_epoch_seconds <= now);
-        if is_expired {
-            guard.remove(token);
-            persist_remember_me_tokens_for_namespace(namespace.as_str(), &guard, &store_file);
-            return None;
-        }
-
-        guard
-            .get(token)
-            .map(|entry| user_from_session_snapshot(&entry.user))
-    }
-
     fn invalidate_user_sessions(&self, target_user_id: &str) {
-        let mut touched_session_namespaces = HashSet::new();
-        {
-            let mut sessions = self
-                .sessions
-                .lock()
-                .expect("session registry lock should not be poisoned");
-            sessions.retain(|_, entry| {
-                let should_keep = entry.user.id != target_user_id;
-                if !should_keep {
-                    touched_session_namespaces.insert(entry.namespace.clone());
-                }
-                should_keep
-            });
-            for namespace in &touched_session_namespaces {
-                if let Some(store_file) = self.session_store_path_for_namespace(namespace) {
-                    persist_session_tokens_for_namespace(namespace, &sessions, &store_file);
-                }
-            }
-        }
-
-        let mut touched_namespaces = HashSet::new();
-        {
-            let mut remember_me_tokens = self
-                .remember_me_tokens
-                .lock()
-                .expect("remember-me registry lock should not be poisoned");
-            remember_me_tokens.retain(|_, entry| {
-                let should_keep = entry.user.id != target_user_id;
-                if !should_keep {
-                    touched_namespaces.insert(entry.namespace.clone());
-                }
-                should_keep
-            });
-
-            for namespace in &touched_namespaces {
-                if let Some(store_file) = self.remember_me_store_path_for_namespace(namespace) {
-                    persist_remember_me_tokens_for_namespace(
-                        namespace,
-                        &remember_me_tokens,
-                        &store_file,
-                    );
-                }
-            }
-        }
+        let mut sessions = self
+            .sessions
+            .lock()
+            .expect("session registry lock should not be poisoned");
+        sessions.retain(|_, entry| entry.user.id != target_user_id);
     }
 
     fn invalidate_session_token(&self, token: &str) {
-        let Some(namespace) = session_namespace_from_token(token) else {
-            return;
-        };
         let mut sessions = self
             .sessions
             .lock()
             .expect("session registry lock should not be poisoned");
         sessions.remove(token);
-        if let Some(store_file) = self.session_store_path_for_namespace(namespace.as_str()) {
-            persist_session_tokens_for_namespace(namespace.as_str(), &sessions, &store_file);
-        }
-    }
-
-    fn invalidate_remember_me_token(&self, token: &str) {
-        let Some(namespace) = remember_me_namespace_from_token(token) else {
-            return;
-        };
-        let Some(store_file) = self.remember_me_store_path_for_namespace(namespace.as_str()) else {
-            return;
-        };
-        let mut guard = self
-            .remember_me_tokens
-            .lock()
-            .expect("remember-me registry lock should not be poisoned");
-        guard.remove(token);
-        persist_remember_me_tokens_for_namespace(namespace.as_str(), &guard, &store_file);
     }
 }
 
@@ -355,10 +239,6 @@ fn now_epoch_seconds() -> u64 {
         .unwrap_or_default()
 }
 
-fn default_session_last_accessed_epoch_seconds() -> u64 {
-    now_epoch_seconds()
-}
-
 fn session_max_inactive_seconds() -> u64 {
     std::env::var("KOMGA_SESSION_MAX_INACTIVE_SECONDS")
         .ok()
@@ -367,159 +247,80 @@ fn session_max_inactive_seconds() -> u64 {
         .unwrap_or(SESSION_MAX_INACTIVE_SECONDS)
 }
 
-fn load_remember_me_tokens(path: Option<&Path>) -> HashMap<String, RememberMeTokenRecord> {
-    let Some(path) = path else {
-        return HashMap::new();
-    };
-
-    let Ok(serialized) = fs::read_to_string(path) else {
-        return HashMap::new();
-    };
-
-    let Ok(records) = serde_json::from_str::<HashMap<String, RememberMeTokenRecord>>(&serialized)
-    else {
-        return HashMap::new();
-    };
-
-    records
+struct ParsedRememberMeToken {
+    runtime_key: String,
+    login_identifier: String,
+    expiry_epoch_millis: u64,
+    algorithm: String,
+    signature: String,
 }
 
-fn load_session_tokens(path: Option<&Path>) -> HashMap<String, SessionTokenRecord> {
-    let Some(path) = path else {
-        return HashMap::new();
-    };
-
-    let Ok(serialized) = fs::read_to_string(path) else {
-        return HashMap::new();
-    };
-
-    let Ok(records) = serde_json::from_str::<HashMap<String, SessionTokenRecord>>(&serialized)
-    else {
-        return HashMap::new();
-    };
-
-    records
-}
-
-fn persist_remember_me_tokens(
-    path: Option<&Path>,
-    tokens: &HashMap<String, RememberMeTokenRecord>,
-) -> bool {
-    let Some(path) = path else {
-        return false;
-    };
-
-    if let Some(parent) = path.parent()
-        && fs::create_dir_all(parent).is_err()
+fn parse_remember_me_token(token: &str) -> Option<ParsedRememberMeToken> {
+    let decoded = URL_SAFE_NO_PAD.decode(token.trim()).ok()?;
+    let decoded = String::from_utf8(decoded).ok()?;
+    let mut parts = decoded.splitn(5, ':');
+    let runtime_key = parts.next()?.trim();
+    let login_identifier = parts.next()?.trim();
+    let expiry_epoch_millis = parts.next()?.trim().parse::<u64>().ok()?;
+    let algorithm = parts.next()?.trim();
+    let signature = parts.next()?.trim();
+    if runtime_key.is_empty()
+        || login_identifier.is_empty()
+        || algorithm.is_empty()
+        || signature.is_empty()
     {
-        return false;
+        return None;
     }
+    Some(ParsedRememberMeToken {
+        runtime_key: runtime_key.to_string(),
+        login_identifier: login_identifier.to_string(),
+        expiry_epoch_millis,
+        algorithm: algorithm.to_string(),
+        signature: signature.to_string(),
+    })
+}
 
-    let Ok(serialized) = serde_json::to_string(tokens) else {
-        return false;
-    };
-
-    let temporary = path.with_extension("tmp");
-    if fs::write(&temporary, serialized).is_err() {
-        return false;
+impl ParsedRememberMeToken {
+    fn runtime_key(&self) -> &str {
+        self.runtime_key.as_str()
     }
-    if fs::rename(&temporary, path).is_err() {
-        let _ = fs::remove_file(&temporary);
-        return false;
+}
+
+fn default_remember_me_settings(runtime_key: &str) -> RememberMeRuntimeSettings {
+    RememberMeRuntimeSettings {
+        key: format!("remember-me-key-{runtime_key}"),
+        duration_days: DEFAULT_REMEMBER_ME_DURATION_DAYS,
     }
-
-    true
 }
 
-fn persist_session_tokens(
-    path: Option<&Path>,
-    tokens: &HashMap<String, SessionTokenRecord>,
-) -> bool {
-    let Some(path) = path else {
-        return false;
-    };
-
-    if let Some(parent) = path.parent()
-        && fs::create_dir_all(parent).is_err()
-    {
-        return false;
+fn normalized_runtime_key(runtime_key: &str) -> String {
+    let runtime_key = runtime_key.trim();
+    if runtime_key.is_empty() {
+        "default".to_string()
+    } else {
+        runtime_key.to_string()
     }
+}
 
-    let Ok(serialized) = serde_json::to_string(tokens) else {
-        return false;
-    };
-
-    let temporary = path.with_extension("tmp");
-    if fs::write(&temporary, serialized).is_err() {
-        return false;
+fn normalized_remember_me_key(key: &str) -> String {
+    let key = key.trim();
+    if key.is_empty() {
+        "remember-me-key-default".to_string()
+    } else {
+        key.to_string()
     }
-    if fs::rename(&temporary, path).is_err() {
-        let _ = fs::remove_file(&temporary);
-        return false;
+}
+
+fn normalized_remember_me_duration_days(duration_days: u64) -> u64 {
+    if duration_days == 0 {
+        DEFAULT_REMEMBER_ME_DURATION_DAYS
+    } else {
+        duration_days
     }
-
-    true
 }
 
-fn persist_remember_me_tokens_for_namespace(
-    namespace: &str,
-    tokens: &HashMap<String, RememberMeTokenRecord>,
-    store_file: &Path,
-) -> bool {
-    let scoped_tokens = tokens
-        .iter()
-        .filter(|(_, record)| record.namespace == namespace)
-        .map(|(token, record)| (token.clone(), record.clone()))
-        .collect::<HashMap<_, _>>();
-    persist_remember_me_tokens(Some(store_file), &scoped_tokens)
-}
-
-fn persist_session_tokens_for_namespace(
-    namespace: &str,
-    tokens: &HashMap<String, SessionTokenRecord>,
-    store_file: &Path,
-) -> bool {
-    let scoped_tokens = tokens
-        .iter()
-        .filter(|(_, record)| record.namespace == namespace)
-        .map(|(token, record)| (token.clone(), record.clone()))
-        .collect::<HashMap<_, _>>();
-    persist_session_tokens(Some(store_file), &scoped_tokens)
-}
-
-fn session_namespace_for_path(path: &Path) -> String {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    path.to_string_lossy().hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
-}
-
-fn session_namespace_from_token(token: &str) -> Option<String> {
-    token
-        .strip_prefix("komga-session-")
-        .and_then(|suffix| suffix.split('-').next())
-        .map(str::trim)
-        .filter(|namespace| !namespace.is_empty())
-        .map(str::to_string)
-}
-
-fn remember_me_namespace_for_path(path: &Path) -> String {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    path.to_string_lossy().hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
-}
-
-fn remember_me_namespace_from_token(token: &str) -> Option<String> {
-    token
-        .strip_prefix("komga-remember-me-")
-        .and_then(|suffix| suffix.split('-').next())
-        .map(str::trim)
-        .filter(|namespace| !namespace.is_empty())
-        .map(str::to_string)
-}
-
-fn prune_expired_tokens(tokens: &mut HashMap<String, RememberMeTokenRecord>) {
-    let now = now_epoch_seconds();
-    tokens.retain(|_, entry| entry.expires_at_epoch_seconds > now);
+fn remember_me_duration_days_to_seconds(duration_days: u64) -> u64 {
+    normalized_remember_me_duration_days(duration_days).saturating_mul(24 * 60 * 60)
 }
 
 fn random_hex_token(byte_len: usize) -> String {
@@ -537,4 +338,154 @@ fn random_hex_token(byte_len: usize) -> String {
     }
 
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn now_epoch_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or_default()
+}
+
+fn build_remember_me_cookie_value(
+    runtime_key: &str,
+    login_identifier: &str,
+    expiry_epoch_millis: u64,
+    password_hash: &str,
+    key: &str,
+) -> String {
+    let signature =
+        remember_me_signature(login_identifier, expiry_epoch_millis, password_hash, key);
+    URL_SAFE_NO_PAD.encode(format!(
+        "{runtime_key}:{login_identifier}:{expiry_epoch_millis}:{REMEMBER_ME_SIGNATURE_ALGORITHM}:{signature}"
+    ))
+}
+
+fn remember_me_signature(
+    login_identifier: &str,
+    expiry_epoch_millis: u64,
+    password_hash: &str,
+    key: &str,
+) -> String {
+    let normalized_key = normalized_remember_me_key(key);
+    let payload =
+        format!("{login_identifier}:{expiry_epoch_millis}:{password_hash}:{normalized_key}");
+    short_sha256_hex(payload.as_bytes(), 64)
+}
+
+fn short_sha256_hex(input: &[u8], length: usize) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(input);
+    let digest = hasher.finalize();
+    let encoded = digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    encoded.chars().take(length).collect()
+}
+
+fn load_persisted_user_by_login_identifier(
+    database_file: &Path,
+    login_identifier: &str,
+) -> Option<AuthUser> {
+    let connection = Connection::open(database_file).ok()?;
+    let user = connection
+        .query_row(
+            "SELECT ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES, AGE_RESTRICTION, AGE_RESTRICTION_ALLOW_ONLY FROM USER WHERE LOWER(EMAIL) = LOWER(?) LIMIT 1",
+            params![login_identifier],
+            |row: &Row<'_>| {
+                Ok(AuthUser {
+                    id: row.get(0)?,
+                    email: row.get(1)?,
+                    password: row.get(2)?,
+                    roles: Vec::new(),
+                    shared_all_libraries: row.get(3)?,
+                    shared_library_ids: Vec::new(),
+                    labels_allow: Vec::new(),
+                    labels_exclude: Vec::new(),
+                    age_restriction: age_restriction_from_row(row.get(4)?, row.get(5)?),
+                })
+            },
+        )
+        .optional()
+        .ok()??;
+
+    let roles = query_string_column(
+        &connection,
+        "SELECT ROLE FROM USER_ROLE WHERE USER_ID = ? ORDER BY ROLE",
+        user.id.as_str(),
+    )?
+    .into_iter()
+    .filter(|role| role != "USER")
+    .collect::<Vec<_>>();
+    let shared_library_ids = query_string_column(
+        &connection,
+        "SELECT LIBRARY_ID FROM USER_LIBRARY_SHARING WHERE USER_ID = ? ORDER BY LIBRARY_ID",
+        user.id.as_str(),
+    )?;
+    let (labels_allow, labels_exclude) = query_user_sharing_labels(&connection, user.id.as_str())?;
+
+    Some(AuthUser {
+        roles,
+        shared_library_ids,
+        labels_allow,
+        labels_exclude,
+        ..user
+    })
+}
+
+fn query_string_column(connection: &Connection, sql: &str, user_id: &str) -> Option<Vec<String>> {
+    let mut statement = connection.prepare(sql).ok()?;
+    let rows = statement
+        .query_map(params![user_id], |row: &Row<'_>| row.get::<_, String>(0))
+        .ok()?;
+    rows.collect::<Result<Vec<_>, _>>().ok()
+}
+
+fn query_user_sharing_labels(
+    connection: &Connection,
+    user_id: &str,
+) -> Option<(Vec<String>, Vec<String>)> {
+    let mut statement = connection
+        .prepare(
+            "SELECT LABEL, ALLOW FROM USER_SHARING WHERE USER_ID = ? ORDER BY ALLOW DESC, LABEL",
+        )
+        .ok()?;
+    let rows = statement
+        .query_map(params![user_id], |row: &Row<'_>| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+        })
+        .ok()?;
+    let mut labels_allow = Vec::new();
+    let mut labels_exclude = Vec::new();
+    for row in rows {
+        let (label, allow) = row.ok()?;
+        if allow {
+            labels_allow.push(label);
+        } else {
+            labels_exclude.push(label);
+        }
+    }
+    Some((labels_allow, labels_exclude))
+}
+
+fn age_restriction_from_row(
+    age: Option<i64>,
+    allow_only: Option<bool>,
+) -> Option<komga_application::identity_access::AuthUserAgeRestriction> {
+    match (age, allow_only) {
+        (Some(age), Some(true)) => {
+            Some(komga_application::identity_access::AuthUserAgeRestriction {
+                age,
+                restriction: "ALLOW_ONLY".to_string(),
+            })
+        }
+        (Some(age), Some(false)) => {
+            Some(komga_application::identity_access::AuthUserAgeRestriction {
+                age,
+                restriction: "EXCLUDE".to_string(),
+            })
+        }
+        _ => None,
+    }
 }

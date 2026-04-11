@@ -1,7 +1,6 @@
 use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
+use std::fmt;
 use std::path::Path;
-
-use crate::config::RuntimeConfig;
 
 #[derive(Debug, Default, Eq, PartialEq)]
 pub struct AdminCliCommands {
@@ -10,110 +9,208 @@ pub struct AdminCliCommands {
     new_password: Option<String>,
 }
 
-pub fn parse_admin_cli_commands<I>(args: I) -> AdminCliCommands
+#[derive(Debug, Eq, PartialEq)]
+pub enum StartupCliPreflight {
+    Help,
+    Admin(AdminCliCommands),
+    Server,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct CliUsageError {
+    message: String,
+}
+
+impl CliUsageError {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for CliUsageError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for CliUsageError {}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct AdminCliActionError {
+    message: String,
+}
+
+impl AdminCliActionError {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for AdminCliActionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for AdminCliActionError {}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PendingValueFlag {
+    Reset,
+    NewPassword,
+}
+
+impl PendingValueFlag {
+    fn error_message(self) -> &'static str {
+        match self {
+            Self::Reset => "Missing value for --reset. Use --reset=<email> or --reset <email>.",
+            Self::NewPassword => {
+                "Missing value for --newpassword. Use --newpassword=<password> or --newpassword <password>."
+            }
+        }
+    }
+}
+
+const PASSWORD_RESET_PAIRING_ERROR: &str = "Password reset requires both '--reset=<email>' (or '--reset <email>') and '--newpassword=<password>' (or '--newpassword <password>').";
+
+pub fn render_usage() -> String {
+    [
+        "Usage: komga-rust [OPTIONS]",
+        "",
+        "By default komga-rust starts the HTTP server and background runtime.",
+        "",
+        "Admin options:",
+        "  --list-users                 Print persisted user emails and exit.",
+        "  --reset <email>              Reset one or more user passwords and exit.",
+        "  --newpassword <password>     Provide the password used with --reset.",
+        "  -h, --help                   Print this help and exit.",
+        "",
+        "Environment is configured mainly through env vars:",
+        "  KOMGA_CONFIG_DIR             Base config/data directory.",
+        "  KOMGA_RUST_ADDR              HTTP bind address (default: 127.0.0.1:25600).",
+        "  KOMGA_RUST_MODE              Runtime mode: snapshot, localdb, isolated, canary.",
+        "  KOMGA_DATABASE_FILE          Main SQLite database path.",
+        "  KOMGA_TASKS_DB_FILE          Tasks SQLite database path.",
+        "  SERVER_SERVLET_CONTEXT_PATH  Optional HTTP base path.",
+        "",
+        "Examples:",
+        "  komga-rust",
+        "  komga-rust --list-users",
+        "  komga-rust --reset alice@example.org --newpassword new-secret",
+        "",
+        "Notes:",
+        "  Use the = form when a value starts with '-'.",
+    ]
+    .join("\n")
+}
+
+pub fn parse_startup_cli<I>(args: I) -> Result<StartupCliPreflight, CliUsageError>
 where
     I: IntoIterator,
     I::Item: Into<String>,
 {
     let mut commands = AdminCliCommands::default();
-    let mut pending_reset = false;
-    let mut pending_new_password = false;
+    let mut pending_value: Option<PendingValueFlag> = None;
 
     for raw in args.into_iter().map(Into::into) {
-        if pending_reset {
-            if !raw.trim().is_empty() {
-                commands.reset_emails.push(raw);
+        if let Some(flag) = pending_value.take() {
+            if is_help_flag(raw.as_str()) {
+                return Ok(StartupCliPreflight::Help);
             }
-            pending_reset = false;
-            continue;
-        }
 
-        if pending_new_password {
-            if !raw.trim().is_empty() {
-                commands.new_password = Some(raw);
+            if raw.trim().is_empty() || raw.starts_with('-') {
+                return Err(CliUsageError::new(flag.error_message()));
             }
-            pending_new_password = false;
+            apply_pending_value(&mut commands, flag, raw.as_str());
             continue;
         }
 
-        if raw == "--list-users" {
-            commands.list_users = true;
-            continue;
-        }
+        match raw.as_str() {
+            "-h" | "--help" => return Ok(StartupCliPreflight::Help),
+            "--list-users" => commands.list_users = true,
+            "--reset" => pending_value = Some(PendingValueFlag::Reset),
+            "--newpassword" => pending_value = Some(PendingValueFlag::NewPassword),
+            _ => {
+                if let Some(value) = raw.strip_prefix("--reset=") {
+                    if value.trim().is_empty() {
+                        return Err(CliUsageError::new(PendingValueFlag::Reset.error_message()));
+                    }
+                    commands.reset_emails.push(value.trim().to_string());
+                    continue;
+                }
 
-        if let Some(value) = raw.strip_prefix("--reset=") {
-            if !value.trim().is_empty() {
-                commands.reset_emails.push(value.to_string());
+                if let Some(value) = raw.strip_prefix("--newpassword=") {
+                    if value.trim().is_empty() {
+                        return Err(CliUsageError::new(
+                            PendingValueFlag::NewPassword.error_message(),
+                        ));
+                    }
+                    commands.new_password = Some(value.to_string());
+                    continue;
+                }
+
+                return Err(CliUsageError::new(format!("Unknown argument: {raw}")));
             }
-            continue;
-        }
-
-        if raw == "--reset" {
-            pending_reset = true;
-            continue;
-        }
-
-        if let Some(value) = raw.strip_prefix("--newpassword=") {
-            if !value.trim().is_empty() {
-                commands.new_password = Some(value.to_string());
-            }
-            continue;
-        }
-
-        if raw == "--newpassword" {
-            pending_new_password = true;
         }
     }
 
-    commands
+    if let Some(flag) = pending_value {
+        return Err(CliUsageError::new(flag.error_message()));
+    }
+
+    if commands.reset_emails.is_empty() != commands.new_password.is_none() {
+        return Err(CliUsageError::new(PASSWORD_RESET_PAIRING_ERROR));
+    }
+
+    if commands.list_users || !commands.reset_emails.is_empty() {
+        Ok(StartupCliPreflight::Admin(commands))
+    } else {
+        Ok(StartupCliPreflight::Server)
+    }
 }
 
-pub async fn run_admin_cli_commands(config: &RuntimeConfig, commands: &AdminCliCommands) {
+fn is_help_flag(argument: &str) -> bool {
+    matches!(argument, "-h" | "--help")
+}
+
+fn apply_pending_value(commands: &mut AdminCliCommands, flag: PendingValueFlag, value: &str) {
+    match flag {
+        PendingValueFlag::Reset => commands.reset_emails.push(value.trim().to_string()),
+        PendingValueFlag::NewPassword => commands.new_password = Some(value.to_string()),
+    }
+}
+
+pub async fn run_admin_cli_commands(
+    database_file: &Path,
+    commands: &AdminCliCommands,
+) -> Result<(), AdminCliActionError> {
     if commands.list_users {
-        print_user_list(config.database_file.as_path()).await;
+        print_user_list(database_file).await?;
     }
 
-    if commands.reset_emails.is_empty() && commands.new_password.is_none() {
-        return;
-    }
-
-    if commands.reset_emails.is_empty() || commands.new_password.is_none() {
-        eprintln!(
-            "You need to specify both '--reset=user@domain.com' and '--newpassword=YourNewPassword'"
-        );
-        return;
+    if commands.reset_emails.is_empty() {
+        return Ok(());
     }
 
     let new_password = commands
         .new_password
         .as_deref()
-        .map(str::trim)
-        .unwrap_or_default();
-    if new_password.is_empty() {
-        eprintln!("The new password must not be blank");
-        return;
-    }
+        .ok_or_else(|| AdminCliActionError::new(PASSWORD_RESET_PAIRING_ERROR))?;
 
-    let hashed_password = match hash_bcrypt_password(new_password, DEFAULT_COST) {
-        Ok(hash) => hash,
-        Err(error) => {
-            eprintln!("failed to hash reset password: {error}");
-            return;
-        }
-    };
-
-    let remember_me_store_root = config
-        .config_dir
-        .as_deref()
-        .or_else(|| config.database_file.parent())
-        .unwrap_or_else(|| Path::new("."));
-    let _ = komga_interfaces::http::identity_access::auth::configure_remember_me_store(
-        remember_me_store_root,
-    );
+    let mut failures = Vec::new();
 
     for email in &commands.reset_emails {
+        let hashed_password =
+            hash_bcrypt_password(new_password, DEFAULT_COST).map_err(|error| {
+                AdminCliActionError::new(format!("failed to hash reset password: {error}"))
+            })?;
+
         let user = komga_infrastructure::sqlite::write_models::load_persisted_user_by_email(
-            config.database_file.as_path(),
+            database_file,
             email,
         )
         .await;
@@ -121,17 +218,19 @@ pub async fn run_admin_cli_commands(config: &RuntimeConfig, commands: &AdminCliC
         let Some(user) = (match user {
             Ok(row) => row,
             Err(error) => {
-                eprintln!("failed to query user for password reset ({email}): {error}");
+                failures.push(format!(
+                    "failed to query user for password reset ({email}): {error}"
+                ));
                 continue;
             }
         }) else {
-            eprintln!("User does not exist: {email}");
+            failures.push(format!("User does not exist: {email}"));
             continue;
         };
 
         let update_result =
             komga_infrastructure::sqlite::write_models::update_persisted_user_password(
-                config.database_file.as_path(),
+                database_file,
                 &user.id,
                 &hashed_password,
             )
@@ -139,74 +238,76 @@ pub async fn run_admin_cli_commands(config: &RuntimeConfig, commands: &AdminCliC
 
         match update_result {
             Ok(true) => {
-                komga_interfaces::http::identity_access::auth::invalidate_user_sessions(
-                    user.id.as_str(),
-                );
+                komga_infrastructure::auth::invalidate_user_sessions(user.id.as_str());
                 println!("Reset password for user: {}", user.email)
             }
-            Ok(false) => eprintln!("User does not exist: {email}"),
-            Err(error) => eprintln!("failed to reset password for user {email}: {error}"),
+            Ok(false) => failures.push(format!("User does not exist: {email}")),
+            Err(error) => failures.push(format!(
+                "failed to reset password for user {email}: {error}"
+            )),
         }
+    }
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(AdminCliActionError::new(failures.join("\n")))
     }
 }
 
-async fn print_user_list(database_file: &Path) {
+async fn print_user_list(database_file: &Path) -> Result<(), AdminCliActionError> {
     let rows =
         komga_infrastructure::sqlite::write_models::list_persisted_user_emails(database_file).await;
 
     match rows {
-        Ok(rows) if rows.is_empty() => println!("No users exist yet"),
-        Ok(rows) => println!("Here is a list of all users: {:?}", rows),
-        Err(error) => eprintln!("failed to list users: {error}"),
+        Ok(rows) if rows.is_empty() => {
+            println!("No users exist yet");
+            Ok(())
+        }
+        Ok(rows) => {
+            println!("Here is a list of all users: {:?}", rows);
+            Ok(())
+        }
+        Err(error) => Err(AdminCliActionError::new(format!(
+            "failed to list users: {error}"
+        ))),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{AdminCliCommands, parse_admin_cli_commands};
+    use super::{AdminCliCommands, StartupCliPreflight, parse_startup_cli};
 
     #[test]
-    fn parse_admin_cli_commands_supports_equals_and_split_forms() {
-        let parsed = parse_admin_cli_commands([
+    fn parse_startup_cli_returns_server_when_no_action_is_requested() {
+        assert_eq!(
+            parse_startup_cli([] as [&str; 0]).expect("empty CLI should parse"),
+            StartupCliPreflight::Server,
+        );
+    }
+
+    #[test]
+    fn parse_startup_cli_supports_equals_and_split_action_forms() {
+        let parsed = parse_startup_cli([
             "--list-users",
             "--reset=alice@example.org",
             "--reset",
             "bob@example.org",
             "--newpassword",
             "secret-1",
-        ]);
+        ])
+        .expect("supported admin flags should parse");
 
         assert_eq!(
             parsed,
-            AdminCliCommands {
+            StartupCliPreflight::Admin(AdminCliCommands {
                 list_users: true,
                 reset_emails: vec![
                     "alice@example.org".to_string(),
                     "bob@example.org".to_string(),
                 ],
                 new_password: Some("secret-1".to_string()),
-            },
-        );
-    }
-
-    #[test]
-    fn parse_admin_cli_commands_ignores_blank_values() {
-        let parsed = parse_admin_cli_commands([
-            "--reset=",
-            "--newpassword=",
-            "--reset",
-            "   ",
-            "--newpassword",
-            "   ",
-        ]);
-
-        assert_eq!(
-            parsed,
-            AdminCliCommands {
-                list_users: false,
-                reset_emails: vec![],
-                new_password: None,
-            },
+            }),
         );
     }
 }

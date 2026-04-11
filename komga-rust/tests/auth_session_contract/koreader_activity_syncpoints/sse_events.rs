@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-async fn read_sse_until(
+pub(super) async fn read_sse_until(
     mut body: axum::body::Body,
     predicate: impl Fn(&str) -> bool,
     timeout: Duration,

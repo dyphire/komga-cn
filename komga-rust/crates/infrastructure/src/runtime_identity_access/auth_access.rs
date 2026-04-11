@@ -13,23 +13,45 @@ pub fn auth_token_user(headers: &HeaderMap) -> Option<AuthUser> {
     (backend().auth_token_user)(headers.clone())
 }
 
-pub fn session_token_for_user_with_namespace(user: &AuthUser, namespace: &str) -> String {
-    (backend().session_token_for_user_with_namespace)(user.clone(), namespace.to_string())
+pub fn session_token_for_user_with_runtime_key(user: &AuthUser, runtime_key: &str) -> String {
+    (backend().session_token_for_user_with_runtime_key)(user.clone(), runtime_key.to_string())
 }
 
-pub fn remember_me_token_for_user_with_namespace(
+pub fn remember_me_token_for_user_with_runtime_key(
     user: &AuthUser,
-    namespace: &str,
+    runtime_key: &str,
 ) -> Option<String> {
-    (backend().remember_me_token_for_user_with_namespace)(user.clone(), namespace.to_string())
+    (backend().remember_me_token_for_user_with_runtime_key)(user.clone(), runtime_key.to_string())
 }
 
-pub fn configure_remember_me_store(store_root: &Path) -> String {
-    (backend().configure_remember_me_store)(store_root.to_path_buf())
+pub fn sync_remember_me_runtime_database_file(runtime_key: &str, database_file: &Path) {
+    (backend().sync_remember_me_runtime_database_file)(
+        runtime_key.to_string(),
+        database_file.to_path_buf(),
+    )
+}
+
+pub fn sync_remember_me_runtime_settings(runtime_key: &str, key: &str, duration_days: u64) {
+    (backend().sync_remember_me_runtime_settings)(
+        runtime_key.to_string(),
+        key.to_string(),
+        duration_days,
+    )
+}
+
+pub fn remember_me_max_age_seconds(runtime_key: &str) -> u64 {
+    (backend().remember_me_max_age_seconds)(runtime_key.to_string())
 }
 
 pub fn invalidate_user_sessions(user_id: &str) {
     (backend().invalidate_user_sessions)(user_id.to_string())
+}
+
+pub fn invalidate_user_sessions_with_runtime_key(user_id: &str, runtime_key: &str) {
+    (backend().invalidate_user_sessions_with_runtime_key)(
+        user_id.to_string(),
+        runtime_key.to_string(),
+    )
 }
 
 pub fn invalidate_session_token(token: &str) {

@@ -288,7 +288,7 @@ pub(super) async fn authenticated_user(
                 &user,
                 authentication_activity_write_input(
                     &request_metadata,
-                    "API_KEY",
+                    "ApiKey",
                     api_key_id,
                     api_key_comment,
                 ),
@@ -312,7 +312,7 @@ pub(super) async fn authenticated_user(
             let _ = persisted_record_successful_authentication_activity(
                 &auth_db.database_file,
                 &user,
-                authentication_activity_write_input(&request_metadata, "BASIC", None, None),
+                authentication_activity_write_input(&request_metadata, "Password", None, None),
             )
             .await;
             Some(*user)

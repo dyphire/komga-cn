@@ -1,5 +1,4 @@
 use axum::Router;
-use std::path::Path;
 use tokio::net::TcpListener;
 
 use crate::composition::start_server;
@@ -66,10 +65,6 @@ pub async fn shutdown_runtime_for_contract() {
 
 pub fn invalidate_sessions_for_user(user_id: &str) {
     komga_interfaces::http::identity_access::auth::invalidate_user_sessions(user_id)
-}
-
-pub fn configure_remember_me_store_root(store_root: &Path) -> String {
-    komga_interfaces::http::identity_access::auth::configure_remember_me_store(store_root)
 }
 
 impl TaskRuntimeConfig for RuntimeConfig {

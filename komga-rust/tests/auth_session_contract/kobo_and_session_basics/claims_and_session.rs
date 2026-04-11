@@ -117,8 +117,7 @@ async fn router_claim_returns_kotlin_already_claimed_message() {
     cleanup_router_fixture(paths);
 }
 
-#[tokio::test]
-async fn router_login_set_cookie_returns_session_cookie_for_header_session() {
+pub(crate) async fn verify_login_set_cookie_returns_session_cookie_for_header_session() {
     let paths = new_router_fixture("router-login-set-cookie-session-header").await;
     seed_router_contract_data(&paths).await;
 
@@ -147,6 +146,11 @@ async fn router_login_set_cookie_returns_session_cookie_for_header_session() {
     assert!(set_cookie.contains("Path=/"));
 
     cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn existing_session_when_exchanging_for_cookies_then_session_is_returned_in_cookies() {
+    verify_login_set_cookie_returns_session_cookie_for_header_session().await;
 }
 
 #[tokio::test]

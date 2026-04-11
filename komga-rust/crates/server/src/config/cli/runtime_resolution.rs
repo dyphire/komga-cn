@@ -81,23 +81,16 @@ fn resolve_oauth2_account_creation(
     )
 }
 
-pub(crate) fn resolve_with_env(
+struct ResolvedConfigInputs {
+    layered: LayeredConfig,
+    resolved_config_dir: PathBuf,
+    platform_profile: PlatformProfile,
+}
+
+fn resolve_config_inputs(
     cli: &RuntimeCli,
     env: &BTreeMap<String, String>,
-) -> Result<RuntimeConfig, ConfigError> {
-    let mode = preferred_string(cli.mode.as_deref(), env.get(MODE_ENV).map(String::as_str))
-        .map(RuntimeMode::parse)
-        .transpose()?
-        .unwrap_or(RuntimeMode::Localdb);
-
-    let runtime_profile = preferred_string(
-        cli.runtime_profile.as_deref(),
-        env.get(RUNTIME_PROFILE_ENV).map(String::as_str),
-    )
-    .map(RuntimeProfile::parse)
-    .transpose()?
-    .unwrap_or_else(|| mode.default_runtime_profile());
-
+) -> Result<ResolvedConfigInputs, ConfigError> {
     let platform_profile = preferred_string(
         cli.platform_profile.as_deref(),
         env.get(PLATFORM_PROFILE_ENV).map(String::as_str),
@@ -117,7 +110,28 @@ pub(crate) fn resolve_with_env(
         .unwrap_or_else(|| PathBuf::from(DEFAULT_CONFIG_DIR));
 
     let layered = build_layered_config(&bootstrap_config_dir, env)?;
+    let resolved_config_dir = resolve_config_dir(
+        cli,
+        env,
+        &layered,
+        platform_profile,
+        bootstrap_config_dir.as_path(),
+    );
 
+    Ok(ResolvedConfigInputs {
+        layered,
+        resolved_config_dir,
+        platform_profile,
+    })
+}
+
+fn resolve_config_dir(
+    cli: &RuntimeCli,
+    env: &BTreeMap<String, String>,
+    layered: &LayeredConfig,
+    platform_profile: PlatformProfile,
+    bootstrap_config_dir: &Path,
+) -> PathBuf {
     let resolved_config_dir_raw = cli
         .config_dir
         .as_ref()
@@ -126,7 +140,7 @@ pub(crate) fn resolve_with_env(
         .or_else(|| {
             preferred_string(None, env.get(CONFIG_DIR_ENV).map(String::as_str)).map(str::to_string)
         })
-        .or_else(|| read_string(&layered, &["komga.config-dir"]))
+        .or_else(|| read_string(layered, &["komga.config-dir"]))
         .or_else(|| {
             platform_profile
                 .default_config_dir(env)
@@ -135,11 +149,36 @@ pub(crate) fn resolve_with_env(
         })
         .or_else(|| default_home_config_dir(env).as_ref().map(path_to_string))
         .unwrap_or_else(|| DEFAULT_CONFIG_DIR.to_string());
-    let resolved_config_dir = PathBuf::from(expand_path_placeholders(
+
+    PathBuf::from(expand_path_placeholders(
         &resolved_config_dir_raw,
-        &bootstrap_config_dir,
+        bootstrap_config_dir,
         env,
-    ));
+    ))
+}
+
+pub(crate) fn resolve_with_env(
+    cli: &RuntimeCli,
+    env: &BTreeMap<String, String>,
+) -> Result<RuntimeConfig, ConfigError> {
+    let mode = preferred_string(cli.mode.as_deref(), env.get(MODE_ENV).map(String::as_str))
+        .map(RuntimeMode::parse)
+        .transpose()?
+        .unwrap_or(RuntimeMode::Localdb);
+
+    let runtime_profile = preferred_string(
+        cli.runtime_profile.as_deref(),
+        env.get(RUNTIME_PROFILE_ENV).map(String::as_str),
+    )
+    .map(RuntimeProfile::parse)
+    .transpose()?
+    .unwrap_or_else(|| mode.default_runtime_profile());
+
+    let ResolvedConfigInputs {
+        layered,
+        resolved_config_dir,
+        platform_profile,
+    } = resolve_config_inputs(cli, env)?;
 
     let (bind_address, server_context_path) =
         resolve_bind_address_and_context_path(cli, env, &layered)?;
@@ -176,4 +215,22 @@ pub(crate) fn resolve_with_env(
     config.validate_single_writer_storage_ownership(env)?;
 
     Ok(config)
+}
+
+pub(crate) fn resolve_admin_action_with_env(
+    cli: &RuntimeCli,
+    env: &BTreeMap<String, String>,
+) -> Result<AdminActionConfig, ConfigError> {
+    let ResolvedConfigInputs {
+        layered,
+        resolved_config_dir,
+        platform_profile,
+    } = resolve_config_inputs(cli, env)?;
+
+    let derived_paths =
+        resolve_derived_runtime_paths(cli, env, &layered, &resolved_config_dir, platform_profile);
+
+    Ok(AdminActionConfig {
+        database_file: derived_paths.database_file,
+    })
 }

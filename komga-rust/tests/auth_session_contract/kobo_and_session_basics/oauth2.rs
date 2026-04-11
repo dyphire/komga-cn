@@ -490,8 +490,7 @@ async fn router_oauth2_callback_allows_missing_email_verified_when_disabled_for_
     cleanup_router_fixture(paths);
 }
 
-#[tokio::test]
-async fn router_oauth2_callback_success_uses_session_cookie_without_auth_token_header() {
+pub(crate) async fn verify_oauth2_callback_success_uses_session_cookie_without_auth_token_header() {
     let paths = new_router_fixture("router-oauth2-callback-success-cookie-only").await;
     seed_router_contract_data(&paths).await;
 
@@ -536,7 +535,26 @@ async fn router_oauth2_callback_success_uses_session_cookie_without_auth_token_h
         .expect("oauth2 callback success should include session cookie");
     assert!(set_cookie.contains("KOMGA-SESSION="));
 
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for oauth2 activity assertion");
+    let source = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT SOURCE FROM AUTHENTICATION_ACTIVITY WHERE EMAIL = ? ORDER BY DATE_TIME DESC LIMIT 1",
+    )
+    .bind("admin@example.org")
+    .fetch_one(&pool)
+    .await
+    .expect("oauth2 login should record authentication activity");
+    pool.close().await;
+
+    assert_eq!(source.as_deref(), Some("OAuth2:oidc"));
+
     cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn oauth2_callback_reuses_komga_session_cookie_after_in_memory_session_refactor() {
+    verify_oauth2_callback_success_uses_session_cookie_without_auth_token_header().await;
 }
 
 #[tokio::test]

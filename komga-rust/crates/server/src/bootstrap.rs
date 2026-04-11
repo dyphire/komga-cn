@@ -76,15 +76,47 @@ pub(crate) fn emit_startup_banner_and_runtime_event(config: &RuntimeConfig) {
 }
 
 pub async fn run_process() {
-    let admin_commands = admin_cli::parse_admin_cli_commands(std::env::args().skip(1));
+    match admin_cli::parse_startup_cli(std::env::args().skip(1)) {
+        Ok(admin_cli::StartupCliPreflight::Help) => {
+            println!("{}", admin_cli::render_usage());
+        }
+        Ok(admin_cli::StartupCliPreflight::Admin(commands)) => run_admin_action(commands).await,
+        Ok(admin_cli::StartupCliPreflight::Server) => run_server().await,
+        Err(error) => {
+            eprintln!("{}\n\n{}", error, admin_cli::render_usage());
+            std::process::exit(2);
+        }
+    }
+}
 
+async fn run_admin_action(commands: admin_cli::AdminCliCommands) {
+    let config = crate::config::AdminActionConfig::from_env().unwrap_or_else(|error| {
+        eprintln!("failed to resolve admin action config: {error}");
+        std::process::exit(1);
+    });
+
+    validate_main_startup_schema_gate(config.database_file.as_path())
+        .await
+        .unwrap_or_else(|error| {
+            eprintln!("{error}");
+            std::process::exit(1);
+        });
+
+    admin_cli::run_admin_cli_commands(config.database_file.as_path(), &commands)
+        .await
+        .unwrap_or_else(|error| {
+            eprintln!("{error}");
+            std::process::exit(1);
+        });
+}
+
+async fn run_server() {
     let config = RuntimeConfig::from_env().expect("invalid runtime config");
     crate::logging::init_global(&config).expect("failed to initialize logging");
     validate_startup_schema_gate(&config)
         .await
         .expect("startup schema gate failed");
     noclaim_bootstrap::ensure_noclaim_initial_users(&config).await;
-    admin_cli::run_admin_cli_commands(&config, &admin_commands).await;
 
     let listener = TcpListener::bind(config.bind_address)
         .await
@@ -106,26 +138,26 @@ pub async fn run_process() {
 }
 
 pub(crate) async fn validate_startup_schema_gate(config: &RuntimeConfig) -> std::io::Result<()> {
-    validate_main_startup_schema_gate(config).await?;
+    validate_main_startup_schema_gate(config.database_file.as_path()).await?;
     validate_tasks_startup_schema_gate(config).await?;
     Ok(())
 }
 
-async fn validate_main_startup_schema_gate(config: &RuntimeConfig) -> std::io::Result<()> {
+async fn validate_main_startup_schema_gate(database_file: &std::path::Path) -> std::io::Result<()> {
     tracing::info!(
         event = "startup_schema_gate",
         database_role = "main",
         outcome = "checking",
-        database_file = %config.database_file.display(),
+        database_file = %database_file.display(),
         "Checking main sqlite schema gate",
     );
 
-    let main_pool = komga_infrastructure::sqlite::connect_pool(&config.database_file, 1)
+    let main_pool = komga_infrastructure::sqlite::connect_pool(database_file, 1)
         .await
         .map_err(|error| {
             schema_gate_failure(
                 "main",
-                &config.database_file,
+                database_file,
                 "failed to open main sqlite database",
                 error,
             )
@@ -135,7 +167,7 @@ async fn validate_main_startup_schema_gate(config: &RuntimeConfig) -> std::io::R
     main_schema_result.map_err(|error| {
         schema_gate_failure(
             "main",
-            &config.database_file,
+            database_file,
             "main sqlite schema gate failed",
             error,
         )
@@ -145,7 +177,7 @@ async fn validate_main_startup_schema_gate(config: &RuntimeConfig) -> std::io::R
         event = "startup_schema_gate",
         database_role = "main",
         outcome = "ready",
-        database_file = %config.database_file.display(),
+        database_file = %database_file.display(),
         "Main sqlite schema gate ready",
     );
 

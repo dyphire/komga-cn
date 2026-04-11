@@ -26,7 +26,8 @@ pub enum RuntimeProfile {
 pub struct AuthDatabaseState {
     pub database_file: PathBuf,
     pub demo_mode: bool,
-    pub remember_me_namespace: String,
+    pub session_runtime_key: String,
+    pub remember_me_runtime_key: String,
 }
 
 #[derive(Clone)]
@@ -143,6 +144,7 @@ pub struct LibraryCatalogOperations {
 #[derive(Clone)]
 pub struct OperationalState {
     pub runtime: RuntimeState,
+    pub remember_me_runtime_key: String,
     pub build_metadata: OperationalBuildMetadata,
     pub settings_store: Arc<ServerSettingsStore>,
     pub oauth2_clients: Arc<Vec<OAuth2ClientConfig>>,

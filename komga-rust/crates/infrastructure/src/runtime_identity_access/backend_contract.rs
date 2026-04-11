@@ -109,12 +109,15 @@ pub enum KoreaderBookLookupError {
 #[allow(clippy::type_complexity)]
 pub struct RuntimeIdentityAccessBackend {
     pub auth_token_user: Arc<dyn Fn(HeaderMap) -> Option<AuthUser> + Send + Sync>,
-    pub session_token_for_user_with_namespace:
+    pub session_token_for_user_with_runtime_key:
         Arc<dyn Fn(AuthUser, String) -> String + Send + Sync>,
-    pub remember_me_token_for_user_with_namespace:
+    pub remember_me_token_for_user_with_runtime_key:
         Arc<dyn Fn(AuthUser, String) -> Option<String> + Send + Sync>,
-    pub configure_remember_me_store: Arc<dyn Fn(PathBuf) -> String + Send + Sync>,
+    pub sync_remember_me_runtime_database_file: Arc<dyn Fn(String, PathBuf) + Send + Sync>,
+    pub sync_remember_me_runtime_settings: Arc<dyn Fn(String, String, u64) + Send + Sync>,
+    pub remember_me_max_age_seconds: Arc<dyn Fn(String) -> u64 + Send + Sync>,
     pub invalidate_user_sessions: Arc<dyn Fn(String) + Send + Sync>,
+    pub invalidate_user_sessions_with_runtime_key: Arc<dyn Fn(String, String) + Send + Sync>,
     pub invalidate_session_token: Arc<dyn Fn(String) + Send + Sync>,
     pub invalidate_remember_me_token: Arc<dyn Fn(String) + Send + Sync>,
     pub persisted_basic_user:

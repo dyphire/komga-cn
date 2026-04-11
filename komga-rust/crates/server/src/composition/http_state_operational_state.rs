@@ -41,6 +41,7 @@ fn with_task_queue<T>(
 
 pub(super) fn compose_operational_state(
     config: &RuntimeConfig,
+    remember_me_runtime_key: String,
     task_queue: SharedTaskQueue,
     task_wakeup: TaskQueueWakeSignal,
     shutdown_trigger: Option<watch::Sender<bool>>,
@@ -64,6 +65,7 @@ pub(super) fn compose_operational_state(
             bind_address: config.bind_address,
             server_context_path: config.server_context_path.clone(),
         },
+        remember_me_runtime_key,
         build_metadata: OperationalBuildMetadata {
             version: build_metadata.version,
             build_time: build_metadata.build_time,
@@ -243,8 +245,13 @@ mod tests {
                 "rust-main",
             )));
             let task_wakeup = Arc::new(tokio::sync::Notify::new());
-            let state =
-                compose_operational_state(&config, task_queue.clone(), task_wakeup.clone(), None);
+            let state = compose_operational_state(
+                &config,
+                "test-runtime".to_string(),
+                task_queue.clone(),
+                task_wakeup.clone(),
+                None,
+            );
 
             (state.enqueue_task_records)(vec![scan_library_task()], urgent)
                 .expect("task enqueue should succeed");

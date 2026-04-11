@@ -4,8 +4,8 @@ use komga_application::identity_access::AuthUser;
 
 use crate::runtime_identity_access::{
     auth_token_user as runtime_auth_token_user,
-    remember_me_token_for_user_with_namespace as runtime_remember_me_token_for_user_with_namespace,
-    session_token_for_user_with_namespace as runtime_session_token_for_user_with_namespace,
+    remember_me_token_for_user_with_runtime_key as runtime_remember_me_token_for_user_with_runtime_key,
+    session_token_for_user_with_runtime_key as runtime_session_token_for_user_with_runtime_key,
 };
 
 pub fn auth_token_user(headers: &HeaderMap) -> Option<AuthUser> {
@@ -36,15 +36,15 @@ pub fn remember_me_requested(uri: &Uri) -> bool {
         .is_some_and(|query| query.split('&').any(|pair| pair == "remember-me=true"))
 }
 
-pub fn session_token_for_user_with_namespace(user: &AuthUser, namespace: &str) -> String {
-    runtime_session_token_for_user_with_namespace(user, namespace)
+pub fn session_token_for_user_with_runtime_key(user: &AuthUser, runtime_key: &str) -> String {
+    runtime_session_token_for_user_with_runtime_key(user, runtime_key)
 }
 
-pub fn remember_me_token_for_user_with_namespace(
+pub fn remember_me_token_for_user_with_runtime_key(
     user: &AuthUser,
-    namespace: &str,
+    runtime_key: &str,
 ) -> Option<String> {
-    runtime_remember_me_token_for_user_with_namespace(user, namespace)
+    runtime_remember_me_token_for_user_with_runtime_key(user, runtime_key)
 }
 
 fn x_auth_token(headers: &HeaderMap) -> Option<String> {

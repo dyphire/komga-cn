@@ -9,7 +9,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password, verify as verify_bcrypt_password};
 use komga_application::identity_access::{
     AuthOutcome, AuthUser, PersistedApiKey, PersistedApiKeyMetadata,
-    PersistedAuthenticationActivity, configure_remember_me_store as configure_session_store,
+    PersistedAuthenticationActivity,
     invalidate_remember_me_token as invalidate_remember_me_session_token,
     invalidate_session_token as invalidate_active_session_token,
     invalidate_user_sessions as invalidate_all_user_sessions, issue_remember_me_token,
@@ -19,6 +19,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha512};
 use sqlx::Row;
 
+use super::session_store::RememberMeRuntimeSettings;
 use super::session_store::session_token_store;
 use crate::sqlite::connect_pool;
 
@@ -29,28 +30,45 @@ pub fn auth_token_user(headers: &HeaderMap) -> Option<AuthUser> {
     let remember_me_token = remember_me_token_from_headers(headers);
     resolve_authenticated_user(
         session_token_store(),
+        session_token_store(),
         session_token.as_deref(),
         remember_me_token.as_deref(),
     )
 }
 
-pub fn session_token_for_user_with_namespace(user: &AuthUser, namespace: &str) -> String {
-    issue_session_token(session_token_store(), user, namespace)
+pub fn session_token_for_user_with_runtime_key(user: &AuthUser, runtime_key: &str) -> String {
+    issue_session_token(session_token_store(), user, runtime_key)
 }
 
-pub fn remember_me_token_for_user_with_namespace(
+pub fn remember_me_token_for_user_with_runtime_key(
     user: &AuthUser,
-    namespace: &str,
+    runtime_key: &str,
 ) -> Option<String> {
-    issue_remember_me_token(session_token_store(), user, namespace)
+    issue_remember_me_token(session_token_store(), user, runtime_key)
 }
 
-pub fn configure_remember_me_store(store_root: &Path) -> String {
-    configure_session_store(session_token_store(), store_root)
+pub fn sync_remember_me_runtime_database_file(runtime_key: &str, database_file: &Path) {
+    session_token_store().sync_remember_me_database_path(runtime_key, database_file);
+}
+
+pub fn sync_remember_me_runtime_settings(runtime_key: &str, settings: RememberMeRuntimeSettings) {
+    session_token_store().sync_remember_me_settings(
+        runtime_key,
+        settings.key.as_str(),
+        settings.duration_days,
+    );
+}
+
+pub fn remember_me_max_age_seconds(runtime_key: &str) -> u64 {
+    session_token_store().remember_me_max_age_seconds(runtime_key)
 }
 
 pub fn invalidate_user_sessions(user_id: &str) {
     invalidate_all_user_sessions(session_token_store(), user_id)
+}
+
+pub fn invalidate_user_sessions_with_runtime_key(user_id: &str, runtime_key: &str) {
+    session_token_store().invalidate_user_sessions_for_runtime_key(runtime_key, user_id);
 }
 
 pub fn invalidate_session_token(token: &str) {

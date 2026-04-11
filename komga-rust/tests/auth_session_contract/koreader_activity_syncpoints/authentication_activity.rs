@@ -22,7 +22,7 @@ async fn router_users_by_id_authentication_activity_latest_treats_blank_apikey_i
     .bind(true)
     .bind(Option::<String>::None)
     .bind("2024-01-02 03:04:05")
-    .bind("BASIC")
+    .bind("Password")
     .bind(Option::<String>::None)
     .bind(Option::<String>::None)
     .execute(&pool)
@@ -72,7 +72,7 @@ async fn router_users_by_id_authentication_activity_latest_matches_email_only_ac
     .bind(true)
     .bind(Option::<String>::None)
     .bind("2030-01-03 04:05:06")
-    .bind("BASIC")
+    .bind("Password")
     .bind(Option::<String>::None)
     .bind(Option::<String>::None)
     .execute(&pool)
@@ -189,7 +189,7 @@ async fn router_users_by_id_authentication_activity_latest_uses_connect_info_for
         payload["userAgent"],
         json!("router-contract-koreader-device")
     );
-    assert_eq!(payload["source"], json!("API_KEY"));
+    assert_eq!(payload["source"], json!("ApiKey"));
 
     cleanup_router_fixture(paths);
 }
@@ -226,7 +226,7 @@ async fn router_users_me_authentication_activity_honors_page_and_date_time_sort(
         .bind(true)
         .bind(Option::<String>::None)
         .bind(date_time)
-        .bind("BASIC")
+        .bind("Password")
         .bind(Option::<String>::None)
         .bind(Option::<String>::None)
         .execute(&pool)
@@ -321,7 +321,7 @@ async fn router_users_by_id_authentication_activity_latest_returns_successful_ko
     assert_eq!(payload["apiKeyComment"], json!("kobo sync"));
     assert_eq!(payload["ip"], json!("203.0.113.44"));
     assert_eq!(payload["userAgent"], json!("router-contract-kobo-device"));
-    assert_eq!(payload["source"], json!("API_KEY"));
+    assert_eq!(payload["source"], json!("ApiKey"));
 
     cleanup_router_fixture(paths);
 }
@@ -352,7 +352,7 @@ async fn router_users_me_authentication_activity_includes_email_only_rows() {
     .bind(true)
     .bind(Option::<String>::None)
     .bind("2030-01-04 00:00:00")
-    .bind("BASIC")
+    .bind("Password")
     .bind(Option::<String>::None)
     .bind(Option::<String>::None)
     .execute(&pool)
@@ -369,7 +369,7 @@ async fn router_users_me_authentication_activity_includes_email_only_rows() {
     .bind(true)
     .bind(Option::<String>::None)
     .bind("2030-01-05 00:00:00")
-    .bind("BASIC")
+    .bind("Password")
     .bind(Option::<String>::None)
     .bind(Option::<String>::None)
     .execute(&pool)
@@ -451,7 +451,7 @@ async fn router_users_me_basic_auth_records_forwarded_ip_and_user_agent() {
 
     assert_eq!(ip.as_deref(), Some("203.0.113.10"));
     assert_eq!(user_agent.as_deref(), Some("router-contract-agent"));
-    assert_eq!(source.as_deref(), Some("BASIC"));
+    assert_eq!(source.as_deref(), Some("Password"));
 
     cleanup_router_fixture(paths);
 }
@@ -538,10 +538,86 @@ async fn router_users_me_api_keys_list_api_key_auth_uses_connect_info_fallback()
         user_agent.as_deref(),
         Some("router-contract-helper-api-key-agent")
     );
-    assert_eq!(source.as_deref(), Some("API_KEY"));
+    assert_eq!(source.as_deref(), Some("ApiKey"));
     assert_eq!(api_key_comment.as_deref(), Some("Helper connect info"));
 
     cleanup_router_fixture(paths);
+}
+
+pub(crate) async fn verify_api_key_login_records_apikey_source_after_auth_refactor() {
+    let paths = new_router_fixture("router-api-key-login-records-kotlin-source").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v2/users/me/api-keys")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "comment": "Contract api key source" }).to_string(),
+                ))
+                .expect("api key create request should build"),
+        )
+        .await
+        .expect("api key create request should complete");
+    assert_eq!(create_response.status(), StatusCode::OK);
+    let created_api_key = response_json(create_response).await;
+    let api_key = created_api_key
+        .get("key")
+        .and_then(Value::as_str)
+        .expect("api key create payload should expose key")
+        .to_string();
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for auth activity cleanup");
+    sqlx::query("DELETE FROM AUTHENTICATION_ACTIVITY WHERE EMAIL = ?")
+        .bind("admin@example.org")
+        .execute(&pool)
+        .await
+        .expect("existing auth activity rows should delete");
+    pool.close().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v2/users/me/api-keys")
+                .header("x-api-key", &api_key)
+                .body(Body::empty())
+                .expect("users me api keys list request should build"),
+        )
+        .await
+        .expect("users me api keys list request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for auth activity assertion");
+    let source = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT SOURCE FROM AUTHENTICATION_ACTIVITY WHERE EMAIL = ? ORDER BY DATE_TIME DESC LIMIT 1",
+    )
+    .bind("admin@example.org")
+    .fetch_one(&pool)
+    .await
+    .expect("api key login should record authentication activity");
+    pool.close().await;
+
+    assert_eq!(source.as_deref(), Some("ApiKey"));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn api_key_login_records_apikey_source_after_auth_refactor() {
+    verify_api_key_login_records_apikey_source_after_auth_refactor().await;
 }
 
 #[tokio::test]
@@ -582,7 +658,7 @@ async fn router_users_authentication_activity_honors_unpaged_date_time_sort() {
         .bind(true)
         .bind(Option::<String>::None)
         .bind(date_time)
-        .bind("BASIC")
+        .bind("Password")
         .bind(Option::<String>::None)
         .bind(Option::<String>::None)
         .execute(&pool)
@@ -613,6 +689,58 @@ async fn router_users_authentication_activity_honors_unpaged_date_time_sort() {
     assert_eq!(
         payload["content"][1]["dateTime"],
         json!("2030-01-02T00:00:00Z")
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_users_me_invalid_basic_auth_does_not_record_failure_activity_yet() {
+    let paths = new_router_fixture("router-users-me-invalid-basic-auth-failure-gap").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for failure-gap auth activity cleanup");
+    sqlx::query("DELETE FROM AUTHENTICATION_ACTIVITY WHERE EMAIL = ?")
+        .bind("admin@example.org")
+        .execute(&pool)
+        .await
+        .expect("existing auth activity rows should delete");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let basic_token = STANDARD.encode("admin@example.org:wrong-password");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v2/users/me")
+                .header(header::AUTHORIZATION, format!("Basic {basic_token}"))
+                .body(Body::empty())
+                .expect("invalid users/me request should build"),
+        )
+        .await
+        .expect("invalid users/me request should complete");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for failure-gap auth activity assertion");
+    let row_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM AUTHENTICATION_ACTIVITY WHERE EMAIL = ?",
+    )
+    .bind("admin@example.org")
+    .fetch_one(&pool)
+    .await
+    .expect("failure-gap auth activity count should be queryable");
+    pool.close().await;
+
+    assert_eq!(
+        row_count, 0,
+        "Rust still leaves authentication failure activity persistence as an explicit parity gap"
     );
 
     cleanup_router_fixture(paths);

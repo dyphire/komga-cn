@@ -21,7 +21,7 @@ pub(super) async fn record_successful_api_key_authentication_by_token(
         user,
         authentication_activity_write_input(
             &authentication_activity_headers_metadata_with_remote_addr(headers, remote_addr),
-            "API_KEY",
+            "ApiKey",
             api_key_id,
             api_key_comment,
         ),

@@ -5,7 +5,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::{Value, json};
 
-use crate::http::identity_access::auth::require_admin;
+use crate::http::identity_access::auth::{require_admin, sync_remember_me_runtime_settings};
 use crate::http::operational::helpers::{
     effective_server_context_path, effective_server_port, invalid_settings_payload,
     is_valid_context_path, multi_source_number, multi_source_string,
@@ -244,6 +244,12 @@ pub(crate) async fn update_server_settings(
             .into_response();
     }
 
+    sync_remember_me_runtime_settings(
+        state.remember_me_runtime_key.as_str(),
+        settings.remember_me_key.as_str(),
+        settings.remember_me_duration_days,
+    );
+
     if let Some(value) = task_pool_size_change
         && let Err(error) = (state.apply_task_pool_size)(value as usize)
     {
@@ -279,7 +285,14 @@ async fn load_operational_settings(
 ) -> Result<OperationalSettings, Response> {
     server_settings_access::load_server_settings(state.settings_store.as_ref())
         .await
-        .map(operational_settings_from_persisted)
+        .map(|settings| {
+            sync_remember_me_runtime_settings(
+                state.remember_me_runtime_key.as_str(),
+                settings.remember_me_key.as_str(),
+                settings.remember_me_duration_days,
+            );
+            operational_settings_from_persisted(settings)
+        })
         .map_err(|error| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,

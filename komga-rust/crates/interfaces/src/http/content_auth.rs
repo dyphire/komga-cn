@@ -2,7 +2,7 @@ use axum::Json;
 use axum::extract::{Extension, Path, Request};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use axum_extra::extract::cookie::{Cookie, SameSite};
+use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
 use serde_json::Value;
 use serde_json::json;
@@ -15,14 +15,14 @@ use crate::http::identity_access::auth::{
     AuthOutcome, AuthUser, PersistedAuthenticationActivity, bootstrap_api_key_user, bootstrap_user,
     bootstrap_user_with_remember_me_cookies, bootstrap_user_with_remember_me_token,
     empty_auth_token_supplied, expired_remember_me_cookie, expired_session_cookie,
-    invalidate_remember_me_token, invalidate_session_token, invalidate_user_sessions,
+    invalidate_session_token, invalidate_user_sessions_for_runtime_key,
     persisted_api_key_comment_exists, persisted_api_key_metadata, persisted_api_key_user,
     persisted_basic_user, persisted_create_api_key, persisted_delete_api_key_by_id,
     persisted_list_api_keys, persisted_list_authentication_activity,
     persisted_record_successful_authentication_activity, persisted_update_password_by_user_id,
-    persisted_users, remember_me_requested, remember_me_token_for_user_with_namespace,
-    remember_me_token_from_headers, require_admin, require_auth, resolved_auth_user,
-    resolved_token, session_token_for_user_with_namespace, session_token_from_headers,
+    persisted_users, remember_me_max_age_seconds, remember_me_requested,
+    remember_me_token_for_user_with_runtime_key, require_admin, require_auth, resolved_auth_user,
+    resolved_token, session_token_for_user_with_runtime_key, session_token_from_headers,
     unauthorized_json_response, user_id, user_is_admin, user_payload_json,
 };
 use crate::http::operational::register_session_expired_event;
@@ -70,15 +70,15 @@ pub(super) async fn users_me(
                 &user,
                 authentication_activity_write_input(
                     &request_metadata,
-                    "API_KEY",
+                    "ApiKey",
                     api_key_id,
                     api_key_comment,
                 ),
             )
             .await;
-            let token = session_token_for_user_with_namespace(
+            let token = session_token_for_user_with_runtime_key(
                 &user,
-                auth_db.remember_me_namespace.as_str(),
+                auth_db.session_runtime_key.as_str(),
             );
             register_discovery_principal(
                 &auth_state,
@@ -92,8 +92,19 @@ pub(super) async fn users_me(
     }
 
     if let Some(user) = resolved_auth_user(&headers) {
+        let remember_me_cookie_present = CookieJar::from_headers(&headers)
+            .get("komga-remember-me")
+            .is_some_and(|cookie| !cookie.value().trim().is_empty());
+        if session_token_from_headers(&headers).is_none() && remember_me_cookie_present {
+            let _ = persisted_record_successful_authentication_activity(
+                auth_db.database_file.as_path(),
+                &user,
+                authentication_activity_write_input(&request_metadata, "RememberMe", None, None),
+            )
+            .await;
+        }
         let token = session_token_from_headers(&headers).unwrap_or_else(|| {
-            session_token_for_user_with_namespace(&user, auth_db.remember_me_namespace.as_str())
+            session_token_for_user_with_runtime_key(&user, auth_db.session_runtime_key.as_str())
         });
         let payload = crate::http::identity_access::auth::user_payload_json(&user);
         register_discovery_principal(&auth_state, &payload, &token);
@@ -103,6 +114,9 @@ pub(super) async fn users_me(
         return bootstrap_user(user, token);
     }
 
+    // Kotlin persists both success and failure authentication events. This HTTP path only aligns
+    // successful-source vocabulary for now; the remaining failure-persistence gap is documented by
+    // the auth-session contract suite instead of being left implicit.
     match persisted_basic_user(&headers, auth_db.database_file.as_path())
         .await
         .unwrap_or(AuthOutcome::Missing)
@@ -111,49 +125,61 @@ pub(super) async fn users_me(
             let _ = persisted_record_successful_authentication_activity(
                 auth_db.database_file.as_path(),
                 &user,
-                authentication_activity_write_input(&request_metadata, "BASIC", None, None),
+                authentication_activity_write_input(&request_metadata, "Password", None, None),
             )
             .await;
-            let Some(remember_me_token) = remember_me_token_for_user_with_namespace(
+            let Some(remember_me_token) = remember_me_token_for_user_with_runtime_key(
                 &user,
-                auth_db.remember_me_namespace.as_str(),
+                auth_db.remember_me_runtime_key.as_str(),
             ) else {
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
             };
+            let remember_me_cookie_max_age_seconds =
+                remember_me_max_age_seconds(auth_db.remember_me_runtime_key.as_str());
             if empty_auth_token_supplied(&headers) {
-                let token = session_token_for_user_with_namespace(
+                let token = session_token_for_user_with_runtime_key(
                     &user,
-                    auth_db.remember_me_namespace.as_str(),
+                    auth_db.session_runtime_key.as_str(),
                 );
                 register_discovery_principal(
                     &auth_state,
                     &crate::http::identity_access::auth::user_payload_json(&user),
                     &token,
                 );
-                bootstrap_user_with_remember_me_token(*user, token, remember_me_token)
+                bootstrap_user_with_remember_me_token(
+                    *user,
+                    token,
+                    remember_me_token,
+                    remember_me_cookie_max_age_seconds,
+                )
             } else {
-                let token = session_token_for_user_with_namespace(
+                let token = session_token_for_user_with_runtime_key(
                     &user,
-                    auth_db.remember_me_namespace.as_str(),
+                    auth_db.session_runtime_key.as_str(),
                 );
                 register_discovery_principal(
                     &auth_state,
                     &crate::http::identity_access::auth::user_payload_json(&user),
                     &token,
                 );
-                bootstrap_user_with_remember_me_cookies(*user, token, remember_me_token)
+                bootstrap_user_with_remember_me_cookies(
+                    *user,
+                    token,
+                    remember_me_token,
+                    remember_me_cookie_max_age_seconds,
+                )
             }
         }
         AuthOutcome::Valid(user) => {
             let _ = persisted_record_successful_authentication_activity(
                 auth_db.database_file.as_path(),
                 &user,
-                authentication_activity_write_input(&request_metadata, "BASIC", None, None),
+                authentication_activity_write_input(&request_metadata, "Password", None, None),
             )
             .await;
-            let token = session_token_for_user_with_namespace(
+            let token = session_token_for_user_with_runtime_key(
                 &user,
-                auth_db.remember_me_namespace.as_str(),
+                auth_db.session_runtime_key.as_str(),
             );
             register_discovery_principal(
                 &auth_state,
@@ -319,7 +345,10 @@ pub(super) async fn users_delete(
 
     match delete_auth_user(auth_db.database_file.as_path(), &target_user_id).await {
         Ok(true) => {
-            invalidate_user_sessions(&target_user_id);
+            invalidate_user_sessions_for_runtime_key(
+                &target_user_id,
+                auth_db.session_runtime_key.as_str(),
+            );
             register_session_expired_event(&state, &target_user_id);
             StatusCode::NO_CONTENT.into_response()
         }
@@ -421,7 +450,10 @@ pub(super) async fn users_update(
         Ok(result) if !result.updated => StatusCode::NOT_FOUND.into_response(),
         Ok(result) => {
             if result.expire_sessions {
-                invalidate_user_sessions(&target_user_id);
+                invalidate_user_sessions_for_runtime_key(
+                    &target_user_id,
+                    auth_db.session_runtime_key.as_str(),
+                );
                 register_session_expired_event(&state, &target_user_id);
             }
             StatusCode::NO_CONTENT.into_response()
@@ -437,9 +469,6 @@ pub(super) async fn logout(headers: HeaderMap) -> Response {
 
     if let Some(token) = session_token_from_headers(&headers) {
         invalidate_session_token(&token);
-    }
-    if let Some(remember_me_token) = remember_me_token_from_headers(&headers) {
-        invalidate_remember_me_token(&remember_me_token);
     }
 
     let mut response = StatusCode::NO_CONTENT.into_response();
@@ -510,7 +539,10 @@ pub(super) async fn users_by_id_password(
     {
         Some(true) => {
             if user_id(&current_user) != target_user_id {
-                invalidate_user_sessions(&target_user_id);
+                invalidate_user_sessions_for_runtime_key(
+                    &target_user_id,
+                    auth_db.session_runtime_key.as_str(),
+                );
                 register_session_expired_event(&state, &target_user_id);
             }
             StatusCode::NO_CONTENT.into_response()

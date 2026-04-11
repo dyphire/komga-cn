@@ -12,9 +12,7 @@ use axum::http::{HeaderValue, header};
 use komga_application::identity_access::AuthUser;
 use komga_domain::discovery::DiscoveryQueryContext;
 
-use crate::http::identity_access::auth::{
-    configure_remember_me_store, session_token_for_user_with_namespace,
-};
+use crate::http::identity_access::auth::session_token_for_user_with_runtime_key;
 use crate::http::state::{
     BookImportSseEvent, LibraryCatalogOperations, OAuth2ClientConfig, OperationalBuildMetadata,
     RemoteCacheEntry, RuntimeState, SseOperationalState, TransientBooksStore,
@@ -142,6 +140,7 @@ where
             bind_address: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)),
             server_context_path: None,
         },
+        remember_me_runtime_key: "settings-test-runtime".to_string(),
         build_metadata: OperationalBuildMetadata {
             version: "0.1.0".to_string(),
             build_time: "2026-04-09T00:00:00Z".to_string(),
@@ -266,7 +265,6 @@ fn test_library_catalog_operations() -> LibraryCatalogOperations {
 }
 
 fn admin_headers(fixture_root: &Path) -> HeaderMap {
-    let namespace = configure_remember_me_store(fixture_root);
     let user = AuthUser {
         id: "admin-user".to_string(),
         email: "admin@example.org".to_string(),
@@ -278,7 +276,8 @@ fn admin_headers(fixture_root: &Path) -> HeaderMap {
         labels_exclude: Vec::new(),
         age_restriction: None,
     };
-    let token = session_token_for_user_with_namespace(&user, &namespace);
+    let token =
+        session_token_for_user_with_runtime_key(&user, fixture_root.to_string_lossy().as_ref());
     let mut headers = HeaderMap::new();
     headers.insert(
         header::HeaderName::from_static("x-auth-token"),

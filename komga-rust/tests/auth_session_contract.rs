@@ -9,6 +9,7 @@ use sqlx::Row;
 use std::sync::{Mutex, OnceLock};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+use tokio::sync::Mutex as AsyncMutex;
 use tower::util::ServiceExt;
 
 #[path = "support/runtime_router_contract_support.rs"]
@@ -28,6 +29,61 @@ mod releases_announcements_client_settings;
 #[test]
 fn auth_session_contract_target_is_registered() {
     assert_required_target_declared("auth/session", "auth_session_contract");
+}
+
+#[tokio::test]
+async fn remember_me_reauthenticates_after_session_expiry() {
+    kobo_and_session_basics::remember_me_and_logout::verify_remember_me_reauthenticates_after_session_expiry().await;
+}
+
+#[tokio::test]
+async fn remember_me_duration_setting_changes_cookie_ttl() {
+    kobo_and_session_basics::remember_me_and_logout::verify_remember_me_duration_setting_changes_cookie_ttl().await;
+}
+
+#[tokio::test]
+async fn remember_me_cold_start_uses_persisted_runtime_settings() {
+    kobo_and_session_basics::remember_me_and_logout::verify_remember_me_cold_start_uses_persisted_runtime_settings().await;
+}
+
+#[tokio::test]
+async fn existing_session_when_exchanging_for_cookies_then_session_is_returned_in_cookies() {
+    kobo_and_session_basics::claims_and_session::verify_login_set_cookie_returns_session_cookie_for_header_session().await;
+}
+
+#[tokio::test]
+async fn api_key_login_records_apikey_source_after_auth_refactor() {
+    koreader_activity_syncpoints::authentication_activity::verify_api_key_login_records_apikey_source_after_auth_refactor().await;
+}
+
+#[tokio::test]
+async fn remember_me_auto_login_records_remember_me_source() {
+    kobo_and_session_basics::remember_me_and_logout::verify_remember_me_auto_login_records_remember_me_source().await;
+}
+
+#[tokio::test]
+async fn oauth2_callback_reuses_komga_session_cookie_after_in_memory_session_refactor() {
+    kobo_and_session_basics::oauth2::verify_oauth2_callback_success_uses_session_cookie_without_auth_token_header().await;
+}
+
+#[tokio::test]
+async fn admin_user_update_expires_sessions_and_emits_session_expired_event() {
+    koreader_activity_syncpoints::remember_me_lifecycle::verify_admin_user_update_expires_sessions_and_emits_session_expired_event().await;
+}
+
+#[tokio::test]
+async fn rotating_remember_me_key_invalidates_existing_cookie() {
+    kobo_and_session_basics::remember_me_and_logout::verify_rotating_remember_me_key_invalidates_existing_cookie().await;
+}
+
+#[tokio::test]
+async fn password_change_invalidates_existing_remember_me_cookie() {
+    koreader_activity_syncpoints::remember_me_lifecycle::verify_password_change_invalidates_existing_remember_me_cookie().await;
+}
+
+#[tokio::test]
+async fn self_password_change_keeps_session_but_invalidates_old_remember_me() {
+    koreader_activity_syncpoints::remember_me_lifecycle::verify_self_password_change_keeps_session_but_invalidates_old_remember_me().await;
 }
 
 async fn seed_syncpoint_user(paths: &RuntimeDbPaths, user_id: &str, email: &str) {
@@ -104,6 +160,11 @@ fn announcements_env_lock() -> &'static Mutex<()> {
 fn kobo_proxy_env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn auth_session_runtime_env_lock() -> &'static AsyncMutex<()> {
+    static LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| AsyncMutex::new(()))
 }
 
 fn restore_env_var(key: &str, value: Option<String>) {
@@ -310,6 +371,21 @@ async fn upsert_server_setting(paths: &RuntimeDbPaths, key: &str, value: &str) {
         .expect("server setting should upsert");
 
     pool.close().await;
+}
+
+async fn load_server_setting(paths: &RuntimeDbPaths, key: &str) -> Option<String> {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("server settings read db should open");
+
+    let row = sqlx::query("SELECT VALUE FROM SERVER_SETTINGS WHERE KEY = ?")
+        .bind(key)
+        .fetch_optional(&pool)
+        .await
+        .expect("server setting should load");
+
+    pool.close().await;
+    row.map(|row| row.get::<String, _>("VALUE"))
 }
 
 async fn seed_kobo_sync_api_key(paths: &RuntimeDbPaths, api_key: &str, user_id: &str) {

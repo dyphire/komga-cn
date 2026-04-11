@@ -6,6 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tantivy::Index;
 use tantivy::schema::{STORED, STRING, Schema};
 
+#[path = "runtime_startup_contract/cli_preflight.rs"]
+mod cli_preflight;
 #[path = "runtime_startup_contract/config_resolution.rs"]
 mod config_resolution;
 #[path = "runtime_startup_contract/lifecycle_logging.rs"]

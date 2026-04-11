@@ -14,6 +14,7 @@ mod startup_policy;
 mod writer_ownership;
 
 pub use cli_args::RuntimeCli;
+pub(crate) use env_config::AdminActionConfig;
 pub use env_config::{OAuth2ClientConfig, RuntimeConfig};
 pub use error::ConfigError;
 pub use profile::{PlatformProfile, RuntimeMode, RuntimeProfile};

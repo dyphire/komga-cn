@@ -13,10 +13,13 @@ use std::path::Path;
 
 use crate::http::access_log;
 use crate::runtime_identity_access::{
-    configure_remember_me_store as configure_session_store,
     invalidate_remember_me_token as invalidate_remember_me_session_token,
     invalidate_session_token as invalidate_active_session_token,
     invalidate_user_sessions as invalidate_all_user_sessions,
+    invalidate_user_sessions_with_runtime_key as invalidate_user_sessions_with_key,
+    remember_me_max_age_seconds as runtime_remember_me_max_age_seconds,
+    sync_remember_me_runtime_database_file as runtime_sync_remember_me_runtime_database_file,
+    sync_remember_me_runtime_settings as runtime_sync_remember_me_runtime_settings,
 };
 
 pub use komga_application::identity_access::{
@@ -35,8 +38,8 @@ pub use response::{
 };
 pub use token::{
     auth_token_user, empty_auth_token_supplied, remember_me_requested,
-    remember_me_token_for_user_with_namespace, remember_me_token_from_headers, resolved_token,
-    session_token_for_user_with_namespace, session_token_from_headers,
+    remember_me_token_for_user_with_runtime_key, remember_me_token_from_headers, resolved_token,
+    session_token_for_user_with_runtime_key, session_token_from_headers,
 };
 pub use user::{
     persisted_api_key_comment_exists, persisted_api_key_metadata, persisted_api_key_user,
@@ -78,12 +81,24 @@ pub fn resolved_auth_user(headers: &HeaderMap) -> Option<AuthUser> {
     auth_user
 }
 
-pub fn configure_remember_me_store(store_root: &Path) -> String {
-    configure_session_store(store_root)
+pub fn sync_remember_me_runtime_settings(runtime_key: &str, key: &str, duration_days: u64) {
+    runtime_sync_remember_me_runtime_settings(runtime_key, key, duration_days);
+}
+
+pub fn sync_remember_me_runtime_database_file(runtime_key: &str, database_file: &Path) {
+    runtime_sync_remember_me_runtime_database_file(runtime_key, database_file);
+}
+
+pub fn remember_me_max_age_seconds(runtime_key: &str) -> u64 {
+    runtime_remember_me_max_age_seconds(runtime_key)
 }
 
 pub fn invalidate_user_sessions(user_id: &str) {
     invalidate_all_user_sessions(user_id)
+}
+
+pub fn invalidate_user_sessions_for_runtime_key(user_id: &str, runtime_key: &str) {
+    invalidate_user_sessions_with_key(user_id, runtime_key)
 }
 
 pub fn invalidate_session_token(token: &str) {

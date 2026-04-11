@@ -22,6 +22,7 @@ reqwest.workspace = true
 rxing.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+rusqlite = { workspace = true, features = ["bundled"] }
 sha2.workspace = true
 sqlx.workspace = true
 tantivy.workspace = true

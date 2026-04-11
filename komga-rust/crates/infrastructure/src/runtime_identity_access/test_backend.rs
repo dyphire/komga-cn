@@ -10,17 +10,32 @@ use super::backend_contract::{
 pub(super) fn compose_test_runtime_identity_access_backend() -> RuntimeIdentityAccessBackend {
     RuntimeIdentityAccessBackend {
         auth_token_user: Arc::new(|headers| infrastructure_auth::auth_token_user(&headers)),
-        session_token_for_user_with_namespace: Arc::new(|user, namespace| {
-            infrastructure_auth::session_token_for_user_with_namespace(&user, &namespace)
+        session_token_for_user_with_runtime_key: Arc::new(|user, runtime_key| {
+            infrastructure_auth::session_token_for_user_with_runtime_key(&user, &runtime_key)
         }),
-        remember_me_token_for_user_with_namespace: Arc::new(|user, namespace| {
-            infrastructure_auth::remember_me_token_for_user_with_namespace(&user, &namespace)
+        remember_me_token_for_user_with_runtime_key: Arc::new(|user, runtime_key| {
+            infrastructure_auth::remember_me_token_for_user_with_runtime_key(&user, &runtime_key)
         }),
-        configure_remember_me_store: Arc::new(|store_root| {
-            infrastructure_auth::configure_remember_me_store(store_root.as_path())
+        sync_remember_me_runtime_database_file: Arc::new(|runtime_key, database_file| {
+            infrastructure_auth::sync_remember_me_runtime_database_file(
+                &runtime_key,
+                database_file.as_path(),
+            )
+        }),
+        sync_remember_me_runtime_settings: Arc::new(|runtime_key, key, duration_days| {
+            infrastructure_auth::sync_remember_me_runtime_settings(
+                &runtime_key,
+                infrastructure_auth::RememberMeRuntimeSettings { key, duration_days },
+            )
+        }),
+        remember_me_max_age_seconds: Arc::new(|runtime_key| {
+            infrastructure_auth::remember_me_max_age_seconds(&runtime_key)
         }),
         invalidate_user_sessions: Arc::new(|user_id| {
             infrastructure_auth::invalidate_user_sessions(&user_id)
+        }),
+        invalidate_user_sessions_with_runtime_key: Arc::new(|user_id, runtime_key| {
+            infrastructure_auth::invalidate_user_sessions_with_runtime_key(&user_id, &runtime_key)
         }),
         invalidate_session_token: Arc::new(|token| {
             infrastructure_auth::invalidate_session_token(&token)

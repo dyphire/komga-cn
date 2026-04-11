@@ -509,7 +509,8 @@ async fn kobo_ping_rejects_requests_without_valid_auth() {
     let auth_db = crate::http::state::AuthDatabaseState {
         database_file: unique_temp_path("komga-device-auth-ping"),
         demo_mode: false,
-        remember_me_namespace: "test".to_string(),
+        session_runtime_key: "test-session".to_string(),
+        remember_me_runtime_key: "test-remember-me".to_string(),
     };
     let response = kobo_ping(
         Extension(auth_db),
@@ -526,7 +527,8 @@ async fn koreader_user_auth_rejects_requests_without_auth() {
     let auth_db = crate::http::state::AuthDatabaseState {
         database_file: unique_temp_path("komga-device-auth-koreader-auth"),
         demo_mode: false,
-        remember_me_namespace: "test".to_string(),
+        session_runtime_key: "test-session".to_string(),
+        remember_me_runtime_key: "test-remember-me".to_string(),
     };
     let response = koreader_user_auth(
         Extension(auth_db),

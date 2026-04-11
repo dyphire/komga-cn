@@ -5,7 +5,10 @@ use std::path::PathBuf;
 
 use super::cli_args::DEFAULT_BIND_ADDRESS;
 use super::error::ConfigError;
-use super::path_resolution::{default_log_file_for_config_dir, resolve_runtime_config_with_env};
+use super::path_resolution::{
+    default_log_file_for_config_dir, resolve_admin_action_config_with_env,
+    resolve_runtime_config_with_env,
+};
 use super::profile::{DEFAULT_CONFIG_DIR, PlatformProfile, RuntimeMode, RuntimeProfile};
 use super::startup_policy::{
     ensure_startup_runtime_layout, validate_single_writer_storage_ownership,
@@ -41,6 +44,11 @@ pub struct RuntimeConfig {
     pub fonts_data_directory: PathBuf,
     pub oauth2_clients: Vec<OAuth2ClientConfig>,
     pub writer_ownership_policy: WriterOwnershipPolicy,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct AdminActionConfig {
+    pub(crate) database_file: PathBuf,
 }
 
 impl RuntimeConfig {
@@ -94,5 +102,27 @@ impl RuntimeConfig {
         env: &BTreeMap<String, String>,
     ) -> Result<(), ConfigError> {
         validate_single_writer_storage_ownership(self, env)
+    }
+}
+
+impl AdminActionConfig {
+    pub(crate) fn from_env() -> Result<Self, ConfigError> {
+        let cli = super::cli_args::RuntimeCli::default();
+        let env = env::vars().collect::<BTreeMap<_, _>>();
+        let config = Self::resolve_with_env(&cli, &env)?;
+        if let Some(parent) = config.database_file.parent() {
+            std::fs::create_dir_all(parent).map_err(|source| ConfigError::DirectoryCreate {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        Ok(config)
+    }
+
+    pub(crate) fn resolve_with_env(
+        cli: &super::cli_args::RuntimeCli,
+        env: &BTreeMap<String, String>,
+    ) -> Result<Self, ConfigError> {
+        resolve_admin_action_config_with_env(cli, env)
     }
 }

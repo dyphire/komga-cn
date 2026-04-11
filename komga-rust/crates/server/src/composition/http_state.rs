@@ -39,7 +39,9 @@ use komga_interfaces::http::discovery::{
     install_persisted_discovery_access,
 };
 use komga_interfaces::http::discovery_auth::DiscoveryAuthState;
-use komga_interfaces::http::identity_access::auth::configure_remember_me_store;
+use komga_interfaces::http::identity_access::auth::{
+    sync_remember_me_runtime_database_file, sync_remember_me_runtime_settings,
+};
 use komga_interfaces::http::state::{
     AuthDatabaseState, BookImportSseEvent, LibraryCatalogOperations, OAuth2ClientConfig,
     OperationalBuildMetadata, OperationalState, ReadProgressState, RemoteCacheEntry,
@@ -92,6 +94,7 @@ use komga_interfaces::{
     OpdsSeriesEntry as InterfacesOpdsSeriesEntry, install_opds_catalog_access,
     install_opds_persisted_access,
 };
+use sha2::Digest;
 use tokio::sync::watch;
 
 use crate::config::{RuntimeConfig, RuntimeProfile as ConfigRuntimeProfile};
@@ -141,12 +144,15 @@ pub fn compose_http_runtime(
     );
     http_state_opds::install_opds_access_backends(config.lucene_data_directory.as_path());
 
-    let remember_me_store_root = config
-        .config_dir
-        .as_deref()
-        .or_else(|| config.database_file.parent())
-        .unwrap_or_else(|| Path::new("."));
-    let remember_me_namespace = configure_remember_me_store(remember_me_store_root);
+    let remember_me_runtime_key = runtime_identity_key(config.database_file.as_path());
+    sync_remember_me_runtime_database_file(
+        remember_me_runtime_key.as_str(),
+        config.database_file.as_path(),
+    );
+    preload_remember_me_runtime_settings(config, remember_me_runtime_key.as_str());
+    // The current registry still derives both token families from the same configured root,
+    // but the HTTP state keeps separate runtime keys so session and remember-me semantics are explicit.
+    let session_runtime_key = remember_me_runtime_key.clone();
 
     let read_progress = ReadProgressState {
         progress_by_token: Arc::new(Mutex::new(HashMap::new())),
@@ -156,10 +162,12 @@ pub fn compose_http_runtime(
     let auth_db = AuthDatabaseState {
         database_file: config.database_file.clone(),
         demo_mode: config.demo_mode,
-        remember_me_namespace,
+        session_runtime_key,
+        remember_me_runtime_key: remember_me_runtime_key.clone(),
     };
     let operational = http_state_operational_state::compose_operational_state(
         config,
+        remember_me_runtime_key.clone(),
         background.task_queue,
         background.task_wakeup,
         shutdown_trigger,
@@ -172,4 +180,29 @@ pub fn compose_http_runtime(
         auth_db,
         operational,
     }
+}
+
+fn runtime_identity_key(database_file: &Path) -> String {
+    let canonical = database_file
+        .canonicalize()
+        .unwrap_or_else(|_| database_file.to_path_buf());
+    let digest = sha2::Sha256::digest(canonical.to_string_lossy().as_bytes());
+    let encoded = digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("auth-runtime-{}", &encoded[..16])
+}
+
+fn preload_remember_me_runtime_settings(config: &RuntimeConfig, remember_me_runtime_key: &str) {
+    let (remember_me_key, remember_me_duration_days) =
+        infrastructure_operational_settings::load_remember_me_runtime_settings(
+            config.database_file.as_path(),
+        )
+        .expect("remember-me startup settings should load");
+    sync_remember_me_runtime_settings(
+        remember_me_runtime_key,
+        remember_me_key.as_str(),
+        remember_me_duration_days,
+    );
 }

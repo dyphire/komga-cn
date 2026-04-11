@@ -177,8 +177,20 @@ pub async fn oauth2_login_code(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
+    let _ = persisted_record_successful_authentication_activity(
+        auth_db.database_file.as_path(),
+        &user,
+        authentication_activity_write_input(
+            &authentication_activity_headers_metadata_with_remote_addr(&headers, None),
+            format!("OAuth2:{}", client_config.client_name).as_str(),
+            None,
+            None,
+        ),
+    )
+    .await;
+
     let session_token =
-        session_token_for_user_with_namespace(&user, auth_db.remember_me_namespace.as_str());
+        session_token_for_user_with_runtime_key(&user, auth_db.session_runtime_key.as_str());
     oauth2_login_success_redirect(session_token.as_str())
 }
 

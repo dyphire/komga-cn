@@ -124,12 +124,15 @@ pub struct AuthenticationActivityWriteInput {
 #[derive(Clone)]
 pub struct RuntimeIdentityAccessBackend {
     pub auth_token_user: Arc<dyn Fn(HeaderMap) -> Option<AuthUser> + Send + Sync>,
-    pub session_token_for_user_with_namespace:
+    pub session_token_for_user_with_runtime_key:
         Arc<dyn Fn(AuthUser, String) -> String + Send + Sync>,
-    pub remember_me_token_for_user_with_namespace:
+    pub remember_me_token_for_user_with_runtime_key:
         Arc<dyn Fn(AuthUser, String) -> Option<String> + Send + Sync>,
-    pub configure_remember_me_store: Arc<dyn Fn(PathBuf) -> String + Send + Sync>,
+    pub sync_remember_me_runtime_database_file: Arc<dyn Fn(String, PathBuf) + Send + Sync>,
+    pub sync_remember_me_runtime_settings: Arc<dyn Fn(String, String, u64) + Send + Sync>,
+    pub remember_me_max_age_seconds: Arc<dyn Fn(String) -> u64 + Send + Sync>,
     pub invalidate_user_sessions: Arc<dyn Fn(String) + Send + Sync>,
+    pub invalidate_user_sessions_with_runtime_key: Arc<dyn Fn(String, String) + Send + Sync>,
     pub invalidate_session_token: Arc<dyn Fn(String) + Send + Sync>,
     pub invalidate_remember_me_token: Arc<dyn Fn(String) + Send + Sync>,
     pub persisted_basic_user:
@@ -327,8 +330,8 @@ fn default_test_backend() -> RuntimeIdentityAccessBackend {
                         .cloned()
                 })
         }),
-        session_token_for_user_with_namespace: Arc::new(|user, namespace| {
-            let token = format!("test-session-{namespace}-{}", user.id);
+        session_token_for_user_with_runtime_key: Arc::new(|user, runtime_key| {
+            let token = format!("test-session-{runtime_key}-{}", user.id);
             test_state()
                 .lock()
                 .expect("runtime identity access test state lock should not be poisoned")
@@ -336,8 +339,8 @@ fn default_test_backend() -> RuntimeIdentityAccessBackend {
                 .insert(token.clone(), user);
             token
         }),
-        remember_me_token_for_user_with_namespace: Arc::new(|user, namespace| {
-            let token = format!("test-remember-me-{namespace}-{}", user.id);
+        remember_me_token_for_user_with_runtime_key: Arc::new(|user, runtime_key| {
+            let token = format!("test-remember-me-{runtime_key}-{}", user.id);
             test_state()
                 .lock()
                 .expect("runtime identity access test state lock should not be poisoned")
@@ -345,10 +348,11 @@ fn default_test_backend() -> RuntimeIdentityAccessBackend {
                 .insert(token.clone(), user);
             Some(token)
         }),
-        configure_remember_me_store: Arc::new(|store_root| {
-            format!("test-remember-me:{}", store_root.display())
-        }),
+        sync_remember_me_runtime_database_file: Arc::new(|_, _| {}),
+        sync_remember_me_runtime_settings: Arc::new(|_, _, _| {}),
+        remember_me_max_age_seconds: Arc::new(|_| 365 * 24 * 60 * 60),
         invalidate_user_sessions: Arc::new(|_| {}),
+        invalidate_user_sessions_with_runtime_key: Arc::new(|_, _| {}),
         invalidate_session_token: Arc::new(|_| {}),
         invalidate_remember_me_token: Arc::new(|_| {}),
         persisted_basic_user: Arc::new(|_, _| Box::pin(async { Some(AuthOutcome::Missing) })),
@@ -432,23 +436,45 @@ pub fn auth_token_user(headers: &HeaderMap) -> Option<AuthUser> {
     (backend().auth_token_user)(headers.clone())
 }
 
-pub fn session_token_for_user_with_namespace(user: &AuthUser, namespace: &str) -> String {
-    (backend().session_token_for_user_with_namespace)(user.clone(), namespace.to_string())
+pub fn session_token_for_user_with_runtime_key(user: &AuthUser, runtime_key: &str) -> String {
+    (backend().session_token_for_user_with_runtime_key)(user.clone(), runtime_key.to_string())
 }
 
-pub fn remember_me_token_for_user_with_namespace(
+pub fn remember_me_token_for_user_with_runtime_key(
     user: &AuthUser,
-    namespace: &str,
+    runtime_key: &str,
 ) -> Option<String> {
-    (backend().remember_me_token_for_user_with_namespace)(user.clone(), namespace.to_string())
+    (backend().remember_me_token_for_user_with_runtime_key)(user.clone(), runtime_key.to_string())
 }
 
-pub fn configure_remember_me_store(store_root: &Path) -> String {
-    (backend().configure_remember_me_store)(store_root.to_path_buf())
+pub fn sync_remember_me_runtime_database_file(runtime_key: &str, database_file: &Path) {
+    (backend().sync_remember_me_runtime_database_file)(
+        runtime_key.to_string(),
+        database_file.to_path_buf(),
+    )
+}
+
+pub fn sync_remember_me_runtime_settings(runtime_key: &str, key: &str, duration_days: u64) {
+    (backend().sync_remember_me_runtime_settings)(
+        runtime_key.to_string(),
+        key.to_string(),
+        duration_days,
+    )
+}
+
+pub fn remember_me_max_age_seconds(runtime_key: &str) -> u64 {
+    (backend().remember_me_max_age_seconds)(runtime_key.to_string())
 }
 
 pub fn invalidate_user_sessions(user_id: &str) {
     (backend().invalidate_user_sessions)(user_id.to_string())
+}
+
+pub fn invalidate_user_sessions_with_runtime_key(user_id: &str, runtime_key: &str) {
+    (backend().invalidate_user_sessions_with_runtime_key)(
+        user_id.to_string(),
+        runtime_key.to_string(),
+    )
 }
 
 pub fn invalidate_session_token(token: &str) {

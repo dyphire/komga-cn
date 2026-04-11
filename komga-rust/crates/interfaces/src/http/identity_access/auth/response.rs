@@ -39,6 +39,7 @@ pub fn bootstrap_user_with_remember_me_cookies(
     user: AuthUser,
     session_token: String,
     remember_me_token: String,
+    remember_me_max_age_seconds: u64,
 ) -> Response {
     let session_cookie = Cookie::build(("KOMGA-SESSION", session_token.clone()))
         .path("/")
@@ -50,7 +51,7 @@ pub fn bootstrap_user_with_remember_me_cookies(
         .path("/")
         .http_only(true)
         .same_site(SameSite::Lax)
-        .max_age(Duration::days(30))
+        .max_age(Duration::seconds(remember_me_max_age_seconds as i64))
         .build()
         .to_string();
 
@@ -74,12 +75,13 @@ pub fn bootstrap_user_with_remember_me_token(
     user: AuthUser,
     token: String,
     remember_me_token: String,
+    remember_me_max_age_seconds: u64,
 ) -> Response {
     let remember_me_cookie = Cookie::build(("komga-remember-me", remember_me_token))
         .path("/")
         .http_only(true)
         .same_site(SameSite::Lax)
-        .max_age(Duration::days(30))
+        .max_age(Duration::seconds(remember_me_max_age_seconds as i64))
         .build()
         .to_string();
 
@@ -141,5 +143,5 @@ pub fn expired_session_cookie() -> HeaderValue {
 }
 
 pub fn expired_remember_me_cookie() -> HeaderValue {
-    HeaderValue::from_static("komga-remember-me=; Path=/; Max-Age=0; HttpOnly")
+    HeaderValue::from_static("komga-remember-me=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
 }
