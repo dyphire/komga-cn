@@ -22,50 +22,46 @@ on:
         description: 'Create Github Release'
         default: true
         type: boolean
-      conveyor-copied-site:
-        description: 'Conveyor copied site'
-        default: true
-        type: boolean
       docker_release:
         description: 'Push Docker images'
         default: true
         type: boolean
-      msstore_release:
-        description: 'Release to the MS Store'
-        default: true
-        type: boolean
+
+permissions:
+  contents: write
+  packages: write
 
 jobs:
   version:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     outputs:
       version_current: ${{ steps.versions.outputs.version_current }}
       version_next: ${{ steps.versions.outputs.version_next }}
-      should_release: ${{ steps.versions.outputs.should_release }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Set up Homebrew
-        id: set-up-homebrew
-        uses: Homebrew/actions/setup-homebrew@master
       - name: Install svu
-        run: brew install --cask caarlos0/tap/svu
+        run: |
+          echo 'deb [trusted=yes] https://apt.fury.io/caarlos0/ /' | sudo tee /etc/apt/sources.list.d/caarlos0.list
+          sudo apt update
+          sudo apt install svu
       - name: Compute next version for release
         run: |
-          echo "VERSION_NEXT=`svu ${{ inputs.bump }}`" | tee -a $GITHUB_ENV
-          echo "VERSION_NEXT_SUFFIX=`svu ${{ inputs.bump }}`" | tee -a $GITHUB_ENV
+          echo "VERSION_NEXT=$(svu ${{ inputs.bump }})" >> "$GITHUB_ENV"
       - name: Set Versions
         id: versions
         run: |
-          echo "version_current=`svu current`" >> $GITHUB_OUTPUT
-          echo "version_next=${{ env.VERSION_NEXT_SUFFIX }}" >> $GITHUB_OUTPUT
-          [[ `svu current` != ${{ env.VERSION_NEXT }} ]] && echo "should_release=true" >> $GITHUB_OUTPUT || echo
+          echo "version_current=$(svu current)" >> "$GITHUB_OUTPUT"
+          echo "version_next=${{ env.VERSION_NEXT }}" >> "$GITHUB_OUTPUT"
 
   release:
     name: Release
     runs-on: ubuntu-latest
     needs: version
+    env:
+      VERSION: ${{ needs.version.outputs.version_next }}
+      IMAGE_NAME: ghcr.io/${{ github.repository }}
     steps:
       - name: Remove unnecessary files
         run: |
@@ -78,11 +74,8 @@ jobs:
 
       - name: Display versions
         run: |
-          echo "Current version: ${{ needs.version.outputs.version_current }}, should release: ${{ needs.version.outputs.version_next }}"
-
-      - name: Update version in gradle.properties
-        if: needs.version.outputs.should_release #only redo if the version changed
-        run: sed -i -e "s/version=.*/version=${{ needs.version.outputs.version_next }}/" gradle.properties
+          echo "Current version: ${{ needs.version.outputs.version_current }}"
+          echo "Release version: ${VERSION}"
 
       - uses: actions/setup-node@v6
         with:
@@ -90,164 +83,105 @@ jobs:
           cache: 'npm'
           cache-dependency-path: komga-webui/package-lock.json
 
-      - name: Setup Java 21
-        uses: actions/setup-java@v5
-        with:
-          java-version: 21
-          java-package: 'jdk'
-          distribution: 'temurin'
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+      - name: Build web UI
+        working-directory: komga-webui
+        run: |
+          npm ci
+          npm run build
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+      - name: Build Rust release binary
+        working-directory: komga-rust
+        run: cargo build --locked --release --bin komga-rust
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v6
-
-      - name: Build
-        run: ./gradlew :komga:prepareThymeLeaf :komga:bootJar :komga-tray:jar
-        env:
-          NODE_OPTIONS: "--max-old-space-size=4096"
-
-      - name: Generate OpenAPI docs
-        if: needs.version.outputs.should_release #only redo if the version changed
-        run: ./gradlew :komga:generateOpenApiDocs
+      - name: Package release artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          release_binary="dist/komga-riir-${VERSION}-linux-amd64.gz"
+          gzip -c "komga-rust/target/release/komga-rust" > "$release_binary"
+          release_sha256=$(sha256sum "$release_binary" | cut -d' ' -f1)
+          echo "RELEASE_BINARY=$release_binary" >> "$GITHUB_ENV"
+          echo "RELEASE_SHA256=$release_sha256" >> "$GITHUB_ENV"
 
       - name: Create release notes
+        env:
+          RELEASE_NOTES: ${{ inputs.release_notes }}
         run: |
-          mkdir release_notes
-          echo -e "${{ inputs.release_notes }}" >> release_notes/release_notes.md
+          set -euo pipefail
+          mkdir -p release_notes
+          printf '%b\n' "$RELEASE_NOTES" > release_notes/release_notes.md
+          release_binary_name=$(basename "$RELEASE_BINARY")
+          {
+            echo ""
+            echo "## Checksums"
+            echo ""
+            printf -- '- `%s`: `%s`\n' "$release_binary_name" "$RELEASE_SHA256"
+          } >> release_notes/release_notes.md
           echo "Release notes:"
           cat release_notes/release_notes.md
           echo ""
 
-      - name: JReleaser Changelog append
-        if: needs.version.outputs.should_release #only redo if the version changed
-        run: ./gradlew jreleaserChangelog
-        env:
-          JRELEASER_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: JReleaser Changelog output
-        if: always() &&  needs.version.outputs.should_release
-        uses: actions/upload-artifact@v7
-        with:
-          name: jreleaser-changelog
-          path: |
-            build/jreleaser/trace.log
-            build/jreleaser/output.properties
-
-      - name: Release commit and push
-        uses: EndBug/add-and-commit@v10
-        if: needs.version.outputs.should_release #only redo if the version changed
-        with:
-          message: 'chore(release): ${{ needs.version.outputs.version_next }} [skip ci]'
-          tag: '${{ needs.version.outputs.version_next }}'
-          default_author: github_actions
-
-      - name: Retrieve the Apple private key and decode it to a file
-        if: inputs.github_release || inputs.conveyor-copied-site
-        env:
-          APPLE_PRIVATE_KEY: ${{ secrets.APPLE_PRIVATE_KEY }}
-        run: |
-          mkdir ./secret
-          echo $APPLE_PRIVATE_KEY | base64 --decode > ./secret/apple_private_key.p8
-
-      - name: Conveyor make copied-site
-        uses: hydraulic-software/conveyor/actions/build@v22.0
-        if: inputs.conveyor-copied-site
-        with:
-          command: --cache-limit=2.0 -f conveyor.ci.conf make copied-site -o ./output/site
-          signing_key: ${{ secrets.CONVEYOR_SIGNING_KEY }}
-          agree_to_license: 1
-        env:
-          APPLE_ISSUER_ID: ${{ secrets.APPLE_ISSUER_ID }}
-          APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
-          AWS_S3_BUCKET: ${{ secrets.B2_BUCKET }}
-          AWS_S3_ENDPOINT: 'https://s3.us-east-005.backblazeb2.com'
-          AWS_ACCESS_KEY_ID: ${{ secrets.B2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.B2_SECRET_ACCESS_KEY }}
-      - name: Upload Conveyor log
-        if: always() && inputs.conveyor-copied-site
-        uses: actions/upload-artifact@v7
-        with:
-          name: conveyor-make-copied-site
-          path: ~/.cache/hydraulic/conveyor/logs/log.latest.txt
-
-      - name: JReleaser Release
+      - name: Create or update GitHub Release
         if: inputs.github_release
-        run: ./gradlew jreleaserRelease
         env:
-          JRELEASER_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: JReleaser Release output
-        if: always() && inputs.github_release
-        uses: actions/upload-artifact@v7
-        with:
-          name: jreleaser-release
-          path: |
-            build/jreleaser/trace.log
-            build/jreleaser/output.properties
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "${VERSION}" >/dev/null 2>&1; then
+            gh release edit "${VERSION}" --title "${VERSION}" --notes-file release_notes/release_notes.md
+            gh release upload "${VERSION}" "$RELEASE_BINARY" --clobber
+          else
+            gh release create "${VERSION}" "$RELEASE_BINARY" --target "${GITHUB_SHA}" --title "${VERSION}" --notes-file release_notes/release_notes.md
+          fi
 
-      # Sometimes the workflow will fail because it's out of disk space
-      - name: Cleanup Conveyor output
-        run: rm -fr ./output
-
-      - name: JReleaser Publish
+      - name: Set up QEMU
         if: inputs.docker_release
-        run: ./gradlew jreleaserPublish
-        env:
-          JRELEASER_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: JReleaser Publish output
-        if: always() && inputs.docker_release
-        uses: actions/upload-artifact@v7
-        with:
-          name: jreleaser-publish
-          path: |
-            build/jreleaser/trace.log
-            build/jreleaser/output.properties
+        uses: docker/setup-qemu-action@v4
 
-      - name: Conveyor - publish to Microsoft Store
-        uses: hydraulic-software/conveyor/actions/build@v22.0
-        if: inputs.msstore_release
-        with:
-          command: --cache-limit=2.0 -f conveyor.msstore.ci.conf make ms-store-release -o ./output/msstore
-          signing_key: ${{ secrets.CONVEYOR_SIGNING_KEY }}
-          agree_to_license: 1
-        env:
-          CONVEYOR_MSSTORE_CLIENT_ID: ${{ secrets.CONVEYOR_MSSTORE_CLIENT_ID }}
-          CONVEYOR_MSSTORE_CLIENT_SECRET: ${{ secrets.CONVEYOR_MSSTORE_CLIENT_SECRET }}
-          CONVEYOR_MSSTORE_TENANT_ID: ${{ secrets.CONVEYOR_MSSTORE_TENANT_ID }}
-          AWS_S3_BUCKET: ${{ secrets.B2_BUCKET }}
-          AWS_S3_ENDPOINT: 'https://s3.us-east-005.backblazeb2.com'
-          AWS_ACCESS_KEY_ID: ${{ secrets.B2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.B2_SECRET_ACCESS_KEY }}
-      - name: Upload Conveyor log
-        if: always() && inputs.msstore_release
-        uses: actions/upload-artifact@v7
-        with:
-          name: conveyor-ms-store-release
-          path: ~/.cache/hydraulic/conveyor/logs/log.latest.txt
+      - name: Set up Docker Buildx
+        if: inputs.docker_release
+        uses: docker/setup-buildx-action@v4
 
-  dispatch:
-    needs: release
-    runs-on: ubuntu-latest
-    steps:
-      - name: Repository Dispatch
-        uses: peter-evans/repository-dispatch@v4
+      - name: Login to GitHub Container Registry
+        if: inputs.docker_release
+        uses: docker/login-action@v4
         with:
-          token: ${{ secrets.REPO_ACCESS_TOKEN }}
-          repository: gotson/komga-website
-          event-type: komga-release
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare image metadata
+        if: inputs.docker_release
+        id: image
+        run: |
+          set -euo pipefail
+          {
+            echo "tags<<EOF"
+            echo "${IMAGE_NAME}:${VERSION}"
+            if [[ "${VERSION}" != *-* ]]; then
+              echo "${IMAGE_NAME}:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "build_time=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+          echo "git_commit_time=$(git log -1 --format=%cI)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Docker image
+        if: inputs.docker_release
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./komga-rust/docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.image.outputs.tags }}
+          build-args: |
+            BUILD_TIME=${{ steps.image.outputs.build_time }}
+            GIT_BRANCH=${{ github.ref_name }}
+            GIT_COMMIT_ID=${{ github.sha }}
+            GIT_COMMIT_TIME=${{ steps.image.outputs.git_commit_time }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

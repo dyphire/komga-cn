@@ -3,6 +3,9 @@ name = "komga-interfaces"
 version = "0.1.0"
 edition.workspace = true
 
+[features]
+allow-missing-webui-dist = []
+
 [dependencies]
 axum.workspace = true
 axum-extra.workspace = true

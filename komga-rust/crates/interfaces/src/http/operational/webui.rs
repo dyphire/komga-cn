@@ -85,7 +85,7 @@ fn serve_webui_asset(webui_path: &str, resource_base_url: &str) -> Response {
     let Some(asset_path) = resolve_embedded_asset_path(webui_path) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let Some(asset) = WebUiAssets::get(asset_path.as_str()) else {
+    let Some(asset_data) = WebUiAssets::get(asset_path.as_str()) else {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             [(header::CONTENT_TYPE, "application/json")],
@@ -115,7 +115,7 @@ fn serve_webui_asset(webui_path: &str, resource_base_url: &str) -> Response {
             .into_response();
     }
 
-    (response_headers, asset.data).into_response()
+    (response_headers, asset_data).into_response()
 }
 
 fn request_scoped_resource_base_url(headers: &HeaderMap) -> String {
@@ -137,10 +137,7 @@ fn cached_rewritten_index_html(resource_base_url: &str) -> Bytes {
     }
 
     let index_html = WebUiAssets::get("index.html").expect("embedded index.html should exist");
-    let rewritten = Bytes::from(rewrite_index_html(
-        index_html.data.as_ref(),
-        resource_base_url,
-    ));
+    let rewritten = Bytes::from(rewrite_index_html(index_html.as_ref(), resource_base_url));
     let mut cache = REWRITTEN_INDEX_HTML_CACHE
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -327,14 +324,20 @@ fn content_type_for(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        INDEX_HTML_CACHE_MAX_ENTRIES, IndexHtmlCache, WebUiAssets, cached_rewritten_index_html,
-        content_type_for, is_runtime_owned_prefix, request_scoped_resource_base_url,
-        resolve_embedded_asset_path, rewrite_index_html, serve_webui_asset,
+        INDEX_HTML_CACHE_MAX_ENTRIES, IndexHtmlCache, content_type_for, is_runtime_owned_prefix,
+        request_scoped_resource_base_url, resolve_embedded_asset_path, serve_webui_asset,
     };
-    use axum::body::{Bytes, to_bytes};
-    use axum::http::{HeaderMap, StatusCode, header};
+    #[cfg(webui_dist_present)]
+    use super::{WebUiAssets, cached_rewritten_index_html, rewrite_index_html};
+    use axum::body::Bytes;
+    #[cfg(webui_dist_present)]
+    use axum::body::to_bytes;
+    #[cfg(webui_dist_present)]
+    use axum::http::header;
+    use axum::http::{HeaderMap, StatusCode};
     use std::path::Path;
 
+    #[cfg(webui_dist_present)]
     #[tokio::test]
     async fn webui_entrypoint_serves_embedded_index_html() {
         let response = serve_webui_asset("", "/");
@@ -353,6 +356,7 @@ mod tests {
         assert_eq!(response_body.as_ref(), index_html.as_slice());
     }
 
+    #[cfg(webui_dist_present)]
     #[tokio::test]
     async fn extensionless_spa_routes_fall_back_to_embedded_index_html() {
         let response = serve_webui_asset("series/123", "/");
@@ -371,6 +375,7 @@ mod tests {
         assert_eq!(response_body.as_ref(), index_html.as_slice());
     }
 
+    #[cfg(webui_dist_present)]
     #[tokio::test]
     async fn root_level_embedded_assets_are_served_from_embed_storage() {
         for asset_path in ["manifest.json", "android-chrome-192x192.png"] {
@@ -393,10 +398,11 @@ mod tests {
             let embedded_asset =
                 WebUiAssets::get(asset_path).expect("embedded asset should exist in rust-embed");
 
-            assert_eq!(response_body.as_ref(), embedded_asset.data.as_ref());
+            assert_eq!(response_body.as_ref(), embedded_asset.as_ref());
         }
     }
 
+    #[cfg(webui_dist_present)]
     #[tokio::test]
     async fn html_entry_assets_are_served_with_no_store_cache_control() {
         for asset_path in ["", "index.html", "manifest.json"] {
@@ -413,6 +419,7 @@ mod tests {
         }
     }
 
+    #[cfg(webui_dist_present)]
     #[tokio::test]
     async fn versioned_static_assets_are_served_with_long_lived_public_cache_control() {
         let static_asset = WebUiAssets::iter()
@@ -476,6 +483,7 @@ mod tests {
         assert_eq!(request_scoped_resource_base_url(&unsafe_headers), "/");
     }
 
+    #[cfg(webui_dist_present)]
     #[test]
     fn cached_rewritten_index_html_matches_direct_rewrite_for_same_prefix() {
         let expected = rewritten_embedded_index_html("/komga/");
@@ -509,8 +517,9 @@ mod tests {
         assert!(cache.get("/fresh/").is_some());
     }
 
+    #[cfg(webui_dist_present)]
     fn rewritten_embedded_index_html(resource_base_url: &str) -> Vec<u8> {
         let index_html = WebUiAssets::get("index.html").expect("embedded index.html should exist");
-        rewrite_index_html(index_html.data.as_ref(), resource_base_url)
+        rewrite_index_html(index_html.as_ref(), resource_base_url)
     }
 }

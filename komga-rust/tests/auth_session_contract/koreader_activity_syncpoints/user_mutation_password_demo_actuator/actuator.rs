@@ -314,7 +314,7 @@ async fn router_actuator_logfile_returns_plaintext_body_for_admin() {
 }
 
 #[test]
-fn router_access_log_skips_actuator_embedded_asset_and_sse_noise_routes() {
+fn router_access_log_skips_actuator_and_sse_noise_routes() {
     let paths = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -375,18 +375,6 @@ fn router_access_log_skips_actuator_embedded_asset_and_sse_noise_routes() {
                 .await
                 .expect("actuator logfile noise request should complete")
                 .status();
-            let asset = app
-                .clone()
-                .oneshot(
-                    Request::builder()
-                        .method("GET")
-                        .uri("/manifest.json")
-                        .body(Body::empty())
-                        .expect("embedded asset noise request should build"),
-                )
-                .await
-                .expect("embedded asset noise request should complete")
-                .status();
             let sse = app
                 .oneshot(
                     Request::builder()
@@ -400,19 +388,18 @@ fn router_access_log_skips_actuator_embedded_asset_and_sse_noise_routes() {
                 .expect("sse noise request should complete")
                 .status();
 
-            (health, logfile, asset, sse)
+            (health, logfile, sse)
         }
     });
 
     assert_eq!(statuses.0, StatusCode::OK);
     assert_eq!(statuses.1, StatusCode::OK);
     assert_eq!(statuses.2, StatusCode::OK);
-    assert_eq!(statuses.3, StatusCode::OK);
     let events = parse_json_log_lines(&logs);
     let access_events = matching_event_fields(&events, "http_access");
     assert!(
         access_events.is_empty(),
-        "actuator, embedded assets, and SSE should be skipped by access logging noise policy: {logs}"
+        "actuator and SSE should be skipped by access logging noise policy: {logs}"
     );
 
     cleanup_router_fixture(paths);

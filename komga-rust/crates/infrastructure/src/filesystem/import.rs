@@ -161,13 +161,13 @@ async fn import_book_impl(
 
     let imported_book_id = scanner_book_id_for_path(&destination_file);
     if let Some(upgrade_book_id) = entry.upgrade_book_id.as_deref() {
-        let _ = migrate_upgraded_book_identity(
+        migrate_upgraded_book_identity(
             database_file,
             upgrade_book_id,
             imported_book_id.as_str(),
             &destination_file,
         )
-        .await;
+        .await?;
     }
 
     let _ = persist_book_imported_event(

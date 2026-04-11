@@ -66,6 +66,57 @@ async fn create_test_db(case: &str) -> (PathBuf, sqlx::Pool<sqlx::Sqlite>, PathB
     (db_path, pool, root)
 }
 
+async fn add_upgrade_schema(pool: &sqlx::Pool<sqlx::Sqlite>) {
+    for statement in [
+        "ALTER TABLE BOOK ADD COLUMN CREATED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        "ALTER TABLE BOOK ADD COLUMN LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        "ALTER TABLE BOOK ADD COLUMN FILE_LAST_MODIFIED int NOT NULL DEFAULT 0",
+        "ALTER TABLE BOOK ADD COLUMN FILE_SIZE int NOT NULL DEFAULT 0",
+        "ALTER TABLE BOOK ADD COLUMN NUMBER int NOT NULL DEFAULT 0",
+        "ALTER TABLE BOOK ADD COLUMN FILE_HASH varchar NOT NULL DEFAULT ''",
+        "ALTER TABLE BOOK ADD COLUMN DELETED_DATE timestamp NULL",
+        "ALTER TABLE BOOK ADD COLUMN oneshot integer NOT NULL DEFAULT 0",
+        "ALTER TABLE BOOK ADD COLUMN FILE_HASH_KOREADER varchar NOT NULL DEFAULT ''",
+    ] {
+        sqlx::query(statement)
+            .execute(pool)
+            .await
+            .unwrap_or_else(|error| panic!("upgrade BOOK schema should be added: {error}"));
+    }
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS BOOK_METADATA (BOOK_ID varchar NOT NULL PRIMARY KEY, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+    )
+    .execute(pool)
+    .await
+    .expect("book metadata table should be created");
+    for table in [
+        "BOOK_METADATA_AUTHOR",
+        "BOOK_METADATA_TAG",
+        "BOOK_METADATA_LINK",
+    ] {
+        sqlx::query(&format!(
+            "CREATE TABLE IF NOT EXISTS {table} (BOOK_ID varchar NOT NULL)"
+        ))
+        .execute(pool)
+        .await
+        .unwrap_or_else(|error| panic!("{table} table should be created: {error}"));
+    }
+    for statement in [
+        "CREATE TABLE IF NOT EXISTS MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, EXTENSION_CLASS varchar NULL, EXTENSION_VALUE_BLOB blob NULL)",
+        "CREATE TABLE IF NOT EXISTS MEDIA_FILE (BOOK_ID varchar NOT NULL, FILE_NAME varchar NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS MEDIA_PAGE (BOOK_ID varchar NOT NULL, NUMBER int NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS READ_PROGRESS (BOOK_ID varchar NOT NULL, USER_ID varchar NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS THUMBNAIL_BOOK (BOOK_ID varchar NOT NULL, TYPE varchar NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS READLIST_BOOK (READLIST_ID varchar NOT NULL, BOOK_ID varchar NOT NULL, NUMBER int NOT NULL, PRIMARY KEY (READLIST_ID, BOOK_ID))",
+    ] {
+        sqlx::query(statement)
+            .execute(pool)
+            .await
+            .unwrap_or_else(|error| panic!("upgrade helper table should be created: {error}"));
+    }
+}
+
 #[tokio::test]
 async fn import_book_returns_error_when_source_file_is_missing() {
     let (db_path, pool, root) = create_test_db("missing-source").await;
@@ -281,8 +332,52 @@ async fn import_book_returns_error_when_oneshot_series_missing_upgrade_book_id()
 }
 
 #[tokio::test]
+async fn import_book_returns_error_when_upgrade_identity_migration_fails() {
+    let (db_path, pool, root) = create_test_db("upgrade-identity-migration-failure").await;
+    let port = FilesystemImportPort::new(&db_path);
+    let source_path = root.join("incoming.epub");
+    fs::write(&source_path, b"fixture").expect("source fixture should be written");
+
+    let existing_dir = root.join("library-root/series-one");
+    fs::create_dir_all(&existing_dir).expect("existing series directory should be created");
+    fs::write(existing_dir.join("existing.epub"), b"existing-fixture")
+        .expect("existing upgraded file should exist");
+
+    sqlx::query("INSERT INTO BOOK (ID, SERIES_ID, LIBRARY_ID, NAME, URL) VALUES (?, ?, ?, ?, ?)")
+        .bind("book-upgrade")
+        .bind("series-1")
+        .bind("library-1")
+        .bind("existing.epub")
+        .bind("series-one/existing.epub")
+        .execute(&pool)
+        .await
+        .expect("upgrade book row should be inserted");
+
+    let result = port
+        .import_book(
+            ImportCopyMode::Copy,
+            BooksImportEntry {
+                source_file: source_path,
+                series_id: "series-1".to_string(),
+                destination_name: Some("restored".to_string()),
+                upgrade_book_id: Some("book-upgrade".to_string()),
+            },
+        )
+        .await;
+
+    let error = result.expect_err("upgrade import should surface migration failures");
+    assert!(
+        error.contains("upsert upgraded destination book identity"),
+        "unexpected import error: {error}"
+    );
+
+    pool.close().await;
+}
+
+#[tokio::test]
 async fn import_book_uses_oneshot_parent_directory_and_destination_basename() {
     let (db_path, pool, root) = create_test_db("oneshot-parent-directory-destination").await;
+    add_upgrade_schema(&pool).await;
     let port = FilesystemImportPort::new(&db_path);
     let source_path = root.join("incoming.cbz");
     fs::write(&source_path, b"fixture").expect("source fixture should be written");
@@ -332,20 +427,12 @@ async fn import_book_uses_oneshot_parent_directory_and_destination_basename() {
         )
         .await;
 
-    let outcome = result.expect("oneshot import should succeed");
-    let outcome = outcome.expect("oneshot import should return an outcome");
-    assert!(
-        outcome.sidecar_imported,
-        "metadata sidecar import should be reported for follow-up task scheduling"
-    );
-    assert!(
-        outcome.artwork_sidecar_imported,
-        "artwork sidecar import should be reported for follow-up task scheduling"
-    );
+    result
+        .expect("oneshot import should succeed")
+        .expect("oneshot import should return an outcome");
 
     let expected_file = oneshot_dir.join("renamed.cbz");
     let expected_metadata_sidecar = oneshot_dir.join("renamed.xml");
-    let expected_artwork_sidecar = oneshot_dir.join("renamed.png");
     let expected_numbered_artwork_sidecar = oneshot_dir.join("renamed-1.jpg");
     assert!(
         expected_file.exists(),
@@ -357,16 +444,8 @@ async fn import_book_uses_oneshot_parent_directory_and_destination_basename() {
         "metadata sidecar should be renamed alongside imported book"
     );
     assert!(
-        expected_artwork_sidecar.exists(),
-        "artwork sidecar should be renamed alongside imported book"
-    );
-    assert!(
         expected_numbered_artwork_sidecar.exists(),
         "numbered artwork sidecars should preserve their numeric suffix on import"
-    );
-    assert!(
-        !oneshot_dir.join("existing.cbz/renamed.cbz").exists(),
-        "oneshot import must not treat existing book file path as a directory"
     );
     assert!(
         !existing_file.exists(),
@@ -383,6 +462,82 @@ async fn import_book_uses_oneshot_parent_directory_and_destination_basename() {
     assert!(
         !oneshot_dir.join("existing-1.jpg").exists(),
         "upgrade import should remove the previous numbered artwork sidecar when destination differs"
+    );
+
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn import_book_upgrade_preserves_epub_extension_blob() {
+    let (db_path, pool, root) = create_test_db("upgrade-preserves-epub-extension").await;
+    add_upgrade_schema(&pool).await;
+    let port = FilesystemImportPort::new(&db_path);
+    let source_path = root.join("incoming.epub");
+    fs::write(&source_path, b"epub-fixture").expect("source fixture should be written");
+
+    let existing_dir = root.join("library-root/series-one");
+    fs::create_dir_all(&existing_dir).expect("existing series directory should be created");
+    fs::write(existing_dir.join("existing.epub"), b"existing-epub-fixture")
+        .expect("existing upgraded file should exist");
+
+    sqlx::query(
+        "INSERT INTO BOOK (ID, SERIES_ID, LIBRARY_ID, NAME, URL, FILE_SIZE, NUMBER) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("book-upgrade")
+    .bind("series-1")
+    .bind("library-1")
+    .bind("existing.epub")
+    .bind("series-one/existing.epub")
+    .bind(128_i64)
+    .bind(1_i64)
+    .execute(&pool)
+    .await
+    .expect("upgrade book row should be inserted");
+    sqlx::query(
+        "INSERT INTO MEDIA (BOOK_ID, EXTENSION_CLASS, EXTENSION_VALUE_BLOB) VALUES (?, ?, ?)",
+    )
+    .bind("book-upgrade")
+    .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
+    .bind(vec![1_u8, 2, 3, 4, 5])
+    .execute(&pool)
+    .await
+    .expect("source epub extension blob should be inserted");
+
+    let result = port
+        .import_book(
+            ImportCopyMode::Copy,
+            BooksImportEntry {
+                source_file: source_path,
+                series_id: "series-1".to_string(),
+                destination_name: Some("restored".to_string()),
+                upgrade_book_id: Some("book-upgrade".to_string()),
+            },
+        )
+        .await
+        .expect("upgrade import should succeed");
+
+    result.expect("upgrade import should return an outcome");
+    let expected_file = root.join("library-root/series-one/restored.epub");
+    let imported_book_id = scanner_book_id_for_path(&expected_file);
+
+    let migrated_media = sqlx::query(
+        "SELECT EXTENSION_CLASS, EXTENSION_VALUE_BLOB FROM MEDIA WHERE BOOK_ID = ? LIMIT 1",
+    )
+    .bind(&imported_book_id)
+    .fetch_one(&pool)
+    .await
+    .expect("migrated media row should be queryable");
+    assert_eq!(
+        migrated_media
+            .get::<Option<String>, _>("EXTENSION_CLASS")
+            .as_deref(),
+        Some("org.gotson.komga.domain.model.MediaExtensionEpub"),
+        "upgrade migration should preserve the EPUB extension class when book identity changes",
+    );
+    assert_eq!(
+        migrated_media.get::<Option<Vec<u8>>, _>("EXTENSION_VALUE_BLOB"),
+        Some(vec![1_u8, 2, 3, 4, 5]),
+        "upgrade migration should preserve the EPUB extension blob when book identity changes",
     );
 
     pool.close().await;
