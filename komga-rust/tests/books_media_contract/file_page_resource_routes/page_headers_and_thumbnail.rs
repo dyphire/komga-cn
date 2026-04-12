@@ -9,6 +9,10 @@ fn solid_png_bytes(rgb: [u8; 3]) -> Vec<u8> {
     cursor.into_inner()
 }
 
+fn legacy_file_url(path: &std::path::Path) -> String {
+    format!("file:{}", path.to_string_lossy().replace(' ', "%20"))
+}
+
 async fn seed_router_persisted_two_page_cbz_book(
     paths: &RuntimeDbPaths,
     book_id: &str,
@@ -106,6 +110,36 @@ async fn seed_router_persisted_two_page_cbz_book(
         .expect("persisted cbz fixture should finish successfully");
 
     (first_page, second_page)
+}
+
+async fn rewrite_router_book_to_legacy_file_urls(
+    paths: &RuntimeDbPaths,
+    book_id: &str,
+    file_name: &str,
+) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("legacy file url rewrite db should open");
+
+    let archive_path = paths.config_dir.join("books").join(file_name);
+    let library_root = legacy_file_url(paths.config_dir.as_path());
+    let book_url = legacy_file_url(archive_path.as_path());
+
+    sqlx::query("UPDATE LIBRARY SET ROOT = ? WHERE ID = ?")
+        .bind(&library_root)
+        .bind("library-1")
+        .execute(&pool)
+        .await
+        .expect("legacy library root should update");
+
+    sqlx::query("UPDATE BOOK SET URL = ? WHERE ID = ?")
+        .bind(&book_url)
+        .bind(book_id)
+        .execute(&pool)
+        .await
+        .expect("legacy book url should update");
+
+    pool.close().await;
 }
 
 #[tokio::test]
@@ -243,6 +277,63 @@ async fn router_persisted_cbz_pages_follow_kotlin_one_based_numbering() {
         invalid_payload.get("error"),
         Some(&Value::String("Page number does not exist".to_string()))
     );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_persisted_cbz_page_route_reads_legacy_file_urls() {
+    let paths = new_router_fixture("router-persisted-cbz-legacy-file-url-page-route").await;
+    seed_router_contract_data(&paths).await;
+    let (_, second_page) = seed_router_persisted_two_page_cbz_book(
+        &paths,
+        "book-cbz-legacy-url-1",
+        "series-1",
+        "persisted legacy pages.cbz",
+        "Persisted Legacy URL Book",
+    )
+    .await;
+    rewrite_router_book_to_legacy_file_urls(
+        &paths,
+        "book-cbz-legacy-url-1",
+        "persisted legacy pages.cbz",
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let pages_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-cbz-legacy-url-1/pages")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("legacy file url pages request should build"),
+        )
+        .await
+        .expect("legacy file url pages request should complete");
+    assert_eq!(pages_response.status(), StatusCode::OK);
+
+    let page_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-cbz-legacy-url-1/pages/2")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("legacy file url single page request should build"),
+        )
+        .await
+        .expect("legacy file url single page request should complete");
+
+    assert_eq!(page_response.status(), StatusCode::OK);
+    let body = to_bytes(page_response.into_body(), usize::MAX)
+        .await
+        .expect("legacy file url single page body should read");
+    assert_eq!(body.as_ref(), second_page.as_slice());
 
     cleanup_router_fixture(paths);
 }

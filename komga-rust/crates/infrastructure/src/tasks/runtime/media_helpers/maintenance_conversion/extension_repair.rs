@@ -3,6 +3,7 @@ use crate::tasks::{
     PersistedExtensionRepairTarget, load_book_for_extension_repair,
     load_books_for_extension_repair, persist_book_extension_repair,
 };
+use crate::{resolve_library_item_path, resolve_stored_path};
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
@@ -83,7 +84,8 @@ pub(in crate::task_queue) fn repair_extension(
         return Ok(());
     };
 
-    let source_path = PathBuf::from(&library_root).join(&book_url);
+    let resolved_library_root = resolve_stored_path(&library_root);
+    let source_path = resolve_library_item_path(&library_root, &book_url);
     if !source_path.exists() {
         return Ok(());
     }
@@ -119,7 +121,7 @@ pub(in crate::task_queue) fn repair_extension(
     })?;
 
     let destination_url =
-        normalize_library_relative_url(&PathBuf::from(&library_root), &destination_path)?;
+        normalize_library_relative_url(&resolved_library_root, &destination_path)?;
     let file_size = fs::metadata(&destination_path)
         .map(|metadata| metadata.len() as i64)
         .unwrap_or_default();

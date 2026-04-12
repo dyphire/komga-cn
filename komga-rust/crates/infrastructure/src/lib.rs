@@ -19,6 +19,7 @@ pub mod opds_persisted_access;
 pub mod operational_metrics_access;
 pub mod operational_settings_access;
 pub mod page_hashes_access;
+mod persisted_paths;
 mod rar_support;
 pub mod read_models;
 pub mod runtime_identity_access;
@@ -30,6 +31,10 @@ pub mod task_queue;
 pub mod tasks;
 
 pub use context::{SqlitePersistenceConnection, SqlitePersistenceContext, SqliteUnitOfWork};
+pub(crate) use persisted_paths::{
+    resolve_library_item_path, resolve_optional_library_item_path, resolve_rooted_path,
+    resolve_stored_path,
+};
 pub use search::{
     SearchDocument, SearchEntityType, SearchError, SearchEvent, SearchIndexLifecycle,
     SearchQueryLifecycle, SearchStartupLifecycle, decide_startup_lifecycle, prepare_for_rebuild,

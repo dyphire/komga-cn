@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use sqlx::{Row, SqlitePool};
 
+use crate::resolve_library_item_path;
 use crate::sqlite::connect_pool;
 
 #[derive(Clone, Debug)]
@@ -345,7 +346,10 @@ pub fn load_book_file_path(database_file: &Path, book_id: &str) -> Result<Option
             })?;
 
             Ok(row.map(|row| {
-                PathBuf::from(row.get::<String, _>("ROOT")).join(row.get::<String, _>("URL"))
+                resolve_library_item_path(
+                    row.get::<String, _>("ROOT").as_str(),
+                    row.get::<String, _>("URL").as_str(),
+                )
             }))
         })
     })
@@ -846,8 +850,10 @@ pub fn load_book_archive_source(
             .map_err(|error| format!("failed to load archive source for '{book_id}': {error}"))?;
 
             Ok(row.map(|row| PersistedBookArchiveSource {
-                file_path: PathBuf::from(row.get::<String, _>("LIBRARY_ROOT"))
-                    .join(row.get::<String, _>("BOOK_URL")),
+                file_path: resolve_library_item_path(
+                    row.get::<String, _>("LIBRARY_ROOT").as_str(),
+                    row.get::<String, _>("BOOK_URL").as_str(),
+                ),
                 series_id: row.get::<String, _>("SERIES_ID"),
                 file_last_modified: row.get::<i64, _>("FILE_LAST_MODIFIED"),
                 media_type: row.get::<String, _>("MEDIA_TYPE"),

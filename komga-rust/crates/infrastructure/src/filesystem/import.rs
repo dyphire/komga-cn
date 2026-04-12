@@ -12,6 +12,7 @@ use komga_application::media_assets::{
 use sqlx::Row;
 
 use crate::sqlite::connect_pool;
+use crate::{resolve_library_item_path, resolve_rooted_path, resolve_stored_path};
 
 #[derive(Clone, Debug)]
 pub struct FilesystemImportPort {
@@ -105,8 +106,10 @@ async fn import_book_impl(
             ));
         }
 
-        let loaded_upgrade_file = PathBuf::from(&loaded_upgrade_target.library_root)
-            .join(&loaded_upgrade_target.book_url);
+        let loaded_upgrade_file = resolve_library_item_path(
+            &loaded_upgrade_target.library_root,
+            &loaded_upgrade_target.book_url,
+        );
         upgrade_sidecars = collect_book_sidecar_paths(&loaded_upgrade_file)?;
         upgrade_file = Some(loaded_upgrade_file);
     }
@@ -161,11 +164,12 @@ async fn import_book_impl(
 
     let imported_book_id = scanner_book_id_for_path(&destination_file);
     if let Some(upgrade_book_id) = entry.upgrade_book_id.as_deref() {
+        let resolved_library_root = resolve_stored_path(&target.library_root);
         migrate_upgraded_book_identity(
             database_file,
             upgrade_book_id,
             imported_book_id.as_str(),
-            Path::new(&target.library_root),
+            resolved_library_root.as_path(),
             &destination_file,
         )
         .await?;
@@ -289,17 +293,18 @@ async fn load_import_upgrade_book_target(
 }
 
 fn resolve_import_destination_dir(target: &ImportSeriesTarget) -> PathBuf {
-    let mut destination_dir = PathBuf::from(&target.library_root);
+    let root = resolve_stored_path(&target.library_root);
     if target.oneshot {
-        if let Some(parent) = Path::new(&target.series_url).parent()
+        let series_path = resolve_rooted_path(root.as_path(), &target.series_url);
+        if let Some(parent) = series_path.parent()
             && !parent.as_os_str().is_empty()
         {
-            destination_dir.push(parent);
+            return parent.to_path_buf();
         }
+        return root;
     } else {
-        destination_dir.push(&target.series_url);
+        return resolve_rooted_path(root.as_path(), &target.series_url);
     }
-    destination_dir
 }
 
 async fn load_library_roots(database_file: &Path) -> Result<Vec<PathBuf>, String> {
@@ -318,7 +323,7 @@ async fn load_library_roots(database_file: &Path) -> Result<Vec<PathBuf>, String
 
     Ok(rows
         .into_iter()
-        .map(|row| PathBuf::from(row.get::<String, _>("ROOT")))
+        .map(|row| resolve_stored_path(row.get::<String, _>("ROOT").as_str()))
         .collect())
 }
 

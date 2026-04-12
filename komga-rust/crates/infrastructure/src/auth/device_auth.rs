@@ -4,11 +4,11 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
-use reqwest::Url;
 use serde_json::Value;
 use sqlx::Row;
 
 use crate::sqlite::connect_pool;
+use crate::{resolve_library_item_path, resolve_optional_library_item_path};
 
 #[derive(Clone)]
 pub struct PersistedBookMediaFile {
@@ -203,7 +203,7 @@ pub async fn load_book_media_file(
                 &file_name,
                 row.get::<String, _>("MEDIA_TYPE").as_str(),
             ),
-            file_path: PathBuf::from(library_root).join(book_url),
+            file_path: resolve_library_item_path(library_root.as_str(), book_url.as_str()),
         }
     }))
 }
@@ -242,10 +242,7 @@ pub async fn load_thumbnail_by_id(
         return Ok(None);
     };
     let library_root = row.get::<Option<String>, _>("LIBRARY_ROOT");
-    let sidecar_path = Url::parse(&url)
-        .ok()
-        .and_then(|parsed| parsed.to_file_path().ok())
-        .or_else(|| library_root.map(|root| PathBuf::from(root).join(&url)));
+    let sidecar_path = resolve_optional_library_item_path(library_root.as_deref(), &url);
     let Some(sidecar_path) = sidecar_path else {
         return Ok(None);
     };

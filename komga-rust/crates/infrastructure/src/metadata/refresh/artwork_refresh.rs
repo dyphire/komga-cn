@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use komga_application::media_assets::{
     BookMediaRecord, BookPageRecord, book_media_is_epub, book_media_is_pdf,
@@ -8,6 +8,7 @@ use komga_application::media_assets::{
 use sqlx::Row;
 
 use crate::filesystem::{load_archive_page_row, load_epub_cover_bytes, resolve_book_page_bytes};
+use crate::{resolve_library_item_path, resolve_stored_path};
 
 use super::artwork_support::{
     MarkSelectedPreference, book_thumbnail_housekeeping, import_book_local_artwork_thumbnail,
@@ -62,7 +63,8 @@ pub fn refresh_book_local_artwork(database_file: &Path, book_id: &str) -> Result
                     return Ok(());
                 }
                 let book_url = book_row.get::<String, _>("BOOK_URL");
-                let library_root = PathBuf::from(book_row.get::<String, _>("LIBRARY_ROOT"));
+                let library_root =
+                    resolve_stored_path(book_row.get::<String, _>("LIBRARY_ROOT").as_str());
                 for (index, artwork_url) in load_book_local_artwork_urls(&library_root, &book_url)?
                     .into_iter()
                     .enumerate()
@@ -154,11 +156,14 @@ pub fn generate_book_thumbnail(database_file: &Path, book_id: &str) -> Result<()
             };
 
             let library_root = media_row.get::<String, _>("LIBRARY_ROOT");
+            let resolved_library_root = resolve_stored_path(&library_root);
             let media = BookMediaRecord {
                 library_id: media_row.get::<String, _>("LIBRARY_ID"),
                 media_type: media_row.get::<String, _>("MEDIA_TYPE"),
-                file_path: PathBuf::from(&library_root)
-                    .join(media_row.get::<String, _>("BOOK_URL")),
+                file_path: resolve_library_item_path(
+                    &library_root,
+                    media_row.get::<String, _>("BOOK_URL").as_str(),
+                ),
                 file_name: media_row.get::<String, _>("FILE_NAME"),
                 page_count: media_row.get::<i64, _>("PAGE_COUNT").max(0) as u64,
             };
@@ -336,7 +341,8 @@ pub fn generate_book_thumbnail(database_file: &Path, book_id: &str) -> Result<()
             })?;
 
             if !should_select {
-                book_thumbnail_housekeeping(&mut tx, &book_id, Path::new(&library_root)).await?;
+                book_thumbnail_housekeeping(&mut tx, &book_id, resolved_library_root.as_path())
+                    .await?;
             }
 
             tx.commit()
@@ -386,7 +392,8 @@ pub fn refresh_series_local_artwork(database_file: &Path, series_id: &str) -> Re
                     return Ok(());
                 }
 
-                let library_root = PathBuf::from(series_row.get::<String, _>("LIBRARY_ROOT"));
+                let library_root =
+                    resolve_stored_path(series_row.get::<String, _>("LIBRARY_ROOT").as_str());
                 for (index, artwork_url) in
                     load_series_local_artwork_urls(&library_root, &series_url)?
                         .into_iter()

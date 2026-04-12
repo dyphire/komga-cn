@@ -4,6 +4,7 @@ use crate::tasks::{
     load_books_to_convert, load_library_maintenance_flags, persist_book_conversion,
     persist_book_conversion_events, persist_book_page_hashes,
 };
+use crate::{resolve_library_item_path, resolve_stored_path};
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
 
@@ -92,7 +93,8 @@ pub(in crate::task_queue) fn convert_book(
         return Ok(());
     }
 
-    let source_path = PathBuf::from(&source.library_root).join(&source.book_url);
+    let library_root = resolve_stored_path(&source.library_root);
+    let source_path = resolve_library_item_path(&source.library_root, &source.book_url);
     if !source_path.exists() {
         return Ok(());
     }
@@ -143,10 +145,7 @@ pub(in crate::task_queue) fn convert_book(
             })?;
         }
 
-        let destination_url = normalize_library_relative_url(
-            &PathBuf::from(&source.library_root),
-            &destination_path,
-        )?;
+        let destination_url = normalize_library_relative_url(&library_root, &destination_path)?;
         let destination_metadata = fs::metadata(&destination_path).map_err(|error| {
             TaskExecutionError::runtime(format!(
                 "failed to read converted CBZ metadata for '{book_id}' ('{}'): {error}",

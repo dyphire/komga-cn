@@ -7,6 +7,7 @@ use pdfium_render::prelude::*;
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
 use crate::load_pdfium;
+use crate::resolve_rooted_path;
 
 pub(super) async fn book_thumbnail_housekeeping(
     tx: &mut Transaction<'_, Sqlite>,
@@ -38,12 +39,7 @@ pub(super) async fn book_thumbnail_housekeeping(
             .as_ref()
             .is_some_and(|thumbnail| !thumbnail.is_empty())
             || thumbnail_url.as_deref().is_some_and(|url| {
-                let path = Path::new(url);
-                let resolved = if path.is_absolute() {
-                    path.to_path_buf()
-                } else {
-                    library_root.join(path)
-                };
+                let resolved = resolve_rooted_path(library_root, url);
                 resolved.exists()
             });
 
@@ -179,7 +175,7 @@ pub(super) fn load_book_local_artwork_urls(
     library_root: &Path,
     book_url: &str,
 ) -> Result<Vec<String>, String> {
-    let book_path = library_root.join(book_url);
+    let book_path = resolve_rooted_path(library_root, book_url);
     let Some(book_dir) = book_path.parent() else {
         return Ok(Vec::new());
     };
@@ -235,7 +231,7 @@ pub(super) fn load_series_local_artwork_urls(
     library_root: &Path,
     series_url: &str,
 ) -> Result<Vec<String>, String> {
-    let series_path = library_root.join(series_url);
+    let series_path = resolve_rooted_path(library_root, series_url);
     let mut artwork_urls = Vec::new();
     let entries = fs::read_dir(&series_path).map_err(|error| {
         format!(

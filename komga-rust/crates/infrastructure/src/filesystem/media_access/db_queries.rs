@@ -6,6 +6,7 @@ use komga_application::media_assets::{
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
 
+use crate::resolve_library_item_path;
 use crate::sqlite::connect_pool;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -66,8 +67,10 @@ pub async fn load_persisted_book_media(
     Ok(row.map(|row| BookMediaRecord {
         library_id: row.get::<String, _>("LIBRARY_ID"),
         media_type: row.get::<String, _>("MEDIA_TYPE"),
-        file_path: PathBuf::from(row.get::<String, _>("LIBRARY_ROOT"))
-            .join(row.get::<String, _>("BOOK_URL")),
+        file_path: resolve_library_item_path(
+            row.get::<String, _>("LIBRARY_ROOT").as_str(),
+            row.get::<String, _>("BOOK_URL").as_str(),
+        ),
         file_name: row.get::<String, _>("FILE_NAME"),
         page_count: row.get::<i64, _>("PAGE_COUNT").max(0) as u64,
     }))
@@ -181,8 +184,10 @@ pub async fn load_persisted_series_thumbnail_media(
     Ok(row.map(|row| BookMediaRecord {
         library_id: String::new(),
         media_type: row.get::<String, _>("MEDIA_TYPE"),
-        file_path: PathBuf::from(row.get::<String, _>("LIBRARY_ROOT"))
-            .join(row.get::<String, _>("BOOK_URL")),
+        file_path: resolve_library_item_path(
+            row.get::<String, _>("LIBRARY_ROOT").as_str(),
+            row.get::<String, _>("BOOK_URL").as_str(),
+        ),
         file_name: row.get::<String, _>("FILE_NAME"),
         page_count: 0,
     }))
@@ -591,7 +596,10 @@ pub async fn load_readlist_archive_entries(
             let file_name = row.get::<String, _>("FILE_NAME");
             let book_url = row.get::<String, _>("BOOK_URL");
             let library_root = row.get::<String, _>("LIBRARY_ROOT");
-            (file_name, PathBuf::from(library_root).join(book_url))
+            (
+                file_name,
+                resolve_library_item_path(library_root.as_str(), book_url.as_str()),
+            )
         })
         .collect())
 }
@@ -642,7 +650,10 @@ pub async fn load_series_archive_entries(
             let file_name = row.get::<String, _>("FILE_NAME");
             let book_url = row.get::<String, _>("BOOK_URL");
             let library_root = row.get::<String, _>("LIBRARY_ROOT");
-            (file_name, PathBuf::from(library_root).join(book_url))
+            (
+                file_name,
+                resolve_library_item_path(library_root.as_str(), book_url.as_str()),
+            )
         })
         .collect::<Vec<_>>();
     Ok(Some((series_title, library_id, entries)))

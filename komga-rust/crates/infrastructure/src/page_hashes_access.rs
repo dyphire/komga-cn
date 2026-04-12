@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use komga_application::media_assets::{
     BookMediaRecord, BookPageRecord, book_media_is_pdf, book_media_is_single_image,
@@ -15,6 +15,7 @@ use crate::filesystem::{
     load_persisted_book_page_row, render_book_page_thumbnail, resolve_book_page_bytes,
 };
 use crate::rar_support::read_rar_entry_bytes;
+use crate::resolve_library_item_path;
 use crate::sqlite::connect_pool;
 use crate::sqlite::read_models::{
     load_page_hash_delete_targets as load_page_hash_delete_targets_model,
@@ -317,7 +318,8 @@ async fn load_unknown_page_hash_source_bytes(
         return Ok(None);
     }
 
-    let source_path = PathBuf::from(source.library_root).join(source.book_url);
+    let source_path =
+        resolve_library_item_path(source.library_root.as_str(), source.book_url.as_str());
     Ok(
         read_unknown_thumbnail_bytes(&source_path, &source.file_name)
             .map(|bytes| (bytes, source.media_type)),
@@ -353,6 +355,7 @@ mod tests {
     use super::*;
     use std::fs::{self, File};
     use std::io::Write;
+    use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
     use zip::CompressionMethod;
     use zip::write::SimpleFileOptions;
@@ -425,6 +428,10 @@ mod tests {
         }
 
         writer.finish().expect("zip file should be finished");
+    }
+
+    fn legacy_file_url(path: &Path) -> String {
+        format!("file:{}", path.to_string_lossy().replace(' ', "%20"))
     }
 
     #[tokio::test]
@@ -537,6 +544,52 @@ mod tests {
             .await
             .expect("thumbnail lookup should succeed")
             .expect("thumbnail should exist");
+
+        assert_eq!(thumbnail.bytes, expected);
+        assert_eq!(thumbnail.media_type, "image/png");
+    }
+
+    #[tokio::test]
+    async fn load_page_hash_thumbnail_reads_zip_entry_when_source_uses_legacy_file_urls() {
+        let (db_path, pool) = create_test_db("zip-fallback-legacy-file-url").await;
+        let root = db_path.parent().expect("db path should have a parent");
+        let library_root = root.join("library root");
+        fs::create_dir_all(&library_root).expect("legacy library root should be created");
+
+        let archive_path = library_root.join("book with spaces.cbz");
+        let expected = vec![7_u8, 7, 4, 2];
+        write_zip_archive(&archive_path, &[("cover.png", &expected)]);
+
+        sqlx::query("INSERT INTO LIBRARY (ID, ROOT) VALUES (?, ?)")
+            .bind("library-1")
+            .bind(legacy_file_url(&library_root))
+            .execute(&pool)
+            .await
+            .expect("legacy library row should be inserted");
+        sqlx::query("INSERT INTO BOOK (ID, URL, LIBRARY_ID) VALUES (?, ?, ?)")
+            .bind("book-legacy")
+            .bind(legacy_file_url(&archive_path))
+            .bind("library-1")
+            .execute(&pool)
+            .await
+            .expect("legacy book row should be inserted");
+        sqlx::query(
+            "INSERT INTO MEDIA_PAGE (BOOK_ID, NUMBER, FILE_HASH, FILE_NAME, MEDIA_TYPE, FILE_SIZE) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind("book-legacy")
+        .bind(0_i64)
+        .bind("hash-legacy")
+        .bind("cover.png")
+        .bind("image/png")
+        .bind(4_i64)
+        .execute(&pool)
+        .await
+        .expect("legacy media page row should be inserted");
+
+        let thumbnail = load_page_hash_thumbnail(db_path.as_path(), "hash-legacy")
+            .await
+            .expect("legacy thumbnail lookup should succeed")
+            .expect("legacy thumbnail should exist");
 
         assert_eq!(thumbnail.bytes, expected);
         assert_eq!(thumbnail.media_type, "image/png");

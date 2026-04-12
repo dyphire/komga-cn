@@ -6,6 +6,7 @@ use komga_application::media_assets::{BookMediaRecord, book_media_is_epub};
 use sqlx::{Row, SqlitePool};
 
 use crate::filesystem::load_epub_package_document;
+use crate::resolve_rooted_path;
 
 use super::SeriesMetadataImportPatch;
 use super::epub::extract_epub_series_patch;
@@ -83,7 +84,10 @@ async fn load_series_books_for_refresh(
             media: BookMediaRecord {
                 library_id: row.get::<String, _>("LIBRARY_ID"),
                 media_type: row.get::<String, _>("MEDIA_TYPE"),
-                file_path: library_root.join(row.get::<String, _>("BOOK_URL")),
+                file_path: resolve_rooted_path(
+                    library_root,
+                    row.get::<String, _>("BOOK_URL").as_str(),
+                ),
                 file_name: row.get::<String, _>("FILE_NAME"),
                 page_count: row.get::<i64, _>("PAGE_COUNT").max(0) as u64,
             },
@@ -561,7 +565,7 @@ pub(super) async fn apply_mylar_series_import(
         return Ok(());
     }
 
-    let series_dir = library_root.join(series_url);
+    let series_dir = resolve_rooted_path(library_root, series_url);
     let Some(patch) = load_mylar_series_patch(series_dir.as_path()) else {
         return Ok(());
     };

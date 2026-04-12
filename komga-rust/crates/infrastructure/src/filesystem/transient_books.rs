@@ -12,6 +12,7 @@ use zip::ZipArchive;
 
 use crate::load_pdfium;
 use crate::rar_support::{detect_rar_media_type, list_rar_entries, read_rar_entry_bytes};
+use crate::resolve_stored_path;
 use crate::sqlite::connect_pool;
 
 #[derive(Clone, Debug)]
@@ -102,7 +103,7 @@ pub async fn validate_transient_scan_root(database_file: &Path, root: &Path) -> 
         .await
         .map_err(|error| format!("transient scan library roots query failed: {error}"))?
         .into_iter()
-        .map(|row| PathBuf::from(row.get::<String, _>("ROOT")))
+        .map(|row| resolve_stored_path(row.get::<String, _>("ROOT").as_str()))
         .collect::<Vec<_>>();
 
     for library_root in library_roots {

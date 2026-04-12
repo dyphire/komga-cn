@@ -6,6 +6,7 @@ use crate::sql::task_queue::{
     DELETE_BOOK_DEPENDENCY_SQL, DELETE_SERIES_BOOK_DEPENDENCY_SQL, DELETE_SERIES_DEPENDENCY_SQL,
 };
 use crate::sqlite::connect_pool;
+use crate::{resolve_library_item_path, resolve_optional_library_item_path};
 
 #[derive(Clone, Debug)]
 pub struct PersistedDeleteBookDecision {
@@ -110,13 +111,17 @@ pub fn load_book_delete_work(
 
             Ok(row.map(|row| PersistedDeleteBookWork {
                 series_id: row.get::<String, _>("SERIES_ID"),
-                book_path: PathBuf::from(row.get::<String, _>("LIBRARY_ROOT"))
-                    .join(row.get::<String, _>("BOOK_URL")),
+                book_path: resolve_library_item_path(
+                    row.get::<String, _>("LIBRARY_ROOT").as_str(),
+                    row.get::<String, _>("BOOK_URL").as_str(),
+                ),
                 sidecar_thumbnail_paths: sidecar_rows
                     .iter()
-                    .map(|sidecar| {
-                        PathBuf::from(sidecar.get::<String, _>("LIBRARY_ROOT"))
-                            .join(sidecar.get::<String, _>("URL"))
+                    .filter_map(|sidecar| {
+                        resolve_optional_library_item_path(
+                            Some(sidecar.get::<String, _>("LIBRARY_ROOT").as_str()),
+                            sidecar.get::<String, _>("URL").as_str(),
+                        )
                     })
                     .collect(),
             }))
@@ -318,19 +323,25 @@ pub fn load_series_delete_work(
                 book_paths: rows
                     .iter()
                     .map(|row| {
-                        PathBuf::from(row.get::<String, _>("LIBRARY_ROOT"))
-                            .join(row.get::<String, _>("BOOK_URL"))
+                        resolve_library_item_path(
+                            row.get::<String, _>("LIBRARY_ROOT").as_str(),
+                            row.get::<String, _>("BOOK_URL").as_str(),
+                        )
                     })
                     .collect(),
                 series_path: series_row.map(|row| {
-                    PathBuf::from(row.get::<String, _>("LIBRARY_ROOT"))
-                        .join(row.get::<String, _>("SERIES_URL"))
+                    resolve_library_item_path(
+                        row.get::<String, _>("LIBRARY_ROOT").as_str(),
+                        row.get::<String, _>("SERIES_URL").as_str(),
+                    )
                 }),
                 sidecar_thumbnail_paths: sidecar_rows
                     .iter()
-                    .map(|row| {
-                        PathBuf::from(row.get::<String, _>("LIBRARY_ROOT"))
-                            .join(row.get::<String, _>("URL"))
+                    .filter_map(|row| {
+                        resolve_optional_library_item_path(
+                            Some(row.get::<String, _>("LIBRARY_ROOT").as_str()),
+                            row.get::<String, _>("URL").as_str(),
+                        )
                     })
                     .collect(),
             })

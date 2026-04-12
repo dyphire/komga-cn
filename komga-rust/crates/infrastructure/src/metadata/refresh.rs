@@ -18,6 +18,7 @@ use crate::filesystem::{
 };
 use crate::load_pdfium;
 use crate::sqlite::connect_pool;
+use crate::{resolve_library_item_path, resolve_stored_path};
 
 #[path = "refresh/artwork_refresh.rs"]
 mod artwork_refresh;
@@ -110,7 +111,7 @@ pub fn refresh_book_metadata(
                 if let Some(sidecar_url) =
                     load_sidecar_url_for_parent(&pool, &book_url, true).await?
                 {
-                    let sidecar_path = PathBuf::from(library_root).join(sidecar_url);
+                    let sidecar_path = resolve_library_item_path(&library_root, &sidecar_url);
                     if let Ok(xml) = fs::read_to_string(&sidecar_path)
                         && comicinfo_provider_matches_capabilities(&capabilities)
                     {
@@ -521,8 +522,10 @@ async fn load_book_media_for_refresh(
     Ok(row.map(|row| BookMediaRecord {
         library_id: row.get::<String, _>("LIBRARY_ID"),
         media_type: row.get::<String, _>("MEDIA_TYPE"),
-        file_path: PathBuf::from(row.get::<String, _>("LIBRARY_ROOT"))
-            .join(row.get::<String, _>("BOOK_URL")),
+        file_path: resolve_library_item_path(
+            row.get::<String, _>("LIBRARY_ROOT").as_str(),
+            row.get::<String, _>("BOOK_URL").as_str(),
+        ),
         file_name: row.get::<String, _>("FILE_NAME"),
         page_count: row.get::<i64, _>("PAGE_COUNT").max(0) as u64,
     }))
@@ -903,6 +906,7 @@ pub fn refresh_series_metadata(database_file: &Path, series_id: &str) -> Result<
             if let Some(series_row) = &series_row {
                 let series_url = series_row.get::<String, _>("SERIES_URL");
                 let library_root = series_row.get::<String, _>("LIBRARY_ROOT");
+                let resolved_library_root = resolve_stored_path(&library_root);
                 let oneshot = series_row.get::<i64, _>("ONESHOT") != 0;
                 let import_comicinfo_series = series_row.get::<bool, _>("IMPORT_COMICINFO_SERIES");
                 let import_comicinfo_collection =
@@ -915,7 +919,7 @@ pub fn refresh_series_metadata(database_file: &Path, series_id: &str) -> Result<
                 apply_series_metadata_from_book_imports(
                     &pool,
                     &series_id,
-                    Path::new(&library_root),
+                    resolved_library_root.as_path(),
                     import_comicinfo_series,
                     import_comicinfo_collection,
                     import_comicinfo_series_append_volume,
@@ -926,7 +930,7 @@ pub fn refresh_series_metadata(database_file: &Path, series_id: &str) -> Result<
                 apply_mylar_series_import(
                     &pool,
                     &series_id,
-                    Path::new(&library_root),
+                    resolved_library_root.as_path(),
                     &series_url,
                     import_mylar_series,
                     oneshot,
