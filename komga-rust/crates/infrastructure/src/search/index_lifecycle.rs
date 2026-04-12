@@ -6,15 +6,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use super::analyzer_profiles::{
-    SearchFieldClass, build_query_time_analyzer, index_tokenizer_profile_name,
-    normalize_multilingual_width, register_search_analyzer_profiles, search_analyzer_version,
-    search_text_field_options,
+    build_query_time_analyzer, index_tokenizer_profile_name, normalize_multilingual_width,
+    register_search_analyzer_profiles, search_analyzer_version, search_text_field_options,
+    SearchFieldClass,
 };
 use tantivy::collector::TopDocs;
 use tantivy::doc;
 use tantivy::query::{BooleanQuery, Occur, QueryParser, TermQuery};
 use tantivy::schema::{
-    Field, FieldType, IndexRecordOption, STORED, STRING, Schema, TantivyDocument, Value,
+    Field, FieldType, IndexRecordOption, Schema, TantivyDocument, Value, STORED, STRING,
 };
 use tantivy::tokenizer::TokenizerManager;
 use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, Term};
@@ -350,7 +350,15 @@ impl SearchFields {
 }
 
 pub fn decide_startup_lifecycle(index_dir: &Path) -> Result<SearchStartupLifecycle, SearchError> {
-    prepare_index_directory(index_dir)?;
+    match prepare_index_directory(index_dir) {
+        Ok(()) => {}
+        Err(SearchError::UnsafeLuceneIndexOwnership(_)) => {
+            // Startup is the one place where Rust is allowed to take over a legacy Kotlin Lucene
+            // directory by wiping it first, because the server has already decided it owns writes.
+            return Ok(SearchStartupLifecycle::RebuildRequired);
+        }
+        Err(error) => return Err(error),
+    }
 
     if !index_dir.join("meta.json").exists() {
         return Ok(SearchStartupLifecycle::RebuildRequired);

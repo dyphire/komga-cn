@@ -6,10 +6,11 @@ use crate::search::analyzer_profiles::query_tokenizer_profile_name;
 use tantivy::schema::{FieldType, IndexRecordOption};
 
 use super::{
-    ANALYZER_VERSION_MARKER_FILE, SearchDocument, SearchEntityType, SearchError, SearchFieldClass,
-    SearchFieldEntry, SearchIndexLifecycle, SearchQueryLifecycle, SearchStartupLifecycle,
     build_query_tokenizer_manager, build_schema, decide_startup_lifecycle,
     index_tokenizer_profile_name, retained_query_field_contracts, search_analyzer_version,
+    SearchDocument, SearchEntityType, SearchError, SearchFieldClass, SearchFieldEntry,
+    SearchIndexLifecycle, SearchQueryLifecycle, SearchStartupLifecycle,
+    ANALYZER_VERSION_MARKER_FILE,
 };
 
 #[test]
@@ -31,18 +32,15 @@ fn bootstrap_rejects_lucene_artifacts() {
 }
 
 #[test]
-fn startup_lifecycle_rejects_lucene_artifacts() {
-    let index_dir = temp_index_dir("startup-lifecycle-rejects-lucene");
+fn startup_lifecycle_marks_legacy_lucene_artifacts_rebuild_required() {
+    let index_dir = temp_index_dir("startup-lifecycle-rebuilds-legacy-lucene");
     std::fs::write(index_dir.join("segments.gen"), b"owned").expect("write ownership marker");
 
     let result = decide_startup_lifecycle(index_dir.as_path());
 
-    assert!(
-        matches!(
-            result,
-            Err(SearchError::UnsafeLuceneIndexOwnership(path)) if path == index_dir
-        ),
-        "startup lifecycle must fail-closed when Lucene ownership artifacts are present",
+    assert_eq!(
+        result.expect("startup lifecycle should wipe-and-rebuild legacy Lucene state"),
+        SearchStartupLifecycle::RebuildRequired,
     );
 
     let _ = std::fs::remove_dir_all(index_dir);
