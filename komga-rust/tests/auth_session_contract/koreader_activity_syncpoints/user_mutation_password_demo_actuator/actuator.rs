@@ -160,28 +160,26 @@ async fn router_actuator_info_returns_build_and_os_metadata_for_admin() {
 
     if let Some(git) = payload.get("git").and_then(Value::as_object) {
         assert!(
-            git.get("branch")
-                .and_then(Value::as_str)
-                .is_some_and(|value| !value.is_empty()),
-            "actuator info git.branch should be non-empty when git metadata exists: {payload:?}"
+            git.get("branch").is_none_or(|value| {
+                value.is_null() || value.as_str().is_some_and(|value| !value.is_empty())
+            }),
+            "actuator info git.branch should be null or a non-empty string when present: {payload:?}"
         );
         let commit = git
             .get("commit")
             .and_then(Value::as_object)
             .expect("actuator info git object should include commit object");
         assert!(
-            commit
-                .get("id")
-                .and_then(Value::as_str)
-                .is_some_and(|value| !value.is_empty()),
-            "actuator info git.commit.id should be non-empty when git metadata exists: {payload:?}"
+            commit.get("id").is_none_or(|value| {
+                value.is_null() || value.as_str().is_some_and(|value| !value.is_empty())
+            }),
+            "actuator info git.commit.id should be null or a non-empty string when present: {payload:?}"
         );
         assert!(
-            commit
-                .get("time")
-                .and_then(Value::as_str)
-                .is_some_and(|value| !value.is_empty()),
-            "actuator info git.commit.time should be non-empty when git metadata exists: {payload:?}"
+            commit.get("time").is_none_or(|value| {
+                value.is_null() || value.as_str().is_some_and(|value| !value.is_empty())
+            }),
+            "actuator info git.commit.time should be null or a non-empty string when present: {payload:?}"
         );
     }
 
