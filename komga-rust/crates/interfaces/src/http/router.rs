@@ -226,6 +226,10 @@ pub fn build_router(
             get(discovery::series_collections_route),
         )
         .route(
+            "/api/v1/series/{series_id}/books",
+            get(discovery::series_books_route),
+        )
+        .route(
             "/api/v1/series/{series_id}/thumbnail",
             get(media_assets::series_thumbnail),
         )

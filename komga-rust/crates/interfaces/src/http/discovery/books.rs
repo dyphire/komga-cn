@@ -1,11 +1,113 @@
 use super::*;
+use crate::http::discovery::detail::{
+    load_persisted_series_resource, resolve_series_id_for_persisted,
+};
 use crate::http::discovery_auth::{AgeRestrictionKind, QueryRestrictions};
+use crate::http::discovery_auth::{DetailContentContext, DetailResourceContext};
+use crate::http::helpers::detail_access_denial_response;
 use icu::collator::{
     Collator,
     options::{CollatorOptions, Strength},
 };
 use icu::locale::locale;
 use komga_domain::discovery::PageEnvelope;
+
+fn optional_query_bool(query: &str, key: &str) -> Result<Option<bool>, ()> {
+    match query_value(query, key) {
+        Some(value) if value.eq_ignore_ascii_case("true") => Ok(Some(true)),
+        Some(value) if value.eq_ignore_ascii_case("false") => Ok(Some(false)),
+        Some(_) => Err(()),
+        None => Ok(None),
+    }
+}
+
+fn decoded_query_values(query: &str, key: &str) -> Option<Vec<String>> {
+    let values = query_values(query, key)
+        .into_iter()
+        .map(|value| decode_query_component(value.trim()))
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+
+    (!values.is_empty()).then_some(values)
+}
+
+fn legacy_books_boolean_condition(kind: &str, value: bool) -> Value {
+    json!({
+        "type": kind,
+        "operator": if value { "isTrue" } else { "isFalse" },
+    })
+}
+
+fn legacy_books_any_of_condition(kind: &str, values: Vec<String>) -> Value {
+    if values.len() == 1 {
+        return json!({
+            "type": kind,
+            "operator": "is",
+            "value": values.into_iter().next().unwrap_or_default(),
+        });
+    }
+
+    json!({
+        "type": "AnyOfBook",
+        "conditions": values
+            .into_iter()
+            .map(|value| json!({
+                "type": kind,
+                "operator": "is",
+                "value": value,
+            }))
+            .collect::<Vec<_>>(),
+    })
+}
+
+fn legacy_series_books_payload(series_id: &str, uri: &Uri) -> Result<Value, StatusCode> {
+    let query = uri.query().unwrap_or_default();
+    let mut conditions = vec![json!({
+        "type": "SeriesId",
+        "operator": "is",
+        "value": series_id,
+    })];
+
+    for (key, condition_type) in [
+        ("tag", "Tag"),
+        ("read_status", "ReadStatus"),
+        ("media_status", "MediaStatus"),
+        ("author", "Author"),
+    ] {
+        if let Some(values) = decoded_query_values(query, key) {
+            conditions.push(legacy_books_any_of_condition(condition_type, values));
+        }
+    }
+
+    let deleted = optional_query_bool(query, "deleted").map_err(|()| StatusCode::BAD_REQUEST)?;
+    if let Some(deleted) = deleted {
+        conditions.push(legacy_books_boolean_condition("Deleted", deleted));
+    }
+
+    Ok(json!({
+        "condition": {
+            "type": "AllOfBook",
+            "conditions": conditions,
+        }
+    }))
+}
+
+fn legacy_series_books_uri(uri: &Uri) -> Result<Uri, StatusCode> {
+    let query = uri.query().unwrap_or_default();
+    if !query_values(query, "sort").is_empty() {
+        return Ok(uri.clone());
+    }
+
+    let path_and_query = if query.is_empty() {
+        format!("{}?sort=number,asc", uri.path())
+    } else {
+        format!("{}?{}&sort=number,asc", uri.path(), query)
+    };
+
+    path_and_query
+        .parse::<Uri>()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
 
 #[derive(Clone, Copy)]
 enum DuplicateBooksSortField {
@@ -513,6 +615,74 @@ pub async fn books_list(
 
     invalid_runtime_books_list_response(DiscoveryError::InvalidSemantics(
         "unsupported runtime books filter combination".to_string(),
+    ))
+}
+
+pub async fn series_books_deprecated(
+    headers: HeaderMap,
+    uri: Uri,
+    AxumPath(series_id): AxumPath<String>,
+    auth_state: DiscoveryAuthState,
+    database_file: &FsPath,
+) -> Response {
+    if let Some(response) = require_request_auth(&headers, database_file).await {
+        return response;
+    }
+
+    if !database_file.exists() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let resolved_series_id = resolve_series_id_for_persisted(database_file, &series_id).await;
+    let Some(resource) =
+        (match load_persisted_series_resource(database_file, &resolved_series_id).await {
+            Ok(resource) => resource,
+            Err(error) => return internal_error_response(error),
+        })
+    else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let detail_context = DetailResourceContext {
+        library_id: Some(resource.library_id),
+        content: Some(DetailContentContext {
+            age_rating: resource.age_rating,
+            sharing_labels: resource.sharing_labels,
+        }),
+    };
+
+    if let Err(denial) = auth_state
+        .resolve_detail_query_context_with_persistence(&headers, &detail_context, database_file)
+        .await
+    {
+        return detail_access_denial_response(denial);
+    }
+
+    let payload = match legacy_series_books_payload(&resolved_series_id, &uri) {
+        Ok(payload) => payload,
+        Err(status) => return status.into_response(),
+    };
+    let uri = match legacy_series_books_uri(&uri) {
+        Ok(uri) => uri,
+        Err(status) => return status.into_response(),
+    };
+
+    if let Some(response) = runtime_owned_books_list_response(
+        &headers,
+        &uri,
+        Some(&payload),
+        None,
+        &auth_state,
+        database_file,
+        true,
+    )
+    .await
+    {
+        return response;
+    }
+
+    invalid_runtime_books_list_response(DiscoveryError::InvalidSemantics(
+        "unsupported legacy series books filter combination".to_string(),
     ))
 }
 

@@ -34,7 +34,9 @@ mod series;
 #[path = "series_routes.rs"]
 mod series_routes;
 
-pub use books::{book_tags, books_duplicates, books_latest, books_list, books_ondeck};
+pub use books::{
+    book_tags, books_duplicates, books_latest, books_list, books_ondeck, series_books_deprecated,
+};
 pub(crate) use detail::load_persisted_book_series_id;
 pub(crate) use detail::load_persisted_webpub_metadata_additions;
 pub use detail::{
@@ -225,6 +227,23 @@ pub(super) async fn series_collections_route(
 ) -> Response {
     series_collections(
         headers,
+        AxumPath(series_id),
+        auth_state,
+        auth_db.database_file.as_path(),
+    )
+    .await
+}
+
+pub(super) async fn series_books_route(
+    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    uri: Uri,
+    AxumPath(series_id): AxumPath<String>,
+) -> Response {
+    series_books_deprecated(
+        headers,
+        uri,
         AxumPath(series_id),
         auth_state,
         auth_db.database_file.as_path(),
