@@ -301,9 +301,9 @@ fn resolve_import_destination_dir(target: &ImportSeriesTarget) -> PathBuf {
         {
             return parent.to_path_buf();
         }
-        return root;
+        root
     } else {
-        return resolve_rooted_path(root.as_path(), &target.series_url);
+        resolve_rooted_path(root.as_path(), &target.series_url)
     }
 }
 

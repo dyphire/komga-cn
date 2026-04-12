@@ -254,7 +254,7 @@ mod tests {
             .await
             .expect("remove-hashed-pages failure fixture db should open");
         for ddl in [
-            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL)",
+            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL, ANALYZE_DIMENSIONS integer NOT NULL DEFAULT 1)",
             "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL, FILE_LAST_MODIFIED int NOT NULL DEFAULT 0, FILE_SIZE int NOT NULL DEFAULT 0)",
             "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, MEDIA_TYPE varchar NOT NULL, STATUS varchar NOT NULL)",
             "CREATE TABLE MEDIA_PAGE (FILE_NAME varchar NOT NULL, MEDIA_TYPE varchar NOT NULL, NUMBER int NOT NULL, BOOK_ID varchar NOT NULL, FILE_HASH varchar NOT NULL DEFAULT '', FILE_SIZE int NOT NULL DEFAULT 0)",
@@ -496,7 +496,7 @@ mod tests {
             .await
             .expect("remove-hashed-pages db should open");
         for ddl in [
-            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL)",
+            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL, ANALYZE_DIMENSIONS integer NOT NULL DEFAULT 1)",
             "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, NAME varchar NOT NULL, URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL, FILE_LAST_MODIFIED int NOT NULL DEFAULT 0, FILE_SIZE int NOT NULL DEFAULT 0, FILE_HASH varchar NOT NULL DEFAULT '', FILE_HASH_KOREADER varchar NOT NULL DEFAULT '', LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
             "CREATE TABLE BOOK_METADATA (BOOK_ID varchar NOT NULL PRIMARY KEY, TITLE varchar NULL)",
             "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, MEDIA_TYPE varchar NOT NULL, STATUS varchar NOT NULL, PAGE_COUNT int NOT NULL DEFAULT 0, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",

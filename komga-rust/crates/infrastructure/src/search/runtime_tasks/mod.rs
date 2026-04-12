@@ -19,6 +19,7 @@ pub struct BookAnalysisInput {
     pub title: String,
     pub url: String,
     pub root: String,
+    pub analyze_dimensions: bool,
     pub series_id: String,
     pub previous_media_status: String,
     pub previous_page_count: i64,
@@ -28,6 +29,8 @@ pub struct BookAnalysisInput {
 pub struct AnalyzedBookPage {
     pub file_name: String,
     pub media_type: String,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
     pub file_size: i64,
 }
 
@@ -105,16 +108,17 @@ pub fn analyze_book_input(
                      COALESCE(bm.TITLE, b.NAME) AS TITLE,
                      b.URL AS URL,
                      b.SERIES_ID AS SERIES_ID,
+                     l.ANALYZE_DIMENSIONS AS ANALYZE_DIMENSIONS,
                      COALESCE(m.STATUS, '') AS PREVIOUS_MEDIA_STATUS,
                      COALESCE(m.PAGE_COUNT, 0) AS PREVIOUS_PAGE_COUNT,
                      l.ROOT AS ROOT
-                   FROM BOOK b
-                   JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+                    FROM BOOK b
+                    JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
                    LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
                    LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
-                   WHERE b.ID = ?
-                   LIMIT 1
-                  "#,
+                      WHERE b.ID = ?
+                      LIMIT 1
+                     "#,
             )
             .bind(&book_id)
             .fetch_optional(&pool)
@@ -125,6 +129,7 @@ pub fn analyze_book_input(
                 title: sqlx::Row::get::<String, _>(&row, "TITLE"),
                 url: sqlx::Row::get::<String, _>(&row, "URL"),
                 root: sqlx::Row::get::<String, _>(&row, "ROOT"),
+                analyze_dimensions: sqlx::Row::get::<bool, _>(&row, "ANALYZE_DIMENSIONS"),
                 series_id: sqlx::Row::get::<String, _>(&row, "SERIES_ID"),
                 previous_media_status: sqlx::Row::get::<String, _>(&row, "PREVIOUS_MEDIA_STATUS"),
                 previous_page_count: sqlx::Row::get::<i64, _>(&row, "PREVIOUS_PAGE_COUNT"),
@@ -166,12 +171,14 @@ pub fn persist_book_analysis(
             for (index, page) in analysis.pages.iter().enumerate() {
                 sqlx::query(
                     "INSERT INTO MEDIA_PAGE (FILE_NAME, MEDIA_TYPE, NUMBER, BOOK_ID, width, height, FILE_HASH, FILE_SIZE) \
-                     VALUES (?, ?, ?, ?, NULL, NULL, '', ?)",
+                     VALUES (?, ?, ?, ?, ?, ?, '', ?)",
                 )
                 .bind(&page.file_name)
                 .bind(&page.media_type)
                 .bind(index as i64)
                 .bind(&book_id)
+                .bind(page.width)
+                .bind(page.height)
                 .bind(page.file_size)
                 .execute(&mut *tx)
                 .await

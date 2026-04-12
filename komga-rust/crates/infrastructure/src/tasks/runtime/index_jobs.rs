@@ -187,9 +187,15 @@ fn parse_for_bigger_result_only(payload: Option<&str>) -> bool {
 mod tests {
     use super::*;
     use crate::sqlite::connect_pool;
+    use image::{ImageBuffer, Rgba};
     use komga_application::task_processing::TaskQueueAdminPort;
     use komga_application::task_processing::TaskRuntimeContext;
     use sqlx::Row;
+    use std::fs::File;
+    use std::io::Write;
+    use zip::CompressionMethod;
+    use zip::ZipWriter;
+    use zip::write::SimpleFileOptions;
 
     fn unique_temp_path(prefix: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
@@ -208,10 +214,151 @@ mod tests {
             .join(file_name)
     }
 
+    fn png_bytes(width: u32, height: u32) -> Vec<u8> {
+        let image =
+            ImageBuffer::<Rgba<u8>, Vec<u8>>::from_pixel(width, height, Rgba([12, 34, 56, 255]));
+        let mut output = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image)
+            .write_to(&mut output, image::ImageFormat::Png)
+            .expect("png fixture should encode");
+        output.into_inner()
+    }
+
+    fn write_cbz_fixture(path: &std::path::Path, page_sizes: &[(u32, u32)]) {
+        let file = File::create(path).expect("cbz fixture should be created");
+        let mut zip = ZipWriter::new(file);
+        let options = SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Stored)
+            .unix_permissions(0o644);
+        for (index, (width, height)) in page_sizes.iter().copied().enumerate() {
+            zip.start_file(format!("{:08}.png", index + 1), options)
+                .expect("cbz page entry should be created");
+            zip.write_all(&png_bytes(width, height))
+                .expect("cbz page bytes should be written");
+        }
+        zip.finish().expect("cbz fixture should finish");
+    }
+
+    fn legacy_file_url(path: &std::path::Path) -> String {
+        format!("file:{}", path.to_string_lossy().replace(' ', "%20"))
+    }
+
+    struct AnalyzeBookDimensionFixture {
+        database_file: std::path::PathBuf,
+        tasks_db_file: std::path::PathBuf,
+        lucene_dir: std::path::PathBuf,
+        library_root: std::path::PathBuf,
+    }
+
+    impl AnalyzeBookDimensionFixture {
+        fn runtime(&self) -> TaskRuntimeContext {
+            TaskRuntimeContext {
+                database_file: self.database_file.clone(),
+                tasks_db_file: self.tasks_db_file.clone(),
+                lucene_data_directory: self.lucene_dir.clone(),
+                consumes_queue: false,
+                owns_main_database: true,
+                owns_filesystem_scan_output: true,
+                owns_sidecar_output: true,
+                owns_search_index: false,
+            }
+        }
+
+        fn cleanup(self) {
+            let _ = std::fs::remove_file(self.database_file);
+            let _ = std::fs::remove_dir_all(self.library_root);
+        }
+    }
+
+    async fn seed_analyze_book_dimension_fixture(
+        case: &str,
+        analyze_dimensions: bool,
+    ) -> AnalyzeBookDimensionFixture {
+        let fixture = AnalyzeBookDimensionFixture {
+            database_file: unique_temp_path(&format!("komga-{case}-main")),
+            tasks_db_file: unique_temp_path(&format!("komga-{case}-tasks")),
+            lucene_dir: unique_temp_path(&format!("komga-{case}-lucene")),
+            library_root: unique_temp_path(&format!("komga-{case}-root")),
+        };
+        std::fs::create_dir_all(fixture.library_root.join("books"))
+            .expect("analyze-book dimensions library root should be created");
+        let archive_path = fixture.library_root.join("books/book-1.cbz");
+        write_cbz_fixture(&archive_path, &[(48, 96), (120, 80)]);
+
+        let pool = connect_pool(fixture.database_file.as_path(), 1)
+            .await
+            .expect("analyze-book dimensions db should open");
+        for ddl in [
+            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL, ANALYZE_DIMENSIONS integer NOT NULL DEFAULT 1)",
+            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, NAME varchar NOT NULL, URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL, CREATED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE TABLE BOOK_METADATA (BOOK_ID varchar NOT NULL PRIMARY KEY, TITLE varchar NULL)",
+            "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, STATUS varchar NOT NULL, MEDIA_TYPE varchar NOT NULL, PAGE_COUNT int NOT NULL DEFAULT 0, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE TABLE MEDIA_PAGE (FILE_NAME varchar NOT NULL, MEDIA_TYPE varchar NOT NULL, NUMBER int NOT NULL, BOOK_ID varchar NOT NULL, width int NULL, height int NULL, FILE_HASH varchar NOT NULL DEFAULT '', FILE_SIZE int NOT NULL DEFAULT 0)",
+            "CREATE TABLE READ_PROGRESS (BOOK_ID varchar NOT NULL, USER_ID varchar NOT NULL, PAGE int NOT NULL DEFAULT 0, COMPLETED integer NOT NULL DEFAULT 0, READ_DATE datetime NULL, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (BOOK_ID, USER_ID))",
+            "CREATE TABLE READ_PROGRESS_SERIES (SERIES_ID varchar NOT NULL, USER_ID varchar NOT NULL, READ_COUNT int NOT NULL DEFAULT 0, IN_PROGRESS_COUNT int NOT NULL DEFAULT 0, MOST_RECENT_READ_DATE datetime NULL, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (SERIES_ID, USER_ID))",
+        ] {
+            sqlx::query(ddl)
+                .execute(&pool)
+                .await
+                .expect("analyze-book dimensions schema should be created");
+        }
+        sqlx::query("INSERT INTO LIBRARY (ID, ROOT, ANALYZE_DIMENSIONS) VALUES (?, ?, ?)")
+            .bind("library-1")
+            .bind(legacy_file_url(&fixture.library_root))
+            .bind(analyze_dimensions)
+            .execute(&pool)
+            .await
+            .expect("analyze-book dimensions library row should be inserted");
+        sqlx::query(
+            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, CREATED_DATE, LAST_MODIFIED_DATE) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind("book-1")
+        .bind("book-1")
+        .bind(legacy_file_url(&archive_path))
+        .bind("library-1")
+        .bind("series-1")
+        .bind("2000-01-01 00:00:00")
+        .bind("2000-01-01 00:00:00")
+        .execute(&pool)
+        .await
+        .expect("analyze-book dimensions book row should be inserted");
+        pool.close().await;
+
+        fixture
+    }
+
+    async fn load_persisted_page_dimensions(
+        database_file: &std::path::Path,
+        book_id: &str,
+    ) -> Vec<(i64, Option<i64>, Option<i64>)> {
+        let pool = connect_pool(database_file, 1)
+            .await
+            .expect("page dimension verify db should open");
+        let rows = sqlx::query(
+            "SELECT NUMBER, width, height FROM MEDIA_PAGE WHERE BOOK_ID = ? ORDER BY NUMBER ASC",
+        )
+        .bind(book_id)
+        .fetch_all(&pool)
+        .await
+        .expect("page dimensions should be queryable");
+        pool.close().await;
+
+        rows.into_iter()
+            .map(|row| {
+                (
+                    row.get::<i64, _>("NUMBER"),
+                    row.get::<Option<i64>, _>("width"),
+                    row.get::<Option<i64>, _>("height"),
+                )
+            })
+            .collect()
+    }
+
     fn analyzed_fixture_page_count(file_name: &str, book_url: &str) -> i64 {
         super::super::media_helpers::analyze_book_media_file(
             &archive_fixture_path(file_name),
             book_url,
+            false,
         )
         .expect("analyze-book fixture should be analyzable")
         .pages
@@ -359,66 +506,8 @@ mod tests {
 
     #[tokio::test]
     async fn analyze_book_enqueues_thumbnail_and_metadata_follow_ups_when_ready() {
-        let database_file = unique_temp_path("komga-analyze-book-follow-up-main");
-        let tasks_db_file = unique_temp_path("komga-analyze-book-follow-up-tasks");
-        let lucene_dir = unique_temp_path("komga-analyze-book-follow-up-lucene");
-        let library_root = unique_temp_path("komga-analyze-book-follow-up-root");
-        std::fs::create_dir_all(library_root.join("books"))
-            .expect("analyze-book follow-up library root should be created");
-        std::fs::copy(
-            archive_fixture_path("rar4.rar"),
-            library_root.join("books/book-1.cbr"),
-        )
-        .expect("analyze-book follow-up source fixture should be copied");
-
-        let pool = connect_pool(database_file.as_path(), 1)
-            .await
-            .expect("analyze-book follow-up db should open");
-        for ddl in [
-            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL)",
-            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, NAME varchar NOT NULL, URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL, CREATED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-            "CREATE TABLE BOOK_METADATA (BOOK_ID varchar NOT NULL PRIMARY KEY, TITLE varchar NULL)",
-            "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, STATUS varchar NOT NULL, MEDIA_TYPE varchar NOT NULL, PAGE_COUNT int NOT NULL DEFAULT 0, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-            "CREATE TABLE MEDIA_PAGE (FILE_NAME varchar NOT NULL, MEDIA_TYPE varchar NOT NULL, NUMBER int NOT NULL, BOOK_ID varchar NOT NULL, width int NULL, height int NULL, FILE_HASH varchar NOT NULL DEFAULT '', FILE_SIZE int NOT NULL DEFAULT 0)",
-            "CREATE TABLE READ_PROGRESS (BOOK_ID varchar NOT NULL, USER_ID varchar NOT NULL, PAGE int NOT NULL DEFAULT 0, COMPLETED integer NOT NULL DEFAULT 0, READ_DATE datetime NULL, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (BOOK_ID, USER_ID))",
-            "CREATE TABLE READ_PROGRESS_SERIES (SERIES_ID varchar NOT NULL, USER_ID varchar NOT NULL, READ_COUNT int NOT NULL DEFAULT 0, IN_PROGRESS_COUNT int NOT NULL DEFAULT 0, MOST_RECENT_READ_DATE datetime NULL, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (SERIES_ID, USER_ID))",
-        ] {
-            sqlx::query(ddl)
-                .execute(&pool)
-                .await
-                .expect("analyze-book follow-up fixture schema should be created");
-        }
-        sqlx::query("INSERT INTO LIBRARY (ID, ROOT) VALUES (?, ?)")
-            .bind("library-1")
-            .bind(library_root.to_string_lossy().to_string())
-            .execute(&pool)
-            .await
-            .expect("analyze-book follow-up library row should be inserted");
-        sqlx::query(
-            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, CREATED_DATE, LAST_MODIFIED_DATE) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind("book-1")
-        .bind("book-1")
-        .bind("books/book-1.cbr")
-        .bind("library-1")
-        .bind("series-1")
-        .bind("2000-01-01 00:00:00")
-        .bind("2000-01-01 00:00:00")
-        .execute(&pool)
-        .await
-        .expect("analyze-book follow-up book row should be inserted");
-        pool.close().await;
-
-        let runtime = TaskRuntimeContext {
-            database_file: database_file.clone(),
-            tasks_db_file,
-            lucene_data_directory: lucene_dir,
-            consumes_queue: false,
-            owns_main_database: true,
-            owns_filesystem_scan_output: true,
-            owns_sidecar_output: true,
-            owns_search_index: false,
-        };
+        let fixture = seed_analyze_book_dimension_fixture("analyze-book-follow-up", true).await;
+        let runtime = fixture.runtime();
         let mut scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "analyze-book-follow-up-test");
         let task = TaskQueueRecord::new("ANALYZE_BOOK_book-1", 90, Some("series-1".to_string()))
@@ -427,7 +516,7 @@ mod tests {
         let result = try_execute(&mut scheduler, &runtime, &task, Some("book-1"));
         assert!(matches!(result, Some(Ok(()))));
 
-        let verify_pool = connect_pool(database_file.as_path(), 1)
+        let verify_pool = connect_pool(fixture.database_file.as_path(), 1)
             .await
             .expect("analyze-book follow-up verify db should open");
         let media_row =
@@ -444,6 +533,11 @@ mod tests {
         verify_pool.close().await;
         assert_eq!(media_row.get::<String, _>("STATUS"), "READY");
         assert!(media_row.get::<i64, _>("PAGE_COUNT") > 0);
+        assert_eq!(
+            load_persisted_page_dimensions(fixture.database_file.as_path(), "book-1").await,
+            vec![(0, Some(48), Some(96)), (1, Some(120), Some(80))],
+            "analyze-book should persist page dimensions when library ANALYZE_DIMENSIONS is enabled",
+        );
         assert!(
             book_row.get::<String, _>("LAST_MODIFIED_DATE") != "2000-01-01 00:00:00",
             "ready analyze-book should refresh BOOK last-modified for downstream SSE visibility",
@@ -477,8 +571,31 @@ mod tests {
             "ready analyze-book must enqueue Kotlin-style thumbnail and metadata follow-up tasks",
         );
 
-        let _ = std::fs::remove_file(database_file);
-        let _ = std::fs::remove_dir_all(library_root);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn analyze_book_keeps_page_dimensions_null_when_library_analysis_is_disabled() {
+        let fixture =
+            seed_analyze_book_dimension_fixture("analyze-book-dimensions-disabled", false).await;
+        let runtime = fixture.runtime();
+        let mut scheduler = TaskQueueScheduler::for_runtime(
+            runtime.clone(),
+            "analyze-book-disabled-dimensions-test",
+        );
+        let task = TaskQueueRecord::new("ANALYZE_BOOK_book-1", 90, Some("series-1".to_string()))
+            .with_simple_type("ANALYZE_BOOK");
+
+        let result = try_execute(&mut scheduler, &runtime, &task, Some("book-1"));
+        assert!(matches!(result, Some(Ok(()))));
+
+        assert_eq!(
+            load_persisted_page_dimensions(fixture.database_file.as_path(), "book-1").await,
+            vec![(0, None, None), (1, None, None)],
+            "analyze-book should leave page dimensions null when library ANALYZE_DIMENSIONS is disabled",
+        );
+
+        fixture.cleanup();
     }
 
     #[tokio::test]
@@ -499,7 +616,7 @@ mod tests {
             .await
             .expect("analyze-book read-progress adjust db should open");
         for ddl in [
-            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL)",
+            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL, ANALYZE_DIMENSIONS integer NOT NULL DEFAULT 1)",
             "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, NAME varchar NOT NULL, URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL, CREATED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, DELETED_DATE datetime NULL)",
             "CREATE TABLE BOOK_METADATA (BOOK_ID varchar NOT NULL PRIMARY KEY, TITLE varchar NULL)",
             "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, STATUS varchar NOT NULL, MEDIA_TYPE varchar NOT NULL, PAGE_COUNT int NOT NULL DEFAULT 0, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
@@ -512,9 +629,10 @@ mod tests {
                 .await
                 .expect("analyze-book read-progress adjust schema should be created");
         }
-        sqlx::query("INSERT INTO LIBRARY (ID, ROOT) VALUES (?, ?)")
+        sqlx::query("INSERT INTO LIBRARY (ID, ROOT, ANALYZE_DIMENSIONS) VALUES (?, ?, ?)")
             .bind("library-1")
             .bind(library_root.to_string_lossy().to_string())
+            .bind(true)
             .execute(&pool)
             .await
             .expect("analyze-book read-progress adjust library row should be inserted");
@@ -689,7 +807,7 @@ mod tests {
             .await
             .expect("analyze-book read-progress keep db should open");
         for ddl in [
-            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL)",
+            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL, ANALYZE_DIMENSIONS integer NOT NULL DEFAULT 1)",
             "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, NAME varchar NOT NULL, URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL, CREATED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, DELETED_DATE datetime NULL)",
             "CREATE TABLE BOOK_METADATA (BOOK_ID varchar NOT NULL PRIMARY KEY, TITLE varchar NULL)",
             "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, STATUS varchar NOT NULL, MEDIA_TYPE varchar NOT NULL, PAGE_COUNT int NOT NULL DEFAULT 0, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
@@ -702,9 +820,10 @@ mod tests {
                 .await
                 .expect("analyze-book read-progress keep schema should be created");
         }
-        sqlx::query("INSERT INTO LIBRARY (ID, ROOT) VALUES (?, ?)")
+        sqlx::query("INSERT INTO LIBRARY (ID, ROOT, ANALYZE_DIMENSIONS) VALUES (?, ?, ?)")
             .bind("library-1")
             .bind(library_root.to_string_lossy().to_string())
+            .bind(true)
             .execute(&pool)
             .await
             .expect("analyze-book read-progress keep library row should be inserted");

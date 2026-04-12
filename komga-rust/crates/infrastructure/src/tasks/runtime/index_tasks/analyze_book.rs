@@ -1,4 +1,5 @@
 use super::*;
+use crate::resolve_library_item_path;
 use crate::tasks::adjust_analyzed_book_read_progress;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -29,13 +30,14 @@ pub(in crate::task_queue) fn analyze_book(
         });
     };
 
-    let file_path = PathBuf::from(&input.root).join(&input.url);
-    let analysis = analyze_book_media_file(&file_path, &input.url).map_err(|error| {
-        TaskExecutionError::runtime(format!(
-            "failed to analyze media file for '{book_id}' ('{}'): {error}",
-            file_path.display(),
-        ))
-    })?;
+    let file_path = resolve_library_item_path(&input.root, &input.url);
+    let analysis = analyze_book_media_file(&file_path, &input.url, input.analyze_dimensions)
+        .map_err(|error| {
+            TaskExecutionError::runtime(format!(
+                "failed to analyze media file for '{book_id}' ('{}'): {error}",
+                file_path.display(),
+            ))
+        })?;
 
     let persisted = AnalyzedBookMedia {
         status: analysis.status,
@@ -46,6 +48,8 @@ pub(in crate::task_queue) fn analyze_book(
             .map(|page| AnalyzedBookPage {
                 file_name: page.file_name,
                 media_type: page.media_type,
+                width: page.width,
+                height: page.height,
                 file_size: page.file_size,
             })
             .collect(),
