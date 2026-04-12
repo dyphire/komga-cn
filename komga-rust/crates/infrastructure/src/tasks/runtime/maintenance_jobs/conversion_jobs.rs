@@ -507,13 +507,17 @@ mod tests {
                 .expect("convert-book success rar fixture should contain an image page");
         let preserved_page_hash = "existing-page-hash-1";
 
-        let actual_last_modified = std::fs::metadata(&source_path)
-            .expect("convert-book success source metadata should be readable")
-            .modified()
-            .expect("convert-book success source modified time should be readable")
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("convert-book success source time should be after unix epoch")
-            .as_secs() as i64;
+        let source_metadata = std::fs::metadata(&source_path)
+            .expect("convert-book success source metadata should be readable");
+        let actual_last_modified = source_metadata
+            .created()
+            .ok()
+            .into_iter()
+            .chain(source_metadata.modified().ok())
+            .max()
+            .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|value| value.as_secs() as i64)
+            .unwrap_or_default();
 
         let pool = connect_pool(database_file.as_path(), 1)
             .await

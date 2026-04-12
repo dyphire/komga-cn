@@ -503,16 +503,60 @@ fn page_hash_match_order_by(sorts: &[String]) -> Result<Vec<String>, sqlx::Error
 }
 
 fn url_to_file_path(value: &str) -> Result<String, sqlx::Error> {
-    let url = Url::parse(value).map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
-    if url.scheme() != "file" {
+    let trimmed = value.trim();
+    if !trimmed.starts_with("file:") {
         return Err(sqlx::Error::Protocol(format!(
             "page hash match URL must use file scheme: {value}",
         )));
     }
 
-    url.to_file_path()
-        .map(|path| path.to_string_lossy().into_owned())
-        .map_err(|()| sqlx::Error::Protocol(format!("invalid file url: {value}")))
+    decode_file_url_path(trimmed)
+        .ok_or_else(|| sqlx::Error::Protocol(format!("invalid file url: {value}")))
+}
+
+fn decode_file_url_path(value: &str) -> Option<String> {
+    if let Ok(url) = Url::parse(value) {
+        if url.scheme() == "file" {
+            // Contract snapshots store Kotlin-style `file:/...` URLs and expect the decoded URL
+            // path, not the platform-native filesystem rendering that `to_file_path()` produces
+            // on Windows.
+            return percent_decode_path(url.path());
+        }
+
+        return None;
+    }
+
+    value.strip_prefix("file:").and_then(percent_decode_path)
+}
+
+fn percent_decode_path(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0usize;
+
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let hi = *bytes.get(index + 1)?;
+            let lo = *bytes.get(index + 2)?;
+            decoded.push((hex_value(hi)? << 4) | hex_value(lo)?);
+            index += 3;
+            continue;
+        }
+
+        decoded.push(bytes[index]);
+        index += 1;
+    }
+
+    String::from_utf8(decoded).ok()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn sqlite_datetime_to_iso_local(value: &str) -> String {

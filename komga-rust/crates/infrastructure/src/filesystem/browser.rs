@@ -45,11 +45,12 @@ pub fn list_directory_entries(path: &Path, directories_only: bool) -> Vec<Value>
 }
 
 #[cfg(windows)]
-fn entry_is_hidden(entry: &fs::DirEntry, _name: &str) -> bool {
-    entry
-        .metadata()
-        .map(|metadata| metadata.file_attributes() & 0x2 != 0)
-        .unwrap_or(false)
+fn entry_is_hidden(entry: &fs::DirEntry, name: &str) -> bool {
+    name.starts_with('.')
+        || entry
+            .metadata()
+            .map(|metadata| metadata.file_attributes() & 0x2 != 0)
+            .unwrap_or(false)
 }
 
 #[cfg(not(windows))]

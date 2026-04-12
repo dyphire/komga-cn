@@ -7,6 +7,7 @@ use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 
 use crate::context::SqlitePersistenceContext;
+use crate::filesystem::remove_file_after_release;
 use crate::sqlite::setup;
 
 pub const DEFAULT_MAX_CONNECTIONS: u32 = 4;
@@ -54,9 +55,9 @@ pub async fn close_all_shared_pools() {
     }
 }
 
-pub fn evict_shared_pools_for_paths(paths: &[PathBuf]) {
+pub fn evict_shared_pools_for_paths(paths: &[PathBuf]) -> Vec<SqlitePool> {
     if paths.is_empty() {
-        return;
+        return Vec::new();
     }
 
     let target_paths = paths
@@ -71,10 +72,15 @@ pub fn evict_shared_pools_for_paths(paths: &[PathBuf]) {
         .filter(|pool_key| target_paths.contains(&pool_key.path))
         .cloned()
         .collect::<Vec<_>>();
+    let mut removed = Vec::with_capacity(matching_keys.len());
 
     for pool_key in matching_keys {
-        pools.remove(&pool_key);
+        if let Some(pool) = pools.remove(&pool_key) {
+            removed.push(pool);
+        }
     }
+
+    removed
 }
 
 fn get_shared_pool(pool_key: &PoolKey) -> Option<SqlitePool> {
@@ -245,7 +251,7 @@ impl SqliteTempPool {
         drop(pool);
 
         for path in sqlite_sidecar_paths(&db_path) {
-            let _ = std::fs::remove_file(&path);
+            let _ = remove_file_after_release(&path);
         }
     }
 }
@@ -253,10 +259,10 @@ impl SqliteTempPool {
 fn sqlite_sidecar_paths(db_path: &Path) -> [PathBuf; 4] {
     let base_name = db_path.to_string_lossy().to_string();
     [
-        db_path.to_path_buf(),
         PathBuf::from(format!("{base_name}-wal")),
         PathBuf::from(format!("{base_name}-shm")),
         PathBuf::from(format!("{base_name}-journal")),
+        db_path.to_path_buf(),
     ]
 }
 

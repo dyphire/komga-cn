@@ -500,12 +500,51 @@ pub(super) fn book_detail_payload(book: &BookDetailReadModel, is_admin: bool) ->
 }
 
 fn admin_file_url(url: &str) -> String {
-    match Url::parse(url) {
-        Ok(parsed) if parsed.scheme() == "file" => parsed
-            .to_file_path()
-            .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| url.to_string()),
-        _ => url.to_string(),
+    decode_file_url_path(url)
+        .unwrap_or_else(|| url.to_string())
+}
+
+fn decode_file_url_path(value: &str) -> Option<String> {
+    if let Ok(parsed) = Url::parse(value) {
+        if parsed.scheme() == "file" {
+            // Contract payloads expect the decoded URL path, not the platform-native
+            // filesystem rendering that `to_file_path()` produces on Windows.
+            return percent_decode_path(parsed.path());
+        }
+
+        return None;
+    }
+
+    value.strip_prefix("file:").and_then(percent_decode_path)
+}
+
+fn percent_decode_path(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0usize;
+
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let hi = *bytes.get(index + 1)?;
+            let lo = *bytes.get(index + 2)?;
+            decoded.push((hex_value(hi)? << 4) | hex_value(lo)?);
+            index += 3;
+            continue;
+        }
+
+        decoded.push(bytes[index]);
+        index += 1;
+    }
+
+    String::from_utf8(decoded).ok()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
     }
 }
 
@@ -809,6 +848,62 @@ mod tests {
                 .and_then(Value::as_array)
                 .map(|links| links.len()),
             Some(1)
+        );
+    }
+
+    #[test]
+    fn book_detail_payload_decodes_legacy_admin_file_urls() {
+        let payload = book_detail_payload(
+            &BookDetailReadModel {
+                id: "book-1".to_string(),
+                series_id: "series-1".to_string(),
+                series_title: "Series".to_string(),
+                series_title_sort: "Series".to_string(),
+                library_id: "lib-1".to_string(),
+                name: "Book".to_string(),
+                url: "file:/library%20root/books/book%201.cbz".to_string(),
+                number: 1,
+                created: "2024-01-01T00:00:00Z".to_string(),
+                last_modified: "2024-01-02T00:00:00Z".to_string(),
+                file_last_modified: "2024-01-03T00:00:00Z".to_string(),
+                size_bytes: 123,
+                media_status: "READY".to_string(),
+                media_type: "application/vnd.comicbook+zip".to_string(),
+                media_pages_count: 5,
+                media_comment: "ok".to_string(),
+                metadata_title: "Meta".to_string(),
+                metadata_summary: "Summary".to_string(),
+                metadata_number: "1".to_string(),
+                metadata_number_sort: 1.0,
+                metadata_release_date: Some("2024-01-04".to_string()),
+                metadata_title_lock: false,
+                metadata_summary_lock: false,
+                metadata_number_lock: false,
+                metadata_number_sort_lock: false,
+                metadata_release_date_lock: false,
+                metadata_authors: Vec::new(),
+                metadata_authors_lock: false,
+                metadata_tags: Vec::new(),
+                metadata_tags_lock: false,
+                metadata_isbn: String::new(),
+                metadata_isbn_lock: false,
+                metadata_links: Vec::new(),
+                metadata_links_lock: false,
+                metadata_created: "2024-01-01T00:00:00Z".to_string(),
+                metadata_last_modified: "2024-01-02T00:00:00Z".to_string(),
+                media_epub_divina_compatible: false,
+                media_epub_is_kepub: false,
+                read_progress: None,
+                deleted: false,
+                file_hash: "hash".to_string(),
+                oneshot: false,
+            },
+            true,
+        );
+
+        assert_eq!(
+            payload.get("url"),
+            Some(&json!("/library root/books/book 1.cbz"))
         );
     }
 

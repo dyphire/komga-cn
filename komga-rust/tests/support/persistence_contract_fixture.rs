@@ -54,13 +54,43 @@ pub async fn seed_tasks_db_from_flyway(path: &Path) -> anyhow::Result<()> {
 
 pub fn cleanup(paths: RuntimeDbPaths) {
     close_fixture_shared_pools(&paths);
-    let _ = std::fs::remove_file(paths.main_db);
-    let _ = std::fs::remove_file(paths.tasks_db);
-    let _ = std::fs::remove_dir_all(paths.config_dir);
+    cleanup_files(&paths);
+}
+
+pub async fn cleanup_async(paths: RuntimeDbPaths) {
+    for pool in evict_shared_pools_for_paths(&[paths.main_db.clone(), paths.tasks_db.clone()]) {
+        pool.close().await;
+    }
+    cleanup_files(&paths);
+}
+
+fn cleanup_files(paths: &RuntimeDbPaths) {
+    for _ in 0..10 {
+        for db_path in [&paths.main_db, &paths.tasks_db] {
+            for path in sqlite_sidecar_paths(db_path) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+        let _ = std::fs::remove_dir_all(&paths.config_dir);
+        if !paths.config_dir.exists() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
 }
 
 fn close_fixture_shared_pools(paths: &RuntimeDbPaths) {
-    evict_shared_pools_for_paths(&[paths.main_db.clone(), paths.tasks_db.clone()]);
+    let _ = evict_shared_pools_for_paths(&[paths.main_db.clone(), paths.tasks_db.clone()]);
+}
+
+fn sqlite_sidecar_paths(db_path: &Path) -> [PathBuf; 4] {
+    let base_name = db_path.to_string_lossy().to_string();
+    [
+        db_path.to_path_buf(),
+        PathBuf::from(format!("{base_name}-wal")),
+        PathBuf::from(format!("{base_name}-shm")),
+        PathBuf::from(format!("{base_name}-journal")),
+    ]
 }
 
 async fn execute_sql_files(
@@ -261,7 +291,14 @@ mod tests {
             .expect("probe row should be inserted in stale database");
         drop(stale_pool);
 
-        cleanup(paths);
+        cleanup_async(paths).await;
+
+        let main_exists_after_cleanup = main_db.exists();
+        let wal_exists_after_cleanup =
+            PathBuf::from(format!("{}-wal", main_db.to_string_lossy())).exists();
+        let shm_exists_after_cleanup =
+            PathBuf::from(format!("{}-shm", main_db.to_string_lossy())).exists();
+        let config_exists_after_cleanup = config_dir.exists();
 
         fs::create_dir_all(&config_dir).expect("fixture root should be recreated after cleanup");
         let fresh_pool = connect_pool(&main_db, 1)
@@ -273,14 +310,15 @@ mod tests {
 
         assert!(
             leaked_rows.is_err(),
-            "fixture cleanup must not reuse a cached pool pointing at a deleted sqlite file",
+            "fixture cleanup must not reuse a cached pool pointing at a deleted sqlite file; main_exists_after_cleanup={main_exists_after_cleanup}, wal_exists_after_cleanup={wal_exists_after_cleanup}, shm_exists_after_cleanup={shm_exists_after_cleanup}, config_exists_after_cleanup={config_exists_after_cleanup}",
         );
 
         fresh_pool.close().await;
-        cleanup(RuntimeDbPaths {
+        cleanup_async(RuntimeDbPaths {
             config_dir,
             main_db,
             tasks_db,
-        });
+        })
+        .await;
     }
 }

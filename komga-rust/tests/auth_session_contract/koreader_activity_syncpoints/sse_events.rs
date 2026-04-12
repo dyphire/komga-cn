@@ -110,6 +110,7 @@ async fn import_book_for_sse(
 
 #[tokio::test]
 async fn router_sse_events_requires_authenticated_user() {
+    let _guard = auth_session_runtime_env_lock().lock().await;
     let paths = new_router_fixture("router-sse-events-auth-required").await;
     seed_router_contract_data(&paths).await;
 
@@ -132,6 +133,7 @@ async fn router_sse_events_requires_authenticated_user() {
 
 #[tokio::test]
 async fn router_sse_events_admin_stream_emits_task_queue_status_and_heartbeat() {
+    let _guard = auth_session_runtime_env_lock().lock().await;
     let paths = new_router_fixture("router-sse-events-admin-task-heartbeat").await;
     seed_router_contract_data(&paths).await;
 
@@ -179,6 +181,7 @@ async fn router_sse_events_admin_stream_emits_task_queue_status_and_heartbeat() 
 
 #[tokio::test]
 async fn router_sse_events_emit_library_changed_without_five_second_poll_delay() {
+    let _guard = auth_session_runtime_env_lock().lock().await;
     let paths = new_router_fixture("router-sse-events-library-change").await;
     seed_router_contract_data(&paths).await;
 
@@ -227,6 +230,7 @@ async fn router_sse_events_emit_library_changed_without_five_second_poll_delay()
 
 #[tokio::test]
 async fn router_sse_events_emit_book_import_for_successful_runtime_import() {
+    let _guard = auth_session_runtime_env_lock().lock().await;
     let paths = new_router_fixture("router-sse-events-book-import-success").await;
     seed_router_contract_data(&paths).await;
     let source_file = temp_import_source_file(
@@ -285,6 +289,7 @@ async fn router_sse_events_emit_book_import_for_successful_runtime_import() {
 
 #[tokio::test]
 async fn router_sse_events_emit_book_import_failure_for_failed_runtime_import() {
+    let _guard = auth_session_runtime_env_lock().lock().await;
     let paths = new_router_fixture("router-sse-events-book-import-failure").await;
     seed_router_contract_data(&paths).await;
     let source_file = missing_import_source_file(
@@ -343,6 +348,7 @@ async fn router_sse_events_emit_book_import_failure_for_failed_runtime_import() 
 
 #[tokio::test]
 async fn router_sse_events_emit_session_expired_for_invalidated_user_sessions() {
+    let _guard = auth_session_runtime_env_lock().lock().await;
     let paths = new_router_fixture("router-sse-events-session-expired").await;
     seed_router_contract_data(&paths).await;
     seed_router_library_restricted_user(
@@ -416,6 +422,7 @@ async fn router_sse_events_emit_session_expired_for_invalidated_user_sessions() 
 
 #[tokio::test]
 async fn router_sse_events_emit_session_expired_when_admin_deletes_user() {
+    let _guard = auth_session_runtime_env_lock().lock().await;
     let paths = new_router_fixture("router-sse-events-session-expired-user-delete").await;
     seed_router_contract_data(&paths).await;
     seed_router_library_restricted_user(

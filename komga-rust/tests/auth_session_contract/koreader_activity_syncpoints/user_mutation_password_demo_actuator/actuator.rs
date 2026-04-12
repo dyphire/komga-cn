@@ -340,8 +340,22 @@ fn router_access_log_skips_actuator_and_sse_noise_routes() {
         .build()
         .expect("noise auth runtime should build")
         .block_on(async {
+            seed_router_age_exclude_user_with_roles(
+                &paths,
+                "access-log-noise-admin",
+                "access-log-noise-admin@example.org",
+                "router-contract-access-log-noise-123",
+                0,
+                &["USER", "ADMIN", "FILE_DOWNLOAD", "PAGE_STREAMING"],
+            )
+            .await;
             let app = build_router_with_config(&config);
-            login_with_basic_and_get_token(app).await
+            login_with_basic_credentials_and_get_token(
+                app,
+                "access-log-noise-admin@example.org",
+                "router-contract-access-log-noise-123",
+            )
+            .await
         });
 
     let (logs, statuses) = capture_router_logs_async_result(&config, {
