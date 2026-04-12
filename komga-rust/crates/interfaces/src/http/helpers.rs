@@ -11,6 +11,7 @@ use komga_domain::discovery::{
     DiscoveryQueryContext as DomainDiscoveryQueryContext, PageEnvelope,
     QueryRestrictions as DomainQueryRestrictions,
 };
+use reqwest::Url;
 use serde_json::{Value, json};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -177,6 +178,10 @@ pub(crate) fn normalized_optional_read_progress_date(
     normalized_date_time(chosen)
 }
 
+pub(crate) fn api_file_path(value: &str) -> String {
+    decode_file_url_path(value).unwrap_or_else(|| value.to_string())
+}
+
 fn format_size_bytes(size_bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
 
@@ -219,6 +224,50 @@ pub(crate) fn restricted_book_url(url: &str, is_admin: bool) -> String {
         .find(|segment| !segment.is_empty())
         .unwrap_or_default()
         .to_string()
+}
+
+fn decode_file_url_path(value: &str) -> Option<String> {
+    if let Ok(parsed) = Url::parse(value) {
+        if parsed.scheme() == "file" {
+            // API payloads must expose decoded URL paths instead of OS-native file paths,
+            // so contracts stay stable across platforms.
+            return percent_decode_path(parsed.path());
+        }
+
+        return None;
+    }
+
+    value.strip_prefix("file:").and_then(percent_decode_path)
+}
+
+fn percent_decode_path(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0usize;
+
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let hi = *bytes.get(index + 1)?;
+            let lo = *bytes.get(index + 2)?;
+            decoded.push((hex_value(hi)? << 4) | hex_value(lo)?);
+            index += 3;
+            continue;
+        }
+
+        decoded.push(bytes[index]);
+        index += 1;
+    }
+
+    String::from_utf8(decoded).ok()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 pub(crate) fn extract_full_text_search(payload: &Value) -> Option<String> {
@@ -348,4 +397,27 @@ pub(crate) fn set_read_progress(state: &ReadProgressState, token: String, book_i
 
     let user_progress = all_progress.entry(token).or_default();
     user_progress.insert(book_id, ReadProgress);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::api_file_path;
+
+    #[test]
+    fn api_file_path_decodes_file_url_paths() {
+        assert_eq!(
+            api_file_path("file:/data/Library%20Root"),
+            "/data/Library Root"
+        );
+    }
+
+    #[test]
+    fn api_file_path_preserves_non_file_or_invalid_values() {
+        assert_eq!(api_file_path("/data/Library Root"), "/data/Library Root");
+        assert_eq!(
+            api_file_path("https://example.com/library/root"),
+            "https://example.com/library/root"
+        );
+        assert_eq!(api_file_path("file:/tmp/%ZZ"), "file:/tmp/%ZZ");
+    }
 }

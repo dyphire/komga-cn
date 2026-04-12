@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 use tokio::time::{Instant, MissedTickBehavior, interval_at};
 
+use crate::http::helpers::api_file_path;
 use crate::http::identity_access::auth::{resolved_auth_user, user_id, user_is_admin};
 
 use super::super::super::{OperationalState, PERSISTED_OWNERSHIP_MARKER, SEARCH_OWNERSHIP_HEADER};
@@ -204,7 +205,7 @@ fn pending_book_import_events(last_seen_event_id: u64) -> (u64, Vec<Event>) {
                 "BookImported",
                 json!({
                     "bookId": event.book_id,
-                    "sourceFile": event.source_file,
+                    "sourceFile": api_file_path(&event.source_file),
                     "success": event.success,
                     "message": event.message,
                 }),
@@ -225,14 +226,21 @@ fn pending_session_expired_events(
         .lock()
         .expect("sse state lock should not be poisoned");
     let mut newest_event_id = last_seen_event_id;
-    let events = sse_state
-        .session_expired_events
-        .iter()
-        .filter(|event| event.id > last_seen_event_id)
-        .inspect(|event| newest_event_id = newest_event_id.max(event.id))
-        .filter(|event| event.user_id == user_id)
-        .map(|event| sse_event("SessionExpired", json!({ "userId": event.user_id })))
-        .collect::<Vec<_>>();
+    let mut events = Vec::new();
+
+    for event in &sse_state.session_expired_events {
+        if event.id <= last_seen_event_id {
+            continue;
+        }
+
+        newest_event_id = newest_event_id.max(event.id);
+        if event.user_id == user_id {
+            events.push(sse_event(
+                "SessionExpired",
+                json!({ "userId": event.user_id }),
+            ));
+        }
+    }
 
     (newest_event_id, events)
 }

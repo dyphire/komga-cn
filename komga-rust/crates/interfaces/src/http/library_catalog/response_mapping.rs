@@ -1,6 +1,8 @@
 use komga_application::library_catalog::LibraryRecord;
 use serde_json::{Value, json};
 
+use crate::http::helpers::api_file_path;
+
 pub(super) fn libraries_payload(libraries: Vec<LibraryRecord>, is_admin: bool) -> Value {
     Value::Array(
         libraries
@@ -12,7 +14,7 @@ pub(super) fn libraries_payload(libraries: Vec<LibraryRecord>, is_admin: bool) -
 
 pub(super) fn library_payload(library: &LibraryRecord, is_admin: bool) -> Value {
     let root = if is_admin {
-        library.root.clone()
+        api_file_path(&library.root)
     } else {
         String::new()
     };

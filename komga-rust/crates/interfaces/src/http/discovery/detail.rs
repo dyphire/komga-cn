@@ -7,7 +7,6 @@ use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use komga_application::discovery::normalize_readlists_search;
 use komga_domain::discovery::PageEnvelope;
-use reqwest::Url;
 use serde_json::{Map, Value, json};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -22,7 +21,7 @@ use crate::http::discovery_auth::{
     DiscoveryQueryContext, QueryRestrictions,
 };
 use crate::http::helpers::{
-    detail_access_denial_response, mark_runtime_owned, normalized_date_time,
+    api_file_path, detail_access_denial_response, mark_runtime_owned, normalized_date_time,
     normalized_file_last_modified, normalized_optional_read_progress_date, query_bool, query_value,
     query_values, restricted_book_url,
 };
@@ -432,7 +431,7 @@ fn extend_webpub_metadata_with_role_authors(
 }
 
 pub(super) fn book_detail_payload(book: &BookDetailReadModel, is_admin: bool) -> Value {
-    let admin_url = admin_file_url(&book.url);
+    let admin_url = api_file_path(&book.url);
     let url = if is_admin {
         admin_url
     } else {
@@ -499,58 +498,9 @@ pub(super) fn book_detail_payload(book: &BookDetailReadModel, is_admin: bool) ->
     })
 }
 
-fn admin_file_url(url: &str) -> String {
-    decode_file_url_path(url)
-        .unwrap_or_else(|| url.to_string())
-}
-
-fn decode_file_url_path(value: &str) -> Option<String> {
-    if let Ok(parsed) = Url::parse(value) {
-        if parsed.scheme() == "file" {
-            // Contract payloads expect the decoded URL path, not the platform-native
-            // filesystem rendering that `to_file_path()` produces on Windows.
-            return percent_decode_path(parsed.path());
-        }
-
-        return None;
-    }
-
-    value.strip_prefix("file:").and_then(percent_decode_path)
-}
-
-fn percent_decode_path(value: &str) -> Option<String> {
-    let bytes = value.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut index = 0usize;
-
-    while index < bytes.len() {
-        if bytes[index] == b'%' {
-            let hi = *bytes.get(index + 1)?;
-            let lo = *bytes.get(index + 2)?;
-            decoded.push((hex_value(hi)? << 4) | hex_value(lo)?);
-            index += 3;
-            continue;
-        }
-
-        decoded.push(bytes[index]);
-        index += 1;
-    }
-
-    String::from_utf8(decoded).ok()
-}
-
-fn hex_value(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
-}
-
 fn series_detail_payload(series: &SeriesDetailReadModel, is_admin: bool) -> Value {
     let url = if is_admin {
-        admin_file_url(&series.url)
+        api_file_path(&series.url)
     } else {
         String::new()
     };

@@ -1,26 +1,28 @@
+use std::fmt::Write as _;
+
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
+use crate::http::helpers::api_file_path;
+
 use super::{TransientBookPageRecord, TransientBookRecord};
 
 pub(super) fn transient_book_id(path: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(path.as_bytes());
-    let digest = hasher.finalize();
-    let digest_hex = digest
-        .as_slice()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    format!("transient-{digest_hex}")[..26].to_string()
+    let digest = Sha256::digest(path.as_bytes());
+    let mut id = String::with_capacity(26);
+    id.push_str("transient-");
+    for byte in digest.iter().take(8) {
+        write!(&mut id, "{byte:02x}").expect("writing digest to string should not fail");
+    }
+    id
 }
 
 pub(super) fn transient_book_payload(record: &TransientBookRecord) -> Value {
     json!({
         "id": record.id,
         "name": record.name,
-        "url": record.path,
+        "url": api_file_path(&record.path),
         "fileLastModified": format_local_datetime(record.file_last_modified_epoch_seconds),
         "sizeBytes": record.size_bytes,
         "size": format_size_bytes(record.size_bytes),
@@ -83,4 +85,17 @@ fn transient_page_payload(page: &TransientBookPageRecord) -> Value {
             .map(format_size_bytes)
             .unwrap_or_default(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::transient_book_id;
+
+    #[test]
+    fn transient_book_id_keeps_legacy_prefix_and_length() {
+        assert_eq!(
+            transient_book_id("/tmp/Transient Book.cbz"),
+            "transient-bb005341c2e74c7d"
+        );
+    }
 }
