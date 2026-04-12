@@ -1,10 +1,9 @@
 use std::path::PathBuf;
 
 use serde_json::{Map, Value, json};
-use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::{Row, SqlitePool};
 
-use crate::sqlite::file_backed_connect_options;
+use crate::sqlite::connect_private_pool;
 
 #[derive(Clone, Debug)]
 pub struct PersistedTaskStoreRecord {
@@ -176,9 +175,7 @@ impl SqliteTaskQueueStore {
                 .expect("persisted task runtime should build");
 
             runtime.block_on(async move {
-                let pool = SqlitePoolOptions::new()
-                    .max_connections(1)
-                    .connect_with(file_backed_connect_options(&tasks_db_file))
+                let pool = connect_private_pool(&tasks_db_file, 1)
                     .await
                     .expect("tasks sqlite pool should open for task persistence");
                 let result = operation(pool.clone()).await;

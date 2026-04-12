@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use sqlx::{Row, Sqlite, SqlitePool};
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_private_pool;
 use crate::tasks::PersistedHashedPageToDelete;
 
 pub fn persist_book_hash(
@@ -665,10 +665,12 @@ where
             .map_err(|error| format!("failed to build task runtime: {error}"))?;
 
         runtime.block_on(async move {
-            let pool = connect_pool(&database_file, 1)
+            let pool = connect_private_pool(&database_file, 1)
                 .await
                 .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
-            operation(pool).await
+            let result = operation(pool.clone()).await;
+            pool.close().await;
+            result
         })
     })
     .join()

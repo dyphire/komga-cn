@@ -135,6 +135,16 @@ pub async fn connect_pool(
     connect_bootstrapped_pool(path, max_connections, BootstrapTarget::None).await
 }
 
+pub(crate) async fn connect_private_pool(
+    path: impl AsRef<Path>,
+    max_connections: u32,
+) -> Result<SqlitePool, sqlx::Error> {
+    SqlitePoolOptions::new()
+        .max_connections(max_connections)
+        .connect_with(file_backed_connect_options(path))
+        .await
+}
+
 pub async fn connect_tasks_pool(
     path: impl AsRef<Path>,
     max_connections: u32,
@@ -210,7 +220,9 @@ pub struct SqliteTempPool {
 impl SqliteTempPool {
     pub async fn new(case_id: &str) -> Result<Self, sqlx::Error> {
         let db_path = deterministic_temp_db_path(case_id);
-        let pool = connect_pool(&db_path, DEFAULT_MAX_CONNECTIONS).await?;
+        // Temp pools are short-lived test fixtures; bypassing the shared cache keeps Windows
+        // cleanup deterministic because there is only one pool lifecycle to shut down.
+        let pool = connect_private_pool(&db_path, DEFAULT_MAX_CONNECTIONS).await?;
 
         Ok(Self { pool, db_path })
     }
@@ -229,12 +241,11 @@ impl SqliteTempPool {
 
     pub async fn cleanup(self) {
         let Self { pool, db_path } = self;
-        evict_shared_pools_for_paths(std::slice::from_ref(&db_path));
         pool.close().await;
         drop(pool);
 
         for path in sqlite_sidecar_paths(&db_path) {
-            remove_sqlite_artifact_if_present(&path);
+            let _ = std::fs::remove_file(&path);
         }
     }
 }
@@ -247,13 +258,6 @@ fn sqlite_sidecar_paths(db_path: &Path) -> [PathBuf; 4] {
         PathBuf::from(format!("{base_name}-shm")),
         PathBuf::from(format!("{base_name}-journal")),
     ]
-}
-
-fn remove_sqlite_artifact_if_present(path: &Path) {
-    if path.exists()
-        && let Err(error) = std::fs::remove_file(path)
-        && error.kind() != std::io::ErrorKind::NotFound
-    {}
 }
 
 fn deterministic_temp_db_path(case_id: &str) -> PathBuf {

@@ -32,4 +32,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Run cargo test
+        env:
+          RUST_BACKTRACE: "1"
         run: cargo test --workspace

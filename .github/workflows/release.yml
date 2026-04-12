@@ -72,13 +72,13 @@ jobs:
       - name: Build web UI
         working-directory: komga-webui
         env:
-          NODE_OPTIONS: "--max-old-space-size=4096"
+          NODE_OPTIONS: "--max-old-space-size=8192"
         run: |
           npm ci
           npm run build
 
       - name: Upload web UI dist
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: webui-dist
           path: komga-webui/dist/**
@@ -120,6 +120,7 @@ jobs:
             docker_runtime: true
     env:
       VERSION: ${{ needs.version.outputs.version_next }}
+      CROSS_CONFIG: komga-rust/Cross.toml
     steps:
       - name: Remove unnecessary files
         run: |
@@ -136,7 +137,7 @@ jobs:
           echo "Release version: ${VERSION}"
 
       - name: Download web UI dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: webui-dist
           path: komga-webui/dist
@@ -196,7 +197,7 @@ jobs:
           fi
 
       - name: Upload release package artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-package-${{ matrix.arch }}-${{ matrix.libc }}
           path: dist/komga-riir-${{ env.VERSION }}-linux-${{ matrix.arch }}-${{ matrix.libc }}.tar.gz
@@ -204,7 +205,7 @@ jobs:
 
       - name: Upload Docker runtime artifact
         if: matrix.docker_runtime
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: docker-artifacts-${{ matrix.arch }}
           path: |
@@ -222,8 +223,12 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version_next }}
     steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
       - name: Download release package artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: release-package-*
           path: dist
@@ -294,13 +299,13 @@ jobs:
           echo "Release version: ${VERSION}"
 
       - name: Download amd64 Docker runtime artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: docker-artifacts-amd64
           path: docker-artifacts/linux-musl/amd64
 
       - name: Download arm64 Docker runtime artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: docker-artifacts-arm64
           path: docker-artifacts/linux-musl/arm64

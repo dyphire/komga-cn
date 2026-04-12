@@ -293,6 +293,9 @@ pub(in crate::task_queue) fn rewrite_zip_book_without_pages(
         kept_entries.push((entry_name, bytes));
     }
 
+    // Windows refuses to replace the archive while the source ZIP reader still owns the file.
+    drop(archive);
+
     if removed_pages.is_empty() {
         return Ok(Vec::new());
     }

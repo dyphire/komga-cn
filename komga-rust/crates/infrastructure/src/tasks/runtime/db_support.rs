@@ -1,4 +1,5 @@
 use super::*;
+use crate::sqlite::connect_private_pool;
 
 pub(super) fn run_database_query<T>(
     database_file: PathBuf,
@@ -16,10 +17,12 @@ where
             })?;
 
         runtime.block_on(async move {
-            let pool = connect_pool(&database_file, 1).await.map_err(|error| {
+            let pool = connect_private_pool(&database_file, 1).await.map_err(|error| {
                 TaskExecutionError::runtime(format!("failed to open sqlite pool: {error}"))
             })?;
-            operation(pool.clone()).await
+            let result = operation(pool.clone()).await;
+            pool.close().await;
+            result
         })
     })
     .join()
