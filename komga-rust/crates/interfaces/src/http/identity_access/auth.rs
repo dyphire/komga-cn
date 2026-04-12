@@ -51,6 +51,10 @@ pub use user::{
     persisted_users,
 };
 
+fn resolved_session_auth_user(headers: &HeaderMap) -> Option<AuthUser> {
+    auth_token_user(headers)
+}
+
 pub fn require_auth(headers: &HeaderMap) -> Option<Response> {
     if resolved_auth_user(headers).is_some() {
         None
@@ -76,9 +80,54 @@ pub fn require_file_download(headers: &HeaderMap) -> Option<Response> {
 }
 
 pub fn resolved_auth_user(headers: &HeaderMap) -> Option<AuthUser> {
-    let auth_user = auth_token_user(headers);
+    let auth_user = resolved_session_auth_user(headers);
     access_log::record_resolved_auth_user_id(auth_user.as_ref().map(user_id));
     auth_user
+}
+
+pub async fn resolved_request_auth_user(
+    headers: &HeaderMap,
+    database_file: &Path,
+) -> Option<AuthUser> {
+    let auth_user = match persisted_api_key_user(headers, database_file)
+        .await
+        .unwrap_or(AuthOutcome::Missing)
+    {
+        AuthOutcome::Valid(user) => Some(*user),
+        AuthOutcome::Invalid => None,
+        AuthOutcome::Missing => match resolved_session_auth_user(headers) {
+            Some(user) => Some(user),
+            None => match persisted_basic_user(headers, database_file)
+                .await
+                .unwrap_or(AuthOutcome::Missing)
+            {
+                AuthOutcome::Valid(user) => Some(*user),
+                AuthOutcome::Invalid | AuthOutcome::Missing => None,
+            },
+        },
+    };
+
+    access_log::record_resolved_auth_user_id(auth_user.as_ref().map(user_id));
+    auth_user
+}
+
+pub async fn require_request_auth(headers: &HeaderMap, database_file: &Path) -> Option<Response> {
+    if resolved_request_auth_user(headers, database_file)
+        .await
+        .is_some()
+    {
+        None
+    } else {
+        Some(StatusCode::UNAUTHORIZED.into_response())
+    }
+}
+
+pub async fn require_request_admin(headers: &HeaderMap, database_file: &Path) -> Option<Response> {
+    match resolved_request_auth_user(headers, database_file).await {
+        Some(user) if user_is_admin(&user) => None,
+        Some(_) => Some(StatusCode::FORBIDDEN.into_response()),
+        None => Some(StatusCode::UNAUTHORIZED.into_response()),
+    }
 }
 
 pub fn sync_remember_me_runtime_settings(runtime_key: &str, key: &str, duration_days: u64) {

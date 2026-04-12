@@ -1,6 +1,94 @@
 use super::*;
 
 #[tokio::test]
+async fn router_book_read_progress_accepts_basic_auth_without_session_bootstrap() {
+    let paths = new_router_fixture("router-book-read-progress-basic-auth-compat").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/books/book-1/read-progress")
+                .header(
+                    header::AUTHORIZATION,
+                    basic_authorization_header_value(
+                        "admin@example.org",
+                        "router-contract-admin-123",
+                    ),
+                )
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "page": 1, "completed": true }).to_string(),
+                ))
+                .expect("book read-progress basic-auth request should build"),
+        )
+        .await
+        .expect("book read-progress basic-auth request should complete");
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for basic-auth read-progress verification");
+    let row = sqlx::query(
+        "SELECT PAGE, COMPLETED FROM READ_PROGRESS WHERE BOOK_ID = ? AND USER_ID = ? LIMIT 1",
+    )
+    .bind("book-1")
+    .bind("admin-user")
+    .fetch_one(&pool)
+    .await
+    .expect("basic-auth read-progress row should exist");
+    pool.close().await;
+
+    assert_eq!(row.get::<i64, _>("PAGE"), 10);
+    assert!(row.get::<bool, _>("COMPLETED"));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_read_progress_forbids_basic_auth_user_without_library_access() {
+    let paths = new_router_fixture("router-book-read-progress-basic-auth-forbidden").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_library_restricted_user(
+        &paths,
+        "restricted-user",
+        "restricted@example.org",
+        "restricted-user-password",
+        &[],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/books/book-1/read-progress")
+                .header(
+                    header::AUTHORIZATION,
+                    basic_authorization_header_value(
+                        "restricted@example.org",
+                        "restricted-user-password",
+                    ),
+                )
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "page": 1, "completed": true }).to_string(),
+                ))
+                .expect("forbidden book read-progress basic-auth request should build"),
+        )
+        .await
+        .expect("forbidden book read-progress basic-auth request should complete");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_book_read_progress_requires_page_when_completed_is_false_or_missing() {
     let paths = new_router_fixture("router-book-read-progress-requires-page").await;
     seed_router_contract_data(&paths).await;

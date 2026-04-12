@@ -210,6 +210,7 @@ pub fn build_router(
         .route("/api/v1/publishers", get(discovery::publishers_route))
         .route("/api/v1/age-ratings", get(discovery::age_ratings_route))
         .route("/api/v1/sharing-labels", get(discovery::sharing_labels_route))
+        .route("/api/v1/series", get(discovery::series_route))
         .route("/api/v1/series/new", get(discovery::series_new_route))
         .route("/api/v1/series/updated", get(discovery::series_updated_route))
         .route(
@@ -219,6 +220,7 @@ pub fn build_router(
         .route("/api/v1/series/latest", get(discovery::series_latest_route))
         .route("/api/v1/tags/book", get(discovery::book_tags))
         .route("/api/v1/series/{series_id}", get(discovery::series_detail_route))
+        .route("/api/v1/series/{series_id}/", get(discovery::series_detail_route))
         .route(
             "/api/v1/series/{series_id}/collections",
             get(discovery::series_collections_route),

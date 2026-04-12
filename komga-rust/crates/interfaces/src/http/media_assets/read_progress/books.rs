@@ -4,6 +4,36 @@ use super::epub::{
 };
 use super::*;
 
+fn request_progress_token(headers: &HeaderMap, user: &AuthUser) -> String {
+    if resolved_auth_user(headers).is_some() {
+        let token = resolved_token(headers);
+        if !token.trim().is_empty() {
+            return token;
+        }
+    }
+
+    format!("user:{}", user_id(user))
+}
+
+async fn load_accessible_book_media(
+    database_file: &FsPath,
+    book_id: &str,
+    user: &AuthUser,
+) -> Result<PersistedBookMedia, Response> {
+    let Some(media) = (match load_persisted_book_media(database_file, book_id).await {
+        Ok(media) => media,
+        Err(error) => return Err(internal_error_response(error)),
+    }) else {
+        return Err(StatusCode::NOT_FOUND.into_response());
+    };
+
+    if !user_can_access_book_media(database_file, book_id, user, &media).await {
+        return Err(StatusCode::FORBIDDEN.into_response());
+    }
+
+    Ok(media)
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn persist_and_record_read_progress(
     database_file: &FsPath,
@@ -35,7 +65,7 @@ pub async fn book_read_progress(
     Path(book_id): Path<String>,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -51,14 +81,23 @@ pub async fn book_read_progress(
         return invalid_read_progress_payload();
     };
 
-    let persisted_user_id = resolved_auth_user(&headers).map(|user| user_id(&user).to_string());
+    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+    else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    if let Err(response) =
+        load_accessible_book_media(auth_db.database_file.as_path(), &book_id, &user).await
+    {
+        return response;
+    }
+    let persisted_user_id = Some(user_id(&user).to_string());
     let page_count = match load_book_page_count(auth_db.database_file.as_path(), &book_id).await {
         Ok(Some(value)) if value > 0 => value,
         Ok(_) => 1,
         Err(error) => return internal_error_response(error),
     };
 
-    let token = resolved_token(&headers);
+    let token = request_progress_token(&headers, &user);
 
     let page_value = payload.get("page");
     let completed_true = payload.get("completed").and_then(|value| value.as_bool()) == Some(true);
@@ -133,7 +172,7 @@ pub async fn book_read_progress_delete(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -145,7 +184,16 @@ pub async fn book_read_progress_delete(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let token = resolved_token(&headers);
+    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+    else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    if let Err(response) =
+        load_accessible_book_media(auth_db.database_file.as_path(), &book_id, &user).await
+    {
+        return response;
+    }
+    let token = request_progress_token(&headers, &user);
     {
         let mut all_progress = state
             .progress_by_token
@@ -158,7 +206,6 @@ pub async fn book_read_progress_delete(
     }
 
     if supports_persisted_flow
-        && let Some(user) = resolved_auth_user(&headers)
         && delete_persisted_read_progress(auth_db.database_file.as_path(), &book_id, user_id(&user))
             .await
             .is_err()

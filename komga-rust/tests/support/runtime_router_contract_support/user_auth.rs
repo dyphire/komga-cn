@@ -7,6 +7,10 @@ use tower::util::ServiceExt;
 
 use super::RuntimeDbPaths;
 
+pub fn basic_authorization_header_value(email: &str, password: &str) -> String {
+    format!("Basic {}", STANDARD.encode(format!("{email}:{password}")))
+}
+
 pub async fn seed_router_age_exclude_user(
     paths: &RuntimeDbPaths,
     user_id: &str,

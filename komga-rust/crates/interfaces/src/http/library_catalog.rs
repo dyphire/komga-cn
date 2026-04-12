@@ -19,22 +19,38 @@ pub use crate::OperationalState;
 pub use crate::http::helpers::{mark_runtime_owned, to_domain_query_context};
 
 use crate::http::discovery_auth::DiscoveryAuthState;
+use crate::http::state::AuthDatabaseState;
 use crate::http::state::OperationalState as InterfaceOperationalState;
 pub(super) async fn libraries_route(
     Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(operational): Extension<InterfaceOperationalState>,
     headers: HeaderMap,
 ) -> Response {
-    response(headers, auth_state, operational).await
+    response(
+        headers,
+        auth_state,
+        auth_db.database_file.as_path(),
+        operational,
+    )
+    .await
 }
 
 pub(super) async fn library_detail_route(
     Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(auth_db): Extension<AuthDatabaseState>,
     Extension(operational): Extension<InterfaceOperationalState>,
     headers: HeaderMap,
     Path(library_id): Path<String>,
 ) -> Response {
-    library_detail(headers, auth_state, operational, Path(library_id)).await
+    library_detail(
+        headers,
+        auth_state,
+        auth_db.database_file.as_path(),
+        operational,
+        Path(library_id),
+    )
+    .await
 }
 
 pub(super) async fn library_create_route(

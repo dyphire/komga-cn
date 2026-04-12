@@ -135,7 +135,13 @@ pub async fn runtime_owned_series_list_response(
         strict_runtime_shape,
         filters.criteria.library_ids.clone(),
     );
-    let context = match auth_state.resolve_query_context(headers, requested_library_ids.as_deref())
+    let context = match auth_state
+        .resolve_query_context_with_persistence(
+            headers,
+            requested_library_ids.as_deref(),
+            database_file,
+        )
+        .await
     {
         Some(context) => context,
         None => return Some(StatusCode::UNAUTHORIZED.into_response()),

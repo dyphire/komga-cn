@@ -10,7 +10,7 @@ pub async fn series_detail(
     auth_state: DiscoveryAuthState,
     database_file: &FsPath,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
 
@@ -37,11 +37,13 @@ pub async fn series_detail(
         }),
     };
 
-    let detail_query_context =
-        match auth_state.resolve_detail_query_context(&headers, &detail_context) {
-            Ok(context) => context,
-            Err(denial) => return detail_access_denial_response(denial),
-        };
+    let detail_query_context = match auth_state
+        .resolve_detail_query_context_with_persistence(&headers, &detail_context, database_file)
+        .await
+    {
+        Ok(context) => context,
+        Err(denial) => return detail_access_denial_response(denial),
+    };
     let is_admin = detail_query_context.is_admin;
     let Some(series) = (match load_persisted_series_detail(
         database_file,
@@ -65,7 +67,7 @@ pub async fn series_collections(
     auth_state: DiscoveryAuthState,
     database_file: &FsPath,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
 
@@ -73,7 +75,10 @@ pub async fn series_collections(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Some(context) = auth_state.resolve_query_context(&headers, None) else {
+    let Some(context) = auth_state
+        .resolve_query_context_with_persistence(&headers, None, database_file)
+        .await
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let has_unrestricted_access =
@@ -97,7 +102,10 @@ pub async fn series_collections(
         }),
     };
 
-    match auth_state.resolve_detail_query_context(&headers, &detail_context) {
+    match auth_state
+        .resolve_detail_query_context_with_persistence(&headers, &detail_context, database_file)
+        .await
+    {
         Ok(_) => match load_persisted_series_collections(database_file, &series_id).await {
             Ok(mut collections) => {
                 for collection in &mut collections {
@@ -139,7 +147,7 @@ pub async fn series_metadata_update(
     Path(series_id): Path<String>,
     body: Value,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_request_admin(&headers, database_file).await {
         return response;
     }
 

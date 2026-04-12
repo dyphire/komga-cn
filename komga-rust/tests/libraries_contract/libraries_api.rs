@@ -62,6 +62,43 @@ async fn assert_single_scan_task(
 }
 
 #[tokio::test]
+async fn router_api_libraries_accepts_basic_auth_like_kotlin_clients() {
+    let paths = new_router_fixture("router-api-libraries-basic-auth-compat").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/libraries")
+                .header(
+                    header::AUTHORIZATION,
+                    basic_authorization_header_value(
+                        "admin@example.org",
+                        "router-contract-admin-123",
+                    ),
+                )
+                .body(Body::empty())
+                .expect("libraries basic-auth request should build"),
+        )
+        .await
+        .expect("libraries basic-auth request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let ids = payload
+        .as_array()
+        .expect("libraries payload should be an array")
+        .iter()
+        .filter_map(|entry| entry.get("id").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec!["library-1"]);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_api_libraries_route_matches_kotlin_etag_without_extra_cache_headers() {
     let paths = new_router_fixture("router-api-libraries-kotlin-cache-headers").await;
     seed_router_contract_data(&paths).await;

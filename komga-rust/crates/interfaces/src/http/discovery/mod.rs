@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 
 use crate::http::discovery_auth::DiscoveryAuthState;
 use crate::http::identity_access::auth::{
-    require_admin, require_auth, resolved_auth_user, user_id,
+    require_admin, require_auth, require_request_auth, resolved_auth_user, user_id,
 };
 
 use super::super::{AuthDatabaseState, OperationalState};
@@ -65,7 +65,8 @@ pub use persisted::{
     PersistedWebLinkEntry, install_persisted_discovery_access,
 };
 pub use series::{
-    series_alphabetical_groups, series_latest, series_list, series_new, series_updated,
+    series_alphabetical_groups, series_deprecated_get, series_latest, series_list, series_new,
+    series_updated,
 };
 
 #[path = "filters.rs"]
@@ -190,6 +191,15 @@ pub(super) async fn series_latest_route(
     uri: Uri,
 ) -> Response {
     series_latest(headers, uri, auth_state, auth_db.database_file.as_path()).await
+}
+
+pub(super) async fn series_route(
+    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    series_deprecated_get(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn series_detail_route(

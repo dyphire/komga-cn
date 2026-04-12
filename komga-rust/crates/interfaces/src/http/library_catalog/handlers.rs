@@ -5,6 +5,7 @@ use axum::response::{IntoResponse, Response};
 use komga_application::library_catalog::{LibraryCatalogMutationError, LibraryRecord};
 use komga_domain::discovery::DiscoveryError;
 use serde_json::{Value, json};
+use std::path::Path as FsPath;
 
 use super::OperationalState;
 use crate::http::discovery_auth::{
@@ -13,7 +14,7 @@ use crate::http::discovery_auth::{
 use crate::http::helpers::{
     detail_access_denial_response, mark_runtime_owned, to_domain_query_context,
 };
-use crate::http::identity_access::auth::{require_admin, require_auth};
+use crate::http::identity_access::auth::{require_admin, require_request_auth};
 use crate::http::library_catalog::request_mapping::{
     is_deep_scan_query, parse_create_library_change_set, parse_update_library_change_set,
 };
@@ -25,13 +26,17 @@ use crate::http::library_catalog::task_mapping::{
 pub async fn response(
     headers: HeaderMap,
     auth_state: DiscoveryAuthState,
+    database_file: &FsPath,
     state: OperationalState,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
 
-    let context = match auth_state.resolve_query_context(&headers, None) {
+    let context = match auth_state
+        .resolve_query_context_with_persistence(&headers, None, database_file)
+        .await
+    {
         Some(context) => context,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
@@ -42,10 +47,11 @@ pub async fn response(
 pub async fn library_detail(
     headers: HeaderMap,
     auth_state: DiscoveryAuthState,
+    database_file: &FsPath,
     state: OperationalState,
     Path(library_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
 
@@ -54,7 +60,10 @@ pub async fn library_detail(
         content: None,
     };
 
-    let context = match auth_state.resolve_detail_query_context(&headers, &detail_context) {
+    let context = match auth_state
+        .resolve_detail_query_context_with_persistence(&headers, &detail_context, database_file)
+        .await
+    {
         Ok(context) => context,
         Err(DetailAccessDenial::Forbidden) => {
             return forbidden_library_detail_response(&state, &library_id).await;

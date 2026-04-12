@@ -17,9 +17,9 @@ use crate::http::cache::{
 use crate::http::discovery::{resolve_book_id_for_persisted, resolve_series_id_for_persisted};
 use crate::http::discovery_auth::principal_from_user_payload;
 use crate::http::identity_access::auth::{
-    AuthUser, require_admin, require_auth, require_file_download, resolved_auth_user,
-    resolved_token, user_has_role, user_id, user_is_admin, user_payload_json,
-    user_shared_all_libraries, user_shared_library_ids,
+    AuthUser, require_admin, require_auth, require_file_download, require_request_auth,
+    resolved_auth_user, resolved_request_auth_user, resolved_token, user_has_role, user_id,
+    user_is_admin, user_payload_json, user_shared_all_libraries, user_shared_library_ids,
 };
 use crate::http::request_urls::app_absolute_url;
 use crate::http::state::AuthDatabaseState;

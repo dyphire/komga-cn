@@ -29,6 +29,54 @@ fn series_page_ids(payload: &Value) -> Vec<String> {
 }
 
 #[tokio::test]
+async fn router_discovery_series_get_routes_match_paperback_compatibility_shape() {
+    let paths = new_router_fixture("router-discovery-series-papperback-get-compat").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
+    let authorization =
+        basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
+
+    let search_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/series?page=0&size=20&search=Series%201&tag=Favorite&genre=SciFi")
+                .header(header::AUTHORIZATION, authorization.as_str())
+                .body(Body::empty())
+                .expect("deprecated series GET request should build"),
+        )
+        .await
+        .expect("deprecated series GET request should complete");
+
+    assert_eq!(search_response.status(), StatusCode::OK);
+    let search_payload = response_json(search_response).await;
+    assert_eq!(series_page_ids(&search_payload), vec!["series-1"]);
+
+    let detail_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/series/series-1/")
+                .header(header::AUTHORIZATION, authorization.as_str())
+                .body(Body::empty())
+                .expect("series detail trailing-slash request should build"),
+        )
+        .await
+        .expect("series detail trailing-slash request should complete");
+
+    assert_eq!(detail_response.status(), StatusCode::OK);
+    let detail_payload = response_json(detail_response).await;
+    assert_eq!(
+        detail_payload.get("id"),
+        Some(&Value::String("series-1".to_string()))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_discovery_series_list_excludes_soft_deleted_series_by_default() {
     let paths = new_router_fixture("router-discovery-series-list-default-deleted-hidden").await;
     seed_router_contract_data(&paths).await;
@@ -172,7 +220,8 @@ async fn router_discovery_series_list_deleted_filter_handles_deleted_only_librar
 }
 
 #[tokio::test]
-async fn router_discovery_removed_v1_series_routes_return_not_found() {
+async fn router_discovery_removed_series_v1_routes_except_paperback_compatibility_return_not_found()
+{
     let paths = new_router_fixture("router-discovery-removed-v1-series-routes").await;
     seed_router_contract_data(&paths).await;
 
@@ -180,7 +229,6 @@ async fn router_discovery_removed_v1_series_routes_return_not_found() {
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for route in [
-        "/api/v1/series?page=0&size=20",
         "/api/v1/series/alphabetical-groups?page=0&size=20",
         "/api/v1/series/series-1/books?page=0&size=20",
     ] {
