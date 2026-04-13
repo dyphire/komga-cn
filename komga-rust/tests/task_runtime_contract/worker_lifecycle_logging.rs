@@ -212,10 +212,12 @@ fn periodic_scan_iteration_logs_completion_only_when_due_and_stays_silent_when_i
         let runtime = runtime.clone();
         let task_queue = task_queue.clone();
         async move {
+            tokio::time::pause();
             let mut last_run = HashMap::from([(
                 "library-1".to_string(),
-                tokio::time::Instant::now() - Duration::from_secs(3_700),
+                tokio::time::Instant::now(),
             )]);
+            tokio::time::advance(Duration::from_secs(3_700)).await;
             komga_rust::infrastructure::task_queue::run_periodic_library_scan_iteration(
                 task_queue,
                 runtime,
