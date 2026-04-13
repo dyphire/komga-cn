@@ -640,6 +640,46 @@ pub async fn load_persisted_books_page(
                     PersistedBooksSortMode::LastModifiedDateDesc => {
                         right.last_modified.cmp(&left.last_modified)
                     }
+                    PersistedBooksSortMode::ReadProgressLastModifiedDateAsc => left
+                        .read_progress
+                        .as_ref()
+                        .map(|progress| progress.last_modified.as_str())
+                        .cmp(
+                            &right
+                                .read_progress
+                                .as_ref()
+                                .map(|progress| progress.last_modified.as_str()),
+                        ),
+                    PersistedBooksSortMode::ReadProgressLastModifiedDateDesc => right
+                        .read_progress
+                        .as_ref()
+                        .map(|progress| progress.last_modified.as_str())
+                        .cmp(
+                            &left
+                                .read_progress
+                                .as_ref()
+                                .map(|progress| progress.last_modified.as_str()),
+                        ),
+                    PersistedBooksSortMode::ReadProgressReadDateAsc => left
+                        .read_progress
+                        .as_ref()
+                        .and_then(|progress| progress.read_date.as_deref())
+                        .cmp(
+                            &right
+                                .read_progress
+                                .as_ref()
+                                .and_then(|progress| progress.read_date.as_deref()),
+                        ),
+                    PersistedBooksSortMode::ReadProgressReadDateDesc => right
+                        .read_progress
+                        .as_ref()
+                        .and_then(|progress| progress.read_date.as_deref())
+                        .cmp(
+                            &left
+                                .read_progress
+                                .as_ref()
+                                .and_then(|progress| progress.read_date.as_deref()),
+                        ),
                     PersistedBooksSortMode::ReleaseDateDesc => {
                         right.metadata_release_date.cmp(&left.metadata_release_date)
                     }
@@ -834,6 +874,16 @@ pub fn parse_persisted_books_sort_modes(
             "createdDate,desc" | "created,desc" => Some(PersistedBooksSortMode::CreatedDateDesc),
             "lastModifiedDate,desc" | "lastModified,desc" => {
                 Some(PersistedBooksSortMode::LastModifiedDateDesc)
+            }
+            "readProgress.lastModified,asc" => {
+                Some(PersistedBooksSortMode::ReadProgressLastModifiedDateAsc)
+            }
+            "readProgress.lastModified,desc" | "readProgress.lastModified" => {
+                Some(PersistedBooksSortMode::ReadProgressLastModifiedDateDesc)
+            }
+            "readProgress.readDate,asc" => Some(PersistedBooksSortMode::ReadProgressReadDateAsc),
+            "readProgress.readDate,desc" | "readProgress.readDate" => {
+                Some(PersistedBooksSortMode::ReadProgressReadDateDesc)
             }
             "metadata.releaseDate,desc" => Some(PersistedBooksSortMode::ReleaseDateDesc),
             "metadata.numberSort,asc" | "number,asc" => Some(PersistedBooksSortMode::NumberSortAsc),

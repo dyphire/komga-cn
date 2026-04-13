@@ -20,6 +20,10 @@ enum BookOrdering {
     NumberSortAsc,
     SeriesIdAsc,
     LastModifiedDesc,
+    ReadProgressLastModifiedAsc,
+    ReadProgressLastModifiedDesc,
+    ReadProgressReadDateAsc,
+    ReadProgressReadDateDesc,
 }
 
 #[derive(sqlx::FromRow)]
@@ -479,6 +483,14 @@ fn book_ordering_from_sorts(sorts: &[String]) -> BookOrdering {
         "lastModifiedDate,desc" | "lastModified,desc" | "lastModifiedDate" | "lastModified" => {
             BookOrdering::LastModifiedDesc
         }
+        "readProgress.lastModified,asc" => BookOrdering::ReadProgressLastModifiedAsc,
+        "readProgress.lastModified,desc" | "readProgress.lastModified" => {
+            BookOrdering::ReadProgressLastModifiedDesc
+        }
+        "readProgress.readDate,asc" => BookOrdering::ReadProgressReadDateAsc,
+        "readProgress.readDate,desc" | "readProgress.readDate" => {
+            BookOrdering::ReadProgressReadDateDesc
+        }
         "metadata.releaseDate,desc" | "metadata.releaseDate" => {
             BookOrdering::MetadataReleaseDateDesc
         }
@@ -504,6 +516,14 @@ fn book_order_sql(ordering: BookOrdering) -> &'static str {
             "b.series_id ASC, b.number_sort ASC, b.title COLLATE NOCASE ASC"
         }
         BookOrdering::LastModifiedDesc => "b.last_modified DESC, b.title COLLATE NOCASE ASC",
+        BookOrdering::ReadProgressLastModifiedAsc => {
+            "rp.last_modified ASC, b.title COLLATE NOCASE ASC"
+        }
+        BookOrdering::ReadProgressLastModifiedDesc => {
+            "rp.last_modified DESC, b.title COLLATE NOCASE ASC"
+        }
+        BookOrdering::ReadProgressReadDateAsc => "rp.read_date ASC, b.title COLLATE NOCASE ASC",
+        BookOrdering::ReadProgressReadDateDesc => "rp.read_date DESC, b.title COLLATE NOCASE ASC",
     }
 }
 
@@ -524,6 +544,22 @@ mod tests {
         assert_eq!(
             book_ordering_from_sorts(&["lastModified,desc".to_string()]),
             BookOrdering::LastModifiedDesc
+        );
+        assert_eq!(
+            book_ordering_from_sorts(&["readProgress.lastModified,asc".to_string()]),
+            BookOrdering::ReadProgressLastModifiedAsc
+        );
+        assert_eq!(
+            book_ordering_from_sorts(&["readProgress.lastModified,desc".to_string()]),
+            BookOrdering::ReadProgressLastModifiedDesc
+        );
+        assert_eq!(
+            book_ordering_from_sorts(&["readProgress.readDate,asc".to_string()]),
+            BookOrdering::ReadProgressReadDateAsc
+        );
+        assert_eq!(
+            book_ordering_from_sorts(&["readProgress.readDate,desc".to_string()]),
+            BookOrdering::ReadProgressReadDateDesc
         );
         assert_eq!(
             book_ordering_from_sorts(&["metadata.releaseDate,desc".to_string()]),

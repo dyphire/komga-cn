@@ -87,7 +87,7 @@ where
         context: &DiscoveryQueryContext,
         query: BooksListQuery,
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
-        let _ = classify_book_sorts(&query.sort)?;
+        classify_book_sorts(&query.sort)?;
         self.repository
             .list_books(context, runtime_books_list_query(query))
             .await

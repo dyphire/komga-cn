@@ -81,6 +81,85 @@ async fn router_discovery_books_list_applies_default_sort_for_unknown_sort_mode_
 }
 
 #[tokio::test]
+async fn router_discovery_books_list_sorts_runtime_owned_results_by_read_progress_dates() {
+    let paths = new_router_fixture("router-discovery-books-list-runtime-read-progress-sort").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_authors_scope_variants(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("books runtime read-progress sort db should open");
+    for (book_id, read_date, last_modified) in [
+        ("book-1", "2024-01-01 00:00:00", "2024-02-01 00:00:00"),
+        ("book-2", "2024-03-01 00:00:00", "2024-01-15 00:00:00"),
+    ] {
+        sqlx::query(
+            "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, READ_DATE, LAST_MODIFIED_DATE) \
+             VALUES (?, ?, ?, ?, ?, ?) \
+             ON CONFLICT (BOOK_ID, USER_ID) DO UPDATE \
+             SET PAGE = excluded.PAGE, COMPLETED = excluded.COMPLETED, READ_DATE = excluded.READ_DATE, \
+                 LAST_MODIFIED_DATE = excluded.LAST_MODIFIED_DATE",
+        )
+        .bind(book_id)
+        .bind("admin-user")
+        .bind(1_i64)
+        .bind(false)
+        .bind(read_date)
+        .bind(last_modified)
+        .execute(&pool)
+        .await
+        .expect("books runtime read-progress sort fixture should upsert read progress row");
+    }
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    for (sort, expected_ids) in [
+        ("readProgress.readDate,asc", vec!["book-1", "book-2"]),
+        ("readProgress.readDate,desc", vec!["book-2", "book-1"]),
+        ("readProgress.lastModified,asc", vec!["book-2", "book-1"]),
+        ("readProgress.lastModified,desc", vec!["book-1", "book-2"]),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/books/list?page=0&size=20&sort={sort}"))
+                    .header("x-auth-token", &auth_token)
+                    .header("x-komga-runtime-search-ownership", "runtime-rust-owned")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({
+                            "condition": {
+                                "type": "LibraryId",
+                                "operator": "is",
+                                "value": "library-1"
+                            }
+                        })
+                        .to_string(),
+                    ))
+                    .expect("books runtime read-progress sort request should build"),
+            )
+            .await
+            .expect("books runtime read-progress sort request should complete");
+        assert_eq!(response.status(), StatusCode::OK, "sort: {sort}");
+        let payload = response_json(response).await;
+        let ids = payload
+            .get("content")
+            .and_then(Value::as_array)
+            .expect("books runtime read-progress sort payload should expose content array")
+            .iter()
+            .filter_map(|entry| entry.get("id").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        assert_eq!(ids, expected_ids, "sort: {sort}");
+    }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_discovery_books_list_sorts_runtime_owned_results_by_number_series_id_and_alias_dates()
  {
     let paths = new_router_fixture("router-discovery-books-list-runtime-sort-order").await;

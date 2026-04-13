@@ -36,6 +36,83 @@ async fn open_pool_and_require_user(
     Ok(pool)
 }
 
+async fn load_book_series_id(
+    pool: &SqlitePool,
+    book_id: &str,
+    query_context: &str,
+) -> Result<Option<String>, String> {
+    sqlx::query("SELECT SERIES_ID FROM BOOK WHERE ID = ? LIMIT 1")
+        .bind(book_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| format!("query {query_context} book series: {error}"))
+        .map(|row| row.map(|row| row.get::<String, _>("SERIES_ID")))
+}
+
+async fn sync_series_read_progress(
+    pool: &SqlitePool,
+    series_id: &str,
+    user_id_value: &str,
+    query_context: &str,
+) -> Result<(), String> {
+    let row = sqlx::query(
+        "SELECT COUNT(rp.BOOK_ID) AS PROGRESS_COUNT, \
+                COALESCE(SUM(CASE WHEN rp.COMPLETED = 1 THEN 1 ELSE 0 END), 0) AS READ_COUNT, \
+                COALESCE(SUM(CASE WHEN rp.COMPLETED = 0 THEN 1 ELSE 0 END), 0) AS IN_PROGRESS_COUNT, \
+                MAX(rp.READ_DATE) AS MOST_RECENT_READ_DATE \
+         FROM BOOK b \
+         LEFT JOIN READ_PROGRESS rp ON rp.BOOK_ID = b.ID AND rp.USER_ID = ? \
+         WHERE b.SERIES_ID = ? AND b.DELETED_DATE IS NULL",
+    )
+    .bind(user_id_value)
+    .bind(series_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| format!("query {query_context} series read progress aggregates: {error}"))?;
+
+    let progress_count = row.get::<i64, _>("PROGRESS_COUNT");
+    if progress_count == 0 {
+        sqlx::query("DELETE FROM READ_PROGRESS_SERIES WHERE SERIES_ID = ? AND USER_ID = ?")
+            .bind(series_id)
+            .bind(user_id_value)
+            .execute(pool)
+            .await
+            .map_err(|error| format!("delete {query_context} series read progress row: {error}"))?;
+        return Ok(());
+    }
+
+    sqlx::query(
+        "INSERT INTO READ_PROGRESS_SERIES (SERIES_ID, USER_ID, READ_COUNT, IN_PROGRESS_COUNT, MOST_RECENT_READ_DATE, LAST_MODIFIED_DATE) \
+         VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP) \
+         ON CONFLICT(SERIES_ID, USER_ID) DO UPDATE \
+         SET READ_COUNT = excluded.READ_COUNT, IN_PROGRESS_COUNT = excluded.IN_PROGRESS_COUNT, \
+             MOST_RECENT_READ_DATE = excluded.MOST_RECENT_READ_DATE, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP",
+    )
+    .bind(series_id)
+    .bind(user_id_value)
+    .bind(row.get::<i64, _>("READ_COUNT"))
+    .bind(row.get::<i64, _>("IN_PROGRESS_COUNT"))
+    .bind(row.get::<Option<String>, _>("MOST_RECENT_READ_DATE"))
+    .execute(pool)
+    .await
+    .map_err(|error| format!("upsert {query_context} series read progress row: {error}"))?;
+
+    Ok(())
+}
+
+async fn sync_series_read_progress_for_book(
+    pool: &SqlitePool,
+    book_id: &str,
+    user_id_value: &str,
+    query_context: &str,
+) -> Result<(), String> {
+    let Some(series_id) = load_book_series_id(pool, book_id, query_context).await? else {
+        return Ok(());
+    };
+
+    sync_series_read_progress(pool, &series_id, user_id_value, query_context).await
+}
+
 pub async fn persist_read_progress(
     database_file: &Path,
     book_id: &str,
@@ -53,14 +130,11 @@ pub async fn persist_read_progress(
     .await?;
 
     sqlx::query(
-        "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, LOCATOR) \
-         VALUES (?, ?, ?, ?, ?) \
+        "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, READ_DATE, DEVICE_ID, DEVICE_NAME, LOCATOR) \
+         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, '', '', ?) \
          ON CONFLICT(BOOK_ID, USER_ID) DO UPDATE \
-         SET PAGE = excluded.PAGE, COMPLETED = excluded.COMPLETED, LOCATOR = excluded.LOCATOR, \
-             READ_DATE = CASE \
-                 WHEN READ_PROGRESS.COMPLETED = 0 AND excluded.COMPLETED = 1 THEN CURRENT_TIMESTAMP \
-                 ELSE READ_PROGRESS.READ_DATE \
-             END, \
+         SET PAGE = excluded.PAGE, COMPLETED = excluded.COMPLETED, READ_DATE = CURRENT_TIMESTAMP, \
+             DEVICE_ID = excluded.DEVICE_ID, DEVICE_NAME = excluded.DEVICE_NAME, LOCATOR = excluded.LOCATOR, \
              LAST_MODIFIED_DATE = CURRENT_TIMESTAMP",
     )
     .bind(book_id)
@@ -71,6 +145,8 @@ pub async fn persist_read_progress(
     .execute(&pool)
     .await
     .map_err(|error| format!("persist read-progress: {error}"))?;
+
+    sync_series_read_progress_for_book(&pool, book_id, user_id_value, "read-progress").await?;
 
     Ok(())
 }
@@ -135,6 +211,9 @@ pub async fn persist_book_progression(
     .execute(&pool)
     .await
     .map_err(|error| format!("persist book progression: {error}"))?;
+
+    sync_series_read_progress_for_book(&pool, book_id, user_id_value, "progression").await?;
+
     Ok(())
 }
 
@@ -230,6 +309,7 @@ pub async fn delete_persisted_read_progress(
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(|error| format!("open read-progress delete db: {error}"))?;
+    let series_id = load_book_series_id(&pool, book_id, "read-progress delete").await?;
 
     sqlx::query("DELETE FROM READ_PROGRESS WHERE BOOK_ID = ? AND USER_ID = ?")
         .bind(book_id)
@@ -237,6 +317,10 @@ pub async fn delete_persisted_read_progress(
         .execute(&pool)
         .await
         .map_err(|error| format!("delete read-progress: {error}"))?;
+
+    if let Some(series_id) = series_id {
+        sync_series_read_progress(&pool, &series_id, user_id_value, "read-progress delete").await?;
+    }
 
     Ok(())
 }

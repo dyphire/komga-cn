@@ -317,6 +317,95 @@ async fn router_book_read_progress_marks_completed_when_page_equals_last_page() 
 }
 
 #[tokio::test]
+async fn router_book_read_progress_refreshes_read_date_and_series_aggregate_on_page_updates() {
+    let paths = new_router_fixture("router-book-read-progress-refreshes-read-date").await;
+    seed_router_contract_data(&paths).await;
+
+    let old_read_date = "2000-01-01 00:00:00";
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for read-progress refresh seed");
+    sqlx::query(
+        "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, READ_DATE) \
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("book-1")
+    .bind("admin-user")
+    .bind(1_i64)
+    .bind(false)
+    .bind(old_read_date)
+    .execute(&pool)
+    .await
+    .expect("existing read progress row should insert");
+    sqlx::query(
+        "INSERT INTO READ_PROGRESS_SERIES (SERIES_ID, USER_ID, READ_COUNT, IN_PROGRESS_COUNT, MOST_RECENT_READ_DATE) \
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("series-1")
+    .bind("admin-user")
+    .bind(0_i64)
+    .bind(1_i64)
+    .bind(old_read_date)
+    .execute(&pool)
+    .await
+    .expect("existing series read progress aggregate row should insert");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let update = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/books/book-1/read-progress")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "page": 2 }).to_string()))
+                .expect("book read-progress refresh request should build"),
+        )
+        .await
+        .expect("book read-progress refresh request should complete");
+
+    assert_eq!(update.status(), StatusCode::NO_CONTENT);
+
+    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for read-progress refresh verification");
+    let book_row = sqlx::query(
+        "SELECT PAGE, COMPLETED, READ_DATE FROM READ_PROGRESS WHERE BOOK_ID = ? AND USER_ID = ? LIMIT 1",
+    )
+    .bind("book-1")
+    .bind("admin-user")
+    .fetch_one(&verify_pool)
+    .await
+    .expect("updated read progress row should be queryable");
+    let series_row = sqlx::query(
+        "SELECT READ_COUNT, IN_PROGRESS_COUNT, MOST_RECENT_READ_DATE FROM READ_PROGRESS_SERIES \
+         WHERE SERIES_ID = ? AND USER_ID = ? LIMIT 1",
+    )
+    .bind("series-1")
+    .bind("admin-user")
+    .fetch_one(&verify_pool)
+    .await
+    .expect("updated series read progress aggregate row should be queryable");
+    verify_pool.close().await;
+
+    let refreshed_book_read_date = book_row.get::<String, _>("READ_DATE");
+    let refreshed_series_read_date = series_row.get::<String, _>("MOST_RECENT_READ_DATE");
+
+    assert_eq!(book_row.get::<i64, _>("PAGE"), 2);
+    assert_eq!(book_row.get::<i64, _>("COMPLETED"), 0);
+    assert_ne!(refreshed_book_read_date, old_read_date);
+    assert_eq!(series_row.get::<i64, _>("READ_COUNT"), 0);
+    assert_eq!(series_row.get::<i64, _>("IN_PROGRESS_COUNT"), 1);
+    assert_eq!(refreshed_series_read_date, refreshed_book_read_date);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_book_read_progress_persists_epub_locator_for_page_updates() {
     let paths = new_router_fixture("router-book-read-progress-persists-epub-locator").await;
     seed_router_contract_data(&paths).await;
