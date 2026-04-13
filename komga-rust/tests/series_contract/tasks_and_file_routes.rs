@@ -602,15 +602,28 @@ async fn router_series_file_delete_enqueues_delete_series_without_group_id() {
     let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for series delete verification");
-    let rows = sqlx::query("SELECT SIMPLE_TYPE, PRIORITY FROM TASK ORDER BY ID ASC")
-        .fetch_all(&tasks_pool)
-        .await
-        .expect("series delete task rows should be queryable");
+    let rows =
+        sqlx::query("SELECT SIMPLE_TYPE, PRIORITY, GROUP_ID, PAYLOAD FROM TASK ORDER BY ID ASC")
+            .fetch_all(&tasks_pool)
+            .await
+            .expect("series delete task rows should be queryable");
     tasks_pool.close().await;
 
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].get::<String, _>("SIMPLE_TYPE"), "DeleteSeries");
     assert_eq!(rows[0].get::<i32, _>("PRIORITY"), 100);
+    assert_eq!(rows[0].get::<Option<String>, _>("GROUP_ID"), None);
+    assert_eq!(
+        serde_json::from_str::<Value>(&rows[0].get::<String, _>("PAYLOAD"))
+            .expect("series delete payload should be valid json"),
+        json!({
+            "seriesId": "series-1",
+            "priority": 100,
+            "groupId": Value::Null,
+            "uniqueId": "DELETE_SERIES:series-1"
+        }),
+        "series file delete route should persist the Kotlin-compatible DeleteSeries payload shape",
+    );
 
     cleanup_router_fixture(paths);
 }

@@ -26,10 +26,11 @@ pub(super) fn try_execute(
                 Err(error) => return Some(Err(error)),
             };
             if let Some(series_id) = series_id {
-                scheduler.enqueue(TaskQueueRecord::new(
-                    format!("REFRESH_SERIES_METADATA:{series_id}"),
-                    task.priority.saturating_sub(5),
-                    Some(series_id),
+                scheduler.enqueue(runtime_follow_up_task(
+                    RuntimeFollowUpTask::RefreshSeriesMetadata {
+                        series_id,
+                        priority: task.priority.saturating_sub(5),
+                    },
                 ));
             }
             Ok(())
@@ -45,10 +46,11 @@ pub(super) fn try_execute(
             {
                 return Some(Err(error));
             }
-            scheduler.enqueue(TaskQueueRecord::new(
-                format!("AGGREGATE_SERIES_METADATA:{series_id}"),
-                task.priority.saturating_sub(5),
-                Some(series_id.to_string()),
+            scheduler.enqueue(runtime_follow_up_task(
+                RuntimeFollowUpTask::AggregateSeriesMetadata {
+                    series_id: series_id.to_string(),
+                    priority: task.priority.saturating_sub(5),
+                },
             ));
             Ok(())
         }

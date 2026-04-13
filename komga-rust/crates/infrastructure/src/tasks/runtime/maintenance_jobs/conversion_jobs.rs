@@ -33,11 +33,11 @@ pub(super) fn try_execute(
                 Err(error) => return Some(Err(error)),
             };
             for book in books {
-                scheduler.enqueue(TaskQueueRecord::new(
-                    format!("CONVERT_BOOK:{}", book.book_id),
-                    task.priority.saturating_sub(5),
-                    Some(book.series_id),
-                ));
+                scheduler.enqueue(runtime_follow_up_task(RuntimeFollowUpTask::ConvertBook {
+                    book_id: book.book_id,
+                    series_id: book.series_id,
+                    priority: task.priority.saturating_sub(5),
+                }));
             }
             Ok(())
         }

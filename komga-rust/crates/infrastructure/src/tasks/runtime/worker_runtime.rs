@@ -11,7 +11,8 @@ use tokio::sync::{Notify, watch};
 use tokio::time::interval;
 use tracing::{Instrument, Span, error, info};
 
-use super::{ScheduledLibraryScan, TaskQueueRecord, TaskQueueScheduler};
+use super::task_protocol::runtime_startup_task;
+use super::{ScheduledLibraryScan, TaskQueueScheduler};
 use crate::tasks::{load_persisted_library_ids, load_persisted_library_scan_profiles};
 
 pub type SharedTaskQueue = Arc<Mutex<TaskQueueScheduler>>;
@@ -621,7 +622,7 @@ fn bootstrap_startup_search_task_inner(
         return Ok(0);
     };
 
-    task_queue.enqueue(TaskQueueRecord::new(task_name.to_string(), 1_000, None));
+    task_queue.enqueue(runtime_startup_task(task_name));
     Ok(1)
 }
 
@@ -726,7 +727,7 @@ fn bootstrap_startup_library_scans_inner(
     let startup_tasks = build_startup_library_scan_tasks(&profiles);
     let enqueued = startup_tasks.len();
     for task in startup_tasks {
-        task_queue.enqueue(TaskQueueRecord::new(task.id, task.priority, task.group));
+        task_queue.enqueue(task);
     }
 
     let scheduled_scans = build_scheduled_library_scans(&profiles)

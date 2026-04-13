@@ -1,6 +1,8 @@
 use super::*;
-use komga_rust::application::media_assets::MediaImportService;
-use komga_rust::infrastructure::filesystem::FilesystemImportPort;
+use komga_rust::application::media_assets::{
+    BooksImportEntry, ImportBookOutcome, ImportCopyMode, MediaImportPort, MediaImportService,
+};
+use std::sync::{Arc, Mutex};
 
 async fn enqueue_books_import(paths: &RuntimeDbPaths, payload: Value, context: &str) {
     let app = build_router_with_config(&runtime_config_for_paths(paths));
@@ -36,6 +38,26 @@ async fn load_import_task_rows(
         .expect(context);
     tasks_pool.close().await;
     rows
+}
+
+#[derive(Clone, Default)]
+struct RecordingImportPort {
+    calls: Arc<Mutex<Vec<(ImportCopyMode, BooksImportEntry)>>>,
+    outcome: Option<ImportBookOutcome>,
+}
+
+impl MediaImportPort for RecordingImportPort {
+    async fn import_book(
+        &self,
+        copy_mode: ImportCopyMode,
+        book: BooksImportEntry,
+    ) -> Result<Option<ImportBookOutcome>, String> {
+        self.calls
+            .lock()
+            .expect("recording import port lock should not be poisoned")
+            .push((copy_mode, book));
+        Ok(self.outcome.clone())
+    }
 }
 
 #[tokio::test]
@@ -213,14 +235,32 @@ async fn router_books_import_runtime_follow_up_enqueues_analyze_book_instead_of_
     .await;
     let import_row = rows.pop().expect("queued import task row should exist");
 
-    let follow_up_tasks =
-        MediaImportService::new(FilesystemImportPort::new(paths.main_db.as_path()))
-            .process_queued_book_payload(
-                &import_row.get::<String, _>("PAYLOAD"),
-                import_row.get::<i64, _>("PRIORITY") as i32,
-            )
-            .await
-            .expect("queued import payload should produce follow-up tasks");
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let follow_up_tasks = MediaImportService::new(RecordingImportPort {
+        calls: calls.clone(),
+        outcome: Some(ImportBookOutcome {
+            library_id: "library-1".to_string(),
+            imported_book_id: "book-imported-1".to_string(),
+            sidecar_imported: false,
+            artwork_sidecar_imported: false,
+        }),
+    })
+    .process_queued_book_payload(
+        &import_row.get::<String, _>("PAYLOAD"),
+        import_row.get::<i64, _>("PRIORITY") as i32,
+    )
+    .await
+    .expect("queued import payload should produce follow-up tasks");
+
+    let recorded_calls = calls
+        .lock()
+        .expect("recorded import calls lock should not be poisoned");
+    assert_eq!(recorded_calls.len(), 1);
+    assert_eq!(recorded_calls[0].0, ImportCopyMode::Copy);
+    assert_eq!(recorded_calls[0].1.series_id, "series-1");
+    assert_eq!(recorded_calls[0].1.destination_name, None);
+    assert_eq!(recorded_calls[0].1.upgrade_book_id, None);
+    assert_eq!(recorded_calls[0].1.source_file, source);
 
     assert_eq!(follow_up_tasks.len(), 1);
     assert!(

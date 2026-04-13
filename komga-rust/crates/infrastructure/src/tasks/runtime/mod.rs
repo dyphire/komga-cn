@@ -26,10 +26,12 @@ mod queue_core;
 mod queue_scheduler;
 mod scanner_jobs;
 mod scanner_support;
+mod task_protocol;
 mod worker_runtime;
 
 use media_helpers::*;
 use scanner_support::*;
+use task_protocol::{RuntimeFollowUpTask, runtime_follow_up_task};
 
 pub use komga_application::task_processing::{
     LibraryScanInterval, ScheduledLibraryScan, TaskQueueRecord,

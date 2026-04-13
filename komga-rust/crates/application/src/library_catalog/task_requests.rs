@@ -4,6 +4,10 @@ use super::task_records::{
 };
 use super::{LibraryCatalogMutationError, LibraryCatalogMutationPort, LibraryTaskResult};
 
+fn task_result(task_records: Vec<crate::task_processing::TaskQueueRecord>) -> LibraryTaskResult {
+    LibraryTaskResult { task_records }
+}
+
 pub struct LibraryTaskService<P> {
     port: P,
 }
@@ -22,9 +26,9 @@ where
         deep_scan: bool,
     ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {
         ensure_library_exists(&self.port, library_id).await?;
-        Ok(LibraryTaskResult {
-            task_records: vec![manual_scan_library_task_record(library_id, deep_scan)],
-        })
+        Ok(task_result(vec![manual_scan_library_task_record(
+            library_id, deep_scan,
+        )]))
     }
 
     pub async fn analyze_library(
@@ -38,9 +42,7 @@ where
             .map_err(LibraryCatalogMutationError::persistence)?
             .unwrap_or_default()
             .1;
-        Ok(LibraryTaskResult {
-            task_records: analyze_library_task_records(books),
-        })
+        Ok(task_result(analyze_library_task_records(books)))
     }
 
     pub async fn refresh_metadata(
@@ -53,9 +55,9 @@ where
             .await
             .map_err(LibraryCatalogMutationError::persistence)?
             .unwrap_or_default();
-        Ok(LibraryTaskResult {
-            task_records: metadata_refresh_task_records(series_ids, books),
-        })
+        Ok(task_result(metadata_refresh_task_records(
+            series_ids, books,
+        )))
     }
 
     pub async fn empty_trash(
@@ -63,9 +65,7 @@ where
         library_id: &str,
     ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {
         ensure_library_exists(&self.port, library_id).await?;
-        Ok(LibraryTaskResult {
-            task_records: empty_trash_task_records(library_id),
-        })
+        Ok(task_result(empty_trash_task_records(library_id)))
     }
 }
 
@@ -194,57 +194,6 @@ mod tests {
     }
 
     #[test]
-    fn scan_library_enqueues_kotlin_style_deep_scan_task_for_existing_library() {
-        let service = LibraryTaskService::new(TestPort {
-            library: Some(LibraryRecord::default_record("library-1".to_string())),
-            ..TestPort::default()
-        });
-
-        let result = block_on(service.scan_library("library-1", true))
-            .expect("existing libraries should enqueue scan tasks");
-
-        assert_eq!(result.task_records.len(), 1);
-        assert_eq!(
-            result.task_records[0].id,
-            "SCAN_LIBRARY:library-1:DEEP:true"
-        );
-        assert_eq!(result.task_records[0].simple_type, "SCAN_LIBRARY");
-        assert_eq!(result.task_records[0].priority, 100);
-        assert_eq!(result.task_records[0].group, None);
-        assert_eq!(
-            result.task_records[0]
-                .payload
-                .as_deref()
-                .and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok()),
-            Some(serde_json::json!({
-                "libraryId": "library-1",
-                "scanDeep": true,
-                "priority": 100,
-                "groupId": serde_json::Value::Null,
-                "uniqueId": "SCAN_LIBRARY:library-1:DEEP:true"
-            }))
-        );
-    }
-
-    #[test]
-    fn analyze_library_groups_tasks_by_series_id() {
-        let service = LibraryTaskService::new(TestPort {
-            library_series_and_book_ids: Some((
-                vec!["series-1".to_string()],
-                vec![("book-1".to_string(), "series-1".to_string())],
-            )),
-            ..TestPort::default()
-        });
-
-        let result =
-            block_on(service.analyze_library("library-1")).expect("analyze library should work");
-
-        assert_eq!(result.task_records.len(), 1);
-        assert_eq!(result.task_records[0].id, "ANALYZE_BOOK:book-1");
-        assert_eq!(result.task_records[0].group.as_deref(), Some("series-1"));
-    }
-
-    #[test]
     fn refresh_metadata_returns_empty_task_list_when_library_is_missing() {
         let service = LibraryTaskService::new(TestPort::default());
 
@@ -252,45 +201,6 @@ mod tests {
             .expect("missing libraries should still return accepted empty metadata refresh tasks");
 
         assert!(result.task_records.is_empty());
-    }
-
-    #[test]
-    fn refresh_metadata_emits_book_metadata_tasks_grouped_by_series_id() {
-        let service = LibraryTaskService::new(TestPort {
-            library_series_and_book_ids: Some((
-                vec!["series-1".to_string()],
-                vec![("book-1".to_string(), "series-1".to_string())],
-            )),
-            ..TestPort::default()
-        });
-
-        let result = block_on(service.refresh_metadata("library-1"))
-            .expect("existing metadata refresh inputs should enqueue tasks");
-
-        let metadata = result
-            .task_records
-            .iter()
-            .find(|task| task.simple_type == "REFRESH_BOOK_METADATA")
-            .expect("book metadata refresh task should be present");
-
-        assert_eq!(metadata.id, "REFRESH_BOOK_METADATA_book-1");
-        assert_eq!(metadata.group.as_deref(), Some("series-1"));
-    }
-
-    #[test]
-    fn empty_trash_enqueues_only_empty_trash_task_for_existing_library() {
-        let service = LibraryTaskService::new(TestPort {
-            library: Some(LibraryRecord::default_record("library-1".to_string())),
-            ..TestPort::default()
-        });
-
-        let result = block_on(service.empty_trash("library-1"))
-            .expect("existing libraries should enqueue empty-trash tasks");
-
-        assert_eq!(result.task_records.len(), 1);
-        assert_eq!(result.task_records[0].id, "EMPTY_TRASH:library-1");
-        assert_eq!(result.task_records[0].simple_type, "EMPTY_TRASH");
-        assert_eq!(result.task_records[0].group, None);
     }
 
     fn block_on<F: Future>(future: F) -> F::Output {

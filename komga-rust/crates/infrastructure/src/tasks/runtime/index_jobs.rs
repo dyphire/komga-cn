@@ -1,4 +1,7 @@
-use super::{RuntimeConfig, TaskExecutionError, TaskQueueRecord, TaskQueueScheduler};
+use super::{
+    RuntimeConfig, RuntimeFollowUpTask, TaskExecutionError, TaskQueueRecord, TaskQueueScheduler,
+    runtime_follow_up_task,
+};
 use crate::operational_settings_access::load_server_settings;
 use crate::search::SearchEntityType;
 use crate::sqlite::write_models::ServerSettingsStore;
@@ -32,22 +35,19 @@ pub(super) fn try_execute(
             };
             if outcome.media_status.eq_ignore_ascii_case("READY") && !outcome.series_id.is_empty() {
                 let follow_up_priority = task.priority.saturating_add(1);
-                scheduler.enqueue(
-                    TaskQueueRecord::new(
-                        format!("GENERATE_BOOK_THUMBNAIL_{book_id}"),
-                        follow_up_priority,
-                        None,
-                    )
-                    .with_simple_type("GENERATE_BOOK_THUMBNAIL"),
-                );
-                scheduler.enqueue(
-                    TaskQueueRecord::new(
-                        format!("REFRESH_BOOK_METADATA_{book_id}"),
-                        follow_up_priority,
-                        Some(outcome.series_id),
-                    )
-                    .with_simple_type("REFRESH_BOOK_METADATA"),
-                );
+                scheduler.enqueue(runtime_follow_up_task(
+                    RuntimeFollowUpTask::GenerateBookThumbnail {
+                        book_id: book_id.to_string(),
+                        priority: follow_up_priority,
+                    },
+                ));
+                scheduler.enqueue(runtime_follow_up_task(
+                    RuntimeFollowUpTask::RefreshBookMetadata {
+                        book_id: book_id.to_string(),
+                        series_id: Some(outcome.series_id),
+                        priority: follow_up_priority,
+                    },
+                ));
             }
             Ok(())
         }
@@ -104,14 +104,12 @@ pub(super) fn try_execute(
                 }
             };
             for book_id in book_ids {
-                scheduler.enqueue(
-                    TaskQueueRecord::new(
-                        format!("GENERATE_BOOK_THUMBNAIL_{book_id}"),
-                        task.priority.saturating_sub(5),
-                        None,
-                    )
-                    .with_simple_type("GENERATE_BOOK_THUMBNAIL"),
-                );
+                scheduler.enqueue(runtime_follow_up_task(
+                    RuntimeFollowUpTask::GenerateBookThumbnail {
+                        book_id,
+                        priority: task.priority.saturating_sub(5),
+                    },
+                ));
             }
             Ok(())
         }

@@ -1,5 +1,9 @@
 use std::path::PathBuf;
 
+use komga_application::task_processing::{
+    DefaultTaskProtocolCatalog, PersistedTaskRowShape, PlannedTaskKind, TaskProtocolCatalog,
+    TaskQueueRecord,
+};
 use serde_json::{Map, Value, json};
 use sqlx::{Row, SqlitePool};
 
@@ -20,6 +24,64 @@ pub struct SqliteTaskQueueStore {
     tasks_db_file: PathBuf,
 }
 
+#[derive(Clone, Debug)]
+struct PersistedTaskCompatibility<C> {
+    catalog: C,
+}
+
+impl<C: Default> Default for PersistedTaskCompatibility<C> {
+    fn default() -> Self {
+        Self {
+            catalog: C::default(),
+        }
+    }
+}
+
+impl<C: TaskProtocolCatalog> PersistedTaskCompatibility<C> {
+    #[cfg(test)]
+    fn new(catalog: C) -> Self {
+        Self { catalog }
+    }
+
+    fn runtime_record_from_persisted_row(
+        &self,
+        persisted_row: PersistedTaskRowShape,
+    ) -> TaskQueueRecord {
+        if let Some(kind) = self
+            .catalog
+            .known_kind_from_persisted_simple_type(&persisted_row.simple_type)
+        {
+            return known_runtime_record(&self.catalog, kind, persisted_row);
+        }
+
+        self.catalog
+            .opaque_task(persisted_row.simple_type.clone(), persisted_row)
+            .into_queue_record()
+    }
+
+    fn persisted_row_from_runtime_record(
+        &self,
+        task: &PersistedTaskStoreRecord,
+    ) -> PersistedTaskRowShape {
+        if let Some(kind) = self
+            .catalog
+            .known_kind_from_runtime_simple_type(&task.simple_type)
+        {
+            return known_persisted_row(&self.catalog, kind, task);
+        }
+
+        PersistedTaskRowShape {
+            id: task.id.clone(),
+            priority: task.priority,
+            group: task.group.clone(),
+            class_name: runtime_task_class_name(task.simple_type.as_str()),
+            simple_type: task.simple_type.clone(),
+            payload: fallback_task_payload(task),
+            owner: task.owner.clone(),
+        }
+    }
+}
+
 impl SqliteTaskQueueStore {
     pub fn new(tasks_db_file: PathBuf) -> Option<Self> {
         if !tasks_db_file.exists() {
@@ -32,8 +94,9 @@ impl SqliteTaskQueueStore {
     pub fn load_records(&self) -> Vec<PersistedTaskStoreRecord> {
         self.run(|pool| {
             Box::pin(async move {
+                let compatibility = compatibility();
                 let rows = sqlx::query(
-                    "SELECT ID, PRIORITY, GROUP_ID, SIMPLE_TYPE, PAYLOAD, OWNER \
+                    "SELECT ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER \
                      FROM TASK \
                      ORDER BY PRIORITY DESC, LAST_MODIFIED_DATE ASC, ID ASC",
                 )
@@ -42,21 +105,16 @@ impl SqliteTaskQueueStore {
                 .expect("persisted task queue rows should be readable");
 
                 rows.into_iter()
-                    .map(|row| PersistedTaskStoreRecord {
-                        id: row.get::<String, _>("ID"),
-                        priority: row.get::<i64, _>("PRIORITY") as i32,
-                        group: row.get::<Option<String>, _>("GROUP_ID"),
-                        simple_type: runtime_simple_type(&row.get::<String, _>("SIMPLE_TYPE")),
-                        payload: row.get::<Option<String>, _>("PAYLOAD"),
-                        owner: row.get::<Option<String>, _>("OWNER"),
-                    })
+                    .map(persisted_row_shape)
+                    .map(|row| compatibility.runtime_record_from_persisted_row(row))
+                    .map(store_record_from_runtime_record)
                     .collect::<Vec<_>>()
             })
         })
     }
 
     pub fn persist_task(&self, task: &PersistedTaskStoreRecord) {
-        let row = PersistedTaskRow::from_record(task);
+        let row = compatibility().persisted_row_from_runtime_record(task);
         self.run(move |pool| {
             Box::pin(async move {
                 sqlx::query(
@@ -190,153 +248,90 @@ impl SqliteTaskQueueStore {
 
 type BoxFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
 
-#[derive(Debug)]
-struct PersistedTaskRow {
-    id: String,
-    priority: i32,
-    group: Option<String>,
-    class_name: String,
-    simple_type: String,
-    payload: String,
-    owner: Option<String>,
+fn compatibility() -> PersistedTaskCompatibility<DefaultTaskProtocolCatalog> {
+    PersistedTaskCompatibility::default()
 }
 
-impl PersistedTaskRow {
-    fn from_record(task: &PersistedTaskStoreRecord) -> Self {
-        let simple_type = persisted_simple_type(task.simple_type.as_str());
-        Self {
-            id: task.id.clone(),
-            priority: task.priority,
-            group: task.group.clone(),
-            class_name: kotlin_task_class_name(simple_type.as_str()),
-            simple_type,
-            payload: persisted_task_payload(task),
-            owner: task.owner.clone(),
-        }
+fn store_record_from_runtime_record(task: TaskQueueRecord) -> PersistedTaskStoreRecord {
+    PersistedTaskStoreRecord {
+        id: task.id,
+        simple_type: task.simple_type,
+        priority: task.priority,
+        group: task.group,
+        payload: task.payload,
+        owner: task.owner,
     }
 }
 
-fn persisted_simple_type(simple_type: &str) -> String {
-    match simple_type {
-        "SCAN_LIBRARY" => "ScanLibrary".to_string(),
-        "EMPTY_TRASH" => "EmptyTrash".to_string(),
-        "ANALYZE_BOOK" => "AnalyzeBook".to_string(),
-        "IMPORT_BOOK" => "ImportBook".to_string(),
-        "FIND_BOOKS_WITH_MISSING_PAGE_HASH" => "FindBooksWithMissingPageHash".to_string(),
-        "FIND_DUPLICATE_PAGES_TO_DELETE" => "FindDuplicatePagesToDelete".to_string(),
-        "FIND_BOOK_THUMBNAILS_TO_REGENERATE" => "FindBookThumbnailsToRegenerate".to_string(),
-        "REFRESH_BOOK_METADATA" => "RefreshBookMetadata".to_string(),
-        "REFRESH_BOOK_LOCAL_ARTWORK" => "RefreshBookLocalArtwork".to_string(),
-        "REFRESH_SERIES_LOCAL_ARTWORK" => "RefreshSeriesLocalArtwork".to_string(),
-        "REPAIR_EXTENSION" => "RepairExtension".to_string(),
-        "GENERATE_BOOK_THUMBNAIL" => "GenerateBookThumbnail".to_string(),
-        "HASH_BOOK" => "HashBook".to_string(),
-        "HASH_BOOK_KOREADER" => "HashBookKoreader".to_string(),
-        "HASH_BOOK_PAGES" => "HashBookPages".to_string(),
-        "REBUILD_INDEX" => "RebuildIndex".to_string(),
-        "UPGRADE_INDEX" => "UpgradeIndex".to_string(),
-        "REMOVE_HASHED_PAGES" => "RemoveHashedPages".to_string(),
-        "DELETE_BOOK" => "DeleteBook".to_string(),
-        "DELETE_SERIES" => "DeleteSeries".to_string(),
-        _ => simple_type.to_string(),
+fn persisted_row_shape(row: sqlx::sqlite::SqliteRow) -> PersistedTaskRowShape {
+    PersistedTaskRowShape {
+        id: row.get::<String, _>("ID"),
+        priority: row.get::<i64, _>("PRIORITY") as i32,
+        group: row.get::<Option<String>, _>("GROUP_ID"),
+        class_name: row.get::<String, _>("CLASS"),
+        simple_type: row.get::<String, _>("SIMPLE_TYPE"),
+        payload: row.get::<String, _>("PAYLOAD"),
+        owner: row.get::<Option<String>, _>("OWNER"),
     }
 }
 
+fn known_runtime_record<C: TaskProtocolCatalog>(
+    catalog: &C,
+    kind: PlannedTaskKind,
+    persisted_row: PersistedTaskRowShape,
+) -> TaskQueueRecord {
+    let descriptor = catalog.descriptor(kind);
+    let mut runtime_record = TaskQueueRecord::new(
+        persisted_row.id,
+        persisted_row.priority,
+        persisted_row.group,
+    )
+    .with_simple_type(descriptor.runtime_simple_type)
+    .with_payload(persisted_row.payload);
+    runtime_record.owner = persisted_row.owner;
+    runtime_record
+}
+
+fn known_persisted_row<C: TaskProtocolCatalog>(
+    catalog: &C,
+    kind: PlannedTaskKind,
+    task: &PersistedTaskStoreRecord,
+) -> PersistedTaskRowShape {
+    let descriptor = catalog.descriptor(kind);
+    PersistedTaskRowShape {
+        id: task.id.clone(),
+        priority: task.priority,
+        group: task.group.clone(),
+        class_name: descriptor.persisted_class_name.to_string(),
+        simple_type: descriptor.persisted_simple_type.to_string(),
+        payload: persisted_compatibility_payload(kind, task),
+        owner: task.owner.clone(),
+    }
+}
+
+#[cfg(test)]
 fn runtime_simple_type(simple_type: &str) -> String {
-    match simple_type {
-        "ScanLibrary" => "SCAN_LIBRARY".to_string(),
-        "EmptyTrash" => "EMPTY_TRASH".to_string(),
-        "AnalyzeBook" => "ANALYZE_BOOK".to_string(),
-        "ImportBook" => "IMPORT_BOOK".to_string(),
-        "FindBooksWithMissingPageHash" => "FIND_BOOKS_WITH_MISSING_PAGE_HASH".to_string(),
-        "FindDuplicatePagesToDelete" => "FIND_DUPLICATE_PAGES_TO_DELETE".to_string(),
-        "FindBookThumbnailsToRegenerate" => "FIND_BOOK_THUMBNAILS_TO_REGENERATE".to_string(),
-        "RefreshBookMetadata" => "REFRESH_BOOK_METADATA".to_string(),
-        "RefreshBookLocalArtwork" => "REFRESH_BOOK_LOCAL_ARTWORK".to_string(),
-        "RefreshSeriesLocalArtwork" => "REFRESH_SERIES_LOCAL_ARTWORK".to_string(),
-        "RepairExtension" => "REPAIR_EXTENSION".to_string(),
-        "GenerateBookThumbnail" => "GENERATE_BOOK_THUMBNAIL".to_string(),
-        "HashBook" => "HASH_BOOK".to_string(),
-        "HashBookKoreader" => "HASH_BOOK_KOREADER".to_string(),
-        "HashBookPages" => "HASH_BOOK_PAGES".to_string(),
-        "RebuildIndex" => "REBUILD_INDEX".to_string(),
-        "UpgradeIndex" => "UPGRADE_INDEX".to_string(),
-        "RemoveHashedPages" => "REMOVE_HASHED_PAGES".to_string(),
-        "DeleteBook" => "DELETE_BOOK".to_string(),
-        "DeleteSeries" => "DELETE_SERIES".to_string(),
-        _ => simple_type.to_string(),
-    }
+    compatibility()
+        .catalog
+        .known_kind_from_persisted_simple_type(simple_type)
+        .map(|kind| {
+            compatibility()
+                .catalog
+                .descriptor(kind)
+                .runtime_simple_type
+                .to_string()
+        })
+        .unwrap_or_else(|| simple_type.to_string())
 }
 
-fn kotlin_task_class_name(simple_type: &str) -> String {
-    if simple_type == "ScanLibrary" {
-        return "org.gotson.komga.application.tasks.Task$ScanLibrary".to_string();
-    }
-    if simple_type == "EmptyTrash" {
-        return "org.gotson.komga.application.tasks.Task$EmptyTrash".to_string();
-    }
-    if simple_type == "AnalyzeBook" {
-        return "org.gotson.komga.application.tasks.Task$AnalyzeBook".to_string();
-    }
-    if simple_type == "ImportBook" {
-        return "org.gotson.komga.application.tasks.Task$ImportBook".to_string();
-    }
-    if simple_type == "FindBooksWithMissingPageHash" {
-        return "org.gotson.komga.application.tasks.Task$FindBooksWithMissingPageHash".to_string();
-    }
-    if simple_type == "FindDuplicatePagesToDelete" {
-        return "org.gotson.komga.application.tasks.Task$FindDuplicatePagesToDelete".to_string();
-    }
-    if simple_type == "FindBookThumbnailsToRegenerate" {
-        return "org.gotson.komga.application.tasks.Task$FindBookThumbnailsToRegenerate"
-            .to_string();
-    }
-    if simple_type == "RefreshBookMetadata" {
-        return "org.gotson.komga.application.tasks.Task$RefreshBookMetadata".to_string();
-    }
-    if simple_type == "RefreshBookLocalArtwork" {
-        return "org.gotson.komga.application.tasks.Task$RefreshBookLocalArtwork".to_string();
-    }
-    if simple_type == "RefreshSeriesLocalArtwork" {
-        return "org.gotson.komga.application.tasks.Task$RefreshSeriesLocalArtwork".to_string();
-    }
-    if simple_type == "RepairExtension" {
-        return "org.gotson.komga.application.tasks.Task$RepairExtension".to_string();
-    }
-    if simple_type == "GenerateBookThumbnail" {
-        return "org.gotson.komga.application.tasks.Task$GenerateBookThumbnail".to_string();
-    }
-    if simple_type == "HashBook" {
-        return "org.gotson.komga.application.tasks.Task$HashBook".to_string();
-    }
-    if simple_type == "HashBookKoreader" {
-        return "org.gotson.komga.application.tasks.Task$HashBookKoreader".to_string();
-    }
-    if simple_type == "HashBookPages" {
-        return "org.gotson.komga.application.tasks.Task$HashBookPages".to_string();
-    }
-    if simple_type == "RebuildIndex" {
-        return "org.gotson.komga.application.tasks.Task$RebuildIndex".to_string();
-    }
-    if simple_type == "UpgradeIndex" {
-        return "org.gotson.komga.application.tasks.Task$UpgradeIndex".to_string();
-    }
-    if simple_type == "RemoveHashedPages" {
-        return "org.gotson.komga.application.tasks.Task$RemoveHashedPages".to_string();
-    }
-    if simple_type == "DeleteBook" {
-        return "org.gotson.komga.application.tasks.Task$DeleteBook".to_string();
-    }
-    if simple_type == "DeleteSeries" {
-        return "org.gotson.komga.application.tasks.Task$DeleteSeries".to_string();
-    }
+fn runtime_task_class_name(simple_type: &str) -> String {
     format!(
         "org.gotson.komga.task.{}.RuntimeTask",
         simple_type.to_ascii_lowercase()
     )
 }
 
-fn default_task_payload(task: &PersistedTaskStoreRecord) -> String {
+fn fallback_task_payload(task: &PersistedTaskStoreRecord) -> String {
     json!({
         "id": task.id,
         "simpleType": task.simple_type,
@@ -370,29 +365,44 @@ fn task_payload(
     Value::Object(payload).to_string()
 }
 
+fn payload_contains_key(task: &PersistedTaskStoreRecord, key: &str) -> bool {
+    payload_json(task)
+        .as_ref()
+        .and_then(Value::as_object)
+        .is_some_and(|payload| payload.contains_key(key))
+}
+
 fn target_task_payload(
     task: &PersistedTaskStoreRecord,
     expected_simple_type: &str,
     target_key: &'static str,
 ) -> Option<String> {
-    (task.simple_type == expected_simple_type).then(|| {
-        task_payload(
-            task,
-            [(target_key, optional_string_value(task_target(task)))],
-        )
-    })
+    (task.simple_type == expected_simple_type).then_some(())?;
+
+    if payload_contains_key(task, target_key) {
+        return task.payload.clone();
+    }
+
+    Some(task_payload(
+        task,
+        [(target_key, optional_string_value(task_target(task)))],
+    ))
 }
 
 fn library_target_task_payload(
     task: &PersistedTaskStoreRecord,
     expected_simple_type: &str,
 ) -> Option<String> {
-    (task.simple_type == expected_simple_type && task.payload.is_none()).then(|| {
-        task_payload(
-            task,
-            [("libraryId", optional_string_value(task_target(task)))],
-        )
-    })
+    (task.simple_type == expected_simple_type).then_some(())?;
+
+    if payload_contains_key(task, "libraryId") {
+        return task.payload.clone();
+    }
+
+    Some(task_payload(
+        task,
+        [("libraryId", optional_string_value(task_target(task)))],
+    ))
 }
 
 fn task_target(task: &PersistedTaskStoreRecord) -> Option<&str> {
@@ -646,37 +656,135 @@ fn rebuild_index_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
     })
 }
 
-fn persisted_task_payload(task: &PersistedTaskStoreRecord) -> String {
-    scan_library_payload(task)
-        .or_else(|| empty_trash_payload(task))
-        .or_else(|| analyze_book_payload(task))
-        .or_else(|| import_book_payload(task))
-        .or_else(|| find_duplicate_pages_to_delete_payload(task))
-        .or_else(|| find_books_with_missing_page_hash_payload(task))
-        .or_else(|| find_book_thumbnails_to_regenerate_payload(task))
-        .or_else(|| refresh_book_metadata_payload(task))
-        .or_else(|| refresh_book_local_artwork_payload(task))
-        .or_else(|| refresh_series_local_artwork_payload(task))
-        .or_else(|| repair_extension_payload(task))
-        .or_else(|| generate_book_thumbnail_payload(task))
-        .or_else(|| hash_book_payload(task))
-        .or_else(|| hash_book_koreader_payload(task))
-        .or_else(|| hash_book_pages_payload(task))
-        .or_else(|| delete_book_payload(task))
-        .or_else(|| delete_series_payload(task))
-        .or_else(|| rebuild_index_payload(task))
+fn persisted_compatibility_payload(
+    kind: PlannedTaskKind,
+    task: &PersistedTaskStoreRecord,
+) -> String {
+    let compatibility_payload = match kind {
+        PlannedTaskKind::ScanLibrary => scan_library_payload(task),
+        PlannedTaskKind::EmptyTrash => empty_trash_payload(task),
+        PlannedTaskKind::AnalyzeBook => analyze_book_payload(task),
+        PlannedTaskKind::ImportBook => import_book_payload(task),
+        PlannedTaskKind::FindBooksWithMissingPageHash => {
+            find_books_with_missing_page_hash_payload(task)
+        }
+        PlannedTaskKind::FindDuplicatePagesToDelete => find_duplicate_pages_to_delete_payload(task),
+        PlannedTaskKind::FindBookThumbnailsToRegenerate => {
+            find_book_thumbnails_to_regenerate_payload(task)
+        }
+        PlannedTaskKind::RefreshBookMetadata => refresh_book_metadata_payload(task),
+        PlannedTaskKind::RefreshBookLocalArtwork => refresh_book_local_artwork_payload(task),
+        PlannedTaskKind::RefreshSeriesLocalArtwork => refresh_series_local_artwork_payload(task),
+        PlannedTaskKind::RepairExtension => repair_extension_payload(task),
+        PlannedTaskKind::GenerateBookThumbnail => generate_book_thumbnail_payload(task),
+        PlannedTaskKind::HashBook => hash_book_payload(task),
+        PlannedTaskKind::HashBookKoreader => hash_book_koreader_payload(task),
+        PlannedTaskKind::HashBookPages => hash_book_pages_payload(task),
+        PlannedTaskKind::RebuildIndex => rebuild_index_payload(task),
+        PlannedTaskKind::DeleteBook => delete_book_payload(task),
+        PlannedTaskKind::DeleteSeries => delete_series_payload(task),
+        PlannedTaskKind::UpgradeIndex
+        | PlannedTaskKind::ImportBooksBatch
+        | PlannedTaskKind::RefreshSeriesMetadata
+        | PlannedTaskKind::AggregateSeriesMetadata
+        | PlannedTaskKind::RemoveHashedPages
+        | PlannedTaskKind::FindBooksToConvert
+        | PlannedTaskKind::ConvertBook => None,
+    };
+
+    compatibility_payload
         .or_else(|| task.payload.clone())
-        .unwrap_or_else(|| default_task_payload(task))
+        .unwrap_or_else(|| fallback_task_payload(task))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use komga_application::task_processing::TaskDescriptor;
     use serde_json::Value;
+
+    #[derive(Clone, Copy, Debug)]
+    struct UpgradeIndexCatalog;
+
+    impl TaskProtocolCatalog for UpgradeIndexCatalog {
+        fn descriptor(&self, kind: PlannedTaskKind) -> TaskDescriptor {
+            match kind {
+                PlannedTaskKind::UpgradeIndex => TaskDescriptor {
+                    runtime_simple_type: "CUSTOM_UPGRADE_INDEX",
+                    persisted_simple_type: "LegacyUpgradeIndex",
+                    persisted_class_name: "custom.tasks.LegacyUpgradeIndex",
+                },
+                _ => kind.descriptor(),
+            }
+        }
+
+        fn known_kind_from_runtime_simple_type(
+            &self,
+            simple_type: &str,
+        ) -> Option<PlannedTaskKind> {
+            match simple_type {
+                "CUSTOM_UPGRADE_INDEX" => Some(PlannedTaskKind::UpgradeIndex),
+                _ => None,
+            }
+        }
+
+        fn known_kind_from_persisted_simple_type(
+            &self,
+            simple_type: &str,
+        ) -> Option<PlannedTaskKind> {
+            match simple_type {
+                "LegacyUpgradeIndex" => Some(PlannedTaskKind::UpgradeIndex),
+                _ => None,
+            }
+        }
+    }
+
+    fn persisted_row(task: PersistedTaskStoreRecord) -> PersistedTaskRowShape {
+        compatibility().persisted_row_from_runtime_record(&task)
+    }
+
+    #[test]
+    fn compatibility_uses_catalog_descriptor_when_persisting_known_runtime_task() {
+        let row = PersistedTaskCompatibility::new(UpgradeIndexCatalog)
+            .persisted_row_from_runtime_record(&PersistedTaskStoreRecord {
+                id: "UPGRADE_INDEX".to_string(),
+                simple_type: "CUSTOM_UPGRADE_INDEX".to_string(),
+                priority: 9,
+                group: None,
+                payload: None,
+                owner: None,
+            });
+
+        assert_eq!(row.simple_type, "LegacyUpgradeIndex");
+        assert_eq!(row.class_name, "custom.tasks.LegacyUpgradeIndex");
+    }
+
+    #[test]
+    fn compatibility_uses_catalog_descriptor_when_loading_known_persisted_task() {
+        let record = PersistedTaskCompatibility::new(UpgradeIndexCatalog)
+            .runtime_record_from_persisted_row(PersistedTaskRowShape {
+                id: "UPGRADE_INDEX".to_string(),
+                priority: 9,
+                group: None,
+                class_name: "custom.tasks.LegacyUpgradeIndex".to_string(),
+                simple_type: "LegacyUpgradeIndex".to_string(),
+                payload: json!({
+                    "id": "UPGRADE_INDEX",
+                    "simpleType": "CUSTOM_UPGRADE_INDEX",
+                    "priority": 9,
+                    "groupId": Value::Null,
+                })
+                .to_string(),
+                owner: Some("rust-main".to_string()),
+            });
+
+        assert_eq!(record.simple_type, "CUSTOM_UPGRADE_INDEX");
+        assert_eq!(record.owner.as_deref(), Some("rust-main"));
+    }
 
     #[test]
     fn persisted_find_duplicate_pages_to_delete_uses_kotlin_task_shape() {
-        let row = PersistedTaskRow::from_record(&PersistedTaskStoreRecord {
+        let row = persisted_row(PersistedTaskStoreRecord {
             id: "FIND_DUPLICATE_PAGES_TO_DELETE_library-1".to_string(),
             simple_type: "FIND_DUPLICATE_PAGES_TO_DELETE".to_string(),
             priority: 42,
@@ -705,7 +813,7 @@ mod tests {
 
     #[test]
     fn persisted_rebuild_index_uses_kotlin_task_shape() {
-        let row = PersistedTaskRow::from_record(&PersistedTaskStoreRecord {
+        let row = persisted_row(PersistedTaskStoreRecord {
             id: "REBUILD_INDEX".to_string(),
             simple_type: "REBUILD_INDEX".to_string(),
             priority: 8,
@@ -739,7 +847,7 @@ mod tests {
 
     #[test]
     fn persisted_upgrade_index_uses_kotlin_task_shape() {
-        let row = PersistedTaskRow::from_record(&PersistedTaskStoreRecord {
+        let row = persisted_row(PersistedTaskStoreRecord {
             id: "UPGRADE_INDEX".to_string(),
             simple_type: "UPGRADE_INDEX".to_string(),
             priority: 9,
@@ -773,7 +881,7 @@ mod tests {
 
     #[test]
     fn persisted_find_book_thumbnails_to_regenerate_uses_kotlin_task_shape() {
-        let row = PersistedTaskRow::from_record(&PersistedTaskStoreRecord {
+        let row = persisted_row(PersistedTaskStoreRecord {
             id: "FIND_BOOK_THUMBNAILS_TO_REGENERATE".to_string(),
             simple_type: "FIND_BOOK_THUMBNAILS_TO_REGENERATE".to_string(),
             priority: 0,
@@ -801,111 +909,8 @@ mod tests {
     }
 
     #[test]
-    fn persisted_scan_library_uses_kotlin_task_shape() {
-        let row = PersistedTaskRow::from_record(&PersistedTaskStoreRecord {
-            id: "SCAN_LIBRARY:library-1:DEEP:true".to_string(),
-            simple_type: "SCAN_LIBRARY".to_string(),
-            priority: 100,
-            group: None,
-            payload: None,
-            owner: None,
-        });
-
-        assert_eq!(row.id, "SCAN_LIBRARY:library-1:DEEP:true");
-        assert_eq!(row.simple_type, "ScanLibrary");
-        assert_eq!(
-            row.class_name,
-            "org.gotson.komga.application.tasks.Task$ScanLibrary"
-        );
-        assert_eq!(
-            serde_json::from_str::<Value>(&row.payload)
-                .expect("scan-library payload should be valid JSON"),
-            json!({
-                "libraryId": "library-1",
-                "scanDeep": true,
-                "priority": 100,
-                "groupId": Value::Null,
-                "uniqueId": "SCAN_LIBRARY:library-1:DEEP:true"
-            })
-        );
-    }
-
-    #[test]
-    fn kotlin_scan_library_simple_type_round_trips_back_to_runtime_type() {
-        assert_eq!(runtime_simple_type("ScanLibrary"), "SCAN_LIBRARY");
-    }
-
-    #[test]
-    fn persisted_empty_trash_uses_kotlin_task_shape() {
-        let row = PersistedTaskRow::from_record(&PersistedTaskStoreRecord {
-            id: "EMPTY_TRASH:library-1".to_string(),
-            simple_type: "EMPTY_TRASH".to_string(),
-            priority: 70,
-            group: None,
-            payload: None,
-            owner: None,
-        });
-
-        assert_eq!(row.id, "EMPTY_TRASH:library-1");
-        assert_eq!(row.simple_type, "EmptyTrash");
-        assert_eq!(
-            row.class_name,
-            "org.gotson.komga.application.tasks.Task$EmptyTrash"
-        );
-        assert_eq!(
-            serde_json::from_str::<Value>(&row.payload)
-                .expect("empty-trash payload should be valid JSON"),
-            json!({
-                "libraryId": "library-1",
-                "priority": 70,
-                "groupId": Value::Null,
-                "uniqueId": "EMPTY_TRASH:library-1"
-            })
-        );
-    }
-
-    #[test]
-    fn kotlin_empty_trash_simple_type_round_trips_back_to_runtime_type() {
-        assert_eq!(runtime_simple_type("EmptyTrash"), "EMPTY_TRASH");
-    }
-
-    #[test]
-    fn persisted_analyze_book_uses_kotlin_task_shape() {
-        let row = PersistedTaskRow::from_record(&PersistedTaskStoreRecord {
-            id: "ANALYZE_BOOK:book-1".to_string(),
-            simple_type: "ANALYZE_BOOK".to_string(),
-            priority: 90,
-            group: Some("series-1".to_string()),
-            payload: None,
-            owner: None,
-        });
-
-        assert_eq!(row.id, "ANALYZE_BOOK:book-1");
-        assert_eq!(row.simple_type, "AnalyzeBook");
-        assert_eq!(
-            row.class_name,
-            "org.gotson.komga.application.tasks.Task$AnalyzeBook"
-        );
-        assert_eq!(
-            serde_json::from_str::<Value>(&row.payload)
-                .expect("analyze-book payload should be valid JSON"),
-            json!({
-                "bookId": "book-1",
-                "priority": 90,
-                "groupId": "series-1",
-                "uniqueId": "ANALYZE_BOOK:book-1"
-            })
-        );
-    }
-
-    #[test]
-    fn kotlin_analyze_book_simple_type_round_trips_back_to_runtime_type() {
-        assert_eq!(runtime_simple_type("AnalyzeBook"), "ANALYZE_BOOK");
-    }
-
-    #[test]
     fn persisted_import_book_uses_kotlin_task_shape() {
-        let row = PersistedTaskRow::from_record(&PersistedTaskStoreRecord {
+        let row = persisted_row(PersistedTaskStoreRecord {
             id: "IMPORT_BOOK:task-1".to_string(),
             simple_type: "IMPORT_BOOK".to_string(),
             priority: 100,
@@ -961,58 +966,8 @@ mod tests {
     }
 
     #[test]
-    fn persisted_refresh_book_metadata_uses_kotlin_task_shape() {
-        let row = PersistedTaskRow::from_record(&PersistedTaskStoreRecord {
-            id: "REFRESH_BOOK_METADATA_book-1".to_string(),
-            simple_type: "REFRESH_BOOK_METADATA".to_string(),
-            priority: 80,
-            group: Some("series-1".to_string()),
-            payload: None,
-            owner: None,
-        });
-
-        assert_eq!(row.id, "REFRESH_BOOK_METADATA_book-1");
-        assert_eq!(row.simple_type, "RefreshBookMetadata");
-        assert_eq!(
-            row.class_name,
-            "org.gotson.komga.application.tasks.Task$RefreshBookMetadata"
-        );
-        assert_eq!(
-            serde_json::from_str::<Value>(&row.payload)
-                .expect("refresh-book-metadata payload should be valid JSON"),
-            json!({
-                "bookId": "book-1",
-                "capabilities": [
-                    "TITLE",
-                    "SUMMARY",
-                    "NUMBER",
-                    "NUMBER_SORT",
-                    "RELEASE_DATE",
-                    "AUTHORS",
-                    "TAGS",
-                    "ISBN",
-                    "READ_LISTS",
-                    "THUMBNAILS",
-                    "LINKS"
-                ],
-                "priority": 80,
-                "groupId": "series-1",
-                "uniqueId": "REFRESH_BOOK_METADATA_book-1"
-            })
-        );
-    }
-
-    #[test]
-    fn kotlin_refresh_book_metadata_simple_type_round_trips_back_to_runtime_type() {
-        assert_eq!(
-            runtime_simple_type("RefreshBookMetadata"),
-            "REFRESH_BOOK_METADATA"
-        );
-    }
-
-    #[test]
     fn persisted_refresh_book_local_artwork_uses_kotlin_task_shape() {
-        let row = PersistedTaskRow::from_record(&PersistedTaskStoreRecord {
+        let row = persisted_row(PersistedTaskStoreRecord {
             id: "REFRESH_BOOK_LOCAL_ARTWORK_book-1".to_string(),
             simple_type: "REFRESH_BOOK_LOCAL_ARTWORK".to_string(),
             priority: 80,
@@ -1049,7 +1004,7 @@ mod tests {
 
     #[test]
     fn persisted_refresh_series_local_artwork_uses_kotlin_task_shape() {
-        let row = PersistedTaskRow::from_record(&PersistedTaskStoreRecord {
+        let row = persisted_row(PersistedTaskStoreRecord {
             id: "REFRESH_SERIES_LOCAL_ARTWORK:series-1".to_string(),
             simple_type: "REFRESH_SERIES_LOCAL_ARTWORK".to_string(),
             priority: 80,
@@ -1086,7 +1041,7 @@ mod tests {
 
     #[test]
     fn persisted_repair_extension_uses_kotlin_task_shape() {
-        let row = PersistedTaskRow::from_record(&PersistedTaskStoreRecord {
+        let row = persisted_row(PersistedTaskStoreRecord {
             id: "REPAIR_EXTENSION_book-1".to_string(),
             simple_type: "REPAIR_EXTENSION".to_string(),
             priority: 12,
@@ -1120,7 +1075,7 @@ mod tests {
 
     #[test]
     fn persisted_hash_book_pages_uses_kotlin_task_shape() {
-        let row = PersistedTaskRow::from_record(&PersistedTaskStoreRecord {
+        let row = persisted_row(PersistedTaskStoreRecord {
             id: "HASH_BOOK_PAGES_book-1".to_string(),
             simple_type: "HASH_BOOK_PAGES".to_string(),
             priority: 5,
@@ -1153,42 +1108,8 @@ mod tests {
     }
 
     #[test]
-    fn persisted_hash_book_uses_kotlin_task_shape() {
-        let row = PersistedTaskRow::from_record(&PersistedTaskStoreRecord {
-            id: "HASH_BOOK_book-1".to_string(),
-            simple_type: "HASH_BOOK".to_string(),
-            priority: 0,
-            group: None,
-            payload: None,
-            owner: None,
-        });
-
-        assert_eq!(row.id, "HASH_BOOK_book-1");
-        assert_eq!(row.simple_type, "HashBook");
-        assert_eq!(
-            row.class_name,
-            "org.gotson.komga.application.tasks.Task$HashBook"
-        );
-        assert_eq!(
-            serde_json::from_str::<Value>(&row.payload)
-                .expect("hash book payload should be valid JSON"),
-            json!({
-                "bookId": "book-1",
-                "priority": 0,
-                "groupId": Value::Null,
-                "uniqueId": "HASH_BOOK_book-1"
-            })
-        );
-    }
-
-    #[test]
-    fn kotlin_hash_book_simple_type_round_trips_back_to_runtime_type() {
-        assert_eq!(runtime_simple_type("HashBook"), "HASH_BOOK");
-    }
-
-    #[test]
     fn persisted_hash_book_koreader_uses_kotlin_task_shape() {
-        let row = PersistedTaskRow::from_record(&PersistedTaskStoreRecord {
+        let row = persisted_row(PersistedTaskStoreRecord {
             id: "HASH_BOOK_KOREADER_book-1".to_string(),
             simple_type: "HASH_BOOK_KOREADER".to_string(),
             priority: 5,
@@ -1225,7 +1146,7 @@ mod tests {
 
     #[test]
     fn persisted_delete_book_uses_kotlin_task_shape() {
-        let row = PersistedTaskRow::from_record(&PersistedTaskStoreRecord {
+        let row = persisted_row(PersistedTaskStoreRecord {
             id: "DELETE_BOOK:book-1".to_string(),
             simple_type: "DELETE_BOOK".to_string(),
             priority: 100,
@@ -1255,76 +1176,5 @@ mod tests {
     #[test]
     fn kotlin_delete_book_simple_type_round_trips_back_to_runtime_type() {
         assert_eq!(runtime_simple_type("DeleteBook"), "DELETE_BOOK");
-    }
-
-    #[test]
-    fn persisted_delete_series_uses_kotlin_task_shape() {
-        let row = PersistedTaskRow::from_record(&PersistedTaskStoreRecord {
-            id: "DELETE_SERIES:series-1".to_string(),
-            simple_type: "DELETE_SERIES".to_string(),
-            priority: 100,
-            group: None,
-            payload: None,
-            owner: None,
-        });
-
-        assert_eq!(row.id, "DELETE_SERIES:series-1");
-        assert_eq!(row.simple_type, "DeleteSeries");
-        assert_eq!(
-            row.class_name,
-            "org.gotson.komga.application.tasks.Task$DeleteSeries"
-        );
-        assert_eq!(
-            serde_json::from_str::<Value>(&row.payload)
-                .expect("delete-series payload should be valid JSON"),
-            json!({
-                "seriesId": "series-1",
-                "priority": 100,
-                "groupId": Value::Null,
-                "uniqueId": "DELETE_SERIES:series-1"
-            })
-        );
-    }
-
-    #[test]
-    fn kotlin_delete_series_simple_type_round_trips_back_to_runtime_type() {
-        assert_eq!(runtime_simple_type("DeleteSeries"), "DELETE_SERIES");
-    }
-
-    #[test]
-    fn persisted_find_books_with_missing_page_hash_uses_kotlin_task_shape() {
-        let row = PersistedTaskRow::from_record(&PersistedTaskStoreRecord {
-            id: "FIND_BOOKS_WITH_MISSING_PAGE_HASH_library-1".to_string(),
-            simple_type: "FIND_BOOKS_WITH_MISSING_PAGE_HASH".to_string(),
-            priority: 7,
-            group: None,
-            payload: None,
-            owner: None,
-        });
-
-        assert_eq!(row.id, "FIND_BOOKS_WITH_MISSING_PAGE_HASH_library-1");
-        assert_eq!(row.simple_type, "FindBooksWithMissingPageHash");
-        assert_eq!(
-            row.class_name,
-            "org.gotson.komga.application.tasks.Task$FindBooksWithMissingPageHash"
-        );
-        assert_eq!(
-            serde_json::from_str::<Value>(&row.payload)
-                .expect("missing page hash finder payload should be valid JSON"),
-            json!({
-                "libraryId": "library-1",
-                "priority": 7,
-                "groupId": Value::Null,
-                "uniqueId": "FIND_BOOKS_WITH_MISSING_PAGE_HASH_library-1"
-            })
-        );
-    }
-
-    #[test]
-    fn kotlin_find_books_with_missing_page_hash_simple_type_round_trips_back_to_runtime_type() {
-        assert_eq!(
-            runtime_simple_type("FindBooksWithMissingPageHash"),
-            "FIND_BOOKS_WITH_MISSING_PAGE_HASH"
-        );
     }
 }

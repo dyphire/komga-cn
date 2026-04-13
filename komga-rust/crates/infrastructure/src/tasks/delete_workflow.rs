@@ -150,7 +150,7 @@ pub fn soft_delete_book_rows(
                 r#"
                 UPDATE BOOK
                 SET DELETED_DATE = CURRENT_TIMESTAMP,
-                    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+                    LAST_MODIFIED_DATE = STRFTIME('%Y-%m-%d %H:%M:%f', 'now')
                 WHERE ID = ?
                 "#,
             )
@@ -168,7 +168,7 @@ pub fn soft_delete_book_rows(
                     WHERE BOOK.SERIES_ID = SERIES.ID
                       AND BOOK.DELETED_DATE IS NULL
                 ),
-                    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+                    LAST_MODIFIED_DATE = STRFTIME('%Y-%m-%d %H:%M:%f', 'now')
                 WHERE ID = ?
                 "#,
             )
@@ -364,7 +364,7 @@ pub fn soft_delete_series_rows(database_file: &Path, series_id: &str) -> Result<
                 r#"
                 UPDATE SERIES
                 SET DELETED_DATE = CURRENT_TIMESTAMP,
-                    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+                    LAST_MODIFIED_DATE = STRFTIME('%Y-%m-%d %H:%M:%f', 'now')
                 WHERE ID = ?
                 "#,
             )

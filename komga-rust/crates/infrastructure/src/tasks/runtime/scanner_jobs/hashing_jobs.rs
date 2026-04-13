@@ -57,20 +57,10 @@ pub(super) fn try_execute(
             };
             for book_id in book_ids {
                 let priority = task.priority.saturating_add(1);
-                let task_id = format!("HASH_BOOK_PAGES_{book_id}");
-                scheduler.enqueue(
-                    TaskQueueRecord::new(task_id.clone(), priority, None)
-                        .with_simple_type("HASH_BOOK_PAGES")
-                        .with_payload(
-                            serde_json::json!({
-                                "bookId": book_id,
-                                "priority": priority,
-                                "groupId": serde_json::Value::Null,
-                                "uniqueId": task_id,
-                            })
-                            .to_string(),
-                        ),
-                );
+                scheduler.enqueue(runtime_follow_up_task(RuntimeFollowUpTask::HashBookPages {
+                    book_id,
+                    priority,
+                }));
             }
             Ok(())
         }
@@ -99,15 +89,13 @@ pub(super) fn try_execute(
                         ))));
                     }
                 };
-                scheduler.enqueue(
-                    TaskQueueRecord::new(
-                        super::super::remove_hashed_pages_task_id(book_id.as_str()),
+                scheduler.enqueue(runtime_follow_up_task(
+                    RuntimeFollowUpTask::RemoveHashedPages {
+                        book_id,
                         priority,
-                        None,
-                    )
-                    .with_simple_type("REMOVE_HASHED_PAGES")
-                    .with_payload(payload),
-                );
+                        payload,
+                    },
+                ));
             }
             Ok(())
         }
@@ -150,14 +138,12 @@ pub(super) fn try_execute(
                 Err(error) => return Some(Err(error)),
             };
             if regenerate_thumbnail {
-                scheduler.enqueue(
-                    TaskQueueRecord::new(
-                        format!("GENERATE_BOOK_THUMBNAIL_{book_id}"),
-                        task.priority.saturating_add(1),
-                        None,
-                    )
-                    .with_simple_type("GENERATE_BOOK_THUMBNAIL"),
-                );
+                scheduler.enqueue(runtime_follow_up_task(
+                    RuntimeFollowUpTask::GenerateBookThumbnail {
+                        book_id: book_id.to_string(),
+                        priority: task.priority.saturating_add(1),
+                    },
+                ));
             }
             Ok(())
         }

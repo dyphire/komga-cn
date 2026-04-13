@@ -474,7 +474,7 @@ async fn router_api_library_empty_trash_enqueues_ungrouped_task() {
 
     let rows = load_task_rows(
         &paths,
-        "SELECT ID, SIMPLE_TYPE, GROUP_ID, PRIORITY FROM TASK ORDER BY ID ASC",
+        "SELECT ID, SIMPLE_TYPE, GROUP_ID, PRIORITY, PAYLOAD FROM TASK ORDER BY ID ASC",
     )
     .await;
 
@@ -483,6 +483,17 @@ async fn router_api_library_empty_trash_enqueues_ungrouped_task() {
     assert_eq!(rows[0].get::<String, _>("SIMPLE_TYPE"), "EmptyTrash");
     assert_eq!(rows[0].get::<Option<String>, _>("GROUP_ID"), None);
     assert_eq!(rows[0].get::<i32, _>("PRIORITY"), 70);
+    assert_eq!(
+        serde_json::from_str::<Value>(&rows[0].get::<String, _>("PAYLOAD"))
+            .expect("empty-trash payload should be valid json"),
+        json!({
+            "libraryId": "library-1",
+            "priority": 70,
+            "groupId": Value::Null,
+            "uniqueId": "EMPTY_TRASH:library-1"
+        }),
+        "library empty-trash route should persist the Kotlin-compatible payload shape consumed by legacy readers",
+    );
 
     cleanup_router_fixture(paths);
 }

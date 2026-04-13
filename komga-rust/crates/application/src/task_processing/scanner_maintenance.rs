@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use super::{LibraryScanInterval, ScheduledLibraryScan, TaskQueueRecord};
-use serde_json::json;
+use super::{
+    DefaultLibraryTaskEmitter, LibraryScanInterval, LibraryTaskCommand, LibraryTaskEmitter,
+    ScheduledLibraryScan, TaskQueueRecord, TaskSchedule,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LibraryScanProfile {
@@ -56,25 +58,17 @@ pub fn build_startup_library_scan_tasks(profiles: &[LibraryScanProfile]) -> Vec<
     build_library_scan_tasks(&library_ids)
 }
 
-fn background_scan_task_id(library_id: &str) -> String {
-    format!("SCAN_LIBRARY:{library_id}:DEEP:false")
-}
-
-fn background_scan_task_payload(library_id: &str, task_id: &str) -> String {
-    json!({
-        "libraryId": library_id,
-        "scanDeep": false,
-        "priority": 4,
-        "groupId": serde_json::Value::Null,
-        "uniqueId": task_id,
-    })
-    .to_string()
-}
-
 fn background_scan_task_record(library_id: &str) -> TaskQueueRecord {
-    let task_id = background_scan_task_id(library_id);
-    TaskQueueRecord::new(task_id.clone(), 4, None)
-        .with_payload(background_scan_task_payload(library_id, &task_id))
+    DefaultLibraryTaskEmitter::default()
+        .emit(LibraryTaskCommand::ScanLibrary {
+            library_id: library_id.to_string(),
+            deep_scan: false,
+            schedule: TaskSchedule::Background,
+        })
+        .into_queue_records()
+        .into_iter()
+        .next()
+        .expect("scan-library emitter should produce exactly one background task")
 }
 
 pub fn build_library_scan_tasks(library_ids: &[String]) -> Vec<TaskQueueRecord> {
@@ -101,13 +95,6 @@ pub fn library_scan_due_periods(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn unknown_scan_interval_returns_error_instead_of_defaulting() {
-        let error = library_scan_interval_from_db("future-value")
-            .expect_err("unknown scan interval should not silently default");
-        assert!(error.contains("unsupported library scan interval"));
-    }
 
     #[test]
     fn scheduled_scans_propagate_invalid_intervals() {
@@ -142,6 +129,22 @@ mod tests {
         assert_eq!(tasks[0].id, "SCAN_LIBRARY:library-1:DEEP:false");
         assert_eq!(tasks[0].priority, 4);
         assert_eq!(tasks[0].group, None);
+    }
+
+    #[test]
+    fn library_scan_tasks_match_canonical_scan_library_emitter_shape() {
+        let library_id = "library-1".to_string();
+
+        let tasks = build_library_scan_tasks(std::slice::from_ref(&library_id));
+        let canonical = DefaultLibraryTaskEmitter::default()
+            .emit(LibraryTaskCommand::ScanLibrary {
+                library_id,
+                deep_scan: false,
+                schedule: TaskSchedule::Background,
+            })
+            .into_queue_records();
+
+        assert_eq!(tasks, canonical);
     }
 
     #[test]

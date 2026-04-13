@@ -243,3 +243,127 @@ async fn scanner_startup_leaves_tasks_untouched_when_tasks_writer_is_external_ow
 
     fixture.cleanup();
 }
+
+#[tokio::test]
+async fn scanner_persisted_scan_library_payload_overrides_legacy_id_target_and_deep_flag() {
+    let fixture = ScannerPersistenceFixture::new("scanner-persistence-scan-payload-precedence")
+        .await
+        .expect("scanner payload precedence fixture should be created");
+
+    let book_path = fixture.library_root.join("Series-A").join("Book-001.cbz");
+    let book_url = book_path.to_string_lossy().to_string();
+    let initial_page_size = write_scannable_cbz_fixture(&book_path, b"page-before-payload-wins")
+        .expect("initial scan-library payload precedence fixture should be written");
+
+    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .process_available(&fixture.config)
+        .expect("initial scan should seed scanner persistence state");
+
+    assert_eq!(
+        load_media_page_file_size(&fixture.paths.main_db, &book_url).await,
+        initial_page_size,
+        "fixture sanity: initial scan should persist MEDIA_PAGE rows before payload precedence replay",
+    );
+
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let updated_page_size = write_scannable_cbz_fixture(&book_path, b"page-after-payload-wins")
+        .expect("updated scan-library payload precedence fixture should be written");
+    let updated_book_size = std::fs::metadata(&book_path)
+        .expect("updated scan-library payload precedence fixture should exist")
+        .len() as i64;
+
+    let tasks_pool = connect_pool(fixture.paths.tasks_db.as_path(), 1)
+        .await
+        .expect("tasks db should open for scan-library payload precedence seed");
+    sqlx::query(
+        "INSERT INTO TASK (ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER) VALUES (?, ?, ?, ?, ?, ?, NULL)",
+    )
+    .bind("SCAN_LIBRARY:missing-library:DEEP:true")
+    .bind(900_i64)
+    .bind(Option::<String>::None)
+    .bind("org.gotson.komga.application.tasks.Task$ScanLibrary")
+    .bind("ScanLibrary")
+    .bind(
+        json!({
+            "libraryId": "library-1",
+            "scanDeep": false,
+            "priority": 900,
+            "groupId": Value::Null,
+            "uniqueId": "SCAN_LIBRARY:missing-library:DEEP:true"
+        })
+        .to_string(),
+    )
+    .execute(&tasks_pool)
+    .await
+    .expect("legacy scan-library task row should be inserted for payload precedence");
+    tasks_pool.close().await;
+
+    let mut replay = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    replay
+        .process_available(&fixture.config)
+        .expect("legacy scan-library payload precedence row should process successfully");
+
+    assert_eq!(
+        load_book_file_size(&fixture.paths.main_db, &book_url).await,
+        updated_book_size,
+        "scan-library replay must honor payload.libraryId over the legacy id target so the real library rescan still updates BOOK rows",
+    );
+    assert_eq!(
+        load_media_page_file_size(&fixture.paths.main_db, &book_url).await,
+        initial_page_size,
+        "scan-library replay must honor payload.scanDeep over the legacy :DEEP: suffix so a false payload does not force deep reanalysis",
+    );
+    assert_ne!(
+        initial_page_size, updated_page_size,
+        "fixture sanity: changed archive content should produce a different deep-scan page size for precedence verification",
+    );
+
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn scanner_persisted_scan_library_recovers_deep_flag_from_underscore_legacy_id() {
+    let fixture = ScannerPersistenceFixture::new("scanner-persistence-scan-underscore-deep")
+        .await
+        .expect("scanner underscore deep fixture should be created");
+
+    let book_path = fixture.library_root.join("Series-A").join("Book-001.cbz");
+    let book_url = book_path.to_string_lossy().to_string();
+    let initial_page_size = write_scannable_cbz_fixture(&book_path, b"page-before-underscore")
+        .expect("initial underscore scan fixture should be written");
+
+    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .process_available(&fixture.config)
+        .expect("initial scan should seed underscore deep replay state");
+
+    assert_eq!(
+        load_media_page_file_size(&fixture.paths.main_db, &book_url).await,
+        initial_page_size,
+        "fixture sanity: initial scan should persist MEDIA_PAGE rows before underscore replay",
+    );
+
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let expected_updated_page_size =
+        write_scannable_cbz_fixture(&book_path, b"page-after-underscore-deep")
+            .expect("updated underscore scan fixture should be written");
+
+    scheduler.enqueue(
+        TaskQueueRecord::new("SCAN_LIBRARY_library-1_DEEP_true", 900, None)
+            .with_simple_type("SCAN_LIBRARY"),
+    );
+    scheduler
+        .process_available(&fixture.config)
+        .expect("underscore legacy scan-library id should process successfully after canonical payload restoration");
+
+    assert_eq!(
+        load_media_page_file_size(&fixture.paths.main_db, &book_url).await,
+        expected_updated_page_size,
+        "scan-library enqueue must recover deep=true from the legacy _DEEP_ suffix so persisted execution still performs deep reanalysis",
+    );
+
+    fixture.cleanup();
+}

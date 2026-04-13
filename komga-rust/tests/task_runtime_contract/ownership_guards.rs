@@ -242,6 +242,94 @@ async fn runtime_refresh_series_metadata_applies_oneshot_provider_fields() {
 }
 
 #[tokio::test]
+async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task_with_default_capabilities() {
+    let paths = new_router_fixture("runtime-executes-kotlin-refresh-book-metadata-defaults").await;
+    seed_router_contract_data(&paths).await;
+
+    let sidecar_dir = paths.config_dir.join("books");
+    std::fs::create_dir_all(&sidecar_dir).expect("book metadata sidecar directory should exist");
+    std::fs::write(
+        sidecar_dir.join("book-1.xml"),
+        br#"<ComicInfo><Title>Kotlin Default Title</Title><Summary>Kotlin Default Summary</Summary></ComicInfo>"#,
+    )
+    .expect("book metadata sidecar fixture should be written for default capability restore");
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for default-capability metadata fixture setup");
+    sqlx::query("DELETE FROM SIDECAR WHERE PARENT_URL = ?")
+        .bind("books/book-1.epub")
+        .execute(&pool)
+        .await
+        .expect(
+            "existing book metadata sidecars should be cleared before default-capability task test",
+        );
+    sqlx::query(
+        "INSERT INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID) VALUES (?, ?, ?, ?)",
+    )
+    .bind("books/book-1.xml")
+    .bind("books/book-1.epub")
+    .bind(1_i64)
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("book metadata sidecar row should be inserted for default-capability task test");
+    pool.close().await;
+
+    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+        .await
+        .expect("tasks db should open for default-capability metadata task setup");
+    sqlx::query(
+        "INSERT INTO TASK (ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER) VALUES (?, ?, ?, ?, ?, ?, NULL)",
+    )
+    .bind("REFRESH_BOOK_METADATA_book-1")
+    .bind(80_i64)
+    .bind("series-1")
+    .bind("org.gotson.komga.application.tasks.Task$RefreshBookMetadata")
+    .bind("RefreshBookMetadata")
+    .bind(
+        json!({
+            "bookId": "book-1",
+            "priority": 80,
+            "groupId": "series-1",
+            "uniqueId": "REFRESH_BOOK_METADATA_book-1"
+        })
+        .to_string(),
+    )
+    .execute(&tasks_pool)
+    .await
+    .expect("Kotlin persisted metadata task row without capabilities should be inserted");
+    tasks_pool.close().await;
+
+    let runtime = runtime_task_context(&paths);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    scheduler
+        .process_available(&runtime)
+        .expect("runtime should restore default RefreshBookMetadata capabilities for persisted Kotlin tasks");
+
+    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for default-capability metadata verification");
+    let metadata =
+        sqlx::query("SELECT TITLE, SUMMARY FROM BOOK_METADATA WHERE BOOK_ID = ? LIMIT 1")
+            .bind("book-1")
+            .fetch_one(&verify_pool)
+            .await
+            .expect(
+                "book metadata row should be queryable after default-capability task execution",
+            );
+    verify_pool.close().await;
+
+    assert_eq!(metadata.get::<String, _>("TITLE"), "Kotlin Default Title");
+    assert_eq!(
+        metadata.get::<String, _>("SUMMARY"),
+        "Kotlin Default Summary"
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn runtime_executes_kotlin_persisted_repair_extension_task() {
     let paths = new_router_fixture("runtime-executes-kotlin-repair-extension-task").await;
     seed_router_contract_data(&paths).await;

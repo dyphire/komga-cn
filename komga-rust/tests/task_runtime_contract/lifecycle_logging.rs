@@ -247,6 +247,128 @@ fn scheduler_logs_recover_before_reclaiming_owned_work() {
     cleanup_router_fixture(paths);
 }
 
+#[tokio::test]
+async fn scheduler_claim_batch_respects_priority_order_group_locks_and_owner_persistence() {
+    let paths = new_router_fixture("scheduler-batch-claim-ordering").await;
+    seed_router_contract_data(&paths).await;
+
+    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+        .await
+        .expect("tasks db should open for batch claim ordering setup");
+    for (id, priority, group_id, class_name, simple_type) in [
+        (
+            "UPGRADE_INDEX:shared-high",
+            1_000_i64,
+            Some("shared-group"),
+            "org.gotson.komga.application.tasks.Task$UpgradeIndex",
+            "UpgradeIndex",
+        ),
+        (
+            "UPGRADE_INDEX:shared-low",
+            950_i64,
+            Some("shared-group"),
+            "org.gotson.komga.application.tasks.Task$UpgradeIndex",
+            "UpgradeIndex",
+        ),
+        (
+            "REBUILD_INDEX:free-middle",
+            900_i64,
+            Some("independent-group"),
+            "org.gotson.komga.application.tasks.Task$RebuildIndex",
+            "RebuildIndex",
+        ),
+        (
+            "UPGRADE_INDEX:free-low",
+            800_i64,
+            None,
+            "org.gotson.komga.application.tasks.Task$UpgradeIndex",
+            "UpgradeIndex",
+        ),
+    ] {
+        sqlx::query(
+            "INSERT INTO TASK (ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER) VALUES (?, ?, ?, ?, ?, ?, NULL)",
+        )
+        .bind(id)
+        .bind(priority)
+        .bind(group_id)
+        .bind(class_name)
+        .bind(simple_type)
+        .bind(json!({
+            "priority": priority,
+            "groupId": group_id,
+            "uniqueId": id,
+        }).to_string())
+        .execute(&tasks_pool)
+        .await
+        .expect("batch claim ordering task row should insert");
+    }
+    tasks_pool.close().await;
+
+    let config = runtime_config_for_paths(&paths);
+    let mut scheduler = TaskQueueScheduler::for_runtime(config.clone(), "rust-main");
+    scheduler.set_task_pool_size(3);
+    let claimed = scheduler.take_available_batch();
+
+    assert_eq!(
+        claimed
+            .iter()
+            .map(|task| task.id.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            "UPGRADE_INDEX:shared-high".to_string(),
+            "REBUILD_INDEX:free-middle".to_string(),
+            "UPGRADE_INDEX:free-low".to_string(),
+        ],
+        "batch claim should keep priority order while skipping same-group work behind an already claimed head task",
+    );
+    assert!(
+        claimed
+            .iter()
+            .all(|task| task.owner.as_deref() == Some("rust-main")),
+        "claimed tasks should expose their persisted owner after batch selection",
+    );
+
+    let verify_pool = connect_pool(paths.tasks_db.as_path(), 1)
+        .await
+        .expect("tasks db should reopen for batch claim ordering verification");
+    let rows = sqlx::query("SELECT ID, OWNER FROM TASK ORDER BY PRIORITY DESC, ID ASC")
+        .fetch_all(&verify_pool)
+        .await
+        .expect("batch claim ordering rows should be queryable");
+    verify_pool.close().await;
+
+    let owners = rows
+        .into_iter()
+        .map(|row| {
+            (
+                row.get::<String, _>("ID"),
+                row.get::<Option<String>, _>("OWNER"),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        owners,
+        vec![
+            (
+                "UPGRADE_INDEX:shared-high".to_string(),
+                Some("rust-main".to_string()),
+            ),
+            ("UPGRADE_INDEX:shared-low".to_string(), None),
+            (
+                "REBUILD_INDEX:free-middle".to_string(),
+                Some("rust-main".to_string()),
+            ),
+            (
+                "UPGRADE_INDEX:free-low".to_string(),
+                Some("rust-main".to_string()),
+            ),
+        ],
+        "batch claim should persist rust-main ownership only for the tasks that were actually claimable",
+    );
+
+    cleanup_router_fixture(paths);
+}
+
 fn task_events<'a>(
     events: &'a [Value],
     event: &str,

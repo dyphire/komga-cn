@@ -39,10 +39,11 @@ pub(in crate::task_queue) fn enqueue_sidecar_refresh_tasks(
                 if let Some(series_id) = series_by_url.get(&sidecar.parent_url)
                     && seen_series_metadata.insert(series_id.clone())
                 {
-                    scheduler.enqueue(TaskQueueRecord::new(
-                        format!("REFRESH_SERIES_METADATA:{series_id}"),
-                        priority,
-                        Some(series_id.clone()),
+                    scheduler.enqueue(runtime_follow_up_task(
+                        RuntimeFollowUpTask::RefreshSeriesMetadata {
+                            series_id: series_id.clone(),
+                            priority,
+                        },
                     ));
                 }
             }
@@ -50,10 +51,11 @@ pub(in crate::task_queue) fn enqueue_sidecar_refresh_tasks(
                 if let Some(series_id) = series_by_url.get(&sidecar.parent_url)
                     && seen_series_artwork.insert(series_id.clone())
                 {
-                    scheduler.enqueue(TaskQueueRecord::new(
-                        format!("REFRESH_SERIES_LOCAL_ARTWORK:{series_id}"),
-                        priority,
-                        None,
+                    scheduler.enqueue(runtime_follow_up_task(
+                        RuntimeFollowUpTask::RefreshSeriesLocalArtwork {
+                            series_id: series_id.clone(),
+                            priority,
+                        },
                     ));
                 }
             }
@@ -62,28 +64,25 @@ pub(in crate::task_queue) fn enqueue_sidecar_refresh_tasks(
                     && seen_books_metadata.insert(book_id.clone())
                 {
                     let group_id = book_series_by_url.get(&sidecar.parent_url).cloned();
-                    scheduler.enqueue(
-                        TaskQueueRecord::new(
-                            format!("REFRESH_BOOK_METADATA_{book_id}"),
+                    scheduler.enqueue(runtime_follow_up_task(
+                        RuntimeFollowUpTask::RefreshBookMetadata {
+                            book_id: book_id.clone(),
+                            series_id: group_id,
                             priority,
-                            group_id,
-                        )
-                        .with_simple_type("REFRESH_BOOK_METADATA"),
-                    );
+                        },
+                    ));
                 }
             }
             (ScannedSidecarSource::Book, ScannedSidecarType::Artwork) => {
                 if let Some(book_id) = book_by_url.get(&sidecar.parent_url)
                     && seen_books_artwork.insert(book_id.clone())
                 {
-                    scheduler.enqueue(
-                        TaskQueueRecord::new(
-                            format!("REFRESH_BOOK_LOCAL_ARTWORK_{book_id}"),
+                    scheduler.enqueue(runtime_follow_up_task(
+                        RuntimeFollowUpTask::RefreshBookLocalArtwork {
+                            book_id: book_id.clone(),
                             priority,
-                            None,
-                        )
-                        .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK"),
-                    );
+                        },
+                    ));
                 }
             }
         }
