@@ -5,10 +5,11 @@ ARG TARGETOS
 ARG TARGETARCH
 RUN apk add --no-cache tzdata
 WORKDIR /app
-COPY docker-artifacts/${TARGETOS}-musl/${TARGETARCH}/komga-rust ./komga-rust
+COPY --chmod=755 docker-artifacts/${TARGETOS}-musl/${TARGETARCH}/komga-rust ./komga-rust
 COPY docker-artifacts/${TARGETOS}-musl/${TARGETARCH}/libpdfium.so ./libpdfium.so
 RUN <<'EOF'
 set -eu
+install -m 755 /dev/null ./docker-runtime.sh
 cat > ./docker-runtime.sh <<'SCRIPT'
 #!/bin/sh
 set -eu
@@ -46,7 +47,6 @@ fi
 
 exit 64
 SCRIPT
-chmod +x ./komga-rust ./docker-runtime.sh
 EOF
 VOLUME /config
 ENV KOMGA_CONFIG_DIR="/config"
