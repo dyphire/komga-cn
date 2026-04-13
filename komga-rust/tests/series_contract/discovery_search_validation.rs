@@ -28,6 +28,17 @@ fn series_page_ids(payload: &Value) -> Vec<String> {
         .collect()
 }
 
+fn book_page_ids(payload: &Value) -> Vec<String> {
+    payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("book page payload should expose content array")
+        .iter()
+        .filter_map(|entry| entry.get("id").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect()
+}
+
 #[tokio::test]
 async fn router_discovery_series_get_routes_match_paperback_compatibility_shape() {
     let paths = new_router_fixture("router-discovery-series-papperback-get-compat").await;
@@ -220,33 +231,56 @@ async fn router_discovery_series_list_deleted_filter_handles_deleted_only_librar
 }
 
 #[tokio::test]
-async fn router_discovery_removed_series_v1_routes_except_paperback_compatibility_return_not_found()
-{
+async fn router_discovery_removed_series_v1_alphabetical_groups_route_returns_not_found() {
     let paths = new_router_fixture("router-discovery-removed-v1-series-routes").await;
     seed_router_contract_data(&paths).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
-    for route in [
-        "/api/v1/series/alphabetical-groups?page=0&size=20",
-        "/api/v1/series/series-1/books?page=0&size=20",
-    ] {
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri(route)
-                    .header("x-auth-token", &auth_token)
-                    .body(Body::empty())
-                    .expect("removed series v1 request should build"),
-            )
-            .await
-            .expect("removed series v1 request should complete");
+    let route = "/api/v1/series/alphabetical-groups?page=0&size=20";
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(route)
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("removed series v1 alphabetical-groups request should build"),
+        )
+        .await
+        .expect("removed series v1 alphabetical-groups request should complete");
 
-        assert_eq!(response.status(), StatusCode::NOT_FOUND, "route: {route}");
-    }
+    assert_eq!(response.status(), StatusCode::NOT_FOUND, "route: {route}");
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_books_route_remains_available_for_deprecated_compatibility() {
+    let paths = new_router_fixture("router-discovery-deprecated-series-books-compat").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/series/series-1/books?page=0&size=20")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("deprecated series books request should build"),
+        )
+        .await
+        .expect("deprecated series books request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(book_page_ids(&payload), vec!["book-1"]);
 
     cleanup_router_fixture(paths);
 }
