@@ -50,6 +50,69 @@ async fn router_book_progression_put_accepts_url_encoded_epub_href() {
 }
 
 #[tokio::test]
+async fn router_book_progression_routes_accept_basic_auth_like_kotlin_clients() {
+    let paths = new_router_fixture("router-book-progression-basic-auth-compat").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for basic-auth progression seed");
+    sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
+        .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
+        .bind(fixture_epub_positions_extension_blob())
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("epub extension positions should be seeded for basic-auth progression test");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let authorization =
+        basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
+    let progression = json!({
+        "modified": "2024-01-04T05:06:07Z",
+        "device": { "id": "reader-9", "name": "Kobo Libra" },
+        "locator": {
+            "href": "/book-1.xhtml#custom-fragment",
+            "type": "application/xhtml+xml",
+            "locations": { "progression": 0.5 }
+        }
+    });
+
+    let put_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/books/book-1/progression")
+                .header(header::AUTHORIZATION, authorization.as_str())
+                .header("x-auth-token", "")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(progression.to_string()))
+                .expect("basic-auth progression put request should build"),
+        )
+        .await
+        .expect("basic-auth progression put request should complete");
+    assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
+
+    let get_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/progression")
+                .header(header::AUTHORIZATION, authorization.as_str())
+                .header("x-auth-token", "")
+                .body(Body::empty())
+                .expect("basic-auth progression get request should build"),
+        )
+        .await
+        .expect("basic-auth progression get request should complete");
+    assert_eq!(get_response.status(), StatusCode::OK);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_book_progression_put_normalizes_epub_locator_from_matching_position() {
     let paths = new_router_fixture("router-book-progression-put-epub-normalizes-locator").await;
     seed_router_contract_data(&paths).await;

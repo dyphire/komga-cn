@@ -72,6 +72,44 @@ async fn router_referential_facets_support_repeated_library_id() {
 }
 
 #[tokio::test]
+async fn router_referential_and_tag_facets_accept_basic_auth_like_kotlin_clients() {
+    let paths = new_router_fixture("router-referential-facets-basic-auth-compat").await;
+    seed_router_contract_data(&paths).await;
+    seed_facet_scope_variants(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let authorization =
+        basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
+
+    for route in [
+        "/api/v1/authors/names",
+        "/api/v1/authors/roles",
+        "/api/v2/authors?unpaged=true",
+        "/api/v1/tags?library_id=library-1&library_id=library-2",
+        "/api/v1/tags/series?library_id=library-1&library_id=library-2",
+        "/api/v1/tags/book?readlist_id=readlist-1",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header(header::AUTHORIZATION, authorization.as_str())
+                    .header("x-auth-token", "")
+                    .body(Body::empty())
+                    .expect("facet basic-auth request should build"),
+            )
+            .await
+            .expect("facet basic-auth request should complete");
+
+        assert_eq!(response.status(), StatusCode::OK, "route: {route}");
+    }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_referential_facets_filter_repeated_library_scope_to_authorized_libraries() {
     let paths = new_router_fixture("router-referential-facets-authorized-library-scope").await;
     seed_router_contract_data(&paths).await;

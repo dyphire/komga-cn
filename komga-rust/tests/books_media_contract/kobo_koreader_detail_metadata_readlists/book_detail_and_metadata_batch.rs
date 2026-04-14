@@ -67,6 +67,36 @@ async fn router_discovery_book_detail_includes_persisted_authors_tags_and_read_p
 }
 
 #[tokio::test]
+async fn router_discovery_book_detail_accepts_basic_auth_like_kotlin_clients() {
+    let paths = new_router_fixture("router-discovery-book-detail-basic-auth-compat").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1")
+                .header(
+                    header::AUTHORIZATION,
+                    basic_authorization_header_value(
+                        "admin@example.org",
+                        "router-contract-admin-123",
+                    ),
+                )
+                .header("x-auth-token", "")
+                .body(Body::empty())
+                .expect("book detail basic-auth request should build"),
+        )
+        .await
+        .expect("book detail basic-auth request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_discovery_book_detail_exposes_oneshot_flag_from_persisted_book_rows() {
     let paths = new_router_fixture("router-discovery-book-detail-oneshot-flag").await;
     seed_router_contract_data(&paths).await;

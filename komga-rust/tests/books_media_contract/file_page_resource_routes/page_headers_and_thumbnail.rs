@@ -196,6 +196,48 @@ async fn router_book_pages_and_raw_pages_include_inline_content_disposition() {
 }
 
 #[tokio::test]
+async fn router_book_page_routes_accept_basic_auth_like_kotlin_clients() {
+    let paths = new_router_fixture("router-book-page-routes-basic-auth-compat").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_pdf_book(
+        &paths,
+        "book-pdf-1",
+        "series-1",
+        "fixture-page.pdf",
+        "Readable Page Title",
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let authorization =
+        basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
+
+    for route in [
+        "/api/v1/books/book-pdf-1/pages",
+        "/api/v1/books/book-pdf-1/pages/1",
+        "/api/v1/books/book-pdf-1/pages/1/thumbnail",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header(header::AUTHORIZATION, authorization.as_str())
+                    .header("x-auth-token", "")
+                    .body(Body::empty())
+                    .expect("book page basic-auth request should build"),
+            )
+            .await
+            .expect("book page basic-auth request should complete");
+
+        assert_eq!(response.status(), StatusCode::OK, "route: {route}");
+    }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_persisted_cbz_pages_follow_kotlin_one_based_numbering() {
     let paths = new_router_fixture("router-persisted-cbz-pages-one-based").await;
     seed_router_contract_data(&paths).await;

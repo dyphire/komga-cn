@@ -45,6 +45,83 @@ async fn router_readlist_patch_preserves_unspecified_fields() {
 }
 
 #[tokio::test]
+async fn router_readlist_admin_routes_accept_basic_auth_like_kotlin_clients() {
+    let paths = new_router_fixture("router-readlist-admin-routes-basic-auth-compat").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let authorization =
+        basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
+
+    let create = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/readlists")
+                .header(header::AUTHORIZATION, authorization.as_str())
+                .header("x-auth-token", "")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "Basic Auth ReadList",
+                        "bookIds": ["book-1"]
+                    })
+                    .to_string(),
+                ))
+                .expect("readlist create basic-auth request should build"),
+        )
+        .await
+        .expect("readlist create basic-auth request should complete");
+    assert_eq!(create.status(), StatusCode::OK);
+    let created = response_json(create).await;
+    let readlist_id = created
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("readlist create basic-auth response should expose id")
+        .to_string();
+
+    let patch = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/api/v1/readlists/{readlist_id}"))
+                .header(header::AUTHORIZATION, authorization.as_str())
+                .header("x-auth-token", "")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "Renamed Basic Auth ReadList",
+                        "summary": "Updated through direct basic auth"
+                    })
+                    .to_string(),
+                ))
+                .expect("readlist patch basic-auth request should build"),
+        )
+        .await
+        .expect("readlist patch basic-auth request should complete");
+    assert_eq!(patch.status(), StatusCode::NO_CONTENT);
+
+    let delete = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/v1/readlists/{readlist_id}"))
+                .header(header::AUTHORIZATION, authorization.as_str())
+                .header("x-auth-token", "")
+                .body(Body::empty())
+                .expect("readlist delete basic-auth request should build"),
+        )
+        .await
+        .expect("readlist delete basic-auth request should complete");
+    assert_eq!(delete.status(), StatusCode::NO_CONTENT);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_readlist_create_rejects_invalid_requests_like_kotlin() {
     for (fixture_suffix, payload) in [
         ("missing-name", json!({ "bookIds": ["book-1"] })),

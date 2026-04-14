@@ -504,7 +504,10 @@ pub async fn load_visible_persisted_readlist_books(
     readlist_id: &str,
     query: &PersistedReadlistBooksQuery,
 ) -> Result<Option<Vec<PersistedVisibleReadlistBook>>, String> {
-    let Some(context) = auth_state.resolve_query_context(headers, None) else {
+    let Some(context) = auth_state
+        .resolve_query_context_with_persistence(headers, None, database_file)
+        .await
+    else {
         return Ok(None);
     };
 
@@ -552,11 +555,13 @@ pub async fn load_visible_persisted_readlist_books(
                 sharing_labels: resource.sharing_labels,
             }),
         };
-        let detail_query_context =
-            match auth_state.resolve_detail_query_context(headers, &detail_context) {
-                Ok(context) => context,
-                Err(_) => continue,
-            };
+        let detail_query_context = match auth_state
+            .resolve_detail_query_context_with_persistence(headers, &detail_context, database_file)
+            .await
+        {
+            Ok(context) => context,
+            Err(_) => continue,
+        };
         let Some(detail) = load_persisted_book_detail(
             database_file,
             &row.book_id,

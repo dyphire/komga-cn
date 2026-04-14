@@ -222,7 +222,7 @@ pub async fn book_progression(
     Path(book_id): Path<String>,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -233,7 +233,8 @@ pub async fn book_progression(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Some(user) = resolved_auth_user(&headers) else {
+    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let Some(media) =
@@ -348,7 +349,7 @@ pub async fn book_progression_get(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -359,7 +360,8 @@ pub async fn book_progression_get(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Some(user) = resolved_auth_user(&headers) else {
+    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let Some(media) =

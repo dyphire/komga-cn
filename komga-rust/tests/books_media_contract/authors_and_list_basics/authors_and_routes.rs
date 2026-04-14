@@ -127,6 +127,41 @@ async fn router_author_endpoints_filter_to_authorized_libraries() {
 }
 
 #[tokio::test]
+async fn router_author_endpoints_accept_basic_auth_like_kotlin_clients() {
+    let paths = new_router_fixture("router-authors-basic-auth-compat").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_authors_scope_variants(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let authorization =
+        basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
+
+    for route in [
+        "/api/v1/authors/names",
+        "/api/v1/authors/roles",
+        "/api/v2/authors?unpaged=true",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header(header::AUTHORIZATION, authorization.as_str())
+                    .header("x-auth-token", "")
+                    .body(Body::empty())
+                    .expect("authors basic-auth request should build"),
+            )
+            .await
+            .expect("authors basic-auth request should complete");
+
+        assert_eq!(response.status(), StatusCode::OK, "route: {route}");
+    }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_authors_names_matches_search_without_accents() {
     let paths = new_router_fixture("router-authors-names-strip-accents").await;
     seed_router_contract_data(&paths).await;

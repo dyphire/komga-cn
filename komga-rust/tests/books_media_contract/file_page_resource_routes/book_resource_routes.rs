@@ -91,3 +91,42 @@ async fn router_book_resource_supports_not_modified_and_inline_content_dispositi
 
     cleanup_router_fixture(paths);
 }
+
+#[tokio::test]
+async fn router_book_resource_routes_accept_basic_auth_like_kotlin_clients() {
+    let paths = new_router_fixture("router-book-resource-basic-auth-compat").await;
+    seed_router_contract_data(&paths).await;
+    write_router_epub_resource(
+        &paths,
+        "books/book-1.epub",
+        "OEBPS/chapter.xhtml",
+        br#"<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><p>Hello</p></body></html>"#,
+    );
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let authorization =
+        basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
+
+    for route in [
+        "/api/v1/books/book-1/resource/OEBPS/chapter.xhtml",
+        "/opds/v2/books/book-1/resource/OEBPS/chapter.xhtml",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header(header::AUTHORIZATION, authorization.as_str())
+                    .header("x-auth-token", "")
+                    .body(Body::empty())
+                    .expect("resource basic-auth request should build"),
+            )
+            .await
+            .expect("resource basic-auth request should complete");
+
+        assert_eq!(response.status(), StatusCode::OK, "route: {route}");
+    }
+
+    cleanup_router_fixture(paths);
+}

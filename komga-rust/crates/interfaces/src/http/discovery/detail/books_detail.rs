@@ -6,7 +6,7 @@ pub async fn book_detail(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -28,11 +28,17 @@ pub async fn book_detail(
             }),
         };
 
-        let detail_query_context =
-            match auth_state.resolve_detail_query_context(&headers, &detail_context) {
-                Ok(context) => context,
-                Err(denial) => return detail_access_denial_response(denial),
-            };
+        let detail_query_context = match auth_state
+            .resolve_detail_query_context_with_persistence(
+                &headers,
+                &detail_context,
+                auth_db.database_file.as_path(),
+            )
+            .await
+        {
+            Ok(context) => context,
+            Err(denial) => return detail_access_denial_response(denial),
+        };
 
         let is_admin = detail_query_context.is_admin;
         return match load_persisted_book_detail(
@@ -56,7 +62,7 @@ pub async fn book_sibling_previous(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -81,11 +87,17 @@ pub async fn book_sibling_previous(
             }),
         };
 
-        let detail_query_context =
-            match auth_state.resolve_detail_query_context(&headers, &detail_context) {
-                Ok(context) => context,
-                Err(denial) => return detail_access_denial_response(denial),
-            };
+        let detail_query_context = match auth_state
+            .resolve_detail_query_context_with_persistence(
+                &headers,
+                &detail_context,
+                auth_db.database_file.as_path(),
+            )
+            .await
+        {
+            Ok(context) => context,
+            Err(denial) => return detail_access_denial_response(denial),
+        };
         let is_admin = detail_query_context.is_admin;
 
         return match load_persisted_book_sibling_detail(
@@ -110,7 +122,7 @@ pub async fn book_sibling_next(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -135,11 +147,17 @@ pub async fn book_sibling_next(
             }),
         };
 
-        let detail_query_context =
-            match auth_state.resolve_detail_query_context(&headers, &detail_context) {
-                Ok(context) => context,
-                Err(denial) => return detail_access_denial_response(denial),
-            };
+        let detail_query_context = match auth_state
+            .resolve_detail_query_context_with_persistence(
+                &headers,
+                &detail_context,
+                auth_db.database_file.as_path(),
+            )
+            .await
+        {
+            Ok(context) => context,
+            Err(denial) => return detail_access_denial_response(denial),
+        };
         let is_admin = detail_query_context.is_admin;
 
         return match load_persisted_book_sibling_detail(
@@ -164,7 +182,7 @@ pub async fn book_readlists(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -189,11 +207,17 @@ pub async fn book_readlists(
             }),
         };
 
-        let detail_query_context =
-            match auth_state.resolve_detail_query_context(&headers, &detail_context) {
-                Ok(context) => context,
-                Err(denial) => return detail_access_denial_response(denial),
-            };
+        let detail_query_context = match auth_state
+            .resolve_detail_query_context_with_persistence(
+                &headers,
+                &detail_context,
+                auth_db.database_file.as_path(),
+            )
+            .await
+        {
+            Ok(context) => context,
+            Err(denial) => return detail_access_denial_response(denial),
+        };
 
         let mut readlists = match load_persisted_readlists(
             auth_db.database_file.as_path(),

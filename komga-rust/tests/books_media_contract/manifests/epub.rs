@@ -258,6 +258,46 @@ async fn router_book_manifest_epub_exposes_epub_specific_shape() {
 }
 
 #[tokio::test]
+async fn router_book_manifest_routes_accept_basic_auth_like_kotlin_clients() {
+    let paths = new_router_fixture("router-book-manifest-basic-auth-compat").await;
+    seed_router_contract_data(&paths).await;
+    write_router_epub_with_cover(&paths, "books/book-1.epub");
+    seed_epub_manifest_media(
+        &paths,
+        "main db should open for basic-auth epub manifest seed",
+        false,
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let authorization =
+        basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
+
+    for route in [
+        "/api/v1/books/book-1/manifest",
+        "/api/v1/books/book-1/manifest/epub",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header(header::AUTHORIZATION, authorization.as_str())
+                    .header("x-auth-token", "")
+                    .body(Body::empty())
+                    .expect("manifest basic-auth request should build"),
+            )
+            .await
+            .expect("manifest basic-auth request should complete");
+
+        assert_eq!(response.status(), StatusCode::OK, "route: {route}");
+    }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_book_manifest_dispatches_to_epub_profile_payload() {
     let paths = new_router_fixture("router-book-manifest-default-uses-epub-profile").await;
     seed_router_contract_data(&paths).await;

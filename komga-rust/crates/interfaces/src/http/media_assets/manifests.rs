@@ -5,7 +5,7 @@ pub async fn book_manifest(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -37,7 +37,7 @@ pub async fn book_manifest_epub(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -69,7 +69,7 @@ pub async fn book_manifest_pdf(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -101,7 +101,7 @@ pub async fn book_manifest_divina(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 

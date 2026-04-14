@@ -41,7 +41,7 @@ async fn book_page_response(
     page_number: u32,
     query: BookPageQuery,
 ) -> Response {
-    if let Some(response) = require_auth(headers) {
+    if let Some(response) = require_request_auth(headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -92,20 +92,22 @@ async fn book_page_response(
                 .into_response();
         }
 
-        if let Some(user) = resolved_auth_user(headers) {
-            if !user_is_admin(&user) && !user_has_role(&user, "PAGE_STREAMING") {
-                return StatusCode::FORBIDDEN.into_response();
-            }
-            if !user_can_access_book_media(
-                auth_db.database_file.as_path(),
-                &resolved_book_id,
-                &user,
-                &media,
-            )
-            .await
-            {
-                return StatusCode::FORBIDDEN.into_response();
-            }
+        let Some(user) = resolved_request_auth_user(headers, auth_db.database_file.as_path()).await
+        else {
+            return StatusCode::UNAUTHORIZED.into_response();
+        };
+        if !user_is_admin(&user) && !user_has_role(&user, "PAGE_STREAMING") {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+        if !user_can_access_book_media(
+            auth_db.database_file.as_path(),
+            &resolved_book_id,
+            &user,
+            &media,
+        )
+        .await
+        {
+            return StatusCode::FORBIDDEN.into_response();
         }
 
         if !book_media_supports_page_api(&media) {
@@ -205,7 +207,7 @@ pub async fn book_page_raw(
     headers: HeaderMap,
     Path((book_id, page_number_signed)): Path<(String, i32)>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
     if page_number_signed <= 0 {
@@ -223,7 +225,7 @@ pub async fn book_page_raw(
     if let Ok(Some(media)) =
         load_persisted_book_media(auth_db.database_file.as_path(), &resolved_book_id).await
     {
-        let auth_user = resolved_auth_user(&headers);
+        let auth_user = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await;
         if let Some(user) = auth_user.as_ref()
             && !user_has_role(user, "PAGE_STREAMING")
         {
@@ -529,7 +531,7 @@ pub async fn book_page_thumbnail(
     headers: HeaderMap,
     Path((book_id, page_number)): Path<(String, u32)>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
     if page_number == 0 {
@@ -542,14 +544,18 @@ pub async fn book_page_thumbnail(
     if let Ok(Some(media)) =
         load_persisted_book_media(auth_db.database_file.as_path(), &resolved_book_id).await
     {
-        if let Some(user) = resolved_auth_user(&headers)
-            && !user_can_access_book_media(
-                auth_db.database_file.as_path(),
-                &resolved_book_id,
-                &user,
-                &media,
-            )
-            .await
+        let Some(user) =
+            resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+        else {
+            return StatusCode::UNAUTHORIZED.into_response();
+        };
+        if !user_can_access_book_media(
+            auth_db.database_file.as_path(),
+            &resolved_book_id,
+            &user,
+            &media,
+        )
+        .await
         {
             return StatusCode::FORBIDDEN.into_response();
         }
@@ -604,7 +610,7 @@ pub async fn book_pages(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -618,14 +624,17 @@ pub async fn book_pages(
             Err(error) => return internal_error_response(error),
         };
 
-    if let Some(user) = resolved_auth_user(&headers)
-        && !user_can_access_book_media(
-            auth_db.database_file.as_path(),
-            &resolved_book_id,
-            &user,
-            &media,
-        )
-        .await
+    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+    else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    if !user_can_access_book_media(
+        auth_db.database_file.as_path(),
+        &resolved_book_id,
+        &user,
+        &media,
+    )
+    .await
     {
         return StatusCode::FORBIDDEN.into_response();
     }
@@ -744,7 +753,7 @@ pub async fn book_positions(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -758,8 +767,17 @@ pub async fn book_positions(
             Err(error) => return internal_error_response(error),
         };
 
-    if let Some(user) = resolved_auth_user(&headers)
-        && !user_can_access_library(&user, &media.library_id)
+    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+    else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    if !user_can_access_book_media(
+        auth_db.database_file.as_path(),
+        &resolved_book_id,
+        &user,
+        &media,
+    )
+    .await
     {
         return StatusCode::FORBIDDEN.into_response();
     }

@@ -216,3 +216,57 @@ async fn router_book_thumbnail_upload_rejects_invalid_selected_flag() {
 
     cleanup_router_fixture(paths);
 }
+
+#[tokio::test]
+async fn router_book_thumbnail_admin_routes_accept_basic_auth_like_kotlin_clients() {
+    let paths = new_router_fixture("router-book-thumbnail-admin-basic-auth-compat").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let authorization =
+        basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
+    let image_bytes = fixture_png_bytes();
+    let (content_type, body) =
+        multipart_image_upload_body("file", "cover.png", "image/png", false, &image_bytes);
+
+    let upload = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/books/book-1/thumbnails")
+                .header(header::AUTHORIZATION, authorization.as_str())
+                .header("x-auth-token", "")
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(body))
+                .expect("book thumbnail basic-auth upload request should build"),
+        )
+        .await
+        .expect("book thumbnail basic-auth upload request should complete");
+    assert_eq!(upload.status(), StatusCode::OK);
+    let thumbnail_id = response_json(upload)
+        .await
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("book thumbnail basic-auth upload should return thumbnail id")
+        .to_string();
+
+    let select = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!(
+                    "/api/v1/books/book-1/thumbnails/{thumbnail_id}/selected"
+                ))
+                .header(header::AUTHORIZATION, authorization.as_str())
+                .header("x-auth-token", "")
+                .body(Body::empty())
+                .expect("book thumbnail basic-auth select request should build"),
+        )
+        .await
+        .expect("book thumbnail basic-auth select request should complete");
+    assert_eq!(select.status(), StatusCode::ACCEPTED);
+
+    cleanup_router_fixture(paths);
+}

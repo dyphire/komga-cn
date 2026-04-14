@@ -387,6 +387,46 @@ async fn router_discovery_books_ondeck_returns_representative_book_detail_fields
 }
 
 #[tokio::test]
+async fn router_discovery_books_ondeck_accepts_basic_auth_like_kotlin_clients() {
+    let paths = new_router_fixture("router-discovery-books-ondeck-basic-auth-compat").await;
+    seed_router_contract_data(&paths).await;
+    insert_ondeck_book(&paths, "book-2", "series-1", "library-1", 2, "Book 2").await;
+    update_ondeck_series_book_count(&paths, "series-1", 2).await;
+    seed_ondeck_progress(
+        &paths,
+        "admin-user",
+        "series-1",
+        "book-1",
+        "2024-02-01T00:00:00",
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/ondeck?unpaged=true")
+                .header(
+                    header::AUTHORIZATION,
+                    basic_authorization_header_value(
+                        "admin@example.org",
+                        "router-contract-admin-123",
+                    ),
+                )
+                .header("x-auth-token", "")
+                .body(Body::empty())
+                .expect("books/ondeck basic-auth request should build"),
+        )
+        .await
+        .expect("books/ondeck basic-auth request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_discovery_books_ondeck_honors_label_allow_restriction() {
     let paths = new_router_fixture("router-discovery-books-ondeck-label-allow").await;
     seed_router_contract_data(&paths).await;

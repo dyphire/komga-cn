@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 
 use crate::http::discovery_auth::DiscoveryAuthState;
 use crate::http::identity_access::auth::{
-    require_admin, require_auth, require_request_auth, resolved_auth_user, user_id,
+    require_request_admin, require_request_auth, resolved_request_auth_user, user_id,
 };
 
 use super::super::{AuthDatabaseState, OperationalState};

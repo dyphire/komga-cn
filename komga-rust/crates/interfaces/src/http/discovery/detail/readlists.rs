@@ -21,7 +21,7 @@ pub async fn readlists(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -59,12 +59,21 @@ pub async fn readlists(
         .collect::<Vec<_>>();
     let requested_sort = sort.first().cloned();
 
-    let requested_context = match auth_state.resolve_query_context(&headers, library_ids.as_deref())
+    let requested_context = match auth_state
+        .resolve_query_context_with_persistence(
+            &headers,
+            library_ids.as_deref(),
+            auth_db.database_file.as_path(),
+        )
+        .await
     {
         Some(context) => context,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
-    let visibility_context = match auth_state.resolve_query_context(&headers, None) {
+    let visibility_context = match auth_state
+        .resolve_query_context_with_persistence(&headers, None, auth_db.database_file.as_path())
+        .await
+    {
         Some(context) => context,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
@@ -314,7 +323,7 @@ pub async fn readlist_create(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -475,7 +484,7 @@ pub async fn readlist_match_comicrack(
     headers: HeaderMap,
     multipart: Result<Multipart, MultipartRejection>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -519,7 +528,7 @@ pub async fn readlist_update(
     Path(readlist_id): Path<String>,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -560,7 +569,7 @@ pub async fn readlist_delete(
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -588,7 +597,7 @@ pub async fn readlist_books(
     Path(readlist_id): Path<String>,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -608,7 +617,13 @@ pub async fn readlist_books(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    let Some(context) = auth_state.resolve_query_context(&headers, query.library_ids.as_deref())
+    let Some(context) = auth_state
+        .resolve_query_context_with_persistence(
+            &headers,
+            query.library_ids.as_deref(),
+            auth_db.database_file.as_path(),
+        )
+        .await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -641,11 +656,14 @@ pub async fn readlist_detail(
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
-    let context = match auth_state.resolve_query_context(&headers, None) {
+    let context = match auth_state
+        .resolve_query_context_with_persistence(&headers, None, auth_db.database_file.as_path())
+        .await
+    {
         Some(context) => context,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
@@ -711,7 +729,7 @@ pub async fn readlist_book_sibling_previous(
     headers: HeaderMap,
     Path((readlist_id, book_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -732,7 +750,7 @@ pub async fn readlist_book_sibling_next(
     headers: HeaderMap,
     Path((readlist_id, book_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -782,7 +800,10 @@ async fn sibling_response(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    let Some(context) = auth_state.resolve_query_context(headers, None) else {
+    let Some(context) = auth_state
+        .resolve_query_context_with_persistence(headers, None, database_file)
+        .await
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let Some(readlist) = (match load_persisted_readlist_detail(

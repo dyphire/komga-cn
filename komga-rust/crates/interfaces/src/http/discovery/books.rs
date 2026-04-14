@@ -577,7 +577,7 @@ pub async fn books_list(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -692,7 +692,7 @@ pub async fn books_latest(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -707,7 +707,14 @@ pub async fn books_latest(
         .await
         .or(requested_library_ids);
 
-        let context = match auth_state.resolve_query_context(&headers, library_ids.as_deref()) {
+        let context = match auth_state
+            .resolve_query_context_with_persistence(
+                &headers,
+                library_ids.as_deref(),
+                auth_db.database_file.as_path(),
+            )
+            .await
+        {
             Some(context) => context,
             None => return StatusCode::UNAUTHORIZED.into_response(),
         };
@@ -778,7 +785,7 @@ pub async fn books_ondeck(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -794,7 +801,14 @@ pub async fn books_ondeck(
     )
     .await
     .or(requested_library_ids);
-    let context = match auth_state.resolve_query_context(&headers, library_ids.as_deref()) {
+    let context = match auth_state
+        .resolve_query_context_with_persistence(
+            &headers,
+            library_ids.as_deref(),
+            auth_db.database_file.as_path(),
+        )
+        .await
+    {
         Some(context) => context,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
@@ -873,7 +887,7 @@ pub async fn books_duplicates(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -881,7 +895,8 @@ pub async fn books_duplicates(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Some(user) = resolved_auth_user(&headers) else {
+    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let user_id = user_id(&user).to_string();
@@ -950,7 +965,7 @@ pub async fn book_tags(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -971,14 +986,18 @@ pub async fn book_tags(
     let readlist_scope = query_value(query, "readlist_id")
         .filter(|value| !value.is_empty())
         .map(decode_query_component);
-    let context = match auth_state.resolve_query_context(
-        &headers,
-        if series_scope.is_some() || readlist_scope.is_some() || library_ids.is_empty() {
-            None
-        } else {
-            Some(library_ids.as_slice())
-        },
-    ) {
+    let context = match auth_state
+        .resolve_query_context_with_persistence(
+            &headers,
+            if series_scope.is_some() || readlist_scope.is_some() || library_ids.is_empty() {
+                None
+            } else {
+                Some(library_ids.as_slice())
+            },
+            auth_db.database_file.as_path(),
+        )
+        .await
+    {
         Some(context) => context,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };

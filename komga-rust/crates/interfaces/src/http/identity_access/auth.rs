@@ -130,6 +130,17 @@ pub async fn require_request_admin(headers: &HeaderMap, database_file: &Path) ->
     }
 }
 
+pub async fn require_request_file_download(
+    headers: &HeaderMap,
+    database_file: &Path,
+) -> Option<Response> {
+    match resolved_request_auth_user(headers, database_file).await {
+        Some(user) if user_is_admin(&user) || user_has_role(&user, "FILE_DOWNLOAD") => None,
+        Some(_) => Some(StatusCode::FORBIDDEN.into_response()),
+        None => Some(StatusCode::UNAUTHORIZED.into_response()),
+    }
+}
+
 pub fn sync_remember_me_runtime_settings(runtime_key: &str, key: &str, duration_days: u64) {
     runtime_sync_remember_me_runtime_settings(runtime_key, key, duration_days);
 }

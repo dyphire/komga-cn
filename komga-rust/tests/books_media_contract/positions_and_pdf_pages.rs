@@ -79,6 +79,78 @@ async fn router_book_pages_single_image_fallback_includes_dimensions() {
 }
 
 #[tokio::test]
+async fn router_book_positions_follow_direct_basic_auth_and_book_visibility() {
+    let paths = new_router_fixture("router-book-positions-basic-auth-visibility").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_age_exclude_user_with_roles(
+        &paths,
+        "restricted-user",
+        "restricted@example.org",
+        "router-contract-restricted-123",
+        12,
+        &["USER", "PAGE_STREAMING"],
+    )
+    .await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for basic-auth positions seed");
+    sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
+        .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
+        .bind(fixture_epub_positions_extension_blob())
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("epub positions extension should be seeded for positions auth test");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+
+    let admin_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/positions")
+                .header(
+                    header::AUTHORIZATION,
+                    basic_authorization_header_value(
+                        "admin@example.org",
+                        "router-contract-admin-123",
+                    ),
+                )
+                .header("x-auth-token", "")
+                .body(Body::empty())
+                .expect("admin basic-auth positions request should build"),
+        )
+        .await
+        .expect("admin basic-auth positions request should complete");
+    assert_eq!(admin_response.status(), StatusCode::OK);
+
+    let restricted_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/positions")
+                .header(
+                    header::AUTHORIZATION,
+                    basic_authorization_header_value(
+                        "restricted@example.org",
+                        "router-contract-restricted-123",
+                    ),
+                )
+                .header("x-auth-token", "")
+                .body(Body::empty())
+                .expect("restricted basic-auth positions request should build"),
+        )
+        .await
+        .expect("restricted basic-auth positions request should complete");
+    assert_eq!(restricted_response.status(), StatusCode::FORBIDDEN);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_book_raw_page_returns_bad_request_with_message_for_non_pdf_media() {
     let paths = new_router_fixture("router-book-raw-page-single-image").await;
     seed_router_contract_data(&paths).await;

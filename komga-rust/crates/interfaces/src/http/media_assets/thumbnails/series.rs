@@ -56,11 +56,12 @@ pub async fn series_thumbnails(
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
-    let Some(user) = resolved_auth_user(&headers) else {
+    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
@@ -109,11 +110,12 @@ pub async fn series_thumbnail_by_id(
     headers: HeaderMap,
     Path((series_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
-    let Some(user) = resolved_auth_user(&headers) else {
+    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
@@ -161,7 +163,7 @@ pub async fn series_thumbnail_upload(
     Path(series_id): Path<String>,
     multipart: Multipart,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -221,7 +223,7 @@ pub async fn series_thumbnail_select(
     headers: HeaderMap,
     Path((series_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -245,7 +247,7 @@ pub async fn series_thumbnail_delete(
     headers: HeaderMap,
     Path((series_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 

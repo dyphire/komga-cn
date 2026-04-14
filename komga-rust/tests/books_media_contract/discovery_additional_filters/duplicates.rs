@@ -39,6 +39,81 @@ async fn router_books_duplicates_requires_admin() {
 }
 
 #[tokio::test]
+async fn router_books_duplicates_accepts_admin_x_api_key_like_kotlin_clients() {
+    let paths = new_router_fixture("router-books-duplicates-admin-x-api-key-compat").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_contract_nullable_samples(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("books duplicates api-key db should open");
+    for book_id in ["book-1", "book-2"] {
+        sqlx::query("UPDATE BOOK SET FILE_HASH = ? WHERE ID = ?")
+            .bind("duplicate-api-key-hash")
+            .bind(book_id)
+            .execute(&pool)
+            .await
+            .expect("duplicate api-key file hash should update");
+    }
+    sqlx::query("UPDATE BOOK SET FILE_SIZE = ? WHERE ID = ?")
+        .bind(1_024_i64)
+        .bind("book-2")
+        .execute(&pool)
+        .await
+        .expect("duplicate api-key file size should align for book-2");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v2/users/me/api-keys")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "comment": "duplicates admin api key" }).to_string(),
+                ))
+                .expect("books duplicates api key create request should build"),
+        )
+        .await
+        .expect("books duplicates api key create request should complete");
+    assert_eq!(create_response.status(), StatusCode::OK);
+    let api_key = response_json(create_response)
+        .await
+        .get("key")
+        .and_then(Value::as_str)
+        .expect("books duplicates api key create response should expose key")
+        .to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/duplicates?page=0&size=20")
+                .header("x-api-key", &api_key)
+                .header("x-auth-token", "")
+                .body(Body::empty())
+                .expect("books duplicates x-api-key request should build"),
+        )
+        .await
+        .expect("books duplicates x-api-key request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let content = payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("books duplicates x-api-key payload should expose content array");
+    assert_eq!(content.len(), 2);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_books_duplicates_returns_full_book_dto_page() {
     let paths = new_router_fixture("router-books-duplicates-full-book-dto").await;
     seed_router_contract_data(&paths).await;

@@ -26,11 +26,14 @@ pub async fn collection_series(
     Path(collection_id): Path<String>,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
-    let visible_context = match auth_state.resolve_query_context(&headers, None) {
+    let visible_context = match auth_state
+        .resolve_query_context_with_persistence(&headers, None, auth_db.database_file.as_path())
+        .await
+    {
         Some(context) => context,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
@@ -339,7 +342,7 @@ pub async fn collections(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -361,7 +364,10 @@ pub async fn collections(
         .collect::<Vec<_>>();
     let unpaged = query_bool(query_string, "unpaged");
 
-    let visible_context = match auth_state.resolve_query_context(&headers, None) {
+    let visible_context = match auth_state
+        .resolve_query_context_with_persistence(&headers, None, auth_db.database_file.as_path())
+        .await
+    {
         Some(context) => context,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
@@ -388,7 +394,14 @@ pub async fn collections(
     let request_scope_context = if requested_library_ids.is_empty() {
         None
     } else {
-        match auth_state.resolve_query_context(&headers, Some(&requested_library_ids)) {
+        match auth_state
+            .resolve_query_context_with_persistence(
+                &headers,
+                Some(&requested_library_ids),
+                auth_db.database_file.as_path(),
+            )
+            .await
+        {
             Some(context) => Some(context),
             None => return StatusCode::UNAUTHORIZED.into_response(),
         }
@@ -508,7 +521,7 @@ pub async fn collection_create(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -808,11 +821,14 @@ pub async fn collection_detail(
     headers: HeaderMap,
     Path(collection_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
-    let context = match auth_state.resolve_query_context(&headers, None) {
+    let context = match auth_state
+        .resolve_query_context_with_persistence(&headers, None, auth_db.database_file.as_path())
+        .await
+    {
         Some(context) => context,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
@@ -864,7 +880,7 @@ pub async fn collection_update(
     Path(collection_id): Path<String>,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
@@ -935,7 +951,7 @@ pub async fn collection_delete(
     headers: HeaderMap,
     Path(collection_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 

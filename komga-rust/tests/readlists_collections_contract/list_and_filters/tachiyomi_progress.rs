@@ -37,6 +37,49 @@ async fn router_readlist_tachiyomi_progress_get_returns_kotlin_counter_fields() 
 }
 
 #[tokio::test]
+async fn router_readlist_tachiyomi_progress_routes_accept_basic_auth_like_kotlin_clients() {
+    let paths = new_router_fixture("router-readlist-tachiyomi-basic-auth-compat").await;
+    seed_router_contract_data(&paths).await;
+    seed_readlist_endpoint_variants(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let authorization =
+        basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
+
+    let get_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/readlists/readlist-1/read-progress/tachiyomi")
+                .header(header::AUTHORIZATION, authorization.as_str())
+                .header("x-auth-token", "")
+                .body(Body::empty())
+                .expect("readlist tachiyomi basic-auth get should build"),
+        )
+        .await
+        .expect("readlist tachiyomi basic-auth get should complete");
+    assert_eq!(get_response.status(), StatusCode::OK);
+
+    let put_response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/readlists/readlist-1/read-progress/tachiyomi")
+                .header(header::AUTHORIZATION, authorization.as_str())
+                .header("x-auth-token", "")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "lastBookRead": 1 }).to_string()))
+                .expect("readlist tachiyomi basic-auth put should build"),
+        )
+        .await
+        .expect("readlist tachiyomi basic-auth put should complete");
+    assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_readlist_tachiyomi_progress_get_counts_in_progress_and_continuous_prefix() {
     let paths =
         new_router_fixture("router-readlist-tachiyomi-progress-get-continuous-prefix").await;

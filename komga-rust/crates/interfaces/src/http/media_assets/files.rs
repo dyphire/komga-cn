@@ -6,11 +6,14 @@ pub async fn readlist_file(
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_file_download(&headers) {
+    if let Some(response) =
+        require_request_file_download(&headers, auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    let Some(user) = resolved_auth_user(&headers) else {
+    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
@@ -81,11 +84,14 @@ pub async fn series_file(
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_file_download(&headers) {
+    if let Some(response) =
+        require_request_file_download(&headers, auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    let Some(user) = resolved_auth_user(&headers) else {
+    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
@@ -139,7 +145,10 @@ pub async fn book_resource(
     }
 
     let is_font = is_font_resource(resource_name);
-    if !is_font && let Some(response) = require_auth(&headers) {
+    if !is_font
+        && let Some(response) =
+            require_request_auth(&headers, auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
@@ -163,7 +172,9 @@ pub async fn book_resource(
     }
 
     if !is_font {
-        let Some(user) = resolved_auth_user(&headers) else {
+        let Some(user) =
+            resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+        else {
             return StatusCode::UNAUTHORIZED.into_response();
         };
         if !user_can_access_book_media(auth_db.database_file.as_path(), &book_id, &user, &media)
@@ -237,16 +248,21 @@ async fn book_file_response(
     headers: &HeaderMap,
     book_id: &str,
 ) -> Response {
-    if let Some(response) = require_file_download(headers) {
+    if let Some(response) =
+        require_request_file_download(headers, auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
     if let Ok(Some(media)) =
         load_persisted_book_media(auth_db.database_file.as_path(), book_id).await
     {
-        if let Some(user) = resolved_auth_user(headers)
-            && !user_can_access_book_media(auth_db.database_file.as_path(), book_id, &user, &media)
-                .await
+        let Some(user) = resolved_request_auth_user(headers, auth_db.database_file.as_path()).await
+        else {
+            return StatusCode::UNAUTHORIZED.into_response();
+        };
+        if !user_can_access_book_media(auth_db.database_file.as_path(), book_id, &user, &media)
+            .await
         {
             return StatusCode::FORBIDDEN.into_response();
         }

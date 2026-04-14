@@ -36,6 +36,77 @@ async fn router_discovery_book_readlists_returns_existing_persisted_readlists() 
 }
 
 #[tokio::test]
+async fn router_book_readlists_and_siblings_accept_basic_auth_like_kotlin_clients() {
+    let paths = new_router_fixture("router-book-readlists-siblings-basic-auth-compat").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_cbz_book(
+        &paths,
+        "book-prev-basic-auth",
+        "book-prev-basic-auth.cbz",
+        "Previous Basic Auth Book",
+    )
+    .await;
+    seed_router_cbz_book(
+        &paths,
+        "book-next-basic-auth",
+        "book-next-basic-auth.cbz",
+        "Next Basic Auth Book",
+    )
+    .await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("book sibling basic-auth db should open");
+    sqlx::query("UPDATE BOOK_METADATA SET NUMBER_SORT = ? WHERE BOOK_ID = ?")
+        .bind(0.5_f64)
+        .bind("book-prev-basic-auth")
+        .execute(&pool)
+        .await
+        .expect("previous basic-auth sibling number sort should update");
+    sqlx::query("UPDATE BOOK_METADATA SET NUMBER_SORT = ? WHERE BOOK_ID = ?")
+        .bind(1.0_f64)
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("book-1 number sort should update for basic-auth sibling test");
+    sqlx::query("UPDATE BOOK_METADATA SET NUMBER_SORT = ? WHERE BOOK_ID = ?")
+        .bind(1.5_f64)
+        .bind("book-next-basic-auth")
+        .execute(&pool)
+        .await
+        .expect("next basic-auth sibling number sort should update");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let authorization =
+        basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
+
+    for route in [
+        "/api/v1/books/book-1/readlists",
+        "/api/v1/books/book-1/previous",
+        "/api/v1/books/book-1/next",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header(header::AUTHORIZATION, authorization.as_str())
+                    .header("x-auth-token", "")
+                    .body(Body::empty())
+                    .expect("book readlists/siblings basic-auth request should build"),
+            )
+            .await
+            .expect("book readlists/siblings basic-auth request should complete");
+
+        assert_eq!(response.status(), StatusCode::OK, "route: {route}");
+    }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_discovery_book_readlists_applies_content_restrictions_to_book_ids_and_filtered_like_kotlin()
  {
     let paths = new_router_fixture("router-discovery-book-readlists-content-restrictions").await;

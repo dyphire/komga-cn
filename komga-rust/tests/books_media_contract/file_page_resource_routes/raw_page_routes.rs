@@ -87,6 +87,44 @@ async fn router_book_raw_page_returns_bad_request_for_negative_page_number() {
 }
 
 #[tokio::test]
+async fn router_book_raw_page_accepts_basic_auth_like_kotlin_clients() {
+    let paths = new_router_fixture("router-book-raw-page-basic-auth-compat").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_pdf_book(
+        &paths,
+        "book-pdf-1",
+        "series-1",
+        "fixture-page.pdf",
+        "Readable Page Title",
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/pages/1/raw")
+                .header(
+                    header::AUTHORIZATION,
+                    basic_authorization_header_value(
+                        "admin@example.org",
+                        "router-contract-admin-123",
+                    ),
+                )
+                .header("x-auth-token", "")
+                .body(Body::empty())
+                .expect("raw page basic-auth request should build"),
+        )
+        .await
+        .expect("raw page basic-auth request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_book_raw_page_returns_bad_request_for_non_integer_page_number() {
     let paths = new_router_fixture("router-book-raw-page-non-integer-page-number").await;
     seed_router_contract_data(&paths).await;

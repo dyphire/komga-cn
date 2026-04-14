@@ -25,9 +25,7 @@ use crate::http::helpers::{
     normalized_file_last_modified, normalized_optional_read_progress_date, query_bool, query_value,
     query_values, restricted_book_url,
 };
-use crate::http::identity_access::auth::{
-    require_admin, require_auth, require_request_admin, require_request_auth,
-};
+use crate::http::identity_access::auth::{require_request_admin, require_request_auth};
 use crate::http::state::AuthDatabaseState;
 #[path = "detail/books_detail.rs"]
 mod books_detail;

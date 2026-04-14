@@ -65,6 +65,46 @@ async fn router_book_file_direct_route_returns_attachment_headers_and_body() {
 }
 
 #[tokio::test]
+async fn router_book_file_direct_route_accepts_basic_auth_like_kotlin_clients() {
+    let paths = new_router_fixture("router-book-file-direct-basic-auth-compat").await;
+    seed_router_contract_data(&paths).await;
+    let books_dir = paths.config_dir.join("books");
+    std::fs::create_dir_all(&books_dir)
+        .expect("books directory should be created for basic-auth direct file route test");
+    let expected_body = b"router-book-file-basic-auth-content";
+    std::fs::write(books_dir.join("book-1.epub"), expected_body)
+        .expect("book fixture file should be written for basic-auth direct file route test");
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/file")
+                .header(
+                    header::AUTHORIZATION,
+                    basic_authorization_header_value(
+                        "admin@example.org",
+                        "router-contract-admin-123",
+                    ),
+                )
+                .header("x-auth-token", "")
+                .body(Body::empty())
+                .expect("basic-auth direct book file request should build"),
+        )
+        .await
+        .expect("basic-auth direct book file request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("basic-auth direct book file response body should be readable");
+    assert_eq!(body.as_ref(), expected_body);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_book_file_direct_route_ignores_range_and_returns_full_body() {
     let paths = new_router_fixture("router-book-file-direct-route-ignores-range").await;
     seed_router_contract_data(&paths).await;

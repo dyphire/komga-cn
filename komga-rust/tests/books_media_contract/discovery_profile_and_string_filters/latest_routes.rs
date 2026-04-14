@@ -54,6 +54,37 @@ async fn router_discovery_books_latest_ignores_sort_query_and_stays_last_modifie
 }
 
 #[tokio::test]
+async fn router_discovery_books_latest_accepts_basic_auth_like_kotlin_clients() {
+    let paths = new_router_fixture("router-discovery-books-latest-basic-auth-compat").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/latest?unpaged=true")
+                .header(
+                    header::AUTHORIZATION,
+                    basic_authorization_header_value(
+                        "admin@example.org",
+                        "router-contract-admin-123",
+                    ),
+                )
+                .header("x-auth-token", "")
+                .header("x-komga-runtime-search-ownership", "runtime-rust-owned")
+                .body(Body::empty())
+                .expect("books/latest basic-auth request should build"),
+        )
+        .await
+        .expect("books/latest basic-auth request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_discovery_books_latest_unpaged_keeps_kotlin_page_shape() {
     let paths = new_router_fixture("router-discovery-books-latest-unpaged-shape").await;
     seed_router_contract_data(&paths).await;

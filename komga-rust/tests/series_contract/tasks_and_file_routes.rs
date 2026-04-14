@@ -129,6 +129,114 @@ async fn router_series_media_assets_forbid_age_restricted_user() {
 }
 
 #[tokio::test]
+async fn router_series_media_assets_and_progress_accept_basic_auth_like_kotlin_clients() {
+    let paths = new_router_fixture("router-series-media-assets-basic-auth-compat").await;
+    seed_router_contract_data(&paths).await;
+    write_router_epub_resource(
+        &paths,
+        "books/book-1.epub",
+        "OEBPS/chapter.xhtml",
+        br#"<html xmlns='http://www.w3.org/1999/xhtml'><body>Series Direct Auth</body></html>"#,
+    );
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let authorization =
+        basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
+    let image_bytes = fixture_png_bytes();
+    let (content_type, body) =
+        multipart_image_upload_body("file", "series.png", "image/png", true, &image_bytes);
+    let upload = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/series/series-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(body))
+                .expect("basic-auth series thumbnail upload should build"),
+        )
+        .await
+        .expect("basic-auth series thumbnail upload should complete");
+    assert_eq!(upload.status(), StatusCode::OK);
+    let thumbnail_id = response_json(upload)
+        .await
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("basic-auth series upload should return thumbnail id")
+        .to_string();
+
+    for route in [
+        "/api/v1/series/series-1/thumbnail".to_string(),
+        "/api/v1/series/series-1/thumbnails".to_string(),
+        format!("/api/v1/series/series-1/thumbnails/{thumbnail_id}"),
+        "/api/v1/series/series-1/file".to_string(),
+        "/api/v2/series/series-1/read-progress/tachiyomi".to_string(),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route.as_str())
+                    .header(header::AUTHORIZATION, authorization.as_str())
+                    .header("x-auth-token", "")
+                    .body(Body::empty())
+                    .expect("series basic-auth get request should build"),
+            )
+            .await
+            .expect("series basic-auth get request should complete");
+
+        assert_eq!(response.status(), StatusCode::OK, "route: {route}");
+    }
+
+    for method in ["POST", "DELETE"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri("/api/v1/series/series-1/read-progress")
+                    .header(header::AUTHORIZATION, authorization.as_str())
+                    .header("x-auth-token", "")
+                    .body(Body::empty())
+                    .expect("series basic-auth read-progress request should build"),
+            )
+            .await
+            .expect("series basic-auth read-progress request should complete");
+
+        assert_eq!(
+            response.status(),
+            StatusCode::NO_CONTENT,
+            "{method} series read-progress"
+        );
+    }
+
+    let tachiyomi_put = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v2/series/series-1/read-progress/tachiyomi")
+                .header(header::AUTHORIZATION, authorization.as_str())
+                .header("x-auth-token", "")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "lastBookNumberSortRead": 1.0
+                    })
+                    .to_string(),
+                ))
+                .expect("series basic-auth tachiyomi put should build"),
+        )
+        .await
+        .expect("series basic-auth tachiyomi put should complete");
+    assert_eq!(tachiyomi_put.status(), StatusCode::NO_CONTENT);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_series_tachiyomi_missing_series_gets_zero_dto_and_put_is_noop() {
     let paths = new_router_fixture("router-series-tachiyomi-missing-series").await;
     seed_router_contract_data(&paths).await;

@@ -93,6 +93,44 @@ async fn router_readlist_books_returns_paginated_content_and_library_filter() {
 }
 
 #[tokio::test]
+async fn router_readlist_detail_books_siblings_and_book_tags_accept_basic_auth_like_kotlin_clients()
+{
+    let paths = new_router_fixture("router-readlist-detail-books-basic-auth-compat").await;
+    seed_router_contract_data(&paths).await;
+    seed_readlist_endpoint_variants(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let authorization =
+        basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
+
+    for route in [
+        "/api/v1/readlists/readlist-1",
+        "/api/v1/readlists/readlist-1/books?unpaged=true",
+        "/api/v1/readlists/readlist-1/books/book-2/previous",
+        "/api/v1/readlists/readlist-1/books/book-2/next",
+        "/api/v1/tags/book?readlist_id=readlist-1",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header(header::AUTHORIZATION, authorization.as_str())
+                    .header("x-auth-token", "")
+                    .body(Body::empty())
+                    .expect("readlist detail basic-auth request should build"),
+            )
+            .await
+            .expect("readlist detail basic-auth request should complete");
+
+        assert_eq!(response.status(), StatusCode::OK, "route: {route}");
+    }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_readlist_books_returns_empty_page_when_library_id_filter_excludes_visible_books_like_kotlin()
  {
     let paths = new_router_fixture("router-readlist-books-library-filter-empty-page").await;
