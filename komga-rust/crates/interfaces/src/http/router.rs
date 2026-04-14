@@ -271,6 +271,7 @@ pub fn build_router(
             "/api/v1/series/list/alphabetical-groups",
             post(discovery::series_alphabetical_groups_route),
         )
+        .route("/api/v1/books", get(discovery::books_route))
         .route("/api/v1/books/list", post(discovery::books_list))
         .route("/api/v1/books/latest", get(discovery::books_latest))
         .route("/api/v1/books/ondeck", get(discovery::books_ondeck))

@@ -204,6 +204,15 @@ pub(super) async fn series_route(
     series_deprecated_get(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
+pub(super) async fn books_route(
+    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    books::books_deprecated_get(headers, uri, auth_state, auth_db.database_file.as_path()).await
+}
+
 pub(super) async fn series_detail_route(
     Extension(auth_state): Extension<DiscoveryAuthState>,
     Extension(auth_db): Extension<AuthDatabaseState>,

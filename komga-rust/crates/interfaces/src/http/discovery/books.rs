@@ -60,6 +60,61 @@ fn legacy_books_any_of_condition(kind: &str, values: Vec<String>) -> Value {
     })
 }
 
+fn legacy_books_query_condition(
+    library_ids: Option<Vec<String>>,
+    tags: Option<Vec<String>>,
+    read_statuses: Option<Vec<String>>,
+    media_statuses: Option<Vec<String>>,
+    released_after: Option<String>,
+) -> Option<Value> {
+    let mut conditions = Vec::new();
+
+    if let Some(library_ids) = library_ids.filter(|values| !values.is_empty()) {
+        conditions.push(legacy_books_any_of_condition("LibraryId", library_ids));
+    }
+    if let Some(tags) = tags.filter(|values| !values.is_empty()) {
+        conditions.push(legacy_books_any_of_condition("Tag", tags));
+    }
+    if let Some(read_statuses) = read_statuses.filter(|values| !values.is_empty()) {
+        conditions.push(legacy_books_any_of_condition("ReadStatus", read_statuses));
+    }
+    if let Some(media_statuses) = media_statuses.filter(|values| !values.is_empty()) {
+        conditions.push(legacy_books_any_of_condition("MediaStatus", media_statuses));
+    }
+    if let Some(released_after) = released_after {
+        conditions.push(json!({
+            "type": "ReleaseDate",
+            "operator": "after",
+            "dateTime": released_after,
+        }));
+    }
+
+    match conditions.len() {
+        0 => None,
+        1 => conditions.into_iter().next(),
+        _ => Some(json!({
+            "type": "AllOfBook",
+            "conditions": conditions,
+        })),
+    }
+}
+
+fn empty_books_page_response(page: usize, size: usize, unpaged: bool, sorted: bool) -> Response {
+    Json(books_page_payload(
+        PageEnvelope {
+            content: vec![],
+            page,
+            size,
+            total_elements: 0,
+            total_pages: 0,
+        },
+        false,
+        !unpaged,
+        sorted,
+    ))
+    .into_response()
+}
+
 fn legacy_series_books_payload(series_id: &str, uri: &Uri) -> Result<Value, StatusCode> {
     let query = uri.query().unwrap_or_default();
     let mut conditions = vec![json!({
@@ -615,6 +670,91 @@ pub async fn books_list(
 
     invalid_runtime_books_list_response(DiscoveryError::InvalidSemantics(
         "unsupported runtime books filter combination".to_string(),
+    ))
+}
+
+pub(super) async fn books_deprecated_get(
+    headers: HeaderMap,
+    uri: Uri,
+    auth_state: DiscoveryAuthState,
+    database_file: &FsPath,
+) -> Response {
+    if let Some(response) = require_request_auth(&headers, database_file).await {
+        return response;
+    }
+
+    if !database_file.exists() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let query = uri.query().unwrap_or_default();
+    let requested_library_ids = requested_query_values(query, "library_id");
+    let library_ids =
+        remap_requested_library_ids_for_persisted(database_file, requested_library_ids.as_ref())
+            .await;
+    let tags = requested_query_values(query, "tag");
+    let read_statuses = requested_query_values(query, "read_status");
+    let media_statuses = requested_query_values(query, "media_status").map(|values| {
+        values
+            .into_iter()
+            .map(|value| value.to_ascii_lowercase())
+            .collect()
+    });
+    let released_after = match query_value(query, "released_after") {
+        Some(value) => {
+            let decoded = decode_query_component(value);
+            let Some(normalized) = normalize_release_date_date_time(&decoded) else {
+                return StatusCode::BAD_REQUEST.into_response();
+            };
+            Some(normalized)
+        }
+        None => None,
+    };
+
+    let page = query_value(query, "page")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
+    let size = query_value(query, "size")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(20)
+        .max(1);
+    let unpaged = query_bool(query, "unpaged");
+    let search = requested_query_values(query, "search")
+        .and_then(|values| values.into_iter().next())
+        .filter(|value| !value.trim().is_empty());
+    let sorted = !query_values(query, "sort").is_empty() || search.is_some();
+    let requested_non_empty_library_ids = requested_library_ids
+        .as_ref()
+        .is_some_and(|values| !values.is_empty());
+    if requested_non_empty_library_ids && library_ids.is_none() {
+        return empty_books_page_response(page, size, unpaged, sorted);
+    }
+
+    let payload = legacy_books_query_condition(
+        library_ids.clone(),
+        tags.clone(),
+        read_statuses.clone(),
+        media_statuses.clone(),
+        released_after.clone(),
+    )
+    .map(|condition| json!({ "condition": condition }));
+
+    if let Some(runtime_response) = runtime_owned_books_list_response(
+        &headers,
+        &uri,
+        payload.as_ref(),
+        search.clone(),
+        &auth_state,
+        database_file,
+        true,
+    )
+    .await
+    {
+        return runtime_response;
+    }
+
+    invalid_runtime_books_list_response(DiscoveryError::InvalidSemantics(
+        "unsupported legacy books filter combination".to_string(),
     ))
 }
 

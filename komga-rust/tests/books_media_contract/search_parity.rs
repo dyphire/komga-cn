@@ -21,6 +21,84 @@ async fn books_list_response(
         .expect("books/list request should complete")
 }
 
+fn page_ids(payload: &Value) -> Vec<String> {
+    payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("book page payload should expose content array")
+        .iter()
+        .filter_map(|entry| entry.get("id").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect()
+}
+
+#[tokio::test]
+async fn router_discovery_books_get_route_matches_paperback_compatibility_shape() {
+    let paths = new_router_fixture("router-discovery-books-get-paperback-compat").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
+    let authorization =
+        basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
+    let route = "/api/v1/books?page=0&size=20&search=Book%201&tag=Favorite&media_status=READY&read_status=UNREAD&released_after=2023-01-01&library_id=library-1";
+    let body = json!({
+        "condition": {
+            "type": "AllOfBook",
+            "conditions": [
+                { "type": "LibraryId", "operator": "is", "value": "library-1" },
+                { "type": "Tag", "operator": "is", "value": "Favorite" },
+                { "type": "MediaStatus", "operator": "is", "value": "READY" },
+                { "type": "ReadStatus", "operator": "is", "value": "UNREAD" },
+                { "type": "ReleaseDate", "operator": "after", "dateTime": "2023-01-01" }
+            ]
+        },
+        "fullTextSearch": "Book 1"
+    });
+
+    let get_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(route)
+                .header(header::AUTHORIZATION, authorization.as_str())
+                .header("x-auth-token", "")
+                .body(Body::empty())
+                .expect("deprecated books GET request should build"),
+        )
+        .await
+        .expect("deprecated books GET request should complete");
+
+    let post_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/books/list?page=0&size=20")
+                .header(header::AUTHORIZATION, authorization.as_str())
+                .header("x-auth-token", "")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .expect("books/list parity request should build"),
+        )
+        .await
+        .expect("books/list parity request should complete");
+
+    assert_eq!(get_response.status(), StatusCode::OK);
+    assert_eq!(post_response.status(), StatusCode::OK);
+
+    let get_payload = response_json(get_response).await;
+    let post_payload = response_json(post_response).await;
+    assert_eq!(page_ids(&get_payload), page_ids(&post_payload));
+    assert_eq!(
+        get_payload.get("totalElements"),
+        post_payload.get("totalElements")
+    );
+    assert_eq!(get_payload.get("number"), post_payload.get("number"));
+    assert_eq!(get_payload.get("size"), post_payload.get("size"));
+
+    cleanup_router_fixture(paths);
+}
+
 #[tokio::test]
 async fn router_discovery_books_list_locks_main_search_parity_for_retained_inputs() {
     let paths = new_router_fixture("router-discovery-books-list-main-search-parity").await;

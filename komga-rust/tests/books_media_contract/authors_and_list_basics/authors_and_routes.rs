@@ -1,32 +1,26 @@
 use super::*;
 
 #[tokio::test]
-async fn router_removed_books_and_authors_v1_routes_return_not_found() {
-    let paths = new_router_fixture("router-removed-books-and-authors-v1-routes").await;
+async fn router_removed_authors_v1_route_returns_not_found() {
+    let paths = new_router_fixture("router-removed-authors-v1-route").await;
     seed_router_contract_data(&paths).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
-    for route in [
-        "/api/v1/books?page=0&size=20",
-        "/api/v1/authors?search=jane",
-    ] {
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri(route)
-                    .header("x-auth-token", &auth_token)
-                    .body(Body::empty())
-                    .expect("removed v1 route request should build"),
-            )
-            .await
-            .expect("removed v1 route request should complete");
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/authors?search=jane")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("removed authors v1 route request should build"),
+        )
+        .await
+        .expect("removed authors v1 route request should complete");
 
-        assert_eq!(response.status(), StatusCode::NOT_FOUND, "route: {route}");
-    }
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
     cleanup_router_fixture(paths);
 }
