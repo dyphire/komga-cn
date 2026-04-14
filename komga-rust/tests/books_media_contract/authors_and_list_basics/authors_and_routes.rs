@@ -1,26 +1,76 @@
 use super::*;
 
 #[tokio::test]
-async fn router_removed_authors_v1_route_returns_not_found() {
-    let paths = new_router_fixture("router-removed-authors-v1-route").await;
+async fn router_deprecated_authors_v1_route_matches_kotlin_shape() {
+    let paths = new_router_fixture("router-deprecated-authors-v1-route").await;
     seed_router_contract_data(&paths).await;
+    seed_router_authors_scope_variants(&paths).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let authorization =
+        basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
 
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/api/v1/authors?search=jane")
-                .header("x-auth-token", &auth_token)
+                .uri("/api/v1/authors?search=jane&library_id=library-1")
+                .header(header::AUTHORIZATION, authorization.as_str())
+                .header("x-auth-token", "")
                 .body(Body::empty())
-                .expect("removed authors v1 route request should build"),
+                .expect("deprecated authors v1 route request should build"),
         )
         .await
-        .expect("removed authors v1 route request should complete");
+        .expect("deprecated authors v1 route request should complete");
 
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let authors = payload
+        .as_array()
+        .expect("deprecated authors v1 payload should be a plain array");
+    assert_eq!(
+        authors,
+        &vec![json!({ "name": "Jane Writer", "role": "writer" })]
+    );
+
+    let collection_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/authors?collection_id=collection-1")
+                .header(header::AUTHORIZATION, authorization.as_str())
+                .header("x-auth-token", "")
+                .body(Body::empty())
+                .expect("deprecated authors v1 collection request should build"),
+        )
+        .await
+        .expect("deprecated authors v1 collection request should complete");
+    assert_eq!(collection_response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(collection_response).await,
+        json!([{ "name": "Jane Writer", "role": "writer" }])
+    );
+
+    let series_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/authors?series_id=series-2")
+                .header(header::AUTHORIZATION, authorization.as_str())
+                .header("x-auth-token", "")
+                .body(Body::empty())
+                .expect("deprecated authors v1 series request should build"),
+        )
+        .await
+        .expect("deprecated authors v1 series request should complete");
+    assert_eq!(series_response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(series_response).await,
+        json!([{ "name": "Alex Side", "role": "writer" }])
+    );
 
     cleanup_router_fixture(paths);
 }

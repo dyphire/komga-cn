@@ -88,6 +88,15 @@ pub(super) async fn authors_names_route(
     authors_names(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
+pub(super) async fn authors_route(
+    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    facets::authors_deprecated_get(headers, uri, auth_state, auth_db.database_file.as_path()).await
+}
+
 pub(super) async fn authors_roles_route(
     Extension(auth_state): Extension<DiscoveryAuthState>,
     Extension(auth_db): Extension<AuthDatabaseState>,

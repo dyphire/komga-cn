@@ -201,6 +201,7 @@ pub fn build_router(
             "/api/v1/libraries/{library_id}/empty-trash",
             post(library_catalog::library_empty_trash_route),
         )
+        .route("/api/v1/authors", get(discovery::authors_route))
         .route("/api/v1/authors/names", get(discovery::authors_names_route))
         .route("/api/v1/authors/roles", get(discovery::authors_roles_route))
         .route("/api/v1/genres", get(discovery::genres_route))

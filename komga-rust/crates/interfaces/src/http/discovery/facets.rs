@@ -137,6 +137,72 @@ pub async fn authors_roles(
     }
 }
 
+pub(super) async fn authors_deprecated_get(
+    headers: HeaderMap,
+    uri: Uri,
+    auth_state: DiscoveryAuthState,
+    database_file: &FsPath,
+) -> Response {
+    if let Some(response) = require_request_auth(&headers, database_file).await {
+        return response;
+    }
+
+    if !database_file.exists() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let query = uri.query().unwrap_or_default();
+    let search = query_value(query, "search")
+        .map(decode_query_component)
+        .unwrap_or_default();
+    let library_id = query_value(query, "library_id")
+        .filter(|value| !value.is_empty())
+        .map(decode_query_component);
+    let collection_id = decoded_collection_id(query);
+    let series_id = query_value(query, "series_id")
+        .filter(|value| !value.is_empty())
+        .map(decode_query_component);
+    let context = match resolve_query_context_or_unauthorized(
+        &auth_state,
+        &headers,
+        library_id.as_ref().map(std::slice::from_ref),
+        database_file,
+    )
+    .await
+    {
+        Ok(context) => context,
+        Err(response) => return response,
+    };
+
+    let scope = if let Some(library_id) = library_id {
+        PersistedAuthorsScope::Libraries(vec![library_id])
+    } else if let Some(collection_id) = collection_id {
+        PersistedAuthorsScope::Collection(collection_id)
+    } else if let Some(series_id) = series_id {
+        PersistedAuthorsScope::Series(series_id)
+    } else {
+        PersistedAuthorsScope::All
+    };
+
+    let mut authors = match load_persisted_authors_by_scope(
+        database_file,
+        &scope,
+        context.authorized_library_ids.as_deref(),
+    )
+    .await
+    {
+        Ok(values) => values,
+        Err(error) => return internal_error_response(error),
+    };
+
+    if !search.is_empty() {
+        let search = search.to_ascii_lowercase();
+        authors.retain(|author| author.name.to_ascii_lowercase().contains(&search));
+    }
+
+    Json(json!(authors)).into_response()
+}
+
 pub async fn authors_v2(
     headers: HeaderMap,
     uri: Uri,
