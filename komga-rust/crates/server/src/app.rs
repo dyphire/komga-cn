@@ -29,6 +29,16 @@ pub fn build_router_with_config(config: &RuntimeConfig) -> Router {
     start_server::build_router_with_config(config)
 }
 
+pub fn build_router_without_runtime_workers_for_contract(config: &RuntimeConfig) -> Router {
+    if matches!(
+        config.runtime_profile,
+        crate::config::RuntimeProfile::LiveLocaldb
+    ) {
+        crate::runtime::startup_scan::bootstrap_library_scan(config);
+    }
+    start_server::build_router_without_runtime_workers(config)
+}
+
 pub fn prepare_startup_search_task_for_contract(
     config: &RuntimeConfig,
 ) -> std::io::Result<Option<&'static str>> {

@@ -72,6 +72,11 @@ pub fn build_router_with_config(config: &RuntimeConfig) -> Router {
     build_http_router(compose_http_runtime(config, background, None))
 }
 
+pub fn build_router_without_runtime_workers(config: &RuntimeConfig) -> Router {
+    let background = prepare_task_queue(config, None);
+    build_http_router(compose_http_runtime(config, background, None))
+}
+
 pub async fn serve_with_config(
     listener: TcpListener,
     config: RuntimeConfig,

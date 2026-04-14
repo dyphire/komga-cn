@@ -6,7 +6,9 @@ use komga_rust::config::{RuntimeMode, WriterOwnershipPolicy};
 use komga_rust::infrastructure::search::search_analyzer_version;
 use komga_rust::infrastructure::sqlite::connect_pool;
 use komga_rust::{SearchEntityType, SearchIndexLifecycle, TaskQueueRecord, TaskQueueScheduler};
-use komga_server::app::build_router_with_config;
+use komga_server::app::{
+    build_router_with_config, build_router_without_runtime_workers_for_contract,
+};
 use serde_json::{Value, json};
 use sqlx::Row;
 use std::fs;

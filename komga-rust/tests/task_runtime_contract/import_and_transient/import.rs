@@ -5,7 +5,9 @@ use komga_rust::application::media_assets::{
 use std::sync::{Arc, Mutex};
 
 async fn enqueue_books_import(paths: &RuntimeDbPaths, payload: Value, context: &str) {
-    let app = build_router_with_config(&runtime_config_for_paths(paths));
+    // These route contracts assert the queued TASK rows themselves, so they must not race
+    // the background worker that would claim and delete import jobs during the same test.
+    let app = build_router_without_runtime_workers_for_contract(&runtime_config_for_paths(paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
