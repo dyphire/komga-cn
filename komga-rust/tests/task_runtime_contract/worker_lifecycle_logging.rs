@@ -30,7 +30,6 @@ fn runtime_worker_spawns_log_started_and_shutdown_with_span_context() {
                     background.task_queue,
                     runtime,
                     background.task_wakeup,
-                    background.scheduled_scans,
                     None,
                 );
                 tokio::time::sleep(Duration::from_millis(25)).await;
@@ -100,7 +99,6 @@ fn runtime_workers_observe_shutdown_signal_before_runtime_teardown() {
                     background.task_queue,
                     runtime,
                     background.task_wakeup,
-                    background.scheduled_scans,
                     Some(shutdown_rx),
                 );
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -278,6 +276,83 @@ fn periodic_scan_iteration_logs_completion_only_when_due_and_stays_silent_when_i
             .is_some_and(|value| value.contains("unsupported library scan interval: FUTURE_VALUE")),
         "periodic scan failure should emit actionable worker-level error context: {failure:?}",
     );
+
+    cleanup_router_fixture(paths);
+}
+
+#[test]
+fn periodic_scan_iteration_drains_each_due_library_separately_and_cleans_stale_state() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("periodic multi-library scan worker test runtime should build");
+    let paths = runtime.block_on(async {
+        let paths = new_router_fixture("worker-periodic-scan-multi-library").await;
+        seed_router_contract_data(&paths).await;
+
+        let pool = connect_pool(paths.main_db.as_path(), 1)
+            .await
+            .expect("periodic multi-library scan worker db should open");
+        sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
+            .bind("library-2")
+            .bind("Library 2")
+            .bind(paths.config_dir.to_string_lossy().to_string())
+            .execute(&pool)
+            .await
+            .expect("periodic multi-library scan worker second library should be inserted");
+        sqlx::query("UPDATE LIBRARY SET SCAN_INTERVAL = ? WHERE ID IN (?, ?)")
+            .bind("HOURLY")
+            .bind("library-1")
+            .bind("library-2")
+            .execute(&pool)
+            .await
+            .expect("periodic multi-library scan intervals should be updated");
+        pool.close().await;
+        paths
+    });
+    let config = runtime_config_for_paths(&paths);
+    let runtime = runtime_task_context(&paths);
+    let task_queue = std::sync::Arc::new(std::sync::Mutex::new(TaskQueueScheduler::for_runtime(
+        runtime.clone(),
+        "rust-main",
+    )));
+
+    let (run_logs, (processed, last_run)) = capture_router_logs_async_result(&config, {
+        let runtime = runtime.clone();
+        let task_queue = task_queue.clone();
+        async move {
+            tokio::time::pause();
+            let mut last_run = HashMap::from([
+                ("library-1".to_string(), tokio::time::Instant::now()),
+                ("library-2".to_string(), tokio::time::Instant::now()),
+                ("stale-library".to_string(), tokio::time::Instant::now()),
+            ]);
+            tokio::time::advance(Duration::from_secs(3_700)).await;
+            let processed =
+                komga_rust::infrastructure::task_queue::run_periodic_library_scan_iteration(
+                    task_queue,
+                    runtime,
+                    &mut last_run,
+                )
+                .expect("due periodic scan iteration should drain each library separately");
+            (processed, last_run)
+        }
+    });
+    let run_events = parse_json_log_lines(&run_logs);
+    let complete = worker_event(&run_events, "periodic_library_scan", "completed");
+    let scheduler_completions = matching_event_fields(&run_events, "task_process_available")
+        .into_iter()
+        .filter(|fields| field_str(fields, "outcome") == Some("completed"))
+        .collect::<Vec<_>>();
+
+    println!("periodic_scan_multi_library_logs {run_logs}");
+
+    assert_eq!(field_u64(complete, "enqueued"), Some(2));
+    assert_eq!(field_u64(complete, "processed"), Some(processed as u64));
+    assert_eq!(scheduler_completions.len(), 2);
+    assert!(last_run.contains_key("library-1"));
+    assert!(last_run.contains_key("library-2"));
+    assert!(!last_run.contains_key("stale-library"));
 
     cleanup_router_fixture(paths);
 }

@@ -9,7 +9,7 @@ use super::cleanup_workflow::compare_book_names_kotlin_like;
 use crate::sqlite::connect_pool;
 
 #[derive(Clone, Debug)]
-pub struct LibraryScanConfig {
+pub(crate) struct LibraryScanConfig {
     pub root: String,
     pub scan_cbx: bool,
     pub scan_pdf: bool,
@@ -20,7 +20,7 @@ pub struct LibraryScanConfig {
 }
 
 #[derive(Clone, Debug)]
-pub struct ScannedLibrary {
+pub(crate) struct ScannedLibrary {
     pub root_available: bool,
     pub series_rows: Vec<ScannedSeriesRow>,
     pub sidecars: Vec<ScannedSidecarRow>,
@@ -54,7 +54,7 @@ struct PersistedScannedSeriesBookRow {
 }
 
 #[derive(Clone, Debug)]
-pub struct ScannedSeriesRow {
+pub(crate) struct ScannedSeriesRow {
     pub series_id: String,
     pub series_name: String,
     pub series_url: String,
@@ -64,7 +64,7 @@ pub struct ScannedSeriesRow {
 }
 
 #[derive(Clone, Debug)]
-pub struct ScannedBookRow {
+pub(crate) struct ScannedBookRow {
     pub book_id: String,
     pub book_name: String,
     pub book_url: String,
@@ -75,7 +75,7 @@ pub struct ScannedBookRow {
 }
 
 #[derive(Clone, Debug)]
-pub struct ScannedSidecarRow {
+pub(crate) struct ScannedSidecarRow {
     pub url: String,
     pub parent_url: String,
     pub last_modified_unix_seconds: i64,
@@ -84,18 +84,18 @@ pub struct ScannedSidecarRow {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum ScannedSidecarSource {
+pub(crate) enum ScannedSidecarSource {
     Series,
     Book,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum ScannedSidecarType {
+pub(crate) enum ScannedSidecarType {
     Metadata,
     Artwork,
 }
 
-pub fn load_library_scan_config(
+pub(crate) fn load_library_scan_config(
     database_file: &Path,
     library_id: &str,
 ) -> Result<Option<LibraryScanConfig>, String> {
@@ -147,7 +147,7 @@ pub fn load_library_scan_config(
     })
 }
 
-pub fn scan_library(
+pub(crate) fn scan_library(
     database_file: &Path,
     library_id: &str,
     deep_scan: bool,
@@ -350,7 +350,7 @@ pub fn scan_library(
     })
 }
 
-pub fn library_empty_trash_after_scan(
+pub(crate) fn library_empty_trash_after_scan(
     database_file: &Path,
     library_id: &str,
 ) -> Result<bool, String> {
@@ -379,7 +379,7 @@ pub fn library_empty_trash_after_scan(
     })
 }
 
-pub fn persist_scanned_library(
+pub(crate) fn persist_scanned_library(
     database_file: &Path,
     library_id: &str,
     scanned: &ScannedLibrary,
@@ -757,7 +757,7 @@ async fn resort_scanned_series_books(
     Ok(renumbered_book_ids)
 }
 
-pub fn load_changed_sidecars(
+pub(crate) fn load_changed_sidecars(
     database_file: &Path,
     library_id: &str,
     scanned_sidecars: &[ScannedSidecarRow],

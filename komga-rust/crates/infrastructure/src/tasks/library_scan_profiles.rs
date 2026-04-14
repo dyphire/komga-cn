@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use komga_application::task_processing::LibraryScanProfile;
 use sqlx::Row;
 
 use crate::sqlite::connect_pool;
@@ -51,6 +52,19 @@ pub fn load_persisted_library_scan_profiles(
     })
     .join()
     .map_err(|_| "join scan profile loader thread".to_string())?
+}
+
+pub fn load_library_scan_profiles(database_file: &Path) -> Result<Vec<LibraryScanProfile>, String> {
+    load_persisted_library_scan_profiles(database_file).map(|profiles| {
+        profiles
+            .into_iter()
+            .map(|profile| LibraryScanProfile {
+                library_id: profile.library_id,
+                scan_startup: profile.scan_startup,
+                scan_interval: profile.scan_interval,
+            })
+            .collect()
+    })
 }
 
 pub fn load_persisted_library_ids(database_file: &Path) -> Result<Vec<String>, String> {
@@ -111,6 +125,45 @@ mod tests {
         let error = load_persisted_library_scan_profiles(db_path.as_path())
             .expect_err("missing library table should return error");
         assert!(error.contains("query scan profiles"));
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn library_scan_profile_loader_maps_to_application_profiles() {
+        let db_path = temp_db_path("scan-profile-application-mapping");
+        let pool = connect_pool(db_path.as_path(), 1)
+            .await
+            .expect("temporary sqlite db should open");
+        sqlx::query(
+            "CREATE TABLE LIBRARY (ID TEXT PRIMARY KEY, SCAN_STARTUP BOOLEAN NOT NULL, SCAN_INTERVAL TEXT NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .expect("library table should be created");
+        sqlx::query(
+            "INSERT INTO LIBRARY (ID, SCAN_STARTUP, SCAN_INTERVAL) VALUES (?, ?, ?), (?, ?, ?)",
+        )
+        .bind("library-2")
+        .bind(false)
+        .bind("DAILY")
+        .bind("library-1")
+        .bind(true)
+        .bind("DISABLED")
+        .execute(&pool)
+        .await
+        .expect("library rows should be inserted");
+        pool.close().await;
+
+        let profiles = load_library_scan_profiles(db_path.as_path())
+            .expect("application scan profiles should load");
+        assert_eq!(profiles.len(), 2);
+        assert_eq!(profiles[0].library_id, "library-1");
+        assert!(profiles[0].scan_startup);
+        assert_eq!(profiles[0].scan_interval, "DISABLED");
+        assert_eq!(profiles[1].library_id, "library-2");
+        assert!(!profiles[1].scan_startup);
+        assert_eq!(profiles[1].scan_interval, "DAILY");
 
         let _ = std::fs::remove_file(db_path);
     }

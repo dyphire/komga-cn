@@ -1,7 +1,5 @@
 pub use komga_application as application;
-pub use komga_application::task_processing::{
-    LibraryScanInterval, ScheduledLibraryScan, TaskQueueRecord,
-};
+pub use komga_application::task_processing::{LibraryScanInterval, TaskQueueRecord};
 pub use komga_domain as domain;
 pub use komga_infrastructure as infrastructure;
 pub use komga_infrastructure::task_queue::{TaskQueueAdmin, TaskQueueScheduler};

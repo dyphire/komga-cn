@@ -1,7 +1,7 @@
 use super::*;
 
 pub(in crate::task_queue) fn enqueue_sidecar_refresh_tasks(
-    scheduler: &mut TaskQueueScheduler,
+    tasks: &mut Vec<TaskQueueRecord>,
     scanned: &ScannedLibrary,
     changed_sidecar_urls: &[String],
     priority: i32,
@@ -39,7 +39,7 @@ pub(in crate::task_queue) fn enqueue_sidecar_refresh_tasks(
                 if let Some(series_id) = series_by_url.get(&sidecar.parent_url)
                     && seen_series_metadata.insert(series_id.clone())
                 {
-                    scheduler.enqueue(runtime_follow_up_task(
+                    tasks.push(runtime_follow_up_task(
                         RuntimeFollowUpTask::RefreshSeriesMetadata {
                             series_id: series_id.clone(),
                             priority,
@@ -51,7 +51,7 @@ pub(in crate::task_queue) fn enqueue_sidecar_refresh_tasks(
                 if let Some(series_id) = series_by_url.get(&sidecar.parent_url)
                     && seen_series_artwork.insert(series_id.clone())
                 {
-                    scheduler.enqueue(runtime_follow_up_task(
+                    tasks.push(runtime_follow_up_task(
                         RuntimeFollowUpTask::RefreshSeriesLocalArtwork {
                             series_id: series_id.clone(),
                             priority,
@@ -64,7 +64,7 @@ pub(in crate::task_queue) fn enqueue_sidecar_refresh_tasks(
                     && seen_books_metadata.insert(book_id.clone())
                 {
                     let group_id = book_series_by_url.get(&sidecar.parent_url).cloned();
-                    scheduler.enqueue(runtime_follow_up_task(
+                    tasks.push(runtime_follow_up_task(
                         RuntimeFollowUpTask::RefreshBookMetadata {
                             book_id: book_id.clone(),
                             series_id: group_id,
@@ -77,7 +77,7 @@ pub(in crate::task_queue) fn enqueue_sidecar_refresh_tasks(
                 if let Some(book_id) = book_by_url.get(&sidecar.parent_url)
                     && seen_books_artwork.insert(book_id.clone())
                 {
-                    scheduler.enqueue(runtime_follow_up_task(
+                    tasks.push(runtime_follow_up_task(
                         RuntimeFollowUpTask::RefreshBookLocalArtwork {
                             book_id: book_id.clone(),
                             priority,

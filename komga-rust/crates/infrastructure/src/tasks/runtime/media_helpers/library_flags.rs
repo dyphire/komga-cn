@@ -20,7 +20,6 @@ pub(in crate::task_queue) struct LibraryHashingFlags {
 
 pub(in crate::task_queue) struct LibraryMaintenanceFlags {
     pub(in crate::task_queue) repair_extensions: bool,
-    pub(in crate::task_queue) convert_to_cbz: bool,
 }
 
 pub(in crate::task_queue) fn load_library_hashing_flags(
@@ -49,6 +48,5 @@ pub(in crate::task_queue) fn load_library_maintenance_flags(
 
     Ok(LibraryMaintenanceFlags {
         repair_extensions: flags.repair_extensions,
-        convert_to_cbz: flags.convert_to_cbz,
     })
 }

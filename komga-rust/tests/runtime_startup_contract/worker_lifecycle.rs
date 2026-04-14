@@ -196,6 +196,79 @@ fn runtime_startup_prepare_task_queue_skips_search_rebuild_when_search_index_not
 }
 
 #[test]
+fn runtime_startup_prepare_task_queue_logs_no_startup_library_scan_skip_when_no_profiles_request_it()
+ {
+    let _guard = startup_contract_lock();
+    let config =
+        runtime_config_for_logging_contract("komga-runtime-startup-worker-bootstrap-no-startup");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("startup no-startup-profile test runtime should build");
+    runtime.block_on(async {
+        komga_server::app::validate_startup_schema_gate_for_contract(&config)
+            .await
+            .expect("startup no-startup-profile schema should initialize");
+
+        let pool = connect_pool(config.database_file.as_path(), 1)
+            .await
+            .expect("startup no-startup-profile db should open");
+        sqlx::query(
+            "INSERT INTO LIBRARY (ID, NAME, ROOT, SCAN_STARTUP, SCAN_INTERVAL) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind("library-1")
+        .bind("Library 1")
+        .bind(config.config_dir.as_ref().expect("config dir should exist").to_string_lossy().to_string())
+        .bind(false)
+        .bind("DISABLED")
+        .execute(&pool)
+        .await
+        .expect("startup no-startup-profile library row should be inserted");
+        pool.close().await;
+    });
+
+    let (logs, queued_scan_tasks) = capture_contract_log_async_result(&config, {
+        let config = config.clone();
+        async move {
+            let background =
+                komga_rust::infrastructure::task_queue::prepare_task_queue(config, None);
+            background
+                .task_queue
+                .lock()
+                .expect("startup no-startup-profile queue lock should not be poisoned")
+                .count_by_simple_type()
+                .get("SCAN_LIBRARY")
+                .copied()
+                .unwrap_or(0)
+        }
+    });
+
+    let events = parse_json_log_lines(&logs);
+    let library_skip = runtime_event_with_component(
+        &events,
+        "worker_bootstrap",
+        "startup_library_scans",
+        "skipped",
+    );
+    let search_skip = runtime_event_with_component(
+        &events,
+        "worker_bootstrap",
+        "startup_search_task",
+        "skipped",
+    );
+
+    assert_eq!(
+        field_str(library_skip, "skip_reason"),
+        Some("no_startup_library_scans")
+    );
+    assert_eq!(
+        field_str(search_skip, "skip_reason"),
+        Some("startup_task_not_requested")
+    );
+    assert_eq!(queued_scan_tasks, 0);
+}
+
+#[test]
 fn runtime_startup_library_scan_processing_logs_run_complete_and_skip_boundaries() {
     let _guard = startup_contract_lock();
     let config =
@@ -251,6 +324,61 @@ fn runtime_startup_library_scan_processing_logs_run_complete_and_skip_boundaries
     assert_eq!(field_bool(run_start, "owns_main_database"), Some(true));
     assert_eq!(field_u64(run_complete, "processed"), Some(1));
 
+    let disabled_startup_config = runtime_config_for_logging_contract(
+        "komga-runtime-startup-library-scan-processing-disabled-startup",
+    );
+    runtime.block_on(async {
+        komga_server::app::validate_startup_schema_gate_for_contract(&disabled_startup_config)
+            .await
+            .expect("startup disabled-startup processing schema should initialize");
+
+        let pool = connect_pool(disabled_startup_config.database_file.as_path(), 1)
+            .await
+            .expect("startup disabled-startup processing db should open");
+        sqlx::query(
+            "INSERT INTO LIBRARY (ID, NAME, ROOT, SCAN_STARTUP, SCAN_INTERVAL) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind("library-2")
+        .bind("Library 2")
+        .bind(
+            disabled_startup_config
+                .config_dir
+                .as_ref()
+                .expect("config dir should exist")
+                .to_string_lossy()
+                .to_string(),
+        )
+        .bind(false)
+        .bind("DAILY")
+        .execute(&pool)
+        .await
+        .expect("startup disabled-startup processing library row should be inserted");
+        pool.close().await;
+    });
+
+    let disabled_startup_logs = capture_contract_log_async(&disabled_startup_config, {
+        let config = disabled_startup_config.clone();
+        async move {
+            komga_rust::infrastructure::task_queue::process_startup_library_scans(config);
+        }
+    });
+    let disabled_startup_events = parse_json_log_lines(&disabled_startup_logs);
+    let disabled_startup_skip = runtime_event_with_component(
+        &disabled_startup_events,
+        "worker_bootstrap",
+        "startup_library_scan_processing",
+        "skipped",
+    );
+
+    assert_eq!(
+        field_bool(disabled_startup_skip, "owns_main_database"),
+        Some(true)
+    );
+    assert_eq!(
+        field_str(disabled_startup_skip, "skip_reason"),
+        Some("no_startup_library_scans")
+    );
+
     let skip_root = unique_temp_dir("komga-runtime-startup-library-scan-processing-skip");
     let skip_runtime = komga_rust::application::task_processing::TaskRuntimeContext {
         database_file: skip_root.join("database.sqlite"),
@@ -285,6 +413,39 @@ fn runtime_startup_library_scan_processing_logs_run_complete_and_skip_boundaries
         field_str(skip, "skip_reason"),
         Some("main_database_not_owned")
     );
+}
+
+#[test]
+fn runtime_startup_library_scan_processing_logs_no_libraries_skip_boundary() {
+    let _guard = startup_contract_lock();
+    let config =
+        runtime_config_for_logging_contract("komga-runtime-startup-library-scan-processing-empty");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("startup empty scan processing test runtime should build");
+    runtime.block_on(async {
+        komga_server::app::validate_startup_schema_gate_for_contract(&config)
+            .await
+            .expect("startup empty scan processing schema should initialize");
+    });
+
+    let logs = capture_contract_log_async(&config, {
+        let config = config.clone();
+        async move {
+            komga_rust::infrastructure::task_queue::process_startup_library_scans(config);
+        }
+    });
+    let events = parse_json_log_lines(&logs);
+    let skip = runtime_event_with_component(
+        &events,
+        "worker_bootstrap",
+        "startup_library_scan_processing",
+        "skipped",
+    );
+
+    assert_eq!(field_bool(skip, "owns_main_database"), Some(true));
+    assert_eq!(field_str(skip, "skip_reason"), Some("no_libraries"));
 }
 
 fn runtime_event_with_component<'a>(

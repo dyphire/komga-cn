@@ -1,4 +1,5 @@
 use super::*;
+use komga_application::task_processing::TaskProcessingError;
 
 #[derive(Debug, Eq, PartialEq)]
 pub(super) struct PersistenceSnapshot {
@@ -72,6 +73,17 @@ pub(super) fn scan_library_task(
     TaskQueueRecord::new(scan_library_task_id(library_id, deep_scan), priority, None)
         .with_simple_type("SCAN_LIBRARY")
         .with_payload(scan_library_task_payload(library_id, priority, deep_scan))
+}
+
+pub(super) fn process_scan_library_task(
+    config: RuntimeConfig,
+    library_id: &str,
+    priority: i32,
+    deep_scan: bool,
+) -> Result<usize, TaskProcessingError> {
+    let mut scheduler = TaskQueueScheduler::for_runtime(config.clone(), "rust-main");
+    scheduler.enqueue(scan_library_task(library_id, priority, deep_scan));
+    scheduler.process_available(&config)
 }
 
 pub(super) fn create_scannable_library_root(config_dir: &Path) -> anyhow::Result<PathBuf> {

@@ -7,7 +7,8 @@ async fn scanner_runtime_blocks_scan_output_when_filesystem_scan_writer_is_exter
         .await
         .expect("scanner blocked scan-output fixture should be created");
 
-    let _initial_runtime = komga_server::app::build_router_with_config(&fixture.config);
+    process_scan_library_task(fixture.config.clone(), "library-1", 900, false)
+        .expect("blocked scan-output contract should seed initial persisted rows");
 
     let book_path = fixture.library_root.join("Series-A").join("Book-001.cbz");
     let book_url = book_path.to_string_lossy().to_string();
@@ -39,6 +40,30 @@ async fn scanner_runtime_blocks_scan_output_when_filesystem_scan_writer_is_exter
         "runtime must not persist scan-derived book updates when filesystem scan output is external-owned",
     );
 
+    let tasks_pool = connect_pool(fixture.paths.tasks_db.as_path(), 1)
+        .await
+        .expect("tasks db should open after blocked scan-output drain");
+    let remaining_tasks = sqlx::query("SELECT COUNT(*) AS COUNT FROM TASK")
+        .fetch_one(&tasks_pool)
+        .await
+        .expect("remaining blocked scan-output task rows should be queryable")
+        .get::<i64, _>("COUNT");
+    let owned_tasks = sqlx::query("SELECT COUNT(*) AS COUNT FROM TASK WHERE OWNER IS NOT NULL")
+        .fetch_one(&tasks_pool)
+        .await
+        .expect("owned blocked scan-output task rows should be queryable")
+        .get::<i64, _>("COUNT");
+    tasks_pool.close().await;
+
+    assert_eq!(
+        remaining_tasks, 0,
+        "external-owned filesystem scan execution must still drain the persisted SCAN_LIBRARY task instead of leaving it queued forever",
+    );
+    assert_eq!(
+        owned_tasks, 0,
+        "external-owned filesystem scan execution must not leak task ownership after the no-op drain path",
+    );
+
     fixture.cleanup();
 }
 
@@ -48,7 +73,8 @@ async fn scanner_unknown_task_type_is_not_completed_or_silently_skipped() {
         .await
         .expect("scanner unknown-task fixture should be created");
 
-    let _initial_runtime = komga_server::app::build_router_with_config(&fixture.config);
+    process_scan_library_task(fixture.config.clone(), "library-1", 900, false)
+        .expect("unknown-task contract should seed initial persisted rows");
 
     let book_path = fixture.library_root.join("Series-A").join("Book-001.cbz");
     let book_url = book_path.to_string_lossy().to_string();
@@ -363,6 +389,52 @@ async fn scanner_persisted_scan_library_recovers_deep_flag_from_underscore_legac
         load_media_page_file_size(&fixture.paths.main_db, &book_url).await,
         expected_updated_page_size,
         "scan-library enqueue must recover deep=true from the legacy _DEEP_ suffix so persisted execution still performs deep reanalysis",
+    );
+
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn scanner_persisted_scan_library_recovers_deep_flag_from_colon_legacy_id() {
+    let fixture = ScannerPersistenceFixture::new("scanner-persistence-scan-colon-deep")
+        .await
+        .expect("scanner colon deep fixture should be created");
+
+    let book_path = fixture.library_root.join("Series-A").join("Book-001.cbz");
+    let book_url = book_path.to_string_lossy().to_string();
+    let initial_page_size = write_scannable_cbz_fixture(&book_path, b"page-before-colon")
+        .expect("initial colon scan fixture should be written");
+
+    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .process_available(&fixture.config)
+        .expect("initial scan should seed colon deep replay state");
+
+    assert_eq!(
+        load_media_page_file_size(&fixture.paths.main_db, &book_url).await,
+        initial_page_size,
+        "fixture sanity: initial scan should persist MEDIA_PAGE rows before colon replay",
+    );
+
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let expected_updated_page_size =
+        write_scannable_cbz_fixture(&book_path, b"page-after-colon-deep")
+            .expect("updated colon scan fixture should be written");
+
+    scheduler.enqueue(TaskQueueRecord::new(
+        "SCAN_LIBRARY:library-1:DEEP:true",
+        900,
+        None,
+    ));
+    scheduler
+        .process_available(&fixture.config)
+        .expect("colon legacy scan-library id should process successfully after canonical payload restoration");
+
+    assert_eq!(
+        load_media_page_file_size(&fixture.paths.main_db, &book_url).await,
+        expected_updated_page_size,
+        "scan-library execution must recover deep=true from the legacy :DEEP: suffix when payload is absent so persisted replay still performs deep reanalysis",
     );
 
     fixture.cleanup();

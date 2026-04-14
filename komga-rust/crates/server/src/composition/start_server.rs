@@ -67,7 +67,6 @@ pub fn build_router_with_config(config: &RuntimeConfig) -> Router {
         background.task_queue.clone(),
         config.clone(),
         background.task_wakeup.clone(),
-        background.scheduled_scans.clone(),
         None,
     );
     build_http_router(compose_http_runtime(config, background, None))
@@ -89,7 +88,6 @@ pub async fn serve_with_config(
         background.task_queue.clone(),
         config.clone(),
         background.task_wakeup.clone(),
-        background.scheduled_scans.clone(),
         Some(worker_shutdown_rx),
     );
     let router = build_http_router(compose_http_runtime(

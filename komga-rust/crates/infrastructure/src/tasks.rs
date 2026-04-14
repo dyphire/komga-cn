@@ -4,7 +4,7 @@ mod library_scan_profiles;
 mod media_queries;
 mod media_updates;
 mod persisted_queue;
-mod scanner;
+pub(crate) mod scanner;
 
 pub use cleanup_workflow::{cleanup_empty_sets_rows, empty_trash_rows};
 pub use delete_workflow::{
@@ -13,7 +13,8 @@ pub use delete_workflow::{
     load_series_delete_work, soft_delete_book_rows, soft_delete_series_rows,
 };
 pub use library_scan_profiles::{
-    PersistedLibraryScanProfile, load_persisted_library_ids, load_persisted_library_scan_profiles,
+    PersistedLibraryScanProfile, load_library_scan_profiles, load_persisted_library_ids,
+    load_persisted_library_scan_profiles,
 };
 pub use media_queries::{
     PersistedBookArchiveSource, PersistedBookHashRuntimeState, PersistedBookToConvert,
@@ -33,8 +34,3 @@ pub use media_updates::{
     persist_duplicate_page_deleted_events, persist_removed_hashed_pages,
 };
 pub use persisted_queue::{PersistedTaskStoreRecord, SqliteTaskQueueStore};
-pub use scanner::{
-    LibraryScanConfig, ScannedBookRow, ScannedLibrary, ScannedSeriesRow, ScannedSidecarRow,
-    ScannedSidecarSource, ScannedSidecarType, library_empty_trash_after_scan,
-    load_changed_sidecars, load_library_scan_config, persist_scanned_library, scan_library,
-};

@@ -1,8 +1,5 @@
 use super::*;
-use crate::tasks::{
-    PersistedExtensionRepairTarget, load_book_for_extension_repair,
-    load_books_for_extension_repair, persist_book_extension_repair,
-};
+use crate::tasks::{load_book_for_extension_repair, persist_book_extension_repair};
 use crate::{resolve_library_item_path, resolve_stored_path};
 use std::collections::HashSet;
 use std::path::Path;
@@ -35,20 +32,6 @@ fn mark_extension_repair_skipped(cache_key: &str) {
         .lock()
         .expect("skipped extension repairs lock should not be poisoned")
         .insert(cache_key.to_string());
-}
-
-pub(in crate::task_queue) fn find_books_for_extension_repair(
-    runtime: &RuntimeConfig,
-    library_id: &str,
-) -> Result<Vec<PersistedExtensionRepairTarget>, TaskExecutionError> {
-    let flags = load_library_maintenance_flags(runtime, library_id)?;
-    if !flags.repair_extensions {
-        return Ok(Vec::new());
-    }
-
-    let runtime = runtime.task_runtime_context();
-    load_books_for_extension_repair(runtime.database_file.as_path(), library_id)
-        .map_err(TaskExecutionError::runtime)
 }
 
 pub(in crate::task_queue) fn repair_extension(

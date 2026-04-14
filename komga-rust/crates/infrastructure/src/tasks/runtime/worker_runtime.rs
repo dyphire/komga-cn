@@ -3,24 +3,25 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use komga_application::task_processing::{
-    LibraryScanProfile, TaskRuntimeConfig, TaskRuntimeContext, build_library_scan_tasks,
-    build_scheduled_library_scans, build_startup_library_scan_tasks, library_scan_due_periods,
+    DefaultLibraryTaskEmitter, LibraryScanPipeline, LibraryScanProfile, LibraryScanScheduleState,
+    LibraryTaskBatch, ScanSchedulingTrigger, TaskRuntimeConfig, TaskRuntimeContext,
 };
+use serde_json::Value;
 use tokio::runtime::Handle;
 use tokio::sync::{Notify, watch};
 use tokio::time::interval;
 use tracing::{Instrument, Span, error, info};
 
+use super::library_scan_pipeline::SqliteFilesystemLibraryScanPipeline;
 use super::task_protocol::runtime_startup_task;
-use super::{ScheduledLibraryScan, TaskQueueScheduler};
-use crate::tasks::{load_persisted_library_ids, load_persisted_library_scan_profiles};
+use super::{TaskQueueRecord, TaskQueueScheduler};
+use crate::tasks::load_persisted_library_scan_profiles;
 
 pub type SharedTaskQueue = Arc<Mutex<TaskQueueScheduler>>;
 pub type TaskQueueWakeSignal = Arc<Notify>;
 
 pub struct RuntimeBackgroundState {
     pub task_queue: SharedTaskQueue,
-    pub scheduled_scans: Vec<ScheduledLibraryScan>,
     pub task_wakeup: TaskQueueWakeSignal,
 }
 
@@ -58,48 +59,42 @@ pub fn prepare_task_queue(
         let _ = task_queue.disown_all();
     }
 
-    let scheduled_scans =
-        if log_and_skip_if_main_db_unowned(STARTUP_LIBRARY_SCANS_COMPONENT, &runtime) {
-            Vec::new()
+    if !log_and_skip_if_main_db_unowned(STARTUP_LIBRARY_SCANS_COMPONENT, &runtime) {
+        log_runtime_bootstrap(
+            STARTUP_LIBRARY_SCANS_COMPONENT,
+            "started",
+            &runtime,
+            RuntimeLifecycleFields::default(),
+        );
+        let enqueued = bootstrap_startup_library_scans_inner(&mut task_queue, &runtime)
+            .unwrap_or_else(|error| {
+                log_runtime_bootstrap(
+                    STARTUP_LIBRARY_SCANS_COMPONENT,
+                    "failed",
+                    &runtime,
+                    RuntimeLifecycleFields::default().with_error(&error),
+                );
+                panic!("bootstrap startup library scans: {error}");
+            });
+
+        if enqueued == 0 {
+            log_runtime_bootstrap(
+                STARTUP_LIBRARY_SCANS_COMPONENT,
+                "skipped",
+                &runtime,
+                RuntimeLifecycleFields::default().with_skip_reason("no_startup_library_scans"),
+            );
         } else {
             log_runtime_bootstrap(
                 STARTUP_LIBRARY_SCANS_COMPONENT,
-                "started",
+                "completed",
                 &runtime,
-                RuntimeLifecycleFields::default(),
+                RuntimeLifecycleFields::default()
+                    .with_enqueued(enqueued)
+                    .with_scheduled_scans(enqueued),
             );
-            let (scheduled_scans, enqueued) =
-                bootstrap_startup_library_scans_inner(&mut task_queue, &runtime).unwrap_or_else(
-                    |error| {
-                        log_runtime_bootstrap(
-                            STARTUP_LIBRARY_SCANS_COMPONENT,
-                            "failed",
-                            &runtime,
-                            RuntimeLifecycleFields::default().with_error(&error),
-                        );
-                        panic!("bootstrap startup library scans: {error}");
-                    },
-                );
-
-            if enqueued == 0 && scheduled_scans.is_empty() {
-                log_runtime_bootstrap(
-                    STARTUP_LIBRARY_SCANS_COMPONENT,
-                    "skipped",
-                    &runtime,
-                    RuntimeLifecycleFields::default().with_skip_reason("no_startup_library_scans"),
-                );
-            } else {
-                log_runtime_bootstrap(
-                    STARTUP_LIBRARY_SCANS_COMPONENT,
-                    "completed",
-                    &runtime,
-                    RuntimeLifecycleFields::default()
-                        .with_enqueued(enqueued)
-                        .with_scheduled_scans(scheduled_scans.len()),
-                );
-            }
-            scheduled_scans
-        };
+        }
+    }
 
     if !runtime.consumes_queue {
         log_runtime_bootstrap(
@@ -154,7 +149,6 @@ pub fn prepare_task_queue(
 
     RuntimeBackgroundState {
         task_queue: Arc::new(Mutex::new(task_queue)),
-        scheduled_scans,
         task_wakeup: Arc::new(Notify::new()),
     }
 }
@@ -163,15 +157,9 @@ pub fn spawn_runtime_workers(
     task_queue: SharedTaskQueue,
     runtime: TaskRuntimeContext,
     task_wakeup: TaskQueueWakeSignal,
-    scheduled_scans: Vec<ScheduledLibraryScan>,
     shutdown_rx: Option<watch::Receiver<bool>>,
 ) {
-    spawn_periodic_library_scan_workers(
-        task_queue.clone(),
-        runtime.clone(),
-        scheduled_scans,
-        shutdown_rx.clone(),
-    );
+    spawn_periodic_library_scan_workers(task_queue.clone(), runtime.clone(), shutdown_rx.clone());
     spawn_background_task_worker(
         task_queue,
         runtime.clone(),
@@ -190,15 +178,6 @@ pub fn bootstrap_startup_search_task(
         .unwrap_or_else(|error| panic!("bootstrap startup search task: {error}"));
 }
 
-pub fn bootstrap_startup_library_scans(
-    task_queue: &mut TaskQueueScheduler,
-    runtime: &TaskRuntimeContext,
-) -> Vec<ScheduledLibraryScan> {
-    bootstrap_startup_library_scans_inner(task_queue, runtime)
-        .map(|(scheduled_scans, _)| scheduled_scans)
-        .unwrap_or_else(|error| panic!("bootstrap startup library scans: {error}"))
-}
-
 pub fn process_startup_library_scans(config: impl TaskRuntimeConfig) {
     let runtime = config.task_runtime_context();
     if log_and_skip_if_main_db_unowned(STARTUP_LIBRARY_SCAN_PROCESSING_COMPONENT, &runtime) {
@@ -212,7 +191,24 @@ pub fn process_startup_library_scans(config: impl TaskRuntimeConfig) {
         RuntimeLifecycleFields::default(),
     );
 
-    let library_ids = load_library_ids(runtime.database_file.as_path(), "load startup library ids")
+    let startup_scan_batch = schedule_startup_library_scan_batch(
+        &runtime,
+        "schedule startup library scans for processing",
+    )
+    .unwrap_or_else(|error| {
+        log_runtime_bootstrap(
+            STARTUP_LIBRARY_SCAN_PROCESSING_COMPONENT,
+            "failed",
+            &runtime,
+            RuntimeLifecycleFields::default().with_error(&error),
+        );
+        panic!("process startup library scans: {error}");
+    });
+    if startup_scan_batch.is_empty() {
+        let profiles = load_scan_profiles(
+            runtime.database_file.as_path(),
+            "load startup library scan profiles for processing skip boundary",
+        )
         .unwrap_or_else(|error| {
             log_runtime_bootstrap(
                 STARTUP_LIBRARY_SCAN_PROCESSING_COMPONENT,
@@ -220,20 +216,26 @@ pub fn process_startup_library_scans(config: impl TaskRuntimeConfig) {
                 &runtime,
                 RuntimeLifecycleFields::default().with_error(&error),
             );
-            panic!("load startup library ids: {error}");
+            panic!("process startup library scans: {error}");
         });
-    if library_ids.is_empty() {
+
         log_runtime_bootstrap(
             STARTUP_LIBRARY_SCAN_PROCESSING_COMPONENT,
             "skipped",
             &runtime,
-            RuntimeLifecycleFields::default().with_skip_reason("no_libraries"),
+            RuntimeLifecycleFields::default().with_skip_reason(if profiles.is_empty() {
+                "no_libraries"
+            } else {
+                "no_startup_library_scans"
+            }),
         );
         return;
     }
 
     let mut task_queue = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    for task in build_library_scan_tasks(&library_ids) {
+    let startup_scan_tasks = startup_scan_batch.into_queue_records();
+    let startup_scan_task_count = startup_scan_tasks.len();
+    for task in startup_scan_tasks {
         task_queue.enqueue(task);
     }
     match task_queue.process_available(&runtime) {
@@ -241,7 +243,7 @@ pub fn process_startup_library_scans(config: impl TaskRuntimeConfig) {
             STARTUP_LIBRARY_SCAN_PROCESSING_COMPONENT,
             "completed",
             &runtime,
-            RuntimeLifecycleFields::default().with_processed(library_ids.len()),
+            RuntimeLifecycleFields::default().with_processed(startup_scan_task_count),
         ),
         Err(error) => {
             let error_message = error.to_string();
@@ -259,7 +261,6 @@ pub fn process_startup_library_scans(config: impl TaskRuntimeConfig) {
 fn spawn_periodic_library_scan_workers(
     task_queue: SharedTaskQueue,
     runtime: TaskRuntimeContext,
-    _scheduled_scans: Vec<ScheduledLibraryScan>,
     shutdown_rx: Option<watch::Receiver<bool>>,
 ) {
     if !runtime.consumes_queue || !runtime.owns_main_database {
@@ -648,33 +649,17 @@ fn run_periodic_library_scan_iteration_inner(
     runtime: &TaskRuntimeContext,
     last_run_by_library: &mut HashMap<String, tokio::time::Instant>,
 ) -> Result<(usize, Vec<String>), (String, Vec<String>)> {
-    let profiles = load_scan_profiles(
-        runtime.database_file.as_path(),
-        "load periodic library scan profiles",
-    )
-    .map_err(|error| (error, Vec::new()))?;
-    let active_libraries = library_scan_due_periods(&profiles).map_err(|error| {
-        (
-            format!("build periodic library scan periods: {error}"),
-            Vec::new(),
-        )
-    })?;
-
-    let mut due_libraries = Vec::new();
-    for (library_id, period) in &active_libraries {
-        let next_due = last_run_by_library
-            .entry(library_id.clone())
-            .or_insert_with(tokio::time::Instant::now);
-
-        if next_due.elapsed() < *period {
-            continue;
-        }
-
-        due_libraries.push(library_id.clone());
-    }
+    sync_periodic_library_scan_state(runtime, last_run_by_library)
+        .map_err(|error| (error, Vec::new()))?;
+    let due_tasks = schedule_periodic_library_scan_batch(runtime, last_run_by_library)
+        .and_then(periodic_library_scan_tasks)
+        .map_err(|error| (error, Vec::new()))?;
+    let due_libraries = due_tasks
+        .iter()
+        .map(|(library_id, _)| library_id.clone())
+        .collect::<Vec<_>>();
 
     if due_libraries.is_empty() {
-        last_run_by_library.retain(|library_id, _| active_libraries.contains_key(library_id));
         return Ok((0, due_libraries));
     }
 
@@ -688,10 +673,7 @@ fn run_periodic_library_scan_iteration_inner(
     );
 
     let mut scheduler_processed = 0;
-    for (library_id, task) in due_libraries
-        .iter()
-        .zip(build_library_scan_tasks(&due_libraries))
-    {
+    for (library_id, task) in due_tasks {
         let mut queue = task_queue
             .lock()
             .expect("task queue state lock should not be poisoned");
@@ -699,21 +681,20 @@ fn run_periodic_library_scan_iteration_inner(
         scheduler_processed += queue
             .process_available(runtime)
             .map_err(|error| (error.to_string(), due_libraries.clone()))?;
-        if let Some(next_due) = last_run_by_library.get_mut(library_id) {
+        if let Some(next_due) = last_run_by_library.get_mut(&library_id) {
             *next_due = tokio::time::Instant::now();
         }
     }
 
-    last_run_by_library.retain(|library_id, _| active_libraries.contains_key(library_id));
     Ok((scheduler_processed, due_libraries))
 }
 
 fn bootstrap_startup_library_scans_inner(
     task_queue: &mut TaskQueueScheduler,
     runtime: &TaskRuntimeContext,
-) -> Result<(Vec<ScheduledLibraryScan>, usize), String> {
+) -> Result<usize, String> {
     if !runtime.owns_main_database {
-        return Ok((Vec::new(), 0));
+        return Ok(0);
     }
 
     let profiles = load_scan_profiles(
@@ -721,19 +702,18 @@ fn bootstrap_startup_library_scans_inner(
         "load startup library scan profiles",
     )?;
     if profiles.is_empty() {
-        return Ok((Vec::new(), 0));
+        return Ok(0);
     }
 
-    let startup_tasks = build_startup_library_scan_tasks(&profiles);
+    let startup_tasks =
+        schedule_startup_library_scan_batch(runtime, "schedule startup library scans")?
+            .into_queue_records();
     let enqueued = startup_tasks.len();
     for task in startup_tasks {
         task_queue.enqueue(task);
     }
 
-    let scheduled_scans = build_scheduled_library_scans(&profiles)
-        .map_err(|error| format!("build scheduled library scans: {error}"))?;
-
-    Ok((scheduled_scans, enqueued))
+    Ok(enqueued)
 }
 
 fn load_scan_profiles(
@@ -754,8 +734,81 @@ fn load_scan_profiles(
         })
 }
 
-fn load_library_ids(database_file: &std::path::Path, action: &str) -> Result<Vec<String>, String> {
-    load_persisted_library_ids(database_file).map_err(|error| format!("{action}: {error}"))
+fn schedule_startup_library_scan_batch(
+    runtime: &TaskRuntimeContext,
+    action: &str,
+) -> Result<LibraryTaskBatch, String> {
+    SqliteFilesystemLibraryScanPipeline::new(
+        runtime.database_file.clone(),
+        DefaultLibraryTaskEmitter::default(),
+    )
+    .schedule(
+        ScanSchedulingTrigger::Startup,
+        &LibraryScanScheduleState::default(),
+    )
+    .map_err(|error| format!("{action}: {error}"))
+}
+
+fn schedule_periodic_library_scan_batch(
+    runtime: &TaskRuntimeContext,
+    last_run_by_library: &HashMap<String, tokio::time::Instant>,
+) -> Result<LibraryTaskBatch, String> {
+    SqliteFilesystemLibraryScanPipeline::new(
+        runtime.database_file.clone(),
+        DefaultLibraryTaskEmitter::default(),
+    )
+    .schedule(
+        ScanSchedulingTrigger::Tick,
+        &LibraryScanScheduleState {
+            elapsed_since_last_run_by_library: last_run_by_library
+                .iter()
+                .map(|(library_id, last_run)| (library_id.clone(), last_run.elapsed()))
+                .collect(),
+        },
+    )
+    .map_err(|error| format!("schedule periodic library scans: {error}"))
+}
+
+fn sync_periodic_library_scan_state(
+    runtime: &TaskRuntimeContext,
+    last_run_by_library: &mut HashMap<String, tokio::time::Instant>,
+) -> Result<(), String> {
+    SqliteFilesystemLibraryScanPipeline::new(
+        runtime.database_file.clone(),
+        DefaultLibraryTaskEmitter::default(),
+    )
+    .sync_periodic_library_scan_state(last_run_by_library)
+    .map_err(|error| format!("build periodic library scan state: {error}"))
+}
+
+fn periodic_library_scan_tasks(
+    batch: LibraryTaskBatch,
+) -> Result<Vec<(String, TaskQueueRecord)>, String> {
+    batch
+        .tasks
+        .into_iter()
+        .map(|task| {
+            let library_id = periodic_scan_task_library_id(task.payload.as_deref())?;
+            Ok((library_id, task.into_queue_record()))
+        })
+        .collect()
+}
+
+fn periodic_scan_task_library_id(payload: Option<&str>) -> Result<String, String> {
+    let Some(payload) = payload else {
+        return Err("periodic library scan task requires serialized payload".to_string());
+    };
+    let payload = serde_json::from_str::<Value>(payload).map_err(|error| {
+        format!("periodic library scan task payload must be valid JSON: {error}")
+    })?;
+
+    payload
+        .get("libraryId")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            "periodic library scan task payload field 'libraryId' must be a string".to_string()
+        })
 }
 
 fn single_value_or_empty(values: &[String]) -> &str {

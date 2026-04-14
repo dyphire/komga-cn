@@ -25,12 +25,6 @@ impl LibraryScanInterval {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ScheduledLibraryScan {
-    pub library_id: String,
-    pub interval: LibraryScanInterval,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TaskQueueRecord {
     pub id: String,
     pub simple_type: String,

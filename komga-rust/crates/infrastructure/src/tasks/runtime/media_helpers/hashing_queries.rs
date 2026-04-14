@@ -2,7 +2,6 @@ use super::hashed_pages::HashedPageToDelete;
 use super::*;
 use crate::tasks::{
     load_book_file_path, load_book_hash_runtime_state, load_book_library_id,
-    load_books_requiring_analysis as load_persisted_books_requiring_analysis,
     load_books_with_missing_page_hash as load_persisted_books_with_missing_page_hash,
     load_books_with_undersized_generated_thumbnails,
     load_duplicate_pages_to_delete as load_persisted_duplicate_pages_to_delete,
@@ -171,13 +170,4 @@ pub(in crate::task_queue) fn find_duplicate_pages_to_delete(
             )
         })
         .collect())
-}
-
-pub(in crate::task_queue) fn find_books_requiring_analysis(
-    runtime: &RuntimeConfig,
-    book_ids: &[String],
-) -> Result<Vec<String>, TaskExecutionError> {
-    let runtime = runtime.task_runtime_context();
-    load_persisted_books_requiring_analysis(runtime.database_file.as_path(), book_ids)
-        .map_err(TaskExecutionError::runtime)
 }

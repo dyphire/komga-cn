@@ -1,11 +1,16 @@
 mod contracts;
+mod library_scan_pipeline;
 mod protocol;
 mod scanner_maintenance;
 
 pub use contracts::{
-    LibraryScanInterval, ScheduledLibraryScan, TaskProcessingError, TaskQueueAdminPort,
-    TaskQueueExecutionPort, TaskQueueOrchestrator, TaskQueueRecord, TaskQueueRepository,
-    TaskRuntimeConfig, TaskRuntimeContext,
+    LibraryScanInterval, TaskProcessingError, TaskQueueAdminPort, TaskQueueExecutionPort,
+    TaskQueueOrchestrator, TaskQueueRecord, TaskQueueRepository, TaskRuntimeConfig,
+    TaskRuntimeContext,
+};
+pub use library_scan_pipeline::{
+    LibraryScanPipeline, LibraryScanScheduleState, ScanOneLibrary, ScanOneLibraryOutcome,
+    ScanOneLibraryResult, ScanSchedulingTrigger,
 };
 pub use protocol::{
     BookSeriesRef, DefaultLibraryTaskEmitter, DefaultTaskProtocolCatalog, LibraryTaskBatch,
@@ -13,6 +18,6 @@ pub use protocol::{
     PlannedTaskKind, TaskDescriptor, TaskProtocolCatalog, TaskSchedule,
 };
 pub use scanner_maintenance::{
-    LibraryScanProfile, build_library_scan_tasks, build_scheduled_library_scans,
-    build_startup_library_scan_tasks, library_scan_due_periods, library_scan_interval_from_db,
+    LibraryScanProfile, NormalizedLibraryScanProfile, library_scan_interval_from_db,
+    normalize_library_scan_profiles,
 };

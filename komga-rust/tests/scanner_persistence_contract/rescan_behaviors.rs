@@ -363,7 +363,8 @@ async fn scanner_rescan_updates_existing_persisted_book_file_size_rows() {
         .await
         .expect("scanner rescan fixture should be created");
 
-    let _initial_runtime = komga_server::app::build_router_with_config(&fixture.config);
+    process_scan_library_task(fixture.config.clone(), "library-1", 900, false)
+        .expect("rescan update contract should seed initial persisted rows");
 
     let book_path = fixture.library_root.join("Series-A").join("Book-001.cbz");
     let book_url = book_path.to_string_lossy().to_string();
@@ -442,6 +443,104 @@ async fn scanner_rescan_recreates_missing_metadata_seed_rows() {
     assert!(repaired_snapshot.series_metadata_rows >= 1);
     assert!(repaired_snapshot.book_metadata_rows >= 1);
     assert!(repaired_snapshot.book_metadata_aggregation_rows >= 1);
+
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn scanner_rescan_soft_deletes_missing_series_while_leaving_sidecar_rows_visible() {
+    let fixture = ScannerPersistenceFixture::new("scanner-persistence-soft-delete-missing-series")
+        .await
+        .expect("scanner soft-delete fixture should be created");
+
+    let series_dir = fixture.library_root.join("Series-A");
+
+    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .process_available(&fixture.config)
+        .expect("initial scan should persist the seeded series before missing-series rescan");
+
+    let initial_snapshot = load_persistence_snapshot(&fixture.paths.main_db, "library-1").await;
+    assert_eq!(
+        initial_snapshot.sidecar_rows, 2,
+        "fixture sanity: initial scan should persist both seeded sidecar rows before removal",
+    );
+
+    fs::remove_dir_all(&series_dir)
+        .expect("series directory should be removable for missing-series soft-delete contract");
+
+    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .process_available(&fixture.config)
+        .expect("rescan should soft-delete missing persisted series successfully");
+
+    let pool = connect_pool(fixture.paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for missing-series soft-delete verification");
+    let series_total = sqlx::query("SELECT COUNT(*) AS COUNT FROM SERIES WHERE LIBRARY_ID = ?")
+        .bind("library-1")
+        .fetch_one(&pool)
+        .await
+        .expect("series total count should be queryable after missing-series rescan")
+        .get::<i64, _>("COUNT");
+    let active_series = sqlx::query(
+        "SELECT COUNT(*) AS COUNT FROM SERIES WHERE LIBRARY_ID = ? AND DELETED_DATE IS NULL",
+    )
+    .bind("library-1")
+    .fetch_one(&pool)
+    .await
+    .expect("active series count should be queryable after missing-series rescan")
+    .get::<i64, _>("COUNT");
+    let deleted_series = sqlx::query(
+        "SELECT COUNT(*) AS COUNT FROM SERIES WHERE LIBRARY_ID = ? AND DELETED_DATE IS NOT NULL",
+    )
+    .bind("library-1")
+    .fetch_one(&pool)
+    .await
+    .expect("deleted series count should be queryable after missing-series rescan")
+    .get::<i64, _>("COUNT");
+    let book_total = sqlx::query("SELECT COUNT(*) AS COUNT FROM BOOK WHERE LIBRARY_ID = ?")
+        .bind("library-1")
+        .fetch_one(&pool)
+        .await
+        .expect("book total count should be queryable after missing-series rescan")
+        .get::<i64, _>("COUNT");
+    let active_books = sqlx::query(
+        "SELECT COUNT(*) AS COUNT FROM BOOK WHERE LIBRARY_ID = ? AND DELETED_DATE IS NULL",
+    )
+    .bind("library-1")
+    .fetch_one(&pool)
+    .await
+    .expect("active book count should be queryable after missing-series rescan")
+    .get::<i64, _>("COUNT");
+    let deleted_books = sqlx::query(
+        "SELECT COUNT(*) AS COUNT FROM BOOK WHERE LIBRARY_ID = ? AND DELETED_DATE IS NOT NULL",
+    )
+    .bind("library-1")
+    .fetch_one(&pool)
+    .await
+    .expect("deleted book count should be queryable after missing-series rescan")
+    .get::<i64, _>("COUNT");
+    let remaining_sidecars =
+        sqlx::query("SELECT COUNT(*) AS COUNT FROM SIDECAR WHERE LIBRARY_ID = ?")
+            .bind("library-1")
+            .fetch_one(&pool)
+            .await
+            .expect("sidecar count should be queryable after missing-series rescan")
+            .get::<i64, _>("COUNT");
+    pool.close().await;
+
+    assert_eq!(series_total, 1);
+    assert_eq!(active_series, 0);
+    assert_eq!(deleted_series, 1);
+    assert_eq!(book_total, 1);
+    assert_eq!(active_books, 0);
+    assert_eq!(deleted_books, 1);
+    assert_eq!(
+        remaining_sidecars, 2,
+        "current scanner rescan semantics soft-delete missing series/book rows without deleting the persisted sidecar records in the same pass",
+    );
 
     fixture.cleanup();
 }
