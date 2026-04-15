@@ -74,7 +74,7 @@ impl RuntimeConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::RuntimeProfile;
+    use crate::RuntimeProfile;
 
     fn runtime_config_for(
         mode: RuntimeMode,

@@ -6,6 +6,7 @@ members = [
   "crates/application",
   "crates/infrastructure",
   "crates/interfaces",
+  "crates/config",
   "crates/server",
   "crates/contract-testkit",
   "crates/benchmark-wpd3",
@@ -71,6 +72,7 @@ tracing-subscriber.workspace = true
 sqlx.workspace = true
 bcrypt.workspace = true
 notify = "8.2.0"
+komga-config = { path = "crates/config" }
 komga-server = { path = "crates/server" }
 komga-benchmark-wpd3 = { path = "crates/benchmark-wpd3" }
 komga-domain = { path = "crates/domain" }

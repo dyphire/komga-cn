@@ -6,6 +6,39 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tantivy::Index;
 use tantivy::schema::{STORED, STRING, Schema};
 
+fn runtime_task_context(config: &komga_rust::config::RuntimeConfig) -> komga_rust::application::task_processing::TaskRuntimeContext {
+    komga_rust::application::task_processing::TaskRuntimeContext {
+        database_file: config.database_file.clone(),
+        tasks_db_file: config.tasks_db_file.clone(),
+        lucene_data_directory: config.lucene_data_directory.clone(),
+        consumes_queue: matches!(
+            config.writer_decision(komga_rust::config::WriterKind::TasksDatabase),
+            komga_rust::config::WriterDecision::Allowed
+                | komga_rust::config::WriterDecision::Isolated
+        ),
+        owns_main_database: matches!(
+            config.writer_decision(komga_rust::config::WriterKind::MainDatabase),
+            komga_rust::config::WriterDecision::Allowed
+                | komga_rust::config::WriterDecision::Isolated
+        ),
+        owns_filesystem_scan_output: matches!(
+            config.writer_decision(komga_rust::config::WriterKind::FilesystemScanOutput),
+            komga_rust::config::WriterDecision::Allowed
+                | komga_rust::config::WriterDecision::Isolated
+        ),
+        owns_sidecar_output: matches!(
+            config.writer_decision(komga_rust::config::WriterKind::SidecarOutput),
+            komga_rust::config::WriterDecision::Allowed
+                | komga_rust::config::WriterDecision::Isolated
+        ),
+        owns_search_index: matches!(
+            config.writer_decision(komga_rust::config::WriterKind::SearchIndex),
+            komga_rust::config::WriterDecision::Allowed
+                | komga_rust::config::WriterDecision::Isolated
+        ),
+    }
+}
+
 #[path = "runtime_startup_contract/cli_preflight.rs"]
 mod cli_preflight;
 #[path = "runtime_startup_contract/config_resolution.rs"]

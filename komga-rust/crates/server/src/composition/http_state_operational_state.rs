@@ -46,7 +46,7 @@ pub(super) fn compose_operational_state(
     task_wakeup: TaskQueueWakeSignal,
     shutdown_trigger: Option<watch::Sender<bool>>,
 ) -> OperationalState {
-    let runtime_for_apply = config.clone();
+    let runtime_for_apply = crate::config::task_runtime_context(config);
     let enqueue_task_queue = task_queue.clone();
     let clear_task_queue = task_queue.clone();
     let count_task_queue = task_queue.clone();
@@ -215,7 +215,6 @@ fn oauth2_clients(config: &RuntimeConfig) -> Vec<OAuth2ClientConfig> {
 mod tests {
     use super::*;
     use komga_application::task_processing::TaskQueueRecord;
-    use komga_application::task_processing::TaskRuntimeConfig;
     use komga_infrastructure::task_queue::TaskQueueScheduler;
     use serde_json::json;
     use std::time::Duration;
@@ -241,7 +240,7 @@ mod tests {
             let config =
                 RuntimeConfig::for_runtime_profile(crate::config::RuntimeProfile::LiveLocaldb);
             let task_queue = Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
-                config.task_runtime_context(),
+                crate::config::task_runtime_context(&config),
                 "rust-main",
             )));
             let task_wakeup = Arc::new(tokio::sync::Notify::new());

@@ -82,7 +82,8 @@ async fn scanner_unknown_task_type_is_not_completed_or_silently_skipped() {
     fs::write(&book_path, updated_payload)
         .expect("book payload rewrite should succeed for unknown task contract");
 
-    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    let runtime = runtime_task_context_from_config(&fixture.config);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler.enqueue(TaskQueueRecord::new(
         "UNSUPPORTED_TASK:book-1",
         1000,
@@ -91,7 +92,7 @@ async fn scanner_unknown_task_type_is_not_completed_or_silently_skipped() {
     scheduler.enqueue(scan_library_task("library-1", 900, false));
 
     let error = scheduler
-        .process_available(&fixture.config)
+        .process_available(&runtime)
         .expect_err("unknown task type should surface as runtime error instead of being completed");
     assert!(
         error
@@ -160,8 +161,10 @@ async fn scanner_startup_releases_previously_claimed_persisted_tasks() {
     .expect("claimed task row should be inserted");
     tasks_pool.close().await;
 
-    let _background =
-        komga_rust::infrastructure::task_queue::prepare_task_queue(fixture.config.clone(), None);
+    let _background = komga_rust::infrastructure::task_queue::prepare_task_queue(
+        runtime_task_context_from_config(&fixture.config),
+        None,
+    );
 
     let verify_pool = connect_pool(fixture.paths.tasks_db.as_path(), 1)
         .await
@@ -281,10 +284,11 @@ async fn scanner_persisted_scan_library_payload_overrides_legacy_id_target_and_d
     let initial_page_size = write_scannable_cbz_fixture(&book_path, b"page-before-payload-wins")
         .expect("initial scan-library payload precedence fixture should be written");
 
-    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    let runtime = runtime_task_context_from_config(&fixture.config);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler.enqueue(scan_library_task("library-1", 900, false));
     scheduler
-        .process_available(&fixture.config)
+        .process_available(&runtime)
         .expect("initial scan should seed scanner persistence state");
 
     assert_eq!(
@@ -326,9 +330,10 @@ async fn scanner_persisted_scan_library_payload_overrides_legacy_id_target_and_d
     .expect("legacy scan-library task row should be inserted for payload precedence");
     tasks_pool.close().await;
 
-    let mut replay = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    let runtime = runtime_task_context_from_config(&fixture.config);
+    let mut replay = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     replay
-        .process_available(&fixture.config)
+        .process_available(&runtime)
         .expect("legacy scan-library payload precedence row should process successfully");
 
     assert_eq!(
@@ -360,10 +365,11 @@ async fn scanner_persisted_scan_library_recovers_deep_flag_from_underscore_legac
     let initial_page_size = write_scannable_cbz_fixture(&book_path, b"page-before-underscore")
         .expect("initial underscore scan fixture should be written");
 
-    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    let runtime = runtime_task_context_from_config(&fixture.config);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler.enqueue(scan_library_task("library-1", 900, false));
     scheduler
-        .process_available(&fixture.config)
+        .process_available(&runtime)
         .expect("initial scan should seed underscore deep replay state");
 
     assert_eq!(
@@ -382,7 +388,7 @@ async fn scanner_persisted_scan_library_recovers_deep_flag_from_underscore_legac
             .with_simple_type("SCAN_LIBRARY"),
     );
     scheduler
-        .process_available(&fixture.config)
+        .process_available(&runtime)
         .expect("underscore legacy scan-library id should process successfully after canonical payload restoration");
 
     assert_eq!(
@@ -405,10 +411,11 @@ async fn scanner_persisted_scan_library_recovers_deep_flag_from_colon_legacy_id(
     let initial_page_size = write_scannable_cbz_fixture(&book_path, b"page-before-colon")
         .expect("initial colon scan fixture should be written");
 
-    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    let runtime = runtime_task_context_from_config(&fixture.config);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler.enqueue(scan_library_task("library-1", 900, false));
     scheduler
-        .process_available(&fixture.config)
+        .process_available(&runtime)
         .expect("initial scan should seed colon deep replay state");
 
     assert_eq!(
@@ -428,7 +435,7 @@ async fn scanner_persisted_scan_library_recovers_deep_flag_from_colon_legacy_id(
         None,
     ));
     scheduler
-        .process_available(&fixture.config)
+        .process_available(&runtime)
         .expect("colon legacy scan-library id should process successfully after canonical payload restoration");
 
     assert_eq!(

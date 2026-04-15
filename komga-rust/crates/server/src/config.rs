@@ -1,21 +1,35 @@
-#[path = "config/cli_args.rs"]
-mod cli_args;
-#[path = "config/env_config.rs"]
-mod env_config;
-#[path = "config/error.rs"]
-mod error;
-#[path = "config/path_resolution.rs"]
-mod path_resolution;
-#[path = "config/profile.rs"]
-mod profile;
-#[path = "config/startup_policy.rs"]
-mod startup_policy;
-#[path = "config/writer_ownership.rs"]
-mod writer_ownership;
+use komga_application::task_processing::TaskRuntimeContext;
 
-pub use cli_args::RuntimeCli;
-pub(crate) use env_config::AdminActionConfig;
-pub use env_config::{OAuth2ClientConfig, RuntimeConfig};
-pub use error::ConfigError;
-pub use profile::{PlatformProfile, RuntimeMode, RuntimeProfile};
-pub use writer_ownership::{WriterDecision, WriterKind, WriterOwnershipPolicy};
+pub(crate) use komga_config::AdminActionConfig;
+pub use komga_config::{
+    ConfigError, OAuth2ClientConfig, PlatformProfile, RuntimeCli, RuntimeConfig, RuntimeMode,
+    RuntimeProfile, WriterDecision, WriterKind, WriterOwnershipPolicy,
+};
+
+pub(crate) fn task_runtime_context(config: &RuntimeConfig) -> TaskRuntimeContext {
+    TaskRuntimeContext {
+        database_file: config.database_file.clone(),
+        tasks_db_file: config.tasks_db_file.clone(),
+        lucene_data_directory: config.lucene_data_directory.clone(),
+        consumes_queue: matches!(
+            config.writer_decision(WriterKind::TasksDatabase),
+            WriterDecision::Allowed | WriterDecision::Isolated
+        ),
+        owns_main_database: matches!(
+            config.writer_decision(WriterKind::MainDatabase),
+            WriterDecision::Allowed | WriterDecision::Isolated
+        ),
+        owns_filesystem_scan_output: matches!(
+            config.writer_decision(WriterKind::FilesystemScanOutput),
+            WriterDecision::Allowed | WriterDecision::Isolated
+        ),
+        owns_sidecar_output: matches!(
+            config.writer_decision(WriterKind::SidecarOutput),
+            WriterDecision::Allowed | WriterDecision::Isolated
+        ),
+        owns_search_index: matches!(
+            config.writer_decision(WriterKind::SearchIndex),
+            WriterDecision::Allowed | WriterDecision::Isolated
+        ),
+    }
+}

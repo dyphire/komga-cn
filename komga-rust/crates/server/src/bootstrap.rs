@@ -1,7 +1,5 @@
 use tokio::net::TcpListener;
 
-use komga_application::task_processing::TaskRuntimeConfig;
-
 use crate::build_metadata::current_build_metadata;
 use crate::composition::start_server;
 use crate::config::{RuntimeConfig, RuntimeMode, RuntimeProfile, WriterDecision, WriterKind};
@@ -20,7 +18,7 @@ pub(crate) fn emit_startup_banner_and_runtime_event(config: &RuntimeConfig) {
     let build = current_build_metadata();
     let rendered_banner = render_startup_banner(build.version.as_str());
     let _ = crate::logging::emit_display(rendered_banner.as_str());
-    let task_runtime = config.task_runtime_context();
+    let task_runtime = crate::config::task_runtime_context(config);
     let config_dir = config
         .config_dir
         .as_ref()
@@ -95,19 +93,19 @@ async fn run_admin_action(commands: admin_cli::AdminCliCommands) {
         std::process::exit(1);
     });
 
-    ensure_existing_admin_database(config.database_file.as_path()).unwrap_or_else(|error| {
+    ensure_existing_admin_database(config.database_file()).unwrap_or_else(|error| {
         eprintln!("{error}");
         std::process::exit(1);
     });
 
-    validate_main_startup_schema_gate(config.database_file.as_path())
+    validate_main_startup_schema_gate(config.database_file())
         .await
         .unwrap_or_else(|error| {
             eprintln!("{error}");
             std::process::exit(1);
         });
 
-    admin_cli::run_admin_cli_commands(config.database_file.as_path(), &commands)
+    admin_cli::run_admin_cli_commands(config.database_file(), &commands)
         .await
         .unwrap_or_else(|error| {
             eprintln!("{error}");

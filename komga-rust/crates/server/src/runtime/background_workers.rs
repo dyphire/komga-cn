@@ -1,4 +1,4 @@
-use komga_application::task_processing::{TaskRuntimeConfig, TaskRuntimeContext};
+use komga_application::task_processing::TaskRuntimeContext;
 pub use komga_infrastructure::task_queue::{
     RuntimeBackgroundState, SharedTaskQueue, TaskQueueWakeSignal,
 };
@@ -10,7 +10,10 @@ pub fn prepare_task_queue(
     config: &RuntimeConfig,
     startup_search_task: Option<&'static str>,
 ) -> RuntimeBackgroundState {
-    komga_infrastructure::task_queue::prepare_task_queue(config.clone(), startup_search_task)
+    komga_infrastructure::task_queue::prepare_task_queue(
+        crate::config::task_runtime_context(config),
+        startup_search_task,
+    )
 }
 
 pub fn spawn_runtime_workers(
@@ -19,7 +22,7 @@ pub fn spawn_runtime_workers(
     task_wakeup: TaskQueueWakeSignal,
     shutdown_rx: Option<watch::Receiver<bool>>,
 ) {
-    let runtime: TaskRuntimeContext = config.task_runtime_context();
+    let runtime: TaskRuntimeContext = crate::config::task_runtime_context(&config);
     komga_infrastructure::task_queue::spawn_runtime_workers(
         task_queue,
         runtime,

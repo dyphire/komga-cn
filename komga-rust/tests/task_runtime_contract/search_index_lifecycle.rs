@@ -12,10 +12,11 @@ async fn isolated_runtime_keeps_search_index_external_owned() {
         allow_isolated_writes: true,
     };
 
-    let mut scheduler = TaskQueueScheduler::for_runtime(config.clone(), "rust-main");
+    let runtime = runtime_task_context_from_config(&config);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler.enqueue(TaskQueueRecord::new("REBUILD_INDEX", 1_000, None));
     let processed = scheduler
-        .process_available(&config)
+        .process_available(&runtime)
         .expect("isolated runtime should process queued tasks without task-execution failure");
     assert_eq!(
         processed, 1,
@@ -136,10 +137,11 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
     pool.close().await;
 
     let config = runtime_config_for_paths(&paths);
-    let mut scheduler = TaskQueueScheduler::for_runtime(config.clone(), "rust-main");
+    let runtime = runtime_task_context_from_config(&config);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler.enqueue(TaskQueueRecord::new("REBUILD_INDEX", 1_000, None));
     scheduler
-        .process_available(&config)
+        .process_available(&runtime)
         .expect("rebuild index task should succeed for incremental sync contract");
 
     write_stale_analyzer_version_marker(config.lucene_data_directory.as_path());
@@ -165,7 +167,7 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
         Some("series-oneshot".to_string()),
     ));
     scheduler
-        .process_available(&config)
+        .process_available(&runtime)
         .expect("refresh-series-metadata task should process for incremental sync contract");
 
     let app = build_router_with_config(&config);
@@ -371,10 +373,11 @@ async fn runtime_refresh_book_metadata_upserts_readlist_search_document_after_co
     seed_router_contract_data(&paths).await;
 
     let config = runtime_config_for_paths(&paths);
-    let mut scheduler = TaskQueueScheduler::for_runtime(config.clone(), "rust-main");
+    let runtime = runtime_task_context_from_config(&config);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler.enqueue(TaskQueueRecord::new("REBUILD_INDEX", 1_000, None));
     scheduler
-        .process_available(&config)
+        .process_available(&runtime)
         .expect("initial rebuild index task should succeed for readlist search sync fixture");
 
     let search_hits = |query: &str, entity_type: SearchEntityType| -> Vec<String> {
@@ -452,7 +455,7 @@ async fn runtime_refresh_book_metadata_upserts_readlist_search_document_after_co
         ),
     );
     scheduler
-        .process_available(&config)
+        .process_available(&runtime)
         .expect("readlist-only metadata refresh should sync readlist search document");
 
     let verify_pool = connect_pool(paths.main_db.as_path(), 1)
@@ -481,10 +484,11 @@ async fn runtime_rebuild_index_payload_can_scope_rebuild_to_selected_entities() 
     seed_router_contract_data(&paths).await;
 
     let config = runtime_config_for_paths(&paths);
-    let mut scheduler = TaskQueueScheduler::for_runtime(config.clone(), "rust-main");
+    let runtime = runtime_task_context_from_config(&config);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler.enqueue(TaskQueueRecord::new("REBUILD_INDEX", 1_000, None));
     scheduler
-        .process_available(&config)
+        .process_available(&runtime)
         .expect("initial rebuild index task should succeed for scoped rebuild fixture");
 
     let search_hits = |query: &str, entity_type: SearchEntityType| -> Vec<String> {
@@ -531,7 +535,7 @@ async fn runtime_rebuild_index_payload_can_scope_rebuild_to_selected_entities() 
         ),
     );
     scheduler
-        .process_available(&config)
+        .process_available(&runtime)
         .expect("scoped rebuild index task should succeed");
 
     assert_eq!(

@@ -81,9 +81,47 @@ pub(super) fn process_scan_library_task(
     priority: i32,
     deep_scan: bool,
 ) -> Result<usize, TaskProcessingError> {
-    let mut scheduler = TaskQueueScheduler::for_runtime(config.clone(), "rust-main");
+    let runtime = runtime_task_context_from_config(&config);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler.enqueue(scan_library_task(library_id, priority, deep_scan));
-    scheduler.process_available(&config)
+    scheduler.process_available(&runtime)
+}
+
+pub(super) fn runtime_task_context_from_config(config: &RuntimeConfig) -> TaskRuntimeContext {
+    TaskRuntimeContext {
+        database_file: config.database_file.clone(),
+        tasks_db_file: config.tasks_db_file.clone(),
+        lucene_data_directory: config.lucene_data_directory.clone(),
+        consumes_queue: matches!(
+            config.writer_decision(komga_rust::config::WriterKind::TasksDatabase),
+            komga_rust::config::WriterDecision::Allowed
+                | komga_rust::config::WriterDecision::Isolated
+        ),
+        owns_main_database: matches!(
+            config.writer_decision(komga_rust::config::WriterKind::MainDatabase),
+            komga_rust::config::WriterDecision::Allowed
+                | komga_rust::config::WriterDecision::Isolated
+        ),
+        owns_filesystem_scan_output: matches!(
+            config.writer_decision(komga_rust::config::WriterKind::FilesystemScanOutput),
+            komga_rust::config::WriterDecision::Allowed
+                | komga_rust::config::WriterDecision::Isolated
+        ),
+        owns_sidecar_output: matches!(
+            config.writer_decision(komga_rust::config::WriterKind::SidecarOutput),
+            komga_rust::config::WriterDecision::Allowed
+                | komga_rust::config::WriterDecision::Isolated
+        ),
+        owns_search_index: matches!(
+            config.writer_decision(komga_rust::config::WriterKind::SearchIndex),
+            komga_rust::config::WriterDecision::Allowed
+                | komga_rust::config::WriterDecision::Isolated
+        ),
+    }
+}
+
+pub(super) fn scheduler_for_config(config: &RuntimeConfig) -> TaskQueueScheduler {
+    TaskQueueScheduler::for_runtime(runtime_task_context_from_config(config), "rust-main")
 }
 
 pub(super) fn create_scannable_library_root(config_dir: &Path) -> anyhow::Result<PathBuf> {

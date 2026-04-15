@@ -7,7 +7,7 @@ async fn scanner_persists_hash_book_tasks_with_kotlin_task_shape() {
         .await
         .expect("scanner hash-book task fixture should be created");
 
-    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    let mut scheduler = scheduler_for_config(&fixture.config);
     scheduler
         .enqueue(TaskQueueRecord::new("HASH_BOOK_book-1", 0, None).with_simple_type("HASH_BOOK"));
 
@@ -35,7 +35,7 @@ async fn scanner_persists_refresh_book_metadata_tasks_with_kotlin_task_shape() {
         .await
         .expect("scanner refresh-book-metadata task fixture should be created");
 
-    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    let mut scheduler = scheduler_for_config(&fixture.config);
     scheduler.enqueue(
         TaskQueueRecord::new(
             "REFRESH_BOOK_METADATA_book-1",
@@ -82,7 +82,7 @@ async fn scanner_persists_find_duplicate_pages_to_delete_tasks_with_kotlin_task_
         .await
         .expect("scanner duplicate-pages task fixture should be created");
 
-    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    let mut scheduler = scheduler_for_config(&fixture.config);
     scheduler.enqueue(
         TaskQueueRecord::new("FIND_DUPLICATE_PAGES_TO_DELETE_library-1", 85, None)
             .with_simple_type("FIND_DUPLICATE_PAGES_TO_DELETE"),
@@ -113,7 +113,7 @@ async fn scanner_persists_find_books_with_missing_page_hash_tasks_with_kotlin_ta
             .await
             .expect("scanner missing-page-hash task fixture should be created");
 
-    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    let mut scheduler = scheduler_for_config(&fixture.config);
     scheduler.enqueue(
         TaskQueueRecord::new("FIND_BOOKS_WITH_MISSING_PAGE_HASH_library-1", 0, None)
             .with_simple_type("FIND_BOOKS_WITH_MISSING_PAGE_HASH"),

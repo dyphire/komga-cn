@@ -2424,6 +2424,15 @@ name = "komga-benchmark-wpd3"
 version = "0.1.0"
 
 [[package]]
+name = "komga-config"
+version = "0.1.0"
+dependencies = [
+ "config",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "komga-contract-testkit"
 version = "0.1.0"
 dependencies = [
@@ -2530,6 +2539,7 @@ dependencies = [
  "image",
  "komga-application",
  "komga-benchmark-wpd3",
+ "komga-config",
  "komga-contract-testkit",
  "komga-domain",
  "komga-infrastructure",
@@ -2562,11 +2572,11 @@ dependencies = [
  "axum-extra",
  "base64",
  "bcrypt",
- "config",
  "flate2",
  "futures-util",
  "image",
  "komga-application",
+ "komga-config",
  "komga-domain",
  "komga-infrastructure",
  "komga-interfaces",

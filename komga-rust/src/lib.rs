@@ -8,6 +8,13 @@ pub use komga_infrastructure::{
     SearchStartupLifecycle, decide_startup_lifecycle, prepare_for_rebuild,
 };
 pub use komga_interfaces as interfaces;
-pub use komga_server::config;
+
+pub mod config {
+    pub use komga_config::{
+        ConfigError, OAuth2ClientConfig, PlatformProfile, RuntimeCli, RuntimeConfig, RuntimeMode,
+        RuntimeProfile, WriterDecision, WriterKind, WriterOwnershipPolicy,
+    };
+}
+
 pub mod scanner;
 pub mod wpd3;

@@ -36,7 +36,7 @@ fn runtime_startup_prepare_task_queue_enqueues_search_rebuild_without_processing
         let config = config.clone();
         async move {
             let background = komga_rust::infrastructure::task_queue::prepare_task_queue(
-                config,
+                runtime_task_context(&config),
                 Some("REBUILD_INDEX"),
             );
             background
@@ -231,7 +231,10 @@ fn runtime_startup_prepare_task_queue_logs_no_startup_library_scan_skip_when_no_
         let config = config.clone();
         async move {
             let background =
-                komga_rust::infrastructure::task_queue::prepare_task_queue(config, None);
+                komga_rust::infrastructure::task_queue::prepare_task_queue(
+                    runtime_task_context(&config),
+                    None,
+                );
             background
                 .task_queue
                 .lock()
@@ -302,7 +305,9 @@ fn runtime_startup_library_scan_processing_logs_run_complete_and_skip_boundaries
     let (run_logs, ()) = capture_contract_log_async_result(&config, {
         let config = config.clone();
         async move {
-            komga_rust::infrastructure::task_queue::process_startup_library_scans(config);
+            komga_rust::infrastructure::task_queue::process_startup_library_scans(
+                runtime_task_context(&config),
+            );
         }
     });
     let run_events = parse_json_log_lines(&run_logs);
@@ -359,7 +364,9 @@ fn runtime_startup_library_scan_processing_logs_run_complete_and_skip_boundaries
     let disabled_startup_logs = capture_contract_log_async(&disabled_startup_config, {
         let config = disabled_startup_config.clone();
         async move {
-            komga_rust::infrastructure::task_queue::process_startup_library_scans(config);
+            komga_rust::infrastructure::task_queue::process_startup_library_scans(
+                runtime_task_context(&config),
+            );
         }
     });
     let disabled_startup_events = parse_json_log_lines(&disabled_startup_logs);
@@ -433,7 +440,9 @@ fn runtime_startup_library_scan_processing_logs_no_libraries_skip_boundary() {
     let logs = capture_contract_log_async(&config, {
         let config = config.clone();
         async move {
-            komga_rust::infrastructure::task_queue::process_startup_library_scans(config);
+            komga_rust::infrastructure::task_queue::process_startup_library_scans(
+                runtime_task_context(&config),
+            );
         }
     });
     let events = parse_json_log_lines(&logs);

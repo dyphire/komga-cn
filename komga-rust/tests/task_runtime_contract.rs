@@ -47,6 +47,39 @@ fn runtime_task_context(paths: &RuntimeDbPaths) -> TaskRuntimeContext {
     }
 }
 
+fn runtime_task_context_from_config(config: &komga_rust::config::RuntimeConfig) -> TaskRuntimeContext {
+    TaskRuntimeContext {
+        database_file: config.database_file.clone(),
+        tasks_db_file: config.tasks_db_file.clone(),
+        lucene_data_directory: config.lucene_data_directory.clone(),
+        consumes_queue: matches!(
+            config.writer_decision(komga_rust::config::WriterKind::TasksDatabase),
+            komga_rust::config::WriterDecision::Allowed
+                | komga_rust::config::WriterDecision::Isolated
+        ),
+        owns_main_database: matches!(
+            config.writer_decision(komga_rust::config::WriterKind::MainDatabase),
+            komga_rust::config::WriterDecision::Allowed
+                | komga_rust::config::WriterDecision::Isolated
+        ),
+        owns_filesystem_scan_output: matches!(
+            config.writer_decision(komga_rust::config::WriterKind::FilesystemScanOutput),
+            komga_rust::config::WriterDecision::Allowed
+                | komga_rust::config::WriterDecision::Isolated
+        ),
+        owns_sidecar_output: matches!(
+            config.writer_decision(komga_rust::config::WriterKind::SidecarOutput),
+            komga_rust::config::WriterDecision::Allowed
+                | komga_rust::config::WriterDecision::Isolated
+        ),
+        owns_search_index: matches!(
+            config.writer_decision(komga_rust::config::WriterKind::SearchIndex),
+            komga_rust::config::WriterDecision::Allowed
+                | komga_rust::config::WriterDecision::Isolated
+        ),
+    }
+}
+
 fn write_stale_analyzer_version_marker(index_dir: &std::path::Path) {
     fs::write(
         index_dir.join(ANALYZER_VERSION_MARKER_FILE),

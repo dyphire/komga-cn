@@ -8,7 +8,6 @@ axum.workspace = true
 axum-extra.workspace = true
 base64.workspace = true
 bcrypt.workspace = true
-config.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -29,6 +28,7 @@ image.workspace = true
 tracing.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
+komga-config = { path = "../config" }
 komga-domain = { path = "../domain" }
 komga-application = { path = "../application" }
 komga-infrastructure = { path = "../infrastructure" }

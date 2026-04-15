@@ -23,7 +23,7 @@ fn runtime_worker_spawns_log_started_and_shutdown_with_span_context() {
         async move {
             async move {
                 let background = komga_rust::infrastructure::task_queue::prepare_task_queue(
-                    config.clone(),
+                    runtime_task_context_from_config(&config),
                     None,
                 );
                 komga_rust::infrastructure::task_queue::spawn_runtime_workers(
@@ -91,7 +91,7 @@ fn runtime_workers_observe_shutdown_signal_before_runtime_teardown() {
         async move {
             async move {
                 let background = komga_rust::infrastructure::task_queue::prepare_task_queue(
-                    config.clone(),
+                    runtime_task_context_from_config(&config),
                     None,
                 );
                 let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);

@@ -12,10 +12,11 @@ async fn scanner_deep_scan_reanalyzes_changed_existing_books() {
         .expect("initial scannable cbz fixture should be written");
     let book_url = book_path.to_string_lossy().to_string();
 
-    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    let runtime = runtime_task_context_from_config(&fixture.config);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler.enqueue(scan_library_task("library-1", 900, false));
     scheduler
-        .process_available(&fixture.config)
+        .process_available(&runtime)
         .expect("initial scan should analyze the seeded book successfully");
 
     let initial_page_size = load_media_page_file_size(&fixture.paths.main_db, &book_url).await;
@@ -31,7 +32,7 @@ async fn scanner_deep_scan_reanalyzes_changed_existing_books() {
 
     scheduler.enqueue(scan_library_task("library-1", 900, true));
     scheduler
-        .process_available(&fixture.config)
+        .process_available(&runtime)
         .expect("deep scan should complete successfully after the book archive changes");
 
     let updated_page_size = load_media_page_file_size(&fixture.paths.main_db, &book_url).await;
@@ -60,10 +61,11 @@ async fn scanner_oneshot_rescan_reuses_existing_series_id_when_book_url_changes(
         .expect("oneshot book fixture should be written");
     update_library_oneshots_directory(&fixture.paths.main_db, "library-1", Some("OneShots")).await;
 
-    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    let runtime = runtime_task_context_from_config(&fixture.config);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler.enqueue(scan_library_task("library-1", 900, false));
     scheduler
-        .process_available(&fixture.config)
+        .process_available(&runtime)
         .expect("initial oneshot scan should complete successfully");
 
     let existing_book_url = existing_book_path.to_string_lossy().to_string();
@@ -84,7 +86,7 @@ async fn scanner_oneshot_rescan_reuses_existing_series_id_when_book_url_changes(
 
     scheduler.enqueue(scan_library_task("library-1", 900, false));
     scheduler
-        .process_available(&fixture.config)
+        .process_available(&runtime)
         .expect("oneshot rescan should complete successfully after rename");
 
     let rescanned_series_id =
@@ -133,10 +135,11 @@ async fn scanner_scan_splits_configured_oneshots_directories_into_per_book_onesh
 
     update_library_oneshots_directory(&fixture.paths.main_db, "library-1", Some("_oneshots")).await;
 
-    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    let runtime = runtime_task_context_from_config(&fixture.config);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler.enqueue(scan_library_task("library-1", 900, false));
     scheduler
-        .process_available(&fixture.config)
+        .process_available(&runtime)
         .expect("scan should treat configured oneshots directories like Kotlin does");
 
     let pool = connect_pool(fixture.paths.main_db.as_path(), 1)
@@ -230,10 +233,11 @@ async fn scanner_regular_scan_reanalyzes_changed_books_when_series_changed() {
                 .expect("secondary scannable cbz fixture should be written");
         }
 
-        let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+        let runtime = runtime_task_context_from_config(&fixture.config);
+        let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         scheduler.enqueue(scan_library_task("library-1", 900, false));
         scheduler
-            .process_available(&fixture.config)
+            .process_available(&runtime)
             .expect("initial scan should analyze seeded books successfully");
 
         if deleted_sibling {
@@ -280,7 +284,7 @@ async fn scanner_regular_scan_reanalyzes_changed_books_when_series_changed() {
 
         scheduler.enqueue(scan_library_task("library-1", 900, false));
         scheduler
-            .process_available(&fixture.config)
+            .process_available(&runtime)
             .expect("regular scan should complete successfully after seriesChanged trigger");
 
         let updated_page_size =
@@ -306,10 +310,11 @@ async fn scanner_rescan_reapplies_provider_numbering_after_kotlin_like_resort() 
     )
     .expect("book sidecar with provider number should be written for rescan fixture");
 
-    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    let runtime = runtime_task_context_from_config(&fixture.config);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler.enqueue(scan_library_task("library-1", 900, false));
     scheduler
-        .process_available(&fixture.config)
+        .process_available(&runtime)
         .expect("initial scan should apply provider numbering successfully");
 
     let initial_pool = connect_pool(fixture.paths.main_db.as_path(), 1)
@@ -332,7 +337,7 @@ async fn scanner_rescan_reapplies_provider_numbering_after_kotlin_like_resort() 
 
     scheduler.enqueue(scan_library_task("library-1", 900, false));
     scheduler
-        .process_available(&fixture.config)
+        .process_available(&runtime)
         .expect("rescan should preserve provider numbering after Kotlin-like resort");
 
     let verify_pool = connect_pool(fixture.paths.main_db.as_path(), 1)
@@ -379,10 +384,11 @@ async fn scanner_rescan_updates_existing_persisted_book_file_size_rows() {
     fs::write(&book_path, updated_payload)
         .expect("book payload rewrite should succeed for rescan update contract");
 
-    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    let runtime = runtime_task_context_from_config(&fixture.config);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler.enqueue(scan_library_task("library-1", 900, false));
     scheduler
-        .process_available(&fixture.config)
+        .process_available(&runtime)
         .expect("scanner rescan task should process successfully");
 
     let updated_size = load_book_file_size(&fixture.paths.main_db, &book_url).await;
@@ -401,10 +407,11 @@ async fn scanner_rescan_recreates_missing_metadata_seed_rows() {
         .await
         .expect("scanner metadata-repair fixture should be created");
 
-    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    let runtime = runtime_task_context_from_config(&fixture.config);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler.enqueue(scan_library_task("library-1", 900, false));
     scheduler
-        .process_available(&fixture.config)
+        .process_available(&runtime)
         .expect("initial scan should create persisted metadata seeds");
 
     let pool = connect_pool(fixture.paths.main_db.as_path(), 1)
@@ -436,7 +443,7 @@ async fn scanner_rescan_recreates_missing_metadata_seed_rows() {
 
     scheduler.enqueue(scan_library_task("library-1", 900, false));
     scheduler
-        .process_available(&fixture.config)
+        .process_available(&runtime)
         .expect("rescan should recreate missing metadata seed rows");
 
     let repaired_snapshot = load_persistence_snapshot(&fixture.paths.main_db, "library-1").await;
@@ -455,10 +462,11 @@ async fn scanner_rescan_soft_deletes_missing_series_while_leaving_sidecar_rows_v
 
     let series_dir = fixture.library_root.join("Series-A");
 
-    let mut scheduler = TaskQueueScheduler::for_runtime(fixture.config.clone(), "rust-main");
+    let runtime = runtime_task_context_from_config(&fixture.config);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler.enqueue(scan_library_task("library-1", 900, false));
     scheduler
-        .process_available(&fixture.config)
+        .process_available(&runtime)
         .expect("initial scan should persist the seeded series before missing-series rescan");
 
     let initial_snapshot = load_persistence_snapshot(&fixture.paths.main_db, "library-1").await;
@@ -472,7 +480,7 @@ async fn scanner_rescan_soft_deletes_missing_series_while_leaving_sidecar_rows_v
 
     scheduler.enqueue(scan_library_task("library-1", 900, false));
     scheduler
-        .process_available(&fixture.config)
+        .process_available(&runtime)
         .expect("rescan should soft-delete missing persisted series successfully");
 
     let pool = connect_pool(fixture.paths.main_db.as_path(), 1)
