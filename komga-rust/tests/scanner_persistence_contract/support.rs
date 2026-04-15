@@ -200,7 +200,7 @@ pub(super) async fn update_series_file_last_modified(
     let pool = connect_pool(main_db, 1)
         .await
         .expect("sqlite pool should open for series last-modified update");
-    sqlx::query("UPDATE SERIES SET FILE_LAST_MODIFIED = ? WHERE URL = ?")
+    sqlx::query("UPDATE SERIES SET FILE_LAST_MODIFIED = datetime(?, 'unixepoch') WHERE URL = ?")
         .bind(file_last_modified)
         .bind(series_url)
         .execute(&pool)

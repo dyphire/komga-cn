@@ -281,11 +281,6 @@ pub(super) fn compose_persisted_discovery_access_backend(
                 infrastructure_discovery::load_persisted_book_count(database_file.as_path()).await
             })
         }),
-        persisted_books_exist: Arc::new(|database_file| {
-            Box::pin(async move {
-                infrastructure_discovery::persisted_books_exist(database_file.as_path()).await
-            })
-        }),
         load_persisted_genres: forward_string_facet_loader!(
             infrastructure_discovery::load_persisted_genres
         ),

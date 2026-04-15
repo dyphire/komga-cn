@@ -26,7 +26,7 @@ pub use authors::{
 };
 pub use books::{
     load_book_poster_summaries, load_persisted_book_count, load_persisted_book_summaries,
-    load_persisted_book_summaries_by_ids, persisted_books_exist,
+    load_persisted_book_summaries_by_ids,
 };
 pub use facets::{
     load_persisted_age_ratings, load_persisted_genres, load_persisted_languages,

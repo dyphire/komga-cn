@@ -33,7 +33,6 @@ pub struct PersistedDiscoveryAccessBackend {
             + Sync,
     >,
     pub load_persisted_book_count: Arc<dyn Fn(PathBuf) -> BoxFutureResult<usize> + Send + Sync>,
-    pub persisted_books_exist: Arc<dyn Fn(PathBuf) -> BoxFutureResult<bool> + Send + Sync>,
     pub load_persisted_genres: Arc<
         dyn Fn(PathBuf, Option<Vec<String>>, Option<String>) -> BoxFutureResult<Vec<String>>
             + Send
@@ -208,13 +207,6 @@ pub(super) async fn persisted_backend_load_persisted_book_count(
 ) -> Result<usize, String> {
     let backend = persisted_discovery_backend()?;
     (backend.load_persisted_book_count)(database_file.to_path_buf()).await
-}
-
-pub(super) async fn persisted_backend_persisted_books_exist(
-    database_file: &FsPath,
-) -> Result<bool, String> {
-    let backend = persisted_discovery_backend()?;
-    (backend.persisted_books_exist)(database_file.to_path_buf()).await
 }
 
 pub(super) async fn persisted_backend_load_persisted_genres(

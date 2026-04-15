@@ -90,7 +90,7 @@ pub fn persist_removed_hashed_pages(
             sqlx::query(
                 r#"
                 UPDATE BOOK
-                SET FILE_LAST_MODIFIED = ?,
+                SET FILE_LAST_MODIFIED = datetime(?, 'unixepoch'),
                     FILE_SIZE = ?,
                     FILE_HASH = '',
                     FILE_HASH_KOREADER = '',
@@ -143,7 +143,7 @@ pub fn persist_book_extension_repair(
                 r#"
                 UPDATE BOOK
                 SET URL = ?,
-                    FILE_LAST_MODIFIED = ?,
+                    FILE_LAST_MODIFIED = datetime(?, 'unixepoch'),
                     FILE_SIZE = ?,
                     LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
                 WHERE ID = ?
@@ -218,7 +218,7 @@ pub fn persist_book_conversion(
                 r#"
                 UPDATE BOOK
                 SET URL = ?,
-                    FILE_LAST_MODIFIED = ?,
+                    FILE_LAST_MODIFIED = datetime(?, 'unixepoch'),
                     FILE_SIZE = ?,
                     FILE_HASH = '',
                     FILE_HASH_KOREADER = '',

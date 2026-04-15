@@ -420,8 +420,8 @@ pub(crate) fn persist_scanned_library(
 
             for series in &scanned.series_rows {
                 let series_updated = sqlx::query(
-                    "UPDATE SERIES \
-                     SET FILE_LAST_MODIFIED = ?, NAME = ?, URL = ?, LIBRARY_ID = ?, oneshot = ?, \
+                "UPDATE SERIES \
+                     SET FILE_LAST_MODIFIED = datetime(?, 'unixepoch'), NAME = ?, URL = ?, LIBRARY_ID = ?, oneshot = ?, \
                          LAST_MODIFIED_DATE = CURRENT_TIMESTAMP, DELETED_DATE = NULL \
                      WHERE ID = ?",
                 )
@@ -439,7 +439,7 @@ pub(crate) fn persist_scanned_library(
                 if series_updated == 0 {
                     sqlx::query(
                         "INSERT OR IGNORE INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot) \
-                         VALUES (?, ?, ?, ?, ?, ?)",
+                         VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)",
                     )
                     .bind(&series.series_id)
                     .bind(series.series_last_modified_unix_seconds)
@@ -464,7 +464,7 @@ pub(crate) fn persist_scanned_library(
                 for book in &series.books {
                     let book_updated = sqlx::query(
                         "UPDATE BOOK \
-                         SET FILE_LAST_MODIFIED = ?, URL = ?, SERIES_ID = ?, FILE_SIZE = ?, \
+                         SET FILE_LAST_MODIFIED = datetime(?, 'unixepoch'), URL = ?, SERIES_ID = ?, FILE_SIZE = ?, \
                              LIBRARY_ID = ?, oneshot = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP, DELETED_DATE = NULL \
                          WHERE ID = ?",
                     )
@@ -484,7 +484,7 @@ pub(crate) fn persist_scanned_library(
                         sqlx::query(
                             "INSERT OR IGNORE INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, \
                                                         LIBRARY_ID, oneshot) \
-                             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                             VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?)",
                         )
                         .bind(&book.book_id)
                         .bind(book.file_last_modified_unix_seconds)
@@ -875,7 +875,7 @@ fn load_existing_scanned_books_by_url(
         let library_id = library_id.clone();
         Box::pin(async move {
             let rows = sqlx::query(
-                "SELECT ID, URL, SERIES_ID, FILE_LAST_MODIFIED \
+                "SELECT ID, URL, SERIES_ID, unixepoch(FILE_LAST_MODIFIED) AS FILE_LAST_MODIFIED \
                  FROM BOOK \
                  WHERE LIBRARY_ID = ? \
                    AND DELETED_DATE IS NULL",
@@ -918,7 +918,7 @@ fn load_existing_scanned_series_by_url(
         let library_id = library_id.clone();
         Box::pin(async move {
             let rows = sqlx::query(
-                "SELECT URL, FILE_LAST_MODIFIED \
+                "SELECT URL, unixepoch(FILE_LAST_MODIFIED) AS FILE_LAST_MODIFIED \
                  FROM SERIES \
                  WHERE LIBRARY_ID = ? \
                    AND DELETED_DATE IS NULL",

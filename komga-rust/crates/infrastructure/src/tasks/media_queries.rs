@@ -680,7 +680,7 @@ pub fn load_book_conversion_target(
                  b.SERIES_ID AS SERIES_ID,
                  b.LIBRARY_ID AS LIBRARY_ID,
                  l.ROOT AS LIBRARY_ROOT,
-                 b.FILE_LAST_MODIFIED AS FILE_LAST_MODIFIED,
+                 unixepoch(b.FILE_LAST_MODIFIED) AS FILE_LAST_MODIFIED,
                 COALESCE(l.CONVERT_TO_CBZ, 0) AS CONVERT_TO_CBZ,
                 COALESCE(m.MEDIA_TYPE, '') AS MEDIA_TYPE,
                 COALESCE(m.STATUS, '') AS MEDIA_STATUS
@@ -833,7 +833,7 @@ pub fn load_book_archive_source(
                 SELECT
                 b.URL AS BOOK_URL,
                 b.SERIES_ID AS SERIES_ID,
-                b.FILE_LAST_MODIFIED AS FILE_LAST_MODIFIED,
+                unixepoch(b.FILE_LAST_MODIFIED) AS FILE_LAST_MODIFIED,
                 l.ROOT AS LIBRARY_ROOT,
                 COALESCE(m.MEDIA_TYPE, '') AS MEDIA_TYPE,
                 COALESCE(m.STATUS, '') AS MEDIA_STATUS

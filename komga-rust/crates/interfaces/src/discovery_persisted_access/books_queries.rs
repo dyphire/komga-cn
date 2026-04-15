@@ -833,14 +833,6 @@ pub async fn runtime_owned_persisted_books_page(
     }
 
     let sort_modes = parse_persisted_books_sort_modes(sorts, full_text_search.as_deref());
-    let has_persisted_rows = match persisted_books_exist(database_file).await {
-        Ok(has_rows) => has_rows,
-        Err(error) => return Some(Err(error)),
-    };
-    if !has_persisted_rows {
-        return Some(Ok(PageEnvelope::from_slice(vec![], page, size, 0)));
-    }
-
     Some(
         load_persisted_books_page(
             database_file,
@@ -898,10 +890,6 @@ pub fn parse_persisted_books_sort_modes(
         modes.push(PersistedBooksSortMode::RelevanceDesc);
     }
     modes
-}
-
-async fn persisted_books_exist(database_file: &FsPath) -> Result<bool, String> {
-    persisted_backend_persisted_books_exist(database_file).await
 }
 
 pub async fn runtime_owned_books_list_response(

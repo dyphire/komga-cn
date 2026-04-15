@@ -353,19 +353,3 @@ fn parse_web_link_entries(raw: &str) -> Vec<WebLinkEntry> {
         })
         .collect()
 }
-
-pub async fn persisted_books_exist(database_file: &FsPath) -> Result<bool, String> {
-    let pool = connect_pool(database_file, 1)
-        .await
-        .map_err(|error| format!("open persisted books db: {error}"))?;
-    let row = sqlx::query(
-        "SELECT COUNT(*) AS COUNT \
-         FROM BOOK \
-         WHERE DELETED_DATE IS NULL",
-    )
-    .fetch_one(&pool)
-    .await
-    .map_err(|error| format!("query persisted books count: {error}"))?;
-
-    Ok(row.get::<i64, _>("COUNT") > 0)
-}
