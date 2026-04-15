@@ -84,10 +84,7 @@ pub fn empty_trash_rows(database_file: &Path, library_id: &str) -> Result<(), St
                 r#"
                 DELETE FROM SERIES
                 WHERE LIBRARY_ID = ?
-                AND (
-                    DELETED_DATE IS NOT NULL
-                    OR BOOK_COUNT = 0
-                )
+                AND DELETED_DATE IS NOT NULL
                 "#,
             )
             .bind(&library_id)
@@ -339,18 +336,18 @@ pub fn cleanup_empty_sets_rows(database_file: &Path) -> Result<(), String> {
             let mut deletes = Vec::<&str>::new();
             if flags.delete_collections {
                 deletes.push(
-                    "DELETE FROM COLLECTION WHERE ID NOT IN (SELECT COLLECTION_ID FROM COLLECTION_SERIES)",
+                    "DELETE FROM THUMBNAIL_COLLECTION WHERE COLLECTION_ID IN (SELECT ID FROM COLLECTION WHERE ID NOT IN (SELECT COLLECTION_ID FROM COLLECTION_SERIES))",
                 );
                 deletes.push(
-                    "DELETE FROM THUMBNAIL_COLLECTION WHERE COLLECTION_ID NOT IN (SELECT ID FROM COLLECTION)",
+                    "DELETE FROM COLLECTION WHERE ID NOT IN (SELECT COLLECTION_ID FROM COLLECTION_SERIES)",
                 );
             }
             if flags.delete_readlists {
                 deletes.push(
-                    "DELETE FROM READLIST WHERE ID NOT IN (SELECT READLIST_ID FROM READLIST_BOOK)",
+                    "DELETE FROM THUMBNAIL_READLIST WHERE READLIST_ID IN (SELECT ID FROM READLIST WHERE ID NOT IN (SELECT READLIST_ID FROM READLIST_BOOK))",
                 );
                 deletes.push(
-                    "DELETE FROM THUMBNAIL_READLIST WHERE READLIST_ID NOT IN (SELECT ID FROM READLIST)",
+                    "DELETE FROM READLIST WHERE ID NOT IN (SELECT READLIST_ID FROM READLIST_BOOK)",
                 );
             }
 
