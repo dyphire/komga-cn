@@ -31,6 +31,23 @@ fn read_bool(layered: &LayeredConfig, keys: &[&str]) -> Option<bool> {
     })
 }
 
+fn read_positive_u64(layered: &LayeredConfig, keys: &[&str]) -> Option<u64> {
+    keys.iter().find_map(|key| {
+        layered
+            .get_int(key)
+            .ok()
+            .and_then(|value| u64::try_from(value).ok())
+            .filter(|value| *value > 0)
+            .or_else(|| {
+                layered
+                    .get_string(key)
+                    .ok()
+                    .and_then(|value| value.trim().parse::<u64>().ok())
+                    .filter(|value| *value > 0)
+            })
+    })
+}
+
 fn resolve_config_bool(
     layered: &LayeredConfig,
     env: &BTreeMap<String, String>,
@@ -79,6 +96,26 @@ fn resolve_oauth2_account_creation(
         ],
         false,
     )
+}
+
+fn resolve_session_max_inactive_seconds(
+    layered: &LayeredConfig,
+    env: &BTreeMap<String, String>,
+) -> u64 {
+    env.get("KOMGA_SESSION_MAX_INACTIVE_SECONDS")
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .or_else(|| {
+            read_positive_u64(
+                layered,
+                &[
+                    "komga.sessionMaxInactiveSeconds",
+                    "komga.session-max-inactive-seconds",
+                    "komga.session_max_inactive_seconds",
+                ],
+            )
+        })
+        .unwrap_or(DEFAULT_SESSION_MAX_INACTIVE_SECONDS)
 }
 
 struct ResolvedConfigInputs {
@@ -189,6 +226,7 @@ pub(crate) fn resolve_with_env(
     let oauth2_clients = resolve_oauth2_clients_for_startup_slice(&layered, env);
     let oauth2_account_creation = resolve_oauth2_account_creation(&layered, env)?;
     let oidc_email_verification = resolve_oidc_email_verification(&layered, env)?;
+    let session_max_inactive_seconds = resolve_session_max_inactive_seconds(&layered, env);
 
     let writer_ownership_policy = resolve_writer_ownership_policy_for_startup_slice(cli, env)?;
     let demo_mode = active_profiles_contain_demo(&layered, env);
@@ -210,6 +248,7 @@ pub(crate) fn resolve_with_env(
         fonts_data_directory: derived_paths.fonts_data_directory,
         oauth2_clients,
         writer_ownership_policy,
+        session_max_inactive_seconds,
     };
 
     config.validate_single_writer_storage_ownership(env)?;

@@ -27,6 +27,6 @@ pub use runtime_identity_access::{
     persisted_record_successful_authentication_activity, persisted_update_password_by_user_id,
     persisted_users, remember_me_max_age_seconds, remember_me_token_for_user_with_runtime_key,
     session_token_for_user_with_runtime_key, sync_remember_me_runtime_database_file,
-    sync_remember_me_runtime_settings,
+    sync_remember_me_runtime_settings, sync_session_runtime_settings,
 };
 pub use session_store::{RememberMeRuntimeSettings, session_token_store};

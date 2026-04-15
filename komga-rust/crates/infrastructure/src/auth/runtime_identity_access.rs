@@ -47,6 +47,10 @@ pub fn remember_me_token_for_user_with_runtime_key(
     issue_remember_me_token(session_token_store(), user, runtime_key)
 }
 
+pub fn sync_session_runtime_settings(runtime_key: &str, max_inactive_seconds: u64) {
+    session_token_store().sync_session_settings(runtime_key, max_inactive_seconds);
+}
+
 pub fn sync_remember_me_runtime_database_file(runtime_key: &str, database_file: &Path) {
     session_token_store().sync_remember_me_database_path(runtime_key, database_file);
 }

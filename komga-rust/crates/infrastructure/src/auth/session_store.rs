@@ -22,6 +22,7 @@ static SESSION_REGISTRY: LazyLock<SessionRegistry> = LazyLock::new(SessionRegist
 pub struct SessionRegistry {
     counter: AtomicU64,
     sessions: Mutex<HashMap<String, SessionTokenRecord>>,
+    session_max_inactive_seconds_by_runtime_key: Mutex<HashMap<String, u64>>,
     remember_me_settings_by_runtime_key: Mutex<HashMap<String, RememberMeRuntimeSettings>>,
     remember_me_database_paths_by_runtime_key: Mutex<HashMap<String, PathBuf>>,
 }
@@ -49,9 +50,30 @@ impl SessionRegistry {
         Self {
             counter: AtomicU64::new(1),
             sessions: Mutex::new(HashMap::new()),
+            session_max_inactive_seconds_by_runtime_key: Mutex::new(HashMap::new()),
             remember_me_settings_by_runtime_key: Mutex::new(HashMap::new()),
             remember_me_database_paths_by_runtime_key: Mutex::new(HashMap::new()),
         }
+    }
+
+    fn session_max_inactive_seconds_for_runtime_key(&self, runtime_key: &str) -> u64 {
+        self.session_max_inactive_seconds_by_runtime_key
+            .lock()
+            .expect("session settings lock should not be poisoned")
+            .get(runtime_key)
+            .cloned()
+            .unwrap_or(SESSION_MAX_INACTIVE_SECONDS)
+    }
+
+    pub fn sync_session_settings(&self, runtime_key: &str, max_inactive_seconds: u64) {
+        let runtime_key = normalized_runtime_key(runtime_key);
+        self.session_max_inactive_seconds_by_runtime_key
+            .lock()
+            .expect("session settings lock should not be poisoned")
+            .insert(
+                runtime_key,
+                normalized_session_max_inactive_seconds(max_inactive_seconds),
+            );
     }
 
     fn remember_me_database_path_for_runtime_key(&self, runtime_key: &str) -> Option<PathBuf> {
@@ -196,11 +218,13 @@ impl SessionRuntime for SessionRegistry {
         let mut resolved_user = None;
         let mut should_remove = false;
         if let Some(entry) = sessions.get_mut(token) {
+            let session_max_inactive_seconds =
+                self.session_max_inactive_seconds_for_runtime_key(entry.runtime_key.as_str());
             let last_seen = entry
                 .last_accessed_epoch_seconds
                 .max(entry.issued_at_epoch_seconds);
             let inactive_for = now.saturating_sub(last_seen);
-            if inactive_for >= session_max_inactive_seconds() {
+            if inactive_for >= session_max_inactive_seconds {
                 should_remove = true;
             } else {
                 entry.last_accessed_epoch_seconds = now;
@@ -239,12 +263,12 @@ fn now_epoch_seconds() -> u64 {
         .unwrap_or_default()
 }
 
-fn session_max_inactive_seconds() -> u64 {
-    std::env::var("KOMGA_SESSION_MAX_INACTIVE_SECONDS")
-        .ok()
-        .and_then(|value| value.trim().parse::<u64>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(SESSION_MAX_INACTIVE_SECONDS)
+fn normalized_session_max_inactive_seconds(max_inactive_seconds: u64) -> u64 {
+    if max_inactive_seconds == 0 {
+        SESSION_MAX_INACTIVE_SECONDS
+    } else {
+        max_inactive_seconds
+    }
 }
 
 struct ParsedRememberMeToken {

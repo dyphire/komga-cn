@@ -128,6 +128,7 @@ pub struct RuntimeIdentityAccessBackend {
         Arc<dyn Fn(AuthUser, String) -> String + Send + Sync>,
     pub remember_me_token_for_user_with_runtime_key:
         Arc<dyn Fn(AuthUser, String) -> Option<String> + Send + Sync>,
+    pub sync_session_runtime_settings: Arc<dyn Fn(String, u64) + Send + Sync>,
     pub sync_remember_me_runtime_database_file: Arc<dyn Fn(String, PathBuf) + Send + Sync>,
     pub sync_remember_me_runtime_settings: Arc<dyn Fn(String, String, u64) + Send + Sync>,
     pub remember_me_max_age_seconds: Arc<dyn Fn(String) -> u64 + Send + Sync>,
@@ -348,6 +349,7 @@ fn default_test_backend() -> RuntimeIdentityAccessBackend {
                 .insert(token.clone(), user);
             Some(token)
         }),
+        sync_session_runtime_settings: Arc::new(|_, _| {}),
         sync_remember_me_runtime_database_file: Arc::new(|_, _| {}),
         sync_remember_me_runtime_settings: Arc::new(|_, _, _| {}),
         remember_me_max_age_seconds: Arc::new(|_| 365 * 24 * 60 * 60),
@@ -445,6 +447,10 @@ pub fn remember_me_token_for_user_with_runtime_key(
     runtime_key: &str,
 ) -> Option<String> {
     (backend().remember_me_token_for_user_with_runtime_key)(user.clone(), runtime_key.to_string())
+}
+
+pub fn sync_session_runtime_settings(runtime_key: &str, max_inactive_seconds: u64) {
+    (backend().sync_session_runtime_settings)(runtime_key.to_string(), max_inactive_seconds)
 }
 
 pub fn sync_remember_me_runtime_database_file(runtime_key: &str, database_file: &Path) {

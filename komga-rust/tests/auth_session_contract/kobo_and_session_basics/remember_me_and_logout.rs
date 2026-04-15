@@ -47,6 +47,12 @@ fn cookie_max_age_seconds(cookie: &str) -> Option<u64> {
         .and_then(|value| value.parse::<u64>().ok())
 }
 
+fn one_second_session_runtime_config(paths: &RuntimeDbPaths) -> komga_rust::config::RuntimeConfig {
+    let mut config = runtime_config_for_paths(paths);
+    config.session_max_inactive_seconds = 1;
+    config
+}
+
 async fn login_with_basic_and_remember_me(
     app: axum::Router,
     email: &str,
@@ -123,12 +129,12 @@ async fn basic_login_with_remember_me_true_issues_session_and_remember_me_cookie
 
 pub(crate) async fn verify_remember_me_reauthenticates_after_session_expiry() {
     let _guard = lock_remember_me_contract().await;
-    let _session_timeout = EnvVarGuard::set("KOMGA_SESSION_MAX_INACTIVE_SECONDS", "1");
 
     let paths = new_router_fixture("router-remember-me-session-expiry-reauth").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let config = one_second_session_runtime_config(&paths);
+    let app = build_router_with_config(&config);
     let login_response = login_with_basic_and_remember_me(
         app.clone(),
         "admin@example.org",
@@ -169,7 +175,6 @@ async fn remember_me_reauthenticates_after_session_expiry() {
 
 pub(crate) async fn verify_remember_me_auto_login_records_remember_me_source() {
     let _guard = lock_remember_me_contract().await;
-    let _session_timeout = EnvVarGuard::set("KOMGA_SESSION_MAX_INACTIVE_SECONDS", "1");
 
     let paths = new_router_fixture("router-remember-me-auto-login-records-source").await;
     seed_router_contract_data(&paths).await;
@@ -184,7 +189,8 @@ pub(crate) async fn verify_remember_me_auto_login_records_remember_me_source() {
         .expect("existing authentication activity rows should delete");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let config = one_second_session_runtime_config(&paths);
+    let app = build_router_with_config(&config);
     let login_response = login_with_basic_and_remember_me(
         app.clone(),
         "admin@example.org",

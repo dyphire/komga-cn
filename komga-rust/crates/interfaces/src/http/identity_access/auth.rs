@@ -20,6 +20,7 @@ use crate::runtime_identity_access::{
     remember_me_max_age_seconds as runtime_remember_me_max_age_seconds,
     sync_remember_me_runtime_database_file as runtime_sync_remember_me_runtime_database_file,
     sync_remember_me_runtime_settings as runtime_sync_remember_me_runtime_settings,
+    sync_session_runtime_settings as runtime_sync_session_runtime_settings,
 };
 
 pub use komga_application::identity_access::{
@@ -147,6 +148,10 @@ pub fn sync_remember_me_runtime_settings(runtime_key: &str, key: &str, duration_
 
 pub fn sync_remember_me_runtime_database_file(runtime_key: &str, database_file: &Path) {
     runtime_sync_remember_me_runtime_database_file(runtime_key, database_file);
+}
+
+pub fn sync_session_runtime_settings(runtime_key: &str, max_inactive_seconds: u64) {
+    runtime_sync_session_runtime_settings(runtime_key, max_inactive_seconds);
 }
 
 pub fn remember_me_max_age_seconds(runtime_key: &str) -> u64 {

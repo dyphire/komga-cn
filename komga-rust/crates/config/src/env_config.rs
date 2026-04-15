@@ -9,11 +9,13 @@ use super::path_resolution::{
     default_log_file_for_config_dir, resolve_admin_action_config_with_env,
     resolve_runtime_config_with_env,
 };
-use super::profile::{PlatformProfile, RuntimeMode, RuntimeProfile, DEFAULT_CONFIG_DIR};
+use super::profile::{DEFAULT_CONFIG_DIR, PlatformProfile, RuntimeMode, RuntimeProfile};
 use super::startup_policy::{
     ensure_startup_runtime_layout, validate_single_writer_storage_ownership,
 };
 use super::writer_ownership::WriterOwnershipPolicy;
+
+pub const DEFAULT_SESSION_MAX_INACTIVE_SECONDS: u64 = 30 * 24 * 60 * 60;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OAuth2ClientConfig {
@@ -44,6 +46,7 @@ pub struct RuntimeConfig {
     pub fonts_data_directory: PathBuf,
     pub oauth2_clients: Vec<OAuth2ClientConfig>,
     pub writer_ownership_policy: WriterOwnershipPolicy,
+    pub session_max_inactive_seconds: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -94,6 +97,7 @@ impl RuntimeConfig {
                 isolation_root: None,
                 allow_isolated_writes: false,
             },
+            session_max_inactive_seconds: DEFAULT_SESSION_MAX_INACTIVE_SECONDS,
         }
     }
 

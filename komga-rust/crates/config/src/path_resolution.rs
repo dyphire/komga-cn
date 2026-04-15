@@ -4,7 +4,9 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use super::cli_args::*;
-use super::env_config::{AdminActionConfig, OAuth2ClientConfig, RuntimeConfig};
+use super::env_config::{
+    AdminActionConfig, DEFAULT_SESSION_MAX_INACTIVE_SECONDS, OAuth2ClientConfig, RuntimeConfig,
+};
 use super::error::ConfigError;
 use super::profile::{
     DEFAULT_CONFIG_DIR, DEFAULT_LOG_FILE_NAME, PlatformProfile, RuntimeMode, RuntimeProfile,

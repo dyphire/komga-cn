@@ -9,6 +9,9 @@ pub(super) fn compose_runtime_identity_access_backend() -> RuntimeIdentityAccess
         remember_me_token_for_user_with_runtime_key: Arc::new(|user, runtime_key| {
             infrastructure_auth::remember_me_token_for_user_with_runtime_key(&user, &runtime_key)
         }),
+        sync_session_runtime_settings: Arc::new(|runtime_key, max_inactive_seconds| {
+            infrastructure_auth::sync_session_runtime_settings(&runtime_key, max_inactive_seconds)
+        }),
         sync_remember_me_runtime_database_file: Arc::new(|runtime_key, database_file| {
             infrastructure_auth::sync_remember_me_runtime_database_file(
                 &runtime_key,

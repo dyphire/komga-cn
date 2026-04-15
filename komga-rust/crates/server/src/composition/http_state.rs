@@ -41,6 +41,7 @@ use komga_interfaces::http::discovery::{
 use komga_interfaces::http::discovery_auth::DiscoveryAuthState;
 use komga_interfaces::http::identity_access::auth::{
     sync_remember_me_runtime_database_file, sync_remember_me_runtime_settings,
+    sync_session_runtime_settings,
 };
 use komga_interfaces::http::state::{
     AuthDatabaseState, BookImportSseEvent, LibraryCatalogOperations, OAuth2ClientConfig,
@@ -153,6 +154,10 @@ pub fn compose_http_runtime(
     // The current registry still derives both token families from the same configured root,
     // but the HTTP state keeps separate runtime keys so session and remember-me semantics are explicit.
     let session_runtime_key = remember_me_runtime_key.clone();
+    sync_session_runtime_settings(
+        session_runtime_key.as_str(),
+        config.session_max_inactive_seconds,
+    );
 
     let read_progress = ReadProgressState {
         progress_by_token: Arc::new(Mutex::new(HashMap::new())),
