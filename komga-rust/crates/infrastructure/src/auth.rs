@@ -13,8 +13,7 @@ pub use device_auth::{
 };
 pub use device_auth_config::configured_api_key;
 pub use kobo_sync::{
-    load_kobo_sync_deltas, load_kobo_sync_snapshot, load_sync_point_marker, load_sync_point_state,
-    proxy_kobo_store_library_sync, remove_sync_point, save_sync_point,
+    load_kobo_sync_deltas, load_kobo_sync_page, proxy_kobo_store_library_sync, remove_sync_point,
 };
 pub use runtime_identity_access::{
     auth_token_user, ensure_oauth_user, invalidate_remember_me_token, invalidate_session_token,

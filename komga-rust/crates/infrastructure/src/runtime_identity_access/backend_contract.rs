@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use axum::http::HeaderMap;
 use komga_application::identity_access::{
-    AuthOutcome, AuthUser, KoboStoreSyncMergeResult, KoboSyncPointState, KoboSyncSnapshot,
-    PersistedApiKey, PersistedApiKeyMetadata, PersistedAuthenticationActivity,
+    AuthOutcome, AuthUser, KoboStoreSyncMergeResult, KoboSyncPage, PersistedApiKey,
+    PersistedApiKeyMetadata, PersistedAuthenticationActivity,
 };
 use serde_json::Value;
 use sqlx::SqlitePool;
@@ -177,8 +177,18 @@ pub struct RuntimeIdentityAccessBackend {
             + Send
             + Sync,
     >,
-    pub load_kobo_sync_snapshot: Arc<
-        dyn Fn(PathBuf, String) -> BoxFuture<Result<KoboSyncSnapshot, sqlx::Error>> + Send + Sync,
+    pub load_kobo_sync_page: Arc<
+        dyn Fn(
+                PathBuf,
+                AuthUser,
+                String,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                usize,
+            ) -> BoxFuture<Result<KoboSyncPage, sqlx::Error>>
+            + Send
+            + Sync,
     >,
     pub load_koreader_book_target: Arc<
         dyn Fn(
@@ -198,10 +208,6 @@ pub struct RuntimeIdentityAccessBackend {
             + Send
             + Sync,
     >,
-    pub load_sync_point_marker:
-        Arc<dyn Fn(PathBuf, String, String) -> BoxFuture<Option<String>> + Send + Sync>,
-    pub load_sync_point_state:
-        Arc<dyn Fn(PathBuf, String, String) -> BoxFuture<Option<KoboSyncPointState>> + Send + Sync>,
     pub load_thumbnail_by_id: Arc<
         dyn Fn(PathBuf, String) -> BoxFuture<Result<Option<(String, Vec<u8>)>, sqlx::Error>>
             + Send
@@ -235,11 +241,6 @@ pub struct RuntimeIdentityAccessBackend {
     >,
     pub remove_sync_point:
         Arc<dyn Fn(PathBuf, String) -> BoxFuture<Result<(), sqlx::Error>> + Send + Sync>,
-    pub save_sync_point: Arc<
-        dyn Fn(PathBuf, String, KoboSyncPointState) -> BoxFuture<Result<(), sqlx::Error>>
-            + Send
-            + Sync,
-    >,
     pub open_auth_pool:
         Arc<dyn Fn(PathBuf) -> BoxFuture<Result<SqlitePool, sqlx::Error>> + Send + Sync>,
 }

@@ -94,6 +94,170 @@ pub(super) async fn proxy_kobo_catch_all_request(
     proxy::execute_kobo_proxy_request(method, path, query, headers, body).await
 }
 
+fn sync_book_snapshot_from_metadata(
+    book_id: &str,
+    created: &str,
+    file_last_modified: &str,
+    metadata: &crate::runtime_identity_access::KoboMetadataRecord,
+) -> KoboSyncBookSnapshot {
+    KoboSyncBookSnapshot {
+        id: book_id.to_string(),
+        title: metadata.title.clone(),
+        summary: metadata.summary.clone(),
+        release_date: metadata.release_date.clone(),
+        language: metadata.language.clone(),
+        file_size: metadata.file_size,
+        page_count: 1,
+        created: metadata
+            .created_date
+            .clone()
+            .unwrap_or_else(|| created.to_string()),
+        last_modified: file_last_modified.to_string(),
+        contributor_names: metadata.contributor_names.clone(),
+        isbn: metadata.isbn.clone(),
+        publisher_name: metadata.publisher_name.clone(),
+        cover_image_id: metadata.cover_image_id.clone(),
+        series_id: metadata.series_id.clone(),
+        series_name: metadata.series_name.clone(),
+        series_number: metadata.series_number.clone(),
+        series_number_float: metadata.series_number_float,
+        oneshot: metadata.oneshot,
+    }
+}
+
+fn removed_book_snapshot(
+    book_id: &str,
+    created: &str,
+    file_last_modified: &str,
+) -> KoboSyncBookSnapshot {
+    KoboSyncBookSnapshot {
+        id: book_id.to_string(),
+        title: book_id.to_string(),
+        summary: String::new(),
+        release_date: None,
+        language: "en".to_string(),
+        file_size: 0,
+        page_count: 1,
+        created: created.to_string(),
+        last_modified: file_last_modified.to_string(),
+        contributor_names: Vec::new(),
+        isbn: None,
+        publisher_name: None,
+        cover_image_id: Some(book_id.to_string()),
+        series_id: None,
+        series_name: None,
+        series_number: None,
+        series_number_float: None,
+        oneshot: true,
+    }
+}
+
+fn progress_snapshot(record: &PersistedReadProgressRecord) -> KoboSyncReadProgressSnapshot {
+    KoboSyncReadProgressSnapshot {
+        page: record.page,
+        completed: record.completed,
+        created: record.created.clone(),
+        last_modified: record.last_modified.clone(),
+        locator: record.locator.clone(),
+    }
+}
+
+async fn build_kobo_sync_events_page(
+    database_file: &FsPath,
+    page: &komga_application::identity_access::KoboSyncPage,
+    user_id: &str,
+    base_url: &str,
+    auth_token: &str,
+) -> Result<Vec<Value>, sqlx::Error> {
+    let mut events = Vec::new();
+
+    for book in &page.books_added {
+        let metadata = load_kobo_metadata_record(database_file, &book.book_id)
+            .await?
+            .ok_or(sqlx::Error::RowNotFound)?;
+        let progress = load_read_progress(database_file, &book.book_id, user_id)
+            .await?
+            .as_ref()
+            .map(progress_snapshot);
+        let snapshot = sync_book_snapshot_from_metadata(
+            &book.book_id,
+            &book.created,
+            &book.file_last_modified,
+            &metadata,
+        );
+        events.push(build_kobo_new_entitlement(
+            &snapshot,
+            progress.as_ref(),
+            base_url,
+            auth_token,
+        ));
+    }
+
+    for book in &page.books_changed {
+        let metadata = load_kobo_metadata_record(database_file, &book.book_id)
+            .await?
+            .ok_or(sqlx::Error::RowNotFound)?;
+        let progress = load_read_progress(database_file, &book.book_id, user_id)
+            .await?
+            .as_ref()
+            .map(progress_snapshot);
+        let snapshot = sync_book_snapshot_from_metadata(
+            &book.book_id,
+            &book.created,
+            &book.file_last_modified,
+            &metadata,
+        );
+        events.push(build_kobo_new_entitlement(
+            &snapshot,
+            progress.as_ref(),
+            base_url,
+            auth_token,
+        ));
+        events.push(build_kobo_changed_product_metadata(
+            &snapshot, base_url, auth_token,
+        ));
+        if let Some(progress) = progress.as_ref() {
+            events.push(build_kobo_changed_reading_state(&snapshot, progress));
+        }
+    }
+
+    for book in &page.books_removed {
+        let snapshot =
+            removed_book_snapshot(&book.book_id, &book.created, &book.file_last_modified);
+        events.push(build_kobo_changed_entitlement_removed(
+            &snapshot, base_url, auth_token,
+        ));
+    }
+
+    for book in &page.books_read_progress_changed {
+        if let Some(progress) = load_read_progress(database_file, &book.book_id, user_id).await? {
+            let metadata = load_kobo_metadata_record(database_file, &book.book_id)
+                .await?
+                .ok_or(sqlx::Error::RowNotFound)?;
+            let snapshot = sync_book_snapshot_from_metadata(
+                &book.book_id,
+                &book.created,
+                &book.file_last_modified,
+                &metadata,
+            );
+            let progress = progress_snapshot(&progress);
+            events.push(build_kobo_changed_reading_state(&snapshot, &progress));
+        }
+    }
+
+    for readlist in &page.readlists_added {
+        events.push(build_kobo_new_tag(readlist));
+    }
+    for readlist in &page.readlists_changed {
+        events.push(build_kobo_changed_tag(readlist));
+    }
+    for readlist in &page.readlists_removed {
+        events.push(build_kobo_deleted_tag(readlist));
+    }
+
+    Ok(events)
+}
+
 pub async fn kobo_library_sync(
     Extension(state): Extension<OperationalState>,
     Path(auth_token): Path<String>,
@@ -112,144 +276,57 @@ pub async fn kobo_library_sync(
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let user_id_value = user_id(&current_user).to_string();
-    let current_api_key_id =
-        kobo_path_api_key_id(auth_token.as_str(), state.runtime.database_file.as_path()).await;
+    let current_api_key_id = resolved_kobo_request_api_key_metadata(
+        &current_user,
+        auth_token.as_str(),
+        &headers,
+        state.runtime.database_file.as_path(),
+    )
+    .await
+    .map(|(id, _)| id);
     let sync_token_raw = kobo_sync_token_from_request(&headers, &uri);
     let sync_token_payload = sync_token_raw
         .as_deref()
         .and_then(parse_komga_sync_token_payload);
 
-    let ongoing_sync_point_id = if let Some(id) = sync_token_payload
-        .as_ref()
-        .and_then(|token| token.ongoing_sync_point_id.clone())
-    {
-        if load_sync_point_state(state.runtime.database_file.as_path(), &id, &user_id_value)
-            .await
-            .is_some()
-        {
-            Some(id)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-    let last_successful_sync_point_id = if let Some(id) = sync_token_payload
-        .as_ref()
-        .and_then(|token| token.last_successful_sync_point_id.clone())
-    {
-        if load_sync_point_state(state.runtime.database_file.as_path(), &id, &user_id_value)
-            .await
-            .is_some()
-        {
-            Some(id)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-    let from_sync_point_id = last_successful_sync_point_id.clone();
-
-    let to_sync_point_id = ongoing_sync_point_id
-        .clone()
-        .unwrap_or_else(random_uuid_like);
-    let mut to_sync_point_state = if let Some(state_entry) = load_sync_point_state(
+    let base_url = request_base_url(&headers);
+    let sync_page = match load_kobo_sync_page(
         state.runtime.database_file.as_path(),
-        to_sync_point_id.as_str(),
+        &current_user,
         &user_id_value,
+        current_api_key_id.as_deref(),
+        sync_token_payload
+            .as_ref()
+            .and_then(|token| token.ongoing_sync_point_id.as_deref()),
+        sync_token_payload
+            .as_ref()
+            .and_then(|token| token.last_successful_sync_point_id.as_deref()),
+        KOBO_SYNC_ITEM_LIMIT,
     )
     .await
     {
-        state_entry
-    } else {
-        KoboSyncPointState {
-            user_id: user_id_value.clone(),
-            api_key_id: current_api_key_id.clone(),
-            marker: now_sync_marker(),
-            cursor: 0,
-            from_marker: if let Some(sync_id) = from_sync_point_id.as_ref() {
-                load_sync_point_marker(
-                    state.runtime.database_file.as_path(),
-                    sync_id,
-                    &user_id_value,
-                )
-                .await
-            } else {
-                None
-            }
-            .or(sync_token_raw.clone()),
-            snapshot: None,
-        }
+        Ok(page) => page,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
-
-    if to_sync_point_state.from_marker.is_none() {
-        let marker = if let Some(sync_id) = from_sync_point_id.as_ref() {
-            load_sync_point_marker(
-                state.runtime.database_file.as_path(),
-                sync_id,
-                &user_id_value,
-            )
-            .await
-        } else {
-            None
-        };
-        to_sync_point_state.from_marker = marker.or(sync_token_raw.clone());
-    }
-
-    if to_sync_point_state.snapshot.is_none() {
-        to_sync_point_state.snapshot =
-            match load_kobo_sync_snapshot(state.runtime.database_file.as_path(), &user_id_value)
-                .await
-            {
-                Ok(snapshot) => Some(snapshot),
-                Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-            };
-    }
-
-    let from_sync_snapshot = if let Some(sync_id) = from_sync_point_id.as_ref() {
-        load_sync_point_state(
-            state.runtime.database_file.as_path(),
-            sync_id,
-            &user_id_value,
-        )
-        .await
-        .and_then(|sync_state| sync_state.snapshot)
-    } else {
-        None
-    };
-
-    let base_url = request_base_url(&headers);
-    let events = build_kobo_sync_events(
-        from_sync_snapshot.as_ref(),
-        to_sync_point_state
-            .snapshot
-            .as_ref()
-            .expect("snapshot initialized"),
+    let response_events = match build_kobo_sync_events_page(
+        state.runtime.database_file.as_path(),
+        &sync_page,
+        &user_id_value,
         base_url.as_str(),
         auth_token.as_str(),
-    );
-
-    let start_index = to_sync_point_state.cursor.min(events.len());
-    let end_index = (start_index + KOBO_SYNC_ITEM_LIMIT).min(events.len());
-    let response_events = events[start_index..end_index].to_vec();
-    let should_continue = end_index < events.len();
-
-    to_sync_point_state.cursor = if should_continue { end_index } else { 0 };
-    if save_sync_point(
-        state.runtime.database_file.as_path(),
-        to_sync_point_id.as_str(),
-        &to_sync_point_state,
     )
     .await
-    .is_err()
     {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-    }
+        Ok(events) => events,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
+    let from_sync_point_id = sync_page.from_sync_point_id.clone();
+    let to_sync_point_id = sync_page.to_sync_point_id.clone();
 
     let kobo_store_sync_enabled = load_kobo_proxy_enabled(&state).await;
     let mut merged_events = response_events;
-    let mut merged_should_continue = should_continue;
+    let mut merged_should_continue = sync_page.should_continue;
     let mut merged_raw_kobo_sync_token = sync_token_payload
         .as_ref()
         .map(|payload| payload.raw_kobo_sync_token.clone())
@@ -261,7 +338,7 @@ pub async fn kobo_library_sync(
                 .map(str::to_string)
         });
 
-    if !should_continue
+    if !sync_page.should_continue
         && kobo_store_sync_enabled
         && let Some(raw_store_sync_token) = merged_raw_kobo_sync_token
             .as_deref()
@@ -291,20 +368,17 @@ pub async fn kobo_library_sync(
     }
 
     if !merged_should_continue
-        && let Some(from_sync_point_id) = from_sync_point_id
+        && let Some(from_sync_point_id) = from_sync_point_id.as_deref()
         && from_sync_point_id != to_sync_point_id
-        && remove_sync_point(
-            state.runtime.database_file.as_path(),
-            from_sync_point_id.as_str(),
-        )
-        .await
-        .is_err()
+        && remove_sync_point(state.runtime.database_file.as_path(), from_sync_point_id)
+            .await
+            .is_err()
     {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
     let sync_token_payload_sanitized = sync_token_payload.map(|mut payload| {
-        payload.ongoing_sync_point_id = ongoing_sync_point_id;
+        payload.ongoing_sync_point_id = sync_page.should_continue.then(|| to_sync_point_id.clone());
         if let Some(raw) = merged_raw_kobo_sync_token.as_ref() {
             payload.raw_kobo_sync_token = raw.clone();
         }
@@ -663,9 +737,14 @@ pub async fn kobo_library_book_state_update(
         return kobo_state_update_failure(book_id.as_str());
     }
 
-    let (device_id, device_name) = kobo_path_api_key_metadata(auth_token.as_str(), database_file)
-        .await
-        .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
+    let (device_id, device_name) = resolved_kobo_request_api_key_metadata(
+        &current_user,
+        auth_token.as_str(),
+        &headers,
+        database_file,
+    )
+    .await
+    .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
 
     let locator_progression = locator
         .get("locations")

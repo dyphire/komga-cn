@@ -27,9 +27,8 @@ pub use backend_contract::{
 pub use backend_state::install_runtime_identity_access;
 pub use kobo_access::{
     load_book_created_timestamp, load_book_last_epub_position_locator, load_book_media_file,
-    load_kobo_metadata_record, load_kobo_sync_snapshot, load_koreader_book_target,
-    load_read_progress, load_sync_point_marker, load_sync_point_state, load_thumbnail_by_id,
-    persist_read_progress_with_locator, persisted_book_exists, proxy_kobo_store_library_sync,
-    remove_sync_point, save_sync_point,
+    load_kobo_metadata_record, load_kobo_sync_page, load_koreader_book_target, load_read_progress,
+    load_thumbnail_by_id, persist_read_progress_with_locator, persisted_book_exists,
+    proxy_kobo_store_library_sync, remove_sync_point,
 };
 pub use user_mutation::{create_auth_user, delete_auth_user, update_auth_user};

@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use komga_application::task_processing::TaskRuntimeContext;
@@ -63,7 +63,13 @@ impl RuntimeTestFixture {
         }
 
         for db_path in db_paths {
-            for sidecar in sqlite_sidecar_paths(db_path.as_path()) {
+            let base = db_path.to_string_lossy().to_string();
+            for sidecar in [
+                db_path.clone(),
+                PathBuf::from(format!("{base}-wal")),
+                PathBuf::from(format!("{base}-shm")),
+                PathBuf::from(format!("{base}-journal")),
+            ] {
                 let _ = std::fs::remove_file(sidecar);
             }
         }
@@ -82,14 +88,4 @@ fn unique_temp_path(prefix: &str) -> PathBuf {
             .expect("clock should be after unix epoch")
             .as_nanos()
     ))
-}
-
-fn sqlite_sidecar_paths(db_path: &Path) -> [PathBuf; 4] {
-    let base = db_path.to_string_lossy().to_string();
-    [
-        db_path.to_path_buf(),
-        PathBuf::from(format!("{base}-wal")),
-        PathBuf::from(format!("{base}-shm")),
-        PathBuf::from(format!("{base}-journal")),
-    ]
 }

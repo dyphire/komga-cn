@@ -500,7 +500,15 @@ mod tests {
             "series-1",
         )
         .await;
-        insert_book(&pool, "book-1", "cover.jpg", "cover.jpg", "series-1", "library-1").await;
+        insert_book(
+            &pool,
+            "book-1",
+            "cover.jpg",
+            "cover.jpg",
+            "series-1",
+            "library-1",
+        )
+        .await;
         sqlx::query(
             "INSERT INTO MEDIA_PAGE (BOOK_ID, NUMBER, FILE_HASH, FILE_NAME, MEDIA_TYPE, FILE_SIZE) VALUES (?, ?, ?, ?, ?, ?)",
         )
@@ -543,7 +551,15 @@ mod tests {
             "series-1",
         )
         .await;
-        insert_book(&pool, "book-1", "book.cbz", "book.cbz", "series-1", "library-1").await;
+        insert_book(
+            &pool,
+            "book-1",
+            "book.cbz",
+            "book.cbz",
+            "series-1",
+            "library-1",
+        )
+        .await;
         sqlx::query(
             "INSERT INTO MEDIA_PAGE (BOOK_ID, NUMBER, FILE_HASH, FILE_NAME, MEDIA_TYPE, FILE_SIZE) VALUES (?, ?, ?, ?, ?, ?)",
         )

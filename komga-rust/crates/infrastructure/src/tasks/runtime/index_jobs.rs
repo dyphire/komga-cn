@@ -185,6 +185,7 @@ fn parse_for_bigger_result_only(payload: Option<&str>) -> bool {
 mod tests {
     use super::*;
     use crate::sqlite::{connect_pool, connect_private_pool, setup::bootstrap_pool};
+    use crate::task_queue::test_support::RuntimeTestFixture;
     use image::{ImageBuffer, Rgba};
     use komga_application::task_processing::TaskQueueAdminPort;
     use komga_application::task_processing::TaskRuntimeContext;
@@ -312,43 +313,11 @@ mod tests {
             .expect("index-jobs fixture user row should be inserted");
     }
 
-    struct AnalyzeBookDimensionFixture {
-        database_file: std::path::PathBuf,
-        tasks_db_file: std::path::PathBuf,
-        lucene_dir: std::path::PathBuf,
-        library_root: std::path::PathBuf,
-    }
-
-    impl AnalyzeBookDimensionFixture {
-        fn runtime(&self) -> TaskRuntimeContext {
-            TaskRuntimeContext {
-                database_file: self.database_file.clone(),
-                tasks_db_file: self.tasks_db_file.clone(),
-                lucene_data_directory: self.lucene_dir.clone(),
-                consumes_queue: false,
-                owns_main_database: true,
-                owns_filesystem_scan_output: true,
-                owns_sidecar_output: true,
-                owns_search_index: false,
-            }
-        }
-
-        fn cleanup(self) {
-            let _ = std::fs::remove_file(self.database_file);
-            let _ = std::fs::remove_dir_all(self.library_root);
-        }
-    }
-
     async fn seed_analyze_book_dimension_fixture(
         case: &str,
         analyze_dimensions: bool,
-    ) -> AnalyzeBookDimensionFixture {
-        let fixture = AnalyzeBookDimensionFixture {
-            database_file: unique_temp_path(&format!("komga-{case}-main")),
-            tasks_db_file: unique_temp_path(&format!("komga-{case}-tasks")),
-            lucene_dir: unique_temp_path(&format!("komga-{case}-lucene")),
-            library_root: unique_temp_path(&format!("komga-{case}-root")),
-        };
+    ) -> RuntimeTestFixture {
+        let fixture = RuntimeTestFixture::new(&format!("analyze-book-dimensions-{case}"));
         std::fs::create_dir_all(fixture.library_root.join("books"))
             .expect("analyze-book dimensions library root should be created");
         let archive_path = fixture.library_root.join("books/book-1.cbz");
@@ -542,7 +511,7 @@ mod tests {
     #[tokio::test]
     async fn analyze_book_enqueues_thumbnail_and_metadata_follow_ups_when_ready() {
         let fixture = seed_analyze_book_dimension_fixture("analyze-book-follow-up", true).await;
-        let runtime = fixture.runtime();
+        let runtime = fixture.runtime_context(false, false);
         let mut scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "analyze-book-follow-up-test");
         let task = TaskQueueRecord::new("ANALYZE_BOOK_book-1", 90, Some("series-1".to_string()))
@@ -606,14 +575,14 @@ mod tests {
             "ready analyze-book must enqueue Kotlin-style thumbnail and metadata follow-up tasks",
         );
 
-        fixture.cleanup();
+        fixture.cleanup().await;
     }
 
     #[tokio::test]
     async fn analyze_book_keeps_page_dimensions_null_when_library_analysis_is_disabled() {
         let fixture =
             seed_analyze_book_dimension_fixture("analyze-book-dimensions-disabled", false).await;
-        let runtime = fixture.runtime();
+        let runtime = fixture.runtime_context(false, false);
         let mut scheduler = TaskQueueScheduler::for_runtime(
             runtime.clone(),
             "analyze-book-disabled-dimensions-test",
@@ -630,7 +599,7 @@ mod tests {
             "analyze-book should leave page dimensions null when library ANALYZE_DIMENSIONS is disabled",
         );
 
-        fixture.cleanup();
+        fixture.cleanup().await;
     }
 
     #[tokio::test]

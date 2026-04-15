@@ -12,8 +12,8 @@ use std::sync::{Arc, OnceLock};
 
 use axum::http::HeaderMap;
 use komga_application::identity_access::{
-    AuthOutcome, AuthUser, KoboStoreSyncMergeResult, KoboSyncPointState, KoboSyncSnapshot,
-    PersistedApiKey, PersistedApiKeyMetadata, PersistedAuthenticationActivity,
+    AuthOutcome, AuthUser, KoboStoreSyncMergeResult, KoboSyncPage, PersistedApiKey,
+    PersistedApiKeyMetadata, PersistedAuthenticationActivity,
 };
 use serde_json::Value;
 use sqlx::SqlitePool;
@@ -193,8 +193,18 @@ pub struct RuntimeIdentityAccessBackend {
             + Send
             + Sync,
     >,
-    pub load_kobo_sync_snapshot: Arc<
-        dyn Fn(PathBuf, String) -> BoxFuture<Result<KoboSyncSnapshot, sqlx::Error>> + Send + Sync,
+    pub load_kobo_sync_page: Arc<
+        dyn Fn(
+                PathBuf,
+                AuthUser,
+                String,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                usize,
+            ) -> BoxFuture<Result<KoboSyncPage, sqlx::Error>>
+            + Send
+            + Sync,
     >,
     pub load_koreader_book_target: Arc<
         dyn Fn(
@@ -214,10 +224,6 @@ pub struct RuntimeIdentityAccessBackend {
             + Send
             + Sync,
     >,
-    pub load_sync_point_marker:
-        Arc<dyn Fn(PathBuf, String, String) -> BoxFuture<Option<String>> + Send + Sync>,
-    pub load_sync_point_state:
-        Arc<dyn Fn(PathBuf, String, String) -> BoxFuture<Option<KoboSyncPointState>> + Send + Sync>,
     pub load_thumbnail_by_id: Arc<
         dyn Fn(PathBuf, String) -> BoxFuture<Result<Option<(String, Vec<u8>)>, sqlx::Error>>
             + Send
@@ -251,11 +257,6 @@ pub struct RuntimeIdentityAccessBackend {
     >,
     pub remove_sync_point:
         Arc<dyn Fn(PathBuf, String) -> BoxFuture<Result<(), sqlx::Error>> + Send + Sync>,
-    pub save_sync_point: Arc<
-        dyn Fn(PathBuf, String, KoboSyncPointState) -> BoxFuture<Result<(), sqlx::Error>>
-            + Send
-            + Sync,
-    >,
     pub create_auth_user: Arc<
         dyn Fn(PathBuf, CreateAuthUserInput) -> BoxFuture<Result<Option<AuthUser>, sqlx::Error>>
             + Send
@@ -381,12 +382,19 @@ fn default_test_backend() -> RuntimeIdentityAccessBackend {
         load_book_last_epub_position_locator: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         load_book_media_file: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         load_kobo_metadata_record: Arc::new(|_, _| Box::pin(async { Ok(None) })),
-        load_kobo_sync_snapshot: Arc::new(|_, _| {
+        load_kobo_sync_page: Arc::new(|_, _, _, _, _, _, _| {
             Box::pin(async {
-                Ok(KoboSyncSnapshot {
-                    books: HashMap::new(),
-                    progress: HashMap::new(),
-                    readlists: HashMap::new(),
+                Ok(KoboSyncPage {
+                    to_sync_point_id: String::new(),
+                    from_sync_point_id: None,
+                    books_added: Vec::new(),
+                    books_changed: Vec::new(),
+                    books_removed: Vec::new(),
+                    books_read_progress_changed: Vec::new(),
+                    readlists_added: Vec::new(),
+                    readlists_changed: Vec::new(),
+                    readlists_removed: Vec::new(),
+                    should_continue: false,
                 })
             })
         }),
@@ -402,8 +410,6 @@ fn default_test_backend() -> RuntimeIdentityAccessBackend {
             })
         }),
         load_read_progress: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),
-        load_sync_point_marker: Arc::new(|_, _, _| Box::pin(async { None })),
-        load_sync_point_state: Arc::new(|_, _, _| Box::pin(async { None })),
         load_thumbnail_by_id: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         persist_read_progress_with_locator: Arc::new(|_, _, _, _, _, _, _, _, _| {
             Box::pin(async { Ok(()) })
@@ -419,7 +425,6 @@ fn default_test_backend() -> RuntimeIdentityAccessBackend {
             })
         }),
         remove_sync_point: Arc::new(|_, _| Box::pin(async { Ok(()) })),
-        save_sync_point: Arc::new(|_, _, _| Box::pin(async { Ok(()) })),
         create_auth_user: Arc::new(|_, _| Box::pin(async { Ok(None) })),
         delete_auth_user: Arc::new(|_, _| Box::pin(async { Ok(false) })),
         update_auth_user: Arc::new(|_, _, _| {
@@ -662,11 +667,25 @@ pub async fn load_kobo_metadata_record(
     (backend().load_kobo_metadata_record)(database_file.to_path_buf(), book_id.to_string()).await
 }
 
-pub async fn load_kobo_sync_snapshot(
+pub async fn load_kobo_sync_page(
     database_file: &Path,
+    user: &AuthUser,
     user_id: &str,
-) -> Result<KoboSyncSnapshot, sqlx::Error> {
-    (backend().load_kobo_sync_snapshot)(database_file.to_path_buf(), user_id.to_string()).await
+    current_api_key_id: Option<&str>,
+    ongoing_sync_point_id: Option<&str>,
+    last_successful_sync_point_id: Option<&str>,
+    limit: usize,
+) -> Result<KoboSyncPage, sqlx::Error> {
+    (backend().load_kobo_sync_page)(
+        database_file.to_path_buf(),
+        user.clone(),
+        user_id.to_string(),
+        current_api_key_id.map(str::to_string),
+        ongoing_sync_point_id.map(str::to_string),
+        last_successful_sync_point_id.map(str::to_string),
+        limit,
+    )
+    .await
 }
 
 pub async fn load_koreader_book_target(
@@ -684,32 +703,6 @@ pub async fn load_read_progress(
     (backend().load_read_progress)(
         database_file.to_path_buf(),
         book_id.to_string(),
-        user_id.to_string(),
-    )
-    .await
-}
-
-pub async fn load_sync_point_marker(
-    database_file: &Path,
-    sync_point_id: &str,
-    user_id: &str,
-) -> Option<String> {
-    (backend().load_sync_point_marker)(
-        database_file.to_path_buf(),
-        sync_point_id.to_string(),
-        user_id.to_string(),
-    )
-    .await
-}
-
-pub async fn load_sync_point_state(
-    database_file: &Path,
-    sync_point_id: &str,
-    user_id: &str,
-) -> Option<KoboSyncPointState> {
-    (backend().load_sync_point_state)(
-        database_file.to_path_buf(),
-        sync_point_id.to_string(),
         user_id.to_string(),
     )
     .await
@@ -773,19 +766,6 @@ pub async fn remove_sync_point(
     sync_point_id: &str,
 ) -> Result<(), sqlx::Error> {
     (backend().remove_sync_point)(database_file.to_path_buf(), sync_point_id.to_string()).await
-}
-
-pub async fn save_sync_point(
-    database_file: &Path,
-    sync_point_id: &str,
-    sync_point_state: &KoboSyncPointState,
-) -> Result<(), sqlx::Error> {
-    (backend().save_sync_point)(
-        database_file.to_path_buf(),
-        sync_point_id.to_string(),
-        sync_point_state.clone(),
-    )
-    .await
 }
 
 pub async fn create_auth_user(

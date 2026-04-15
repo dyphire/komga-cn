@@ -43,18 +43,6 @@ async fn create_test_db(case: &str) -> (PathBuf, sqlx::Pool<sqlx::Sqlite>, PathB
         .execute(&pool)
         .await
         .expect("series row should be inserted");
-    sqlx::query(
-        "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot) VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)",
-    )
-        .bind("series-2")
-        .bind(0_i64)
-        .bind("Series 2")
-        .bind("series-two")
-        .bind("library-1")
-        .bind(0)
-        .execute(&pool)
-        .await
-        .expect("second series row should be inserted");
 
     (db_path, pool, root)
 }
@@ -147,6 +135,19 @@ async fn import_book_returns_error_when_upgrade_target_series_mismatches() {
     let port = FilesystemImportPort::new(&db_path);
     let source_path = root.join("book.cbz");
     fs::write(&source_path, b"fixture").expect("source fixture should be written");
+
+    sqlx::query(
+        "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot) VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)",
+    )
+    .bind("series-2")
+    .bind(0_i64)
+    .bind("Series 2")
+    .bind("series-two")
+    .bind("library-1")
+    .bind(0)
+    .execute(&pool)
+    .await
+    .expect("second series row should be inserted");
 
     sqlx::query(
         "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, SERIES_ID, LIBRARY_ID, NAME, URL) VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)",

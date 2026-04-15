@@ -3,8 +3,8 @@ use axum::extract::{Extension, Path};
 use axum::http::{HeaderMap, StatusCode};
 use base64::engine::general_purpose::STANDARD;
 use komga_application::identity_access::{
-    KoboSyncBookSnapshot, KoboSyncReadListSnapshot, KoboSyncReadProgressSnapshot, KoboSyncSnapshot,
-    generated_kobo_api_token, sanitize_identifier,
+    KoboSyncBookSnapshot, KoboSyncReadListSnapshot, KoboSyncReadProgressSnapshot,
+    KoboSyncSnapshot, build_kobo_sync_events, generated_kobo_api_token, sanitize_identifier,
 };
 use std::collections::HashMap;
 use std::fs;

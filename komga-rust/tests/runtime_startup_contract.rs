@@ -6,7 +6,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tantivy::Index;
 use tantivy::schema::{STORED, STRING, Schema};
 
-fn runtime_task_context(config: &komga_rust::config::RuntimeConfig) -> komga_rust::application::task_processing::TaskRuntimeContext {
+fn runtime_task_context(
+    config: &komga_rust::config::RuntimeConfig,
+) -> komga_rust::application::task_processing::TaskRuntimeContext {
     komga_rust::application::task_processing::TaskRuntimeContext {
         database_file: config.database_file.clone(),
         tasks_db_file: config.tasks_db_file.clone(),

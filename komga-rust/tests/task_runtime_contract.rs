@@ -47,7 +47,9 @@ fn runtime_task_context(paths: &RuntimeDbPaths) -> TaskRuntimeContext {
     }
 }
 
-fn runtime_task_context_from_config(config: &komga_rust::config::RuntimeConfig) -> TaskRuntimeContext {
+fn runtime_task_context_from_config(
+    config: &komga_rust::config::RuntimeConfig,
+) -> TaskRuntimeContext {
     TaskRuntimeContext {
         database_file: config.database_file.clone(),
         tasks_db_file: config.tasks_db_file.clone(),

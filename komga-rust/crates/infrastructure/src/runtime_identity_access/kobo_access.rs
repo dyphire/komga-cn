@@ -2,9 +2,7 @@
 
 use std::path::Path;
 
-use komga_application::identity_access::{
-    KoboStoreSyncMergeResult, KoboSyncPointState, KoboSyncSnapshot,
-};
+use komga_application::identity_access::{AuthUser, KoboStoreSyncMergeResult, KoboSyncPage};
 use serde_json::Value;
 
 use super::backend_contract::{
@@ -45,11 +43,25 @@ pub async fn load_kobo_metadata_record(
     (backend().load_kobo_metadata_record)(database_file.to_path_buf(), book_id.to_string()).await
 }
 
-pub async fn load_kobo_sync_snapshot(
+pub async fn load_kobo_sync_page(
     database_file: &Path,
+    user: &AuthUser,
     user_id: &str,
-) -> Result<KoboSyncSnapshot, sqlx::Error> {
-    (backend().load_kobo_sync_snapshot)(database_file.to_path_buf(), user_id.to_string()).await
+    current_api_key_id: Option<&str>,
+    ongoing_sync_point_id: Option<&str>,
+    last_successful_sync_point_id: Option<&str>,
+    limit: usize,
+) -> Result<KoboSyncPage, sqlx::Error> {
+    (backend().load_kobo_sync_page)(
+        database_file.to_path_buf(),
+        user.clone(),
+        user_id.to_string(),
+        current_api_key_id.map(str::to_string),
+        ongoing_sync_point_id.map(str::to_string),
+        last_successful_sync_point_id.map(str::to_string),
+        limit,
+    )
+    .await
 }
 
 pub async fn load_koreader_book_target(
@@ -67,32 +79,6 @@ pub async fn load_read_progress(
     (backend().load_read_progress)(
         database_file.to_path_buf(),
         book_id.to_string(),
-        user_id.to_string(),
-    )
-    .await
-}
-
-pub async fn load_sync_point_marker(
-    database_file: &Path,
-    sync_point_id: &str,
-    user_id: &str,
-) -> Option<String> {
-    (backend().load_sync_point_marker)(
-        database_file.to_path_buf(),
-        sync_point_id.to_string(),
-        user_id.to_string(),
-    )
-    .await
-}
-
-pub async fn load_sync_point_state(
-    database_file: &Path,
-    sync_point_id: &str,
-    user_id: &str,
-) -> Option<KoboSyncPointState> {
-    (backend().load_sync_point_state)(
-        database_file.to_path_buf(),
-        sync_point_id.to_string(),
         user_id.to_string(),
     )
     .await
@@ -155,17 +141,4 @@ pub async fn remove_sync_point(
     sync_point_id: &str,
 ) -> Result<(), sqlx::Error> {
     (backend().remove_sync_point)(database_file.to_path_buf(), sync_point_id.to_string()).await
-}
-
-pub async fn save_sync_point(
-    database_file: &Path,
-    sync_point_id: &str,
-    sync_point_state: &KoboSyncPointState,
-) -> Result<(), sqlx::Error> {
-    (backend().save_sync_point)(
-        database_file.to_path_buf(),
-        sync_point_id.to_string(),
-        sync_point_state.clone(),
-    )
-    .await
 }

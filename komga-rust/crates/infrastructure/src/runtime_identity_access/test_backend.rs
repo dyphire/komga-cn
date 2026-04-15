@@ -204,12 +204,28 @@ pub(super) fn compose_test_runtime_identity_access_backend() -> RuntimeIdentityA
                     .map(|value| value.map(map_test_kobo_metadata_record))
             })
         }),
-        load_kobo_sync_snapshot: Arc::new(|database_file, user_id| {
-            Box::pin(async move {
-                infrastructure_auth::load_kobo_sync_snapshot(database_file.as_path(), &user_id)
+        load_kobo_sync_page: Arc::new(
+            |database_file,
+             user,
+             user_id,
+             current_api_key_id,
+             ongoing_sync_point_id,
+             last_successful_sync_point_id,
+             limit| {
+                Box::pin(async move {
+                    infrastructure_auth::load_kobo_sync_page(
+                        database_file.as_path(),
+                        &user,
+                        &user_id,
+                        current_api_key_id.as_deref(),
+                        ongoing_sync_point_id.as_deref(),
+                        last_successful_sync_point_id.as_deref(),
+                        limit,
+                    )
                     .await
-            })
-        }),
+                })
+            },
+        ),
         load_koreader_book_target: Arc::new(|database_file, book_hash| {
             Box::pin(async move {
                 infrastructure_auth::load_koreader_book_target(database_file.as_path(), &book_hash)
@@ -223,26 +239,6 @@ pub(super) fn compose_test_runtime_identity_access_backend() -> RuntimeIdentityA
                 infrastructure_auth::load_read_progress(database_file.as_path(), &book_id, &user_id)
                     .await
                     .map(|value| value.map(map_test_persisted_read_progress_record))
-            })
-        }),
-        load_sync_point_marker: Arc::new(|database_file, sync_point_id, user_id| {
-            Box::pin(async move {
-                infrastructure_auth::load_sync_point_marker(
-                    database_file.as_path(),
-                    &sync_point_id,
-                    &user_id,
-                )
-                .await
-            })
-        }),
-        load_sync_point_state: Arc::new(|database_file, sync_point_id, user_id| {
-            Box::pin(async move {
-                infrastructure_auth::load_sync_point_state(
-                    database_file.as_path(),
-                    &sync_point_id,
-                    &user_id,
-                )
-                .await
             })
         }),
         load_thumbnail_by_id: Arc::new(|database_file, thumbnail_id| {
@@ -296,16 +292,6 @@ pub(super) fn compose_test_runtime_identity_access_backend() -> RuntimeIdentityA
             Box::pin(async move {
                 infrastructure_auth::remove_sync_point(database_file.as_path(), &sync_point_id)
                     .await
-            })
-        }),
-        save_sync_point: Arc::new(|database_file, sync_point_id, sync_point_state| {
-            Box::pin(async move {
-                infrastructure_auth::save_sync_point(
-                    database_file.as_path(),
-                    &sync_point_id,
-                    &sync_point_state,
-                )
-                .await
             })
         }),
         open_auth_pool: Arc::new(|database_file| {

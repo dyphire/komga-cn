@@ -164,14 +164,30 @@ pub struct KomgaSyncTokenPayload {
     pub last_successful_sync_point_id: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct KoboSyncPointState {
-    pub user_id: String,
-    pub api_key_id: Option<String>,
-    pub marker: String,
-    pub cursor: usize,
-    pub from_marker: Option<String>,
-    pub snapshot: Option<KoboSyncSnapshot>,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KoboSyncPointBook {
+    pub book_id: String,
+    pub created: String,
+    pub file_last_modified: String,
+    pub file_size: u64,
+    pub file_hash: String,
+    pub metadata_last_modified: String,
+    pub read_progress_last_modified: Option<String>,
+    pub cover_image_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KoboSyncPage {
+    pub to_sync_point_id: String,
+    pub from_sync_point_id: Option<String>,
+    pub books_added: Vec<KoboSyncPointBook>,
+    pub books_changed: Vec<KoboSyncPointBook>,
+    pub books_removed: Vec<KoboSyncPointBook>,
+    pub books_read_progress_changed: Vec<KoboSyncPointBook>,
+    pub readlists_added: Vec<KoboSyncReadListSnapshot>,
+    pub readlists_changed: Vec<KoboSyncReadListSnapshot>,
+    pub readlists_removed: Vec<KoboSyncReadListSnapshot>,
+    pub should_continue: bool,
 }
 
 pub fn build_kobo_sync_events(
@@ -341,6 +357,67 @@ pub fn build_kobo_sync_events(
     }
 
     events
+}
+
+pub fn build_kobo_new_entitlement(
+    book: &KoboSyncBookSnapshot,
+    progress: Option<&KoboSyncReadProgressSnapshot>,
+    base_url: &str,
+    auth_token: &str,
+) -> Value {
+    kobo_new_entitlement_event(
+        book,
+        kobo_reading_state_from_snapshot(book, progress),
+        base_url,
+        auth_token,
+    )
+}
+
+pub fn build_kobo_changed_product_metadata(
+    book: &KoboSyncBookSnapshot,
+    base_url: &str,
+    auth_token: &str,
+) -> Value {
+    kobo_changed_product_metadata_event(book, base_url, auth_token)
+}
+
+pub fn build_kobo_changed_entitlement_removed(
+    book: &KoboSyncBookSnapshot,
+    base_url: &str,
+    auth_token: &str,
+) -> Value {
+    kobo_changed_entitlement_removed_event(book, base_url, auth_token)
+}
+
+pub fn build_kobo_changed_reading_state(
+    book: &KoboSyncBookSnapshot,
+    progress: &KoboSyncReadProgressSnapshot,
+) -> Value {
+    kobo_changed_reading_state_event(kobo_reading_state_from_snapshot(book, Some(progress)))
+}
+
+pub fn build_kobo_new_tag(readlist: &KoboSyncReadListSnapshot) -> Value {
+    json!({
+        "NewTag": {
+            "Tag": kobo_tag_from_snapshot(readlist, true),
+        }
+    })
+}
+
+pub fn build_kobo_changed_tag(readlist: &KoboSyncReadListSnapshot) -> Value {
+    json!({
+        "ChangedTag": {
+            "Tag": kobo_tag_from_snapshot(readlist, true),
+        }
+    })
+}
+
+pub fn build_kobo_deleted_tag(readlist: &KoboSyncReadListSnapshot) -> Value {
+    json!({
+        "DeletedTag": {
+            "Tag": kobo_tag_from_snapshot(readlist, false),
+        }
+    })
 }
 
 pub fn now_sync_marker() -> String {

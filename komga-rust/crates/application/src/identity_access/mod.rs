@@ -14,10 +14,12 @@ pub use device_tokens::{
 };
 pub use kobo_sync::{
     KOBO_SYNC_ITEM_LIMIT, KoboStoreSyncMergeResult, KoboSyncBookSnapshot, KoboSyncDeltas,
-    KoboSyncPointState, KoboSyncReadListSnapshot, KoboSyncReadProgressSnapshot, KoboSyncSnapshot,
-    KomgaSyncTokenPayload, build_kobo_sync_events, build_komga_sync_token_payload,
-    decode_or_passthrough_sync_token, is_kobo_store_sync_token_candidate, now_sync_marker,
-    parse_komga_sync_token_payload,
+    KoboSyncPage, KoboSyncPointBook, KoboSyncReadListSnapshot, KoboSyncReadProgressSnapshot,
+    KoboSyncSnapshot, KomgaSyncTokenPayload, build_kobo_changed_entitlement_removed,
+    build_kobo_changed_product_metadata, build_kobo_changed_reading_state, build_kobo_changed_tag,
+    build_kobo_deleted_tag, build_kobo_new_entitlement, build_kobo_new_tag, build_kobo_sync_events,
+    build_komga_sync_token_payload, decode_or_passthrough_sync_token,
+    is_kobo_store_sync_token_candidate, now_sync_marker, parse_komga_sync_token_payload,
 };
 pub use principal_resolution::{
     configured_api_key_identity, koreader_authorized, resolve_kobo_user, resolve_koreader_user_id,

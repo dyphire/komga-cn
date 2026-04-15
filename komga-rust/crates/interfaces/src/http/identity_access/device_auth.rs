@@ -6,7 +6,10 @@ use axum::response::{IntoResponse, Response};
 use axum_extra::extract::cookie::CookieJar;
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use komga_application::identity_access::{
-    AuthOutcome, AuthUser, KOBO_SYNC_ITEM_LIMIT, KoboSyncPointState, build_kobo_sync_events,
+    AuthOutcome, AuthUser, KOBO_SYNC_ITEM_LIMIT, KoboSyncBookSnapshot,
+    KoboSyncReadProgressSnapshot, build_kobo_changed_entitlement_removed,
+    build_kobo_changed_product_metadata, build_kobo_changed_reading_state, build_kobo_changed_tag,
+    build_kobo_deleted_tag, build_kobo_new_entitlement, build_kobo_new_tag,
     build_komga_sync_token_payload, decode_or_passthrough_sync_token, generated_kobo_token_triplet,
     is_kobo_store_sync_token_candidate, now_sync_marker, parse_komga_sync_token_payload,
     resolve_koreader_user_id, user_id,
@@ -23,7 +26,7 @@ use std::path::Path as FsPath;
 use crate::OperationalState;
 use crate::http::access_log::RequestConnectionInfo;
 use crate::http::identity_access::auth::{
-    persisted_api_key_metadata, persisted_api_key_user_by_token,
+    persisted_api_key_metadata, persisted_api_key_user, persisted_api_key_user_by_token,
     persisted_record_successful_authentication_activity, resolved_auth_user,
     session_token_for_user_with_runtime_key, user_has_role, user_is_admin,
 };
@@ -37,9 +40,9 @@ use crate::media_assets_runtime_access::{
 use crate::runtime_identity_access::{
     KoreaderBookLookupError, PersistedReadProgressRecord, configured_api_key, ensure_oauth_user,
     load_book_created_timestamp, load_book_last_epub_position_locator, load_kobo_metadata_record,
-    load_kobo_sync_snapshot, load_koreader_book_target, load_read_progress, load_sync_point_marker,
-    load_sync_point_state, load_thumbnail_by_id, persist_read_progress_with_locator,
-    persisted_book_exists, proxy_kobo_store_library_sync, remove_sync_point, save_sync_point,
+    load_kobo_sync_page, load_koreader_book_target, load_read_progress, load_thumbnail_by_id,
+    persist_read_progress_with_locator, persisted_book_exists, proxy_kobo_store_library_sync,
+    remove_sync_point,
 };
 
 #[path = "device_auth/auth_resolvers.rs"]

@@ -230,11 +230,10 @@ fn runtime_startup_prepare_task_queue_logs_no_startup_library_scan_skip_when_no_
     let (logs, queued_scan_tasks) = capture_contract_log_async_result(&config, {
         let config = config.clone();
         async move {
-            let background =
-                komga_rust::infrastructure::task_queue::prepare_task_queue(
-                    runtime_task_context(&config),
-                    None,
-                );
+            let background = komga_rust::infrastructure::task_queue::prepare_task_queue(
+                runtime_task_context(&config),
+                None,
+            );
             background
                 .task_queue
                 .lock()

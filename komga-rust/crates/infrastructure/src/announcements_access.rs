@@ -40,13 +40,13 @@ mod tests {
         sqlx::query(
             "INSERT INTO USER (ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES) VALUES (?, ?, ?, ?)",
         )
-            .bind("user-1")
-            .bind("user-1@example.org")
-            .bind("hashed-password")
-            .bind(true)
-            .execute(&pool)
-            .await
-            .expect("user row should be inserted");
+        .bind("user-1")
+        .bind("user-1@example.org")
+        .bind("hashed-password")
+        .bind(true)
+        .execute(&pool)
+        .await
+        .expect("user row should be inserted");
 
         (db_path, pool)
     }
