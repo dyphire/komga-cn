@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::{connect_private_pool, setup::bootstrap_pool};
+use sqlx::SqlitePool;
 
 use super::super::{SearchEntityType, SearchIndexLifecycle};
 use super::{
@@ -9,53 +10,22 @@ use super::{
     sync_series_and_oneshot_books_after_metadata_update,
 };
 
+async fn open_bootstrapped_pool(database_file: &std::path::Path) -> SqlitePool {
+    let pool = connect_private_pool(database_file, 1)
+        .await
+        .expect("fixture sqlite database should open");
+    bootstrap_pool(&pool)
+        .await
+        .expect("fixture sqlite database should bootstrap main schema");
+    pool
+}
+
 #[tokio::test]
 async fn rebuild_indexes_oneshot_inherited_series_metadata_and_book_isbn_fields() {
     let database_file = temp_db_path("search-rebuild-oneshot-inherited-metadata");
     let index_dir = temp_index_dir("search-rebuild-oneshot-inherited-metadata");
 
-    let pool = connect_pool(&database_file, 1)
-        .await
-        .expect("fixture sqlite database should open");
-
-    for ddl in [
-        "CREATE TABLE IF NOT EXISTS LIBRARY (ID TEXT PRIMARY KEY, NAME TEXT NOT NULL, ROOT TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS SERIES (\
-             ID TEXT PRIMARY KEY, FILE_LAST_MODIFIED INTEGER NOT NULL, NAME TEXT NOT NULL, \
-             URL TEXT NOT NULL, LIBRARY_ID TEXT NOT NULL, BOOK_COUNT INTEGER NOT NULL DEFAULT 0, \
-             DELETED_DATE TEXT NULL, oneshot INTEGER NOT NULL DEFAULT 0)",
-        "CREATE TABLE IF NOT EXISTS SERIES_METADATA (\
-             STATUS TEXT NOT NULL, TITLE TEXT NOT NULL, TITLE_SORT TEXT NOT NULL, \
-             PUBLISHER TEXT NOT NULL DEFAULT '', LANGUAGE TEXT NOT NULL DEFAULT '', \
-             AGE_RATING INTEGER NULL, READING_DIRECTION TEXT NULL, TOTAL_BOOK_COUNT INTEGER NULL, \
-             SERIES_ID TEXT NOT NULL PRIMARY KEY)",
-        "CREATE TABLE IF NOT EXISTS BOOK (\
-             ID TEXT PRIMARY KEY, FILE_LAST_MODIFIED INTEGER NOT NULL, NAME TEXT NOT NULL, \
-             URL TEXT NOT NULL, SERIES_ID TEXT NOT NULL, FILE_SIZE INTEGER NOT NULL, \
-             NUMBER INTEGER NOT NULL, LIBRARY_ID TEXT NOT NULL, DELETED_DATE TEXT NULL, \
-             oneshot INTEGER NOT NULL DEFAULT 0)",
-        "CREATE TABLE IF NOT EXISTS BOOK_METADATA (\
-             NUMBER TEXT NOT NULL, NUMBER_SORT REAL NOT NULL, TITLE TEXT NOT NULL, \
-             ISBN TEXT NOT NULL DEFAULT '', RELEASE_DATE TEXT NULL, \
-             BOOK_ID TEXT NOT NULL PRIMARY KEY)",
-        "CREATE TABLE IF NOT EXISTS MEDIA (BOOK_ID TEXT PRIMARY KEY, STATUS TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS BOOK_METADATA_TAG (BOOK_ID TEXT NOT NULL, TAG TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS BOOK_METADATA_AUTHOR (BOOK_ID TEXT NOT NULL, NAME TEXT NOT NULL, ROLE TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS SERIES_METADATA_GENRE (SERIES_ID TEXT NOT NULL, GENRE TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS SERIES_METADATA_SHARING (SERIES_ID TEXT NOT NULL, LABEL TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS BOOK_METADATA_AGGREGATION (SERIES_ID TEXT NOT NULL PRIMARY KEY, RELEASE_DATE TEXT NULL)",
-        "CREATE TABLE IF NOT EXISTS BOOK_METADATA_AGGREGATION_TAG (SERIES_ID TEXT NOT NULL, TAG TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS BOOK_METADATA_AGGREGATION_AUTHOR (SERIES_ID TEXT NOT NULL, NAME TEXT NOT NULL, ROLE TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS SERIES_METADATA_ALTERNATE_TITLE (SERIES_ID TEXT NOT NULL, LABEL TEXT NOT NULL, TITLE TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS SERIES_METADATA_TAG (SERIES_ID TEXT NOT NULL, TAG TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS COLLECTION (ID TEXT PRIMARY KEY, NAME TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS READLIST (ID TEXT PRIMARY KEY, NAME TEXT NOT NULL)",
-    ] {
-        sqlx::query(ddl)
-            .execute(&pool)
-            .await
-            .expect("fixture schema should be created");
-    }
+    let pool = open_bootstrapped_pool(database_file.as_path()).await;
 
     sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
         .bind("library-1")
@@ -104,14 +74,6 @@ async fn rebuild_indexes_oneshot_inherited_series_metadata_and_book_isbn_fields(
     .await
     .expect("series alternate title should be inserted");
 
-    sqlx::query("INSERT INTO BOOK_METADATA_AUTHOR (BOOK_ID, NAME, ROLE) VALUES (?, ?, ?)")
-        .bind("book-1")
-        .bind("Jane Writer")
-        .bind("writer")
-        .execute(&pool)
-        .await
-        .expect("book metadata author should be inserted");
-
     sqlx::query(
         "INSERT INTO BOOK (\
              ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID, oneshot) \
@@ -129,6 +91,14 @@ async fn rebuild_indexes_oneshot_inherited_series_metadata_and_book_isbn_fields(
     .execute(&pool)
     .await
     .expect("book row should be inserted");
+
+    sqlx::query("INSERT INTO BOOK_METADATA_AUTHOR (BOOK_ID, NAME, ROLE) VALUES (?, ?, ?)")
+        .bind("book-1")
+        .bind("Jane Writer")
+        .bind("writer")
+        .execute(&pool)
+        .await
+        .expect("book metadata author should be inserted");
 
     sqlx::query(
         "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, ISBN, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
@@ -206,48 +176,7 @@ async fn incremental_sync_updates_all_entity_documents_for_lifecycle_events() {
     let database_file = temp_db_path("search-incremental-sync-lifecycle");
     let index_dir = temp_index_dir("search-incremental-sync-lifecycle");
 
-    let pool = connect_pool(&database_file, 1)
-        .await
-        .expect("fixture sqlite database should open");
-
-    for ddl in [
-        "CREATE TABLE IF NOT EXISTS LIBRARY (ID TEXT PRIMARY KEY, NAME TEXT NOT NULL, ROOT TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS SERIES (\
-             ID TEXT PRIMARY KEY, FILE_LAST_MODIFIED INTEGER NOT NULL, NAME TEXT NOT NULL, \
-             URL TEXT NOT NULL, LIBRARY_ID TEXT NOT NULL, BOOK_COUNT INTEGER NOT NULL DEFAULT 0, \
-             DELETED_DATE TEXT NULL, oneshot INTEGER NOT NULL DEFAULT 0)",
-        "CREATE TABLE IF NOT EXISTS SERIES_METADATA (\
-             STATUS TEXT NOT NULL, TITLE TEXT NOT NULL, TITLE_SORT TEXT NOT NULL, \
-             PUBLISHER TEXT NOT NULL DEFAULT '', LANGUAGE TEXT NOT NULL DEFAULT '', \
-             AGE_RATING INTEGER NULL, READING_DIRECTION TEXT NULL, TOTAL_BOOK_COUNT INTEGER NULL, \
-             SERIES_ID TEXT NOT NULL PRIMARY KEY)",
-        "CREATE TABLE IF NOT EXISTS BOOK (\
-             ID TEXT PRIMARY KEY, FILE_LAST_MODIFIED INTEGER NOT NULL, NAME TEXT NOT NULL, \
-             URL TEXT NOT NULL, SERIES_ID TEXT NOT NULL, FILE_SIZE INTEGER NOT NULL, \
-             NUMBER INTEGER NOT NULL, LIBRARY_ID TEXT NOT NULL, DELETED_DATE TEXT NULL, \
-             oneshot INTEGER NOT NULL DEFAULT 0)",
-        "CREATE TABLE IF NOT EXISTS BOOK_METADATA (\
-             NUMBER TEXT NOT NULL, NUMBER_SORT REAL NOT NULL, TITLE TEXT NOT NULL, \
-             ISBN TEXT NOT NULL DEFAULT '', RELEASE_DATE TEXT NULL, \
-             BOOK_ID TEXT NOT NULL PRIMARY KEY)",
-        "CREATE TABLE IF NOT EXISTS MEDIA (BOOK_ID TEXT PRIMARY KEY, STATUS TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS BOOK_METADATA_TAG (BOOK_ID TEXT NOT NULL, TAG TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS BOOK_METADATA_AUTHOR (BOOK_ID TEXT NOT NULL, NAME TEXT NOT NULL, ROLE TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS SERIES_METADATA_GENRE (SERIES_ID TEXT NOT NULL, GENRE TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS SERIES_METADATA_SHARING (SERIES_ID TEXT NOT NULL, LABEL TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS BOOK_METADATA_AGGREGATION (SERIES_ID TEXT NOT NULL PRIMARY KEY, RELEASE_DATE TEXT NULL)",
-        "CREATE TABLE IF NOT EXISTS BOOK_METADATA_AGGREGATION_TAG (SERIES_ID TEXT NOT NULL, TAG TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS BOOK_METADATA_AGGREGATION_AUTHOR (SERIES_ID TEXT NOT NULL, NAME TEXT NOT NULL, ROLE TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS SERIES_METADATA_ALTERNATE_TITLE (SERIES_ID TEXT NOT NULL, LABEL TEXT NOT NULL, TITLE TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS SERIES_METADATA_TAG (SERIES_ID TEXT NOT NULL, TAG TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS COLLECTION (ID TEXT PRIMARY KEY, NAME TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS READLIST (ID TEXT PRIMARY KEY, NAME TEXT NOT NULL)",
-    ] {
-        sqlx::query(ddl)
-            .execute(&pool)
-            .await
-            .expect("fixture schema should be created");
-    }
+    let pool = open_bootstrapped_pool(database_file.as_path()).await;
 
     sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
         .bind("library-1")
@@ -389,16 +318,19 @@ async fn incremental_sync_updates_all_entity_documents_for_lifecycle_events() {
         .await
         .expect("oneshot media row should be inserted");
 
-    sqlx::query("INSERT INTO COLLECTION (ID, NAME) VALUES (?, ?)")
+    sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
         .bind("collection-1")
         .bind("Collection One")
+        .bind(false)
+        .bind(0_i64)
         .execute(&pool)
         .await
         .expect("collection row should be inserted");
 
-    sqlx::query("INSERT INTO READLIST (ID, NAME) VALUES (?, ?)")
+    sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT) VALUES (?, ?, ?)")
         .bind("readlist-1")
         .bind("ReadList One")
+        .bind(0_i64)
         .execute(&pool)
         .await
         .expect("readlist row should be inserted");
@@ -408,7 +340,7 @@ async fn incremental_sync_updates_all_entity_documents_for_lifecycle_events() {
     rebuild_index_from_database(database_file.as_path(), index_dir.as_path())
         .expect("index rebuild should complete");
 
-    let pool = connect_pool(&database_file, 1)
+    let pool = connect_private_pool(database_file.as_path(), 1)
         .await
         .expect("fixture sqlite database should reopen for collection update");
 
@@ -447,7 +379,7 @@ async fn incremental_sync_updates_all_entity_documents_for_lifecycle_events() {
         .expect("collection delete query should succeed");
     assert!(deleted_collection_hits.is_empty());
 
-    let pool = connect_pool(&database_file, 1)
+    let pool = connect_private_pool(database_file.as_path(), 1)
         .await
         .expect("fixture sqlite database should reopen");
 

@@ -21,7 +21,7 @@ pub async fn save_announcements_read(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sqlite::connect_pool;
+    use crate::sqlite::{connect_pool, setup};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -33,20 +33,17 @@ mod tests {
         let pool = connect_pool(&db_path, 1)
             .await
             .expect("test db should open");
-
-        sqlx::query("CREATE TABLE IF NOT EXISTS USER (ID varchar NOT NULL PRIMARY KEY)")
-            .execute(&pool)
+        setup::bootstrap_pool(&pool)
             .await
-            .expect("user table should be created");
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS ANNOUNCEMENTS_READ (USER_ID varchar NOT NULL, ANNOUNCEMENT_ID varchar NOT NULL, PRIMARY KEY (USER_ID, ANNOUNCEMENT_ID), FOREIGN KEY (USER_ID) references USER (ID))",
-        )
-        .execute(&pool)
-        .await
-        .expect("announcements read table should be created");
+            .expect("test db should bootstrap main schema");
 
-        sqlx::query("INSERT INTO USER (ID) VALUES (?)")
+        sqlx::query(
+            "INSERT INTO USER (ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES) VALUES (?, ?, ?, ?)",
+        )
             .bind("user-1")
+            .bind("user-1@example.org")
+            .bind("hashed-password")
+            .bind(true)
             .execute(&pool)
             .await
             .expect("user row should be inserted");

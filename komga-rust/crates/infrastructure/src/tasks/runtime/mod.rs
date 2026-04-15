@@ -28,6 +28,8 @@ mod queue_scheduler;
 mod scanner_jobs;
 mod scanner_support;
 mod task_protocol;
+#[cfg(test)]
+pub(crate) mod test_support;
 mod worker_runtime;
 
 use media_helpers::*;

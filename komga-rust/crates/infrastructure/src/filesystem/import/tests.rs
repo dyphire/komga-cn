@@ -18,103 +18,45 @@ async fn create_test_db(case: &str) -> (PathBuf, sqlx::Pool<sqlx::Sqlite>, PathB
     let pool = connect_pool(&db_path, 1)
         .await
         .expect("test db should open");
-
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL)",
-    )
-    .execute(&pool)
-    .await
-    .expect("library table should be created");
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS SERIES (ID varchar NOT NULL PRIMARY KEY, LIBRARY_ID varchar NOT NULL, URL varchar NOT NULL, oneshot integer NOT NULL DEFAULT 0)",
-    )
-    .execute(&pool)
-    .await
-    .expect("series table should be created");
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS BOOK (ID varchar NOT NULL PRIMARY KEY, SERIES_ID varchar NOT NULL, LIBRARY_ID varchar NOT NULL, NAME varchar NOT NULL, URL varchar NOT NULL)",
-    )
-    .execute(&pool)
-    .await
-    .expect("book table should be created");
+    crate::sqlite::setup::bootstrap_pool(&pool)
+        .await
+        .expect("test db should bootstrap main schema");
 
     let library_root = root.join("library-root");
     fs::create_dir_all(&library_root).expect("library root should be created");
-    sqlx::query("INSERT INTO LIBRARY (ID, ROOT) VALUES (?, ?)")
+    sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
         .bind("library-1")
+        .bind("Library 1")
         .bind(library_root.to_string_lossy().to_string())
         .execute(&pool)
         .await
         .expect("library row should be inserted");
-    sqlx::query("INSERT INTO SERIES (ID, LIBRARY_ID, URL, oneshot) VALUES (?, ?, ?, ?)")
+    sqlx::query(
+        "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot) VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)",
+    )
         .bind("series-1")
-        .bind("library-1")
+        .bind(0_i64)
+        .bind("Series 1")
         .bind("series-one")
+        .bind("library-1")
         .bind(0)
         .execute(&pool)
         .await
         .expect("series row should be inserted");
-    sqlx::query("INSERT INTO SERIES (ID, LIBRARY_ID, URL, oneshot) VALUES (?, ?, ?, ?)")
+    sqlx::query(
+        "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot) VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)",
+    )
         .bind("series-2")
-        .bind("library-1")
+        .bind(0_i64)
+        .bind("Series 2")
         .bind("series-two")
+        .bind("library-1")
         .bind(0)
         .execute(&pool)
         .await
         .expect("second series row should be inserted");
 
     (db_path, pool, root)
-}
-
-async fn add_upgrade_schema(pool: &sqlx::Pool<sqlx::Sqlite>) {
-    for statement in [
-        "ALTER TABLE BOOK ADD COLUMN CREATED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP",
-        "ALTER TABLE BOOK ADD COLUMN LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP",
-        "ALTER TABLE BOOK ADD COLUMN FILE_LAST_MODIFIED int NOT NULL DEFAULT 0",
-        "ALTER TABLE BOOK ADD COLUMN FILE_SIZE int NOT NULL DEFAULT 0",
-        "ALTER TABLE BOOK ADD COLUMN NUMBER int NOT NULL DEFAULT 0",
-        "ALTER TABLE BOOK ADD COLUMN FILE_HASH varchar NOT NULL DEFAULT ''",
-        "ALTER TABLE BOOK ADD COLUMN DELETED_DATE timestamp NULL",
-        "ALTER TABLE BOOK ADD COLUMN oneshot integer NOT NULL DEFAULT 0",
-        "ALTER TABLE BOOK ADD COLUMN FILE_HASH_KOREADER varchar NOT NULL DEFAULT ''",
-    ] {
-        sqlx::query(statement)
-            .execute(pool)
-            .await
-            .unwrap_or_else(|error| panic!("upgrade BOOK schema should be added: {error}"));
-    }
-
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS BOOK_METADATA (BOOK_ID varchar NOT NULL PRIMARY KEY, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-    )
-    .execute(pool)
-    .await
-    .expect("book metadata table should be created");
-    for table in [
-        "BOOK_METADATA_AUTHOR",
-        "BOOK_METADATA_TAG",
-        "BOOK_METADATA_LINK",
-    ] {
-        sqlx::query(&format!(
-            "CREATE TABLE IF NOT EXISTS {table} (BOOK_ID varchar NOT NULL)"
-        ))
-        .execute(pool)
-        .await
-        .unwrap_or_else(|error| panic!("{table} table should be created: {error}"));
-    }
-    for statement in [
-        "CREATE TABLE IF NOT EXISTS MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, EXTENSION_CLASS varchar NULL, EXTENSION_VALUE_BLOB blob NULL)",
-        "CREATE TABLE IF NOT EXISTS MEDIA_FILE (BOOK_ID varchar NOT NULL, FILE_NAME varchar NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS MEDIA_PAGE (BOOK_ID varchar NOT NULL, NUMBER int NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS READ_PROGRESS (BOOK_ID varchar NOT NULL, USER_ID varchar NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS THUMBNAIL_BOOK (BOOK_ID varchar NOT NULL, TYPE varchar NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS READLIST_BOOK (READLIST_ID varchar NOT NULL, BOOK_ID varchar NOT NULL, NUMBER int NOT NULL, PRIMARY KEY (READLIST_ID, BOOK_ID))",
-    ] {
-        sqlx::query(statement)
-            .execute(pool)
-            .await
-            .unwrap_or_else(|error| panic!("upgrade helper table should be created: {error}"));
-    }
 }
 
 #[tokio::test]
@@ -206,8 +148,11 @@ async fn import_book_returns_error_when_upgrade_target_series_mismatches() {
     let source_path = root.join("book.cbz");
     fs::write(&source_path, b"fixture").expect("source fixture should be written");
 
-    sqlx::query("INSERT INTO BOOK (ID, SERIES_ID, LIBRARY_ID, NAME, URL) VALUES (?, ?, ?, ?, ?)")
+    sqlx::query(
+        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, SERIES_ID, LIBRARY_ID, NAME, URL) VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)",
+    )
         .bind("book-upgrade")
+        .bind(0_i64)
         .bind("series-2")
         .bind("library-1")
         .bind("existing.cbz")
@@ -332,52 +277,8 @@ async fn import_book_returns_error_when_oneshot_series_missing_upgrade_book_id()
 }
 
 #[tokio::test]
-async fn import_book_returns_error_when_upgrade_identity_migration_fails() {
-    let (db_path, pool, root) = create_test_db("upgrade-identity-migration-failure").await;
-    let port = FilesystemImportPort::new(&db_path);
-    let source_path = root.join("incoming.epub");
-    fs::write(&source_path, b"fixture").expect("source fixture should be written");
-
-    let existing_dir = root.join("library-root/series-one");
-    fs::create_dir_all(&existing_dir).expect("existing series directory should be created");
-    fs::write(existing_dir.join("existing.epub"), b"existing-fixture")
-        .expect("existing upgraded file should exist");
-
-    sqlx::query("INSERT INTO BOOK (ID, SERIES_ID, LIBRARY_ID, NAME, URL) VALUES (?, ?, ?, ?, ?)")
-        .bind("book-upgrade")
-        .bind("series-1")
-        .bind("library-1")
-        .bind("existing.epub")
-        .bind("series-one/existing.epub")
-        .execute(&pool)
-        .await
-        .expect("upgrade book row should be inserted");
-
-    let result = port
-        .import_book(
-            ImportCopyMode::Copy,
-            BooksImportEntry {
-                source_file: source_path,
-                series_id: "series-1".to_string(),
-                destination_name: Some("restored".to_string()),
-                upgrade_book_id: Some("book-upgrade".to_string()),
-            },
-        )
-        .await;
-
-    let error = result.expect_err("upgrade import should surface migration failures");
-    assert!(
-        error.contains("upsert upgraded destination book identity"),
-        "unexpected import error: {error}"
-    );
-
-    pool.close().await;
-}
-
-#[tokio::test]
 async fn import_book_uses_oneshot_parent_directory_and_destination_basename() {
     let (db_path, pool, root) = create_test_db("oneshot-parent-directory-destination").await;
-    add_upgrade_schema(&pool).await;
     let port = FilesystemImportPort::new(&db_path);
     let source_path = root.join("incoming.cbz");
     fs::write(&source_path, b"fixture").expect("source fixture should be written");
@@ -394,8 +295,11 @@ async fn import_book_uses_oneshot_parent_directory_and_destination_basename() {
         .execute(&pool)
         .await
         .expect("oneshot series row should be updated");
-    sqlx::query("INSERT INTO BOOK (ID, SERIES_ID, LIBRARY_ID, NAME, URL) VALUES (?, ?, ?, ?, ?)")
+    sqlx::query(
+        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, SERIES_ID, LIBRARY_ID, NAME, URL) VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)",
+    )
         .bind("book-upgrade")
+        .bind(0_i64)
         .bind("series-1")
         .bind("library-1")
         .bind("existing.cbz")
@@ -470,7 +374,6 @@ async fn import_book_uses_oneshot_parent_directory_and_destination_basename() {
 #[tokio::test]
 async fn import_book_upgrade_preserves_epub_extension_blob() {
     let (db_path, pool, root) = create_test_db("upgrade-preserves-epub-extension").await;
-    add_upgrade_schema(&pool).await;
     let port = FilesystemImportPort::new(&db_path);
     let source_path = root.join("incoming.epub");
     fs::write(&source_path, b"epub-fixture").expect("source fixture should be written");
@@ -481,9 +384,10 @@ async fn import_book_upgrade_preserves_epub_extension_blob() {
         .expect("existing upgraded file should exist");
 
     sqlx::query(
-        "INSERT INTO BOOK (ID, SERIES_ID, LIBRARY_ID, NAME, URL, FILE_SIZE, NUMBER) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, SERIES_ID, LIBRARY_ID, NAME, URL, FILE_SIZE, NUMBER) VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?)",
     )
     .bind("book-upgrade")
+    .bind(0_i64)
     .bind("series-1")
     .bind("library-1")
     .bind("existing.epub")
@@ -494,9 +398,10 @@ async fn import_book_upgrade_preserves_epub_extension_blob() {
     .await
     .expect("upgrade book row should be inserted");
     sqlx::query(
-        "INSERT INTO MEDIA (BOOK_ID, EXTENSION_CLASS, EXTENSION_VALUE_BLOB) VALUES (?, ?, ?)",
+        "INSERT INTO MEDIA (BOOK_ID, STATUS, EXTENSION_CLASS, EXTENSION_VALUE_BLOB) VALUES (?, ?, ?, ?)",
     )
     .bind("book-upgrade")
+    .bind("READY")
     .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
     .bind(vec![1_u8, 2, 3, 4, 5])
     .execute(&pool)

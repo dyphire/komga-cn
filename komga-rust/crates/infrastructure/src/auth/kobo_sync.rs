@@ -10,10 +10,10 @@ use reqwest::header::{HeaderName, HeaderValue};
 use serde_json::{Value, json};
 use sqlx::Row;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::{connect_pool, connect_private_pool};
 
 async fn ensure_kobo_sync_state_table(database_file: &Path) -> Result<(), sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_private_pool(database_file, 1).await?;
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS KOBO_SYNC_POINT_STATE ( SYNC_POINT_ID TEXT NOT NULL, USER_ID TEXT NOT NULL, STATE_JSON TEXT NOT NULL, PRIMARY KEY (SYNC_POINT_ID, USER_ID) )",
     )
@@ -28,7 +28,7 @@ pub async fn load_sync_point_state(
     user_id: &str,
 ) -> Option<KoboSyncPointState> {
     let _ = ensure_kobo_sync_state_table(database_file).await;
-    let pool = connect_pool(database_file, 1).await.ok()?;
+    let pool = connect_private_pool(database_file, 1).await.ok()?;
     let row = sqlx::query(
         "SELECT STATE_JSON FROM KOBO_SYNC_POINT_STATE WHERE SYNC_POINT_ID = ? AND USER_ID = ? LIMIT 1",
     )
@@ -59,7 +59,7 @@ pub async fn save_sync_point(
     sync_point_state: &KoboSyncPointState,
 ) -> Result<(), sqlx::Error> {
     ensure_kobo_sync_state_table(database_file).await?;
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_private_pool(database_file, 1).await?;
     sqlx::query(
         "INSERT INTO KOBO_SYNC_POINT_STATE (SYNC_POINT_ID, USER_ID, STATE_JSON) VALUES (?, ?, ?) ON CONFLICT (SYNC_POINT_ID, USER_ID) DO UPDATE SET STATE_JSON = excluded.STATE_JSON",
     )
@@ -76,7 +76,7 @@ pub async fn remove_sync_point(
     sync_point_id: &str,
 ) -> Result<(), sqlx::Error> {
     let _ = ensure_kobo_sync_state_table(database_file).await;
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_private_pool(database_file, 1).await?;
     sqlx::query("DELETE FROM KOBO_SYNC_POINT_STATE WHERE SYNC_POINT_ID = ?")
         .bind(sync_point_id)
         .execute(&pool)

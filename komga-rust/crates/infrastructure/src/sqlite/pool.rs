@@ -278,6 +278,7 @@ fn deterministic_temp_db_path(case_id: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sqlite::setup;
 
     #[tokio::test]
     async fn sqlite_temp_pool_cleanup_removes_wal_sidecars() {
@@ -288,14 +289,16 @@ mod tests {
         let wal_path = PathBuf::from(format!("{}-wal", db_path.display()));
         let shm_path = PathBuf::from(format!("{}-shm", db_path.display()));
 
-        sqlx::query("CREATE TABLE cleanup_probe (id INTEGER PRIMARY KEY, value TEXT NOT NULL)")
+        setup::bootstrap_pool(temp_pool.pool())
+            .await
+            .expect("temp pool should bootstrap main schema");
+        sqlx::query("INSERT INTO USER (ID, EMAIL, PASSWORD) VALUES (?, ?, ?)")
+            .bind("cleanup-user")
+            .bind("cleanup-user@example.org")
+            .bind("test-password")
             .execute(temp_pool.pool())
             .await
-            .expect("probe table should be created");
-        sqlx::query("INSERT INTO cleanup_probe (value) VALUES ('probe')")
-            .execute(temp_pool.pool())
-            .await
-            .expect("probe row should be inserted");
+            .expect("fixture user row should be inserted");
 
         assert!(
             wal_path.exists() || shm_path.exists(),

@@ -366,7 +366,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::sqlite::connect_pool;
+    use crate::sqlite::{connect_pool, setup};
 
     fn temp_db_path(case_id: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
@@ -380,15 +380,16 @@ mod tests {
         let pool = connect_pool(db_path, 1)
             .await
             .expect("temporary sqlite db should open");
-        sqlx::query(
-            "CREATE TABLE LIBRARY (ID TEXT PRIMARY KEY, SCAN_STARTUP BOOLEAN NOT NULL, SCAN_INTERVAL TEXT NOT NULL)",
-        )
-        .execute(&pool)
-        .await
-        .expect("library table should be created");
+        setup::bootstrap_pool(&pool)
+            .await
+            .expect("temporary sqlite db should bootstrap main schema");
         for (library_id, scan_startup, scan_interval) in rows {
-            sqlx::query("INSERT INTO LIBRARY (ID, SCAN_STARTUP, SCAN_INTERVAL) VALUES (?, ?, ?)")
+            sqlx::query(
+                "INSERT INTO LIBRARY (ID, NAME, ROOT, SCAN_STARTUP, SCAN_INTERVAL) VALUES (?, ?, ?, ?, ?)",
+            )
                 .bind(library_id.to_string())
+                .bind(format!("Library {library_id}"))
+                .bind(std::env::temp_dir().to_string_lossy().to_string())
                 .bind(*scan_startup)
                 .bind(scan_interval.to_string())
                 .execute(&pool)

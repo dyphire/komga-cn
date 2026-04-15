@@ -278,17 +278,19 @@ mod tests {
         let tasks_db = paths.tasks_db.clone();
         let config_dir = paths.config_dir.clone();
 
+        seed_main_db_from_flyway(&main_db)
+            .await
+            .expect("fixture main db should be seeded before stale pool opens");
         let stale_pool = connect_pool(&main_db, 1)
             .await
             .expect("fixture main db should open");
-        sqlx::query("CREATE TABLE leak_probe (value TEXT NOT NULL)")
+        sqlx::query("INSERT INTO USER (ID, EMAIL, PASSWORD) VALUES (?, ?, ?)")
+            .bind("stale-user")
+            .bind("stale-user@example.org")
+            .bind("test-password")
             .execute(&stale_pool)
             .await
-            .expect("probe table should be created in stale database");
-        sqlx::query("INSERT INTO leak_probe (value) VALUES ('stale-row')")
-            .execute(&stale_pool)
-            .await
-            .expect("probe row should be inserted in stale database");
+            .expect("fixture user row should be inserted in stale database");
         drop(stale_pool);
 
         cleanup_async(paths).await;
@@ -304,7 +306,7 @@ mod tests {
         let fresh_pool = connect_pool(&main_db, 1)
             .await
             .expect("fresh fixture main db should open after cleanup");
-        let leaked_rows = sqlx::query_scalar::<_, String>("SELECT value FROM leak_probe")
+        let leaked_rows = sqlx::query_scalar::<_, String>("SELECT ID FROM USER")
             .fetch_all(&fresh_pool)
             .await;
 

@@ -65,33 +65,12 @@ async fn seed_kobo_sync_point_state(
     sync_point_id: &str,
     state_json: &Value,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let state: komga_rust::application::identity_access::KoboSyncPointState =
+        serde_json::from_value(state_json.clone())
+            .expect("seed sync point state should deserialize to KoboSyncPointState");
+    komga_rust::infrastructure::auth::save_sync_point(paths.main_db.as_path(), sync_point_id, &state)
         .await
-        .expect("kobo sync point state seed db should open");
-
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS KOBO_SYNC_POINT_STATE ( SYNC_POINT_ID TEXT NOT NULL, USER_ID TEXT NOT NULL, STATE_JSON TEXT NOT NULL, PRIMARY KEY (SYNC_POINT_ID, USER_ID) )",
-    )
-    .execute(&pool)
-    .await
-    .expect("kobo sync point state table should exist");
-
-    sqlx::query(
-        "INSERT INTO KOBO_SYNC_POINT_STATE (SYNC_POINT_ID, USER_ID, STATE_JSON) VALUES (?, ?, ?)",
-    )
-    .bind(sync_point_id)
-    .bind(
-        state_json
-            .get("user_id")
-            .and_then(Value::as_str)
-            .expect("seed sync point state should include user_id"),
-    )
-    .bind(state_json.to_string())
-    .execute(&pool)
-    .await
-    .expect("kobo sync point state row should be inserted");
-
-    pool.close().await;
+        .expect("kobo sync point state row should be inserted");
 }
 
 #[tokio::test]

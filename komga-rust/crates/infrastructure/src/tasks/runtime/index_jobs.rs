@@ -184,11 +184,11 @@ fn parse_for_bigger_result_only(payload: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sqlite::connect_pool;
+    use crate::sqlite::{connect_pool, connect_private_pool, setup::bootstrap_pool};
     use image::{ImageBuffer, Rgba};
     use komga_application::task_processing::TaskQueueAdminPort;
     use komga_application::task_processing::TaskRuntimeContext;
-    use sqlx::Row;
+    use sqlx::{Row, SqlitePool};
     use std::fs::File;
     use std::io::Write;
     use zip::CompressionMethod;
@@ -237,8 +237,79 @@ mod tests {
         zip.finish().expect("cbz fixture should finish");
     }
 
-    fn legacy_file_url(path: &std::path::Path) -> String {
-        format!("file:{}", path.to_string_lossy().replace(' ', "%20"))
+    async fn open_bootstrapped_main_pool(database_file: &std::path::Path) -> SqlitePool {
+        let pool = connect_private_pool(database_file, 1)
+            .await
+            .expect("index-jobs fixture db should open");
+        bootstrap_pool(&pool)
+            .await
+            .expect("index-jobs fixture db should bootstrap main schema");
+        pool
+    }
+
+    async fn insert_library(
+        pool: &SqlitePool,
+        library_root: &std::path::Path,
+        analyze_dimensions: bool,
+    ) {
+        sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT, ANALYZE_DIMENSIONS) VALUES (?, ?, ?, ?)")
+            .bind("library-1")
+            .bind("Library 1")
+            .bind(library_root.to_string_lossy().to_string())
+            .bind(analyze_dimensions)
+            .execute(pool)
+            .await
+            .expect("index-jobs fixture library row should be inserted");
+    }
+
+    async fn insert_series(pool: &SqlitePool, library_id: &str, series_id: &str) {
+        sqlx::query(
+            "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID) VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?)",
+        )
+        .bind(series_id)
+        .bind(0_i64)
+        .bind("Series 1")
+        .bind(format!("series/{series_id}"))
+        .bind(library_id)
+        .execute(pool)
+        .await
+        .expect("index-jobs fixture series row should be inserted");
+    }
+
+    async fn insert_book(
+        pool: &SqlitePool,
+        book_id: &str,
+        name: &str,
+        url: &str,
+        library_id: &str,
+        series_id: &str,
+        deleted_date: Option<&str>,
+    ) {
+        sqlx::query(
+            "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID, DELETED_DATE) VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(book_id)
+        .bind(0_i64)
+        .bind(name)
+        .bind(url)
+        .bind(series_id)
+        .bind(0_i64)
+        .bind(1_i64)
+        .bind(library_id)
+        .bind(deleted_date)
+        .execute(pool)
+        .await
+        .expect("index-jobs fixture book row should be inserted");
+    }
+
+    async fn insert_user(pool: &SqlitePool, user_id: &str) {
+        sqlx::query("INSERT INTO USER (ID, EMAIL, PASSWORD) VALUES (?, ?, ?)")
+            .bind(user_id)
+            .bind(format!("{user_id}@example.org"))
+            .bind("test-password")
+            .execute(pool)
+            .await
+            .expect("index-jobs fixture user row should be inserted");
     }
 
     struct AnalyzeBookDimensionFixture {
@@ -283,43 +354,19 @@ mod tests {
         let archive_path = fixture.library_root.join("books/book-1.cbz");
         write_cbz_fixture(&archive_path, &[(48, 96), (120, 80)]);
 
-        let pool = connect_pool(fixture.database_file.as_path(), 1)
-            .await
-            .expect("analyze-book dimensions db should open");
-        for ddl in [
-            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL, ANALYZE_DIMENSIONS integer NOT NULL DEFAULT 1)",
-            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, NAME varchar NOT NULL, URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL, CREATED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-            "CREATE TABLE BOOK_METADATA (BOOK_ID varchar NOT NULL PRIMARY KEY, TITLE varchar NULL)",
-            "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, STATUS varchar NOT NULL, MEDIA_TYPE varchar NOT NULL, PAGE_COUNT int NOT NULL DEFAULT 0, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-            "CREATE TABLE MEDIA_PAGE (FILE_NAME varchar NOT NULL, MEDIA_TYPE varchar NOT NULL, NUMBER int NOT NULL, BOOK_ID varchar NOT NULL, width int NULL, height int NULL, FILE_HASH varchar NOT NULL DEFAULT '', FILE_SIZE int NOT NULL DEFAULT 0)",
-            "CREATE TABLE READ_PROGRESS (BOOK_ID varchar NOT NULL, USER_ID varchar NOT NULL, PAGE int NOT NULL DEFAULT 0, COMPLETED integer NOT NULL DEFAULT 0, READ_DATE datetime NULL, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (BOOK_ID, USER_ID))",
-            "CREATE TABLE READ_PROGRESS_SERIES (SERIES_ID varchar NOT NULL, USER_ID varchar NOT NULL, READ_COUNT int NOT NULL DEFAULT 0, IN_PROGRESS_COUNT int NOT NULL DEFAULT 0, MOST_RECENT_READ_DATE datetime NULL, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (SERIES_ID, USER_ID))",
-        ] {
-            sqlx::query(ddl)
-                .execute(&pool)
-                .await
-                .expect("analyze-book dimensions schema should be created");
-        }
-        sqlx::query("INSERT INTO LIBRARY (ID, ROOT, ANALYZE_DIMENSIONS) VALUES (?, ?, ?)")
-            .bind("library-1")
-            .bind(legacy_file_url(&fixture.library_root))
-            .bind(analyze_dimensions)
-            .execute(&pool)
-            .await
-            .expect("analyze-book dimensions library row should be inserted");
-        sqlx::query(
-            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, CREATED_DATE, LAST_MODIFIED_DATE) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        let pool = open_bootstrapped_main_pool(fixture.database_file.as_path()).await;
+        insert_library(&pool, &fixture.library_root, analyze_dimensions).await;
+        insert_series(&pool, "library-1", "series-1").await;
+        insert_book(
+            &pool,
+            "book-1",
+            "book-1",
+            "books/book-1.cbz",
+            "library-1",
+            "series-1",
+            None,
         )
-        .bind("book-1")
-        .bind("book-1")
-        .bind(legacy_file_url(&archive_path))
-        .bind("library-1")
-        .bind("series-1")
-        .bind("2000-01-01 00:00:00")
-        .bind("2000-01-01 00:00:00")
-        .execute(&pool)
-        .await
-        .expect("analyze-book dimensions book row should be inserted");
+        .await;
         pool.close().await;
 
         fixture
@@ -368,27 +415,21 @@ mod tests {
         let database_file = unique_temp_path("komga-thumbnail-finder-main");
         let tasks_db_file = unique_temp_path("komga-thumbnail-finder-tasks");
         let lucene_dir = unique_temp_path("komga-thumbnail-finder-lucene");
+        let library_root = unique_temp_path("komga-thumbnail-finder-root");
 
-        let pool = connect_pool(database_file.as_path(), 1)
-            .await
-            .expect("thumbnail finder test db should open");
-        sqlx::query(
-            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, DELETED_DATE timestamp NULL)",
+        let pool = open_bootstrapped_main_pool(database_file.as_path()).await;
+        insert_library(&pool, &library_root, true).await;
+        insert_series(&pool, "library-1", "series-1").await;
+        insert_book(
+            &pool,
+            "book-1",
+            "book-1",
+            "books/book-1.cbz",
+            "library-1",
+            "series-1",
+            None,
         )
-        .execute(&pool)
-        .await
-        .expect("book table should be created");
-        sqlx::query(
-            "CREATE TABLE THUMBNAIL_BOOK (ID varchar NOT NULL PRIMARY KEY, BOOK_ID varchar NOT NULL, SELECTED integer NOT NULL)",
-        )
-        .execute(&pool)
-        .await
-        .expect("thumbnail book table should be created");
-        sqlx::query("INSERT INTO BOOK (ID, DELETED_DATE) VALUES (?, NULL)")
-            .bind("book-1")
-            .execute(&pool)
-            .await
-            .expect("book row should be inserted");
+        .await;
         pool.close().await;
 
         let runtime = TaskRuntimeContext {
@@ -419,6 +460,7 @@ mod tests {
         assert_eq!(generated.group, None);
 
         let _ = std::fs::remove_file(database_file);
+        let _ = std::fs::remove_dir_all(library_root);
     }
 
     #[tokio::test]
@@ -426,37 +468,31 @@ mod tests {
         let database_file = unique_temp_path("komga-thumbnail-finder-all-books-main");
         let tasks_db_file = unique_temp_path("komga-thumbnail-finder-all-books-tasks");
         let lucene_dir = unique_temp_path("komga-thumbnail-finder-all-books-lucene");
+        let library_root = unique_temp_path("komga-thumbnail-finder-all-books-root");
 
-        let pool = connect_pool(database_file.as_path(), 1)
-            .await
-            .expect("full thumbnail finder test db should open");
-        sqlx::query(
-            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, DELETED_DATE timestamp NULL)",
-        )
-        .execute(&pool)
-        .await
-        .expect("book table should be created");
-        sqlx::query(
-            "CREATE TABLE THUMBNAIL_BOOK (ID varchar NOT NULL PRIMARY KEY, BOOK_ID varchar NOT NULL, SELECTED integer NOT NULL)",
-        )
-        .execute(&pool)
-        .await
-        .expect("thumbnail book table should be created");
+        let pool = open_bootstrapped_main_pool(database_file.as_path()).await;
+        insert_library(&pool, &library_root, true).await;
+        insert_series(&pool, "library-1", "series-1").await;
         for (book_id, deleted_date) in [
             ("book-1", Option::<String>::None),
             ("book-2", Option::<String>::None),
             ("book-3", Some("2025-01-01 00:00:00".to_string())),
         ] {
-            sqlx::query("INSERT INTO BOOK (ID, DELETED_DATE) VALUES (?, ?)")
-                .bind(book_id)
-                .bind(deleted_date)
-                .execute(&pool)
-                .await
-                .expect("book row should be inserted for full thumbnail finder test");
+            insert_book(
+                &pool,
+                book_id,
+                book_id,
+                &format!("books/{book_id}.cbz"),
+                "library-1",
+                "series-1",
+                deleted_date.as_deref(),
+            )
+            .await;
         }
-        sqlx::query("INSERT INTO THUMBNAIL_BOOK (ID, BOOK_ID, SELECTED) VALUES (?, ?, ?)")
+        sqlx::query("INSERT INTO THUMBNAIL_BOOK (ID, BOOK_ID, TYPE, SELECTED) VALUES (?, ?, ?, ?)")
             .bind("thumb-book-1")
             .bind("book-1")
+            .bind("USER_UPLOADED")
             .bind(true)
             .execute(&pool)
             .await
@@ -500,6 +536,7 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(database_file);
+        let _ = std::fs::remove_dir_all(library_root);
     }
 
     #[tokio::test]
@@ -610,41 +647,21 @@ mod tests {
         )
         .expect("analyze-book read-progress adjust source fixture should be copied");
 
-        let pool = connect_pool(database_file.as_path(), 1)
-            .await
-            .expect("analyze-book read-progress adjust db should open");
-        for ddl in [
-            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL, ANALYZE_DIMENSIONS integer NOT NULL DEFAULT 1)",
-            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, NAME varchar NOT NULL, URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL, CREATED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, DELETED_DATE datetime NULL)",
-            "CREATE TABLE BOOK_METADATA (BOOK_ID varchar NOT NULL PRIMARY KEY, TITLE varchar NULL)",
-            "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, STATUS varchar NOT NULL, MEDIA_TYPE varchar NOT NULL, PAGE_COUNT int NOT NULL DEFAULT 0, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-            "CREATE TABLE MEDIA_PAGE (FILE_NAME varchar NOT NULL, MEDIA_TYPE varchar NOT NULL, NUMBER int NOT NULL, BOOK_ID varchar NOT NULL, width int NULL, height int NULL, FILE_HASH varchar NOT NULL DEFAULT '', FILE_SIZE int NOT NULL DEFAULT 0)",
-            "CREATE TABLE READ_PROGRESS (BOOK_ID varchar NOT NULL, USER_ID varchar NOT NULL, PAGE int NOT NULL DEFAULT 0, COMPLETED integer NOT NULL DEFAULT 0, READ_DATE datetime NULL, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (BOOK_ID, USER_ID))",
-            "CREATE TABLE READ_PROGRESS_SERIES (SERIES_ID varchar NOT NULL, USER_ID varchar NOT NULL, READ_COUNT int NOT NULL DEFAULT 0, IN_PROGRESS_COUNT int NOT NULL DEFAULT 0, MOST_RECENT_READ_DATE datetime NULL, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (SERIES_ID, USER_ID))",
-        ] {
-            sqlx::query(ddl)
-                .execute(&pool)
-                .await
-                .expect("analyze-book read-progress adjust schema should be created");
-        }
-        sqlx::query("INSERT INTO LIBRARY (ID, ROOT, ANALYZE_DIMENSIONS) VALUES (?, ?, ?)")
-            .bind("library-1")
-            .bind(library_root.to_string_lossy().to_string())
-            .bind(true)
-            .execute(&pool)
-            .await
-            .expect("analyze-book read-progress adjust library row should be inserted");
-        sqlx::query(
-            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID) VALUES (?, ?, ?, ?, ?)",
+        let pool = open_bootstrapped_main_pool(database_file.as_path()).await;
+        insert_library(&pool, &library_root, true).await;
+        insert_series(&pool, "library-1", "series-1").await;
+        insert_book(
+            &pool,
+            "book-1",
+            "book-1",
+            "books/book-1.cbr",
+            "library-1",
+            "series-1",
+            None,
         )
-        .bind("book-1")
-        .bind("book-1")
-        .bind("books/book-1.cbr")
-        .bind("library-1")
-        .bind("series-1")
-        .execute(&pool)
-        .await
-        .expect("analyze-book read-progress adjust book row should be inserted");
+        .await;
+        insert_user(&pool, "user-completed").await;
+        insert_user(&pool, "user-incomplete").await;
         sqlx::query(
             "INSERT INTO MEDIA (BOOK_ID, STATUS, MEDIA_TYPE, PAGE_COUNT) VALUES (?, ?, ?, ?)",
         )
@@ -801,41 +818,21 @@ mod tests {
         .expect("analyze-book read-progress keep source fixture should be copied");
         let actual_page_count = analyzed_fixture_page_count("rar4.rar", "books/book-1.cbr");
 
-        let pool = connect_pool(database_file.as_path(), 1)
-            .await
-            .expect("analyze-book read-progress keep db should open");
-        for ddl in [
-            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL, ANALYZE_DIMENSIONS integer NOT NULL DEFAULT 1)",
-            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, NAME varchar NOT NULL, URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL, CREATED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, DELETED_DATE datetime NULL)",
-            "CREATE TABLE BOOK_METADATA (BOOK_ID varchar NOT NULL PRIMARY KEY, TITLE varchar NULL)",
-            "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, STATUS varchar NOT NULL, MEDIA_TYPE varchar NOT NULL, PAGE_COUNT int NOT NULL DEFAULT 0, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-            "CREATE TABLE MEDIA_PAGE (FILE_NAME varchar NOT NULL, MEDIA_TYPE varchar NOT NULL, NUMBER int NOT NULL, BOOK_ID varchar NOT NULL, width int NULL, height int NULL, FILE_HASH varchar NOT NULL DEFAULT '', FILE_SIZE int NOT NULL DEFAULT 0)",
-            "CREATE TABLE READ_PROGRESS (BOOK_ID varchar NOT NULL, USER_ID varchar NOT NULL, PAGE int NOT NULL DEFAULT 0, COMPLETED integer NOT NULL DEFAULT 0, READ_DATE datetime NULL, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (BOOK_ID, USER_ID))",
-            "CREATE TABLE READ_PROGRESS_SERIES (SERIES_ID varchar NOT NULL, USER_ID varchar NOT NULL, READ_COUNT int NOT NULL DEFAULT 0, IN_PROGRESS_COUNT int NOT NULL DEFAULT 0, MOST_RECENT_READ_DATE datetime NULL, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (SERIES_ID, USER_ID))",
-        ] {
-            sqlx::query(ddl)
-                .execute(&pool)
-                .await
-                .expect("analyze-book read-progress keep schema should be created");
-        }
-        sqlx::query("INSERT INTO LIBRARY (ID, ROOT, ANALYZE_DIMENSIONS) VALUES (?, ?, ?)")
-            .bind("library-1")
-            .bind(library_root.to_string_lossy().to_string())
-            .bind(true)
-            .execute(&pool)
-            .await
-            .expect("analyze-book read-progress keep library row should be inserted");
-        sqlx::query(
-            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID) VALUES (?, ?, ?, ?, ?)",
+        let pool = open_bootstrapped_main_pool(database_file.as_path()).await;
+        insert_library(&pool, &library_root, true).await;
+        insert_series(&pool, "library-1", "series-1").await;
+        insert_book(
+            &pool,
+            "book-1",
+            "book-1",
+            "books/book-1.cbr",
+            "library-1",
+            "series-1",
+            None,
         )
-        .bind("book-1")
-        .bind("book-1")
-        .bind("books/book-1.cbr")
-        .bind("library-1")
-        .bind("series-1")
-        .execute(&pool)
-        .await
-        .expect("analyze-book read-progress keep book row should be inserted");
+        .await;
+        insert_user(&pool, "user-completed").await;
+        insert_user(&pool, "user-incomplete").await;
         sqlx::query(
             "INSERT INTO MEDIA (BOOK_ID, STATUS, MEDIA_TYPE, PAGE_COUNT) VALUES (?, ?, ?, ?)",
         )

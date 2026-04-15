@@ -105,6 +105,7 @@ pub fn load_persisted_library_ids(database_file: &Path) -> Result<Vec<String>, S
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sqlite::setup;
 
     fn temp_db_path(case_id: &str) -> std::path::PathBuf {
         let nanos = std::time::SystemTime::now()
@@ -135,19 +136,20 @@ mod tests {
         let pool = connect_pool(db_path.as_path(), 1)
             .await
             .expect("temporary sqlite db should open");
+        setup::bootstrap_pool(&pool)
+            .await
+            .expect("temporary sqlite db should bootstrap main schema");
         sqlx::query(
-            "CREATE TABLE LIBRARY (ID TEXT PRIMARY KEY, SCAN_STARTUP BOOLEAN NOT NULL, SCAN_INTERVAL TEXT NOT NULL)",
-        )
-        .execute(&pool)
-        .await
-        .expect("library table should be created");
-        sqlx::query(
-            "INSERT INTO LIBRARY (ID, SCAN_STARTUP, SCAN_INTERVAL) VALUES (?, ?, ?), (?, ?, ?)",
+            "INSERT INTO LIBRARY (ID, NAME, ROOT, SCAN_STARTUP, SCAN_INTERVAL) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)",
         )
         .bind("library-2")
+        .bind("Library 2")
+        .bind(std::env::temp_dir().to_string_lossy().to_string())
         .bind(false)
         .bind("DAILY")
         .bind("library-1")
+        .bind("Library 1")
+        .bind(std::env::temp_dir().to_string_lossy().to_string())
         .bind(true)
         .bind("DISABLED")
         .execute(&pool)

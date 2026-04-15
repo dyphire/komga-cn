@@ -157,22 +157,12 @@ pub(super) fn try_execute(
 mod tests {
     use super::*;
     use crate::sqlite::connect_pool;
+    use crate::task_queue::test_support::RuntimeTestFixture;
     use komga_application::task_processing::TaskQueueAdminPort;
     use komga_application::task_processing::TaskRuntimeContext;
     use serde_json::json;
-    use sqlx::Row;
+    use sqlx::{Row, SqlitePool};
     use std::io::Write;
-
-    fn unique_temp_path(prefix: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!(
-            "{prefix}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock should be after unix epoch")
-                .as_nanos()
-        ))
-    }
 
     fn write_zip_fixture(path: &std::path::Path) -> Vec<(String, i64)> {
         let file =
@@ -200,26 +190,32 @@ mod tests {
         ]
     }
 
+    async fn insert_series(pool: &SqlitePool, library_id: &str, series_id: &str) {
+        sqlx::query(
+            "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID) VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?)",
+        )
+        .bind(series_id)
+        .bind(0_i64)
+        .bind("Series 1")
+        .bind(format!("series/{series_id}"))
+        .bind(library_id)
+        .execute(pool)
+        .await
+        .expect("series row should be inserted for hashing fixture");
+    }
+
     async fn create_remove_hashed_pages_failure_fixture(
         case: &str,
         book_url: &str,
         media_type: &str,
         media_status: &str,
         create_source_file: bool,
-    ) -> (
-        TaskRuntimeContext,
-        TaskQueueRecord,
-        std::path::PathBuf,
-        std::path::PathBuf,
-    ) {
-        let database_file = unique_temp_path(&format!("komga-remove-hashed-pages-{case}-main"));
-        let tasks_db_file = unique_temp_path(&format!("komga-remove-hashed-pages-{case}-tasks"));
-        let lucene_dir = unique_temp_path(&format!("komga-remove-hashed-pages-{case}-lucene"));
-        let library_root = unique_temp_path(&format!("komga-remove-hashed-pages-{case}-root"));
-        std::fs::create_dir_all(library_root.join("books"))
+    ) -> (RuntimeTestFixture, TaskRuntimeContext, TaskQueueRecord) {
+        let fixture = RuntimeTestFixture::new(&format!("remove-hashed-pages-{case}"));
+        std::fs::create_dir_all(fixture.library_root.join("books"))
             .expect("remove-hashed-pages failure fixture root should be created");
 
-        let source_path = library_root.join(book_url);
+        let source_path = fixture.library_root.join(book_url);
         let file_last_modified = if create_source_file {
             std::fs::write(&source_path, b"remove-hashed-pages-failure")
                 .expect("remove-hashed-pages failure fixture source should be written");
@@ -236,29 +232,19 @@ mod tests {
             0_i64
         };
 
-        let pool = connect_pool(database_file.as_path(), 1)
-            .await
-            .expect("remove-hashed-pages failure fixture db should open");
-        for ddl in [
-            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL, ANALYZE_DIMENSIONS integer NOT NULL DEFAULT 1)",
-            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL, FILE_LAST_MODIFIED datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, FILE_SIZE int NOT NULL DEFAULT 0)",
-            "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, MEDIA_TYPE varchar NOT NULL, STATUS varchar NOT NULL)",
-            "CREATE TABLE MEDIA_PAGE (FILE_NAME varchar NOT NULL, MEDIA_TYPE varchar NOT NULL, NUMBER int NOT NULL, BOOK_ID varchar NOT NULL, FILE_HASH varchar NOT NULL DEFAULT '', FILE_SIZE int NOT NULL DEFAULT 0)",
-        ] {
-            sqlx::query(ddl)
-                .execute(&pool)
-                .await
-                .expect("remove-hashed-pages failure fixture schema should be created");
-        }
-        sqlx::query("INSERT INTO LIBRARY (ID, ROOT) VALUES (?, ?)")
+        let pool = fixture.main_pool().await;
+        sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
             .bind("library-1")
-            .bind(library_root.to_string_lossy().to_string())
+            .bind("Library 1")
+            .bind(fixture.library_root.to_string_lossy().to_string())
             .execute(&pool)
             .await
             .expect("remove-hashed-pages failure fixture library row should be inserted");
+        insert_series(&pool, "library-1", "series-1").await;
         sqlx::query(
-            "INSERT INTO BOOK (ID, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE) VALUES (?, ?, ?, ?, datetime(?, 'unixepoch'), ?)",
+            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE) VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?)",
         )
+        .bind("book-1")
         .bind("book-1")
         .bind(book_url)
         .bind("library-1")
@@ -277,16 +263,7 @@ mod tests {
             .expect("remove-hashed-pages failure fixture media row should be inserted");
         pool.close().await;
 
-        let runtime = TaskRuntimeContext {
-            database_file: database_file.clone(),
-            tasks_db_file,
-            lucene_data_directory: lucene_dir,
-            consumes_queue: false,
-            owns_main_database: true,
-            owns_filesystem_scan_output: true,
-            owns_sidecar_output: true,
-            owns_search_index: false,
-        };
+        let runtime = fixture.runtime_context(false, false);
         let payload = serde_json::to_string(&super::super::RemoveHashedPagesPayload::new(
             "book-1".to_string(),
             vec![super::super::HashedPageToDelete {
@@ -303,41 +280,41 @@ mod tests {
             .with_simple_type("REMOVE_HASHED_PAGES")
             .with_payload(payload);
 
-        (runtime, task, database_file, library_root)
+        (fixture, runtime, task)
     }
 
     #[tokio::test]
     async fn missing_page_hash_finder_enqueues_kotlin_style_hash_book_pages_ids() {
-        let database_file = unique_temp_path("komga-missing-page-hash-finder-main");
-        let tasks_db_file = unique_temp_path("komga-missing-page-hash-finder-tasks");
-        let lucene_dir = unique_temp_path("komga-missing-page-hash-finder-lucene");
-
-        let pool = connect_pool(database_file.as_path(), 1)
-            .await
-            .expect("missing page hash finder test db should open");
-        for ddl in [
-            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, HASH_FILES integer NOT NULL DEFAULT 0, HASH_PAGES integer NOT NULL DEFAULT 0, HASH_KOREADER integer NOT NULL DEFAULT 0)",
-            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, LIBRARY_ID varchar NOT NULL, DELETED_DATE timestamp NULL)",
-            "CREATE TABLE MEDIA_PAGE (BOOK_ID varchar NOT NULL, FILE_HASH varchar NULL)",
-        ] {
-            sqlx::query(ddl)
-                .execute(&pool)
-                .await
-                .expect("missing page hash finder fixture schema should be created");
-        }
-        sqlx::query("INSERT INTO LIBRARY (ID, HASH_PAGES) VALUES (?, ?)")
+        let fixture = RuntimeTestFixture::new("missing-page-hash-finder");
+        let pool = fixture.main_pool().await;
+        sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT, HASH_PAGES) VALUES (?, ?, ?, ?)")
             .bind("library-1")
+            .bind("Library 1")
+            .bind(fixture.library_root.to_string_lossy().to_string())
             .bind(true)
             .execute(&pool)
             .await
             .expect("library row should be inserted for missing page hash finder fixture");
-        sqlx::query("INSERT INTO BOOK (ID, LIBRARY_ID, DELETED_DATE) VALUES (?, ?, NULL)")
+        insert_series(&pool, "library-1", "series-1").await;
+        sqlx::query(
+            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE, DELETED_DATE) VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?, NULL)",
+        )
             .bind("book-1")
+            .bind("book-1")
+            .bind("books/book-1.cbz")
             .bind("library-1")
+            .bind("series-1")
+            .bind(0_i64)
+            .bind(0_i64)
             .execute(&pool)
             .await
             .expect("book row should be inserted for missing page hash finder fixture");
-        sqlx::query("INSERT INTO MEDIA_PAGE (BOOK_ID, FILE_HASH) VALUES (?, ?)")
+        sqlx::query(
+            "INSERT INTO MEDIA_PAGE (FILE_NAME, MEDIA_TYPE, NUMBER, BOOK_ID, FILE_HASH) VALUES (?, ?, ?, ?, ?)",
+        )
+            .bind("0001.png")
+            .bind("image/png")
+            .bind(0_i64)
             .bind("book-1")
             .bind("")
             .execute(&pool)
@@ -345,16 +322,7 @@ mod tests {
             .expect("media page row should be inserted for missing page hash finder fixture");
         pool.close().await;
 
-        let runtime = TaskRuntimeContext {
-            database_file: database_file.clone(),
-            tasks_db_file,
-            lucene_data_directory: lucene_dir,
-            consumes_queue: false,
-            owns_main_database: true,
-            owns_filesystem_scan_output: true,
-            owns_sidecar_output: true,
-            owns_search_index: true,
-        };
+        let runtime = fixture.runtime_context(false, true);
         let mut scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "missing-page-hash-finder-test");
         let finder_task =
@@ -385,41 +353,41 @@ mod tests {
             })),
         );
 
-        let _ = std::fs::remove_file(database_file);
+        fixture.cleanup().await;
     }
 
     #[tokio::test]
     async fn missing_page_hash_finder_skips_when_library_hash_pages_is_disabled() {
-        let database_file = unique_temp_path("komga-missing-page-hash-disabled-main");
-        let tasks_db_file = unique_temp_path("komga-missing-page-hash-disabled-tasks");
-        let lucene_dir = unique_temp_path("komga-missing-page-hash-disabled-lucene");
-
-        let pool = connect_pool(database_file.as_path(), 1)
-            .await
-            .expect("missing page hash disabled test db should open");
-        for ddl in [
-            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, HASH_FILES integer NOT NULL DEFAULT 0, HASH_PAGES integer NOT NULL DEFAULT 0, HASH_KOREADER integer NOT NULL DEFAULT 0)",
-            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, LIBRARY_ID varchar NOT NULL, DELETED_DATE timestamp NULL)",
-            "CREATE TABLE MEDIA_PAGE (BOOK_ID varchar NOT NULL, FILE_HASH varchar NULL)",
-        ] {
-            sqlx::query(ddl)
-                .execute(&pool)
-                .await
-                .expect("missing page hash disabled fixture schema should be created");
-        }
-        sqlx::query("INSERT INTO LIBRARY (ID, HASH_PAGES) VALUES (?, ?)")
+        let fixture = RuntimeTestFixture::new("missing-page-hash-disabled");
+        let pool = fixture.main_pool().await;
+        sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT, HASH_PAGES) VALUES (?, ?, ?, ?)")
             .bind("library-1")
+            .bind("Library 1")
+            .bind(fixture.library_root.to_string_lossy().to_string())
             .bind(false)
             .execute(&pool)
             .await
             .expect("library row should be inserted for disabled page-hash fixture");
-        sqlx::query("INSERT INTO BOOK (ID, LIBRARY_ID, DELETED_DATE) VALUES (?, ?, NULL)")
+        insert_series(&pool, "library-1", "series-1").await;
+        sqlx::query(
+            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE, DELETED_DATE) VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?, NULL)",
+        )
             .bind("book-1")
+            .bind("book-1")
+            .bind("books/book-1.cbz")
             .bind("library-1")
+            .bind("series-1")
+            .bind(0_i64)
+            .bind(0_i64)
             .execute(&pool)
             .await
             .expect("book row should be inserted for disabled page-hash fixture");
-        sqlx::query("INSERT INTO MEDIA_PAGE (BOOK_ID, FILE_HASH) VALUES (?, ?)")
+        sqlx::query(
+            "INSERT INTO MEDIA_PAGE (FILE_NAME, MEDIA_TYPE, NUMBER, BOOK_ID, FILE_HASH) VALUES (?, ?, ?, ?, ?)",
+        )
+            .bind("0001.png")
+            .bind("image/png")
+            .bind(0_i64)
             .bind("book-1")
             .bind("")
             .execute(&pool)
@@ -427,16 +395,7 @@ mod tests {
             .expect("media page row should be inserted for disabled page-hash fixture");
         pool.close().await;
 
-        let runtime = TaskRuntimeContext {
-            database_file: database_file.clone(),
-            tasks_db_file,
-            lucene_data_directory: lucene_dir,
-            consumes_queue: false,
-            owns_main_database: true,
-            owns_filesystem_scan_output: true,
-            owns_sidecar_output: true,
-            owns_search_index: true,
-        };
+        let runtime = fixture.runtime_context(false, true);
         let mut scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "missing-page-hash-disabled-test");
         let finder_task =
@@ -453,20 +412,17 @@ mod tests {
             "finder must not enqueue HASH_BOOK_PAGES tasks when library.hashPages is disabled at execution time",
         );
 
-        let _ = std::fs::remove_file(database_file);
+        fixture.cleanup().await;
     }
 
     #[tokio::test]
     async fn remove_hashed_pages_persists_duplicate_page_deleted_history_and_thumbnail_task() {
         let book_id = "book-1";
-        let database_file = unique_temp_path("komga-remove-hashed-pages-main");
-        let tasks_db_file = unique_temp_path("komga-remove-hashed-pages-tasks");
-        let lucene_dir = unique_temp_path("komga-remove-hashed-pages-lucene");
-        let library_root = unique_temp_path("komga-remove-hashed-pages-root");
-        std::fs::create_dir_all(library_root.join("books"))
+        let fixture = RuntimeTestFixture::new("remove-hashed-pages");
+        std::fs::create_dir_all(fixture.library_root.join("books"))
             .expect("remove-hashed-pages library root should be created");
 
-        let book_path = library_root.join("books/book-1.cbz");
+        let book_path = fixture.library_root.join("books/book-1.cbz");
         let page_entries = write_zip_fixture(book_path.as_path());
         let book_metadata = std::fs::metadata(&book_path)
             .expect("remove-hashed-pages book metadata should be readable");
@@ -478,30 +434,15 @@ mod tests {
             .as_secs() as i64;
         let file_size = i64::try_from(book_metadata.len()).unwrap_or(i64::MAX);
 
-        let pool = connect_pool(database_file.as_path(), 1)
-            .await
-            .expect("remove-hashed-pages db should open");
-        for ddl in [
-            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL, ANALYZE_DIMENSIONS integer NOT NULL DEFAULT 1)",
-            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, NAME varchar NOT NULL, URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL, FILE_LAST_MODIFIED datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, FILE_SIZE int NOT NULL DEFAULT 0, FILE_HASH varchar NOT NULL DEFAULT '', FILE_HASH_KOREADER varchar NOT NULL DEFAULT '', LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-            "CREATE TABLE BOOK_METADATA (BOOK_ID varchar NOT NULL PRIMARY KEY, TITLE varchar NULL)",
-            "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, MEDIA_TYPE varchar NOT NULL, STATUS varchar NOT NULL, PAGE_COUNT int NOT NULL DEFAULT 0, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-            "CREATE TABLE MEDIA_PAGE (FILE_NAME varchar NOT NULL, MEDIA_TYPE varchar NOT NULL, NUMBER int NOT NULL, BOOK_ID varchar NOT NULL, width int NULL, height int NULL, FILE_HASH varchar NOT NULL DEFAULT '', FILE_SIZE int NOT NULL DEFAULT 0)",
-            "CREATE TABLE PAGE_HASH (HASH varchar NOT NULL PRIMARY KEY, DELETE_COUNT int NOT NULL DEFAULT 0, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-            "CREATE TABLE HISTORICAL_EVENT (ID varchar NOT NULL PRIMARY KEY, TYPE varchar NOT NULL, BOOK_ID varchar NULL, SERIES_ID varchar NULL, TIMESTAMP datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-            "CREATE TABLE HISTORICAL_EVENT_PROPERTIES (ID varchar NOT NULL, \"KEY\" varchar NOT NULL, VALUE varchar NOT NULL)",
-        ] {
-            sqlx::query(ddl)
-                .execute(&pool)
-                .await
-                .expect("remove-hashed-pages fixture schema should be created");
-        }
-        sqlx::query("INSERT INTO LIBRARY (ID, ROOT) VALUES (?, ?)")
+        let pool = fixture.main_pool().await;
+        sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
             .bind("library-1")
-            .bind(library_root.to_string_lossy().to_string())
+            .bind("Library 1")
+            .bind(fixture.library_root.to_string_lossy().to_string())
             .execute(&pool)
             .await
             .expect("remove-hashed-pages library row should be inserted");
+        insert_series(&pool, "library-1", "series-1").await;
         sqlx::query(
             "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE) VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?)",
         )
@@ -549,30 +490,23 @@ mod tests {
         .execute(&pool)
         .await
         .expect("remove-hashed-pages second page row should be inserted");
-        sqlx::query("INSERT INTO PAGE_HASH (HASH, DELETE_COUNT) VALUES (?, ?)")
+        sqlx::query("INSERT INTO PAGE_HASH (HASH, ACTION, DELETE_COUNT) VALUES (?, ?, ?)")
             .bind("hash-one")
+            .bind("DELETE_AUTO")
             .bind(0_i64)
             .execute(&pool)
             .await
             .expect("remove-hashed-pages first page hash row should be inserted");
-        sqlx::query("INSERT INTO PAGE_HASH (HASH, DELETE_COUNT) VALUES (?, ?)")
+        sqlx::query("INSERT INTO PAGE_HASH (HASH, ACTION, DELETE_COUNT) VALUES (?, ?, ?)")
             .bind("hash-two")
+            .bind("DELETE_AUTO")
             .bind(0_i64)
             .execute(&pool)
             .await
             .expect("remove-hashed-pages second page hash row should be inserted");
         pool.close().await;
 
-        let runtime = TaskRuntimeContext {
-            database_file: database_file.clone(),
-            tasks_db_file,
-            lucene_data_directory: lucene_dir,
-            consumes_queue: false,
-            owns_main_database: true,
-            owns_filesystem_scan_output: true,
-            owns_sidecar_output: true,
-            owns_search_index: false,
-        };
+        let runtime = fixture.runtime_context(false, false);
         let mut scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "remove-hashed-pages-test");
         let payload = serde_json::to_string(&super::super::RemoveHashedPagesPayload::new(
@@ -603,7 +537,7 @@ mod tests {
         assert_eq!(generated.id, "GENERATE_BOOK_THUMBNAIL_book-1");
         assert_eq!(generated.simple_type, "GENERATE_BOOK_THUMBNAIL");
 
-        let verify_pool = connect_pool(database_file.as_path(), 1)
+        let verify_pool = connect_pool(fixture.database_file.as_path(), 1)
             .await
             .expect("remove-hashed-pages verify db should open");
         let remaining_pages = sqlx::query(
@@ -668,22 +602,19 @@ mod tests {
         assert_eq!(props.get("page media type"), Some(&"image/png".to_string()));
         verify_pool.close().await;
 
-        let _ = std::fs::remove_file(database_file);
-        let _ = std::fs::remove_file(book_path);
-        let _ = std::fs::remove_dir_all(library_root);
+        fixture.cleanup().await;
     }
 
     #[tokio::test]
     async fn remove_hashed_pages_fails_when_source_file_is_missing() {
-        let (runtime, task, database_file, library_root) =
-            create_remove_hashed_pages_failure_fixture(
-                "missing-file",
-                "books/book-1.cbz",
-                "application/zip",
-                "READY",
-                false,
-            )
-            .await;
+        let (fixture, runtime, task) = create_remove_hashed_pages_failure_fixture(
+            "missing-file",
+            "books/book-1.cbz",
+            "application/zip",
+            "READY",
+            false,
+        )
+        .await;
         let mut scheduler = TaskQueueScheduler::for_runtime(
             runtime.clone(),
             "remove-hashed-pages-missing-file-test",
@@ -699,21 +630,19 @@ mod tests {
                 .contains("file not found for hashed-page removal")
         );
 
-        let _ = std::fs::remove_file(database_file);
-        let _ = std::fs::remove_dir_all(library_root);
+        fixture.cleanup().await;
     }
 
     #[tokio::test]
     async fn remove_hashed_pages_fails_when_media_type_is_unsupported() {
-        let (runtime, task, database_file, library_root) =
-            create_remove_hashed_pages_failure_fixture(
-                "unsupported-media",
-                "books/book-1.pdf",
-                "application/pdf",
-                "READY",
-                true,
-            )
-            .await;
+        let (fixture, runtime, task) = create_remove_hashed_pages_failure_fixture(
+            "unsupported-media",
+            "books/book-1.pdf",
+            "application/pdf",
+            "READY",
+            true,
+        )
+        .await;
         let mut scheduler = TaskQueueScheduler::for_runtime(
             runtime.clone(),
             "remove-hashed-pages-unsupported-media-test",
@@ -729,21 +658,19 @@ mod tests {
                 .contains("unsupported media type for hashed-page removal")
         );
 
-        let _ = std::fs::remove_file(database_file);
-        let _ = std::fs::remove_dir_all(library_root);
+        fixture.cleanup().await;
     }
 
     #[tokio::test]
     async fn remove_hashed_pages_fails_when_media_is_not_ready() {
-        let (runtime, task, database_file, library_root) =
-            create_remove_hashed_pages_failure_fixture(
-                "media-not-ready",
-                "books/book-1.cbz",
-                "application/zip",
-                "OUTDATED",
-                true,
-            )
-            .await;
+        let (fixture, runtime, task) = create_remove_hashed_pages_failure_fixture(
+            "media-not-ready",
+            "books/book-1.cbz",
+            "application/zip",
+            "OUTDATED",
+            true,
+        )
+        .await;
         let mut scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "remove-hashed-pages-not-ready-test");
 
@@ -757,7 +684,6 @@ mod tests {
                 .contains("media not ready for hashed-page removal")
         );
 
-        let _ = std::fs::remove_file(database_file);
-        let _ = std::fs::remove_dir_all(library_root);
+        fixture.cleanup().await;
     }
 }

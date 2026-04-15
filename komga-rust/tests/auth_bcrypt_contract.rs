@@ -5,7 +5,7 @@ use komga_rust::application::identity_access::AuthOutcome;
 use komga_rust::infrastructure::auth::{
     persisted_basic_user, persisted_update_password_by_user_id,
 };
-use komga_rust::infrastructure::sqlite::connect_pool;
+use komga_rust::infrastructure::sqlite::{connect_pool, setup};
 use std::path::PathBuf;
 use tempfile::TempDir;
 
@@ -15,31 +15,9 @@ async fn create_test_db(case: &str) -> (TempDir, PathBuf, sqlx::Pool<sqlx::Sqlit
     let pool = connect_pool(&db_path, 1)
         .await
         .expect("test db should open");
-
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS USER (ID varchar NOT NULL PRIMARY KEY, EMAIL varchar NOT NULL, PASSWORD varchar NOT NULL, SHARED_ALL_LIBRARIES boolean NOT NULL, AGE_RESTRICTION int8 NULL, AGE_RESTRICTION_ALLOW_ONLY boolean NULL)",
-    )
-    .execute(&pool)
-    .await
-    .expect("user table should be created");
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS USER_ROLE (USER_ID varchar NOT NULL, ROLE varchar NOT NULL)",
-    )
-    .execute(&pool)
-    .await
-    .expect("user role table should be created");
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS USER_LIBRARY_SHARING (USER_ID varchar NOT NULL, LIBRARY_ID varchar NOT NULL)",
-    )
-    .execute(&pool)
-    .await
-    .expect("user library sharing table should be created");
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS USER_SHARING (USER_ID varchar NOT NULL, LABEL varchar NOT NULL, ALLOW boolean NOT NULL)",
-    )
-    .execute(&pool)
-    .await
-    .expect("user sharing table should be created");
+    setup::bootstrap_pool(&pool)
+        .await
+        .expect("test db should bootstrap main schema");
 
     (temp_dir, db_path, pool)
 }

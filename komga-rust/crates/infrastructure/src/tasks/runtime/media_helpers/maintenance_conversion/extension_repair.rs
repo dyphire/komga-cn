@@ -135,19 +135,8 @@ pub(in crate::task_queue) fn repair_extension(
 mod tests {
     use super::*;
     use crate::sqlite::connect_pool;
-    use komga_application::task_processing::TaskRuntimeContext;
+    use crate::task_queue::test_support::RuntimeTestFixture;
     use sqlx::Row;
-
-    fn unique_temp_path(prefix: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!(
-            "{prefix}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock should be after unix epoch")
-                .as_nanos()
-        ))
-    }
 
     fn clear_skipped_extension_repairs_for_test_database(database_file: &Path) {
         skipped_extension_repairs()
@@ -158,43 +147,37 @@ mod tests {
             });
     }
 
-    #[tokio::test]
-    async fn repair_extensions_remembers_previously_skipped_books_within_process() {
-        let database_file = unique_temp_path("komga-repair-extensions-main");
-        clear_skipped_extension_repairs_for_test_database(database_file.as_path());
-        let config_dir = unique_temp_path("komga-repair-extensions-config");
-        std::fs::create_dir_all(config_dir.join("books"))
-            .expect("repair-extensions config dir should be created");
-        let source_path = config_dir.join("books/repair-book.epub");
-        std::fs::write(&source_path, b"repair-extension-skip-fixture")
-            .expect("repair-extensions source file should be written");
-
-        let pool = connect_pool(database_file.as_path(), 1)
-            .await
-            .expect("repair-extensions test db should open");
-        for ddl in [
-            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL, ANALYZE_DIMENSIONS integer NOT NULL DEFAULT 1, REPAIR_EXTENSIONS integer NOT NULL DEFAULT 0, CONVERT_TO_CBZ integer NOT NULL DEFAULT 0)",
-            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL DEFAULT '', FILE_LAST_MODIFIED int NOT NULL DEFAULT 0, FILE_SIZE int NOT NULL DEFAULT 0, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, DELETED_DATE timestamp NULL)",
-            "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, MEDIA_TYPE varchar NOT NULL)",
-            "CREATE TABLE SIDECAR (URL varchar NOT NULL PRIMARY KEY, PARENT_URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL)",
-        ] {
-            sqlx::query(ddl)
-                .execute(&pool)
-                .await
-                .expect("repair-extensions fixture schema should be created");
-        }
-        sqlx::query("INSERT INTO LIBRARY (ID, ROOT, REPAIR_EXTENSIONS) VALUES (?, ?, ?)")
+    async fn seed_extension_repair_fixture(
+        fixture: &RuntimeTestFixture,
+        book_url: &str,
+        media_type: &str,
+    ) {
+        let pool = fixture.main_pool().await;
+        sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT, REPAIR_EXTENSIONS) VALUES (?, ?, ?, ?)")
             .bind("library-1")
-            .bind(config_dir.to_string_lossy().to_string())
+            .bind("Library 1")
+            .bind(fixture.library_root.to_string_lossy().to_string())
             .bind(true)
             .execute(&pool)
             .await
             .expect("repair-extensions library row should be inserted");
         sqlx::query(
-            "INSERT INTO BOOK (ID, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID) VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?)",
+        )
+        .bind("series-1")
+        .bind(0_i64)
+        .bind("Series 1")
+        .bind("series/series-1")
+        .bind("library-1")
+        .execute(&pool)
+        .await
+        .expect("repair-extensions series row should be inserted");
+        sqlx::query(
+            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE) VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?)",
         )
         .bind("book-1")
-        .bind("books/repair-book.epub")
+        .bind("book-1")
+        .bind(book_url)
         .bind("library-1")
         .bind("series-1")
         .bind(0_i64)
@@ -202,29 +185,34 @@ mod tests {
         .execute(&pool)
         .await
         .expect("repair-extensions book row should be inserted");
-        sqlx::query("INSERT INTO MEDIA (BOOK_ID, MEDIA_TYPE) VALUES (?, ?)")
+        sqlx::query("INSERT INTO MEDIA (BOOK_ID, MEDIA_TYPE, STATUS) VALUES (?, ?, ?)")
             .bind("book-1")
-            .bind("application/zip")
+            .bind(media_type)
+            .bind("READY")
             .execute(&pool)
             .await
             .expect("repair-extensions media row should be inserted");
         pool.close().await;
+    }
 
-        let runtime = TaskRuntimeContext {
-            database_file: database_file.clone(),
-            tasks_db_file: unique_temp_path("komga-repair-extensions-tasks"),
-            lucene_data_directory: unique_temp_path("komga-repair-extensions-lucene"),
-            consumes_queue: true,
-            owns_main_database: true,
-            owns_filesystem_scan_output: true,
-            owns_sidecar_output: true,
-            owns_search_index: true,
-        };
+    #[tokio::test]
+    async fn repair_extensions_remembers_previously_skipped_books_within_process() {
+        let fixture = RuntimeTestFixture::new("repair-extensions-main");
+        clear_skipped_extension_repairs_for_test_database(fixture.database_file.as_path());
+        std::fs::create_dir_all(fixture.library_root.join("books"))
+            .expect("repair-extensions config dir should be created");
+        let source_path = fixture.library_root.join("books/repair-book.epub");
+        std::fs::write(&source_path, b"repair-extension-skip-fixture")
+            .expect("repair-extensions source file should be written");
+
+        seed_extension_repair_fixture(&fixture, "books/repair-book.epub", "application/zip").await;
+
+        let runtime = fixture.runtime_context(true, true);
 
         repair_extension(&runtime, "book-1")
             .expect("first repair-extension call should skip EPUB-detected-as-ZIP cleanly");
 
-        let pool = connect_pool(database_file.as_path(), 1)
+        let pool = connect_pool(fixture.database_file.as_path(), 1)
             .await
             .expect("repair-extensions db should reopen for media mutation");
         sqlx::query("UPDATE MEDIA SET MEDIA_TYPE = ? WHERE BOOK_ID = ?")
@@ -238,7 +226,7 @@ mod tests {
         repair_extension(&runtime, "book-1")
             .expect("second repair-extension call should short-circuit previously skipped books");
 
-        let verify_pool = connect_pool(database_file.as_path(), 1)
+        let verify_pool = connect_pool(fixture.database_file.as_path(), 1)
             .await
             .expect("repair-extensions db should reopen for verification");
         let row = sqlx::query("SELECT URL FROM BOOK WHERE ID = ? LIMIT 1")
@@ -254,87 +242,39 @@ mod tests {
             "skipped repair cache should prevent later runs from renaming the original file",
         );
         assert!(
-            !config_dir.join("books/repair-book.pdf").exists(),
+            !fixture.library_root.join("books/repair-book.pdf").exists(),
             "skipped repair cache should suppress later extension repair work for the same book id",
         );
 
-        clear_skipped_extension_repairs_for_test_database(database_file.as_path());
-        let _ = std::fs::remove_file(source_path);
-        let _ = std::fs::remove_dir_all(config_dir);
-        let _ = std::fs::remove_file(database_file);
+        clear_skipped_extension_repairs_for_test_database(fixture.database_file.as_path());
+        fixture.cleanup().await;
     }
 
     #[tokio::test]
     async fn repair_extensions_does_not_cache_books_that_were_already_correct() {
-        let database_file = unique_temp_path("komga-repair-extensions-candidate-main");
-        clear_skipped_extension_repairs_for_test_database(database_file.as_path());
-        let config_dir = unique_temp_path("komga-repair-extensions-candidate-config");
-        std::fs::create_dir_all(config_dir.join("books"))
+        let fixture = RuntimeTestFixture::new("repair-extensions-candidate");
+        clear_skipped_extension_repairs_for_test_database(fixture.database_file.as_path());
+        std::fs::create_dir_all(fixture.library_root.join("books"))
             .expect("repair-extensions candidate config dir should be created");
-        let source_path = config_dir.join("books/repair-book.pdf");
+        let source_path = fixture.library_root.join("books/repair-book.pdf");
         std::fs::write(&source_path, b"repair-extension-candidate-fixture")
             .expect("repair-extensions candidate source file should be written");
 
-        let pool = connect_pool(database_file.as_path(), 1)
-            .await
-            .expect("repair-extensions candidate test db should open");
-        for ddl in [
-            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL, ANALYZE_DIMENSIONS integer NOT NULL DEFAULT 1, REPAIR_EXTENSIONS integer NOT NULL DEFAULT 0, CONVERT_TO_CBZ integer NOT NULL DEFAULT 0)",
-            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL DEFAULT '', FILE_LAST_MODIFIED int NOT NULL DEFAULT 0, FILE_SIZE int NOT NULL DEFAULT 0, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, DELETED_DATE timestamp NULL)",
-            "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, MEDIA_TYPE varchar NOT NULL)",
-            "CREATE TABLE SIDECAR (URL varchar NOT NULL PRIMARY KEY, PARENT_URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL)",
-        ] {
-            sqlx::query(ddl)
-                .execute(&pool)
-                .await
-                .expect("repair-extensions candidate fixture schema should be created");
-        }
-        sqlx::query("INSERT INTO LIBRARY (ID, ROOT, REPAIR_EXTENSIONS) VALUES (?, ?, ?)")
-            .bind("library-1")
-            .bind(config_dir.to_string_lossy().to_string())
-            .bind(true)
-            .execute(&pool)
-            .await
-            .expect("repair-extensions candidate library row should be inserted");
-        sqlx::query(
-            "INSERT INTO BOOK (ID, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE) VALUES (?, ?, ?, ?, ?, ?)",
-        )
-        .bind("book-1")
-        .bind("books/repair-book.pdf")
-        .bind("library-1")
-        .bind("series-1")
-        .bind(0_i64)
-        .bind(0_i64)
-        .execute(&pool)
-        .await
-        .expect("repair-extensions candidate book row should be inserted");
-        sqlx::query("INSERT INTO MEDIA (BOOK_ID, MEDIA_TYPE) VALUES (?, ?)")
-            .bind("book-1")
-            .bind("application/pdf")
-            .execute(&pool)
-            .await
-            .expect("repair-extensions candidate media row should be inserted");
-        pool.close().await;
+        seed_extension_repair_fixture(&fixture, "books/repair-book.pdf", "application/pdf").await;
 
-        let runtime = TaskRuntimeContext {
-            database_file: database_file.clone(),
-            tasks_db_file: unique_temp_path("komga-repair-extensions-candidate-tasks"),
-            lucene_data_directory: unique_temp_path("komga-repair-extensions-candidate-lucene"),
-            consumes_queue: true,
-            owns_main_database: true,
-            owns_filesystem_scan_output: true,
-            owns_sidecar_output: true,
-            owns_search_index: true,
-        };
+        let runtime = fixture.runtime_context(true, true);
 
         repair_extension(&runtime, "book-1")
             .expect("first repair-extension call should ignore already-correct books cleanly");
 
-        let pool = connect_pool(database_file.as_path(), 1)
+        let pool = connect_pool(fixture.database_file.as_path(), 1)
             .await
             .expect("repair-extensions candidate db should reopen for mismatch mutation");
-        std::fs::rename(&source_path, config_dir.join("books/repair-book.bin"))
-            .expect("repair-extensions candidate file should be renamed to mismatched extension");
+        std::fs::rename(
+            &source_path,
+            fixture.library_root.join("books/repair-book.bin"),
+        )
+        .expect("repair-extensions candidate file should be renamed to mismatched extension");
         sqlx::query("UPDATE BOOK SET URL = ? WHERE ID = ?")
             .bind("books/repair-book.bin")
             .bind("book-1")
@@ -346,7 +286,7 @@ mod tests {
         repair_extension(&runtime, "book-1")
             .expect("second repair-extension call should repair newly mismatched books");
 
-        let verify_pool = connect_pool(database_file.as_path(), 1)
+        let verify_pool = connect_pool(fixture.database_file.as_path(), 1)
             .await
             .expect("repair-extensions candidate db should reopen for verification");
         let row = sqlx::query("SELECT URL FROM BOOK WHERE ID = ? LIMIT 1")
@@ -362,153 +302,59 @@ mod tests {
             "already-correct books must not be cached as skipped, so later mismatches still repair back to the correct extension",
         );
         assert!(
-            !config_dir.join("books/repair-book.bin").exists(),
+            !fixture.library_root.join("books/repair-book.bin").exists(),
             "later mismatched files should still be repaired when the first run only observed a correct extension",
         );
 
-        clear_skipped_extension_repairs_for_test_database(database_file.as_path());
-        let _ = std::fs::remove_file(source_path);
-        let _ = std::fs::remove_dir_all(config_dir);
-        let _ = std::fs::remove_file(database_file);
+        clear_skipped_extension_repairs_for_test_database(fixture.database_file.as_path());
+        fixture.cleanup().await;
     }
 
     #[tokio::test]
     async fn repair_extensions_skip_cache_isolated_by_runtime_database() {
-        let skipped_db = unique_temp_path("komga-repair-extensions-isolated-skipped-main");
-        clear_skipped_extension_repairs_for_test_database(skipped_db.as_path());
-        let skipped_config_dir =
-            unique_temp_path("komga-repair-extensions-isolated-skipped-config");
-        std::fs::create_dir_all(skipped_config_dir.join("books"))
+        let skipped_fixture = RuntimeTestFixture::new("repair-extensions-isolated-skipped");
+        clear_skipped_extension_repairs_for_test_database(skipped_fixture.database_file.as_path());
+        std::fs::create_dir_all(skipped_fixture.library_root.join("books"))
             .expect("isolated skipped config dir should be created");
-        let skipped_source_path = skipped_config_dir.join("books/repair-book.epub");
+        let skipped_source_path = skipped_fixture.library_root.join("books/repair-book.epub");
         std::fs::write(&skipped_source_path, b"isolated-skipped-fixture")
             .expect("isolated skipped source file should be written");
 
-        let skipped_pool = connect_pool(skipped_db.as_path(), 1)
-            .await
-            .expect("isolated skipped test db should open");
-        for ddl in [
-            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL, ANALYZE_DIMENSIONS integer NOT NULL DEFAULT 1, REPAIR_EXTENSIONS integer NOT NULL DEFAULT 0, CONVERT_TO_CBZ integer NOT NULL DEFAULT 0)",
-            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL DEFAULT '', FILE_LAST_MODIFIED int NOT NULL DEFAULT 0, FILE_SIZE int NOT NULL DEFAULT 0, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, DELETED_DATE timestamp NULL)",
-            "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, MEDIA_TYPE varchar NOT NULL)",
-            "CREATE TABLE SIDECAR (URL varchar NOT NULL PRIMARY KEY, PARENT_URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL)",
-        ] {
-            sqlx::query(ddl)
-                .execute(&skipped_pool)
-                .await
-                .expect("isolated skipped fixture schema should be created");
-        }
-        sqlx::query("INSERT INTO LIBRARY (ID, ROOT, REPAIR_EXTENSIONS) VALUES (?, ?, ?)")
-            .bind("library-1")
-            .bind(skipped_config_dir.to_string_lossy().to_string())
-            .bind(true)
-            .execute(&skipped_pool)
-            .await
-            .expect("isolated skipped library row should be inserted");
-        sqlx::query(
-            "INSERT INTO BOOK (ID, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE) VALUES (?, ?, ?, ?, ?, ?)",
+        seed_extension_repair_fixture(
+            &skipped_fixture,
+            "books/repair-book.epub",
+            "application/zip",
         )
-        .bind("book-1")
-        .bind("books/repair-book.epub")
-        .bind("library-1")
-        .bind("series-1")
-        .bind(0_i64)
-        .bind(0_i64)
-        .execute(&skipped_pool)
-        .await
-        .expect("isolated skipped book row should be inserted");
-        sqlx::query("INSERT INTO MEDIA (BOOK_ID, MEDIA_TYPE) VALUES (?, ?)")
-            .bind("book-1")
-            .bind("application/zip")
-            .execute(&skipped_pool)
-            .await
-            .expect("isolated skipped media row should be inserted");
-        skipped_pool.close().await;
+        .await;
 
-        let skipped_runtime = TaskRuntimeContext {
-            database_file: skipped_db.clone(),
-            tasks_db_file: unique_temp_path("komga-repair-extensions-isolated-skipped-tasks"),
-            lucene_data_directory: unique_temp_path(
-                "komga-repair-extensions-isolated-skipped-lucene",
-            ),
-            consumes_queue: true,
-            owns_main_database: true,
-            owns_filesystem_scan_output: true,
-            owns_sidecar_output: true,
-            owns_search_index: true,
-        };
+        let skipped_runtime = skipped_fixture.runtime_context(true, true);
 
         repair_extension(&skipped_runtime, "book-1")
             .expect("first runtime should mark its epub-detected-as-zip book as skipped");
 
-        let candidate_db = unique_temp_path("komga-repair-extensions-isolated-candidate-main");
-        clear_skipped_extension_repairs_for_test_database(candidate_db.as_path());
-        let candidate_config_dir =
-            unique_temp_path("komga-repair-extensions-isolated-candidate-config");
-        std::fs::create_dir_all(candidate_config_dir.join("books"))
+        let candidate_fixture = RuntimeTestFixture::new("repair-extensions-isolated-candidate");
+        clear_skipped_extension_repairs_for_test_database(
+            candidate_fixture.database_file.as_path(),
+        );
+        std::fs::create_dir_all(candidate_fixture.library_root.join("books"))
             .expect("isolated candidate config dir should be created");
-        let candidate_bin_path = candidate_config_dir.join("books/repair-book.bin");
+        let candidate_bin_path = candidate_fixture.library_root.join("books/repair-book.bin");
         std::fs::write(&candidate_bin_path, b"isolated-candidate-fixture")
             .expect("isolated candidate source file should be written");
 
-        let candidate_pool = connect_pool(candidate_db.as_path(), 1)
-            .await
-            .expect("isolated candidate test db should open");
-        for ddl in [
-            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL, ANALYZE_DIMENSIONS integer NOT NULL DEFAULT 1, REPAIR_EXTENSIONS integer NOT NULL DEFAULT 0, CONVERT_TO_CBZ integer NOT NULL DEFAULT 0)",
-            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL DEFAULT '', FILE_LAST_MODIFIED int NOT NULL DEFAULT 0, FILE_SIZE int NOT NULL DEFAULT 0, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, DELETED_DATE timestamp NULL)",
-            "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, MEDIA_TYPE varchar NOT NULL)",
-            "CREATE TABLE SIDECAR (URL varchar NOT NULL PRIMARY KEY, PARENT_URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL)",
-        ] {
-            sqlx::query(ddl)
-                .execute(&candidate_pool)
-                .await
-                .expect("isolated candidate fixture schema should be created");
-        }
-        sqlx::query("INSERT INTO LIBRARY (ID, ROOT, REPAIR_EXTENSIONS) VALUES (?, ?, ?)")
-            .bind("library-1")
-            .bind(candidate_config_dir.to_string_lossy().to_string())
-            .bind(true)
-            .execute(&candidate_pool)
-            .await
-            .expect("isolated candidate library row should be inserted");
-        sqlx::query(
-            "INSERT INTO BOOK (ID, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE) VALUES (?, ?, ?, ?, ?, ?)",
+        seed_extension_repair_fixture(
+            &candidate_fixture,
+            "books/repair-book.bin",
+            "application/pdf",
         )
-        .bind("book-1")
-        .bind("books/repair-book.bin")
-        .bind("library-1")
-        .bind("series-1")
-        .bind(0_i64)
-        .bind(0_i64)
-        .execute(&candidate_pool)
-        .await
-        .expect("isolated candidate book row should be inserted");
-        sqlx::query("INSERT INTO MEDIA (BOOK_ID, MEDIA_TYPE) VALUES (?, ?)")
-            .bind("book-1")
-            .bind("application/pdf")
-            .execute(&candidate_pool)
-            .await
-            .expect("isolated candidate media row should be inserted");
-        candidate_pool.close().await;
+        .await;
 
-        let candidate_runtime = TaskRuntimeContext {
-            database_file: candidate_db.clone(),
-            tasks_db_file: unique_temp_path("komga-repair-extensions-isolated-candidate-tasks"),
-            lucene_data_directory: unique_temp_path(
-                "komga-repair-extensions-isolated-candidate-lucene",
-            ),
-            consumes_queue: true,
-            owns_main_database: true,
-            owns_filesystem_scan_output: true,
-            owns_sidecar_output: true,
-            owns_search_index: true,
-        };
+        let candidate_runtime = candidate_fixture.runtime_context(true, true);
 
         repair_extension(&candidate_runtime, "book-1")
             .expect("separate runtime database should still repair its own mismatched book");
 
-        let verify_pool = connect_pool(candidate_db.as_path(), 1)
+        let verify_pool = connect_pool(candidate_fixture.database_file.as_path(), 1)
             .await
             .expect("isolated candidate db should reopen for verification");
         let row = sqlx::query("SELECT URL FROM BOOK WHERE ID = ? LIMIT 1")
@@ -520,7 +366,10 @@ mod tests {
 
         assert_eq!(row.get::<String, _>("URL"), "books/repair-book.pdf");
         assert!(
-            candidate_config_dir.join("books/repair-book.pdf").exists(),
+            candidate_fixture
+                .library_root
+                .join("books/repair-book.pdf")
+                .exists(),
             "skip cache must not leak across distinct runtime databases that reuse the same book id",
         );
         assert!(
@@ -528,12 +377,11 @@ mod tests {
             "candidate runtime should finish the rename instead of short-circuiting on another database's cached skip",
         );
 
-        clear_skipped_extension_repairs_for_test_database(skipped_db.as_path());
-        clear_skipped_extension_repairs_for_test_database(candidate_db.as_path());
-        let _ = std::fs::remove_file(skipped_source_path);
-        let _ = std::fs::remove_dir_all(skipped_config_dir);
-        let _ = std::fs::remove_file(skipped_db);
-        let _ = std::fs::remove_dir_all(candidate_config_dir);
-        let _ = std::fs::remove_file(candidate_db);
+        clear_skipped_extension_repairs_for_test_database(skipped_fixture.database_file.as_path());
+        clear_skipped_extension_repairs_for_test_database(
+            candidate_fixture.database_file.as_path(),
+        );
+        skipped_fixture.cleanup().await;
+        candidate_fixture.cleanup().await;
     }
 }

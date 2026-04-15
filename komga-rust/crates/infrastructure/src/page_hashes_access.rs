@@ -353,6 +353,7 @@ fn encode_image_bytes_as_thumbnail_jpeg(bytes: &[u8], max_edge: u32) -> Option<V
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sqlite::setup;
     use std::fs::{self, File};
     use std::io::Write;
     use std::path::PathBuf;
@@ -367,39 +368,63 @@ mod tests {
         let pool = crate::sqlite::connect_pool(&db_path, 1)
             .await
             .expect("test db should open");
-
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL)",
-        )
-        .execute(&pool)
-        .await
-        .expect("library table should be created");
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS BOOK (ID varchar NOT NULL PRIMARY KEY, URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL)",
-        )
-        .execute(&pool)
-        .await
-        .expect("book table should be created");
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS MEDIA_PAGE (BOOK_ID varchar NOT NULL, NUMBER int NOT NULL, FILE_HASH varchar NOT NULL DEFAULT '', FILE_NAME varchar NOT NULL, MEDIA_TYPE varchar NOT NULL, FILE_SIZE int8 NULL, PRIMARY KEY (BOOK_ID, NUMBER))",
-        )
-        .execute(&pool)
-        .await
-        .expect("media page table should be created");
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS PAGE_HASH (HASH varchar NOT NULL PRIMARY KEY, SIZE int8 NULL, ACTION varchar NOT NULL, DELETE_COUNT int NOT NULL DEFAULT 0, CREATED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-        )
-        .execute(&pool)
-        .await
-        .expect("page hash table should be created");
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS PAGE_HASH_THUMBNAIL (HASH varchar NOT NULL PRIMARY KEY, THUMBNAIL blob NOT NULL)",
-        )
-        .execute(&pool)
-        .await
-        .expect("thumbnail table should be created");
+        setup::bootstrap_pool(&pool)
+            .await
+            .expect("test db should bootstrap main schema");
 
         (db_path, pool)
+    }
+
+    async fn insert_library_and_series(
+        pool: &sqlx::Pool<sqlx::Sqlite>,
+        library_id: &str,
+        library_root: &str,
+        series_id: &str,
+        series_url: &str,
+    ) {
+        sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
+            .bind(library_id)
+            .bind("Library")
+            .bind(library_root)
+            .execute(pool)
+            .await
+            .expect("library row should be inserted");
+        sqlx::query(
+            "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot) VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)",
+        )
+        .bind(series_id)
+        .bind(0_i64)
+        .bind("Series")
+        .bind(series_url)
+        .bind(library_id)
+        .bind(0)
+        .execute(pool)
+        .await
+        .expect("series row should be inserted");
+    }
+
+    async fn insert_book(
+        pool: &sqlx::Pool<sqlx::Sqlite>,
+        book_id: &str,
+        book_name: &str,
+        book_url: &str,
+        series_id: &str,
+        library_id: &str,
+    ) {
+        sqlx::query(
+            "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(book_id)
+        .bind(0_i64)
+        .bind(book_name)
+        .bind(book_url)
+        .bind(series_id)
+        .bind(0_i64)
+        .bind(1_i64)
+        .bind(library_id)
+        .execute(pool)
+        .await
+        .expect("book row should be inserted");
     }
 
     fn unique_temp_dir(case: &str) -> PathBuf {
@@ -467,19 +492,15 @@ mod tests {
         let expected = vec![9_u8, 8, 7, 6];
         fs::write(&source_path, &expected).expect("source image should be written");
 
-        sqlx::query("INSERT INTO LIBRARY (ID, ROOT) VALUES (?, ?)")
-            .bind("library-1")
-            .bind(library_root_value.as_str())
-            .execute(&pool)
-            .await
-            .expect("library row should be inserted");
-        sqlx::query("INSERT INTO BOOK (ID, URL, LIBRARY_ID) VALUES (?, ?, ?)")
-            .bind("book-1")
-            .bind("cover.jpg")
-            .bind("library-1")
-            .execute(&pool)
-            .await
-            .expect("book row should be inserted");
+        insert_library_and_series(
+            &pool,
+            "library-1",
+            library_root_value.as_str(),
+            "series-1",
+            "series-1",
+        )
+        .await;
+        insert_book(&pool, "book-1", "cover.jpg", "cover.jpg", "series-1", "library-1").await;
         sqlx::query(
             "INSERT INTO MEDIA_PAGE (BOOK_ID, NUMBER, FILE_HASH, FILE_NAME, MEDIA_TYPE, FILE_SIZE) VALUES (?, ?, ?, ?, ?, ?)",
         )
@@ -514,19 +535,15 @@ mod tests {
         let expected = vec![5_u8, 4, 3, 2, 1];
         write_zip_archive(&archive_path, &[("cover.png", &expected)]);
 
-        sqlx::query("INSERT INTO LIBRARY (ID, ROOT) VALUES (?, ?)")
-            .bind("library-1")
-            .bind(library_root_value.as_str())
-            .execute(&pool)
-            .await
-            .expect("library row should be inserted");
-        sqlx::query("INSERT INTO BOOK (ID, URL, LIBRARY_ID) VALUES (?, ?, ?)")
-            .bind("book-1")
-            .bind("book.cbz")
-            .bind("library-1")
-            .execute(&pool)
-            .await
-            .expect("book row should be inserted");
+        insert_library_and_series(
+            &pool,
+            "library-1",
+            library_root_value.as_str(),
+            "series-1",
+            "series-1",
+        )
+        .await;
+        insert_book(&pool, "book-1", "book.cbz", "book.cbz", "series-1", "library-1").await;
         sqlx::query(
             "INSERT INTO MEDIA_PAGE (BOOK_ID, NUMBER, FILE_HASH, FILE_NAME, MEDIA_TYPE, FILE_SIZE) VALUES (?, ?, ?, ?, ?, ?)",
         )
@@ -560,19 +577,25 @@ mod tests {
         let expected = vec![7_u8, 7, 4, 2];
         write_zip_archive(&archive_path, &[("cover.png", &expected)]);
 
-        sqlx::query("INSERT INTO LIBRARY (ID, ROOT) VALUES (?, ?)")
-            .bind("library-1")
-            .bind(legacy_file_url(&library_root))
-            .execute(&pool)
-            .await
-            .expect("legacy library row should be inserted");
-        sqlx::query("INSERT INTO BOOK (ID, URL, LIBRARY_ID) VALUES (?, ?, ?)")
-            .bind("book-legacy")
-            .bind(legacy_file_url(&archive_path))
-            .bind("library-1")
-            .execute(&pool)
-            .await
-            .expect("legacy book row should be inserted");
+        let legacy_library_root = legacy_file_url(&library_root);
+        let legacy_book_url = legacy_file_url(&archive_path);
+        insert_library_and_series(
+            &pool,
+            "library-1",
+            legacy_library_root.as_str(),
+            "series-legacy",
+            "series-legacy",
+        )
+        .await;
+        insert_book(
+            &pool,
+            "book-legacy",
+            "book with spaces.cbz",
+            legacy_book_url.as_str(),
+            "series-legacy",
+            "library-1",
+        )
+        .await;
         sqlx::query(
             "INSERT INTO MEDIA_PAGE (BOOK_ID, NUMBER, FILE_HASH, FILE_NAME, MEDIA_TYPE, FILE_SIZE) VALUES (?, ?, ?, ?, ?, ?)",
         )

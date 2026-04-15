@@ -62,19 +62,8 @@ pub(super) fn try_execute(
 mod tests {
     use super::*;
     use crate::sqlite::connect_pool;
-    use komga_application::task_processing::TaskRuntimeContext;
-    use sqlx::Row;
-
-    fn unique_temp_path(prefix: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!(
-            "{prefix}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock should be after unix epoch")
-                .as_nanos()
-        ))
-    }
+    use crate::task_queue::test_support::RuntimeTestFixture;
+    use sqlx::{Row, SqlitePool};
 
     fn archive_fixture_path(file_name: &str) -> std::path::PathBuf {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -99,69 +88,59 @@ mod tests {
         }
     }
 
+    async fn insert_series(pool: &SqlitePool, library_id: &str, series_id: &str) {
+        sqlx::query(
+            "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID) VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?)",
+        )
+        .bind(series_id)
+        .bind(0_i64)
+        .bind("Series 1")
+        .bind(format!("series/{series_id}"))
+        .bind(library_id)
+        .execute(pool)
+        .await
+        .expect("series row should be inserted for conversion fixture");
+    }
+
     #[tokio::test]
     async fn find_books_to_convert_enqueues_convert_book_grouped_by_series_id() {
-        let database_file = unique_temp_path("komga-find-books-to-convert-main");
-        let tasks_db_file = unique_temp_path("komga-find-books-to-convert-tasks");
-        let lucene_dir = unique_temp_path("komga-find-books-to-convert-lucene");
-
-        let pool = connect_pool(database_file.as_path(), 1)
-            .await
-            .expect("find-books-to-convert test db should open");
-        for ddl in [
-            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, REPAIR_EXTENSIONS integer NOT NULL DEFAULT 0, CONVERT_TO_CBZ integer NOT NULL DEFAULT 0)",
-            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL, DELETED_DATE timestamp NULL)",
-            "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, MEDIA_TYPE varchar NOT NULL)",
-        ] {
-            sqlx::query(ddl)
-                .execute(&pool)
-                .await
-                .expect("find-books-to-convert fixture schema should be created");
-        }
-        sqlx::query("INSERT INTO LIBRARY (ID, CONVERT_TO_CBZ) VALUES (?, ?)")
+        let fixture = RuntimeTestFixture::new("find-books-to-convert");
+        let pool = fixture.main_pool().await;
+        sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT, CONVERT_TO_CBZ) VALUES (?, ?, ?, ?)")
             .bind("library-1")
+            .bind("Library 1")
+            .bind(fixture.library_root.to_string_lossy().to_string())
             .bind(true)
             .execute(&pool)
             .await
             .expect("library row should be inserted for find-books-to-convert fixture");
+        insert_series(&pool, "library-1", "series-1").await;
         sqlx::query(
-            "INSERT INTO BOOK (ID, LIBRARY_ID, SERIES_ID, DELETED_DATE) VALUES (?, ?, ?, NULL)",
+            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE, DELETED_DATE) VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?, NULL)",
         )
         .bind("book-1")
+        .bind("book-1")
+        .bind("books/book-1.cbr")
         .bind("library-1")
         .bind("series-1")
+        .bind(0_i64)
+        .bind(0_i64)
         .execute(&pool)
         .await
         .expect("book row should be inserted for find-books-to-convert fixture");
-        sqlx::query("INSERT INTO MEDIA (BOOK_ID, MEDIA_TYPE) VALUES (?, ?)")
+        sqlx::query("INSERT INTO MEDIA (BOOK_ID, MEDIA_TYPE, STATUS) VALUES (?, ?, ?)")
             .bind("book-1")
             .bind("application/x-rar-compressed; version=5")
+            .bind("READY")
             .execute(&pool)
             .await
             .expect("media row should be inserted for find-books-to-convert fixture");
         pool.close().await;
 
-        let tasks_pool = connect_pool(tasks_db_file.as_path(), 1)
-            .await
-            .expect("convert-book grouping tasks db should open");
-        sqlx::query(
-            "CREATE TABLE TASK (ID varchar NOT NULL PRIMARY KEY, PRIORITY int NOT NULL, GROUP_ID varchar NULL, CLASS varchar NOT NULL, SIMPLE_TYPE varchar NOT NULL, PAYLOAD varchar NOT NULL, OWNER varchar NULL, CREATED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-        )
-        .execute(&tasks_pool)
-        .await
-        .expect("convert-book grouping TASK table should be created");
+        let tasks_pool = fixture.tasks_pool().await;
         tasks_pool.close().await;
 
-        let runtime = TaskRuntimeContext {
-            database_file: database_file.clone(),
-            tasks_db_file: tasks_db_file.clone(),
-            lucene_data_directory: lucene_dir,
-            consumes_queue: true,
-            owns_main_database: true,
-            owns_filesystem_scan_output: true,
-            owns_sidecar_output: true,
-            owns_search_index: true,
-        };
+        let runtime = fixture.runtime_context(true, true);
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         let task = TaskQueueRecord::new(
             "FIND_BOOKS_TO_CONVERT:library-1",
@@ -180,7 +159,7 @@ mod tests {
             "find-books-to-convert should enqueue one downstream convert task",
         );
 
-        let tasks_pool = connect_pool(tasks_db_file.as_path(), 1)
+        let tasks_pool = connect_pool(fixture.tasks_db_file.as_path(), 1)
             .await
             .expect("tasks db should open for convert-book grouping verification");
         let row =
@@ -195,71 +174,49 @@ mod tests {
             row.get::<Option<String>, _>("GROUP_ID"),
             Some("series-1".to_string())
         );
+
+        fixture.cleanup().await;
     }
 
     #[tokio::test]
     async fn find_books_to_convert_skips_when_library_convert_to_cbz_is_disabled() {
-        let database_file = unique_temp_path("komga-find-books-disabled-main");
-        let tasks_db_file = unique_temp_path("komga-find-books-disabled-tasks");
-        let lucene_dir = unique_temp_path("komga-find-books-disabled-lucene");
-
-        let pool = connect_pool(database_file.as_path(), 1)
-            .await
-            .expect("disabled find-books-to-convert test db should open");
-        for ddl in [
-            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, REPAIR_EXTENSIONS integer NOT NULL DEFAULT 0, CONVERT_TO_CBZ integer NOT NULL DEFAULT 0)",
-            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL, DELETED_DATE timestamp NULL)",
-            "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, MEDIA_TYPE varchar NOT NULL)",
-        ] {
-            sqlx::query(ddl)
-                .execute(&pool)
-                .await
-                .expect("disabled find-books-to-convert fixture schema should be created");
-        }
-        sqlx::query("INSERT INTO LIBRARY (ID, CONVERT_TO_CBZ) VALUES (?, ?)")
+        let fixture = RuntimeTestFixture::new("find-books-disabled");
+        let pool = fixture.main_pool().await;
+        sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT, CONVERT_TO_CBZ) VALUES (?, ?, ?, ?)")
             .bind("library-1")
+            .bind("Library 1")
+            .bind(fixture.library_root.to_string_lossy().to_string())
             .bind(false)
             .execute(&pool)
             .await
             .expect("disabled library row should be inserted for find-books-to-convert fixture");
+        insert_series(&pool, "library-1", "series-1").await;
         sqlx::query(
-            "INSERT INTO BOOK (ID, LIBRARY_ID, SERIES_ID, DELETED_DATE) VALUES (?, ?, ?, NULL)",
+            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE, DELETED_DATE) VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?, NULL)",
         )
         .bind("book-1")
+        .bind("book-1")
+        .bind("books/book-1.cbr")
         .bind("library-1")
         .bind("series-1")
+        .bind(0_i64)
+        .bind(0_i64)
         .execute(&pool)
         .await
         .expect("disabled fixture book row should be inserted");
-        sqlx::query("INSERT INTO MEDIA (BOOK_ID, MEDIA_TYPE) VALUES (?, ?)")
+        sqlx::query("INSERT INTO MEDIA (BOOK_ID, MEDIA_TYPE, STATUS) VALUES (?, ?, ?)")
             .bind("book-1")
             .bind("application/vnd.comicbook-rar")
+            .bind("READY")
             .execute(&pool)
             .await
             .expect("disabled fixture media row should be inserted");
         pool.close().await;
 
-        let tasks_pool = connect_pool(tasks_db_file.as_path(), 1)
-            .await
-            .expect("disabled convert-book tasks db should open");
-        sqlx::query(
-            "CREATE TABLE TASK (ID varchar NOT NULL PRIMARY KEY, PRIORITY int NOT NULL, GROUP_ID varchar NULL, CLASS varchar NOT NULL, SIMPLE_TYPE varchar NOT NULL, PAYLOAD varchar NOT NULL, OWNER varchar NULL, CREATED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-        )
-        .execute(&tasks_pool)
-        .await
-        .expect("disabled convert-book TASK table should be created");
+        let tasks_pool = fixture.tasks_pool().await;
         tasks_pool.close().await;
 
-        let runtime = TaskRuntimeContext {
-            database_file: database_file.clone(),
-            tasks_db_file: tasks_db_file.clone(),
-            lucene_data_directory: lucene_dir,
-            consumes_queue: true,
-            owns_main_database: true,
-            owns_filesystem_scan_output: true,
-            owns_sidecar_output: true,
-            owns_search_index: true,
-        };
+        let runtime = fixture.runtime_context(true, true);
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         let task = TaskQueueRecord::new(
             "FIND_BOOKS_TO_CONVERT:library-1",
@@ -274,7 +231,7 @@ mod tests {
             "find-books-to-convert should not enqueue convert-book tasks when convert-to-cbz is disabled",
         );
 
-        let tasks_pool = connect_pool(tasks_db_file.as_path(), 1)
+        let tasks_pool = connect_pool(fixture.tasks_db_file.as_path(), 1)
             .await
             .expect("tasks db should open for disabled convert-book verification");
         let count = sqlx::query("SELECT COUNT(*) AS COUNT FROM TASK")
@@ -285,18 +242,17 @@ mod tests {
         tasks_pool.close().await;
 
         assert_eq!(count, 0);
+
+        fixture.cleanup().await;
     }
 
     #[tokio::test]
     async fn convert_book_skips_when_source_file_last_modified_differs_from_database() {
         let book_id = "convert-last-modified-book-1";
-        let database_file = unique_temp_path("komga-convert-book-last-modified-main");
-        let tasks_db_file = unique_temp_path("komga-convert-book-last-modified-tasks");
-        let lucene_dir = unique_temp_path("komga-convert-book-last-modified-lucene");
-        let library_root = unique_temp_path("komga-convert-book-last-modified-root");
-        std::fs::create_dir_all(library_root.join("books"))
+        let fixture = RuntimeTestFixture::new("convert-book-last-modified");
+        std::fs::create_dir_all(fixture.library_root.join("books"))
             .expect("convert-book last-modified directory should be created");
-        let source_path = library_root.join("books/book-1.cbr");
+        let source_path = fixture.library_root.join("books/book-1.cbr");
         std::fs::write(&source_path, b"not-a-real-rar")
             .expect("convert-book last-modified source should be written");
 
@@ -308,31 +264,21 @@ mod tests {
             .expect("convert-book last-modified source time should be after unix epoch")
             .as_secs() as i64;
 
-        let pool = connect_pool(database_file.as_path(), 1)
-            .await
-            .expect("convert-book last-modified db should open");
-        for ddl in [
-            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL, ANALYZE_DIMENSIONS integer NOT NULL DEFAULT 1, REPAIR_EXTENSIONS integer NOT NULL DEFAULT 0, CONVERT_TO_CBZ integer NOT NULL DEFAULT 0)",
-            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL, FILE_LAST_MODIFIED datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, FILE_SIZE int NOT NULL DEFAULT 0, FILE_HASH varchar NOT NULL DEFAULT '', FILE_HASH_KOREADER varchar NOT NULL DEFAULT '', LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, DELETED_DATE timestamp NULL)",
-            "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, MEDIA_TYPE varchar NOT NULL, STATUS varchar NOT NULL)",
-            "CREATE TABLE SIDECAR (URL varchar NOT NULL PRIMARY KEY, PARENT_URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL)",
-        ] {
-            sqlx::query(ddl)
-                .execute(&pool)
-                .await
-                .expect("convert-book last-modified fixture schema should be created");
-        }
-        sqlx::query("INSERT INTO LIBRARY (ID, ROOT, CONVERT_TO_CBZ) VALUES (?, ?, ?)")
+        let pool = fixture.main_pool().await;
+        sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT, CONVERT_TO_CBZ) VALUES (?, ?, ?, ?)")
             .bind("library-1")
-            .bind(library_root.to_string_lossy().to_string())
+            .bind("Library 1")
+            .bind(fixture.library_root.to_string_lossy().to_string())
             .bind(true)
             .execute(&pool)
             .await
             .expect("convert-book last-modified library row should be inserted");
+        insert_series(&pool, "library-1", "series-1").await;
         sqlx::query(
-            "INSERT INTO BOOK (ID, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE) VALUES (?, ?, ?, ?, datetime(?, 'unixepoch'), ?)",
+            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE) VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?)",
         )
         .bind(book_id)
+        .bind("book-1")
         .bind("books/book-1.cbr")
         .bind("library-1")
         .bind("series-1")
@@ -350,16 +296,7 @@ mod tests {
             .expect("convert-book last-modified media row should be inserted");
         pool.close().await;
 
-        let runtime = TaskRuntimeContext {
-            database_file: database_file.clone(),
-            tasks_db_file: tasks_db_file.clone(),
-            lucene_data_directory: lucene_dir,
-            consumes_queue: false,
-            owns_main_database: true,
-            owns_filesystem_scan_output: true,
-            owns_sidecar_output: true,
-            owns_search_index: true,
-        };
+        let runtime = fixture.runtime_context(false, true);
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         let task = TaskQueueRecord::new(
             format!("CONVERT_BOOK:{book_id}"),
@@ -371,9 +308,9 @@ mod tests {
         let result = try_execute(&mut scheduler, &runtime, &task, Some(book_id));
         assert!(matches!(result, Some(Ok(()))));
         assert!(source_path.exists());
-        assert!(!library_root.join("books/book-1.cbz").exists());
+        assert!(!fixture.library_root.join("books/book-1.cbz").exists());
 
-        let verify_pool = connect_pool(database_file.as_path(), 1)
+        let verify_pool = connect_pool(fixture.database_file.as_path(), 1)
             .await
             .expect("convert-book last-modified verify db should open");
         let row = sqlx::query("SELECT URL FROM BOOK WHERE ID = ? LIMIT 1")
@@ -384,18 +321,17 @@ mod tests {
         verify_pool.close().await;
 
         assert_eq!(row.get::<String, _>("URL"), "books/book-1.cbr");
+
+        fixture.cleanup().await;
     }
 
     #[tokio::test]
     async fn convert_book_skips_after_a_previous_failed_conversion() {
         let book_id = "convert-failed-cache-book-1";
-        let database_file = unique_temp_path("komga-convert-book-failed-cache-main");
-        let tasks_db_file = unique_temp_path("komga-convert-book-failed-cache-tasks");
-        let lucene_dir = unique_temp_path("komga-convert-book-failed-cache-lucene");
-        let library_root = unique_temp_path("komga-convert-book-failed-cache-root");
-        std::fs::create_dir_all(library_root.join("books"))
+        let fixture = RuntimeTestFixture::new("convert-book-failed-cache");
+        std::fs::create_dir_all(fixture.library_root.join("books"))
             .expect("convert-book failed-cache directory should be created");
-        let source_path = library_root.join("books/book-1.cbr");
+        let source_path = fixture.library_root.join("books/book-1.cbr");
         std::fs::write(&source_path, b"not-a-real-rar")
             .expect("convert-book failed-cache source should be written");
 
@@ -407,31 +343,21 @@ mod tests {
             .expect("convert-book failed-cache source time should be after unix epoch")
             .as_secs() as i64;
 
-        let pool = connect_pool(database_file.as_path(), 1)
-            .await
-            .expect("convert-book failed-cache db should open");
-        for ddl in [
-            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL, ANALYZE_DIMENSIONS integer NOT NULL DEFAULT 1, REPAIR_EXTENSIONS integer NOT NULL DEFAULT 0, CONVERT_TO_CBZ integer NOT NULL DEFAULT 0)",
-            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL, FILE_LAST_MODIFIED datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, FILE_SIZE int NOT NULL DEFAULT 0, FILE_HASH varchar NOT NULL DEFAULT '', FILE_HASH_KOREADER varchar NOT NULL DEFAULT '', LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, DELETED_DATE timestamp NULL)",
-            "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, MEDIA_TYPE varchar NOT NULL, STATUS varchar NOT NULL)",
-            "CREATE TABLE SIDECAR (URL varchar NOT NULL PRIMARY KEY, PARENT_URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL)",
-        ] {
-            sqlx::query(ddl)
-                .execute(&pool)
-                .await
-                .expect("convert-book failed-cache fixture schema should be created");
-        }
-        sqlx::query("INSERT INTO LIBRARY (ID, ROOT, CONVERT_TO_CBZ) VALUES (?, ?, ?)")
+        let pool = fixture.main_pool().await;
+        sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT, CONVERT_TO_CBZ) VALUES (?, ?, ?, ?)")
             .bind("library-1")
-            .bind(library_root.to_string_lossy().to_string())
+            .bind("Library 1")
+            .bind(fixture.library_root.to_string_lossy().to_string())
             .bind(true)
             .execute(&pool)
             .await
             .expect("convert-book failed-cache library row should be inserted");
+        insert_series(&pool, "library-1", "series-1").await;
         sqlx::query(
-            "INSERT INTO BOOK (ID, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE) VALUES (?, ?, ?, ?, datetime(?, 'unixepoch'), ?)",
+            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE) VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?)",
         )
         .bind(book_id)
+        .bind("book-1")
         .bind("books/book-1.cbr")
         .bind("library-1")
         .bind("series-1")
@@ -449,16 +375,7 @@ mod tests {
             .expect("convert-book failed-cache media row should be inserted");
         pool.close().await;
 
-        let runtime = TaskRuntimeContext {
-            database_file: database_file.clone(),
-            tasks_db_file: tasks_db_file.clone(),
-            lucene_data_directory: lucene_dir,
-            consumes_queue: false,
-            owns_main_database: true,
-            owns_filesystem_scan_output: true,
-            owns_sidecar_output: true,
-            owns_search_index: true,
-        };
+        let runtime = fixture.runtime_context(false, true);
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         let task = TaskQueueRecord::new(
             format!("CONVERT_BOOK:{book_id}"),
@@ -473,20 +390,19 @@ mod tests {
         let second = try_execute(&mut scheduler, &runtime, &task, Some(book_id));
         assert!(matches!(second, Some(Ok(()))));
         assert!(source_path.exists());
-        assert!(!library_root.join("books/book-1.cbz").exists());
+        assert!(!fixture.library_root.join("books/book-1.cbz").exists());
+
+        fixture.cleanup().await;
     }
 
     #[tokio::test]
     async fn convert_book_persists_history_events_on_success() {
         let book_id = "convert-success-book-1";
-        let database_file = unique_temp_path("komga-convert-book-success-main");
-        let tasks_db_file = unique_temp_path("komga-convert-book-success-tasks");
-        let lucene_dir = unique_temp_path("komga-convert-book-success-lucene");
-        let library_root = unique_temp_path("komga-convert-book-success-root");
-        std::fs::create_dir_all(library_root.join("books"))
+        let fixture = RuntimeTestFixture::new("convert-book-success");
+        std::fs::create_dir_all(fixture.library_root.join("books"))
             .expect("convert-book success directory should be created");
 
-        let source_path = library_root.join("books/book-1.cbr");
+        let source_path = fixture.library_root.join("books/book-1.cbr");
         std::fs::copy(archive_fixture_path("rar4.rar"), &source_path)
             .expect("convert-book success source fixture should be copied");
         let preserved_page =
@@ -519,33 +435,16 @@ mod tests {
             .map(|value| value.as_secs() as i64)
             .unwrap_or_default();
 
-        let pool = connect_pool(database_file.as_path(), 1)
-            .await
-            .expect("convert-book success db should open");
-        for ddl in [
-            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL, ANALYZE_DIMENSIONS integer NOT NULL DEFAULT 1, REPAIR_EXTENSIONS integer NOT NULL DEFAULT 0, CONVERT_TO_CBZ integer NOT NULL DEFAULT 0)",
-            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, NAME varchar NOT NULL, URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL, FILE_LAST_MODIFIED datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, FILE_SIZE int NOT NULL DEFAULT 0, FILE_HASH varchar NOT NULL DEFAULT '', FILE_HASH_KOREADER varchar NOT NULL DEFAULT '', LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, DELETED_DATE timestamp NULL)",
-            "CREATE TABLE BOOK_METADATA (BOOK_ID varchar NOT NULL PRIMARY KEY, TITLE varchar NULL)",
-            "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, MEDIA_TYPE varchar NOT NULL, STATUS varchar NOT NULL, PAGE_COUNT int NOT NULL DEFAULT 0, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-            "CREATE TABLE MEDIA_PAGE (FILE_NAME varchar NOT NULL, MEDIA_TYPE varchar NOT NULL, NUMBER int NOT NULL, BOOK_ID varchar NOT NULL, width int NULL, height int NULL, FILE_HASH varchar NOT NULL DEFAULT '', FILE_SIZE int NOT NULL DEFAULT 0)",
-            "CREATE TABLE READ_PROGRESS (BOOK_ID varchar NOT NULL, USER_ID varchar NOT NULL, PAGE int NOT NULL DEFAULT 0, COMPLETED integer NOT NULL DEFAULT 0, READ_DATE datetime NULL, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (BOOK_ID, USER_ID))",
-            "CREATE TABLE READ_PROGRESS_SERIES (SERIES_ID varchar NOT NULL, USER_ID varchar NOT NULL, READ_COUNT int NOT NULL DEFAULT 0, IN_PROGRESS_COUNT int NOT NULL DEFAULT 0, MOST_RECENT_READ_DATE datetime NULL, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (SERIES_ID, USER_ID))",
-            "CREATE TABLE SIDECAR (URL varchar NOT NULL PRIMARY KEY, PARENT_URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL)",
-            "CREATE TABLE HISTORICAL_EVENT (ID varchar NOT NULL PRIMARY KEY, TYPE varchar NOT NULL, BOOK_ID varchar NULL, SERIES_ID varchar NULL, TIMESTAMP datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-            "CREATE TABLE HISTORICAL_EVENT_PROPERTIES (ID varchar NOT NULL, \"KEY\" varchar NOT NULL, VALUE varchar NOT NULL)",
-        ] {
-            sqlx::query(ddl)
-                .execute(&pool)
-                .await
-                .expect("convert-book success fixture schema should be created");
-        }
-        sqlx::query("INSERT INTO LIBRARY (ID, ROOT, CONVERT_TO_CBZ) VALUES (?, ?, ?)")
+        let pool = fixture.main_pool().await;
+        sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT, CONVERT_TO_CBZ) VALUES (?, ?, ?, ?)")
             .bind("library-1")
-            .bind(library_root.to_string_lossy().to_string())
+            .bind("Library 1")
+            .bind(fixture.library_root.to_string_lossy().to_string())
             .bind(true)
             .execute(&pool)
             .await
             .expect("convert-book success library row should be inserted");
+        insert_series(&pool, "library-1", "series-1").await;
         sqlx::query(
             "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE) VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?)",
         )
@@ -579,20 +478,11 @@ mod tests {
         .bind(preserved_page_hash)
         .bind(i64::try_from(preserved_page.unpacked_size).unwrap_or(i64::MAX))
         .execute(&pool)
-        .await
-        .expect("convert-book success source page hash should be inserted");
+            .await
+            .expect("convert-book success source page hash should be inserted");
         pool.close().await;
 
-        let runtime = TaskRuntimeContext {
-            database_file: database_file.clone(),
-            tasks_db_file: tasks_db_file.clone(),
-            lucene_data_directory: lucene_dir,
-            consumes_queue: false,
-            owns_main_database: true,
-            owns_filesystem_scan_output: true,
-            owns_sidecar_output: true,
-            owns_search_index: false,
-        };
+        let runtime = fixture.runtime_context(false, false);
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         let task = TaskQueueRecord::new(
             format!("CONVERT_BOOK:{book_id}"),
@@ -604,7 +494,7 @@ mod tests {
         let result = try_execute(&mut scheduler, &runtime, &task, Some(book_id));
         assert!(matches!(result, Some(Ok(()))));
 
-        let destination_path = library_root.join("books/book-1.cbz");
+        let destination_path = fixture.library_root.join("books/book-1.cbz");
         assert!(
             !source_path.exists(),
             "convert-book success should delete the original source file"
@@ -614,7 +504,7 @@ mod tests {
             "convert-book success should create the converted cbz file"
         );
 
-        let verify_pool = connect_pool(database_file.as_path(), 1)
+        let verify_pool = connect_pool(fixture.database_file.as_path(), 1)
             .await
             .expect("convert-book success verify db should open");
         let book_row = sqlx::query("SELECT URL FROM BOOK WHERE ID = ? LIMIT 1")
@@ -718,46 +608,35 @@ mod tests {
         );
 
         verify_pool.close().await;
+
+        fixture.cleanup().await;
     }
 
     #[tokio::test]
     async fn repair_extension_executes_per_book_task() {
         let book_id = "repair-task-book-1";
-        let database_file = unique_temp_path("komga-repair-extension-per-book-main");
-        let tasks_db_file = unique_temp_path("komga-repair-extension-per-book-tasks");
-        let lucene_dir = unique_temp_path("komga-repair-extension-per-book-lucene");
-        let library_root = unique_temp_path("komga-repair-extension-per-book-root");
-        std::fs::create_dir_all(library_root.join("books"))
+        let fixture = RuntimeTestFixture::new("repair-extension-per-book");
+        std::fs::create_dir_all(fixture.library_root.join("books"))
             .expect("repair-extension per-book directory should be created");
-        let source_path = library_root.join("books/repair-book.bin");
+        let source_path = fixture.library_root.join("books/repair-book.bin");
         std::fs::write(&source_path, b"repair-extension-per-book")
             .expect("repair-extension per-book source should be written");
 
-        let pool = connect_pool(database_file.as_path(), 1)
-            .await
-            .expect("repair-extension per-book db should open");
-        for ddl in [
-            "CREATE TABLE LIBRARY (ID varchar NOT NULL PRIMARY KEY, ROOT varchar NOT NULL, ANALYZE_DIMENSIONS integer NOT NULL DEFAULT 1, REPAIR_EXTENSIONS integer NOT NULL DEFAULT 0, CONVERT_TO_CBZ integer NOT NULL DEFAULT 0)",
-            "CREATE TABLE BOOK (ID varchar NOT NULL PRIMARY KEY, URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL, SERIES_ID varchar NOT NULL, FILE_LAST_MODIFIED datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, FILE_SIZE int NOT NULL DEFAULT 0, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, DELETED_DATE timestamp NULL)",
-            "CREATE TABLE MEDIA (BOOK_ID varchar NOT NULL PRIMARY KEY, MEDIA_TYPE varchar NOT NULL)",
-            "CREATE TABLE SIDECAR (URL varchar NOT NULL PRIMARY KEY, PARENT_URL varchar NOT NULL, LIBRARY_ID varchar NOT NULL)",
-        ] {
-            sqlx::query(ddl)
-                .execute(&pool)
-                .await
-                .expect("repair-extension per-book fixture schema should be created");
-        }
-        sqlx::query("INSERT INTO LIBRARY (ID, ROOT, REPAIR_EXTENSIONS) VALUES (?, ?, ?)")
+        let pool = fixture.main_pool().await;
+        sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT, REPAIR_EXTENSIONS) VALUES (?, ?, ?, ?)")
             .bind("library-1")
-            .bind(library_root.to_string_lossy().to_string())
+            .bind("Library 1")
+            .bind(fixture.library_root.to_string_lossy().to_string())
             .bind(true)
             .execute(&pool)
             .await
             .expect("repair-extension per-book library row should be inserted");
+        insert_series(&pool, "library-1", "series-1").await;
         sqlx::query(
-            "INSERT INTO BOOK (ID, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE) VALUES (?, ?, ?, ?, datetime(?, 'unixepoch'), ?)",
+            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE) VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?)",
         )
         .bind(book_id)
+        .bind("repair-book")
         .bind("books/repair-book.bin")
         .bind("library-1")
         .bind("series-1")
@@ -766,35 +645,19 @@ mod tests {
         .execute(&pool)
         .await
         .expect("repair-extension per-book book row should be inserted");
-        sqlx::query("INSERT INTO MEDIA (BOOK_ID, MEDIA_TYPE) VALUES (?, ?)")
+        sqlx::query("INSERT INTO MEDIA (BOOK_ID, MEDIA_TYPE, STATUS) VALUES (?, ?, ?)")
             .bind(book_id)
             .bind("application/pdf")
+            .bind("READY")
             .execute(&pool)
             .await
             .expect("repair-extension per-book media row should be inserted");
         pool.close().await;
 
-        let tasks_pool = connect_pool(tasks_db_file.as_path(), 1)
-            .await
-            .expect("repair-extension per-book tasks db should open");
-        sqlx::query(
-            "CREATE TABLE TASK (ID varchar NOT NULL PRIMARY KEY, PRIORITY int NOT NULL, GROUP_ID varchar NULL, CLASS varchar NOT NULL, SIMPLE_TYPE varchar NOT NULL, PAYLOAD varchar NOT NULL, OWNER varchar NULL, CREATED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, LAST_MODIFIED_DATE datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-        )
-        .execute(&tasks_pool)
-        .await
-        .expect("repair-extension per-book TASK table should be created");
+        let tasks_pool = fixture.tasks_pool().await;
         tasks_pool.close().await;
 
-        let runtime = TaskRuntimeContext {
-            database_file: database_file.clone(),
-            tasks_db_file: tasks_db_file.clone(),
-            lucene_data_directory: lucene_dir,
-            consumes_queue: true,
-            owns_main_database: true,
-            owns_filesystem_scan_output: true,
-            owns_sidecar_output: true,
-            owns_search_index: true,
-        };
+        let runtime = fixture.runtime_context(true, true);
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         let task = TaskQueueRecord::new(
             format!("REPAIR_EXTENSION_{book_id}"),
@@ -815,7 +678,7 @@ mod tests {
         let result = try_execute(&mut scheduler, &runtime, &task, Some(book_id));
         assert!(matches!(result, Some(Ok(()))));
 
-        let verify_pool = connect_pool(database_file.as_path(), 1)
+        let verify_pool = connect_pool(fixture.database_file.as_path(), 1)
             .await
             .expect("repair-extension per-book verify db should open");
         let row = sqlx::query("SELECT URL FROM BOOK WHERE ID = ? LIMIT 1")
@@ -826,7 +689,9 @@ mod tests {
         verify_pool.close().await;
 
         assert_eq!(row.get::<String, _>("URL"), "books/repair-book.pdf");
-        assert!(library_root.join("books/repair-book.pdf").exists());
+        assert!(fixture.library_root.join("books/repair-book.pdf").exists());
         assert!(!source_path.exists());
+
+        fixture.cleanup().await;
     }
 }

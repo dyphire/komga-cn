@@ -507,26 +507,14 @@ mod tests {
         let pool = connect_pool(&db_path, 1)
             .await
             .expect("test db should open");
-
-        sqlx::query("CREATE TABLE IF NOT EXISTS USER (ID varchar NOT NULL PRIMARY KEY)")
-            .execute(&pool)
+        crate::sqlite::setup::bootstrap_pool(&pool)
             .await
-            .expect("user table should be created");
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS CLIENT_SETTINGS_GLOBAL (KEY varchar NOT NULL PRIMARY KEY, VALUE varchar NOT NULL, ALLOW_UNAUTHORIZED boolean NOT NULL DEFAULT 0)",
-        )
-        .execute(&pool)
-        .await
-        .expect("global client settings table should be created");
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS CLIENT_SETTINGS_USER (USER_ID varchar NOT NULL, KEY varchar NOT NULL, VALUE varchar NOT NULL, FOREIGN KEY (USER_ID) REFERENCES USER (ID), PRIMARY KEY (KEY, USER_ID))",
-        )
-        .execute(&pool)
-        .await
-        .expect("user client settings table should be created");
+            .expect("test db should bootstrap main schema");
 
-        sqlx::query("INSERT INTO USER (ID) VALUES (?)")
+        sqlx::query("INSERT INTO USER (ID, EMAIL, PASSWORD) VALUES (?, ?, ?)")
             .bind("user-1")
+            .bind("user-1@example.org")
+            .bind("test-password")
             .execute(&pool)
             .await
             .expect("user row should be inserted");
@@ -541,19 +529,9 @@ mod tests {
         let pool = connect_pool(&db_path, 1)
             .await
             .expect("test db should open");
-
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS HISTORICAL_EVENT (ID varchar NOT NULL PRIMARY KEY, TYPE varchar NOT NULL, BOOK_ID varchar, SERIES_ID varchar, TIMESTAMP varchar NOT NULL)",
-        )
-        .execute(&pool)
-        .await
-        .expect("historical event table should be created");
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS HISTORICAL_EVENT_PROPERTIES (ID varchar NOT NULL, \"KEY\" varchar NOT NULL, VALUE varchar NOT NULL)",
-        )
-        .execute(&pool)
-        .await
-        .expect("historical event properties table should be created");
+        crate::sqlite::setup::bootstrap_pool(&pool)
+            .await
+            .expect("history test db should bootstrap main schema");
 
         (db_path, pool)
     }
@@ -565,19 +543,17 @@ mod tests {
         let pool = connect_pool(&db_path, 1)
             .await
             .expect("test db should open");
-
-        for ddl in [
-            "CREATE TABLE IF NOT EXISTS SYNC_POINT (ID varchar NOT NULL PRIMARY KEY, USER_ID varchar NOT NULL, API_KEY_ID varchar NOT NULL)",
-            "CREATE TABLE IF NOT EXISTS SYNC_POINT_BOOK (SYNC_POINT_ID varchar NOT NULL, BOOK_ID varchar NOT NULL, BOOK_CREATED_DATE datetime NOT NULL, BOOK_LAST_MODIFIED_DATE datetime NOT NULL, BOOK_FILE_LAST_MODIFIED datetime NOT NULL, BOOK_FILE_SIZE integer NOT NULL, BOOK_FILE_HASH varchar NOT NULL, BOOK_METADATA_LAST_MODIFIED_DATE datetime NOT NULL, SYNCED integer NOT NULL DEFAULT 0)",
-            "CREATE TABLE IF NOT EXISTS SYNC_POINT_BOOK_REMOVED_SYNCED (SYNC_POINT_ID varchar NOT NULL, BOOK_ID varchar NOT NULL)",
-            "CREATE TABLE IF NOT EXISTS SYNC_POINT_READLIST (SYNC_POINT_ID varchar NOT NULL, READLIST_ID varchar NOT NULL, READLIST_NAME varchar NOT NULL, READLIST_CREATED_DATE datetime NOT NULL, READLIST_LAST_MODIFIED_DATE datetime NOT NULL, SYNCED integer NOT NULL DEFAULT 0)",
-            "CREATE TABLE IF NOT EXISTS SYNC_POINT_READLIST_BOOK (SYNC_POINT_ID varchar NOT NULL, READLIST_ID varchar NOT NULL, BOOK_ID varchar NOT NULL)",
-            "CREATE TABLE IF NOT EXISTS SYNC_POINT_READLIST_REMOVED_SYNCED (SYNC_POINT_ID varchar NOT NULL, READLIST_ID varchar NOT NULL)",
-        ] {
-            sqlx::query(ddl)
+        crate::sqlite::setup::bootstrap_pool(&pool)
+            .await
+            .expect("sync point test db should bootstrap main schema");
+        for user_id in ["user-1", "user-2"] {
+            sqlx::query("INSERT INTO USER (ID, EMAIL, PASSWORD) VALUES (?, ?, ?)")
+                .bind(user_id)
+                .bind(format!("{user_id}@example.org"))
+                .bind("test-password")
                 .execute(&pool)
                 .await
-                .expect("sync point fixture tables should be created");
+                .expect("sync point fixture user should be inserted");
         }
 
         (db_path, pool)
