@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{LazyLock, RwLock};
 
-use super::{super::OperationalState, WebUiAssets};
+use super::{super::OperationalState, webui_assets::WebUiAssets};
 
 const RESOURCE_BASE_URL_TEMPLATE_MARKER: &str =
     concat!("/*[(${", "\"'\" + baseUrl + \"'\"", "})]*/ '/'",);
@@ -328,14 +328,18 @@ mod tests {
         request_scoped_resource_base_url, resolve_embedded_asset_path, serve_webui_asset,
     };
     #[cfg(webui_dist_present)]
-    use super::{WebUiAssets, cached_rewritten_index_html, rewrite_index_html};
+    use super::{cached_rewritten_index_html, rewrite_index_html};
     use axum::body::Bytes;
     #[cfg(webui_dist_present)]
     use axum::body::to_bytes;
     #[cfg(webui_dist_present)]
     use axum::http::header;
     use axum::http::{HeaderMap, StatusCode};
+    #[cfg(webui_dist_present)]
+    use std::borrow::Cow;
     use std::path::Path;
+    #[cfg(webui_dist_present)]
+    use super::super::webui_assets::WebUiAssets;
 
     #[cfg(webui_dist_present)]
     #[tokio::test]
@@ -423,7 +427,7 @@ mod tests {
     #[tokio::test]
     async fn versioned_static_assets_are_served_with_long_lived_public_cache_control() {
         let static_asset = WebUiAssets::iter()
-            .find(|path| path.contains('/'))
+            .find(|path: &Cow<'static, str>| path.contains('/'))
             .expect("embedded webui should expose at least one nested static asset");
 
         let response = serve_webui_asset(static_asset.as_ref(), "/");

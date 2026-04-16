@@ -1,11 +1,16 @@
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use komga_contract_testkit::contract_matrix::assert_required_target_declared;
-use komga_rust::application::task_processing::TaskRuntimeContext;
-use komga_rust::config::{RuntimeMode, WriterOwnershipPolicy};
-use komga_rust::infrastructure::search::search_analyzer_version;
-use komga_rust::infrastructure::sqlite::connect_pool;
-use komga_rust::{SearchEntityType, SearchIndexLifecycle, TaskQueueRecord, TaskQueueScheduler};
+use komga_application::task_processing::TaskRuntimeContext;
+use komga_application::task_processing::TaskQueueRecord;
+use komga_config::profile::RuntimeMode;
+use komga_config::writer_ownership::WriterOwnershipPolicy;
+use komga_infrastructure::search::analyzer_profiles::search_analyzer_version;
+use komga_infrastructure::search::index_lifecycle::{
+    SearchEntityType, SearchIndexLifecycle,
+};
+use komga_infrastructure::task_queue::queue_scheduler::TaskQueueScheduler;
+use komga_infrastructure::sqlite::connect_pool;
 use komga_server::app::{
     build_router_with_config, build_router_without_runtime_workers_for_contract,
 };
@@ -14,23 +19,20 @@ use sqlx::Row;
 use std::fs;
 use tower::util::ServiceExt;
 
-#[path = "support/runtime_router_contract_support.rs"]
-pub mod runtime_router_contract_support;
+mod support;
 
-use runtime_router_contract_support::*;
+use support::runtime_router_contract_support::{
+    RuntimeDbPaths,
+    contract_seed::*,
+    fixture_bootstrap::*,
+    log_capture::*,
+    media_file_fixtures::*,
+    metadata_series_seeding::*,
+    response_helpers::*,
+    user_auth::*,
+};
 
-#[path = "task_runtime_contract/import_and_transient.rs"]
-mod import_and_transient;
-#[path = "task_runtime_contract/lifecycle_logging.rs"]
-mod lifecycle_logging;
-#[path = "task_runtime_contract/metadata_aggregation.rs"]
-mod metadata_aggregation;
-#[path = "task_runtime_contract/ownership_guards.rs"]
-mod ownership_guards;
-#[path = "task_runtime_contract/search_index_lifecycle.rs"]
-mod search_index_lifecycle;
-#[path = "task_runtime_contract/worker_lifecycle_logging.rs"]
-mod worker_lifecycle_logging;
+mod task_runtime_contract_cases;
 
 const ANALYZER_VERSION_MARKER_FILE: &str = ".komga-search-analyzer-version";
 
@@ -48,36 +50,36 @@ fn runtime_task_context(paths: &RuntimeDbPaths) -> TaskRuntimeContext {
 }
 
 fn runtime_task_context_from_config(
-    config: &komga_rust::config::RuntimeConfig,
+    config: &komga_config::env_config::RuntimeConfig,
 ) -> TaskRuntimeContext {
     TaskRuntimeContext {
         database_file: config.database_file.clone(),
         tasks_db_file: config.tasks_db_file.clone(),
         lucene_data_directory: config.lucene_data_directory.clone(),
         consumes_queue: matches!(
-            config.writer_decision(komga_rust::config::WriterKind::TasksDatabase),
-            komga_rust::config::WriterDecision::Allowed
-                | komga_rust::config::WriterDecision::Isolated
+            config.writer_decision(komga_config::writer_ownership::WriterKind::TasksDatabase),
+            komga_config::writer_ownership::WriterDecision::Allowed
+                | komga_config::writer_ownership::WriterDecision::Isolated
         ),
         owns_main_database: matches!(
-            config.writer_decision(komga_rust::config::WriterKind::MainDatabase),
-            komga_rust::config::WriterDecision::Allowed
-                | komga_rust::config::WriterDecision::Isolated
+            config.writer_decision(komga_config::writer_ownership::WriterKind::MainDatabase),
+            komga_config::writer_ownership::WriterDecision::Allowed
+                | komga_config::writer_ownership::WriterDecision::Isolated
         ),
         owns_filesystem_scan_output: matches!(
-            config.writer_decision(komga_rust::config::WriterKind::FilesystemScanOutput),
-            komga_rust::config::WriterDecision::Allowed
-                | komga_rust::config::WriterDecision::Isolated
+            config.writer_decision(komga_config::writer_ownership::WriterKind::FilesystemScanOutput),
+            komga_config::writer_ownership::WriterDecision::Allowed
+                | komga_config::writer_ownership::WriterDecision::Isolated
         ),
         owns_sidecar_output: matches!(
-            config.writer_decision(komga_rust::config::WriterKind::SidecarOutput),
-            komga_rust::config::WriterDecision::Allowed
-                | komga_rust::config::WriterDecision::Isolated
+            config.writer_decision(komga_config::writer_ownership::WriterKind::SidecarOutput),
+            komga_config::writer_ownership::WriterDecision::Allowed
+                | komga_config::writer_ownership::WriterDecision::Isolated
         ),
         owns_search_index: matches!(
-            config.writer_decision(komga_rust::config::WriterKind::SearchIndex),
-            komga_rust::config::WriterDecision::Allowed
-                | komga_rust::config::WriterDecision::Isolated
+            config.writer_decision(komga_config::writer_ownership::WriterKind::SearchIndex),
+            komga_config::writer_ownership::WriterDecision::Allowed
+                | komga_config::writer_ownership::WriterDecision::Isolated
         ),
     }
 }

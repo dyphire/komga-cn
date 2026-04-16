@@ -1,8 +1,9 @@
 use super::collections_support::PersistedCollectionWriteInput;
 use super::*;
-use crate::http::discovery::persisted::persisted_backend_search_collection_ids;
+use crate::http::discovery::persisted::backend::persisted_backend_search_collection_ids;
+use crate::http::discovery::persisted::common_helpers::decode_query_component;
 use crate::http::discovery::series::series_list;
-use crate::http::discovery::series_routes::{author_query_to_author_match, decode_query_component};
+use crate::http::discovery::series_routes::author_query_to_author_match;
 use crate::http::helpers::validation_error_response;
 use axum::body::{Body, to_bytes};
 use icu::collator::{

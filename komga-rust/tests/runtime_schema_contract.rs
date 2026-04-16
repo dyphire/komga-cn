@@ -1,13 +1,14 @@
 use komga_contract_testkit::contract_matrix::assert_required_target_declared;
-use komga_rust::infrastructure::SqlitePersistenceContext;
-use komga_rust::infrastructure::sqlite::{
+use komga_infrastructure::context::SqlitePersistenceContext;
+use komga_infrastructure::sqlite::{
     connect_persistence_context, connect_pool, connect_tasks_pool, setup,
 };
 use sqlx::Row;
 use std::path::Path;
 
-#[path = "support/persistence_contract_fixture.rs"]
-mod persistence_contract_fixture;
+mod support;
+
+use support::persistence_contract_fixture;
 
 #[test]
 fn runtime_schema_contract_target_is_registered() {

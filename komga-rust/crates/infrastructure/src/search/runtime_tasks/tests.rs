@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::sqlite::{connect_private_pool, setup::bootstrap_pool};
 use sqlx::SqlitePool;
 
-use super::super::{SearchEntityType, SearchIndexLifecycle};
+use super::super::index_lifecycle::{SearchEntityType, SearchIndexLifecycle};
 use super::{
     rebuild_index_from_database, sync_entity_delete_from_index, sync_entity_upsert_from_database,
     sync_series_and_oneshot_books_after_metadata_update,

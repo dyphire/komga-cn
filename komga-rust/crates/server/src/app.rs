@@ -2,7 +2,7 @@ use axum::Router;
 use tokio::net::TcpListener;
 
 use crate::composition::start_server;
-use crate::config::RuntimeConfig;
+use komga_config::env_config::RuntimeConfig;
 use komga_interfaces::http::state::RuntimeProfile;
 
 pub fn build_router() -> Router {
@@ -12,8 +12,8 @@ pub fn build_router() -> Router {
 
 pub fn build_router_with_profile(profile: RuntimeProfile) -> Router {
     let config = RuntimeConfig::for_runtime_profile(match profile {
-        RuntimeProfile::SnapshotAligned => crate::config::RuntimeProfile::SnapshotAligned,
-        RuntimeProfile::LiveLocaldb => crate::config::RuntimeProfile::LiveLocaldb,
+        RuntimeProfile::SnapshotAligned => komga_config::profile::RuntimeProfile::SnapshotAligned,
+        RuntimeProfile::LiveLocaldb => komga_config::profile::RuntimeProfile::LiveLocaldb,
     });
     build_router_with_config(&config)
 }
@@ -21,7 +21,7 @@ pub fn build_router_with_profile(profile: RuntimeProfile) -> Router {
 pub fn build_router_with_config(config: &RuntimeConfig) -> Router {
     if matches!(
         config.runtime_profile,
-        crate::config::RuntimeProfile::LiveLocaldb
+        komga_config::profile::RuntimeProfile::LiveLocaldb
     ) {
         crate::runtime::startup_scan::bootstrap_library_scan(config);
     }
@@ -31,7 +31,7 @@ pub fn build_router_with_config(config: &RuntimeConfig) -> Router {
 pub fn build_router_without_runtime_workers_for_contract(config: &RuntimeConfig) -> Router {
     if matches!(
         config.runtime_profile,
-        crate::config::RuntimeProfile::LiveLocaldb
+        komga_config::profile::RuntimeProfile::LiveLocaldb
     ) {
         crate::runtime::startup_scan::bootstrap_library_scan(config);
     }
@@ -55,7 +55,7 @@ pub async fn serve_with_config(
 ) -> std::io::Result<()> {
     if matches!(
         config.runtime_profile,
-        crate::config::RuntimeProfile::LiveLocaldb
+        komga_config::profile::RuntimeProfile::LiveLocaldb
     ) {
         crate::runtime::startup_scan::bootstrap_library_scan(&config);
     }

@@ -1,6 +1,7 @@
-use crate::http::discovery_auth::{
-    AgeRestrictionKind, DetailAccessDenial, DiscoveryQueryContext, QueryRestrictions,
+use crate::http::discovery_auth::context::{
+    DetailAccessDenial, DiscoveryQueryContext, QueryRestrictions,
 };
+use crate::http::discovery_auth::principal::AgeRestrictionKind;
 use axum::Json;
 use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -16,7 +17,8 @@ use serde_json::{Value, json};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use super::super::{ReadProgress, ReadProgressState, SEARCH_OWNERSHIP_HEADER};
+use crate::http::state::{ReadProgress, ReadProgressState};
+use crate::SEARCH_OWNERSHIP_HEADER;
 
 pub(crate) fn books_page_payload(
     page: PageEnvelope<BookReadModel>,

@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use komga_rust::config::RuntimeConfig;
+use komga_config::env_config::RuntimeConfig;
 
 pub fn capture_router_logs_async_result<T, F>(config: &RuntimeConfig, action: F) -> (String, T)
 where

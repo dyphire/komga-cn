@@ -6,7 +6,7 @@ use komga_application::library_catalog::{
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 
 use crate::read_models::{get_persisted_library, list_persisted_libraries};
-use crate::sqlite::write_models::{
+use crate::sqlite::write_models::libraries::{
     PersistedLibraryWriteModel, delete_persisted_library, library_book_ids,
     library_book_ids_with_empty_hash, library_series_and_book_ids,
     load_persisted_library_write_model, persist_library_create, persist_library_update,
@@ -88,7 +88,10 @@ impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
         &self,
         library_id: &str,
     ) -> Result<Vec<(String, String)>, String> {
-        crate::tasks::load_books_for_extension_repair(self.database_file.as_path(), library_id)
+        crate::tasks::media_queries::load_books_for_extension_repair(
+            self.database_file.as_path(),
+            library_id,
+        )
             .map(|rows| {
                 rows.into_iter()
                     .map(|row| (row.book_id, row.series_id))
@@ -150,8 +153,8 @@ impl From<crate::read_models::PersistedLibraryReadModel> for LibraryRecord {
     }
 }
 
-impl From<crate::sqlite::write_models::PersistedLibraryWriteModel> for LibraryRecord {
-    fn from(value: crate::sqlite::write_models::PersistedLibraryWriteModel) -> Self {
+impl From<crate::sqlite::write_models::libraries::PersistedLibraryWriteModel> for LibraryRecord {
+    fn from(value: crate::sqlite::write_models::libraries::PersistedLibraryWriteModel) -> Self {
         Self {
             id: value.id,
             name: value.name,

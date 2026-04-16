@@ -6,17 +6,20 @@ use komga_server::app::build_router_with_config;
 use serde_json::Value;
 use tower::util::ServiceExt;
 
-#[path = "support/runtime_router_contract_support.rs"]
-pub mod runtime_router_contract_support;
+mod support;
 
-use runtime_router_contract_support::*;
+use support::runtime_router_contract_support::{
+    RuntimeDbPaths,
+    contract_seed::*,
+    fixture_bootstrap::*,
+    log_capture::*,
+    media_file_fixtures::*,
+    metadata_series_seeding::*,
+    response_helpers::*,
+    user_auth::*,
+};
 
-#[path = "opds_contract/catalog.rs"]
-mod catalog;
-#[path = "opds_contract/search_and_manifest.rs"]
-mod search_and_manifest;
-#[path = "opds_contract/v1_feeds.rs"]
-mod v1_feeds;
+mod opds_contract_cases;
 
 #[test]
 fn opds_contract_target_is_registered() {

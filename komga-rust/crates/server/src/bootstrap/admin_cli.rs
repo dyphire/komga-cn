@@ -205,7 +205,7 @@ pub async fn run_admin_cli_commands(
     let mut failures = Vec::new();
 
     for email in &commands.reset_emails {
-        let user = komga_infrastructure::sqlite::write_models::load_persisted_user_by_email(
+        let user = komga_infrastructure::sqlite::write_models::bootstrap_users::load_persisted_user_by_email(
             database_file,
             email,
         )
@@ -241,7 +241,7 @@ pub async fn run_admin_cli_commands(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    komga_infrastructure::sqlite::write_models::update_persisted_user_passwords(
+    komga_infrastructure::sqlite::write_models::bootstrap_users::update_persisted_user_passwords(
         database_file,
         &password_updates,
     )
@@ -251,7 +251,7 @@ pub async fn run_admin_cli_commands(
     })?;
 
     for user in users {
-        komga_infrastructure::auth::invalidate_user_sessions(user.id.as_str());
+        komga_infrastructure::runtime_identity_access::invalidate_user_sessions(user.id.as_str());
         println!("Reset password for user: {}", user.email);
     }
 
@@ -259,8 +259,10 @@ pub async fn run_admin_cli_commands(
 }
 
 async fn print_user_list(database_file: &Path) -> Result<(), AdminCliActionError> {
-    let rows =
-        komga_infrastructure::sqlite::write_models::list_persisted_user_emails(database_file).await;
+    let rows = komga_infrastructure::sqlite::write_models::bootstrap_users::list_persisted_user_emails(
+        database_file,
+    )
+    .await;
 
     match rows {
         Ok(rows) if rows.is_empty() => {

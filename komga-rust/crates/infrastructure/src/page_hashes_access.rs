@@ -10,14 +10,17 @@ use serde_json::Value;
 use std::io::Cursor;
 use zip::ZipArchive;
 
-use crate::filesystem::{
-    load_archive_page_row, load_pdf_page_row, load_persisted_book_media,
-    load_persisted_book_page_row, render_book_page_thumbnail, resolve_book_page_bytes,
+use crate::filesystem::media_access::db_queries::{
+    load_persisted_book_media, load_persisted_book_page_row,
+};
+use crate::filesystem::media_access::page_content::{
+    load_archive_page_row, load_pdf_page_row, render_book_page_thumbnail,
+    resolve_book_page_bytes,
 };
 use crate::rar_support::read_rar_entry_bytes;
 use crate::resolve_library_item_path;
 use crate::sqlite::connect_pool;
-use crate::sqlite::read_models::{
+use crate::sqlite::read_models::page_hashes::{
     load_page_hash_delete_targets as load_page_hash_delete_targets_model,
     load_page_hash_matches_page as load_page_hash_matches_page_model,
     load_page_hash_thumbnail as load_page_hash_thumbnail_model,
@@ -25,7 +28,7 @@ use crate::sqlite::read_models::{
     load_page_hashes_unknown_page as load_page_hashes_unknown_page_model,
     load_unknown_page_hash_match_target, load_unknown_page_hash_source,
 };
-use crate::sqlite::write_models::upsert_page_hash as upsert_page_hash_model;
+use crate::sqlite::write_models::page_hashes::upsert_page_hash as upsert_page_hash_model;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PageHashThumbnail {

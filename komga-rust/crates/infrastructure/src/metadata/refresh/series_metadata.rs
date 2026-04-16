@@ -5,7 +5,7 @@ use std::path::Path;
 use komga_application::media_assets::{BookMediaRecord, book_media_is_epub};
 use sqlx::{Row, SqlitePool};
 
-use crate::filesystem::load_epub_package_document;
+use crate::filesystem::media_access::epub::load_epub_package_document;
 use crate::resolve_rooted_path;
 
 use super::SeriesMetadataImportPatch;

@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
-use komga_rust::config::{RuntimeCli, RuntimeConfig};
-use komga_rust::infrastructure::rebuild_index_from_database;
+use komga_config::cli_args::RuntimeCli;
+use komga_config::env_config::RuntimeConfig;
+use komga_infrastructure::search::runtime_tasks::rebuild_index_from_database;
 
 use super::{RuntimeDbPaths, persistence_contract_fixture};
 

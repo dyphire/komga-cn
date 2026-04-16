@@ -6,11 +6,16 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use komga_contract_testkit::contract_matrix::assert_required_target_declared;
-use komga_rust::application::task_processing::TaskRuntimeContext;
-use komga_rust::config::{RuntimeCli, RuntimeConfig};
-use komga_rust::infrastructure::sqlite::connect_pool;
+use komga_application::task_processing::TaskRuntimeContext;
+use komga_application::task_processing::TaskQueueRecord;
+use komga_config::cli_args::RuntimeCli;
+use komga_config::env_config::RuntimeConfig;
+use komga_infrastructure::search::index_lifecycle::{
+    SearchEntityType, SearchIndexLifecycle,
+};
+use komga_infrastructure::sqlite::connect_pool;
+use komga_infrastructure::task_queue::queue_scheduler::TaskQueueScheduler;
 use komga_rust::scanner::{ScannerOptions, scan_root_folder};
-use komga_rust::{SearchEntityType, SearchIndexLifecycle, TaskQueueRecord, TaskQueueScheduler};
 use serde_json::{Value, json};
 use sqlx::Row;
 use zip::CompressionMethod;
@@ -25,18 +30,11 @@ const MINIMAL_PNG_BYTES: &[u8] = &[
     0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
 ];
 
-#[path = "support/persistence_contract_fixture.rs"]
-mod persistence_contract_fixture;
-#[path = "scanner_persistence_contract/persistence_runtime_flow.rs"]
-mod persistence_runtime_flow;
-#[path = "scanner_persistence_contract/rescan_behaviors.rs"]
-mod rescan_behaviors;
-#[path = "scanner_persistence_contract/runtime_guards.rs"]
-mod runtime_guards;
-#[path = "scanner_persistence_contract/support.rs"]
 mod support;
-#[path = "scanner_persistence_contract/task_shape_contracts.rs"]
-mod task_shape_contracts;
+
+use support::persistence_contract_fixture;
+
+mod scanner_persistence_contract_cases;
 
 #[test]
 fn scanner_persistence_contract_target_is_registered() {

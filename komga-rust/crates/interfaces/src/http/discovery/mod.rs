@@ -12,72 +12,24 @@ use komga_application::discovery::{
 use komga_domain::discovery::{DirectBrowseBooksListFamily, DiscoveryError};
 use serde_json::{Value, json};
 
-use crate::http::discovery_auth::DiscoveryAuthState;
+use crate::http::discovery_auth::state::DiscoveryAuthState;
 use crate::http::identity_access::auth::{
     require_request_admin, require_request_auth, resolved_request_auth_user, user_id,
 };
 
-use super::super::{AuthDatabaseState, OperationalState};
 use super::helpers::{
     books_page_payload, extract_full_text_search, mark_runtime_owned, query_bool, query_value,
     query_values,
 };
+use crate::http::state::{AuthDatabaseState, OperationalState};
 
-#[path = "books.rs"]
-mod books;
-#[path = "detail.rs"]
-mod detail;
-#[path = "facets.rs"]
+pub mod books;
+pub mod detail;
 mod facets;
-#[path = "series.rs"]
-mod series;
-#[path = "series_routes.rs"]
-mod series_routes;
-
-pub use books::{
-    book_tags, books_duplicates, books_latest, books_list, books_ondeck, series_books_deprecated,
-};
-pub(crate) use detail::load_persisted_book_series_id;
-pub(crate) use detail::load_persisted_webpub_metadata_additions;
-pub use detail::{
-    DiscoveryDetailAccessBackends, DiscoveryDetailBooksAccessBackend,
-    DiscoveryDetailCollectionsAccessBackend, DiscoveryDetailReadlistsAccessBackend,
-    DiscoveryDetailSeriesAccessBackend, ExistingSeriesMetadataRecord, PersistedBookAuthorRecord,
-    PersistedBookDetailRecord, PersistedBookResourceRecord, PersistedBookSiblingDirectionRecord,
-    PersistedCollectionAccessRecord, PersistedComicrackMatchCandidateRecord,
-    PersistedReadProgressRecord, PersistedReadlistBookRecord, PersistedReadlistRecord,
-    PersistedSeriesCollectionRecord, PersistedSeriesDetailRecord, PersistedSeriesResourceRecord,
-    PersistedSeriesRestrictionRecord, SeriesAlternateTitleRecord, SeriesMetadataLinkRecord,
-    SeriesSummaryRecord, book_detail, book_readlists, book_sibling_next, book_sibling_previous,
-    collection_create, collection_delete, collection_detail, collection_series, collection_update,
-    collections, install_discovery_detail_access_backends, readlist_book_sibling_next,
-    readlist_book_sibling_previous, readlist_books, readlist_create, readlist_delete,
-    readlist_detail, readlist_match_comicrack, readlist_update, readlists,
-    resolve_book_id_for_persisted, resolve_series_id_for_persisted, series_collections,
-    series_detail, series_metadata_update,
-};
-pub use facets::{
-    age_ratings, authors_names, authors_roles, authors_v2, genres, languages, publishers,
-    series_release_dates, series_tags, sharing_labels, tags,
-};
-pub use persisted::{
-    PersistedAuthorEntry, PersistedAuthorsScope, PersistedBookBrowseEntry,
-    PersistedBookPosterSummary, PersistedBookSummary, PersistedBookTagsScope,
-    PersistedDiscoveryAccessBackend, PersistedReadProgressSummary, PersistedSeriesSummary,
-    PersistedWebLinkEntry, install_persisted_discovery_access,
-};
-pub use series::{
-    series_alphabetical_groups, series_deprecated_get, series_latest, series_list, series_new,
-    series_updated,
-};
-
-#[path = "filters.rs"]
 mod filters;
-#[path = "persisted.rs"]
-mod persisted;
-
-use filters::*;
-use persisted::*;
+pub mod persisted;
+pub mod series;
+mod series_routes;
 
 pub(super) async fn authors_names_route(
     Extension(auth_state): Extension<DiscoveryAuthState>,
@@ -85,7 +37,7 @@ pub(super) async fn authors_names_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    authors_names(headers, uri, auth_state, auth_db.database_file.as_path()).await
+    facets::authors_names(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn authors_route(
@@ -102,7 +54,7 @@ pub(super) async fn authors_roles_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
 ) -> Response {
-    authors_roles(headers, auth_state, auth_db.database_file.as_path()).await
+    facets::authors_roles(headers, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn genres_route(
@@ -111,7 +63,7 @@ pub(super) async fn genres_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    genres(headers, uri, auth_state, auth_db.database_file.as_path()).await
+    facets::genres(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn tags_route(
@@ -120,7 +72,7 @@ pub(super) async fn tags_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    tags(headers, uri, auth_state, auth_db.database_file.as_path()).await
+    facets::tags(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn series_tags_route(
@@ -129,7 +81,7 @@ pub(super) async fn series_tags_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    series_tags(headers, uri, auth_state, auth_db.database_file.as_path()).await
+    facets::series_tags(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn languages_route(
@@ -138,7 +90,7 @@ pub(super) async fn languages_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    languages(headers, uri, auth_state, auth_db.database_file.as_path()).await
+    facets::languages(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn publishers_route(
@@ -147,7 +99,7 @@ pub(super) async fn publishers_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    publishers(headers, uri, auth_state, auth_db.database_file.as_path()).await
+    facets::publishers(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn age_ratings_route(
@@ -156,7 +108,7 @@ pub(super) async fn age_ratings_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    age_ratings(headers, uri, auth_state, auth_db.database_file.as_path()).await
+    facets::age_ratings(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn sharing_labels_route(
@@ -165,7 +117,7 @@ pub(super) async fn sharing_labels_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    sharing_labels(headers, uri, auth_state, auth_db.database_file.as_path()).await
+    facets::sharing_labels(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn series_new_route(
@@ -174,7 +126,7 @@ pub(super) async fn series_new_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    series_new(headers, uri, auth_state, auth_db.database_file.as_path()).await
+    series::series_new(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn series_updated_route(
@@ -183,7 +135,7 @@ pub(super) async fn series_updated_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    series_updated(headers, uri, auth_state, auth_db.database_file.as_path()).await
+    series::series_updated(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn series_release_dates_route(
@@ -192,7 +144,7 @@ pub(super) async fn series_release_dates_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    series_release_dates(headers, uri, auth_state, auth_db.database_file.as_path()).await
+    facets::series_release_dates(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn series_latest_route(
@@ -201,7 +153,7 @@ pub(super) async fn series_latest_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    series_latest(headers, uri, auth_state, auth_db.database_file.as_path()).await
+    series::series_latest(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn series_route(
@@ -210,7 +162,7 @@ pub(super) async fn series_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    series_deprecated_get(headers, uri, auth_state, auth_db.database_file.as_path()).await
+    series::series_deprecated_get(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }
 
 pub(super) async fn books_route(
@@ -228,7 +180,7 @@ pub(super) async fn series_detail_route(
     headers: HeaderMap,
     AxumPath(series_id): AxumPath<String>,
 ) -> Response {
-    series_detail(
+    detail::series_detail(
         headers,
         AxumPath(series_id),
         auth_state,
@@ -243,7 +195,7 @@ pub(super) async fn series_collections_route(
     headers: HeaderMap,
     AxumPath(series_id): AxumPath<String>,
 ) -> Response {
-    series_collections(
+    detail::series_collections(
         headers,
         AxumPath(series_id),
         auth_state,
@@ -259,7 +211,7 @@ pub(super) async fn series_books_route(
     uri: Uri,
     AxumPath(series_id): AxumPath<String>,
 ) -> Response {
-    series_books_deprecated(
+    books::series_books_deprecated(
         headers,
         uri,
         AxumPath(series_id),
@@ -276,7 +228,7 @@ pub(super) async fn series_metadata_update_route(
     AxumPath(series_id): AxumPath<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    series_metadata_update(
+    detail::series_metadata_update(
         headers,
         auth_db.database_file.as_path(),
         operational.runtime.lucene_data_directory.as_path(),
@@ -292,7 +244,8 @@ pub(super) async fn series_alphabetical_groups_route(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    series_alphabetical_groups(headers, body, auth_state, auth_db.database_file.as_path()).await
+    series::series_alphabetical_groups(headers, body, auth_state, auth_db.database_file.as_path())
+        .await
 }
 
 pub(super) async fn authors_v2_route(
@@ -301,5 +254,5 @@ pub(super) async fn authors_v2_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    authors_v2(headers, uri, auth_state, auth_db.database_file.as_path()).await
+    facets::authors_v2(headers, uri, auth_state, auth_db.database_file.as_path()).await
 }

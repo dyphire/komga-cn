@@ -1,5 +1,5 @@
 use super::*;
-use crate::http::discovery::load_persisted_webpub_metadata_additions;
+use crate::http::discovery::detail::load_persisted_webpub_metadata_additions;
 use flate2::read::GzDecoder;
 use komga_application::media_assets::BookPageRecord;
 use std::io::Read;

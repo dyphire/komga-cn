@@ -3,7 +3,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{OnceLock, RwLock};
 
-use super::{
+use super::index_lifecycle::{
     SearchEntityType, SearchError, SearchEvent, SearchIndexLifecycle, prepare_for_rebuild,
 };
 

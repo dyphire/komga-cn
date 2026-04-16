@@ -1,6 +1,8 @@
 use axum::Router;
+use komga_infrastructure::search::index_lifecycle::{
+    SearchStartupLifecycle, decide_startup_lifecycle, prepare_for_rebuild,
+};
 use komga_infrastructure::sqlite::close_all_shared_pools;
-use komga_infrastructure::{SearchStartupLifecycle, decide_startup_lifecycle, prepare_for_rebuild};
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -9,12 +11,13 @@ use tokio::sync::oneshot;
 use tokio::sync::watch;
 
 use crate::composition::http_state::{HttpRuntimeState, compose_http_runtime};
-use crate::config::{RuntimeConfig, WriterKind};
+use komga_config::env_config::RuntimeConfig;
+use komga_config::writer_ownership::WriterKind;
 use crate::runtime::background_workers::{prepare_task_queue, spawn_runtime_workers};
 
 #[derive(Clone, Copy)]
 struct StartupSearchPlan {
-    writer_decision: crate::config::WriterDecision,
+    writer_decision: komga_config::writer_ownership::WriterDecision,
     lifecycle: &'static str,
     startup_task: Option<&'static str>,
 }
@@ -311,18 +314,18 @@ async fn complete_shutdown_lifecycle() {
     );
 }
 
-fn search_writer_decision_label(decision: crate::config::WriterDecision) -> &'static str {
+fn search_writer_decision_label(decision: komga_config::writer_ownership::WriterDecision) -> &'static str {
     match decision {
-        crate::config::WriterDecision::Allowed => "allowed",
-        crate::config::WriterDecision::Isolated => "isolated",
-        crate::config::WriterDecision::Blocked { .. } => "blocked",
+        komga_config::writer_ownership::WriterDecision::Allowed => "allowed",
+        komga_config::writer_ownership::WriterDecision::Isolated => "isolated",
+        komga_config::writer_ownership::WriterDecision::Blocked { .. } => "blocked",
     }
 }
 
-fn search_writer_reason(decision: crate::config::WriterDecision) -> &'static str {
+fn search_writer_reason(decision: komga_config::writer_ownership::WriterDecision) -> &'static str {
     match decision {
-        crate::config::WriterDecision::Allowed | crate::config::WriterDecision::Isolated => "",
-        crate::config::WriterDecision::Blocked { reason } => reason,
+        komga_config::writer_ownership::WriterDecision::Allowed | komga_config::writer_ownership::WriterDecision::Isolated => "",
+        komga_config::writer_ownership::WriterDecision::Blocked { reason } => reason,
     }
 }
 

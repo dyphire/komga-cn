@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use sqlx::Row;
 
-use crate::SqlitePersistenceContext;
+use crate::context::SqlitePersistenceContext;
 use crate::sqlite::connect_persistence_context;
 
 #[derive(Clone)]

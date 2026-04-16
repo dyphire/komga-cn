@@ -1,5 +1,5 @@
 use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
-use komga_rust::infrastructure::sqlite::connect_pool;
+use komga_infrastructure::sqlite::connect_pool;
 
 use super::RuntimeDbPaths;
 

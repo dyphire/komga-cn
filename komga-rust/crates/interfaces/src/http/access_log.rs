@@ -34,7 +34,7 @@ tokio::task_local! {
     static ACCESS_LOG_USER_ID: RefCell<String>;
 }
 
-pub(crate) fn make_request_span<B>(request: &Request<B>) -> Span {
+pub fn make_request_span<B>(request: &Request<B>) -> Span {
     let metadata = AccessLogRequestMetadata::from_request(request);
 
     tracing::info_span!(
@@ -51,9 +51,9 @@ pub(crate) fn make_request_span<B>(request: &Request<B>) -> Span {
     )
 }
 
-pub(crate) fn on_request<B>(_: &Request<B>, _: &Span) {}
+pub fn on_request<B>(_: &Request<B>, _: &Span) {}
 
-pub(crate) fn on_response<B>(response: &Response<B>, latency: Duration, span: &Span) {
+pub fn on_response<B>(response: &Response<B>, latency: Duration, span: &Span) {
     let Some(state) = response.extensions().get::<AccessLogResponseState>() else {
         return;
     };
@@ -70,7 +70,7 @@ pub(crate) fn on_response<B>(response: &Response<B>, latency: Duration, span: &S
     }
 }
 
-pub(crate) fn on_failure<F>(_: F, _: Duration, _: &Span) {}
+pub fn on_failure<F>(_: F, _: Duration, _: &Span) {}
 
 pub(crate) fn record_resolved_auth_user_id(user_id: Option<&str>) {
     let user_id = user_id.unwrap_or(ANONYMOUS_USER_ID);
@@ -81,7 +81,7 @@ pub(crate) fn record_resolved_auth_user_id(user_id: Option<&str>) {
     });
 }
 
-pub(crate) async fn prepare_access_log_middleware(request: Request, next: Next) -> Response {
+pub async fn prepare_access_log_middleware(request: Request, next: Next) -> Response {
     let started_at = Instant::now();
     let request_id = next_request_id();
     let mut request = request;

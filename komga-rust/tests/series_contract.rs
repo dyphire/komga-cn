@@ -1,7 +1,7 @@
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use komga_contract_testkit::contract_matrix::assert_required_target_declared;
-use komga_rust::infrastructure::sqlite::connect_pool;
+use komga_infrastructure::sqlite::connect_pool;
 use komga_server::app::build_router_with_config;
 use serde_json::{Value, json};
 use sqlx::Row;
@@ -10,25 +10,20 @@ use tokio::time::{Duration, sleep};
 use tower::util::ServiceExt;
 use zip::ZipArchive;
 
-#[path = "support/runtime_router_contract_support.rs"]
-pub mod runtime_router_contract_support;
+mod support;
 
-use runtime_router_contract_support::*;
+use support::runtime_router_contract_support::{
+    RuntimeDbPaths,
+    contract_seed::*,
+    fixture_bootstrap::*,
+    log_capture::*,
+    media_file_fixtures::*,
+    metadata_series_seeding::*,
+    response_helpers::*,
+    user_auth::*,
+};
 
-#[path = "series_contract/detail_and_metadata.rs"]
-mod detail_and_metadata;
-#[path = "series_contract/discovery_filters.rs"]
-mod discovery_filters;
-#[path = "series_contract/discovery_release_date_filters.rs"]
-mod discovery_release_date_filters;
-#[path = "series_contract/discovery_search_validation.rs"]
-mod discovery_search_validation;
-#[path = "series_contract/search_parity.rs"]
-mod search_parity;
-#[path = "series_contract/tasks_and_file_routes.rs"]
-mod tasks_and_file_routes;
-#[path = "series_contract/thumbnails_and_media_assets.rs"]
-mod thumbnails_and_media_assets;
+mod series_contract_cases;
 
 #[test]
 fn series_contract_target_is_registered() {

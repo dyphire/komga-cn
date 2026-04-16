@@ -1,11 +1,11 @@
 use axum::http::{HeaderMap, header};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
-use komga_rust::application::identity_access::AuthOutcome;
-use komga_rust::infrastructure::auth::{
+use komga_application::identity_access::AuthOutcome;
+use komga_infrastructure::auth::{
     persisted_basic_user, persisted_update_password_by_user_id,
 };
-use komga_rust::infrastructure::sqlite::{connect_pool, setup};
+use komga_infrastructure::sqlite::{connect_pool, setup};
 use std::path::PathBuf;
 use tempfile::TempDir;
 

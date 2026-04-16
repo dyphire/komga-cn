@@ -2,14 +2,14 @@ use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
 use std::io::Read;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::config::RuntimeConfig;
+use komga_config::env_config::RuntimeConfig;
 
 pub async fn ensure_noclaim_initial_users(config: &RuntimeConfig) {
     if !spring_profile_enabled("noclaim") || spring_profile_enabled("test") {
         return;
     }
 
-    let existing_users = komga_infrastructure::sqlite::write_models::load_persisted_user_count(
+    let existing_users = komga_infrastructure::sqlite::write_models::claims::load_persisted_user_count(
         config.database_file.as_path(),
     )
     .await;
@@ -74,7 +74,7 @@ pub async fn ensure_noclaim_initial_users(config: &RuntimeConfig) {
         };
 
         users_to_persist.push(
-            komga_infrastructure::sqlite::write_models::InitialBootstrapUserWriteModel {
+            komga_infrastructure::sqlite::write_models::bootstrap_users::InitialBootstrapUserWriteModel {
                 id: generate_startup_user_id(user.email),
                 email: user.email.to_string(),
                 hashed_password,
@@ -83,7 +83,7 @@ pub async fn ensure_noclaim_initial_users(config: &RuntimeConfig) {
         );
     }
 
-    if let Err(error) = komga_infrastructure::sqlite::write_models::persist_initial_bootstrap_users(
+    if let Err(error) = komga_infrastructure::sqlite::write_models::bootstrap_users::persist_initial_bootstrap_users(
         config.database_file.as_path(),
         &users_to_persist,
     )

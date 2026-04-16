@@ -4,10 +4,8 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
-use komga_rust::infrastructure::{
-    SqlitePersistenceContext,
-    sqlite::{connect_pool, evict_shared_pools_for_paths},
-};
+use komga_infrastructure::context::SqlitePersistenceContext;
+use komga_infrastructure::sqlite::{connect_pool, evict_shared_pools_for_paths};
 
 pub struct RuntimeDbPaths {
     pub config_dir: PathBuf,

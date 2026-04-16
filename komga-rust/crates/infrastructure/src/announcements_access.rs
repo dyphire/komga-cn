@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use crate::sqlite::read_models::load_announcement_read_ids as load_announcement_read_ids_model;
-use crate::sqlite::write_models::save_announcements_read as save_announcements_read_model;
+use crate::sqlite::read_models::announcements::load_announcement_read_ids as load_announcement_read_ids_model;
+use crate::sqlite::write_models::announcements::save_announcements_read as save_announcements_read_model;
 
 pub async fn load_announcement_read_ids(
     database_file: &Path,

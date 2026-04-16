@@ -1,9 +1,20 @@
 use super::*;
-use crate::http::discovery::detail::{
-    load_persisted_series_resource, resolve_series_id_for_persisted,
+use super::filters::{exact_oneshot_bootstrap_series_id, normalize_release_date_date_time};
+use super::persisted::common_helpers::{decode_query_component, filter_rows};
+use super::persisted::delegates::{
+    internal_error_response, invalid_runtime_books_list_response, load_persisted_book_tags,
+    load_persisted_books_page, load_persisted_duplicate_books, load_persisted_ondeck_books,
+    remap_requested_library_ids_for_persisted, requested_query_values,
+    runtime_owned_books_latest_response, runtime_owned_books_list_response,
 };
-use crate::http::discovery_auth::{AgeRestrictionKind, QueryRestrictions};
-use crate::http::discovery_auth::{DetailContentContext, DetailResourceContext};
+use super::persisted::models::{
+    BooksFilterCriteria, PersistedBookTagsScope, PersistedBooksBrowseQuery,
+    PersistedBooksSortMode,
+};
+use crate::http::discovery_auth::context::{
+    DetailContentContext, DetailResourceContext, QueryRestrictions,
+};
+use crate::http::discovery_auth::principal::AgeRestrictionKind;
 use crate::http::helpers::detail_access_denial_response;
 use icu::collator::{
     Collator,
@@ -773,9 +784,11 @@ pub async fn series_books_deprecated(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let resolved_series_id = resolve_series_id_for_persisted(database_file, &series_id).await;
+    let resolved_series_id = super::detail::resolve_series_id_for_persisted(database_file, &series_id).await;
     let Some(resource) =
-        (match load_persisted_series_resource(database_file, &resolved_series_id).await {
+        (match super::detail::load_persisted_series_resource(database_file, &resolved_series_id)
+            .await
+        {
             Ok(resource) => resource,
             Err(error) => return internal_error_response(error),
         })

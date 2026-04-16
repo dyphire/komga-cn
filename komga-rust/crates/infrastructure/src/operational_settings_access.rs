@@ -4,11 +4,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::sqlite::connect_pool;
-use crate::sqlite::read_models::{
+use crate::sqlite::read_models::client_settings::{
     load_client_settings_global as load_client_settings_global_model,
     load_client_settings_user as load_client_settings_user_model,
 };
-use crate::sqlite::write_models::{
+use crate::sqlite::write_models::client_settings::{
     delete_client_settings_global as delete_client_settings_global_model,
     delete_client_settings_user as delete_client_settings_user_model,
     upsert_client_settings_global as upsert_client_settings_global_model,
@@ -18,7 +18,7 @@ use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 use sqlx::Row;
 
-use crate::ServerSettingsStore;
+use crate::sqlite::write_models::server_settings::ServerSettingsStore;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PersistedServerSettings {

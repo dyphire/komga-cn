@@ -1,11 +1,11 @@
-use axum::Router;
 use axum::middleware;
 use axum::routing::{delete, get, patch, post, put};
+use axum::Router;
 use tower_http::trace::TraceLayer;
 
 use crate::http::access_log;
 use crate::http::cache;
-use crate::http::discovery_auth::DiscoveryAuthState;
+use crate::http::discovery_auth::state::DiscoveryAuthState;
 use crate::http::{discovery, identity_access, library_catalog, media_assets, opds, operational};
 
 use crate::http::identity_access::device_auth;
@@ -177,29 +177,30 @@ pub fn build_router(
         .route("/api/v1/tasks", delete(operational::delete_tasks))
         .route(
             "/api/v1/libraries",
-            get(library_catalog::libraries_route).post(library_catalog::library_create_route),
+            get(library_catalog::handlers::libraries_route)
+                .post(library_catalog::handlers::library_create_route),
         )
         .route(
             "/api/v1/libraries/{library_id}",
-            get(library_catalog::library_detail_route)
-                .patch(library_catalog::library_update_route)
-                .delete(library_catalog::library_delete_route),
+            get(library_catalog::handlers::library_detail_route)
+                .patch(library_catalog::handlers::library_update_route)
+                .delete(library_catalog::handlers::library_delete_route),
         )
         .route(
             "/api/v1/libraries/{library_id}/scan",
-            post(library_catalog::library_scan_route),
+            post(library_catalog::handlers::library_scan_route),
         )
         .route(
             "/api/v1/libraries/{library_id}/analyze",
-            post(library_catalog::library_analyze_route),
+            post(library_catalog::handlers::library_analyze_route),
         )
         .route(
             "/api/v1/libraries/{library_id}/metadata/refresh",
-            post(library_catalog::library_metadata_refresh_route),
+            post(library_catalog::handlers::library_metadata_refresh_route),
         )
         .route(
             "/api/v1/libraries/{library_id}/empty-trash",
-            post(library_catalog::library_empty_trash_route),
+            post(library_catalog::handlers::library_empty_trash_route),
         )
         .route("/api/v1/authors", get(discovery::authors_route))
         .route("/api/v1/authors/names", get(discovery::authors_names_route))
@@ -219,7 +220,7 @@ pub fn build_router(
             get(discovery::series_release_dates_route),
         )
         .route("/api/v1/series/latest", get(discovery::series_latest_route))
-        .route("/api/v1/tags/book", get(discovery::book_tags))
+        .route("/api/v1/tags/book", get(discovery::books::book_tags))
         .route("/api/v1/series/{series_id}", get(discovery::series_detail_route))
         .route("/api/v1/series/{series_id}/", get(discovery::series_detail_route))
         .route(
@@ -232,19 +233,19 @@ pub fn build_router(
         )
         .route(
             "/api/v1/series/{series_id}/thumbnail",
-            get(media_assets::series_thumbnail),
+            get(media_assets::handlers::series_thumbnail),
         )
         .route(
             "/api/v1/series/{series_id}/thumbnails",
-            get(media_assets::series_thumbnails).post(media_assets::series_thumbnail_upload),
+            get(media_assets::handlers::series_thumbnails).post(media_assets::handlers::series_thumbnail_upload),
         )
         .route(
             "/api/v1/series/{series_id}/thumbnails/{thumbnail_id}",
-            get(media_assets::series_thumbnail_by_id).delete(media_assets::series_thumbnail_delete),
+            get(media_assets::handlers::series_thumbnail_by_id).delete(media_assets::handlers::series_thumbnail_delete),
         )
         .route(
             "/api/v1/series/{series_id}/thumbnails/{thumbnail_id}/selected",
-            put(media_assets::series_thumbnail_select),
+            put(media_assets::handlers::series_thumbnail_select),
         )
         .route(
             "/api/v1/series/{series_id}/metadata",
@@ -252,413 +253,419 @@ pub fn build_router(
         )
         .route(
             "/api/v1/series/{series_id}/metadata/refresh",
-            post(media_assets::series_metadata_refresh),
+            post(media_assets::handlers::series_metadata_refresh),
         )
         .route(
             "/api/v1/series/{series_id}/analyze",
-            post(media_assets::series_analyze),
+            post(media_assets::handlers::series_analyze),
         )
         .route(
             "/api/v1/series/{series_id}/read-progress",
-            post(media_assets::series_read_progress_post)
-                .delete(media_assets::series_read_progress_delete),
+            post(media_assets::handlers::series_read_progress_post)
+                .delete(media_assets::handlers::series_read_progress_delete),
         )
         .route(
             "/api/v1/series/{series_id}/file",
-            get(media_assets::series_file).delete(media_assets::series_file_delete),
+            get(media_assets::handlers::series_file).delete(media_assets::handlers::series_file_delete),
         )
-        .route("/api/v1/series/list", post(discovery::series_list))
+        .route("/api/v1/series/list", post(discovery::series::series_list))
         .route(
             "/api/v1/series/list/alphabetical-groups",
             post(discovery::series_alphabetical_groups_route),
         )
         .route("/api/v1/books", get(discovery::books_route))
-        .route("/api/v1/books/list", post(discovery::books_list))
-        .route("/api/v1/books/latest", get(discovery::books_latest))
-        .route("/api/v1/books/ondeck", get(discovery::books_ondeck))
-        .route("/api/v1/books/duplicates", get(discovery::books_duplicates))
-        .route("/api/v1/books/{book_id}", get(discovery::book_detail))
+        .route("/api/v1/books/list", post(discovery::books::books_list))
+        .route("/api/v1/books/latest", get(discovery::books::books_latest))
+        .route("/api/v1/books/ondeck", get(discovery::books::books_ondeck))
+        .route("/api/v1/books/duplicates", get(discovery::books::books_duplicates))
+        .route("/api/v1/books/{book_id}", get(discovery::detail::book_detail))
         .route(
             "/api/v1/books/{book_id}/previous",
-            get(discovery::book_sibling_previous),
+            get(discovery::detail::book_sibling_previous),
         )
         .route(
             "/api/v1/books/{book_id}/next",
-            get(discovery::book_sibling_next),
+            get(discovery::detail::book_sibling_next),
         )
         .route(
             "/api/v1/books/{book_id}/readlists",
-            get(discovery::book_readlists),
+            get(discovery::detail::book_readlists),
         )
         .route(
             "/api/v1/readlists",
-            get(discovery::readlists).post(discovery::readlist_create),
+            get(discovery::detail::readlists).post(discovery::detail::readlist_create),
         )
         .route(
             "/api/v1/readlists/match/comicrack",
-            post(discovery::readlist_match_comicrack),
+            post(discovery::detail::readlist_match_comicrack),
         )
         .route(
             "/api/v1/readlists/{readlist_id}",
-            get(discovery::readlist_detail)
-                .patch(discovery::readlist_update)
-                .delete(discovery::readlist_delete),
+            get(discovery::detail::readlist_detail)
+                .patch(discovery::detail::readlist_update)
+                .delete(discovery::detail::readlist_delete),
         )
         .route(
             "/api/v1/readlists/{readlist_id}/thumbnail",
-            get(media_assets::readlist_thumbnail),
+            get(media_assets::handlers::readlist_thumbnail),
         )
         .route(
             "/api/v1/readlists/{readlist_id}/thumbnails",
-            get(media_assets::readlist_thumbnails).post(media_assets::readlist_thumbnail_upload),
+            get(media_assets::handlers::readlist_thumbnails).post(media_assets::handlers::readlist_thumbnail_upload),
         )
         .route(
             "/api/v1/readlists/{readlist_id}/thumbnails/{thumbnail_id}",
-            get(media_assets::readlist_thumbnail_by_id).delete(media_assets::readlist_thumbnail_delete),
+            get(media_assets::handlers::readlist_thumbnail_by_id).delete(media_assets::handlers::readlist_thumbnail_delete),
         )
         .route(
             "/api/v1/readlists/{readlist_id}/thumbnails/{thumbnail_id}/selected",
-            put(media_assets::readlist_thumbnail_select),
+            put(media_assets::handlers::readlist_thumbnail_select),
         )
         .route(
             "/api/v1/readlists/{readlist_id}/books",
-            get(discovery::readlist_books),
+            get(discovery::detail::readlist_books),
         )
         .route(
             "/api/v1/readlists/{readlist_id}/books/{book_id}/previous",
-            get(discovery::readlist_book_sibling_previous),
+            get(discovery::detail::readlist_book_sibling_previous),
         )
         .route(
             "/api/v1/readlists/{readlist_id}/books/{book_id}/next",
-            get(discovery::readlist_book_sibling_next),
+            get(discovery::detail::readlist_book_sibling_next),
         )
         .route(
             "/api/v1/readlists/{readlist_id}/read-progress/tachiyomi",
-            get(media_assets::readlist_tachiyomi_read_progress_get)
-                .put(media_assets::readlist_tachiyomi_read_progress_put),
+            get(media_assets::handlers::readlist_tachiyomi_read_progress_get)
+                .put(media_assets::handlers::readlist_tachiyomi_read_progress_put),
         )
         .route(
             "/api/v1/readlists/{readlist_id}/file",
-            get(media_assets::readlist_file),
+            get(media_assets::handlers::readlist_file),
         )
         .route(
             "/api/v1/collections",
-            get(discovery::collections).post(discovery::collection_create),
+            get(discovery::detail::collections).post(discovery::detail::collection_create),
         )
         .route(
             "/api/v1/collections/{collection_id}/series",
-            get(discovery::collection_series),
+            get(discovery::detail::collection_series),
         )
         .route(
             "/api/v1/collections/{collection_id}",
-            get(discovery::collection_detail)
-                .patch(discovery::collection_update)
-                .delete(discovery::collection_delete),
+            get(discovery::detail::collection_detail)
+                .patch(discovery::detail::collection_update)
+                .delete(discovery::detail::collection_delete),
         )
         .route(
             "/api/v1/collections/{collection_id}/thumbnail",
-            get(media_assets::collection_thumbnail),
+            get(media_assets::handlers::collection_thumbnail),
         )
         .route(
             "/api/v1/collections/{collection_id}/thumbnails",
-            get(media_assets::collection_thumbnails).post(media_assets::collection_thumbnail_upload),
+            get(media_assets::handlers::collection_thumbnails).post(media_assets::handlers::collection_thumbnail_upload),
         )
         .route(
             "/api/v1/collections/{collection_id}/thumbnails/{thumbnail_id}",
-            get(media_assets::collection_thumbnail_by_id).delete(media_assets::collection_thumbnail_delete),
+            get(media_assets::handlers::collection_thumbnail_by_id).delete(media_assets::handlers::collection_thumbnail_delete),
         )
         .route(
             "/api/v1/collections/{collection_id}/thumbnails/{thumbnail_id}/selected",
-            put(media_assets::collection_thumbnail_select),
+            put(media_assets::handlers::collection_thumbnail_select),
         )
-        .route("/api/v1/books/{book_id}/pages", get(media_assets::book_pages))
+        .route("/api/v1/books/{book_id}/pages", get(media_assets::handlers::book_pages))
         .route(
             "/api/v1/books/{book_id}/positions",
-            get(media_assets::book_positions),
+            get(media_assets::handlers::book_positions),
         )
         .route(
             "/api/v1/books/{book_id}/pages/{page_number}",
-            get(media_assets::book_page),
+            get(media_assets::handlers::book_page),
         )
         .route(
             "/api/v1/books/{book_id}/pages/{page_number}/raw",
-            get(media_assets::book_page_raw),
+            get(media_assets::handlers::book_page_raw),
         )
         .route(
             "/api/v1/books/{book_id}/pages/{page_number}/thumbnail",
-            get(media_assets::book_page_thumbnail),
+            get(media_assets::handlers::book_page_thumbnail),
         )
         .route(
             "/api/v1/books/{book_id}/thumbnail",
-            get(media_assets::book_thumbnail),
+            get(media_assets::handlers::book_thumbnail),
         )
         .route(
             "/api/v1/books/{book_id}/thumbnails",
-            get(media_assets::book_thumbnails).post(media_assets::book_thumbnail_upload),
+            get(media_assets::handlers::book_thumbnails).post(media_assets::handlers::book_thumbnail_upload),
         )
         .route(
             "/api/v1/books/{book_id}/thumbnails/{thumbnail_id}",
-            get(media_assets::book_thumbnail_by_id).delete(media_assets::book_thumbnail_delete),
+            get(media_assets::handlers::book_thumbnail_by_id).delete(media_assets::handlers::book_thumbnail_delete),
         )
         .route(
             "/api/v1/books/{book_id}/thumbnails/{thumbnail_id}/selected",
-            put(media_assets::book_thumbnail_select),
+            put(media_assets::handlers::book_thumbnail_select),
         )
         .route(
             "/api/v1/books/{book_id}/manifest",
-            get(media_assets::book_manifest),
+            get(media_assets::handlers::book_manifest),
         )
         .route(
             "/api/v1/books/{book_id}/manifest/epub",
-            get(media_assets::book_manifest_epub),
+            get(media_assets::handlers::book_manifest_epub),
         )
         .route(
             "/api/v1/books/{book_id}/manifest/pdf",
-            get(media_assets::book_manifest_pdf),
+            get(media_assets::handlers::book_manifest_pdf),
         )
         .route(
             "/api/v1/books/{book_id}/manifest/divina",
-            get(media_assets::book_manifest_divina),
+            get(media_assets::handlers::book_manifest_divina),
         )
         .route(
             "/api/v1/books/{book_id}/file",
-            get(media_assets::book_file).delete(media_assets::book_file_delete),
+            get(media_assets::handlers::book_file).delete(media_assets::handlers::book_file_delete),
         )
         .route(
             "/api/v1/books/{book_id}/file/{*file_name}",
-            get(media_assets::book_file_with_suffix),
+            get(media_assets::handlers::book_file_with_suffix),
         )
         .route(
             "/api/v1/books/{book_id}/resource/{*resource_path}",
-            get(media_assets::book_resource),
+            get(media_assets::handlers::book_resource),
         )
         .route(
             "/opds/v2/books/{book_id}/resource/{*resource_path}",
-            get(media_assets::book_resource),
+            get(media_assets::handlers::book_resource),
         )
         .route(
             "/api/v1/books/thumbnails",
-            put(media_assets::books_thumbnails_regenerate),
+            put(media_assets::handlers::books_thumbnails_regenerate),
         )
         .route(
             "/api/v1/books/{book_id}/analyze",
-            post(media_assets::book_analyze),
+            post(media_assets::handlers::book_analyze),
         )
         .route(
             "/api/v1/books/{book_id}/metadata/refresh",
-            post(media_assets::book_metadata_refresh),
+            post(media_assets::handlers::book_metadata_refresh),
         )
         .route(
             "/api/v1/books/{book_id}/metadata",
-            axum::routing::patch(media_assets::book_metadata_update),
+            axum::routing::patch(media_assets::handlers::book_metadata_update),
         )
         .route(
             "/api/v1/books/metadata",
-            axum::routing::patch(media_assets::book_metadata_batch_update),
+            axum::routing::patch(media_assets::handlers::book_metadata_batch_update),
         )
-        .route("/api/v1/books/import", post(media_assets::books_import))
+        .route("/api/v1/books/import", post(media_assets::handlers::books_import))
         .route(
             "/api/v1/books/{book_id}/read-progress",
-            patch(media_assets::book_read_progress)
-                .delete(media_assets::book_read_progress_delete),
+            patch(media_assets::handlers::book_read_progress)
+                .delete(media_assets::handlers::book_read_progress_delete),
         )
         .route(
             "/api/v1/books/{book_id}/progression",
-            get(media_assets::book_progression_get)
-                .put(media_assets::book_progression),
+            get(media_assets::handlers::book_progression_get)
+                .put(media_assets::handlers::book_progression),
         )
         .route(
             "/api/v2/users",
-            get(identity_access::users_list_route).post(identity_access::users_create_route),
+            get(identity_access::content_auth::users_list_route)
+                .post(identity_access::content_auth::users_create_route),
         )
-        .route("/api/v2/users/me", get(identity_access::users_me_route))
+        .route("/api/v2/users/me", get(identity_access::content_auth::users_me_route))
         .route(
             "/api/v2/users/{id}",
-            patch(identity_access::users_update_route).delete(identity_access::users_delete_route),
+            patch(identity_access::content_auth::users_update_route)
+                .delete(identity_access::content_auth::users_delete_route),
         )
         .route(
             "/api/v2/users/me/password",
-            patch(identity_access::users_me_password_route),
+            patch(identity_access::content_auth::users_me_password_route),
         )
         .route(
             "/api/v2/users/me/api-keys",
-            get(identity_access::users_me_api_keys_list_route)
-                .post(identity_access::users_me_api_keys_create_route),
+            get(identity_access::content_auth::users_me_api_keys_list_route)
+                .post(identity_access::content_auth::users_me_api_keys_create_route),
         )
         .route(
             "/api/v2/users/me/api-keys/{key_id}",
-            delete(identity_access::users_me_api_keys_delete_route),
+            delete(identity_access::content_auth::users_me_api_keys_delete_route),
         )
         .route(
             "/api/v2/users/me/authentication-activity",
-            get(identity_access::users_me_authentication_activity_route),
+            get(identity_access::content_auth::users_me_authentication_activity_route),
         )
         .route(
             "/api/v2/users/authentication-activity",
-            get(identity_access::users_authentication_activity_route),
+            get(identity_access::content_auth::users_authentication_activity_route),
         )
         .route(
             "/api/v2/users/{id}/authentication-activity/latest",
-            get(identity_access::users_by_id_authentication_activity_latest_route),
+            get(identity_access::content_auth::users_by_id_authentication_activity_latest_route),
         )
         .route(
             "/api/v2/series/{series_id}/read-progress/tachiyomi",
-            get(media_assets::series_tachiyomi_read_progress_get)
-                .put(media_assets::series_tachiyomi_read_progress_put),
+            get(media_assets::handlers::series_tachiyomi_read_progress_get)
+                .put(media_assets::handlers::series_tachiyomi_read_progress_put),
         )
         .route(
             "/api/v2/users/{id}/password",
-            patch(identity_access::users_by_id_password_route),
+            patch(identity_access::content_auth::users_by_id_password_route),
         )
         .route("/api/v2/authors", get(discovery::authors_v2_route))
-        .route("/opds/v1.2/catalog", get(opds::opds_v1_catalog_route))
-        .route("/opds/v1.2/search", get(opds::opds_v1_search_route))
-        .route("/opds/v1.2/ondeck", get(opds::opds_v1_on_deck_route))
-        .route("/opds/v1.2/keep-reading", get(opds::opds_v1_keep_reading_route))
-        .route("/opds/v1.2/series", get(opds::opds_v1_series_route))
-        .route("/opds/v1.2/series/latest", get(opds::opds_v1_series_latest_route))
-        .route("/opds/v1.2/books/latest", get(opds::opds_v1_books_latest_route))
-        .route("/opds/v1.2/libraries", get(opds::opds_v1_libraries_route))
-        .route("/opds/v1.2/collections", get(opds::opds_v1_collections_route))
-        .route("/opds/v1.2/readlists", get(opds::opds_v1_readlists_route))
-        .route("/opds/v1.2/publishers", get(opds::opds_v1_publishers_route))
-        .route("/opds/v1.2/series/{series_id}", get(opds::opds_v1_series_detail_route))
+        .route("/opds/v1.2/catalog", get(opds::content_opds::opds_v1_catalog_route))
+        .route("/opds/v1.2/search", get(opds::content_opds::opds_v1_search_route))
+        .route("/opds/v1.2/ondeck", get(opds::content_opds::opds_v1_on_deck_route))
+        .route("/opds/v1.2/keep-reading", get(opds::content_opds::opds_v1_keep_reading_route))
+        .route("/opds/v1.2/series", get(opds::content_opds::opds_v1_series_route))
+        .route("/opds/v1.2/series/latest", get(opds::content_opds::opds_v1_series_latest_route))
+        .route("/opds/v1.2/books/latest", get(opds::content_opds::opds_v1_books_latest_route))
+        .route("/opds/v1.2/libraries", get(opds::content_opds::opds_v1_libraries_route))
+        .route("/opds/v1.2/collections", get(opds::content_opds::opds_v1_collections_route))
+        .route("/opds/v1.2/readlists", get(opds::content_opds::opds_v1_readlists_route))
+        .route("/opds/v1.2/publishers", get(opds::content_opds::opds_v1_publishers_route))
+        .route("/opds/v1.2/series/{series_id}", get(opds::content_opds::opds_v1_series_detail_route))
         .route(
             "/opds/v1.2/libraries/{library_id}",
-            get(opds::opds_v1_library_detail_route),
+            get(opds::content_opds::opds_v1_library_detail_route),
         )
         .route(
             "/opds/v1.2/collections/{collection_id}",
-            get(opds::opds_v1_collection_detail_route),
+            get(opds::content_opds::opds_v1_collection_detail_route),
         )
         .route(
             "/opds/v1.2/readlists/{readlist_id}",
-            get(opds::opds_v1_readlist_detail_route),
+            get(opds::content_opds::opds_v1_readlist_detail_route),
         )
         .route(
             "/opds/v1.2/books/{book_id}/file/{file_name}",
-            get(opds::opds_v1_book_file_route),
+            get(opds::content_opds::opds_v1_book_file_route),
         )
         .route(
             "/opds/v1.2/books/{book_id}/thumbnail",
-            get(opds::opds_v1_book_thumbnail_route),
+            get(opds::content_opds::opds_v1_book_thumbnail_route),
         )
         .route(
             "/opds/v1.2/books/{book_id}/thumbnail/small",
-            get(opds::opds_v1_book_thumbnail_small_route),
+            get(opds::content_opds::opds_v1_book_thumbnail_small_route),
         )
         .route(
             "/opds/v1.2/books/{book_id}/pages/{page_number}",
-            get(media_assets::book_page_opds_v1),
+            get(media_assets::handlers::book_page_opds_v1),
         )
-        .route("/opds/v2/auth", get(opds::opds_auth_route))
-        .route("/opds/v2/catalog", get(opds::opds_catalog_route))
-        .route("/opds/v2/libraries", get(opds::opds_v2_libraries_route))
+        .route("/opds/v2/auth", get(opds::content_opds::opds_auth_route))
+        .route("/opds/v2/catalog", get(opds::content_opds::opds_catalog_route))
+        .route("/opds/v2/libraries", get(opds::content_opds::opds_v2_libraries_route))
         .route(
             "/opds/v2/libraries/keep-reading",
-            get(opds::opds_v2_libraries_keep_reading_route),
+            get(opds::content_opds::opds_v2_libraries_keep_reading_route),
         )
         .route(
             "/opds/v2/libraries/on-deck",
-            get(opds::opds_v2_libraries_on_deck_route),
+            get(opds::content_opds::opds_v2_libraries_on_deck_route),
         )
         .route(
             "/opds/v2/libraries/books/latest",
-            get(opds::opds_v2_libraries_latest_books_route),
+            get(opds::content_opds::opds_v2_libraries_latest_books_route),
         )
         .route(
             "/opds/v2/libraries/series/latest",
-            get(opds::opds_v2_libraries_latest_series_route),
+            get(opds::content_opds::opds_v2_libraries_latest_series_route),
         )
         .route(
             "/opds/v2/libraries/browse",
-            get(opds::opds_v2_libraries_browse_route),
+            get(opds::content_opds::opds_v2_libraries_browse_route),
         )
         .route(
             "/opds/v2/libraries/collections",
-            get(opds::opds_v2_libraries_collections_route),
+            get(opds::content_opds::opds_v2_libraries_collections_route),
         )
         .route(
             "/opds/v2/libraries/readlists",
-            get(opds::opds_v2_libraries_readlists_route),
+            get(opds::content_opds::opds_v2_libraries_readlists_route),
         )
         .route(
             "/opds/v2/libraries/{library_id}",
-            get(opds::opds_v2_library_route),
+            get(opds::content_opds::opds_v2_library_route),
         )
         .route(
             "/opds/v2/libraries/{library_id}/keep-reading",
-            get(opds::opds_v2_library_keep_reading_route),
+            get(opds::content_opds::opds_v2_library_keep_reading_route),
         )
         .route(
             "/opds/v2/libraries/{library_id}/on-deck",
-            get(opds::opds_v2_library_on_deck_route),
+            get(opds::content_opds::opds_v2_library_on_deck_route),
         )
         .route(
             "/opds/v2/libraries/{library_id}/books/latest",
-            get(opds::opds_v2_library_latest_books_route),
+            get(opds::content_opds::opds_v2_library_latest_books_route),
         )
         .route(
             "/opds/v2/libraries/{library_id}/series/latest",
-            get(opds::opds_v2_library_latest_series_route),
+            get(opds::content_opds::opds_v2_library_latest_series_route),
         )
         .route(
             "/opds/v2/libraries/{library_id}/browse",
-            get(opds::opds_v2_library_browse_route),
+            get(opds::content_opds::opds_v2_library_browse_route),
         )
         .route(
             "/opds/v2/libraries/{library_id}/collections",
-            get(opds::opds_v2_library_collections_route),
+            get(opds::content_opds::opds_v2_library_collections_route),
         )
         .route(
             "/opds/v2/libraries/{library_id}/readlists",
-            get(opds::opds_v2_library_readlists_route),
+            get(opds::content_opds::opds_v2_library_readlists_route),
         )
         .route(
             "/opds/v2/collections/{collection_id}",
-            get(opds::opds_v2_collection_route),
+            get(opds::content_opds::opds_v2_collection_route),
         )
-        .route("/opds/v2/series/{series_id}", get(opds::opds_v2_series_route))
+        .route("/opds/v2/series/{series_id}", get(opds::content_opds::opds_v2_series_route))
         .route(
             "/opds/v2/readlists/{readlist_id}",
-            get(opds::opds_v2_readlist_route),
+            get(opds::content_opds::opds_v2_readlist_route),
         )
-        .route("/opds/v2/search", get(opds::opds_v2_search_route))
+        .route("/opds/v2/search", get(opds::content_opds::opds_v2_search_route))
         .route(
             "/opds/v2/books/{book_id}/manifest",
-            get(opds::opds_manifest_route),
+            get(opds::content_opds::opds_manifest_route),
         )
         .route(
             "/opds/v2/books/{book_id}/manifest/{manifest_profile}",
-            get(opds::opds_manifest_profile_route),
+            get(opds::content_opds::opds_manifest_profile_route),
         )
-        .route("/opds/v2/books/{book_id}/file", get(opds::opds_v2_book_file_route))
+        .route("/opds/v2/books/{book_id}/file", get(opds::content_opds::opds_v2_book_file_route))
         .route(
             "/opds/v2/books/{book_id}/file/{*file_name}",
-            get(opds::opds_v2_book_file_with_suffix_route),
+            get(opds::content_opds::opds_v2_book_file_with_suffix_route),
         )
         .route(
             "/opds/v2/books/{book_id}/thumbnail",
-            get(opds::opds_v2_book_thumbnail_route),
+            get(opds::content_opds::opds_v2_book_thumbnail_route),
         )
         .route(
             "/opds/v2/books/{book_id}/pages/{page_number}",
-            get(opds::opds_v2_book_page_route),
+            get(opds::content_opds::opds_v2_book_page_route),
         )
         .route(
             "/opds/v2/books/{book_id}/pages/{page_number}/raw",
-            get(opds::opds_v2_book_page_raw_route),
+            get(opds::content_opds::opds_v2_book_page_raw_route),
         )
         .route(
             "/opds/v2/books/{book_id}/progression",
-            get(media_assets::book_progression_get)
-                .put(media_assets::book_progression),
+            get(media_assets::handlers::book_progression_get)
+                .put(media_assets::handlers::book_progression),
         )
         .route(
             "/api/v1/login/set-cookie",
-            get(identity_access::login_set_cookie_route),
+            get(identity_access::content_auth::login_set_cookie_route),
         )
-        .route("/api/logout", get(identity_access::logout_route).post(identity_access::logout_route))
+        .route(
+            "/api/logout",
+            get(identity_access::content_auth::logout_route)
+                .post(identity_access::content_auth::logout_route),
+        )
         .route("/sse/v1/events", get(operational::sse_events))
         .route("/", get(operational::webui_entrypoint))
         .route("/{*webui_path}", get(operational::webui_asset));

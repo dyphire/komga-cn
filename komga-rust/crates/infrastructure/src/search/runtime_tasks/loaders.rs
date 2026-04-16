@@ -1,7 +1,7 @@
 use sqlx::Row;
 
-use super::super::{SearchDocument, SearchEntityType, SearchFieldEntry};
 use super::db::{search_field, search_fields};
+use crate::search::index_lifecycle::{SearchDocument, SearchEntityType, SearchFieldEntry};
 
 const AUTHOR_ROLE_DELIMITER: &str = "::";
 

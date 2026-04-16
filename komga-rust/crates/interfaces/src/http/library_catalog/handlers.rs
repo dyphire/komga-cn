@@ -1,5 +1,5 @@
 use axum::Json;
-use axum::extract::Path;
+use axum::extract::{Extension, Path};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use komga_application::library_catalog::{LibraryCatalogMutationError, LibraryRecord};
@@ -7,21 +7,102 @@ use komga_domain::discovery::DiscoveryError;
 use serde_json::{Value, json};
 use std::path::Path as FsPath;
 
-use super::OperationalState;
-use crate::http::discovery_auth::{
-    DetailAccessDenial, DetailResourceContext, DiscoveryAuthState, DiscoveryQueryContext,
+use crate::http::discovery_auth::context::{
+    DetailAccessDenial, DetailResourceContext, DiscoveryQueryContext,
 };
-use crate::http::helpers::{
-    detail_access_denial_response, mark_runtime_owned, to_domain_query_context,
-};
+use crate::http::discovery_auth::state::DiscoveryAuthState;
+use crate::http::helpers::{detail_access_denial_response, mark_runtime_owned, to_domain_query_context};
 use crate::http::identity_access::auth::{require_admin, require_request_auth};
-use crate::http::library_catalog::request_mapping::{
-    is_deep_scan_query, parse_create_library_change_set, parse_update_library_change_set,
-};
-use crate::http::library_catalog::response_mapping::{libraries_payload, library_payload};
-use crate::http::library_catalog::task_mapping::{
-    enqueue_task_records, enqueue_task_records_with_status,
-};
+use crate::http::state::AuthDatabaseState;
+use crate::http::state::OperationalState;
+
+use super::request_mapping::{is_deep_scan_query, parse_create_library_change_set, parse_update_library_change_set};
+use super::response_mapping::{libraries_payload, library_payload};
+use super::task_mapping::{enqueue_task_records, enqueue_task_records_with_status};
+
+pub async fn libraries_route(
+    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(operational): Extension<OperationalState>,
+    headers: HeaderMap,
+) -> Response {
+    response(headers, auth_state, auth_db.database_file.as_path(), operational).await
+}
+
+pub async fn library_detail_route(
+    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(operational): Extension<OperationalState>,
+    headers: HeaderMap,
+    path: Path<String>,
+) -> Response {
+    library_detail(
+        headers,
+        auth_state,
+        auth_db.database_file.as_path(),
+        operational,
+        path,
+    )
+    .await
+}
+
+pub async fn library_create_route(
+    Extension(operational): Extension<OperationalState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    library_create(headers, operational, body).await
+}
+
+pub async fn library_update_route(
+    Extension(operational): Extension<OperationalState>,
+    headers: HeaderMap,
+    path: Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    library_update(headers, operational, path, body).await
+}
+
+pub async fn library_delete_route(
+    Extension(operational): Extension<OperationalState>,
+    headers: HeaderMap,
+    path: Path<String>,
+) -> Response {
+    library_delete(headers, operational, path).await
+}
+
+pub async fn library_scan_route(
+    Extension(operational): Extension<OperationalState>,
+    headers: HeaderMap,
+    uri: Uri,
+    path: Path<String>,
+) -> Response {
+    library_scan(headers, uri, operational, path).await
+}
+
+pub async fn library_analyze_route(
+    Extension(operational): Extension<OperationalState>,
+    headers: HeaderMap,
+    path: Path<String>,
+) -> Response {
+    library_analyze(headers, operational, path).await
+}
+
+pub async fn library_metadata_refresh_route(
+    Extension(operational): Extension<OperationalState>,
+    headers: HeaderMap,
+    path: Path<String>,
+) -> Response {
+    library_metadata_refresh(headers, operational, path).await
+}
+
+pub async fn library_empty_trash_route(
+    Extension(operational): Extension<OperationalState>,
+    headers: HeaderMap,
+    path: Path<String>,
+) -> Response {
+    library_empty_trash(headers, operational, path).await
+}
 
 pub async fn response(
     headers: HeaderMap,

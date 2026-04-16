@@ -1,9 +1,7 @@
 use serde_json::Value;
 
-pub(super) use super::persisted::decode_query_component;
-
 pub(super) fn author_query_to_author_match(value: String) -> Value {
-    let normalized = decode_query_component(&value);
+    let normalized = super::persisted::common_helpers::decode_query_component(&value);
     let (name, role) = normalized
         .split_once(',')
         .map(|(name, role)| (name.trim(), role.trim()))
@@ -21,11 +19,13 @@ pub(super) fn author_query_to_author_match(value: String) -> Value {
 }
 #[cfg(test)]
 mod tests {
-    use super::{author_query_to_author_match, decode_query_component};
+    use super::author_query_to_author_match;
 
     #[test]
     fn decode_query_component_decodes_plus_and_percent_encoding() {
-        let decoded = decode_query_component("John+Doe%2Cwriter%20team");
+        let decoded = super::super::persisted::common_helpers::decode_query_component(
+            "John+Doe%2Cwriter%20team",
+        );
         assert_eq!(decoded, "John Doe,writer team");
     }
 

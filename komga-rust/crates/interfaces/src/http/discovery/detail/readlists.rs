@@ -2,7 +2,7 @@ use super::readlists_support::{
     PersistedReadlistBooksQuery, PersistedReadlistWriteInput, merge_readlist_write_input,
 };
 use super::*;
-use crate::http::discovery::persisted::persisted_backend_search_readlist_scored_ids;
+use crate::http::discovery::persisted::backend::persisted_backend_search_readlist_scored_ids;
 use crate::http::helpers::validation_error_response;
 use axum_extra::extract::{Multipart, multipart::MultipartRejection};
 use icu::collator::{

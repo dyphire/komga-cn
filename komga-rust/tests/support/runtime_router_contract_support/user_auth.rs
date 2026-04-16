@@ -2,7 +2,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
-use komga_rust::infrastructure::sqlite::connect_pool;
+use komga_infrastructure::sqlite::connect_pool;
 use tower::util::ServiceExt;
 
 use super::RuntimeDbPaths;

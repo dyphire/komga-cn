@@ -1,10 +1,11 @@
 use komga_contract_testkit::contract_matrix::assert_required_target_declared;
-use komga_infrastructure::ServerSettingsStore;
-use komga_rust::infrastructure::sqlite::connect_persistence_context;
-use komga_rust::infrastructure::sqlite::connect_pool;
+use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore;
+use komga_infrastructure::sqlite::connect_persistence_context;
+use komga_infrastructure::sqlite::connect_pool;
 
-#[path = "support/persistence_contract_fixture.rs"]
-mod persistence_contract_fixture;
+mod support;
+
+use support::persistence_contract_fixture;
 
 #[test]
 fn settings_persistence_contract_target_is_registered() {

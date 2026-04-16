@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use sqlx::{Row, Sqlite, SqlitePool};
 
 use crate::sqlite::connect_private_pool;
-use crate::tasks::PersistedHashedPageToDelete;
+use super::media_queries::PersistedHashedPageToDelete;
 
 pub fn persist_book_hash(
     database_file: &Path,

@@ -2,10 +2,6 @@ pub use super::files::{
     book_file, book_file_with_suffix, book_resource, readlist_file, series_file,
 };
 pub use super::import::books_import;
-pub use super::import::{
-    hash_book_pages_with_media_content, process_queued_book_import_task,
-    process_queued_books_import_task,
-};
 pub use super::manifests::{
     book_manifest, book_manifest_divina, book_manifest_epub, book_manifest_pdf,
 };
@@ -15,8 +11,8 @@ pub use super::operations::{
     series_metadata_refresh,
 };
 pub use super::pages::{
-    BookPageQuery, book_page, book_page_opds_v1, book_page_opds_v2, book_page_raw,
-    book_page_thumbnail, book_pages, book_positions,
+    book_page, book_page_opds_v1, book_page_opds_v2, book_page_raw, book_page_thumbnail,
+    book_pages, book_positions, BookPageQuery,
 };
 pub use super::read_progress::{
     book_progression, book_progression_get, book_read_progress, book_read_progress_delete,

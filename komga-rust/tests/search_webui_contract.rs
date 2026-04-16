@@ -1,18 +1,25 @@
 use axum::body::Body;
 use axum::body::to_bytes;
 use axum::http::{Request, StatusCode, header};
-use komga_rust::infrastructure::sqlite::connect_pool;
+use komga_infrastructure::sqlite::connect_pool;
 use komga_server::app::build_router_with_config;
 use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
-#[path = "support/runtime_router_contract_support.rs"]
-pub mod runtime_router_contract_support;
+mod support;
 
-use runtime_router_contract_support::*;
+use support::runtime_router_contract_support::{
+    RuntimeDbPaths,
+    contract_seed::*,
+    fixture_bootstrap::*,
+    log_capture::*,
+    media_file_fixtures::*,
+    metadata_series_seeding::*,
+    response_helpers::*,
+    user_auth::*,
+};
 
-#[path = "../crates/interfaces/src/http/access_log.rs"]
-mod access_log_impl;
+use komga_interfaces::http::access_log as access_log_impl;
 
 async fn enrich_book_contract_fixture(paths: &RuntimeDbPaths) {
     let pool = connect_pool(paths.main_db.as_path(), 1)

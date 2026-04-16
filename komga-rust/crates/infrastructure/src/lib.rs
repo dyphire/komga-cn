@@ -7,7 +7,7 @@ use pdfium_render::prelude::*;
 pub mod announcements_access;
 pub mod auth;
 pub mod claims_access;
-mod context;
+pub mod context;
 pub mod discovery_detail_access;
 pub mod discovery_persisted_access;
 pub mod filesystem;
@@ -26,22 +26,13 @@ pub mod runtime_identity_access;
 pub mod search;
 pub mod sql;
 pub mod sqlite;
-#[path = "tasks/runtime/mod.rs"]
 pub mod task_queue;
 pub mod tasks;
 
-pub use context::{SqlitePersistenceConnection, SqlitePersistenceContext, SqliteUnitOfWork};
 pub(crate) use persisted_paths::{
     resolve_library_item_path, resolve_optional_library_item_path, resolve_rooted_path,
     resolve_stored_path,
 };
-pub use search::{
-    SearchDocument, SearchEntityType, SearchError, SearchEvent, SearchIndexLifecycle,
-    SearchQueryLifecycle, SearchStartupLifecycle, decide_startup_lifecycle, prepare_for_rebuild,
-    rebuild_index_from_database, sync_entity_delete_from_index, sync_entity_upsert_from_database,
-    sync_series_and_oneshot_books_after_metadata_update,
-};
-pub use sqlite::write_models::ServerSettingsStore;
 
 static PDFIUM: OnceLock<Result<Pdfium, String>> = OnceLock::new();
 const DEFAULT_PDFIUM_LIBRARY_PATH: &str = env!("KOMGA_PDFIUM_LIB_PATH");

@@ -1,5 +1,5 @@
 fn main() {
-    match komga_rust::wpd3::run_from_env() {
+    match komga_benchmark_wpd3::wpd3::run_from_env() {
         Ok(plan) => {
             println!("{plan}");
         }

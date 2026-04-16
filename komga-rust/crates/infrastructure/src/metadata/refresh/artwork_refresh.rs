@@ -7,7 +7,10 @@ use komga_application::media_assets::{
 };
 use sqlx::Row;
 
-use crate::filesystem::{load_archive_page_row, load_epub_cover_bytes, resolve_book_page_bytes};
+use crate::filesystem::media_access::epub::load_epub_cover_bytes;
+use crate::filesystem::media_access::page_content::{
+    load_archive_page_row, resolve_book_page_bytes,
+};
 use crate::{resolve_library_item_path, resolve_stored_path};
 
 use super::artwork_support::{

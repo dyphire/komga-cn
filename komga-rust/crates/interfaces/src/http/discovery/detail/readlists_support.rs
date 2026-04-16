@@ -818,7 +818,7 @@ mod tests {
         ComicRackReadListRequest, ComicRackReadListRequestBook, comicrack_payload,
         decode_query_component, parse_comicrack_readlist, sort_visible_persisted_readlist_books,
     };
-    use crate::http::discovery::detail::{
+    use super::super::{
         BookDetailReadModel, BookMetadataAuthorReadModel, BookMetadataLinkReadModel,
     };
     use serde_json::json;

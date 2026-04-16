@@ -13,7 +13,7 @@ use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::fmt::time::UtcTime;
 use tracing_subscriber::layer::SubscriberExt;
 
-use crate::config::RuntimeConfig;
+use komga_config::env_config::RuntimeConfig;
 
 pub const DEFAULT_ENV_FILTER: &str = "info,hyper=warn,h2=warn,sqlx=warn";
 pub const SHARED_EVENT_FIELDS: &[&str] = &[

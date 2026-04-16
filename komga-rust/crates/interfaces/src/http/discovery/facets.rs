@@ -1,5 +1,14 @@
 use super::*;
-use crate::http::discovery_auth::DiscoveryQueryContext;
+use super::persisted::common_helpers::decode_query_component;
+use super::persisted::delegates::{
+    authors_v2_page_payload, internal_error_response, load_persisted_age_ratings,
+    load_persisted_author_names, load_persisted_author_roles, load_persisted_authors_by_scope,
+    load_persisted_genres, load_persisted_languages, load_persisted_publishers,
+    load_persisted_series_release_dates, load_persisted_series_tags,
+    load_persisted_sharing_labels, load_persisted_tags,
+};
+use super::persisted::models::PersistedAuthorsScope;
+use crate::http::discovery_auth::context::DiscoveryQueryContext;
 
 fn decoded_library_ids(query: &str) -> Vec<String> {
     query_values(query, "library_id")

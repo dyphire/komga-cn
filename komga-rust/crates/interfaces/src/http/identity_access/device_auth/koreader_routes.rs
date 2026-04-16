@@ -1,5 +1,5 @@
 use super::*;
-use crate::media_assets_runtime_access::{
+use crate::media_assets_runtime_access::facade::{
     decode_epub_positions, load_persisted_epub_extension_blob,
 };
 

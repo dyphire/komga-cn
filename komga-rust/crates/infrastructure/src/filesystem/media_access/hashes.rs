@@ -4,10 +4,10 @@ use sha2::{Digest, Sha256};
 
 use crate::sqlite::connect_pool;
 
-use super::{
+use super::db_queries::{
     load_persisted_book_media, load_persisted_book_pages, public_page_number_to_persisted,
-    resolve_book_page_bytes,
 };
+use super::page_content::resolve_book_page_bytes;
 
 pub async fn persist_book_page_hashes_from_media_content(
     database_file: &Path,

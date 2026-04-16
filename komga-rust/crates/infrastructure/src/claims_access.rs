@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::sqlite::write_models::{
+use crate::sqlite::write_models::claims::{
     CreatedClaimedUser, load_persisted_user_count, persist_initial_admin_user,
 };
 

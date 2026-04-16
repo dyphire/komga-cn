@@ -12,8 +12,7 @@ use std::path::Path as FsPath;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::KoreaderBookTarget;
-use crate::runtime_identity_access::test_support::seed_koreader_book_target;
+use crate::runtime_identity_access::{KoreaderBookTarget, test_support::seed_koreader_book_target};
 
 fn unique_temp_path(prefix: &str) -> PathBuf {
     let millis = SystemTime::now()

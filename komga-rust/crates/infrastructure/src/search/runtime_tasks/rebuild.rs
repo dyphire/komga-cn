@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use super::super::{SearchEntityType, SearchIndexLifecycle};
 use super::db;
 use super::loaders;
+use crate::search::index_lifecycle::{SearchEntityType, SearchIndexLifecycle};
 
 pub(super) fn rebuild_index_from_database(
     database_file: &Path,

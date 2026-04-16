@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::Write;
 
-use komga_rust::infrastructure::sqlite::connect_pool;
+use komga_infrastructure::sqlite::connect_pool;
 use lopdf::{Document as PdfDocument, Object, Stream, dictionary};
 use zip::CompressionMethod;
 use zip::ZipWriter;
