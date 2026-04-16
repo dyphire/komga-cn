@@ -19,10 +19,12 @@ pub async fn load_persisted_readlist_thumbnails(
         .await
         .map_err(|error| format!("open readlist thumbnails db: {error}"))?;
     let rows = sqlx::query(
-        "SELECT ID, READLIST_ID, TYPE, SELECTED, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT, THUMBNAIL \
-         FROM THUMBNAIL_READLIST \
-         WHERE READLIST_ID = ? \
-         ORDER BY SELECTED DESC, LAST_MODIFIED_DATE DESC, ID ASC",
+        r#"
+        SELECT ID, READLIST_ID, TYPE, SELECTED, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT, THUMBNAIL
+        FROM THUMBNAIL_READLIST
+        WHERE READLIST_ID = ?
+        ORDER BY SELECTED DESC, LAST_MODIFIED_DATE DESC, ID ASC
+        "#
     )
     .bind(readlist_id)
     .fetch_all(&pool)
@@ -63,10 +65,12 @@ pub async fn insert_readlist_thumbnail(
         .map_err(|error| format!("begin readlist thumbnail create tx: {error}"))?;
 
     let exists = sqlx::query(
-        "SELECT 1 AS FOUND \
-         FROM READLIST \
-         WHERE ID = ? \
-         LIMIT 1",
+        r#"
+        SELECT 1 AS FOUND
+        FROM READLIST
+        WHERE ID = ?
+        LIMIT 1
+        "#
     )
     .bind(readlist_id)
     .fetch_optional(&mut *tx)
@@ -82,9 +86,11 @@ pub async fn insert_readlist_thumbnail(
 
     if selected {
         sqlx::query(
-            "UPDATE THUMBNAIL_READLIST \
-             SET SELECTED = 0 \
-             WHERE READLIST_ID = ?",
+            r#"
+            UPDATE THUMBNAIL_READLIST
+            SET SELECTED = 0
+            WHERE READLIST_ID = ?
+            "#
         )
         .bind(readlist_id)
         .execute(&mut *tx)
@@ -94,9 +100,11 @@ pub async fn insert_readlist_thumbnail(
 
     let id = generated_thumbnail_id("thumbnail-readlist");
     sqlx::query(
-        "INSERT INTO THUMBNAIL_READLIST \
-         (ID, SELECTED, THUMBNAIL, TYPE, READLIST_ID, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        r#"
+        INSERT INTO THUMBNAIL_READLIST
+            (ID, SELECTED, THUMBNAIL, TYPE, READLIST_ID, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#
     )
     .bind(&id)
     .bind(selected)
@@ -146,10 +154,12 @@ pub async fn select_readlist_thumbnail(
         .map_err(|error| format!("begin readlist thumbnail select tx: {error}"))?;
 
     let exists = sqlx::query(
-        "SELECT 1 AS FOUND \
-         FROM READLIST \
-         WHERE ID = ? \
-         LIMIT 1",
+        r#"
+        SELECT 1 AS FOUND
+        FROM READLIST
+        WHERE ID = ?
+        LIMIT 1
+        "#
     )
     .bind(readlist_id)
     .fetch_optional(&mut *tx)
@@ -164,10 +174,12 @@ pub async fn select_readlist_thumbnail(
     }
 
     let target_readlist_id = sqlx::query(
-        "SELECT READLIST_ID \
-         FROM THUMBNAIL_READLIST \
-         WHERE ID = ? \
-         LIMIT 1",
+        r#"
+        SELECT READLIST_ID
+        FROM THUMBNAIL_READLIST
+        WHERE ID = ?
+        LIMIT 1
+        "#
     )
     .bind(thumbnail_id)
     .fetch_optional(&mut *tx)
@@ -182,18 +194,22 @@ pub async fn select_readlist_thumbnail(
     };
 
     sqlx::query(
-        "UPDATE THUMBNAIL_READLIST \
-         SET SELECTED = 0 \
-         WHERE READLIST_ID = ?",
+        r#"
+        UPDATE THUMBNAIL_READLIST
+        SET SELECTED = 0
+        WHERE READLIST_ID = ?
+        "#
     )
     .bind(&target_readlist_id)
     .execute(&mut *tx)
     .await
     .map_err(|error| format!("clear selected readlist thumbnails for select: {error}"))?;
     sqlx::query(
-        "UPDATE THUMBNAIL_READLIST \
-         SET SELECTED = 1, LAST_MODIFIED_DATE = STRFTIME('%Y-%m-%d %H:%M:%f', 'now') \
-         WHERE ID = ?",
+        r#"
+        UPDATE THUMBNAIL_READLIST
+        SET SELECTED = 1, LAST_MODIFIED_DATE = STRFTIME('%Y-%m-%d %H:%M:%f', 'now')
+        WHERE ID = ?
+        "#
     )
     .bind(thumbnail_id)
     .execute(&mut *tx)
@@ -224,10 +240,12 @@ pub async fn delete_readlist_thumbnail(
         .map_err(|error| format!("begin readlist thumbnail delete tx: {error}"))?;
 
     let exists = sqlx::query(
-        "SELECT 1 AS FOUND \
-         FROM READLIST \
-         WHERE ID = ? \
-         LIMIT 1",
+        r#"
+        SELECT 1 AS FOUND
+        FROM READLIST
+        WHERE ID = ?
+        LIMIT 1
+        "#
     )
     .bind(readlist_id)
     .fetch_optional(&mut *tx)
@@ -242,10 +260,12 @@ pub async fn delete_readlist_thumbnail(
     }
 
     let target = sqlx::query(
-        "SELECT READLIST_ID, SELECTED \
-         FROM THUMBNAIL_READLIST \
-         WHERE ID = ? \
-         LIMIT 1",
+        r#"
+        SELECT READLIST_ID, SELECTED
+        FROM THUMBNAIL_READLIST
+        WHERE ID = ?
+        LIMIT 1
+        "#
     )
     .bind(thumbnail_id)
     .fetch_optional(&mut *tx)
@@ -261,8 +281,10 @@ pub async fn delete_readlist_thumbnail(
     let deleted_selected = target.get::<bool, _>("SELECTED");
 
     sqlx::query(
-        "DELETE FROM THUMBNAIL_READLIST \
-         WHERE ID = ?",
+        r#"
+        DELETE FROM THUMBNAIL_READLIST
+        WHERE ID = ?
+        "#
     )
     .bind(thumbnail_id)
     .execute(&mut *tx)
@@ -283,10 +305,12 @@ async fn normalize_readlist_thumbnail_selection(
     deleted_selected: bool,
 ) -> Result<(), String> {
     let remaining_rows = sqlx::query(
-        "SELECT ID, SELECTED \
-         FROM THUMBNAIL_READLIST \
-         WHERE READLIST_ID = ? \
-         ORDER BY ID ASC",
+        r#"
+        SELECT ID, SELECTED
+        FROM THUMBNAIL_READLIST
+        WHERE READLIST_ID = ?
+        ORDER BY ID ASC
+        "#
     )
     .bind(readlist_id)
     .fetch_all(&mut **tx)
@@ -314,10 +338,12 @@ async fn normalize_readlist_thumbnail_selection(
     };
 
     sqlx::query(
-        "UPDATE THUMBNAIL_READLIST \
-         SET SELECTED = CASE WHEN ID = ? THEN 1 ELSE 0 END, \
-             LAST_MODIFIED_DATE = CASE WHEN ID = ? THEN STRFTIME('%Y-%m-%d %H:%M:%f', 'now') ELSE LAST_MODIFIED_DATE END \
-         WHERE READLIST_ID = ?",
+        r#"
+        UPDATE THUMBNAIL_READLIST
+        SET SELECTED = CASE WHEN ID = ? THEN 1 ELSE 0 END,
+            LAST_MODIFIED_DATE = CASE WHEN ID = ? THEN STRFTIME('%Y-%m-%d %H:%M:%f', 'now') ELSE LAST_MODIFIED_DATE END
+        WHERE READLIST_ID = ?
+        "#
     )
     .bind(&target_selected_id)
     .bind(&target_selected_id)
@@ -341,9 +367,11 @@ pub async fn load_persisted_readlist_name(
         .await
         .map_err(|error| format!("open readlist file db: {error}"))?;
     let row = sqlx::query(
-        "SELECT NAME \
-         FROM READLIST \
-         WHERE ID = ?",
+        r#"
+        SELECT NAME
+        FROM READLIST
+        WHERE ID = ?
+        "#
     )
     .bind(readlist_id)
     .fetch_optional(&pool)

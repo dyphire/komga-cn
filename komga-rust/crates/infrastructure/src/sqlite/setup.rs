@@ -155,10 +155,10 @@ async fn bootstrap_or_migrate_schema(
 
 async fn is_fresh_install_database(connection: &mut SqliteConnection) -> Result<bool, sqlx::Error> {
     let tables = sqlx::query_as::<_, (String,)>(
-        "SELECT name \
-         FROM sqlite_master \
-         WHERE type = 'table' \
-         AND name NOT LIKE 'sqlite_%'",
+        r#"SELECT name
+FROM sqlite_master
+WHERE type = 'table'
+  AND name NOT LIKE 'sqlite_%'"#,
     )
     .fetch_all(&mut *connection)
     .await?;
@@ -234,10 +234,11 @@ async fn load_applied_flyway_versions(
     }
 
     let versions = sqlx::query_scalar::<_, String>(
-        "SELECT version \
-         FROM flyway_schema_history \
-         WHERE success = 1 AND version IS NOT NULL \
-         ORDER BY version",
+        r#"SELECT version
+FROM flyway_schema_history
+WHERE success = 1
+  AND version IS NOT NULL
+ORDER BY version"#,
     )
     .fetch_all(&mut *connection)
     .await?;
@@ -270,8 +271,10 @@ where
         }
 
         sqlx::query(
-            "INSERT OR IGNORE INTO _sqlx_migrations (version, description, success, checksum, execution_time) \
-             VALUES (?1, ?2, 1, ?3, 0)",
+            r#"INSERT OR IGNORE INTO _sqlx_migrations (
+    version, description, success, checksum, execution_time
+)
+VALUES (?1, ?2, 1, ?3, 0)"#,
         )
         .bind(migration.version)
         .bind(migration.description.as_ref())
@@ -287,14 +290,14 @@ async fn create_sqlx_migrations_table(
     connection: &mut SqliteConnection,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "CREATE TABLE IF NOT EXISTS _sqlx_migrations (\
-             version BIGINT PRIMARY KEY,\
-             description TEXT NOT NULL,\
-             installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\
-             success BOOLEAN NOT NULL,\
-             checksum BLOB NOT NULL,\
-             execution_time BIGINT NOT NULL\
-         )",
+        r#"CREATE TABLE IF NOT EXISTS _sqlx_migrations (
+    version BIGINT PRIMARY KEY,
+    description TEXT NOT NULL,
+    installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    success BOOLEAN NOT NULL,
+    checksum BLOB NOT NULL,
+    execution_time BIGINT NOT NULL
+)"#,
     )
     .execute(&mut *connection)
     .await?;
@@ -345,9 +348,10 @@ async fn detect_legacy_schema_baseline(
 
 async fn table_exists(connection: &mut SqliteConnection, table: &str) -> Result<bool, sqlx::Error> {
     let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) \
-         FROM sqlite_master \
-         WHERE type = 'table' AND LOWER(name) = LOWER(?1)",
+        r#"SELECT COUNT(*)
+FROM sqlite_master
+WHERE type = 'table'
+  AND LOWER(name) = LOWER(?1)"#,
     )
     .bind(table)
     .fetch_one(&mut *connection)
@@ -503,12 +507,12 @@ async fn comparable_schema_inventory(
     connection: &mut SqliteConnection,
 ) -> Result<Vec<(String, String, String, String)>, sqlx::Error> {
     sqlx::query_as::<_, (String, String, String, String)>(
-        "SELECT type, name, tbl_name, COALESCE(sql, '') AS sql \
-         FROM sqlite_master \
-         WHERE type IN ('table', 'index', 'trigger', 'view') \
-         AND name NOT LIKE 'sqlite_%' \
-         AND LOWER(name) NOT IN ('_sqlx_migrations', 'flyway_schema_history') \
-         ORDER BY type, name",
+        r#"SELECT type, name, tbl_name, COALESCE(sql, '') AS sql
+FROM sqlite_master
+WHERE type IN ('table', 'index', 'trigger', 'view')
+  AND name NOT LIKE 'sqlite_%'
+  AND LOWER(name) NOT IN ('_sqlx_migrations', 'flyway_schema_history')
+ORDER BY type, name"#,
     )
     .fetch_all(&mut *connection)
     .await

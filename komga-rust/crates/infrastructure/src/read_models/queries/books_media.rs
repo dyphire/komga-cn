@@ -67,9 +67,11 @@ pub(in crate::read_models) async fn resolve_book_resource_sqlx(
     book_id: &str,
 ) -> Result<Option<BookResourceReadModel>, DiscoveryError> {
     let row = sqlx::query_as::<_, SqlxBookResourceRow>(
-        "SELECT b.id, b.url \
-         FROM books b \
-         WHERE b.id = ?",
+        r#"
+        SELECT b.id, b.url
+        FROM books b
+        WHERE b.id = ?
+        "#,
     )
     .bind(book_id)
     .fetch_optional(&pool)

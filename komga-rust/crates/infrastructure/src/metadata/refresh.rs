@@ -505,14 +505,16 @@ async fn load_book_media_for_refresh(
     book_id: &str,
 ) -> Result<Option<BookMediaRecord>, String> {
     let row = sqlx::query(
-        "SELECT b.LIBRARY_ID AS LIBRARY_ID, b.NAME AS FILE_NAME, b.URL AS BOOK_URL, \
-                l.ROOT AS LIBRARY_ROOT, \
-                COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE, \
-                COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT \
-         FROM BOOK b \
-         JOIN LIBRARY l ON l.ID = b.LIBRARY_ID \
-         LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID \
-         WHERE b.ID = ?",
+        r#"
+        SELECT b.LIBRARY_ID AS LIBRARY_ID, b.NAME AS FILE_NAME, b.URL AS BOOK_URL,
+               l.ROOT AS LIBRARY_ROOT,
+               COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE,
+               COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT
+        FROM BOOK b
+        JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+        LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
+        WHERE b.ID = ?
+        "#,
     )
     .bind(book_id)
     .fetch_optional(pool)
@@ -537,8 +539,13 @@ async fn load_book_page_row_for_refresh(
     page_number: u64,
 ) -> Result<Option<BookPageRecord>, String> {
     let row = sqlx::query(
-        "SELECT NUMBER, FILE_NAME, MEDIA_TYPE, WIDTH, HEIGHT, CASE WHEN FILE_SIZE IS NULL THEN -1 ELSE FILE_SIZE END AS FILE_SIZE \
-         FROM MEDIA_PAGE WHERE BOOK_ID = ? AND NUMBER = ? LIMIT 1",
+        r#"
+        SELECT NUMBER, FILE_NAME, MEDIA_TYPE, WIDTH, HEIGHT,
+               CASE WHEN FILE_SIZE IS NULL THEN -1 ELSE FILE_SIZE END AS FILE_SIZE
+        FROM MEDIA_PAGE
+        WHERE BOOK_ID = ? AND NUMBER = ?
+        LIMIT 1
+        "#,
     )
     .bind(book_id)
     .bind(page_number as i64)
@@ -561,12 +568,14 @@ async fn load_book_metadata_for_refresh(
     book_id: &str,
 ) -> Result<Option<BookMetadata>, String> {
     let row = sqlx::query(
-        "SELECT TITLE, TITLE_LOCK, SUMMARY, SUMMARY_LOCK, NUMBER, NUMBER_LOCK, NUMBER_SORT, \
-                NUMBER_SORT_LOCK, RELEASE_DATE, RELEASE_DATE_LOCK, AUTHORS_LOCK, TAGS_LOCK, ISBN, \
-                ISBN_LOCK, LINKS_LOCK \
-         FROM BOOK_METADATA \
-         WHERE BOOK_ID = ? \
-         LIMIT 1",
+        r#"
+        SELECT TITLE, TITLE_LOCK, SUMMARY, SUMMARY_LOCK, NUMBER, NUMBER_LOCK, NUMBER_SORT,
+               NUMBER_SORT_LOCK, RELEASE_DATE, RELEASE_DATE_LOCK, AUTHORS_LOCK, TAGS_LOCK, ISBN,
+               ISBN_LOCK, LINKS_LOCK
+        FROM BOOK_METADATA
+        WHERE BOOK_ID = ?
+        LIMIT 1
+        "#,
     )
     .bind(book_id)
     .fetch_optional(pool)
@@ -662,12 +671,14 @@ async fn persist_book_metadata_for_refresh(
     }
 
     sqlx::query(
-        "UPDATE BOOK_METADATA \
-         SET TITLE = ?, TITLE_LOCK = ?, SUMMARY = ?, SUMMARY_LOCK = ?, NUMBER = ?, \
-             NUMBER_LOCK = ?, NUMBER_SORT = ?, NUMBER_SORT_LOCK = ?, RELEASE_DATE = ?, \
-             RELEASE_DATE_LOCK = ?, AUTHORS_LOCK = ?, TAGS_LOCK = ?, ISBN = ?, ISBN_LOCK = ?, \
-             LINKS_LOCK = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
-         WHERE BOOK_ID = ?",
+        r#"
+        UPDATE BOOK_METADATA
+        SET TITLE = ?, TITLE_LOCK = ?, SUMMARY = ?, SUMMARY_LOCK = ?, NUMBER = ?,
+            NUMBER_LOCK = ?, NUMBER_SORT = ?, NUMBER_SORT_LOCK = ?, RELEASE_DATE = ?,
+            RELEASE_DATE_LOCK = ?, AUTHORS_LOCK = ?, TAGS_LOCK = ?, ISBN = ?, ISBN_LOCK = ?,
+            LINKS_LOCK = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+        WHERE BOOK_ID = ?
+        "#,
     )
     .bind(&metadata.title)
     .bind(metadata.title_lock)
@@ -823,7 +834,12 @@ async fn upsert_comicinfo_readlist(
         })?;
 
     sqlx::query(
-        "UPDATE READLIST SET BOOK_COUNT = (SELECT COUNT(*) FROM READLIST_BOOK WHERE READLIST_ID = ?), LAST_MODIFIED_DATE = CURRENT_TIMESTAMP WHERE ID = ?",
+        r#"
+        UPDATE READLIST
+        SET BOOK_COUNT = (SELECT COUNT(*) FROM READLIST_BOOK WHERE READLIST_ID = ?),
+            LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+        WHERE ID = ?
+        "#,
     )
     .bind(&readlist_id)
     .bind(&readlist_id)

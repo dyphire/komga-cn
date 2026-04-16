@@ -21,9 +21,9 @@ pub struct InitialBootstrapUserWriteModel {
 pub async fn list_persisted_user_emails(database_file: &Path) -> Result<Vec<String>, sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
     let rows = sqlx::query(
-        "SELECT EMAIL \
-         FROM USER \
-         ORDER BY EMAIL",
+        r#"SELECT EMAIL
+           FROM USER
+           ORDER BY EMAIL"#,
     )
     .fetch_all(&pool)
     .await?;
@@ -40,10 +40,10 @@ pub async fn load_persisted_user_by_email(
 ) -> Result<Option<PersistedBootstrapUser>, sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
     let row = sqlx::query(
-        "SELECT ID, EMAIL \
-         FROM USER \
-         WHERE LOWER(EMAIL) = LOWER(?) \
-         LIMIT 1",
+        r#"SELECT ID, EMAIL
+           FROM USER
+           WHERE LOWER(EMAIL) = LOWER(?)
+           LIMIT 1"#,
     )
     .bind(email)
     .fetch_optional(&pool)
@@ -64,9 +64,9 @@ pub async fn update_persisted_user_passwords(
 
     for (user_id, hashed_password) in updates {
         let rows_affected = sqlx::query(
-            "UPDATE USER \
-                 SET PASSWORD = ? \
-                 WHERE ID = ?",
+            r#"UPDATE USER
+               SET PASSWORD = ?
+               WHERE ID = ?"#,
         )
         .bind(hashed_password)
         .bind(user_id)
@@ -92,8 +92,8 @@ pub async fn persist_initial_bootstrap_users(
 
     for user in users {
         sqlx::query(
-            "INSERT INTO USER (ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES, AGE_RESTRICTION, AGE_RESTRICTION_ALLOW_ONLY) \
-             VALUES (?, ?, ?, ?, ?, ?)",
+            r#"INSERT INTO USER (ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES, AGE_RESTRICTION, AGE_RESTRICTION_ALLOW_ONLY)
+               VALUES (?, ?, ?, ?, ?, ?)"#,
         )
         .bind(&user.id)
         .bind(&user.email)
@@ -105,7 +105,7 @@ pub async fn persist_initial_bootstrap_users(
         .await?;
 
         for role in &user.roles {
-            sqlx::query("INSERT INTO USER_ROLE (USER_ID, ROLE) VALUES (?, ?)")
+            sqlx::query(r#"INSERT INTO USER_ROLE (USER_ID, ROLE) VALUES (?, ?)"#)
                 .bind(&user.id)
                 .bind(role)
                 .execute(&mut *tx)

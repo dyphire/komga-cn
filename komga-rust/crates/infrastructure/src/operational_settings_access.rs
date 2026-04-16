@@ -51,9 +51,9 @@ pub async fn delete_syncpoints_by_user(
     let sync_point_ids = load_syncpoint_ids_for_user(&mut tx, user_id, None).await?;
     delete_syncpoint_children(&mut tx, &sync_point_ids).await?;
     sqlx::query(
-        "DELETE \
-         FROM SYNC_POINT \
-         WHERE USER_ID = ?",
+        r#"DELETE
+        FROM SYNC_POINT
+        WHERE USER_ID = ?"#,
     )
     .bind(user_id)
     .execute(&mut *tx)
@@ -250,8 +250,8 @@ pub async fn load_history_page(
     let pool = connect_pool(database_file, 1).await?;
 
     let total_elements = sqlx::query(
-        "SELECT COUNT(*) AS COUNT \
-         FROM HISTORICAL_EVENT",
+        r#"SELECT COUNT(*) AS COUNT
+        FROM HISTORICAL_EVENT"#,
     )
     .fetch_one(&pool)
     .await?
@@ -262,8 +262,8 @@ pub async fn load_history_page(
 
     let (order_by, sort_payload) = history_sort_details(sorts);
     let mut sql = String::from(
-        "SELECT ID, TYPE, BOOK_ID, SERIES_ID, TIMESTAMP \
-         FROM HISTORICAL_EVENT",
+        r#"SELECT ID, TYPE, BOOK_ID, SERIES_ID, TIMESTAMP
+        FROM HISTORICAL_EVENT"#,
     );
     if !order_by.is_empty() {
         sql.push_str(" ORDER BY ");
@@ -292,9 +292,9 @@ pub async fn load_history_page(
             .collect::<Vec<_>>()
             .join(", ");
         let sql = format!(
-            "SELECT ID, \"KEY\" AS EVENT_KEY, VALUE \
-             FROM HISTORICAL_EVENT_PROPERTIES \
-             WHERE ID IN ({placeholders})",
+            r#"SELECT ID, "KEY" AS EVENT_KEY, VALUE
+            FROM HISTORICAL_EVENT_PROPERTIES
+            WHERE ID IN ({placeholders})"#,
         );
 
         let mut query = sqlx::query(&sql);

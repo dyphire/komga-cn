@@ -105,10 +105,10 @@ pub(crate) fn load_library_scan_config(
         let library_id = library_id.clone();
         Box::pin(async move {
             let row = sqlx::query(
-                "SELECT ROOT, SCAN_CBX, SCAN_PDF, SCAN_EPUB, SCAN_FORCE_MODIFIED_TIME, ONESHOTS_DIRECTORY \
-                 FROM LIBRARY \
-                 WHERE ID = ? \
-                 LIMIT 1",
+                r#"SELECT ROOT, SCAN_CBX, SCAN_PDF, SCAN_EPUB, SCAN_FORCE_MODIFIED_TIME, ONESHOTS_DIRECTORY
+FROM LIBRARY
+WHERE ID = ?
+LIMIT 1"#,
             )
             .bind(&library_id)
             .fetch_optional(&pool)
@@ -120,9 +120,9 @@ pub(crate) fn load_library_scan_config(
             };
 
             let exclusions = sqlx::query(
-                "SELECT EXCLUSION \
-                 FROM LIBRARY_EXCLUSIONS \
-                 WHERE LIBRARY_ID = ?",
+                r#"SELECT EXCLUSION
+FROM LIBRARY_EXCLUSIONS
+WHERE LIBRARY_ID = ?"#,
             )
             .bind(&library_id)
             .fetch_all(&pool)
@@ -360,10 +360,10 @@ pub(crate) fn library_empty_trash_after_scan(
         let library_id = library_id.clone();
         Box::pin(async move {
             let value = sqlx::query(
-                "SELECT EMPTY_TRASH_AFTER_SCAN \
-                 FROM LIBRARY \
-                 WHERE ID = ? \
-                 LIMIT 1",
+                r#"SELECT EMPTY_TRASH_AFTER_SCAN
+FROM LIBRARY
+WHERE ID = ?
+LIMIT 1"#,
             )
             .bind(&library_id)
             .fetch_optional(&pool)
@@ -392,9 +392,9 @@ pub(crate) fn persist_scanned_library(
         Box::pin(async move {
             if !scanned.root_available {
                 sqlx::query(
-                    "UPDATE LIBRARY \
-                     SET UNAVAILABLE_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
-                     WHERE ID = ?",
+                    r#"UPDATE LIBRARY
+SET UNAVAILABLE_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+WHERE ID = ?"#,
                 )
                 .bind(&library_id)
                 .execute(&pool)
@@ -404,9 +404,9 @@ pub(crate) fn persist_scanned_library(
             }
 
             sqlx::query(
-                "UPDATE LIBRARY \
-                 SET UNAVAILABLE_DATE = NULL, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
-                 WHERE ID = ?",
+                r#"UPDATE LIBRARY
+SET UNAVAILABLE_DATE = NULL, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+WHERE ID = ?"#,
             )
             .bind(&library_id)
             .execute(&pool)
@@ -420,10 +420,10 @@ pub(crate) fn persist_scanned_library(
 
             for series in &scanned.series_rows {
                 let series_updated = sqlx::query(
-                "UPDATE SERIES \
-                     SET FILE_LAST_MODIFIED = datetime(?, 'unixepoch'), NAME = ?, URL = ?, LIBRARY_ID = ?, oneshot = ?, \
-                         LAST_MODIFIED_DATE = CURRENT_TIMESTAMP, DELETED_DATE = NULL \
-                     WHERE ID = ?",
+                r#"UPDATE SERIES
+SET FILE_LAST_MODIFIED = datetime(?, 'unixepoch'), NAME = ?, URL = ?, LIBRARY_ID = ?, oneshot = ?,
+    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP, DELETED_DATE = NULL
+WHERE ID = ?"#,
                 )
                 .bind(series.series_last_modified_unix_seconds)
                 .bind(&series.series_name)
@@ -438,8 +438,8 @@ pub(crate) fn persist_scanned_library(
 
                 if series_updated == 0 {
                     sqlx::query(
-                        "INSERT OR IGNORE INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot) \
-                         VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)",
+                        r#"INSERT OR IGNORE INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot)
+VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)"#,
                     )
                     .bind(&series.series_id)
                     .bind(series.series_last_modified_unix_seconds)
@@ -463,10 +463,10 @@ pub(crate) fn persist_scanned_library(
 
                 for book in &series.books {
                     let book_updated = sqlx::query(
-                        "UPDATE BOOK \
-                         SET FILE_LAST_MODIFIED = datetime(?, 'unixepoch'), URL = ?, SERIES_ID = ?, FILE_SIZE = ?, \
-                             LIBRARY_ID = ?, oneshot = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP, DELETED_DATE = NULL \
-                         WHERE ID = ?",
+                        r#"UPDATE BOOK
+SET FILE_LAST_MODIFIED = datetime(?, 'unixepoch'), URL = ?, SERIES_ID = ?, FILE_SIZE = ?,
+    LIBRARY_ID = ?, oneshot = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP, DELETED_DATE = NULL
+WHERE ID = ?"#,
                     )
                     .bind(book.file_last_modified_unix_seconds)
                     .bind(&book.book_url)
@@ -482,9 +482,9 @@ pub(crate) fn persist_scanned_library(
 
                     if book_updated == 0 {
                         sqlx::query(
-                            "INSERT OR IGNORE INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, \
-                                                        LIBRARY_ID, oneshot) \
-                             VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?)",
+                            r#"INSERT OR IGNORE INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE,
+                             LIBRARY_ID, oneshot)
+VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?)"#,
                         )
                         .bind(&book.book_id)
                         .bind(book.file_last_modified_unix_seconds)
@@ -509,10 +509,10 @@ pub(crate) fn persist_scanned_library(
                         })?;
 
                     let media_updated = sqlx::query(
-                        "UPDATE MEDIA_FILE \
-                         SET FILE_SIZE = ? \
-                         WHERE FILE_NAME = ? \
-                           AND BOOK_ID = ?",
+                        r#"UPDATE MEDIA_FILE
+SET FILE_SIZE = ?
+WHERE FILE_NAME = ?
+  AND BOOK_ID = ?"#,
                     )
                     .bind(book.file_size)
                     .bind(&book.file_name)
@@ -524,8 +524,8 @@ pub(crate) fn persist_scanned_library(
 
                     if media_updated == 0 {
                         sqlx::query(
-                            "INSERT INTO MEDIA_FILE (FILE_NAME, BOOK_ID, FILE_SIZE) \
-                             VALUES (?, ?, ?)",
+                            r#"INSERT INTO MEDIA_FILE (FILE_NAME, BOOK_ID, FILE_SIZE)
+VALUES (?, ?, ?)"#,
                         )
                         .bind(&book.file_name)
                         .bind(&book.book_id)
@@ -539,9 +539,9 @@ pub(crate) fn persist_scanned_library(
 
             for book_id in &scanned.changed_existing_book_ids {
                 sqlx::query(
-                    "UPDATE MEDIA \
-                     SET STATUS = 'OUTDATED' \
-                     WHERE BOOK_ID = ?",
+                    r#"UPDATE MEDIA
+SET STATUS = 'OUTDATED'
+WHERE BOOK_ID = ?"#,
                 )
                 .bind(book_id)
                 .execute(&pool)
@@ -555,10 +555,10 @@ pub(crate) fn persist_scanned_library(
 
             for sidecar in &scanned.sidecars {
                 let sidecar_updated = sqlx::query(
-                    "UPDATE SIDECAR \
-                     SET PARENT_URL = ?, LAST_MODIFIED_TIME = ? \
-                     WHERE URL = ? \
-                       AND LIBRARY_ID = ?",
+                    r#"UPDATE SIDECAR
+SET PARENT_URL = ?, LAST_MODIFIED_TIME = ?
+WHERE URL = ?
+  AND LIBRARY_ID = ?"#,
                 )
                 .bind(&sidecar.parent_url)
                 .bind(sidecar.last_modified_unix_seconds)
@@ -571,8 +571,8 @@ pub(crate) fn persist_scanned_library(
 
                 if sidecar_updated == 0 {
                     sqlx::query(
-                        "INSERT OR IGNORE INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID) \
-                         VALUES (?, ?, ?, ?)",
+                        r#"INSERT OR IGNORE INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID)
+VALUES (?, ?, ?, ?)"#,
                     )
                     .bind(&sidecar.url)
                     .bind(&sidecar.parent_url)
@@ -586,10 +586,10 @@ pub(crate) fn persist_scanned_library(
 
             if scanned.root_available {
                 let existing_series = sqlx::query(
-                    "SELECT ID \
-                     FROM SERIES \
-                     WHERE LIBRARY_ID = ? \
-                       AND DELETED_DATE IS NULL",
+                    r#"SELECT ID
+FROM SERIES
+WHERE LIBRARY_ID = ?
+  AND DELETED_DATE IS NULL"#,
                 )
                 .bind(&library_id)
                 .fetch_all(&pool)
@@ -603,9 +603,9 @@ pub(crate) fn persist_scanned_library(
                         continue;
                     }
                     sqlx::query(
-                        "UPDATE SERIES \
-                         SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
-                         WHERE ID = ?",
+                        r#"UPDATE SERIES
+SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+WHERE ID = ?"#,
                     )
                     .bind(&series_id)
                     .execute(&pool)
@@ -614,10 +614,10 @@ pub(crate) fn persist_scanned_library(
                 }
 
                 let existing_books = sqlx::query(
-                    "SELECT ID \
-                     FROM BOOK \
-                     WHERE LIBRARY_ID = ? \
-                       AND DELETED_DATE IS NULL",
+                    r#"SELECT ID
+FROM BOOK
+WHERE LIBRARY_ID = ?
+  AND DELETED_DATE IS NULL"#,
                 )
                 .bind(&library_id)
                 .fetch_all(&pool)
@@ -631,9 +631,9 @@ pub(crate) fn persist_scanned_library(
                         continue;
                     }
                     sqlx::query(
-                        "UPDATE BOOK \
-                         SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
-                         WHERE ID = ?",
+                        r#"UPDATE BOOK
+SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+WHERE ID = ?"#,
                     )
                     .bind(&book_id)
                     .execute(&pool)
@@ -643,12 +643,12 @@ pub(crate) fn persist_scanned_library(
             }
 
             sqlx::query(
-                "UPDATE SERIES \
-                 SET BOOK_COUNT = (SELECT COUNT(*) \
-                                   FROM BOOK \
-                                   WHERE BOOK.SERIES_ID = SERIES.ID \
-                                     AND BOOK.DELETED_DATE IS NULL) \
-                 WHERE LIBRARY_ID = ?",
+                r#"UPDATE SERIES
+SET BOOK_COUNT = (SELECT COUNT(*)
+                  FROM BOOK
+                  WHERE BOOK.SERIES_ID = SERIES.ID
+                    AND BOOK.DELETED_DATE IS NULL)
+WHERE LIBRARY_ID = ?"#,
             )
             .bind(&library_id)
             .execute(&pool)
@@ -683,16 +683,16 @@ async fn resort_scanned_series_books(
     let mut renumbered_book_ids = Vec::new();
     for series_id in series_ids {
         let book_rows = sqlx::query(
-            "SELECT b.ID AS BOOK_ID, b.NAME AS BOOK_NAME, b.NUMBER AS BOOK_NUMBER, \
-                    COALESCE(bm.NUMBER, '') AS METADATA_NUMBER, \
-                    COALESCE(bm.NUMBER_SORT, CAST(0 AS REAL)) AS METADATA_NUMBER_SORT, \
-                    COALESCE(bm.NUMBER_LOCK, 0) AS METADATA_NUMBER_LOCK, \
-                    COALESCE(bm.NUMBER_SORT_LOCK, 0) AS METADATA_NUMBER_SORT_LOCK \
-             FROM BOOK b \
-             LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
-             WHERE b.SERIES_ID = ? \
-               AND b.DELETED_DATE IS NULL \
-             ORDER BY b.ID ASC",
+            r#"SELECT b.ID AS BOOK_ID, b.NAME AS BOOK_NAME, b.NUMBER AS BOOK_NUMBER,
+       COALESCE(bm.NUMBER, '') AS METADATA_NUMBER,
+       COALESCE(bm.NUMBER_SORT, CAST(0 AS REAL)) AS METADATA_NUMBER_SORT,
+       COALESCE(bm.NUMBER_LOCK, 0) AS METADATA_NUMBER_LOCK,
+       COALESCE(bm.NUMBER_SORT_LOCK, 0) AS METADATA_NUMBER_SORT_LOCK
+FROM BOOK b
+LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
+WHERE b.SERIES_ID = ?
+  AND b.DELETED_DATE IS NULL
+ORDER BY b.ID ASC"#,
         )
         .bind(&series_id)
         .fetch_all(pool)
@@ -722,9 +722,9 @@ async fn resort_scanned_series_books(
 
             if book.book_number != new_number {
                 sqlx::query(
-                    "UPDATE BOOK \
-                     SET NUMBER = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
-                     WHERE ID = ?",
+                    r#"UPDATE BOOK
+SET NUMBER = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+WHERE ID = ?"#,
                 )
                 .bind(new_number)
                 .bind(&book.book_id)
@@ -738,11 +738,11 @@ async fn resort_scanned_series_books(
                 && (book.metadata_number_sort - new_metadata_number_sort).abs() > f64::EPSILON;
             if metadata_number_changed || metadata_number_sort_changed {
                 sqlx::query(
-                    "UPDATE BOOK_METADATA \
-                     SET NUMBER = CASE WHEN NUMBER_LOCK = 0 THEN ? ELSE NUMBER END, \
-                         NUMBER_SORT = CASE WHEN NUMBER_SORT_LOCK = 0 THEN ? ELSE NUMBER_SORT END, \
-                         LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
-                     WHERE BOOK_ID = ?",
+                    r#"UPDATE BOOK_METADATA
+SET NUMBER = CASE WHEN NUMBER_LOCK = 0 THEN ? ELSE NUMBER END,
+    NUMBER_SORT = CASE WHEN NUMBER_SORT_LOCK = 0 THEN ? ELSE NUMBER_SORT END,
+    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+WHERE BOOK_ID = ?"#,
                 )
                 .bind(&new_metadata_number)
                 .bind(new_metadata_number_sort)
@@ -775,9 +775,9 @@ pub(crate) fn load_changed_sidecars(
         let scanned_sidecars = scanned_sidecars.clone();
         Box::pin(async move {
             let existing_rows = sqlx::query(
-                "SELECT URL, LAST_MODIFIED_TIME \
-                 FROM SIDECAR \
-                 WHERE LIBRARY_ID = ?",
+                r#"SELECT URL, LAST_MODIFIED_TIME
+FROM SIDECAR
+WHERE LIBRARY_ID = ?"#,
             )
             .bind(&library_id)
             .fetch_all(&pool)
@@ -828,8 +828,8 @@ async fn ensure_series_metadata_seed(
     series: &ScannedSeriesRow,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "INSERT OR IGNORE INTO SERIES_METADATA (STATUS, TITLE, TITLE_SORT, SERIES_ID) \
-         VALUES (?, ?, ?, ?)",
+        r#"INSERT OR IGNORE INTO SERIES_METADATA (STATUS, TITLE, TITLE_SORT, SERIES_ID)
+VALUES (?, ?, ?, ?)"#,
     )
     .bind("ONGOING")
     .bind(&series.series_name)
@@ -838,7 +838,7 @@ async fn ensure_series_metadata_seed(
     .execute(pool)
     .await?;
 
-    sqlx::query("INSERT OR IGNORE INTO BOOK_METADATA_AGGREGATION (SERIES_ID) VALUES (?)")
+    sqlx::query(r#"INSERT OR IGNORE INTO BOOK_METADATA_AGGREGATION (SERIES_ID) VALUES (?)"#)
         .bind(&series.series_id)
         .execute(pool)
         .await?;
@@ -851,8 +851,8 @@ async fn ensure_book_metadata_seed(
     book: &ScannedBookRow,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "INSERT OR IGNORE INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, BOOK_ID) \
-         VALUES (?, ?, ?, ?)",
+        r#"INSERT OR IGNORE INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, BOOK_ID)
+VALUES (?, ?, ?, ?)"#,
     )
     .bind("0")
     .bind(0.0_f64)
@@ -875,10 +875,10 @@ fn load_existing_scanned_books_by_url(
         let library_id = library_id.clone();
         Box::pin(async move {
             let rows = sqlx::query(
-                "SELECT ID, URL, SERIES_ID, unixepoch(FILE_LAST_MODIFIED) AS FILE_LAST_MODIFIED \
-                 FROM BOOK \
-                 WHERE LIBRARY_ID = ? \
-                   AND DELETED_DATE IS NULL",
+                r#"SELECT ID, URL, SERIES_ID, unixepoch(FILE_LAST_MODIFIED) AS FILE_LAST_MODIFIED
+FROM BOOK
+WHERE LIBRARY_ID = ?
+  AND DELETED_DATE IS NULL"#,
             )
             .bind(&library_id)
             .fetch_all(&pool)
@@ -918,10 +918,10 @@ fn load_existing_scanned_series_by_url(
         let library_id = library_id.clone();
         Box::pin(async move {
             let rows = sqlx::query(
-                "SELECT URL, unixepoch(FILE_LAST_MODIFIED) AS FILE_LAST_MODIFIED \
-                 FROM SERIES \
-                 WHERE LIBRARY_ID = ? \
-                   AND DELETED_DATE IS NULL",
+                r#"SELECT URL, unixepoch(FILE_LAST_MODIFIED) AS FILE_LAST_MODIFIED
+FROM SERIES
+WHERE LIBRARY_ID = ?
+  AND DELETED_DATE IS NULL"#,
             )
             .bind(&library_id)
             .fetch_all(&pool)

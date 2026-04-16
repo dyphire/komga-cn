@@ -12,7 +12,7 @@ pub struct CreatedClaimedUser {
 
 pub async fn load_persisted_user_count(database_file: &Path) -> Result<i64, sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
-    let count = sqlx::query("SELECT COUNT(*) AS COUNT FROM USER")
+    let count = sqlx::query(r#"SELECT COUNT(*) AS COUNT FROM USER"#)
         .fetch_one(&pool)
         .await?
         .get::<i64, _>("COUNT");
@@ -29,15 +29,15 @@ pub async fn persist_initial_admin_user(
     let mut tx = pool.begin().await?;
 
     sqlx::query(
-        "INSERT INTO USER ( \
-             ID, \
-             EMAIL, \
-             PASSWORD, \
-             SHARED_ALL_LIBRARIES, \
-             AGE_RESTRICTION, \
-             AGE_RESTRICTION_ALLOW_ONLY \
-         ) \
-         VALUES (?, ?, ?, ?, ?, ?)",
+        r#"INSERT INTO USER (
+            ID,
+            EMAIL,
+            PASSWORD,
+            SHARED_ALL_LIBRARIES,
+            AGE_RESTRICTION,
+            AGE_RESTRICTION_ALLOW_ONLY
+        )
+        VALUES (?, ?, ?, ?, ?, ?)"#,
     )
     .bind(user_id)
     .bind(email)
@@ -49,7 +49,7 @@ pub async fn persist_initial_admin_user(
     .await?;
 
     for role in claim_user_roles() {
-        sqlx::query("INSERT INTO USER_ROLE (USER_ID, ROLE) VALUES (?, ?)")
+        sqlx::query(r#"INSERT INTO USER_ROLE (USER_ID, ROLE) VALUES (?, ?)"#)
             .bind(user_id)
             .bind(role)
             .execute(&mut *tx)

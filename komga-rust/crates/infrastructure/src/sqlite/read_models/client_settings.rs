@@ -12,18 +12,18 @@ pub async fn load_client_settings_global(
     let pool = connect_pool(database_file, 1).await?;
     let rows = if allow_unauthorized_only {
         sqlx::query(
-            "SELECT KEY, VALUE, ALLOW_UNAUTHORIZED \
-             FROM CLIENT_SETTINGS_GLOBAL \
-             WHERE ALLOW_UNAUTHORIZED = 1 \
-             ORDER BY KEY ASC",
+            r#"SELECT KEY, VALUE, ALLOW_UNAUTHORIZED
+             FROM CLIENT_SETTINGS_GLOBAL
+             WHERE ALLOW_UNAUTHORIZED = 1
+             ORDER BY KEY ASC"#,
         )
         .fetch_all(&pool)
         .await?
     } else {
         sqlx::query(
-            "SELECT KEY, VALUE, ALLOW_UNAUTHORIZED \
-             FROM CLIENT_SETTINGS_GLOBAL \
-             ORDER BY KEY ASC",
+            r#"SELECT KEY, VALUE, ALLOW_UNAUTHORIZED
+             FROM CLIENT_SETTINGS_GLOBAL
+             ORDER BY KEY ASC"#,
         )
         .fetch_all(&pool)
         .await?
@@ -51,10 +51,10 @@ pub async fn load_client_settings_user(
 ) -> Result<Value, sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
     let rows = sqlx::query(
-        "SELECT KEY, VALUE \
-         FROM CLIENT_SETTINGS_USER \
-         WHERE USER_ID = ? \
-         ORDER BY KEY ASC",
+        r#"SELECT KEY, VALUE
+         FROM CLIENT_SETTINGS_USER
+         WHERE USER_ID = ?
+         ORDER BY KEY ASC"#,
     )
     .bind(user_id)
     .fetch_all(&pool)

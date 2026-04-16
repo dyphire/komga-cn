@@ -412,7 +412,19 @@ mod tests {
         library_id: &str,
     ) {
         sqlx::query(
-            "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?)",
+            r#"
+            INSERT INTO BOOK (
+                ID,
+                FILE_LAST_MODIFIED,
+                NAME,
+                URL,
+                SERIES_ID,
+                FILE_SIZE,
+                NUMBER,
+                LIBRARY_ID
+            ) VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?)
+            "#,
+
         )
         .bind(book_id)
         .bind(0_i64)

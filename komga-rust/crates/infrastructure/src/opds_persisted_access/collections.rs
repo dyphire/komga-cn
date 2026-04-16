@@ -25,12 +25,12 @@ pub async fn load_publishers(
 
     let pool = connect_pool(database_file, 1).await?;
     let rows = sqlx::query(
-        "SELECT DISTINCT sm.PUBLISHER AS PUBLISHER, s.LIBRARY_ID AS LIBRARY_ID \
-         FROM SERIES_METADATA sm \
-         JOIN SERIES s ON s.ID = sm.SERIES_ID \
-         WHERE sm.PUBLISHER IS NOT NULL \
-         AND trim(sm.PUBLISHER) != '' \
-         ORDER BY lower(sm.PUBLISHER), sm.PUBLISHER",
+        r#"SELECT DISTINCT sm.PUBLISHER AS PUBLISHER, s.LIBRARY_ID AS LIBRARY_ID
+FROM SERIES_METADATA sm
+JOIN SERIES s ON s.ID = sm.SERIES_ID
+WHERE sm.PUBLISHER IS NOT NULL
+  AND trim(sm.PUBLISHER) != ''
+ORDER BY lower(sm.PUBLISHER), sm.PUBLISHER"#,
     )
     .fetch_all(&pool)
     .await?;
@@ -83,22 +83,22 @@ pub async fn load_collections(
     let pool = connect_pool(database_file, 1).await?;
     let rows = if let Some(library_id) = library_id {
         sqlx::query(
-            "SELECT DISTINCT c.ID, c.NAME, c.ORDERED, \
-                    COALESCE(c.LAST_MODIFIED_DATE, c.CREATED_DATE, '') AS LAST_MODIFIED \
-             FROM COLLECTION c \
-             JOIN COLLECTION_SERIES cs ON cs.COLLECTION_ID = c.ID \
-             JOIN SERIES s ON s.ID = cs.SERIES_ID \
-             WHERE s.LIBRARY_ID = ? \
-             ORDER BY c.NAME COLLATE NOCASE ASC, c.ID ASC",
+            r#"SELECT DISTINCT c.ID, c.NAME, c.ORDERED,
+       COALESCE(c.LAST_MODIFIED_DATE, c.CREATED_DATE, '') AS LAST_MODIFIED
+FROM COLLECTION c
+JOIN COLLECTION_SERIES cs ON cs.COLLECTION_ID = c.ID
+JOIN SERIES s ON s.ID = cs.SERIES_ID
+WHERE s.LIBRARY_ID = ?
+ORDER BY c.NAME COLLATE NOCASE ASC, c.ID ASC"#,
         )
         .bind(library_id)
         .fetch_all(&pool)
         .await?
     } else {
         sqlx::query(
-            "SELECT ID, NAME, ORDERED, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED \
-             FROM COLLECTION \
-             ORDER BY NAME COLLATE NOCASE ASC, ID ASC",
+            r#"SELECT ID, NAME, ORDERED, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
+FROM COLLECTION
+ORDER BY NAME COLLATE NOCASE ASC, ID ASC"#,
         )
         .fetch_all(&pool)
         .await?
@@ -139,10 +139,10 @@ pub async fn load_collection(
 
     let pool = connect_pool(database_file, 1).await?;
     let row = sqlx::query(
-        "SELECT ID, NAME, ORDERED, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED \
-         FROM COLLECTION \
-         WHERE ID = ? \
-         LIMIT 1",
+        r#"SELECT ID, NAME, ORDERED, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
+FROM COLLECTION
+WHERE ID = ?
+LIMIT 1"#,
     )
     .bind(collection_id)
     .fetch_optional(&pool)
@@ -168,28 +168,23 @@ pub async fn load_collection_books(
 
     let pool = connect_pool(database_file, 1).await?;
     let rows = sqlx::query(
-        "SELECT b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE, b.NAME AS FILE_NAME, \
-                COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE, \
-                COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING, \
-                COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS, \
-                COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') AS LAST_MODIFIED \
-         FROM COLLECTION_SERIES cs \
-         JOIN BOOK b ON b.SERIES_ID = cs.SERIES_ID \
-         LEFT \
-         JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
-         LEFT \
-         JOIN MEDIA m ON m.BOOK_ID = b.ID \
-         LEFT \
-         JOIN SERIES s ON s.ID = b.SERIES_ID \
-         LEFT \
-         JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
-         LEFT \
-         JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
-         WHERE cs.COLLECTION_ID = ? \
-         AND b.DELETED_DATE IS NULL \
-         GROUP BY b.ID, b.LIBRARY_ID, TITLE, FILE_NAME, MEDIA_TYPE, AGE_RATING, LAST_MODIFIED \
-         ORDER BY cs.NUMBER ASC, COALESCE(bm.NUMBER_SORT, CAST(b.NUMBER AS REAL), 0) ASC, \
-                  b.ID ASC",
+        r#"SELECT b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE, b.NAME AS FILE_NAME,
+       COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE,
+       COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
+       COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS,
+       COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') AS LAST_MODIFIED
+FROM COLLECTION_SERIES cs
+JOIN BOOK b ON b.SERIES_ID = cs.SERIES_ID
+LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
+LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
+LEFT JOIN SERIES s ON s.ID = b.SERIES_ID
+LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
+LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID
+WHERE cs.COLLECTION_ID = ?
+  AND b.DELETED_DATE IS NULL
+GROUP BY b.ID, b.LIBRARY_ID, TITLE, FILE_NAME, MEDIA_TYPE, AGE_RATING, LAST_MODIFIED
+ORDER BY cs.NUMBER ASC, COALESCE(bm.NUMBER_SORT, CAST(b.NUMBER AS REAL), 0) ASC,
+         b.ID ASC"#,
     )
     .bind(collection_id)
     .fetch_all(&pool)
@@ -221,36 +216,32 @@ pub async fn load_collection_series(
 
     let pool = connect_pool(database_file, 1).await?;
     let query = if ordered {
-        "SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE, \
-                COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING, \
-                COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS, \
-                COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED \
-         FROM COLLECTION_SERIES cs \
-         JOIN SERIES s ON s.ID = cs.SERIES_ID \
-         LEFT \
-         JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
-         LEFT \
-         JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
-         WHERE cs.COLLECTION_ID = ? \
-         AND s.DELETED_DATE IS NULL \
-         GROUP BY s.ID, s.LIBRARY_ID, TITLE, AGE_RATING, LAST_MODIFIED \
-         ORDER BY cs.NUMBER ASC, COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC, \
-                  s.ID ASC"
+        r#"SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE,
+       COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
+       COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS,
+       COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED
+FROM COLLECTION_SERIES cs
+JOIN SERIES s ON s.ID = cs.SERIES_ID
+LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
+LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID
+WHERE cs.COLLECTION_ID = ?
+  AND s.DELETED_DATE IS NULL
+GROUP BY s.ID, s.LIBRARY_ID, TITLE, AGE_RATING, LAST_MODIFIED
+ORDER BY cs.NUMBER ASC, COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC,
+         s.ID ASC"#
     } else {
-        "SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE, \
-                COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING, \
-                COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS, \
-                COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED \
-         FROM COLLECTION_SERIES cs \
-         JOIN SERIES s ON s.ID = cs.SERIES_ID \
-         LEFT \
-         JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
-         LEFT \
-         JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
-         WHERE cs.COLLECTION_ID = ? \
-         AND s.DELETED_DATE IS NULL \
-         GROUP BY s.ID, s.LIBRARY_ID, TITLE, AGE_RATING, LAST_MODIFIED \
-         ORDER BY COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC, s.ID ASC"
+        r#"SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE,
+       COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
+       COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS,
+       COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED
+FROM COLLECTION_SERIES cs
+JOIN SERIES s ON s.ID = cs.SERIES_ID
+LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
+LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID
+WHERE cs.COLLECTION_ID = ?
+  AND s.DELETED_DATE IS NULL
+GROUP BY s.ID, s.LIBRARY_ID, TITLE, AGE_RATING, LAST_MODIFIED
+ORDER BY COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC, s.ID ASC"#
     };
     let rows = sqlx::query(query)
         .bind(collection_id)

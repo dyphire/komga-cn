@@ -43,14 +43,14 @@ pub(in crate::read_models) async fn list_libraries_sqlx(
     }
 
     let mut builder = QueryBuilder::<Sqlite>::new(
-        "SELECT id, name, root \
-               FROM libraries",
+        r#"SELECT id, name, root
+FROM libraries"#,
     );
     let mut state = SqlxWhereState::default();
     if let Some(allowed_ids) = allowed.as_ref() {
         append_in_clause_sqlx("id", allowed_ids, &mut builder, &mut state);
     }
-    builder.push(" ORDER BY name COLLATE NOCASE ASC");
+    builder.push(r#" ORDER BY name COLLATE NOCASE ASC"#);
 
     let rows = builder
         .build_query_as::<SqlxLibraryRow>()

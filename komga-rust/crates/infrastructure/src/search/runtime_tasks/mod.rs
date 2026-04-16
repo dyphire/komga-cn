@@ -170,8 +170,16 @@ pub fn persist_book_analysis(
 
             for (index, page) in analysis.pages.iter().enumerate() {
                 sqlx::query(
-                    "INSERT INTO MEDIA_PAGE (FILE_NAME, MEDIA_TYPE, NUMBER, BOOK_ID, width, height, FILE_HASH, FILE_SIZE) \
-                     VALUES (?, ?, ?, ?, ?, ?, '', ?)",
+                    r#"INSERT INTO MEDIA_PAGE (
+                    FILE_NAME,
+                    MEDIA_TYPE,
+                    NUMBER,
+                    BOOK_ID,
+                    width,
+                    height,
+                    FILE_HASH,
+                    FILE_SIZE
+                ) VALUES (?, ?, ?, ?, ?, ?, '', ?)"#,
                 )
                 .bind(&page.file_name)
                 .bind(&page.media_type)
@@ -182,17 +190,23 @@ pub fn persist_book_analysis(
                 .bind(page.file_size)
                 .execute(&mut *tx)
                 .await
-                .map_err(|error| format!("failed to insert MEDIA_PAGE row for '{book_id}': {error}"))?;
+                .map_err(|error| {
+                    format!("failed to insert MEDIA_PAGE row for '{book_id}': {error}")
+                })?;
             }
 
             sqlx::query(
-                "INSERT INTO MEDIA (BOOK_ID, STATUS, MEDIA_TYPE, PAGE_COUNT) \
-                 VALUES (?, ?, ?, ?) \
-                 ON CONFLICT(BOOK_ID) DO UPDATE \
-                 SET STATUS = excluded.STATUS, \
-                     MEDIA_TYPE = excluded.MEDIA_TYPE, \
-                     PAGE_COUNT = excluded.PAGE_COUNT, \
-                     LAST_MODIFIED_DATE = CURRENT_TIMESTAMP",
+                r#"INSERT INTO MEDIA (
+                    BOOK_ID,
+                    STATUS,
+                    MEDIA_TYPE,
+                    PAGE_COUNT
+                ) VALUES (?, ?, ?, ?)
+                ON CONFLICT(BOOK_ID) DO UPDATE
+                SET STATUS = excluded.STATUS,
+                    MEDIA_TYPE = excluded.MEDIA_TYPE,
+                    PAGE_COUNT = excluded.PAGE_COUNT,
+                    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP"#,
             )
             .bind(&book_id)
             .bind(&analysis.status)

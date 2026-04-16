@@ -116,7 +116,19 @@ mod tests {
             .expect("library row should be inserted for find-books-to-convert fixture");
         insert_series(&pool, "library-1", "series-1").await;
         sqlx::query(
-            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE, DELETED_DATE) VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?, NULL)",
+            r#"
+            INSERT INTO BOOK (
+                ID,
+                NAME,
+                URL,
+                LIBRARY_ID,
+                SERIES_ID,
+                FILE_LAST_MODIFIED,
+                FILE_SIZE,
+                DELETED_DATE
+            )
+            VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?, NULL)
+            "#,
         )
         .bind("book-1")
         .bind("book-1")
@@ -192,7 +204,19 @@ mod tests {
             .expect("disabled library row should be inserted for find-books-to-convert fixture");
         insert_series(&pool, "library-1", "series-1").await;
         sqlx::query(
-            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE, DELETED_DATE) VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?, NULL)",
+            r#"
+            INSERT INTO BOOK (
+                ID,
+                NAME,
+                URL,
+                LIBRARY_ID,
+                SERIES_ID,
+                FILE_LAST_MODIFIED,
+                FILE_SIZE,
+                DELETED_DATE
+            )
+            VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?, NULL)
+            "#,
         )
         .bind("book-1")
         .bind("book-1")
@@ -275,7 +299,18 @@ mod tests {
             .expect("convert-book last-modified library row should be inserted");
         insert_series(&pool, "library-1", "series-1").await;
         sqlx::query(
-            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE) VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?)",
+            r#"
+            INSERT INTO BOOK (
+                ID,
+                NAME,
+                URL,
+                LIBRARY_ID,
+                SERIES_ID,
+                FILE_LAST_MODIFIED,
+                FILE_SIZE
+            )
+            VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?)
+            "#,
         )
         .bind(book_id)
         .bind("book-1")
@@ -354,7 +389,18 @@ mod tests {
             .expect("convert-book failed-cache library row should be inserted");
         insert_series(&pool, "library-1", "series-1").await;
         sqlx::query(
-            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE) VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?)",
+            r#"
+            INSERT INTO BOOK (
+                ID,
+                NAME,
+                URL,
+                LIBRARY_ID,
+                SERIES_ID,
+                FILE_LAST_MODIFIED,
+                FILE_SIZE
+            )
+            VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?)
+            "#,
         )
         .bind(book_id)
         .bind("book-1")
@@ -446,7 +492,18 @@ mod tests {
             .expect("convert-book success library row should be inserted");
         insert_series(&pool, "library-1", "series-1").await;
         sqlx::query(
-            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE) VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?)",
+            r#"
+            INSERT INTO BOOK (
+                ID,
+                NAME,
+                URL,
+                LIBRARY_ID,
+                SERIES_ID,
+                FILE_LAST_MODIFIED,
+                FILE_SIZE
+            )
+            VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?)
+            "#,
         )
         .bind(book_id)
         .bind("book-1")
@@ -469,7 +526,19 @@ mod tests {
         .await
         .expect("convert-book success media row should be inserted");
         sqlx::query(
-            "INSERT INTO MEDIA_PAGE (FILE_NAME, MEDIA_TYPE, NUMBER, BOOK_ID, width, height, FILE_HASH, FILE_SIZE) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)",
+            r#"
+            INSERT INTO MEDIA_PAGE (
+                FILE_NAME,
+                MEDIA_TYPE,
+                NUMBER,
+                BOOK_ID,
+                width,
+                height,
+                FILE_HASH,
+                FILE_SIZE
+            )
+            VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)
+            "#,
         )
         .bind(&preserved_page.file_name)
         .bind(page_media_type_for_test(&preserved_page.file_name))
@@ -633,7 +702,18 @@ mod tests {
             .expect("repair-extension per-book library row should be inserted");
         insert_series(&pool, "library-1", "series-1").await;
         sqlx::query(
-            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE) VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?)",
+            r#"
+            INSERT INTO BOOK (
+                ID,
+                NAME,
+                URL,
+                LIBRARY_ID,
+                SERIES_ID,
+                FILE_LAST_MODIFIED,
+                FILE_SIZE
+            )
+            VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?)
+            "#,
         )
         .bind(book_id)
         .bind("repair-book")

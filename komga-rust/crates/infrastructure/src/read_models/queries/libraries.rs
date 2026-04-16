@@ -95,25 +95,27 @@ pub(in crate::read_models) async fn list_persisted_libraries_sqlx(
     }
 
     let mut builder = QueryBuilder::<Sqlite>::new(
-        "SELECT ID AS id, NAME AS name, ROOT AS root, \
-                IMPORT_COMICINFO_BOOK AS import_comicinfo_book, \
-                IMPORT_COMICINFO_SERIES AS import_comicinfo_series, \
-                IMPORT_COMICINFO_COLLECTION AS import_comicinfo_collection, \
-                IMPORT_COMICINFO_READLIST AS import_comicinfo_readlist, \
-                IMPORT_COMICINFO_SERIES_APPEND_VOLUME AS import_comicinfo_series_append_volume, \
-                IMPORT_EPUB_BOOK AS import_epub_book, IMPORT_EPUB_SERIES AS import_epub_series, \
-                IMPORT_MYLAR_SERIES AS import_mylar_series, \
-                IMPORT_LOCAL_ARTWORK AS import_local_artwork, \
-                IMPORT_BARCODE_ISBN AS import_barcode_isbn, \
-                SCAN_FORCE_MODIFIED_TIME AS scan_force_modified_time, \
-                SCAN_INTERVAL AS scan_interval, SCAN_STARTUP AS scan_startup, \
-                SCAN_CBX AS scan_cbx, SCAN_PDF AS scan_pdf, SCAN_EPUB AS scan_epub, \
-                REPAIR_EXTENSIONS AS repair_extensions, CONVERT_TO_CBZ AS convert_to_cbz, \
-                EMPTY_TRASH_AFTER_SCAN AS empty_trash_after_scan, SERIES_COVER AS series_cover, \
-                HASH_FILES AS hash_files, HASH_PAGES AS hash_pages, \
-                HASH_KOREADER AS hash_koreader, ANALYZE_DIMENSIONS AS analyze_dimensions, \
-                ONESHOTS_DIRECTORY AS oneshots_directory, UNAVAILABLE_DATE AS unavailable_date \
-         FROM LIBRARY",
+        r#"
+        SELECT ID AS id, NAME AS name, ROOT AS root,
+               IMPORT_COMICINFO_BOOK AS import_comicinfo_book,
+               IMPORT_COMICINFO_SERIES AS import_comicinfo_series,
+               IMPORT_COMICINFO_COLLECTION AS import_comicinfo_collection,
+               IMPORT_COMICINFO_READLIST AS import_comicinfo_readlist,
+               IMPORT_COMICINFO_SERIES_APPEND_VOLUME AS import_comicinfo_series_append_volume,
+               IMPORT_EPUB_BOOK AS import_epub_book, IMPORT_EPUB_SERIES AS import_epub_series,
+               IMPORT_MYLAR_SERIES AS import_mylar_series,
+               IMPORT_LOCAL_ARTWORK AS import_local_artwork,
+               IMPORT_BARCODE_ISBN AS import_barcode_isbn,
+               SCAN_FORCE_MODIFIED_TIME AS scan_force_modified_time,
+               SCAN_INTERVAL AS scan_interval, SCAN_STARTUP AS scan_startup,
+               SCAN_CBX AS scan_cbx, SCAN_PDF AS scan_pdf, SCAN_EPUB AS scan_epub,
+               REPAIR_EXTENSIONS AS repair_extensions, CONVERT_TO_CBZ AS convert_to_cbz,
+               EMPTY_TRASH_AFTER_SCAN AS empty_trash_after_scan, SERIES_COVER AS series_cover,
+               HASH_FILES AS hash_files, HASH_PAGES AS hash_pages,
+               HASH_KOREADER AS hash_koreader, ANALYZE_DIMENSIONS AS analyze_dimensions,
+               ONESHOTS_DIRECTORY AS oneshots_directory, UNAVAILABLE_DATE AS unavailable_date
+        FROM LIBRARY
+        "#,
     );
     let mut state = SqlxWhereState::default();
     if let Some(allowed_ids) = allowed.as_ref() {
@@ -147,25 +149,27 @@ pub(in crate::read_models) async fn get_persisted_library_sqlx(
     }
 
     let mut builder = QueryBuilder::<Sqlite>::new(
-        "SELECT ID AS id, NAME AS name, ROOT AS root, \
-                IMPORT_COMICINFO_BOOK AS import_comicinfo_book, \
-                IMPORT_COMICINFO_SERIES AS import_comicinfo_series, \
-                IMPORT_COMICINFO_COLLECTION AS import_comicinfo_collection, \
-                IMPORT_COMICINFO_READLIST AS import_comicinfo_readlist, \
-                IMPORT_COMICINFO_SERIES_APPEND_VOLUME AS import_comicinfo_series_append_volume, \
-                IMPORT_EPUB_BOOK AS import_epub_book, IMPORT_EPUB_SERIES AS import_epub_series, \
-                IMPORT_MYLAR_SERIES AS import_mylar_series, \
-                IMPORT_LOCAL_ARTWORK AS import_local_artwork, \
-                IMPORT_BARCODE_ISBN AS import_barcode_isbn, \
-                SCAN_FORCE_MODIFIED_TIME AS scan_force_modified_time, \
-                SCAN_INTERVAL AS scan_interval, SCAN_STARTUP AS scan_startup, \
-                SCAN_CBX AS scan_cbx, SCAN_PDF AS scan_pdf, SCAN_EPUB AS scan_epub, \
-                REPAIR_EXTENSIONS AS repair_extensions, CONVERT_TO_CBZ AS convert_to_cbz, \
-                EMPTY_TRASH_AFTER_SCAN AS empty_trash_after_scan, SERIES_COVER AS series_cover, \
-                HASH_FILES AS hash_files, HASH_PAGES AS hash_pages, \
-                HASH_KOREADER AS hash_koreader, ANALYZE_DIMENSIONS AS analyze_dimensions, \
-                ONESHOTS_DIRECTORY AS oneshots_directory, UNAVAILABLE_DATE AS unavailable_date \
-         FROM LIBRARY",
+        r#"
+        SELECT ID AS id, NAME AS name, ROOT AS root,
+               IMPORT_COMICINFO_BOOK AS import_comicinfo_book,
+               IMPORT_COMICINFO_SERIES AS import_comicinfo_series,
+               IMPORT_COMICINFO_COLLECTION AS import_comicinfo_collection,
+               IMPORT_COMICINFO_READLIST AS import_comicinfo_readlist,
+               IMPORT_COMICINFO_SERIES_APPEND_VOLUME AS import_comicinfo_series_append_volume,
+               IMPORT_EPUB_BOOK AS import_epub_book, IMPORT_EPUB_SERIES AS import_epub_series,
+               IMPORT_MYLAR_SERIES AS import_mylar_series,
+               IMPORT_LOCAL_ARTWORK AS import_local_artwork,
+               IMPORT_BARCODE_ISBN AS import_barcode_isbn,
+               SCAN_FORCE_MODIFIED_TIME AS scan_force_modified_time,
+               SCAN_INTERVAL AS scan_interval, SCAN_STARTUP AS scan_startup,
+               SCAN_CBX AS scan_cbx, SCAN_PDF AS scan_pdf, SCAN_EPUB AS scan_epub,
+               REPAIR_EXTENSIONS AS repair_extensions, CONVERT_TO_CBZ AS convert_to_cbz,
+               EMPTY_TRASH_AFTER_SCAN AS empty_trash_after_scan, SERIES_COVER AS series_cover,
+               HASH_FILES AS hash_files, HASH_PAGES AS hash_pages,
+               HASH_KOREADER AS hash_koreader, ANALYZE_DIMENSIONS AS analyze_dimensions,
+               ONESHOTS_DIRECTORY AS oneshots_directory, UNAVAILABLE_DATE AS unavailable_date
+        FROM LIBRARY
+        "#,
     );
     let mut state = SqlxWhereState::default();
     append_clause_sqlx("ID = ", &mut builder, &mut state);
@@ -187,10 +191,12 @@ pub(in crate::read_models) async fn get_persisted_library_sqlx(
 
     let mut library = PersistedLibraryReadModel::from(row);
     let exclusions = sqlx::query_as::<_, SqlxLibraryExclusionRow>(
-        "SELECT LIBRARY_ID AS library_id, EXCLUSION AS exclusion \
-         FROM LIBRARY_EXCLUSIONS \
-         WHERE LIBRARY_ID = ? \
-         ORDER BY EXCLUSION COLLATE NOCASE ASC",
+        r#"
+        SELECT LIBRARY_ID AS library_id, EXCLUSION AS exclusion
+        FROM LIBRARY_EXCLUSIONS
+        WHERE LIBRARY_ID = ?
+        ORDER BY EXCLUSION COLLATE NOCASE ASC
+        "#,
     )
     .bind(library_id)
     .fetch_all(&pool)
@@ -220,8 +226,10 @@ async fn attach_library_exclusions(
         .collect::<HashMap<_, _>>();
 
     let mut builder = QueryBuilder::<Sqlite>::new(
-        "SELECT LIBRARY_ID AS library_id, EXCLUSION AS exclusion \
-         FROM LIBRARY_EXCLUSIONS",
+        r#"
+        SELECT LIBRARY_ID AS library_id, EXCLUSION AS exclusion
+        FROM LIBRARY_EXCLUSIONS
+        "#,
     );
     let mut state = SqlxWhereState::default();
     append_in_clause_sqlx("LIBRARY_ID", &library_ids, &mut builder, &mut state);

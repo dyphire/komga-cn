@@ -50,14 +50,14 @@ pub async fn load_persisted_book_media(
         .map_err(|error| format!("open book media db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT b.LIBRARY_ID AS LIBRARY_ID, b.NAME AS FILE_NAME, b.URL AS BOOK_URL, \
-                l.ROOT AS LIBRARY_ROOT, \
-                COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE, \
-                COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT \
-         FROM BOOK b \
-         JOIN LIBRARY l ON l.ID = b.LIBRARY_ID \
-         LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID \
-         WHERE b.ID = ?",
+        r#"SELECT b.LIBRARY_ID AS LIBRARY_ID, b.NAME AS FILE_NAME, b.URL AS BOOK_URL,
+            l.ROOT AS LIBRARY_ROOT,
+            COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE,
+            COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT
+         FROM BOOK b
+         JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+         LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
+         WHERE b.ID = ?"#,
     )
     .bind(book_id)
     .fetch_optional(&pool)
@@ -113,8 +113,8 @@ pub async fn load_persisted_media_file_records(
         .map_err(|error| format!("open book media file records db: {error}"))?;
 
     sqlx::query(
-        "SELECT FILE_NAME, COALESCE(MEDIA_TYPE, '') AS MEDIA_TYPE, SUB_TYPE \
-         FROM MEDIA_FILE WHERE BOOK_ID = ? ORDER BY FILE_NAME ASC",
+        r#"SELECT FILE_NAME, COALESCE(MEDIA_TYPE, '') AS MEDIA_TYPE, SUB_TYPE
+         FROM MEDIA_FILE WHERE BOOK_ID = ? ORDER BY FILE_NAME ASC"#,
     )
     .bind(book_id)
     .fetch_all(&pool)
@@ -168,13 +168,13 @@ pub async fn load_persisted_series_thumbnail_media(
         .await
         .map_err(|error| format!("open series thumbnail db: {error}"))?;
     let row = sqlx::query(
-        "SELECT b.NAME AS FILE_NAME, b.URL AS BOOK_URL, l.ROOT AS LIBRARY_ROOT, \
-                COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE \
-         FROM BOOK b \
-         JOIN LIBRARY l ON l.ID = b.LIBRARY_ID \
-         LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID \
-         WHERE b.SERIES_ID = ? AND b.DELETED_DATE IS NULL \
-         ORDER BY b.NUMBER ASC, b.ID ASC LIMIT 1",
+        r#"SELECT b.NAME AS FILE_NAME, b.URL AS BOOK_URL, l.ROOT AS LIBRARY_ROOT,
+            COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE
+         FROM BOOK b
+         JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+         LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
+         WHERE b.SERIES_ID = ? AND b.DELETED_DATE IS NULL
+         ORDER BY b.NUMBER ASC, b.ID ASC LIMIT 1"#,
     )
     .bind(series_id)
     .fetch_optional(&pool)
@@ -204,8 +204,9 @@ pub async fn load_persisted_book_pages(
         .await
         .map_err(|error| format!("open book pages db: {error}"))?;
     let rows = sqlx::query(
-        "SELECT NUMBER, FILE_NAME, MEDIA_TYPE, WIDTH, HEIGHT, CASE WHEN FILE_SIZE IS NULL THEN -1 ELSE FILE_SIZE END AS FILE_SIZE \
-         FROM MEDIA_PAGE WHERE BOOK_ID = ? ORDER BY NUMBER ASC",
+        r#"SELECT NUMBER, FILE_NAME, MEDIA_TYPE, WIDTH, HEIGHT,
+            CASE WHEN FILE_SIZE IS NULL THEN -1 ELSE FILE_SIZE END AS FILE_SIZE
+         FROM MEDIA_PAGE WHERE BOOK_ID = ? ORDER BY NUMBER ASC"#,
     )
     .bind(book_id)
     .fetch_all(&pool)
@@ -231,8 +232,9 @@ pub async fn load_persisted_book_page_row(
     };
 
     let row = sqlx::query(
-        "SELECT NUMBER, FILE_NAME, MEDIA_TYPE, WIDTH, HEIGHT, CASE WHEN FILE_SIZE IS NULL THEN -1 ELSE FILE_SIZE END AS FILE_SIZE \
-         FROM MEDIA_PAGE WHERE BOOK_ID = ? AND NUMBER = ? LIMIT 1",
+        r#"SELECT NUMBER, FILE_NAME, MEDIA_TYPE, WIDTH, HEIGHT,
+            CASE WHEN FILE_SIZE IS NULL THEN -1 ELSE FILE_SIZE END AS FILE_SIZE
+         FROM MEDIA_PAGE WHERE BOOK_ID = ? AND NUMBER = ? LIMIT 1"#,
     )
     .bind(book_id)
     .bind(persisted_page_number)
@@ -300,10 +302,12 @@ async fn load_series_id_by_sorted_position(
         .await
         .map_err(|error| format!("open series-id remap db: {error}"))?;
     let row = sqlx::query(
-        "SELECT s.ID AS ID FROM SERIES s LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
-         WHERE s.DELETED_DATE IS NULL \
-         ORDER BY COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC, s.ID ASC \
-         LIMIT 1 OFFSET ?",
+        r#"SELECT s.ID AS ID
+         FROM SERIES s
+         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
+         WHERE s.DELETED_DATE IS NULL
+         ORDER BY COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC, s.ID ASC
+         LIMIT 1 OFFSET ?"#,
     )
     .bind((index - 1) as i64)
     .fetch_optional(&pool)
@@ -323,9 +327,11 @@ async fn load_book_id_by_sorted_position(
         .await
         .map_err(|error| format!("open book-id remap db: {error}"))?;
     let row = sqlx::query(
-        "SELECT b.ID AS ID FROM BOOK b LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
-         WHERE b.DELETED_DATE IS NULL \
-         ORDER BY COALESCE(bm.TITLE, b.NAME) COLLATE NOCASE ASC, b.ID ASC LIMIT 1 OFFSET ?",
+        r#"SELECT b.ID AS ID
+         FROM BOOK b
+         LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
+         WHERE b.DELETED_DATE IS NULL
+         ORDER BY COALESCE(bm.TITLE, b.NAME) COLLATE NOCASE ASC, b.ID ASC LIMIT 1 OFFSET ?"#,
     )
     .bind((index - 1) as i64)
     .fetch_optional(&pool)
@@ -419,9 +425,11 @@ pub async fn load_series_book_ids(
         .await
         .map_err(|error| format!("open series books db: {error}"))?;
     let rows = sqlx::query(
-        "SELECT b.ID AS ID FROM BOOK b LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
-         WHERE b.SERIES_ID = ? AND b.DELETED_DATE IS NULL \
-         ORDER BY COALESCE(bm.NUMBER_SORT, 0) ASC, b.ID ASC",
+        r#"SELECT b.ID AS ID
+         FROM BOOK b
+         LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
+         WHERE b.SERIES_ID = ? AND b.DELETED_DATE IS NULL
+         ORDER BY COALESCE(bm.NUMBER_SORT, 0) ASC, b.ID ASC"#,
     )
     .bind(series_id)
     .fetch_all(&pool)
@@ -444,10 +452,11 @@ pub async fn load_series_book_number_sorts(
         .await
         .map_err(|error| format!("open series number sort db: {error}"))?;
     let rows = sqlx::query(
-        "SELECT b.ID AS ID, COALESCE(bm.NUMBER_SORT, 0) AS NUMBER_SORT \
-         FROM BOOK b LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
-         WHERE b.SERIES_ID = ? AND b.DELETED_DATE IS NULL \
-         ORDER BY COALESCE(bm.NUMBER_SORT, 0) ASC, b.ID ASC",
+        r#"SELECT b.ID AS ID, COALESCE(bm.NUMBER_SORT, 0) AS NUMBER_SORT
+         FROM BOOK b
+         LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
+         WHERE b.SERIES_ID = ? AND b.DELETED_DATE IS NULL
+         ORDER BY COALESCE(bm.NUMBER_SORT, 0) ASC, b.ID ASC"#,
     )
     .bind(series_id)
     .fetch_all(&pool)
@@ -471,13 +480,13 @@ pub async fn load_book_restrictions(
         .await
         .map_err(|error| format!("open book restrictions db: {error}"))?;
     let row = sqlx::query(
-        "SELECT sm.AGE_RATING AS AGE_RATING, COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS LABELS \
-         FROM BOOK b \
-         JOIN SERIES s ON s.ID = b.SERIES_ID \
-         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
-         LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
-         WHERE b.ID = ? \
-         GROUP BY sm.AGE_RATING",
+        r#"SELECT sm.AGE_RATING AS AGE_RATING, COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS LABELS
+         FROM BOOK b
+         JOIN SERIES s ON s.ID = b.SERIES_ID
+         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
+         LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID
+         WHERE b.ID = ?
+         GROUP BY sm.AGE_RATING"#,
     )
     .bind(book_id)
     .fetch_optional(&pool)
@@ -511,13 +520,13 @@ pub async fn load_persisted_manifest_book(
         .await
         .map_err(|error| format!("open manifest book db: {error}"))?;
     let row = sqlx::query(
-        "SELECT b.LIBRARY_ID AS LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE, \
-                b.NAME AS FILE_NAME, \
-                COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE \
-         FROM BOOK b \
-         LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
-         LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID \
-         WHERE b.ID = ?",
+        r#"SELECT b.LIBRARY_ID AS LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE,
+            b.NAME AS FILE_NAME,
+            COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE
+         FROM BOOK b
+         LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
+         LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
+         WHERE b.ID = ?"#,
     )
     .bind(book_id)
     .fetch_optional(&pool)
@@ -578,12 +587,12 @@ pub async fn load_readlist_archive_entries(
         .await
         .map_err(|error| format!("open readlist archive db: {error}"))?;
     let rows = sqlx::query(
-        "SELECT b.NAME AS FILE_NAME, b.URL AS BOOK_URL, l.ROOT AS LIBRARY_ROOT \
-         FROM READLIST_BOOK rb \
-         JOIN BOOK b ON b.ID = rb.BOOK_ID \
-         JOIN LIBRARY l ON l.ID = b.LIBRARY_ID \
-         WHERE rb.READLIST_ID = ? \
-         ORDER BY rb.NUMBER ASC",
+        r#"SELECT b.NAME AS FILE_NAME, b.URL AS BOOK_URL, l.ROOT AS LIBRARY_ROOT
+         FROM READLIST_BOOK rb
+         JOIN BOOK b ON b.ID = rb.BOOK_ID
+         JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+         WHERE rb.READLIST_ID = ?
+         ORDER BY rb.NUMBER ASC"#,
     )
     .bind(readlist_id)
     .fetch_all(&pool)
@@ -616,11 +625,11 @@ pub async fn load_series_archive_entries(
         .await
         .map_err(|error| format!("open series archive db: {error}"))?;
     let series_row = sqlx::query(
-        "SELECT s.LIBRARY_ID AS LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE \
-         FROM SERIES s \
-         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
-         WHERE s.ID = ? \
-         LIMIT 1",
+        r#"SELECT s.LIBRARY_ID AS LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE
+         FROM SERIES s
+         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
+         WHERE s.ID = ?
+         LIMIT 1"#,
     )
     .bind(series_id)
     .fetch_optional(&pool)
@@ -633,11 +642,11 @@ pub async fn load_series_archive_entries(
     let library_id = series_row.get::<String, _>("LIBRARY_ID");
     let series_title = series_row.get::<String, _>("SERIES_TITLE");
     let rows = sqlx::query(
-        "SELECT b.NAME AS FILE_NAME, b.URL AS BOOK_URL, l.ROOT AS LIBRARY_ROOT \
-         FROM BOOK b \
-         JOIN LIBRARY l ON l.ID = b.LIBRARY_ID \
-         WHERE b.SERIES_ID = ? AND b.DELETED_DATE IS NULL \
-         ORDER BY b.NUMBER ASC, b.ID ASC",
+        r#"SELECT b.NAME AS FILE_NAME, b.URL AS BOOK_URL, l.ROOT AS LIBRARY_ROOT
+         FROM BOOK b
+         JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+         WHERE b.SERIES_ID = ? AND b.DELETED_DATE IS NULL
+         ORDER BY b.NUMBER ASC, b.ID ASC"#,
     )
     .bind(series_id)
     .fetch_all(&pool)

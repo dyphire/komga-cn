@@ -128,14 +128,13 @@ pub async fn load_persisted_series_resource(
         .map_err(|error| format!("open series detail db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT s.LIBRARY_ID, sm.AGE_RATING, \
-                COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS \
-         FROM SERIES s \
-         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
-         LEFT \
-         JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
-         WHERE s.ID = ? \
-         GROUP BY s.LIBRARY_ID, sm.AGE_RATING",
+        r#"SELECT s.LIBRARY_ID, sm.AGE_RATING,
+                COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS
+         FROM SERIES s
+         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
+         LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID
+         WHERE s.ID = ?
+         GROUP BY s.LIBRARY_ID, sm.AGE_RATING"#,
     )
     .bind(series_id)
     .fetch_optional(&pool)
@@ -160,14 +159,13 @@ pub async fn load_series_id_by_sorted_position(
         .map_err(|error| format!("open series-id remap db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT s.ID AS ID \
-         FROM SERIES s \
-         LEFT \
-         JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
-         WHERE s.DELETED_DATE IS NULL \
-         ORDER BY COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC, s.ID ASC \
-         LIMIT 1 \
-         OFFSET ?",
+        r#"SELECT s.ID AS ID
+         FROM SERIES s
+         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
+         WHERE s.DELETED_DATE IS NULL
+         ORDER BY COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC, s.ID ASC
+         LIMIT 1
+         OFFSET ?"#,
     )
     .bind((index - 1) as i64)
     .fetch_optional(&pool)
@@ -186,28 +184,27 @@ pub async fn load_persisted_series_detail(
         .map_err(|error| format!("open series detail db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT s.ID AS ID, s.LIBRARY_ID AS LIBRARY_ID, s.NAME AS NAME, s.URL AS URL, \
-                s.CREATED_DATE AS CREATED_DATE, s.LAST_MODIFIED_DATE AS LAST_MODIFIED_DATE, \
-                CAST(s.FILE_LAST_MODIFIED AS TEXT) AS FILE_LAST_MODIFIED, s.ONESHOT AS ONESHOT, \
-                s.DELETED_DATE AS DELETED_DATE, COALESCE(sm.STATUS, 'ONGOING') AS STATUS, \
-                COALESCE(sm.TITLE, s.NAME) AS TITLE, \
-                COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) AS TITLE_SORT, \
-                COALESCE(sm.SUMMARY, '') AS SUMMARY, \
-                COALESCE(sm.READING_DIRECTION, '') AS READING_DIRECTION, \
-                COALESCE(sm.PUBLISHER, '') AS PUBLISHER, sm.AGE_RATING AS AGE_RATING, \
-                COALESCE(sm.LANGUAGE, '') AS LANGUAGE, \
-                COALESCE(sm.CREATED_DATE, s.CREATED_DATE) AS METADATA_CREATED, \
-                COALESCE(sm.LAST_MODIFIED_DATE, s.LAST_MODIFIED_DATE) AS METADATA_LAST_MODIFIED, \
-                COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS \
-         FROM SERIES s \
-         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
-         LEFT \
-         JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
-         WHERE s.ID = ? \
-           GROUP BY s.ID, s.LIBRARY_ID, s.NAME, s.URL, s.CREATED_DATE, s.LAST_MODIFIED_DATE, \
-                    s.FILE_LAST_MODIFIED, s.ONESHOT, s.DELETED_DATE, sm.STATUS, sm.TITLE, \
-                   sm.SUMMARY, sm.READING_DIRECTION, sm.PUBLISHER, sm.AGE_RATING, sm.LANGUAGE, \
-                   METADATA_CREATED, METADATA_LAST_MODIFIED",
+        r#"SELECT s.ID AS ID, s.LIBRARY_ID AS LIBRARY_ID, s.NAME AS NAME, s.URL AS URL,
+                s.CREATED_DATE AS CREATED_DATE, s.LAST_MODIFIED_DATE AS LAST_MODIFIED_DATE,
+                CAST(s.FILE_LAST_MODIFIED AS TEXT) AS FILE_LAST_MODIFIED, s.ONESHOT AS ONESHOT,
+                s.DELETED_DATE AS DELETED_DATE, COALESCE(sm.STATUS, 'ONGOING') AS STATUS,
+                COALESCE(sm.TITLE, s.NAME) AS TITLE,
+                COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) AS TITLE_SORT,
+                COALESCE(sm.SUMMARY, '') AS SUMMARY,
+                COALESCE(sm.READING_DIRECTION, '') AS READING_DIRECTION,
+                COALESCE(sm.PUBLISHER, '') AS PUBLISHER, sm.AGE_RATING AS AGE_RATING,
+                COALESCE(sm.LANGUAGE, '') AS LANGUAGE,
+                COALESCE(sm.CREATED_DATE, s.CREATED_DATE) AS METADATA_CREATED,
+                COALESCE(sm.LAST_MODIFIED_DATE, s.LAST_MODIFIED_DATE) AS METADATA_LAST_MODIFIED,
+                COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS
+         FROM SERIES s
+         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
+         LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID
+         WHERE s.ID = ?
+         GROUP BY s.ID, s.LIBRARY_ID, s.NAME, s.URL, s.CREATED_DATE, s.LAST_MODIFIED_DATE,
+                  s.FILE_LAST_MODIFIED, s.ONESHOT, s.DELETED_DATE, sm.STATUS, sm.TITLE,
+                  sm.SUMMARY, sm.READING_DIRECTION, sm.PUBLISHER, sm.AGE_RATING, sm.LANGUAGE,
+                  METADATA_CREATED, METADATA_LAST_MODIFIED"#,
     )
     .bind(series_id)
     .fetch_optional(&pool)
@@ -219,9 +216,9 @@ pub async fn load_persisted_series_detail(
     };
 
     let books_count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) \
-         FROM BOOK \
-         WHERE SERIES_ID = ?",
+        r#"SELECT COUNT(*)
+         FROM BOOK
+         WHERE SERIES_ID = ?"#,
     )
     .bind(series_id)
     .fetch_one(&pool)
@@ -266,11 +263,11 @@ pub async fn load_persisted_series_collections(
         .map_err(|error| format!("open series collection db: {error}"))?;
 
     let rows = sqlx::query(
-        "SELECT c.ID, c.NAME, c.ORDERED, c.CREATED_DATE, c.LAST_MODIFIED_DATE \
-         FROM COLLECTION c \
-         JOIN COLLECTION_SERIES cs ON cs.COLLECTION_ID = c.ID \
-         WHERE cs.SERIES_ID = ? \
-         ORDER BY c.NAME COLLATE NOCASE ASC",
+        r#"SELECT c.ID, c.NAME, c.ORDERED, c.CREATED_DATE, c.LAST_MODIFIED_DATE
+         FROM COLLECTION c
+         JOIN COLLECTION_SERIES cs ON cs.COLLECTION_ID = c.ID
+         WHERE cs.SERIES_ID = ?
+         ORDER BY c.NAME COLLATE NOCASE ASC"#,
     )
     .bind(series_id)
     .fetch_all(&pool)
@@ -281,10 +278,10 @@ pub async fn load_persisted_series_collections(
     for row in rows {
         let collection_id = row.get::<String, _>("ID");
         let series_ids_rows = sqlx::query(
-            "SELECT SERIES_ID \
-             FROM COLLECTION_SERIES \
-             WHERE COLLECTION_ID = ? \
-             ORDER BY NUMBER ASC",
+            r#"SELECT SERIES_ID
+             FROM COLLECTION_SERIES
+             WHERE COLLECTION_ID = ?
+             ORDER BY NUMBER ASC"#,
         )
         .bind(collection_id.clone())
         .fetch_all(&pool)
@@ -316,13 +313,13 @@ pub async fn load_existing_series_metadata(
         .map_err(|error| format!("open series metadata db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT STATUS, STATUS_LOCK, TITLE, TITLE_LOCK, TITLE_SORT, TITLE_SORT_LOCK, SUMMARY, \
-                SUMMARY_LOCK, READING_DIRECTION, READING_DIRECTION_LOCK, PUBLISHER, \
-                PUBLISHER_LOCK, AGE_RATING, AGE_RATING_LOCK, LANGUAGE, LANGUAGE_LOCK, \
-                GENRES_LOCK, TAGS_LOCK, TOTAL_BOOK_COUNT, TOTAL_BOOK_COUNT_LOCK, \
-                SHARING_LABELS_LOCK, LINKS_LOCK, ALTERNATE_TITLES_LOCK \
-         FROM SERIES_METADATA \
-         WHERE SERIES_ID = ?",
+        r#"SELECT STATUS, STATUS_LOCK, TITLE, TITLE_LOCK, TITLE_SORT, TITLE_SORT_LOCK, SUMMARY,
+                SUMMARY_LOCK, READING_DIRECTION, READING_DIRECTION_LOCK, PUBLISHER,
+                PUBLISHER_LOCK, AGE_RATING, AGE_RATING_LOCK, LANGUAGE, LANGUAGE_LOCK,
+                GENRES_LOCK, TAGS_LOCK, TOTAL_BOOK_COUNT, TOTAL_BOOK_COUNT_LOCK,
+                SHARING_LABELS_LOCK, LINKS_LOCK, ALTERNATE_TITLES_LOCK
+         FROM SERIES_METADATA
+         WHERE SERIES_ID = ?"#,
     )
     .bind(series_id)
     .fetch_optional(&pool)
@@ -334,7 +331,7 @@ pub async fn load_existing_series_metadata(
     };
 
     let genres = sqlx::query(
-        "SELECT GENRE FROM SERIES_METADATA_GENRE WHERE SERIES_ID = ? ORDER BY GENRE COLLATE NOCASE ASC",
+        r#"SELECT GENRE FROM SERIES_METADATA_GENRE WHERE SERIES_ID = ? ORDER BY GENRE COLLATE NOCASE ASC"#,
     )
     .bind(series_id)
     .fetch_all(&pool)
@@ -345,7 +342,7 @@ pub async fn load_existing_series_metadata(
     .collect::<Vec<_>>();
 
     let tags = sqlx::query(
-        "SELECT TAG FROM SERIES_METADATA_TAG WHERE SERIES_ID = ? ORDER BY TAG COLLATE NOCASE ASC",
+        r#"SELECT TAG FROM SERIES_METADATA_TAG WHERE SERIES_ID = ? ORDER BY TAG COLLATE NOCASE ASC"#,
     )
     .bind(series_id)
     .fetch_all(&pool)
@@ -356,18 +353,22 @@ pub async fn load_existing_series_metadata(
     .collect::<Vec<_>>();
 
     let sharing_labels = sqlx::query(
-        "SELECT LABEL FROM SERIES_METADATA_SHARING WHERE SERIES_ID = ? ORDER BY LABEL COLLATE NOCASE ASC",
+        r#"SELECT LABEL FROM SERIES_METADATA_SHARING
+             WHERE SERIES_ID = ?
+             ORDER BY LABEL COLLATE NOCASE ASC"#,
     )
     .bind(series_id)
     .fetch_all(&pool)
     .await
     .map_err(|error| format!("query existing series metadata sharing labels: {error}"))?
     .into_iter()
-        .map(|row| row.get::<String, _>("LABEL"))
-        .collect::<Vec<_>>();
+    .map(|row| row.get::<String, _>("LABEL"))
+    .collect::<Vec<_>>();
 
     let links = sqlx::query(
-        "SELECT LABEL, URL FROM SERIES_METADATA_LINK WHERE SERIES_ID = ? ORDER BY LABEL COLLATE NOCASE ASC, URL ASC",
+        r#"SELECT LABEL, URL FROM SERIES_METADATA_LINK
+             WHERE SERIES_ID = ?
+             ORDER BY LABEL COLLATE NOCASE ASC, URL ASC"#,
     )
     .bind(series_id)
     .fetch_all(&pool)
@@ -381,7 +382,9 @@ pub async fn load_existing_series_metadata(
     .collect::<Vec<_>>();
 
     let alternate_titles = sqlx::query(
-        "SELECT LABEL, TITLE FROM SERIES_METADATA_ALTERNATE_TITLE WHERE SERIES_ID = ? ORDER BY LABEL COLLATE NOCASE ASC, TITLE COLLATE NOCASE ASC",
+        r#"SELECT LABEL, TITLE FROM SERIES_METADATA_ALTERNATE_TITLE
+             WHERE SERIES_ID = ?
+             ORDER BY LABEL COLLATE NOCASE ASC, TITLE COLLATE NOCASE ASC"#,
     )
     .bind(series_id)
     .fetch_all(&pool)
@@ -445,15 +448,15 @@ pub async fn persist_series_metadata_update(
         .map_err(|error| format!("begin series metadata update tx: {error}"))?;
 
     let result = sqlx::query(
-        "UPDATE SERIES_METADATA \
-         SET STATUS = ?, STATUS_LOCK = ?, TITLE = ?, TITLE_LOCK = ?, TITLE_SORT = ?, \
-             TITLE_SORT_LOCK = ?, SUMMARY = ?, SUMMARY_LOCK = ?, READING_DIRECTION = ?, \
-             READING_DIRECTION_LOCK = ?, PUBLISHER = ?, PUBLISHER_LOCK = ?, AGE_RATING = ?, \
-             AGE_RATING_LOCK = ?, LANGUAGE = ?, LANGUAGE_LOCK = ?, GENRES_LOCK = ?, \
-             TAGS_LOCK = ?, TOTAL_BOOK_COUNT = ?, TOTAL_BOOK_COUNT_LOCK = ?, \
-             SHARING_LABELS_LOCK = ?, LINKS_LOCK = ?, ALTERNATE_TITLES_LOCK = ?, \
-             LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
-         WHERE SERIES_ID = ?",
+        r#"UPDATE SERIES_METADATA
+         SET STATUS = ?, STATUS_LOCK = ?, TITLE = ?, TITLE_LOCK = ?, TITLE_SORT = ?,
+             TITLE_SORT_LOCK = ?, SUMMARY = ?, SUMMARY_LOCK = ?, READING_DIRECTION = ?,
+             READING_DIRECTION_LOCK = ?, PUBLISHER = ?, PUBLISHER_LOCK = ?, AGE_RATING = ?,
+             AGE_RATING_LOCK = ?, LANGUAGE = ?, LANGUAGE_LOCK = ?, GENRES_LOCK = ?,
+             TAGS_LOCK = ?, TOTAL_BOOK_COUNT = ?, TOTAL_BOOK_COUNT_LOCK = ?,
+             SHARING_LABELS_LOCK = ?, LINKS_LOCK = ?, ALTERNATE_TITLES_LOCK = ?,
+             LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+         WHERE SERIES_ID = ?"#,
     )
     .bind(&update.status)
     .bind(update.status_lock)
@@ -531,7 +534,7 @@ async fn replace_series_metadata_strings(
     series_id: &str,
     values: &[String],
 ) -> Result<(), String> {
-    sqlx::query(&format!("DELETE FROM {table} WHERE SERIES_ID = ?"))
+    sqlx::query(&format!(r#"DELETE FROM {table} WHERE SERIES_ID = ?"#))
         .bind(series_id)
         .execute(&mut **tx)
         .await
@@ -539,7 +542,7 @@ async fn replace_series_metadata_strings(
 
     for value in values {
         sqlx::query(&format!(
-            "INSERT INTO {table} (SERIES_ID, {value_column}) VALUES (?, ?)"
+            r#"INSERT INTO {table} (SERIES_ID, {value_column}) VALUES (?, ?)"#
         ))
         .bind(series_id)
         .bind(value)
@@ -560,7 +563,7 @@ async fn replace_series_metadata_alternate_titles(
     series_id: &str,
     titles: &[SeriesAlternateTitleRecord],
 ) -> Result<(), String> {
-    sqlx::query("DELETE FROM SERIES_METADATA_ALTERNATE_TITLE WHERE SERIES_ID = ?")
+    sqlx::query(r#"DELETE FROM SERIES_METADATA_ALTERNATE_TITLE WHERE SERIES_ID = ?"#)
         .bind(series_id)
         .execute(&mut **tx)
         .await
@@ -570,7 +573,7 @@ async fn replace_series_metadata_alternate_titles(
 
     for title in titles {
         sqlx::query(
-            "INSERT INTO SERIES_METADATA_ALTERNATE_TITLE (SERIES_ID, LABEL, TITLE) VALUES (?, ?, ?)",
+            r#"INSERT INTO SERIES_METADATA_ALTERNATE_TITLE (SERIES_ID, LABEL, TITLE) VALUES (?, ?, ?)"#,
         )
         .bind(series_id)
         .bind(&title.label)
@@ -590,7 +593,7 @@ async fn replace_series_metadata_links(
     series_id: &str,
     links: &[SeriesMetadataLinkRecord],
 ) -> Result<(), String> {
-    sqlx::query("DELETE FROM SERIES_METADATA_LINK WHERE SERIES_ID = ?")
+    sqlx::query(r#"DELETE FROM SERIES_METADATA_LINK WHERE SERIES_ID = ?"#)
         .bind(series_id)
         .execute(&mut **tx)
         .await
@@ -599,7 +602,7 @@ async fn replace_series_metadata_links(
         })?;
 
     for link in links {
-        sqlx::query("INSERT INTO SERIES_METADATA_LINK (SERIES_ID, LABEL, URL) VALUES (?, ?, ?)")
+        sqlx::query(r#"INSERT INTO SERIES_METADATA_LINK (SERIES_ID, LABEL, URL) VALUES (?, ?, ?)"#)
             .bind(series_id)
             .bind(&link.label)
             .bind(&link.url)
@@ -622,9 +625,9 @@ pub async fn refresh_series_after_metadata_update(
         .map_err(|error| format!("open series metadata refresh db: {error}"))?;
 
     sqlx::query(
-        "UPDATE SERIES_METADATA \
-         SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
-         WHERE SERIES_ID = ?",
+        r#"UPDATE SERIES_METADATA
+         SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+         WHERE SERIES_ID = ?"#,
     )
     .bind(series_id)
     .execute(&pool)
@@ -632,9 +635,9 @@ pub async fn refresh_series_after_metadata_update(
     .map_err(|error| format!("refresh series metadata timestamp: {error}"))?;
 
     sqlx::query(
-        "UPDATE SERIES \
-         SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
-         WHERE ID = ?",
+        r#"UPDATE SERIES
+         SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+         WHERE ID = ?"#,
     )
     .bind(series_id)
     .execute(&pool)

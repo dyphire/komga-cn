@@ -385,7 +385,9 @@ async fn import_book_upgrade_preserves_epub_extension_blob() {
         .expect("existing upgraded file should exist");
 
     sqlx::query(
-        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, SERIES_ID, LIBRARY_ID, NAME, URL, FILE_SIZE, NUMBER) VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?)",
+        r#"INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, SERIES_ID, LIBRARY_ID, NAME, URL,
+                          FILE_SIZE, NUMBER)
+         VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?)"#,
     )
     .bind("book-upgrade")
     .bind(0_i64)

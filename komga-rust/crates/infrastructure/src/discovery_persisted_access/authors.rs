@@ -17,13 +17,13 @@ pub async fn load_persisted_author_names(
     }
 
     let mut query = QueryBuilder::<Sqlite>::new(
-        "SELECT DISTINCT a.NAME \
-         FROM BOOK_METADATA_AUTHOR a \
-         JOIN BOOK b ON b.ID = a.BOOK_ID",
+        r#"SELECT DISTINCT a.NAME
+         FROM BOOK_METADATA_AUTHOR a
+         JOIN BOOK b ON b.ID = a.BOOK_ID"#,
     );
 
     if let Some(authorized_library_ids) = authorized_library_ids {
-        query.push(" WHERE b.LIBRARY_ID IN (");
+        query.push(r#" WHERE b.LIBRARY_ID IN ("#);
         let mut separated = query.separated(",");
         for library_id in authorized_library_ids {
             separated.push_bind(library_id);
@@ -31,7 +31,7 @@ pub async fn load_persisted_author_names(
         separated.push_unseparated(")");
     }
 
-    query.push(" ORDER BY lower(a.NAME), a.NAME");
+    query.push(r#" ORDER BY lower(a.NAME), a.NAME"#);
 
     let rows = query
         .build()
@@ -62,13 +62,13 @@ pub async fn load_persisted_author_roles(
     }
 
     let mut query = QueryBuilder::<Sqlite>::new(
-        "SELECT DISTINCT a.ROLE \
-         FROM BOOK_METADATA_AUTHOR a \
-         JOIN BOOK b ON b.ID = a.BOOK_ID",
+        r#"SELECT DISTINCT a.ROLE
+         FROM BOOK_METADATA_AUTHOR a
+         JOIN BOOK b ON b.ID = a.BOOK_ID"#,
     );
 
     if let Some(authorized_library_ids) = authorized_library_ids {
-        query.push(" WHERE b.LIBRARY_ID IN (");
+        query.push(r#" WHERE b.LIBRARY_ID IN ("#);
         let mut separated = query.separated(",");
         for library_id in authorized_library_ids {
             separated.push_bind(library_id);
@@ -76,7 +76,7 @@ pub async fn load_persisted_author_roles(
         separated.push_unseparated(")");
     }
 
-    query.push(" ORDER BY lower(a.ROLE), a.ROLE");
+    query.push(r#" ORDER BY lower(a.ROLE), a.ROLE"#);
 
     let rows = query
         .build()
@@ -108,17 +108,17 @@ pub async fn load_persisted_authors_by_scope(
         .map_err(|error| format!("open v2 authors db: {error}"))?;
 
     let mut query = QueryBuilder::<Sqlite>::new(
-        "SELECT a.NAME, a.ROLE \
-         FROM BOOK_METADATA_AUTHOR a \
-         JOIN BOOK b ON b.ID = a.BOOK_ID",
+        r#"SELECT a.NAME, a.ROLE
+         FROM BOOK_METADATA_AUTHOR a
+         JOIN BOOK b ON b.ID = a.BOOK_ID"#,
     );
 
     let mut has_where = false;
     let mut push_condition = |query: &mut QueryBuilder<Sqlite>| {
         if has_where {
-            query.push(" AND ");
+            query.push(r#" AND "#);
         } else {
-            query.push(" WHERE ");
+            query.push(r#" WHERE "#);
             has_where = true;
         }
     };
@@ -130,7 +130,7 @@ pub async fn load_persisted_authors_by_scope(
                 return Ok(Vec::new());
             }
             push_condition(&mut query);
-            query.push("b.LIBRARY_ID IN (");
+            query.push(r#"b.LIBRARY_ID IN ("#);
             let mut separated = query.separated(",");
             for library_id in library_ids {
                 separated.push_bind(library_id);
@@ -138,20 +138,20 @@ pub async fn load_persisted_authors_by_scope(
             separated.push_unseparated(")");
         }
         AuthorsScope::Collection(collection_id) => {
-            query.push(" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = b.SERIES_ID");
+            query.push(r#" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = b.SERIES_ID"#);
             push_condition(&mut query);
-            query.push("cs.COLLECTION_ID = ");
+            query.push(r#"cs.COLLECTION_ID = "#);
             query.push_bind(collection_id);
         }
         AuthorsScope::Series(series_id) => {
             push_condition(&mut query);
-            query.push("b.SERIES_ID = ");
+            query.push(r#"b.SERIES_ID = "#);
             query.push_bind(series_id);
         }
         AuthorsScope::ReadList(readlist_id) => {
-            query.push(" JOIN READLIST_BOOK rb ON rb.BOOK_ID = b.ID");
+            query.push(r#" JOIN READLIST_BOOK rb ON rb.BOOK_ID = b.ID"#);
             push_condition(&mut query);
-            query.push("rb.READLIST_ID = ");
+            query.push(r#"rb.READLIST_ID = "#);
             query.push_bind(readlist_id);
         }
     }
@@ -169,7 +169,7 @@ pub async fn load_persisted_authors_by_scope(
         separated.push_unseparated(")");
     }
 
-    query.push(" ORDER BY lower(a.NAME), lower(a.ROLE), a.NAME, a.ROLE, b.ID");
+    query.push(r#" ORDER BY lower(a.NAME), lower(a.ROLE), a.NAME, a.ROLE, b.ID"#);
 
     let rows = query
         .build()

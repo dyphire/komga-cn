@@ -6,14 +6,17 @@ pub async fn load_persisted_library_ids(database_file: &FsPath) -> Result<Vec<St
         .map_err(|error| format!("open persisted browse-library db: {error}"))?;
 
     let rows = sqlx::query(
-        "SELECT LIBRARY_ID AS ID \
-         FROM ( SELECT DISTINCT LIBRARY_ID \
-         FROM SERIES \
-         WHERE DELETED_DATE IS NULL \
-         UNION SELECT DISTINCT LIBRARY_ID \
-         FROM BOOK \
-         WHERE DELETED_DATE IS NULL ) \
-         ORDER BY ID COLLATE NOCASE ASC, ID ASC",
+        r#"SELECT LIBRARY_ID AS ID
+         FROM (
+             SELECT DISTINCT LIBRARY_ID
+             FROM SERIES
+             WHERE DELETED_DATE IS NULL
+             UNION
+             SELECT DISTINCT LIBRARY_ID
+             FROM BOOK
+             WHERE DELETED_DATE IS NULL
+         )
+         ORDER BY ID COLLATE NOCASE ASC, ID ASC"#,
     )
     .fetch_all(&pool)
     .await
@@ -33,8 +36,8 @@ pub async fn load_collection_memberships(
         .map_err(|error| format!("open series collection db: {error}"))?;
 
     let rows = sqlx::query(
-        "SELECT SERIES_ID, COLLECTION_ID \
-         FROM COLLECTION_SERIES",
+        r#"SELECT SERIES_ID, COLLECTION_ID
+         FROM COLLECTION_SERIES"#,
     )
     .fetch_all(&pool)
     .await
@@ -58,8 +61,8 @@ pub async fn load_readlist_memberships(
         .map_err(|error| format!("open readlist memberships db: {error}"))?;
 
     let rows = sqlx::query(
-        "SELECT BOOK_ID, READLIST_ID \
-         FROM READLIST_BOOK",
+        r#"SELECT BOOK_ID, READLIST_ID
+         FROM READLIST_BOOK"#,
     )
     .fetch_all(&pool)
     .await

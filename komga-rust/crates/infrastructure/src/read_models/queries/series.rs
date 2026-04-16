@@ -82,8 +82,11 @@ pub(in crate::read_models) async fn list_series_sqlx(
     }
 
     let mut count_builder = QueryBuilder::<Sqlite>::new(
-        "SELECT COUNT(DISTINCT s.id) \
-                                     FROM series s",
+        r#"
+            SELECT COUNT(DISTINCT s.id)
+            FROM series s
+        "#,
+
     );
     let mut count_state = SqlxWhereState::default();
     apply_series_list_filters_sqlx(
@@ -103,13 +106,19 @@ pub(in crate::read_models) async fn list_series_sqlx(
     let offset = query.page.saturating_mul(safe_size);
 
     let mut select_builder = QueryBuilder::<Sqlite>::new(
-        "SELECT s.id AS id, s.library_id AS library_id, s.title AS title, \
-                s.created AS created, s.last_modified AS last_modified, \
-                s.release_date AS release_date, s.book_count AS book_count, \
-                COALESCE(GROUP_CONCAT(DISTINCT sl.label), '') AS labels \
-         FROM series s \
-         LEFT \
-         JOIN series_labels sl ON sl.series_id = s.id",
+        r#"
+            SELECT s.id AS id,
+                   s.library_id AS library_id,
+                   s.title AS title,
+                   s.created AS created,
+                   s.last_modified AS last_modified,
+                   s.release_date AS release_date,
+                   s.book_count AS book_count,
+                   COALESCE(GROUP_CONCAT(DISTINCT sl.label), '') AS labels
+            FROM series s
+            LEFT JOIN series_labels sl ON sl.series_id = s.id
+        "#,
+
     );
     let mut select_state = SqlxWhereState::default();
     apply_series_list_filters_sqlx(
@@ -120,7 +129,10 @@ pub(in crate::read_models) async fn list_series_sqlx(
         allowed.as_ref(),
     );
     select_builder.push(
-        " GROUP BY s.id, s.library_id, s.title, s.created, s.last_modified, s.release_date, s.book_count ORDER BY ",
+        r#"
+            GROUP BY s.id, s.library_id, s.title, s.created, s.last_modified, s.release_date, s.book_count ORDER BY
+        "#,
+
     );
     select_builder.push(series_order_sql(series_ordering_from_sorts(&query.sort)));
     select_builder.push(" LIMIT ");
@@ -188,36 +200,47 @@ pub(in crate::read_models) async fn get_series_detail_sqlx(
     }
 
     let mut builder = QueryBuilder::<Sqlite>::new(
-        "SELECT s.id AS id, s.library_id AS library_id, s.title AS title, s.url AS url, \
-                s.created AS created, s.last_modified AS last_modified, \
-                s.file_last_modified AS file_last_modified, s.status AS status, \
-                s.publisher AS publisher, s.age_rating AS age_rating, s.language AS language, \
-                s.deleted AS deleted, s.oneshot AS oneshot, \
-                COALESCE(GROUP_CONCAT(DISTINCT sl.label), '') AS sharing_labels, \
-                COALESCE(GROUP_CONCAT(DISTINCT sg.genre), '') AS genres, \
-                COALESCE(GROUP_CONCAT(DISTINCT st.tag), '') AS tags, COALESCE((SELECT COUNT(*) \
-         FROM books b \
-         WHERE b.series_id = s.id), 0) AS books_count, COALESCE((SELECT COUNT(*) \
-         FROM books b \
-         WHERE b.series_id = s.id \
-         AND LOWER(b.read_status) = 'read'), 0) AS books_read_count, COALESCE((SELECT COUNT(*) \
-         FROM books b \
-         WHERE b.series_id = s.id \
-         AND LOWER(b.read_status) = 'unread'), 0) AS books_unread_count, \
-           COALESCE((SELECT COUNT(*) \
-         FROM books b \
-         WHERE b.series_id = s.id \
-         AND LOWER(b.read_status) = 'in_progress'), 0) AS books_in_progress_count, \
-           COALESCE((SELECT MIN(b.metadata_release_date) \
-         FROM books b \
-         WHERE b.series_id = s.id), NULL) AS books_metadata_release_date \
-         FROM series s \
-         LEFT \
-         JOIN series_labels sl ON sl.series_id = s.id \
-         LEFT \
-         JOIN series_genres sg ON sg.series_id = s.id \
-         LEFT \
-         JOIN series_tags st ON st.series_id = s.id",
+        r#"
+            SELECT s.id AS id,
+                   s.library_id AS library_id,
+                   s.title AS title,
+                   s.url AS url,
+                   s.created AS created,
+                   s.last_modified AS last_modified,
+                   s.file_last_modified AS file_last_modified,
+                   s.status AS status,
+                   s.publisher AS publisher,
+                   s.age_rating AS age_rating,
+                   s.language AS language,
+                   s.deleted AS deleted,
+                   s.oneshot AS oneshot,
+                   COALESCE(GROUP_CONCAT(DISTINCT sl.label), '') AS sharing_labels,
+                   COALESCE(GROUP_CONCAT(DISTINCT sg.genre), '') AS genres,
+                   COALESCE(GROUP_CONCAT(DISTINCT st.tag), '') AS tags,
+                   COALESCE((SELECT COUNT(*)
+                             FROM books b
+                             WHERE b.series_id = s.id), 0) AS books_count,
+                   COALESCE((SELECT COUNT(*)
+                             FROM books b
+                             WHERE b.series_id = s.id
+                             AND LOWER(b.read_status) = 'read'), 0) AS books_read_count,
+                   COALESCE((SELECT COUNT(*)
+                             FROM books b
+                             WHERE b.series_id = s.id
+                             AND LOWER(b.read_status) = 'unread'), 0) AS books_unread_count,
+                   COALESCE((SELECT COUNT(*)
+                             FROM books b
+                             WHERE b.series_id = s.id
+                             AND LOWER(b.read_status) = 'in_progress'), 0) AS books_in_progress_count,
+                   COALESCE((SELECT MIN(b.metadata_release_date)
+                             FROM books b
+                             WHERE b.series_id = s.id), NULL) AS books_metadata_release_date
+            FROM series s
+            LEFT JOIN series_labels sl ON sl.series_id = s.id
+            LEFT JOIN series_genres sg ON sg.series_id = s.id
+            LEFT JOIN series_tags st ON st.series_id = s.id
+        "#,
+
     );
     let mut state = SqlxWhereState::default();
 
@@ -234,8 +257,11 @@ pub(in crate::read_models) async fn get_series_detail_sqlx(
     }
 
     builder.push(
-        " GROUP BY s.id, s.library_id, s.title, s.url, s.created, s.last_modified, s.file_last_modified, \
-           s.status, s.publisher, s.age_rating, s.language, s.deleted, s.oneshot",
+        r#"
+            GROUP BY s.id, s.library_id, s.title, s.url, s.created, s.last_modified, s.file_last_modified,
+                      s.status, s.publisher, s.age_rating, s.language, s.deleted, s.oneshot
+        "#,
+
     );
 
     let row = builder
@@ -252,9 +278,12 @@ pub(in crate::read_models) async fn resolve_series_resource_sqlx(
     series_id: &str,
 ) -> Result<Option<SeriesResourceReadModel>, DiscoveryError> {
     let row = sqlx::query_as::<_, SqlxSeriesResourceRow>(
-        "SELECT s.id, s.url \
-         FROM series s \
-         WHERE s.id = ?",
+        r#"
+            SELECT s.id, s.url
+            FROM series s
+            WHERE s.id = ?
+        "#,
+
     )
     .bind(series_id)
     .fetch_optional(&pool)

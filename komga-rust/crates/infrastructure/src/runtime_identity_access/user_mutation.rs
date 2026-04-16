@@ -37,8 +37,14 @@ pub async fn create_auth_user(
     ));
 
     sqlx::query(
-        "INSERT INTO USER (ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES, AGE_RESTRICTION, AGE_RESTRICTION_ALLOW_ONLY) \
-         VALUES (?, ?, ?, ?, ?, ?)",
+        r#"INSERT INTO USER (
+            ID,
+            EMAIL,
+            PASSWORD,
+            SHARED_ALL_LIBRARIES,
+            AGE_RESTRICTION,
+            AGE_RESTRICTION_ALLOW_ONLY
+        ) VALUES (?, ?, ?, ?, ?, ?)"#,
     )
     .bind(&input.user_id)
     .bind(&input.email)
@@ -175,8 +181,9 @@ pub async fn update_auth_user(
     let mut tx = pool.begin().await?;
 
     let Some(user_row) = sqlx::query(
-        "SELECT SHARED_ALL_LIBRARIES, AGE_RESTRICTION, AGE_RESTRICTION_ALLOW_ONLY \
-         FROM USER WHERE ID = ? LIMIT 1",
+        r#"SELECT SHARED_ALL_LIBRARIES, AGE_RESTRICTION, AGE_RESTRICTION_ALLOW_ONLY
+        FROM USER
+        WHERE ID = ? LIMIT 1"#,
     )
     .bind(target_user_id)
     .fetch_optional(&mut *tx)
@@ -239,10 +246,10 @@ pub async fn update_auth_user(
         || current_age_restriction != new_age_restriction;
 
     sqlx::query(
-        "UPDATE USER \
-         SET SHARED_ALL_LIBRARIES = ?, AGE_RESTRICTION = ?, AGE_RESTRICTION_ALLOW_ONLY = ?, \
-             LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
-         WHERE ID = ?",
+        r#"UPDATE USER
+        SET SHARED_ALL_LIBRARIES = ?, AGE_RESTRICTION = ?, AGE_RESTRICTION_ALLOW_ONLY = ?,
+            LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+        WHERE ID = ?"#,
     )
     .bind(shared_all_libraries)
     .bind(age_restriction)

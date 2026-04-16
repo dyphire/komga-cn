@@ -51,12 +51,14 @@ async fn load_book_metadata(
         .map_err(|error| format!("open book metadata db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT TITLE, TITLE_LOCK, SUMMARY, SUMMARY_LOCK, NUMBER, NUMBER_LOCK, NUMBER_SORT, \
-                NUMBER_SORT_LOCK, RELEASE_DATE, RELEASE_DATE_LOCK, AUTHORS_LOCK, TAGS_LOCK, ISBN, \
-                ISBN_LOCK, LINKS_LOCK \
-         FROM BOOK_METADATA \
-         WHERE BOOK_ID = ? \
-         LIMIT 1",
+        r#"
+        SELECT TITLE, TITLE_LOCK, SUMMARY, SUMMARY_LOCK, NUMBER, NUMBER_LOCK, NUMBER_SORT,
+               NUMBER_SORT_LOCK, RELEASE_DATE, RELEASE_DATE_LOCK, AUTHORS_LOCK, TAGS_LOCK, ISBN,
+               ISBN_LOCK, LINKS_LOCK
+        FROM BOOK_METADATA
+        WHERE BOOK_ID = ?
+        LIMIT 1
+        "#,
     )
     .bind(book_id)
     .fetch_optional(&pool)
@@ -179,12 +181,14 @@ async fn persist_book_metadata(
     }
 
     sqlx::query(
-        "UPDATE BOOK_METADATA \
-         SET TITLE = ?, TITLE_LOCK = ?, SUMMARY = ?, SUMMARY_LOCK = ?, NUMBER = ?, \
-             NUMBER_LOCK = ?, NUMBER_SORT = ?, NUMBER_SORT_LOCK = ?, RELEASE_DATE = ?, \
-             RELEASE_DATE_LOCK = ?, AUTHORS_LOCK = ?, TAGS_LOCK = ?, ISBN = ?, ISBN_LOCK = ?, \
-             LINKS_LOCK = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
-         WHERE BOOK_ID = ?",
+        r#"
+        UPDATE BOOK_METADATA
+        SET TITLE = ?, TITLE_LOCK = ?, SUMMARY = ?, SUMMARY_LOCK = ?, NUMBER = ?,
+            NUMBER_LOCK = ?, NUMBER_SORT = ?, NUMBER_SORT_LOCK = ?, RELEASE_DATE = ?,
+            RELEASE_DATE_LOCK = ?, AUTHORS_LOCK = ?, TAGS_LOCK = ?, ISBN = ?, ISBN_LOCK = ?,
+            LINKS_LOCK = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+        WHERE BOOK_ID = ?
+        "#,
     )
     .bind(&metadata.title)
     .bind(metadata.title_lock)

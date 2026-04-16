@@ -32,7 +32,7 @@ pub(super) fn query_filters_sqlx<'args>(
 
     if let (Some(term), Some(column)) = (search, search_column) {
         push_sqlx_clause_prefix(builder, state);
-        builder.push(format!("LOWER({column}) LIKE "));
+        builder.push(format!(r#"LOWER({column}) LIKE "#));
         let lowered = format!("%{}%", term.to_ascii_lowercase());
         builder.push_bind(lowered.clone());
         state.params.push(SqlValue::Text(lowered));
@@ -57,7 +57,11 @@ pub(super) fn apply_restrictions_sqlx<'args>(
     if !restrictions.labels_exclude.is_empty() {
         push_sqlx_clause_prefix(builder, state);
         builder.push(format!(
-            "NOT EXISTS (SELECT 1 FROM series_labels ex WHERE ex.series_id = {series_alias}.id AND LOWER(ex.label) IN ("
+            r#"NOT EXISTS (
+    SELECT 1
+    FROM series_labels ex
+    WHERE ex.series_id = {series_alias}.id
+      AND LOWER(ex.label) IN ("#
         ));
         {
             let mut separated = builder.separated(",");
@@ -66,7 +70,7 @@ pub(super) fn apply_restrictions_sqlx<'args>(
                 separated.push_bind(lowered.clone());
                 state.params.push(SqlValue::Text(lowered));
             }
-            separated.push_unseparated("))");
+            separated.push_unseparated(r#"))"#);
         }
     }
 
@@ -74,18 +78,20 @@ pub(super) fn apply_restrictions_sqlx<'args>(
         (restrictions.age_restriction, restrictions.age)
     {
         push_sqlx_clause_prefix(builder, state);
-        builder.push(format!(
-            "({series_alias}.age_rating IS NULL OR {series_alias}.age_rating < "
-        ));
+        builder.push(format!(r#"({series_alias}.age_rating IS NULL OR {series_alias}.age_rating < "#));
         builder.push_bind(max_age as i64);
-        builder.push(")");
+        builder.push(r#")"#);
         state.params.push(SqlValue::Integer(max_age as i64));
     }
 
     if !restrictions.labels_allow.is_empty() {
         push_sqlx_clause_prefix(builder, state);
         builder.push(format!(
-            "EXISTS (SELECT 1 FROM series_labels al WHERE al.series_id = {series_alias}.id AND LOWER(al.label) IN ("
+            r#"EXISTS (
+    SELECT 1
+    FROM series_labels al
+    WHERE al.series_id = {series_alias}.id
+      AND LOWER(al.label) IN ("#
         ));
         {
             let mut separated = builder.separated(",");
@@ -94,7 +100,7 @@ pub(super) fn apply_restrictions_sqlx<'args>(
                 separated.push_bind(lowered.clone());
                 state.params.push(SqlValue::Text(lowered));
             }
-            separated.push_unseparated("))");
+            separated.push_unseparated(r#"))"#);
         }
     }
 }
@@ -106,14 +112,14 @@ pub(super) fn append_in_clause_sqlx<'args>(
     state: &mut SqlxWhereState,
 ) {
     push_sqlx_clause_prefix(builder, state);
-    builder.push(format!("{column} IN ("));
+    builder.push(format!(r#"{column} IN ("#));
     {
         let mut separated = builder.separated(",");
         for value in values {
             separated.push_bind(value.clone());
             state.params.push(SqlValue::Text(value.clone()));
         }
-        separated.push_unseparated(")");
+        separated.push_unseparated(r#")"#);
     }
 }
 
@@ -142,7 +148,7 @@ pub(super) fn append_string_set_filter_sqlx<'args>(
             column.to_string()
         };
         push_sqlx_clause_prefix(builder, state);
-        builder.push(format!("{lhs} IN ("));
+        builder.push(format!(r#"{lhs} IN ("#));
         {
             let mut separated = builder.separated(",");
             for value in values {
@@ -155,7 +161,7 @@ pub(super) fn append_string_set_filter_sqlx<'args>(
                     state.params.push(SqlValue::Text(value.clone()));
                 }
             }
-            separated.push_unseparated(")");
+            separated.push_unseparated(r#")"#);
         }
     }
 }
@@ -170,14 +176,14 @@ pub(super) fn append_u16_set_filter_sqlx<'args>(
         && !values.is_empty()
     {
         push_sqlx_clause_prefix(builder, state);
-        builder.push(format!("{column} IN ("));
+        builder.push(format!(r#"{column} IN ("#));
         {
             let mut separated = builder.separated(",");
             for value in values {
                 separated.push_bind(*value as i64);
                 state.params.push(SqlValue::Integer(*value as i64));
             }
-            separated.push_unseparated(")");
+            separated.push_unseparated(r#")"#);
         }
     }
 }
@@ -194,7 +200,11 @@ pub(super) fn append_exists_series_filter_sqlx<'args>(
     {
         push_sqlx_clause_prefix(builder, state);
         builder.push(format!(
-            "EXISTS (SELECT 1 FROM {table} f WHERE f.series_id = s.id AND LOWER(f.{value_column}) IN ("
+            r#"EXISTS (
+    SELECT 1
+    FROM {table} f
+    WHERE f.series_id = s.id
+      AND LOWER(f.{value_column}) IN ("#
         ));
         {
             let mut separated = builder.separated(",");
@@ -203,7 +213,7 @@ pub(super) fn append_exists_series_filter_sqlx<'args>(
                 separated.push_bind(lowered.clone());
                 state.params.push(SqlValue::Text(lowered));
             }
-            separated.push_unseparated("))");
+            separated.push_unseparated(r#"))"#);
         }
     }
 }
@@ -243,9 +253,9 @@ fn push_sqlx_clause_prefix<'args>(
     state: &mut SqlxWhereState,
 ) {
     if state.has_where {
-        builder.push(" AND ");
+        builder.push(r#" AND "#);
     } else {
-        builder.push(" WHERE ");
+        builder.push(r#" WHERE "#);
         state.has_where = true;
     }
 }
@@ -270,8 +280,8 @@ mod tests {
         };
 
         let mut builder = QueryBuilder::<Sqlite>::new(
-            "SELECT s.id \
-                   FROM series s",
+            r#"SELECT s.id
+FROM series s"#,
         );
         let mut state = SqlxWhereState::default();
         query_filters_sqlx(
@@ -290,11 +300,15 @@ mod tests {
 
         assert!(
             actual_sql.ends_with(
-                "WHERE s.library_id IN (?,?) AND LOWER(s.title) LIKE ? AND NOT EXISTS (SELECT \
-                 1 FROM series_labels ex WHERE ex.series_id = s.id AND LOWER(ex.label) IN \
-                 (?,?)) AND (s.age_rating IS NULL OR s.age_rating < ?) AND EXISTS (SELECT 1 \
-                 FROM series_labels al WHERE al.series_id = s.id AND LOWER(al.label) IN \
-                 (?,?))"
+                r#"WHERE s.library_id IN (?,?) AND LOWER(s.title) LIKE ? AND NOT EXISTS (
+    SELECT 1
+    FROM series_labels ex
+    WHERE ex.series_id = s.id
+      AND LOWER(ex.label) IN (?,?)) AND (s.age_rating IS NULL OR s.age_rating < ?) AND EXISTS (
+    SELECT 1
+    FROM series_labels al
+    WHERE al.series_id = s.id
+      AND LOWER(al.label) IN (?,?))"#
             ),
             "unexpected sql: {actual_sql}",
         );
@@ -317,8 +331,8 @@ mod tests {
     #[test]
     fn sqlx_extended_predicates_preserve_exists_lowercase_and_parameter_order() {
         let mut builder = QueryBuilder::<Sqlite>::new(
-            "SELECT s.id \
-                   FROM series s",
+            r#"SELECT s.id
+FROM series s"#,
         );
         let mut state = SqlxWhereState::default();
         append_clause_sqlx("s.deleted = 0", &mut builder, &mut state);
@@ -347,9 +361,11 @@ mod tests {
 
         let query = builder.build();
         assert!(query.sql().ends_with(
-            "WHERE s.deleted = 0 AND LOWER(s.read_status) IN (?,?) AND EXISTS (SELECT 1 \
-                 FROM series_genres f WHERE f.series_id = s.id AND LOWER(f.genre) IN (?,?)) \
-                 AND s.release_date IN (?) AND s.age_rating IN (?,?)"
+            r#"WHERE s.deleted = 0 AND LOWER(s.read_status) IN (?,?) AND EXISTS (
+    SELECT 1
+    FROM series_genres f
+    WHERE f.series_id = s.id
+      AND LOWER(f.genre) IN (?,?)) AND s.release_date IN (?) AND s.age_rating IN (?,?)"#
         ));
 
         assert_eq!(

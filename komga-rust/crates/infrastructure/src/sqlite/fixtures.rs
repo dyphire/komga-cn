@@ -10,8 +10,8 @@ pub async fn insert_minimal_library(
     name: &str,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "INSERT INTO libraries (id, name) \
-                 VALUES (?1, ?2)",
+        r#"INSERT INTO libraries (id, name)
+VALUES (?1, ?2)"#,
     )
     .bind(id)
     .bind(name)
@@ -27,8 +27,8 @@ pub async fn insert_minimal_series(
     title: &str,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "INSERT INTO series (id, library_id, title) \
-                 VALUES (?1, ?2, ?3)",
+        r#"INSERT INTO series (id, library_id, title)
+VALUES (?1, ?2, ?3)"#,
     )
     .bind(id)
     .bind(library_id)
@@ -46,8 +46,8 @@ pub async fn insert_minimal_book(
     title: &str,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "INSERT INTO books (id, series_id, library_id, title) \
-                 VALUES (?1, ?2, ?3, ?4)",
+        r#"INSERT INTO books (id, series_id, library_id, title)
+VALUES (?1, ?2, ?3, ?4)"#,
     )
     .bind(id)
     .bind(series_id)
@@ -63,9 +63,9 @@ pub async fn series_defaults(
     series_id: &str,
 ) -> Result<(String, String, String, String), sqlx::Error> {
     sqlx::query_as::<_, (String, String, String, String)>(
-        "SELECT created, last_modified, file_last_modified, url \
-         FROM series \
-         WHERE id = ?1",
+        r#"SELECT created, last_modified, file_last_modified, url
+FROM series
+WHERE id = ?1"#,
     )
     .bind(series_id)
     .fetch_one(pool)
@@ -77,9 +77,9 @@ pub async fn book_defaults(
     book_id: &str,
 ) -> Result<(String, String, String, String, i64, String), sqlx::Error> {
     sqlx::query_as::<_, (String, String, String, String, i64, String)>(
-        "SELECT created, last_modified, file_last_modified, media_status, number_sort, url \
-         FROM books \
-         WHERE id = ?1",
+        r#"SELECT created, last_modified, file_last_modified, media_status, number_sort, url
+FROM books
+WHERE id = ?1"#,
     )
     .bind(book_id)
     .fetch_one(pool)
@@ -92,10 +92,10 @@ pub async fn count_series_label(
     label: &str,
 ) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) \
-         FROM series_labels \
-         WHERE series_id = ?1 \
-         AND label = ?2",
+        r#"SELECT COUNT(*)
+FROM series_labels
+WHERE series_id = ?1
+  AND label = ?2"#,
     )
     .bind(series_id)
     .bind(label)
@@ -109,10 +109,10 @@ pub async fn count_book_tag(
     tag: &str,
 ) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) \
-                                  FROM book_tags \
-                                  WHERE book_id = ?1 \
-                                  AND tag = ?2",
+        r#"SELECT COUNT(*)
+FROM book_tags
+WHERE book_id = ?1
+  AND tag = ?2"#,
     )
     .bind(book_id)
     .bind(tag)
@@ -122,8 +122,8 @@ pub async fn count_book_tag(
 
 pub async fn insert_library(pool: &SqlitePool, row: LibraryRow) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "INSERT INTO libraries (id, name, root) \
-                 VALUES (?1, ?2, ?3)",
+        r#"INSERT INTO libraries (id, name, root)
+VALUES (?1, ?2, ?3)"#,
     )
     .bind(row.id)
     .bind(row.name)
@@ -158,10 +158,14 @@ pub async fn insert_series(pool: &SqlitePool, row: SeriesRow) -> Result<(), sqlx
     } = row;
 
     sqlx::query(
-        "INSERT INTO series (id, library_id, title, age_rating, language, publisher, \
-           release_date, status, complete, read_status, deleted, oneshot, created, last_modified, \
-           file_last_modified, url) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+        r#"INSERT INTO series (
+    id, library_id, title, age_rating, language, publisher, release_date, status,
+    complete, read_status, deleted, oneshot, created, last_modified, file_last_modified, url
+)
+VALUES (
+    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
+    ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16
+)"#,
     )
     .bind(&id)
     .bind(library_id)
@@ -184,8 +188,8 @@ pub async fn insert_series(pool: &SqlitePool, row: SeriesRow) -> Result<(), sqlx
 
     for label in labels {
         sqlx::query(
-            "INSERT INTO series_labels (series_id, label) \
-                     VALUES (?1, ?2)",
+            r#"INSERT INTO series_labels (series_id, label)
+VALUES (?1, ?2)"#,
         )
         .bind(&id)
         .bind(label)
@@ -195,8 +199,8 @@ pub async fn insert_series(pool: &SqlitePool, row: SeriesRow) -> Result<(), sqlx
 
     for genre in genres {
         sqlx::query(
-            "INSERT INTO series_genres (series_id, genre) \
-                     VALUES (?1, ?2)",
+            r#"INSERT INTO series_genres (series_id, genre)
+VALUES (?1, ?2)"#,
         )
         .bind(&id)
         .bind(genre)
@@ -206,8 +210,8 @@ pub async fn insert_series(pool: &SqlitePool, row: SeriesRow) -> Result<(), sqlx
 
     for tag in tags {
         sqlx::query(
-            "INSERT INTO series_tags (series_id, tag) \
-                     VALUES (?1, ?2)",
+            r#"INSERT INTO series_tags (series_id, tag)
+VALUES (?1, ?2)"#,
         )
         .bind(&id)
         .bind(tag)
@@ -217,8 +221,8 @@ pub async fn insert_series(pool: &SqlitePool, row: SeriesRow) -> Result<(), sqlx
 
     for author in authors {
         sqlx::query(
-            "INSERT INTO series_authors (series_id, author) \
-                     VALUES (?1, ?2)",
+            r#"INSERT INTO series_authors (series_id, author)
+VALUES (?1, ?2)"#,
         )
         .bind(&id)
         .bind(author)
@@ -240,8 +244,8 @@ pub async fn insert_collection(pool: &SqlitePool, row: CollectionRow) -> Result<
     } = row;
 
     sqlx::query(
-        "INSERT INTO collections (id, name, ordered, created_date, last_modified_date) \
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        r#"INSERT INTO collections (id, name, ordered, created_date, last_modified_date)
+VALUES (?1, ?2, ?3, ?4, ?5)"#,
     )
     .bind(&id)
     .bind(name)
@@ -253,8 +257,8 @@ pub async fn insert_collection(pool: &SqlitePool, row: CollectionRow) -> Result<
 
     for (index, series_id) in series_ids.iter().enumerate() {
         sqlx::query(
-            "INSERT INTO collection_series (collection_id, series_id, position) \
-             VALUES (?1, ?2, ?3)",
+            r#"INSERT INTO collection_series (collection_id, series_id, position)
+VALUES (?1, ?2, ?3)"#,
         )
         .bind(&id)
         .bind(series_id)
@@ -278,8 +282,8 @@ pub async fn insert_read_list(pool: &SqlitePool, row: ReadListRow) -> Result<(),
     } = row;
 
     sqlx::query(
-        "INSERT INTO readlists (id, name, summary, ordered, created_date, last_modified_date) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        r#"INSERT INTO readlists (id, name, summary, ordered, created_date, last_modified_date)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6)"#,
     )
     .bind(&id)
     .bind(name)
@@ -292,8 +296,8 @@ pub async fn insert_read_list(pool: &SqlitePool, row: ReadListRow) -> Result<(),
 
     for (index, book_id) in book_ids.iter().enumerate() {
         sqlx::query(
-            "INSERT INTO readlist_books (readlist_id, book_id, position) \
-             VALUES (?1, ?2, ?3)",
+            r#"INSERT INTO readlist_books (readlist_id, book_id, position)
+VALUES (?1, ?2, ?3)"#,
         )
         .bind(&id)
         .bind(book_id)
@@ -330,10 +334,15 @@ pub async fn insert_book(pool: &SqlitePool, row: BookRow) -> Result<(), sqlx::Er
     } = row;
 
     sqlx::query(
-        "INSERT INTO books (id, series_id, library_id, title, url, created, last_modified, \
-           file_last_modified, size_bytes, media_status, media_profile, media_type, \
-           media_pages_count, metadata_release_date, number_sort, read_status, deleted, oneshot) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+        r#"INSERT INTO books (
+    id, series_id, library_id, title, url, created, last_modified, file_last_modified,
+    size_bytes, media_status, media_profile, media_type, media_pages_count,
+    metadata_release_date, number_sort, read_status, deleted, oneshot
+)
+VALUES (
+    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
+    ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18
+)"#,
     )
     .bind(&id)
     .bind(series_id)
@@ -358,8 +367,8 @@ pub async fn insert_book(pool: &SqlitePool, row: BookRow) -> Result<(), sqlx::Er
 
     for tag in tags {
         sqlx::query(
-            "INSERT INTO book_tags (book_id, tag) \
-                     VALUES (?1, ?2)",
+            r#"INSERT INTO book_tags (book_id, tag)
+VALUES (?1, ?2)"#,
         )
         .bind(&id)
         .bind(tag)
@@ -369,8 +378,8 @@ pub async fn insert_book(pool: &SqlitePool, row: BookRow) -> Result<(), sqlx::Er
 
     for author in authors {
         sqlx::query(
-            "INSERT INTO book_authors (book_id, author) \
-                     VALUES (?1, ?2)",
+            r#"INSERT INTO book_authors (book_id, author)
+VALUES (?1, ?2)"#,
         )
         .bind(&id)
         .bind(author)
@@ -386,9 +395,10 @@ pub async fn insert_read_progress(
     row: ReadProgressRow,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "INSERT INTO read_progress (book_id, user_id, page, completed, read_date, created, \
-           last_modified, device_id, device_name) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        r#"INSERT INTO read_progress (
+    book_id, user_id, page, completed, read_date, created, last_modified, device_id, device_name
+)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"#,
     )
     .bind(row.book_id)
     .bind(row.user_id)

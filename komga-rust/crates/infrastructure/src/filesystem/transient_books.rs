@@ -57,12 +57,12 @@ pub async fn infer_transient_series_and_number(
     };
 
     let exact_match = sqlx::query(
-        "SELECT s.ID AS ID \
-         FROM SERIES s \
-         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
-         WHERE LOWER(COALESCE(sm.TITLE, s.NAME)) = LOWER(?) \
-         ORDER BY s.LAST_MODIFIED_DATE DESC, s.ID ASC \
-         LIMIT 1",
+        r#"SELECT s.ID AS ID
+         FROM SERIES s
+         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
+         WHERE LOWER(COALESCE(sm.TITLE, s.NAME)) = LOWER(?)
+         ORDER BY s.LAST_MODIFIED_DATE DESC, s.ID ASC
+         LIMIT 1"#,
     )
     .bind(series_title_candidate.as_str())
     .fetch_optional(&pool)
@@ -73,12 +73,12 @@ pub async fn infer_transient_series_and_number(
 
     let fuzzy_match = if exact_match.is_none() {
         sqlx::query(
-            "SELECT s.ID AS ID \
-             FROM SERIES s \
-             LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
-             WHERE LOWER(COALESCE(sm.TITLE, s.NAME)) LIKE LOWER(?) \
-             ORDER BY s.LAST_MODIFIED_DATE DESC, s.ID ASC \
-             LIMIT 1",
+            r#"SELECT s.ID AS ID
+             FROM SERIES s
+             LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
+             WHERE LOWER(COALESCE(sm.TITLE, s.NAME)) LIKE LOWER(?)
+             ORDER BY s.LAST_MODIFIED_DATE DESC, s.ID ASC
+             LIMIT 1"#,
         )
         .bind(format!("%{}%", series_title_candidate))
         .fetch_optional(&pool)

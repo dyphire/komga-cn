@@ -595,11 +595,13 @@ async fn upsert_series_read_progress_row(
     user_id: &str,
 ) -> Result<(), sqlx::Error> {
     let row = sqlx::query(
-        "SELECT COALESCE(SUM(CASE WHEN rp.COMPLETED = 1 THEN 1 ELSE 0 END), 0) AS READ_COUNT, \
-                COALESCE(SUM(CASE WHEN rp.COMPLETED = 0 THEN 1 ELSE 0 END), 0) AS IN_PROGRESS_COUNT, \
-                MAX(rp.READ_DATE) AS MOST_RECENT_READ_DATE \
-         FROM BOOK b LEFT JOIN READ_PROGRESS rp ON rp.BOOK_ID = b.ID AND rp.USER_ID = ? \
-         WHERE b.SERIES_ID = ? AND b.DELETED_DATE IS NULL",
+        r#"SELECT
+            COALESCE(SUM(CASE WHEN rp.COMPLETED = 1 THEN 1 ELSE 0 END), 0) AS READ_COUNT,
+            COALESCE(SUM(CASE WHEN rp.COMPLETED = 0 THEN 1 ELSE 0 END), 0) AS IN_PROGRESS_COUNT,
+            MAX(rp.READ_DATE) AS MOST_RECENT_READ_DATE
+        FROM BOOK b
+        LEFT JOIN READ_PROGRESS rp ON rp.BOOK_ID = b.ID AND rp.USER_ID = ?
+        WHERE b.SERIES_ID = ? AND b.DELETED_DATE IS NULL"#,
     )
     .bind(user_id)
     .bind(series_id)
@@ -607,11 +609,19 @@ async fn upsert_series_read_progress_row(
     .await?;
 
     sqlx::query(
-        "INSERT INTO READ_PROGRESS_SERIES (SERIES_ID, USER_ID, READ_COUNT, IN_PROGRESS_COUNT, MOST_RECENT_READ_DATE, LAST_MODIFIED_DATE) \
-         VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP) \
-         ON CONFLICT(SERIES_ID, USER_ID) DO UPDATE \
-         SET READ_COUNT = excluded.READ_COUNT, IN_PROGRESS_COUNT = excluded.IN_PROGRESS_COUNT, \
-             MOST_RECENT_READ_DATE = excluded.MOST_RECENT_READ_DATE, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP",
+        r#"INSERT INTO READ_PROGRESS_SERIES (
+            SERIES_ID,
+            USER_ID,
+            READ_COUNT,
+            IN_PROGRESS_COUNT,
+            MOST_RECENT_READ_DATE,
+            LAST_MODIFIED_DATE
+        ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(SERIES_ID, USER_ID) DO UPDATE
+        SET READ_COUNT = excluded.READ_COUNT,
+            IN_PROGRESS_COUNT = excluded.IN_PROGRESS_COUNT,
+            MOST_RECENT_READ_DATE = excluded.MOST_RECENT_READ_DATE,
+            LAST_MODIFIED_DATE = CURRENT_TIMESTAMP"#,
     )
     .bind(series_id)
     .bind(user_id)

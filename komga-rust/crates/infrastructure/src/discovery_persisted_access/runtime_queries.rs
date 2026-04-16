@@ -9,27 +9,27 @@ pub async fn load_persisted_ondeck_books(
         .map_err(|error| format!("open books ondeck db: {error}"))?;
 
     let rows = sqlx::query(
-        "SELECT b.ID, b.LIBRARY_ID, b.NAME, COALESCE(bm.TITLE, b.NAME) AS TITLE \
-         FROM READ_PROGRESS_SERIES rps \
-         JOIN SERIES s ON s.ID = rps.SERIES_ID \
-         JOIN BOOK b ON b.SERIES_ID = s.ID \
-         JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
-         LEFT JOIN READ_PROGRESS rp ON rp.BOOK_ID = b.ID AND rp.USER_ID = rps.USER_ID \
-         WHERE rps.USER_ID = ? \
-         AND rps.IN_PROGRESS_COUNT = 0 \
-         AND rps.READ_COUNT != s.BOOK_COUNT \
-         AND rp.COMPLETED IS NULL \
-         AND NOT EXISTS (SELECT 1 \
-                         FROM BOOK b_prev \
-                         JOIN BOOK_METADATA bm_prev ON bm_prev.BOOK_ID = b_prev.ID \
-                         LEFT JOIN READ_PROGRESS rp_prev ON rp_prev.BOOK_ID = b_prev.ID \
-                                                      AND rp_prev.USER_ID = rps.USER_ID \
-                         WHERE b_prev.SERIES_ID = b.SERIES_ID \
-                         AND rp_prev.COMPLETED IS NULL \
-                         AND (COALESCE(bm_prev.NUMBER_SORT, 0) < COALESCE(bm.NUMBER_SORT, 0) \
-                              OR (COALESCE(bm_prev.NUMBER_SORT, 0) = COALESCE(bm.NUMBER_SORT, 0) \
-                                  AND b_prev.ID < b.ID))) \
-         ORDER BY rps.MOST_RECENT_READ_DATE DESC",
+        r#"SELECT b.ID, b.LIBRARY_ID, b.NAME, COALESCE(bm.TITLE, b.NAME) AS TITLE
+         FROM READ_PROGRESS_SERIES rps
+         JOIN SERIES s ON s.ID = rps.SERIES_ID
+         JOIN BOOK b ON b.SERIES_ID = s.ID
+         JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
+         LEFT JOIN READ_PROGRESS rp ON rp.BOOK_ID = b.ID AND rp.USER_ID = rps.USER_ID
+         WHERE rps.USER_ID = ?
+         AND rps.IN_PROGRESS_COUNT = 0
+         AND rps.READ_COUNT != s.BOOK_COUNT
+         AND rp.COMPLETED IS NULL
+         AND NOT EXISTS (SELECT 1
+                         FROM BOOK b_prev
+                         JOIN BOOK_METADATA bm_prev ON bm_prev.BOOK_ID = b_prev.ID
+                         LEFT JOIN READ_PROGRESS rp_prev ON rp_prev.BOOK_ID = b_prev.ID
+                                                      AND rp_prev.USER_ID = rps.USER_ID
+                         WHERE b_prev.SERIES_ID = b.SERIES_ID
+                         AND rp_prev.COMPLETED IS NULL
+                         AND (COALESCE(bm_prev.NUMBER_SORT, 0) < COALESCE(bm.NUMBER_SORT, 0)
+                              OR (COALESCE(bm_prev.NUMBER_SORT, 0) = COALESCE(bm.NUMBER_SORT, 0)
+                                  AND b_prev.ID < b.ID)))
+         ORDER BY rps.MOST_RECENT_READ_DATE DESC"#,
     )
     .bind(user_id)
     .fetch_all(&pool)
@@ -55,17 +55,17 @@ pub async fn load_persisted_duplicate_books(
         .map_err(|error| format!("open books duplicates db: {error}"))?;
 
     let rows = sqlx::query(
-        "SELECT b.ID, b.LIBRARY_ID, b.NAME, COALESCE(bm.TITLE, b.NAME) AS TITLE \
-         FROM BOOK b \
-         JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
-         WHERE b.FILE_HASH IS NOT NULL \
-         AND b.FILE_HASH != '' \
-         AND b.FILE_HASH IN (SELECT FILE_HASH \
-                            FROM BOOK \
-                            WHERE FILE_HASH IS NOT NULL \
-                            AND FILE_HASH != '' \
-                            GROUP BY FILE_HASH, FILE_SIZE \
-                            HAVING COUNT(*) > 1)",
+        r#"SELECT b.ID, b.LIBRARY_ID, b.NAME, COALESCE(bm.TITLE, b.NAME) AS TITLE
+         FROM BOOK b
+         JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
+         WHERE b.FILE_HASH IS NOT NULL
+         AND b.FILE_HASH != ''
+         AND b.FILE_HASH IN (SELECT FILE_HASH
+                            FROM BOOK
+                            WHERE FILE_HASH IS NOT NULL
+                            AND FILE_HASH != ''
+                            GROUP BY FILE_HASH, FILE_SIZE
+                            HAVING COUNT(*) > 1)"#,
     )
     .fetch_all(&pool)
     .await
@@ -104,50 +104,50 @@ pub async fn load_persisted_book_tags(
     let rows = match scope {
         BookTagsScope::All => {
             let mut query = QueryBuilder::<Sqlite>::new(
-                "SELECT bt.TAG \
-                 FROM BOOK_METADATA_TAG bt \
-                 JOIN BOOK b ON b.ID = bt.BOOK_ID",
+                r#"SELECT bt.TAG
+                 FROM BOOK_METADATA_TAG bt
+                 JOIN BOOK b ON b.ID = bt.BOOK_ID"#,
             );
             if let Some(authorized_library_ids) =
                 authorized_library_ids.filter(|ids| !ids.is_empty())
             {
-                query.push(" WHERE b.LIBRARY_ID IN (");
+                query.push(r#" WHERE b.LIBRARY_ID IN ("#);
                 let mut separated = query.separated(",");
                 for library_id in authorized_library_ids {
                     separated.push_bind(library_id);
                 }
                 separated.push_unseparated(")");
             }
-            query.push(" ORDER BY lower(bt.TAG), bt.TAG, b.ID");
+            query.push(r#" ORDER BY lower(bt.TAG), bt.TAG, b.ID"#);
             query.build().fetch_all(&pool).await
         }
         BookTagsScope::Series(series_id) => {
             let mut query = QueryBuilder::<Sqlite>::new(
-                "SELECT bt.TAG \
-                 FROM BOOK_METADATA_TAG bt \
-                 JOIN BOOK b ON b.ID = bt.BOOK_ID \
-                 WHERE b.SERIES_ID = ",
+                r#"SELECT bt.TAG
+                 FROM BOOK_METADATA_TAG bt
+                 JOIN BOOK b ON b.ID = bt.BOOK_ID
+                 WHERE b.SERIES_ID = "#,
             );
             query.push_bind(series_id);
             if let Some(authorized_library_ids) =
                 authorized_library_ids.filter(|ids| !ids.is_empty())
             {
-                query.push(" AND b.LIBRARY_ID IN (");
+                query.push(r#" AND b.LIBRARY_ID IN ("#);
                 let mut separated = query.separated(",");
                 for library_id in authorized_library_ids {
                     separated.push_bind(library_id);
                 }
                 separated.push_unseparated(")");
             }
-            query.push(" ORDER BY lower(bt.TAG), bt.TAG, b.ID");
+            query.push(r#" ORDER BY lower(bt.TAG), bt.TAG, b.ID"#);
             query.build().fetch_all(&pool).await
         }
         BookTagsScope::Libraries(library_ids) => {
             let mut query = QueryBuilder::<Sqlite>::new(
-                "SELECT bt.TAG \
-                 FROM BOOK_METADATA_TAG bt \
-                 JOIN BOOK b ON b.ID = bt.BOOK_ID \
-                 WHERE b.LIBRARY_ID IN (",
+                r#"SELECT bt.TAG
+                 FROM BOOK_METADATA_TAG bt
+                 JOIN BOOK b ON b.ID = bt.BOOK_ID
+                 WHERE b.LIBRARY_ID IN ("#,
             );
             let mut separated = query.separated(",");
             for library_id in library_ids {
@@ -157,36 +157,36 @@ pub async fn load_persisted_book_tags(
             if let Some(authorized_library_ids) =
                 authorized_library_ids.filter(|ids| !ids.is_empty())
             {
-                query.push(" AND b.LIBRARY_ID IN (");
+                query.push(r#" AND b.LIBRARY_ID IN ("#);
                 let mut separated = query.separated(",");
                 for library_id in authorized_library_ids {
                     separated.push_bind(library_id);
                 }
                 separated.push_unseparated(")");
             }
-            query.push(" ORDER BY lower(bt.TAG), bt.TAG, b.ID");
+            query.push(r#" ORDER BY lower(bt.TAG), bt.TAG, b.ID"#);
             query.build().fetch_all(&pool).await
         }
         BookTagsScope::ReadList(readlist_id) => {
             let mut query = QueryBuilder::<Sqlite>::new(
-                "SELECT bt.TAG \
-                 FROM BOOK_METADATA_TAG bt \
-                 JOIN BOOK b ON b.ID = bt.BOOK_ID \
-                 JOIN READLIST_BOOK rb ON rb.BOOK_ID = b.ID \
-                 WHERE rb.READLIST_ID = ",
+                r#"SELECT bt.TAG
+                 FROM BOOK_METADATA_TAG bt
+                 JOIN BOOK b ON b.ID = bt.BOOK_ID
+                 JOIN READLIST_BOOK rb ON rb.BOOK_ID = b.ID
+                 WHERE rb.READLIST_ID = "#,
             );
             query.push_bind(readlist_id);
             if let Some(authorized_library_ids) =
                 authorized_library_ids.filter(|ids| !ids.is_empty())
             {
-                query.push(" AND b.LIBRARY_ID IN (");
+                query.push(r#" AND b.LIBRARY_ID IN ("#);
                 let mut separated = query.separated(",");
                 for library_id in authorized_library_ids {
                     separated.push_bind(library_id);
                 }
                 separated.push_unseparated(")");
             }
-            query.push(" ORDER BY lower(bt.TAG), bt.TAG, b.ID");
+            query.push(r#" ORDER BY lower(bt.TAG), bt.TAG, b.ID"#);
             query.build().fetch_all(&pool).await
         }
     }
@@ -218,7 +218,7 @@ pub async fn persisted_utc_date_minus_days(
         format!("+{} days", days.saturating_abs())
     };
 
-    let row = sqlx::query("SELECT date('now', ?) AS CUTOFF")
+    let row = sqlx::query(r#"SELECT date('now', ?) AS CUTOFF"#)
         .bind(modifier)
         .fetch_one(&pool)
         .await
@@ -236,9 +236,9 @@ pub async fn load_series_read_progress_counts(
         .map_err(|error| format!("open series read-progress db: {error}"))?;
 
     let rows = sqlx::query(
-        "SELECT SERIES_ID, READ_COUNT, IN_PROGRESS_COUNT \
-         FROM READ_PROGRESS_SERIES \
-         WHERE USER_ID = ?",
+        r#"SELECT SERIES_ID, READ_COUNT, IN_PROGRESS_COUNT
+         FROM READ_PROGRESS_SERIES
+         WHERE USER_ID = ?"#,
     )
     .bind(user_id)
     .fetch_all(&pool)
@@ -266,9 +266,9 @@ pub async fn load_series_total_book_counts(
         .map_err(|error| format!("open series metadata db: {error}"))?;
 
     let rows = sqlx::query(
-        "SELECT SERIES_ID, TOTAL_BOOK_COUNT \
-         FROM SERIES_METADATA \
-         WHERE TOTAL_BOOK_COUNT IS NOT NULL",
+        r#"SELECT SERIES_ID, TOTAL_BOOK_COUNT
+         FROM SERIES_METADATA
+         WHERE TOTAL_BOOK_COUNT IS NOT NULL"#,
     )
     .fetch_all(&pool)
     .await

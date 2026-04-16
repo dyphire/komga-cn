@@ -287,7 +287,20 @@ mod tests {
         deleted_date: Option<&str>,
     ) {
         sqlx::query(
-            "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID, DELETED_DATE) VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?, ?)",
+            r#"
+            INSERT INTO BOOK (
+                ID,
+                FILE_LAST_MODIFIED,
+                NAME,
+                URL,
+                SERIES_ID,
+                FILE_SIZE,
+                NUMBER,
+                LIBRARY_ID,
+                DELETED_DATE
+            )
+            VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?, ?)
+            "#,
         )
         .bind(book_id)
         .bind(0_i64)
@@ -349,7 +362,12 @@ mod tests {
             .await
             .expect("page dimension verify db should open");
         let rows = sqlx::query(
-            "SELECT NUMBER, width, height FROM MEDIA_PAGE WHERE BOOK_ID = ? ORDER BY NUMBER ASC",
+            r#"
+            SELECT NUMBER, width, height
+            FROM MEDIA_PAGE
+            WHERE BOOK_ID = ?
+            ORDER BY NUMBER ASC
+            "#,
         )
         .bind(book_id)
         .fetch_all(&pool)
@@ -670,7 +688,17 @@ mod tests {
             ("user-incomplete", 0_i64, 1_i64, Some("2001-01-02 00:00:00")),
         ] {
             sqlx::query(
-                "INSERT INTO READ_PROGRESS_SERIES (SERIES_ID, USER_ID, READ_COUNT, IN_PROGRESS_COUNT, MOST_RECENT_READ_DATE, LAST_MODIFIED_DATE) VALUES (?, ?, ?, ?, ?, ?)",
+                r#"
+                INSERT INTO READ_PROGRESS_SERIES (
+                    SERIES_ID,
+                    USER_ID,
+                    READ_COUNT,
+                    IN_PROGRESS_COUNT,
+                    MOST_RECENT_READ_DATE,
+                    LAST_MODIFIED_DATE
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                "#,
             )
             .bind("series-1")
             .bind(user_id)
@@ -721,7 +749,12 @@ mod tests {
         .await
         .expect("adjusted read progress rows should be queryable");
         let series_rows = sqlx::query(
-            "SELECT USER_ID, READ_COUNT, IN_PROGRESS_COUNT, LAST_MODIFIED_DATE FROM READ_PROGRESS_SERIES WHERE SERIES_ID = ? ORDER BY USER_ID ASC",
+            r#"
+            SELECT USER_ID, READ_COUNT, IN_PROGRESS_COUNT, LAST_MODIFIED_DATE
+            FROM READ_PROGRESS_SERIES
+            WHERE SERIES_ID = ?
+            ORDER BY USER_ID ASC
+            "#,
         )
         .bind("series-1")
         .fetch_all(&verify_pool)
@@ -837,7 +870,17 @@ mod tests {
         .await
         .expect("same-count incomplete read progress row should be inserted");
         sqlx::query(
-            "INSERT INTO READ_PROGRESS_SERIES (SERIES_ID, USER_ID, READ_COUNT, IN_PROGRESS_COUNT, MOST_RECENT_READ_DATE, LAST_MODIFIED_DATE) VALUES (?, ?, ?, ?, ?, ?)",
+            r#"
+            INSERT INTO READ_PROGRESS_SERIES (
+                SERIES_ID,
+                USER_ID,
+                READ_COUNT,
+                IN_PROGRESS_COUNT,
+                MOST_RECENT_READ_DATE,
+                LAST_MODIFIED_DATE
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            "#,
         )
         .bind("series-1")
         .bind("user-completed")
@@ -849,7 +892,17 @@ mod tests {
         .await
         .expect("same-count completed series row should be inserted");
         sqlx::query(
-            "INSERT INTO READ_PROGRESS_SERIES (SERIES_ID, USER_ID, READ_COUNT, IN_PROGRESS_COUNT, MOST_RECENT_READ_DATE, LAST_MODIFIED_DATE) VALUES (?, ?, ?, ?, ?, ?)",
+            r#"
+            INSERT INTO READ_PROGRESS_SERIES (
+                SERIES_ID,
+                USER_ID,
+                READ_COUNT,
+                IN_PROGRESS_COUNT,
+                MOST_RECENT_READ_DATE,
+                LAST_MODIFIED_DATE
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            "#,
         )
         .bind("series-1")
         .bind("user-incomplete")
@@ -893,7 +946,12 @@ mod tests {
         .await
         .expect("same-count read progress rows should be queryable");
         let series_rows = sqlx::query(
-            "SELECT USER_ID, READ_COUNT, IN_PROGRESS_COUNT, LAST_MODIFIED_DATE FROM READ_PROGRESS_SERIES WHERE SERIES_ID = ? ORDER BY USER_ID ASC",
+            r#"
+            SELECT USER_ID, READ_COUNT, IN_PROGRESS_COUNT, LAST_MODIFIED_DATE
+            FROM READ_PROGRESS_SERIES
+            WHERE SERIES_ID = ?
+            ORDER BY USER_ID ASC
+            "#,
         )
         .bind("series-1")
         .fetch_all(&verify_pool)

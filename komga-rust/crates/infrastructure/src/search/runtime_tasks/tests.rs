@@ -27,7 +27,7 @@ async fn rebuild_indexes_oneshot_inherited_series_metadata_and_book_isbn_fields(
 
     let pool = open_bootstrapped_pool(database_file.as_path()).await;
 
-    sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
+    sqlx::query(r#"INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)"#)
         .bind("library-1")
         .bind("Library 1")
         .bind("/tmp")
@@ -36,7 +36,8 @@ async fn rebuild_indexes_oneshot_inherited_series_metadata_and_book_isbn_fields(
         .expect("library row should be inserted");
 
     sqlx::query(
-        "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot) VALUES (?, ?, ?, ?, ?, ?)",
+        r#"INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot)
+VALUES (?, ?, ?, ?, ?, ?)"#,
     )
     .bind("series-1")
     .bind(0_i64)
@@ -49,9 +50,8 @@ async fn rebuild_indexes_oneshot_inherited_series_metadata_and_book_isbn_fields(
     .expect("series row should be inserted");
 
     sqlx::query(
-        "INSERT INTO SERIES_METADATA (\
-             STATUS, TITLE, TITLE_SORT, PUBLISHER, LANGUAGE, AGE_RATING, SERIES_ID) \
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+        r#"INSERT INTO SERIES_METADATA (STATUS, TITLE, TITLE_SORT, PUBLISHER, LANGUAGE, AGE_RATING, SERIES_ID)
+VALUES (?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind("ONGOING")
     .bind("Series One")
@@ -65,7 +65,7 @@ async fn rebuild_indexes_oneshot_inherited_series_metadata_and_book_isbn_fields(
     .expect("series metadata should be inserted");
 
     sqlx::query(
-        "INSERT INTO SERIES_METADATA_ALTERNATE_TITLE (SERIES_ID, LABEL, TITLE) VALUES (?, ?, ?)",
+        r#"INSERT INTO SERIES_METADATA_ALTERNATE_TITLE (SERIES_ID, LABEL, TITLE) VALUES (?, ?, ?)"#,
     )
     .bind("series-1")
     .bind("alt-1")
@@ -75,9 +75,8 @@ async fn rebuild_indexes_oneshot_inherited_series_metadata_and_book_isbn_fields(
     .expect("series alternate title should be inserted");
 
     sqlx::query(
-        "INSERT INTO BOOK (\
-             ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID, oneshot) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        r#"INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID, oneshot)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind("book-1")
     .bind(0_i64)
@@ -92,7 +91,7 @@ async fn rebuild_indexes_oneshot_inherited_series_metadata_and_book_isbn_fields(
     .await
     .expect("book row should be inserted");
 
-    sqlx::query("INSERT INTO BOOK_METADATA_AUTHOR (BOOK_ID, NAME, ROLE) VALUES (?, ?, ?)")
+    sqlx::query(r#"INSERT INTO BOOK_METADATA_AUTHOR (BOOK_ID, NAME, ROLE) VALUES (?, ?, ?)"#)
         .bind("book-1")
         .bind("Jane Writer")
         .bind("writer")
@@ -101,7 +100,8 @@ async fn rebuild_indexes_oneshot_inherited_series_metadata_and_book_isbn_fields(
         .expect("book metadata author should be inserted");
 
     sqlx::query(
-        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, ISBN, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
+        r#"INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, ISBN, BOOK_ID)
+VALUES (?, ?, ?, ?, ?)"#,
     )
     .bind("1")
     .bind(1.0_f64)
@@ -178,7 +178,7 @@ async fn incremental_sync_updates_all_entity_documents_for_lifecycle_events() {
 
     let pool = open_bootstrapped_pool(database_file.as_path()).await;
 
-    sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
+    sqlx::query(r#"INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)"#)
         .bind("library-1")
         .bind("Library 1")
         .bind("/tmp")
@@ -187,7 +187,8 @@ async fn incremental_sync_updates_all_entity_documents_for_lifecycle_events() {
         .expect("library row should be inserted");
 
     sqlx::query(
-        "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot) VALUES (?, ?, ?, ?, ?, ?)",
+        r#"INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot)
+VALUES (?, ?, ?, ?, ?, ?)"#,
     )
     .bind("series-1")
     .bind(0_i64)
@@ -200,7 +201,8 @@ async fn incremental_sync_updates_all_entity_documents_for_lifecycle_events() {
     .expect("series row should be inserted");
 
     sqlx::query(
-        "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot) VALUES (?, ?, ?, ?, ?, ?)",
+        r#"INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot)
+VALUES (?, ?, ?, ?, ?, ?)"#,
     )
     .bind("series-oneshot")
     .bind(0_i64)
@@ -213,9 +215,8 @@ async fn incremental_sync_updates_all_entity_documents_for_lifecycle_events() {
     .expect("oneshot series row should be inserted");
 
     sqlx::query(
-        "INSERT INTO SERIES_METADATA (\
-             STATUS, TITLE, TITLE_SORT, PUBLISHER, LANGUAGE, AGE_RATING, SERIES_ID) \
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+        r#"INSERT INTO SERIES_METADATA (STATUS, TITLE, TITLE_SORT, PUBLISHER, LANGUAGE, AGE_RATING, SERIES_ID)
+VALUES (?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind("ONGOING")
     .bind("Series One")
@@ -229,9 +230,8 @@ async fn incremental_sync_updates_all_entity_documents_for_lifecycle_events() {
     .expect("series metadata row should be inserted");
 
     sqlx::query(
-        "INSERT INTO SERIES_METADATA (\
-             STATUS, TITLE, TITLE_SORT, PUBLISHER, LANGUAGE, AGE_RATING, SERIES_ID) \
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+        r#"INSERT INTO SERIES_METADATA (STATUS, TITLE, TITLE_SORT, PUBLISHER, LANGUAGE, AGE_RATING, SERIES_ID)
+VALUES (?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind("ONGOING")
     .bind("OneShot Series")
@@ -245,9 +245,8 @@ async fn incremental_sync_updates_all_entity_documents_for_lifecycle_events() {
     .expect("oneshot series metadata row should be inserted");
 
     sqlx::query(
-        "INSERT INTO BOOK (\
-             ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID, oneshot) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        r#"INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID, oneshot)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind("book-1")
     .bind(0_i64)
@@ -263,9 +262,8 @@ async fn incremental_sync_updates_all_entity_documents_for_lifecycle_events() {
     .expect("book row should be inserted");
 
     sqlx::query(
-        "INSERT INTO BOOK (\
-             ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID, oneshot) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        r#"INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID, oneshot)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind("book-oneshot")
     .bind(0_i64)
@@ -281,7 +279,8 @@ async fn incremental_sync_updates_all_entity_documents_for_lifecycle_events() {
     .expect("oneshot book row should be inserted");
 
     sqlx::query(
-        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, ISBN, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
+        r#"INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, ISBN, BOOK_ID)
+VALUES (?, ?, ?, ?, ?)"#,
     )
     .bind("1")
     .bind(1.0_f64)
@@ -293,7 +292,8 @@ async fn incremental_sync_updates_all_entity_documents_for_lifecycle_events() {
     .expect("book metadata row should be inserted");
 
     sqlx::query(
-        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, ISBN, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
+        r#"INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, ISBN, BOOK_ID)
+VALUES (?, ?, ?, ?, ?)"#,
     )
     .bind("1")
     .bind(1.0_f64)
@@ -304,21 +304,21 @@ async fn incremental_sync_updates_all_entity_documents_for_lifecycle_events() {
     .await
     .expect("oneshot book metadata row should be inserted");
 
-    sqlx::query("INSERT INTO MEDIA (BOOK_ID, STATUS) VALUES (?, ?)")
+    sqlx::query(r#"INSERT INTO MEDIA (BOOK_ID, STATUS) VALUES (?, ?)"#)
         .bind("book-1")
         .bind("READY")
         .execute(&pool)
         .await
         .expect("media row should be inserted");
 
-    sqlx::query("INSERT INTO MEDIA (BOOK_ID, STATUS) VALUES (?, ?)")
+    sqlx::query(r#"INSERT INTO MEDIA (BOOK_ID, STATUS) VALUES (?, ?)"#)
         .bind("book-oneshot")
         .bind("READY")
         .execute(&pool)
         .await
         .expect("oneshot media row should be inserted");
 
-    sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
+    sqlx::query(r#"INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)"#)
         .bind("collection-1")
         .bind("Collection One")
         .bind(false)
@@ -327,7 +327,7 @@ async fn incremental_sync_updates_all_entity_documents_for_lifecycle_events() {
         .await
         .expect("collection row should be inserted");
 
-    sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT) VALUES (?, ?, ?)")
+    sqlx::query(r#"INSERT INTO READLIST (ID, NAME, BOOK_COUNT) VALUES (?, ?, ?)"#)
         .bind("readlist-1")
         .bind("ReadList One")
         .bind(0_i64)
@@ -344,7 +344,7 @@ async fn incremental_sync_updates_all_entity_documents_for_lifecycle_events() {
         .await
         .expect("fixture sqlite database should reopen for collection update");
 
-    sqlx::query("UPDATE COLLECTION SET NAME = ? WHERE ID = ?")
+    sqlx::query(r#"UPDATE COLLECTION SET NAME = ? WHERE ID = ?"#)
         .bind("Collection Prime")
         .bind("collection-1")
         .execute(&pool)
@@ -383,7 +383,7 @@ async fn incremental_sync_updates_all_entity_documents_for_lifecycle_events() {
         .await
         .expect("fixture sqlite database should reopen");
 
-    sqlx::query("UPDATE READLIST SET NAME = ? WHERE ID = ?")
+    sqlx::query(r#"UPDATE READLIST SET NAME = ? WHERE ID = ?"#)
         .bind("ReadList Prime")
         .bind("readlist-1")
         .execute(&pool)
@@ -391,9 +391,9 @@ async fn incremental_sync_updates_all_entity_documents_for_lifecycle_events() {
         .expect("readlist name should be updated");
 
     sqlx::query(
-        "UPDATE BOOK_METADATA \
-         SET TITLE = ? \
-         WHERE BOOK_ID = ?",
+        r#"UPDATE BOOK_METADATA
+SET TITLE = ?
+WHERE BOOK_ID = ?"#,
     )
     .bind("Book Prime")
     .bind("book-1")
@@ -402,9 +402,9 @@ async fn incremental_sync_updates_all_entity_documents_for_lifecycle_events() {
     .expect("book metadata title should be updated");
 
     sqlx::query(
-        "UPDATE SERIES_METADATA \
-         SET TITLE = ? \
-         WHERE SERIES_ID = ?",
+        r#"UPDATE SERIES_METADATA
+SET TITLE = ?
+WHERE SERIES_ID = ?"#,
     )
     .bind("Series Prime")
     .bind("series-1")
@@ -412,7 +412,7 @@ async fn incremental_sync_updates_all_entity_documents_for_lifecycle_events() {
     .await
     .expect("series metadata title should be updated");
 
-    sqlx::query("INSERT INTO BOOK_METADATA_AGGREGATION_TAG (SERIES_ID, TAG) VALUES (?, ?)")
+    sqlx::query(r#"INSERT INTO BOOK_METADATA_AGGREGATION_TAG (SERIES_ID, TAG) VALUES (?, ?)"#)
         .bind("series-1")
         .bind("agg-tag")
         .execute(&pool)
@@ -420,9 +420,9 @@ async fn incremental_sync_updates_all_entity_documents_for_lifecycle_events() {
         .expect("aggregated tag should be inserted");
 
     sqlx::query(
-        "UPDATE SERIES_METADATA \
-         SET PUBLISHER = ? \
-         WHERE SERIES_ID = ?",
+        r#"UPDATE SERIES_METADATA
+SET PUBLISHER = ?
+WHERE SERIES_ID = ?"#,
     )
     .bind("Oneshot Publisher Updated")
     .bind("series-oneshot")

@@ -20,15 +20,16 @@ pub async fn load_manifest_book_record(
 
     let pool = connect_pool(database_file, 1).await?;
     let row = sqlx::query(
-        "SELECT COALESCE(bm.TITLE, b.NAME) AS TITLE, b.NAME AS NAME, m.MEDIA_TYPE AS MEDIA_TYPE, \
-                COALESCE(m.PAGE_COUNT, 1) AS PAGE_COUNT \
-         FROM BOOK b \
-         LEFT \
-         JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
-         LEFT \
-         JOIN MEDIA m ON m.BOOK_ID = b.ID \
-         WHERE b.ID = ? \
-         LIMIT 1",
+        r#"SELECT COALESCE(bm.TITLE, b.NAME) AS TITLE, b.NAME AS NAME, m.MEDIA_TYPE AS MEDIA_TYPE,
+               COALESCE(m.PAGE_COUNT, 1) AS PAGE_COUNT
+        FROM BOOK b
+        LEFT
+        JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
+        LEFT
+        JOIN MEDIA m ON m.BOOK_ID = b.ID
+        WHERE b.ID = ?
+        LIMIT 1"#,
+
     )
     .bind(book_id)
     .fetch_optional(&pool)

@@ -19,10 +19,12 @@ pub async fn persisted_collection_exists(
         .await
         .map_err(|error| format!("open collection exists db: {error}"))?;
     let row = sqlx::query(
-        "SELECT 1 AS FOUND \
-         FROM COLLECTION \
-         WHERE ID = ? \
-         LIMIT 1",
+        r#"
+        SELECT 1 AS FOUND
+        FROM COLLECTION
+        WHERE ID = ?
+        LIMIT 1
+        "#
     )
     .bind(collection_id)
     .fetch_optional(&pool)
@@ -43,10 +45,12 @@ pub async fn load_persisted_collection_thumbnails(
         .await
         .map_err(|error| format!("open collection thumbnails db: {error}"))?;
     let rows = sqlx::query(
-        "SELECT ID, COLLECTION_ID, TYPE, SELECTED, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT, THUMBNAIL \
-         FROM THUMBNAIL_COLLECTION \
-         WHERE COLLECTION_ID = ? \
-         ORDER BY SELECTED DESC, LAST_MODIFIED_DATE DESC, ID ASC",
+        r#"
+        SELECT ID, COLLECTION_ID, TYPE, SELECTED, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT, THUMBNAIL
+        FROM THUMBNAIL_COLLECTION
+        WHERE COLLECTION_ID = ?
+        ORDER BY SELECTED DESC, LAST_MODIFIED_DATE DESC, ID ASC
+        "#
     )
     .bind(collection_id)
     .fetch_all(&pool)
@@ -87,10 +91,12 @@ pub async fn insert_collection_thumbnail(
         .map_err(|error| format!("begin collection thumbnail create tx: {error}"))?;
 
     let exists = sqlx::query(
-        "SELECT 1 AS FOUND \
-         FROM COLLECTION \
-         WHERE ID = ? \
-         LIMIT 1",
+        r#"
+        SELECT 1 AS FOUND
+        FROM COLLECTION
+        WHERE ID = ?
+        LIMIT 1
+        "#
     )
     .bind(collection_id)
     .fetch_optional(&mut *tx)
@@ -106,9 +112,11 @@ pub async fn insert_collection_thumbnail(
 
     if selected {
         sqlx::query(
-            "UPDATE THUMBNAIL_COLLECTION \
-             SET SELECTED = 0 \
-             WHERE COLLECTION_ID = ?",
+            r#"
+            UPDATE THUMBNAIL_COLLECTION
+            SET SELECTED = 0
+            WHERE COLLECTION_ID = ?
+            "#
         )
         .bind(collection_id)
         .execute(&mut *tx)
@@ -118,9 +126,11 @@ pub async fn insert_collection_thumbnail(
 
     let id = generated_thumbnail_id("thumbnail-collection");
     sqlx::query(
-        "INSERT INTO THUMBNAIL_COLLECTION \
-         (ID, SELECTED, THUMBNAIL, TYPE, COLLECTION_ID, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        r#"
+        INSERT INTO THUMBNAIL_COLLECTION
+            (ID, SELECTED, THUMBNAIL, TYPE, COLLECTION_ID, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#
     )
     .bind(&id)
     .bind(selected)
@@ -169,10 +179,12 @@ pub async fn select_collection_thumbnail(
         .map_err(|error| format!("begin collection thumbnail select tx: {error}"))?;
 
     let target_collection_id = sqlx::query(
-        "SELECT COLLECTION_ID \
-         FROM THUMBNAIL_COLLECTION \
-         WHERE ID = ? \
-         LIMIT 1",
+        r#"
+        SELECT COLLECTION_ID
+        FROM THUMBNAIL_COLLECTION
+        WHERE ID = ?
+        LIMIT 1
+        "#
     )
     .bind(thumbnail_id)
     .fetch_optional(&mut *tx)
@@ -187,18 +199,22 @@ pub async fn select_collection_thumbnail(
     };
 
     sqlx::query(
-        "UPDATE THUMBNAIL_COLLECTION \
-         SET SELECTED = 0 \
-         WHERE COLLECTION_ID = ?",
+        r#"
+        UPDATE THUMBNAIL_COLLECTION
+        SET SELECTED = 0
+        WHERE COLLECTION_ID = ?
+        "#
     )
     .bind(&target_collection_id)
     .execute(&mut *tx)
     .await
     .map_err(|error| format!("clear selected collection thumbnails for select: {error}"))?;
     sqlx::query(
-        "UPDATE THUMBNAIL_COLLECTION \
-         SET SELECTED = 1, LAST_MODIFIED_DATE = STRFTIME('%Y-%m-%d %H:%M:%f', 'now') \
-         WHERE ID = ? AND COLLECTION_ID = ?",
+        r#"
+        UPDATE THUMBNAIL_COLLECTION
+        SET SELECTED = 1, LAST_MODIFIED_DATE = STRFTIME('%Y-%m-%d %H:%M:%f', 'now')
+        WHERE ID = ? AND COLLECTION_ID = ?
+        "#
     )
     .bind(thumbnail_id)
     .bind(target_collection_id)
@@ -230,10 +246,12 @@ pub async fn delete_collection_thumbnail(
         .map_err(|error| format!("begin collection thumbnail delete tx: {error}"))?;
 
     let exists = sqlx::query(
-        "SELECT 1 AS FOUND \
-         FROM COLLECTION \
-         WHERE ID = ? \
-         LIMIT 1",
+        r#"
+        SELECT 1 AS FOUND
+        FROM COLLECTION
+        WHERE ID = ?
+        LIMIT 1
+        "#
     )
     .bind(collection_id)
     .fetch_optional(&mut *tx)
@@ -248,10 +266,12 @@ pub async fn delete_collection_thumbnail(
     }
 
     let target = sqlx::query(
-        "SELECT COLLECTION_ID, SELECTED \
-         FROM THUMBNAIL_COLLECTION \
-         WHERE ID = ? \
-         LIMIT 1",
+        r#"
+        SELECT COLLECTION_ID, SELECTED
+        FROM THUMBNAIL_COLLECTION
+        WHERE ID = ?
+        LIMIT 1
+        "#
     )
     .bind(thumbnail_id)
     .fetch_optional(&mut *tx)
@@ -267,8 +287,10 @@ pub async fn delete_collection_thumbnail(
     let deleted_selected = target.get::<bool, _>("SELECTED");
 
     sqlx::query(
-        "DELETE FROM THUMBNAIL_COLLECTION \
-         WHERE ID = ?",
+        r#"
+        DELETE FROM THUMBNAIL_COLLECTION
+        WHERE ID = ?
+        "#
     )
     .bind(thumbnail_id)
     .execute(&mut *tx)
@@ -290,10 +312,12 @@ async fn normalize_collection_thumbnail_selection(
     deleted_selected: bool,
 ) -> Result<(), String> {
     let remaining_rows = sqlx::query(
-        "SELECT ID, SELECTED \
-         FROM THUMBNAIL_COLLECTION \
-         WHERE COLLECTION_ID = ? \
-         ORDER BY ID ASC",
+        r#"
+        SELECT ID, SELECTED
+        FROM THUMBNAIL_COLLECTION
+        WHERE COLLECTION_ID = ?
+        ORDER BY ID ASC
+        "#
     )
     .bind(collection_id)
     .fetch_all(&mut **tx)
@@ -321,10 +345,12 @@ async fn normalize_collection_thumbnail_selection(
     };
 
     sqlx::query(
-        "UPDATE THUMBNAIL_COLLECTION \
-         SET SELECTED = CASE WHEN ID = ? THEN 1 ELSE 0 END, \
-             LAST_MODIFIED_DATE = CASE WHEN ID = ? THEN STRFTIME('%Y-%m-%d %H:%M:%f', 'now') ELSE LAST_MODIFIED_DATE END \
-         WHERE COLLECTION_ID = ?",
+        r#"
+        UPDATE THUMBNAIL_COLLECTION
+        SET SELECTED = CASE WHEN ID = ? THEN 1 ELSE 0 END,
+            LAST_MODIFIED_DATE = CASE WHEN ID = ? THEN STRFTIME('%Y-%m-%d %H:%M:%f', 'now') ELSE LAST_MODIFIED_DATE END
+        WHERE COLLECTION_ID = ?
+        "#
     )
     .bind(&target_selected_id)
     .bind(&target_selected_id)

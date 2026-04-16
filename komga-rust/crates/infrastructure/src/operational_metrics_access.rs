@@ -10,10 +10,11 @@ pub async fn load_task_execution_values(
         .await
         .map_err(|error| format!("open tasks db for metrics: {error}"))?;
     let rows = sqlx::query(
-        "SELECT SIMPLE_TYPE, CAST(COUNT(*) AS REAL) AS VALUE \
-         FROM TASK \
-         GROUP BY SIMPLE_TYPE \
-         ORDER BY SIMPLE_TYPE",
+        r#"SELECT SIMPLE_TYPE, CAST(COUNT(*) AS REAL) AS VALUE
+        FROM TASK
+        GROUP BY SIMPLE_TYPE
+        ORDER BY SIMPLE_TYPE"#,
+
     )
     .fetch_all(&pool)
     .await
@@ -36,8 +37,9 @@ pub async fn load_libraries_count(database_file: &Path) -> Result<f64, String> {
         .map_err(|error| format!("open main db for libraries metrics: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT CAST(COUNT(*) AS REAL) AS VALUE \
-         FROM LIBRARY",
+        r#"SELECT CAST(COUNT(*) AS REAL) AS VALUE
+        FROM LIBRARY"#,
+
     )
     .fetch_optional(&pool)
     .await
@@ -54,10 +56,11 @@ pub async fn load_series_grouped_by_library(
         .map_err(|error| format!("open main db for series metrics: {error}"))?;
 
     let rows = sqlx::query(
-        "SELECT LIBRARY_ID, CAST(COUNT(*) AS REAL) AS VALUE \
-         FROM SERIES \
-         GROUP BY LIBRARY_ID \
-         ORDER BY LIBRARY_ID",
+        r#"SELECT LIBRARY_ID, CAST(COUNT(*) AS REAL) AS VALUE
+        FROM SERIES
+        GROUP BY LIBRARY_ID
+        ORDER BY LIBRARY_ID"#,
+
     )
     .fetch_all(&pool)
     .await
@@ -82,10 +85,11 @@ pub async fn load_books_grouped_by_library(
         .map_err(|error| format!("open main db for books metrics: {error}"))?;
 
     let rows = sqlx::query(
-        "SELECT LIBRARY_ID, CAST(COUNT(*) AS REAL) AS VALUE \
-         FROM BOOK \
-         GROUP BY LIBRARY_ID \
-         ORDER BY LIBRARY_ID",
+        r#"SELECT LIBRARY_ID, CAST(COUNT(*) AS REAL) AS VALUE
+        FROM BOOK
+        GROUP BY LIBRARY_ID
+        ORDER BY LIBRARY_ID"#,
+
     )
     .fetch_all(&pool)
     .await
@@ -110,10 +114,11 @@ pub async fn load_books_filesize_grouped_by_library(
         .map_err(|error| format!("open main db for books filesize metrics: {error}"))?;
 
     let rows = sqlx::query(
-        "SELECT LIBRARY_ID, CAST(COALESCE(SUM(FILE_SIZE), 0) AS REAL) AS VALUE \
-         FROM BOOK \
-         GROUP BY LIBRARY_ID \
-         ORDER BY LIBRARY_ID",
+        r#"SELECT LIBRARY_ID, CAST(COALESCE(SUM(FILE_SIZE), 0) AS REAL) AS VALUE
+        FROM BOOK
+        GROUP BY LIBRARY_ID
+        ORDER BY LIBRARY_ID"#,
+
     )
     .fetch_all(&pool)
     .await
@@ -138,10 +143,11 @@ pub async fn load_sidecars_grouped_by_library(
         .map_err(|error| format!("open main db for sidecars metrics: {error}"))?;
 
     let rows = sqlx::query(
-        "SELECT LIBRARY_ID, CAST(COUNT(*) AS REAL) AS VALUE \
-         FROM SIDECAR \
-         GROUP BY LIBRARY_ID \
-         ORDER BY LIBRARY_ID",
+        r#"SELECT LIBRARY_ID, CAST(COUNT(*) AS REAL) AS VALUE
+        FROM SIDECAR
+        GROUP BY LIBRARY_ID
+        ORDER BY LIBRARY_ID"#,
+
     )
     .fetch_all(&pool)
     .await
@@ -164,8 +170,9 @@ pub async fn load_collections_count(database_file: &Path) -> Result<f64, String>
         .map_err(|error| format!("open main db for collections metrics: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT CAST(COUNT(*) AS REAL) AS VALUE \
-         FROM COLLECTION",
+        r#"SELECT CAST(COUNT(*) AS REAL) AS VALUE
+        FROM COLLECTION"#,
+
     )
     .fetch_optional(&pool)
     .await
@@ -180,8 +187,9 @@ pub async fn load_readlists_count(database_file: &Path) -> Result<f64, String> {
         .map_err(|error| format!("open main db for readlists metrics: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT CAST(COUNT(*) AS REAL) AS VALUE \
-         FROM READLIST",
+        r#"SELECT CAST(COUNT(*) AS REAL) AS VALUE
+        FROM READLIST"#,
+
     )
     .fetch_optional(&pool)
     .await
@@ -196,10 +204,11 @@ pub async fn load_task_failure_count(database_file: &Path) -> Result<f64, String
         .map_err(|error| format!("open main db for task failure metrics: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT CAST(COUNT(*) AS REAL) AS VALUE \
-         FROM HISTORICAL_EVENT \
-         WHERE TYPE LIKE '%TASK%' \
-         AND TYPE LIKE '%FAIL%'",
+        r#"SELECT CAST(COUNT(*) AS REAL) AS VALUE
+        FROM HISTORICAL_EVENT
+        WHERE TYPE LIKE '%TASK%'
+        AND TYPE LIKE '%FAIL%'"#,
+
     )
     .fetch_optional(&pool)
     .await

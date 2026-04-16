@@ -32,9 +32,12 @@ pub fn load_persisted_library_scan_profiles(
                 .map_err(|error| format!("open scan profile db: {error}"))?;
 
             let rows = sqlx::query(
-                "SELECT ID, SCAN_STARTUP, SCAN_INTERVAL \
-                 FROM LIBRARY \
-                 ORDER BY ID ASC",
+                r#"SELECT
+                    ID,
+                    SCAN_STARTUP,
+                    SCAN_INTERVAL
+                FROM LIBRARY
+                ORDER BY ID ASC"#,
             )
             .fetch_all(&pool)
             .await
@@ -85,8 +88,8 @@ pub fn load_persisted_library_ids(database_file: &Path) -> Result<Vec<String>, S
                 .map_err(|error| format!("open library id db: {error}"))?;
 
             let rows = sqlx::query(
-                "SELECT ID \
-                 FROM LIBRARY",
+                r#"SELECT ID
+                FROM LIBRARY"#,
             )
             .fetch_all(&pool)
             .await

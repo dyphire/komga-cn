@@ -96,8 +96,10 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
     };
 
     let libraries_rows = sqlx::query(
-        "SELECT ID, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED \
-         FROM LIBRARY",
+        r#"SELECT
+             ID,
+             COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
+         FROM LIBRARY"#,
     )
     .fetch_all(&pool)
     .await
@@ -115,9 +117,12 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
         .collect::<HashMap<_, _>>();
 
     let series_rows = sqlx::query(
-        "SELECT ID, LIBRARY_ID, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED \
-         FROM SERIES \
-         WHERE DELETED_DATE IS NULL",
+        r#"SELECT
+             ID,
+             LIBRARY_ID,
+             COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
+         FROM SERIES
+         WHERE DELETED_DATE IS NULL"#,
     )
     .fetch_all(&pool)
     .await
@@ -136,10 +141,13 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
         .collect::<HashMap<_, _>>();
 
     let books_rows = sqlx::query(
-        "SELECT ID, SERIES_ID, LIBRARY_ID, \
-                COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED \
-         FROM BOOK \
-         WHERE DELETED_DATE IS NULL",
+        r#"SELECT
+             ID,
+             SERIES_ID,
+             LIBRARY_ID,
+             COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
+         FROM BOOK
+         WHERE DELETED_DATE IS NULL"#,
     )
     .fetch_all(&pool)
     .await
@@ -159,12 +167,13 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
         .collect::<HashMap<_, _>>();
 
     let readlist_rows = sqlx::query(
-        "SELECT rl.ID AS ID, \
-                COALESCE(rl.LAST_MODIFIED_DATE, rl.CREATED_DATE, '') AS LAST_MODIFIED, \
-                rb.BOOK_ID AS BOOK_ID \
-         FROM READLIST rl \
-         LEFT JOIN READLIST_BOOK rb ON rb.READLIST_ID = rl.ID \
-         ORDER BY rl.ID ASC, rb.NUMBER ASC, rb.BOOK_ID ASC",
+        r#"SELECT
+             rl.ID AS ID,
+             COALESCE(rl.LAST_MODIFIED_DATE, rl.CREATED_DATE, '') AS LAST_MODIFIED,
+             rb.BOOK_ID AS BOOK_ID
+         FROM READLIST rl
+         LEFT JOIN READLIST_BOOK rb ON rb.READLIST_ID = rl.ID
+         ORDER BY rl.ID ASC, rb.NUMBER ASC, rb.BOOK_ID ASC"#,
     )
     .fetch_all(&pool)
     .await
@@ -184,12 +193,13 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
     }
 
     let collection_rows = sqlx::query(
-        "SELECT c.ID AS ID, \
-                COALESCE(c.LAST_MODIFIED_DATE, c.CREATED_DATE, '') AS LAST_MODIFIED, \
-                cs.SERIES_ID AS SERIES_ID \
-         FROM COLLECTION c \
-         LEFT JOIN COLLECTION_SERIES cs ON cs.COLLECTION_ID = c.ID \
-         ORDER BY c.ID ASC, cs.NUMBER ASC, cs.SERIES_ID ASC",
+        r#"SELECT
+             c.ID AS ID,
+             COALESCE(c.LAST_MODIFIED_DATE, c.CREATED_DATE, '') AS LAST_MODIFIED,
+             cs.SERIES_ID AS SERIES_ID
+         FROM COLLECTION c
+         LEFT JOIN COLLECTION_SERIES cs ON cs.COLLECTION_ID = c.ID
+         ORDER BY c.ID ASC, cs.NUMBER ASC, cs.SERIES_ID ASC"#,
     )
     .fetch_all(&pool)
     .await
@@ -209,13 +219,16 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
     }
 
     let book_import_rows = sqlx::query(
-        "SELECT he.ID AS ID, he.BOOK_ID AS BOOK_ID, he.TIMESTAMP AS TIMESTAMP, \
-                MAX(CASE WHEN hep.\"KEY\" = 'source' THEN hep.VALUE END) AS SOURCE_FILE \
-         FROM HISTORICAL_EVENT he \
-         LEFT JOIN HISTORICAL_EVENT_PROPERTIES hep ON hep.ID = he.ID \
-         WHERE he.TYPE = 'BookImported' \
-         GROUP BY he.ID, he.BOOK_ID, he.TIMESTAMP \
-         ORDER BY he.TIMESTAMP ASC, he.ID ASC",
+        r#"SELECT
+             he.ID AS ID,
+             he.BOOK_ID AS BOOK_ID,
+             he.TIMESTAMP AS TIMESTAMP,
+             MAX(CASE WHEN hep."KEY" = 'source' THEN hep.VALUE END) AS SOURCE_FILE
+         FROM HISTORICAL_EVENT he
+         LEFT JOIN HISTORICAL_EVENT_PROPERTIES hep ON hep.ID = he.ID
+         WHERE he.TYPE = 'BookImported'
+         GROUP BY he.ID, he.BOOK_ID, he.TIMESTAMP
+         ORDER BY he.TIMESTAMP ASC, he.ID ASC"#,
     )
     .fetch_all(&pool)
     .await
@@ -233,9 +246,11 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
         .collect::<Vec<_>>();
 
     let read_progress_rows = sqlx::query(
-        "SELECT BOOK_ID, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED \
-         FROM READ_PROGRESS \
-         WHERE USER_ID = ?",
+        r#"SELECT
+             BOOK_ID,
+             COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
+         FROM READ_PROGRESS
+         WHERE USER_ID = ?"#,
     )
     .bind(user_id)
     .fetch_all(&pool)
@@ -252,10 +267,11 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
         .collect::<HashMap<_, _>>();
 
     let read_progress_series_rows = sqlx::query(
-        "SELECT SERIES_ID, \
-                COALESCE(LAST_MODIFIED_DATE, MOST_RECENT_READ_DATE, '') AS LAST_MODIFIED \
-         FROM READ_PROGRESS_SERIES \
-         WHERE USER_ID = ?",
+        r#"SELECT
+             SERIES_ID,
+             COALESCE(LAST_MODIFIED_DATE, MOST_RECENT_READ_DATE, '') AS LAST_MODIFIED
+         FROM READ_PROGRESS_SERIES
+         WHERE USER_ID = ?"#,
     )
     .bind(user_id)
     .fetch_all(&pool)
@@ -272,14 +288,15 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
         .collect::<HashMap<_, _>>();
 
     let thumbnail_book_rows = sqlx::query(
-        "SELECT tb.ID, \
-                tb.BOOK_ID AS BOOK_ID, \
-                COALESCE(b.SERIES_ID, '') AS SERIES_ID, \
-                tb.SELECTED AS SELECTED, \
-                COALESCE(tb.LAST_MODIFIED_DATE, tb.CREATED_DATE, '') AS LAST_MODIFIED \
-         FROM THUMBNAIL_BOOK tb \
-         LEFT JOIN BOOK b ON b.ID = tb.BOOK_ID \
-         ORDER BY tb.BOOK_ID ASC, tb.SELECTED ASC, COALESCE(tb.LAST_MODIFIED_DATE, tb.CREATED_DATE, '') ASC, tb.ID ASC",
+        r#"SELECT
+             tb.ID,
+             tb.BOOK_ID AS BOOK_ID,
+             COALESCE(b.SERIES_ID, '') AS SERIES_ID,
+             tb.SELECTED AS SELECTED,
+             COALESCE(tb.LAST_MODIFIED_DATE, tb.CREATED_DATE, '') AS LAST_MODIFIED
+         FROM THUMBNAIL_BOOK tb
+         LEFT JOIN BOOK b ON b.ID = tb.BOOK_ID
+         ORDER BY tb.BOOK_ID ASC, tb.SELECTED ASC, COALESCE(tb.LAST_MODIFIED_DATE, tb.CREATED_DATE, '') ASC, tb.ID ASC"#,
     )
     .fetch_all(&pool)
     .await
@@ -300,10 +317,12 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
         .collect::<HashMap<_, _>>();
 
     let thumbnail_series_rows = sqlx::query(
-        "SELECT SERIES_ID AS ID, SELECTED, \
-                COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED \
-         FROM THUMBNAIL_SERIES \
-         ORDER BY SERIES_ID ASC, SELECTED ASC, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') ASC, ID ASC",
+        r#"SELECT
+             SERIES_ID AS ID,
+             SELECTED,
+             COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
+         FROM THUMBNAIL_SERIES
+         ORDER BY SERIES_ID ASC, SELECTED ASC, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') ASC, ID ASC"#,
     )
     .fetch_all(&pool)
     .await
@@ -322,10 +341,13 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
         .collect::<HashMap<_, _>>();
 
     let thumbnail_collection_rows = sqlx::query(
-        "SELECT ID, COLLECTION_ID, SELECTED, \
-                COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED \
-         FROM THUMBNAIL_COLLECTION \
-         ORDER BY COLLECTION_ID ASC, SELECTED ASC, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') ASC, ID ASC",
+        r#"SELECT
+             ID,
+             COLLECTION_ID,
+             SELECTED,
+             COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
+         FROM THUMBNAIL_COLLECTION
+         ORDER BY COLLECTION_ID ASC, SELECTED ASC, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') ASC, ID ASC"#,
     )
     .fetch_all(&pool)
     .await
@@ -345,10 +367,13 @@ pub async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapsh
         .collect::<HashMap<_, _>>();
 
     let thumbnail_readlist_rows = sqlx::query(
-        "SELECT ID, READLIST_ID, SELECTED, \
-                COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED \
-         FROM THUMBNAIL_READLIST \
-         ORDER BY READLIST_ID ASC, SELECTED ASC, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') ASC, ID ASC",
+        r#"SELECT
+             ID,
+             READLIST_ID,
+             SELECTED,
+             COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
+         FROM THUMBNAIL_READLIST
+         ORDER BY READLIST_ID ASC, SELECTED ASC, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') ASC, ID ASC"#,
     )
     .fetch_all(&pool)
     .await

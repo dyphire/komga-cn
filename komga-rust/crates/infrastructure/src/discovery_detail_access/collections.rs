@@ -26,9 +26,9 @@ pub async fn persisted_collections_exist(database_file: &FsPath) -> Result<bool,
         .await
         .map_err(|error| format!("open collections exists db: {error}"))?;
     let row = sqlx::query(
-        "SELECT 1 AS FOUND \
-         FROM COLLECTION \
-         LIMIT 1",
+        r#"SELECT 1 AS FOUND
+FROM COLLECTION
+LIMIT 1"#,
     )
     .fetch_optional(&pool)
     .await
@@ -44,9 +44,9 @@ pub async fn load_persisted_collections(
         .map_err(|error| format!("open persisted collections db: {error}"))?;
 
     let rows = sqlx::query(
-        "SELECT ID, NAME, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE \
-         FROM COLLECTION \
-         ORDER BY NAME COLLATE NOCASE ASC",
+        r#"SELECT ID, NAME, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE
+FROM COLLECTION
+ORDER BY NAME COLLATE NOCASE ASC"#,
     )
     .fetch_all(&pool)
     .await
@@ -77,9 +77,9 @@ pub async fn load_persisted_collection_detail(
         .map_err(|error| format!("open persisted collection detail db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT ID, NAME, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE \
-         FROM COLLECTION \
-         WHERE ID = ?",
+        r#"SELECT ID, NAME, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE
+FROM COLLECTION
+WHERE ID = ?"#,
     )
     .bind(collection_id)
     .fetch_optional(&pool)
@@ -104,10 +104,10 @@ pub async fn load_persisted_collection_series_ids(
         .map_err(|error| format!("open persisted collection series ids db: {error}"))?;
 
     let rows = sqlx::query(
-        "SELECT SERIES_ID \
-         FROM COLLECTION_SERIES \
-         WHERE COLLECTION_ID = ? \
-         ORDER BY NUMBER ASC",
+        r#"SELECT SERIES_ID
+FROM COLLECTION_SERIES
+WHERE COLLECTION_ID = ?
+ORDER BY NUMBER ASC"#,
     )
     .bind(collection_id)
     .fetch_all(&pool)
@@ -128,10 +128,10 @@ pub async fn load_series_library_id(
         .await
         .map_err(|error| format!("open series visibility db: {error}"))?;
     let row = sqlx::query(
-        "SELECT LIBRARY_ID \
-         FROM SERIES \
-         WHERE ID = ? \
-         LIMIT 1",
+        r#"SELECT LIBRARY_ID
+FROM SERIES
+WHERE ID = ?
+LIMIT 1"#,
     )
     .bind(series_id)
     .fetch_optional(&pool)
@@ -150,10 +150,10 @@ pub async fn load_series_restrictions(
         .map_err(|error| format!("open series restrictions db: {error}"))?;
 
     let age_row = sqlx::query(
-        "SELECT AGE_RATING \
-         FROM SERIES_METADATA \
-         WHERE SERIES_ID = ? \
-         LIMIT 1",
+        r#"SELECT AGE_RATING
+FROM SERIES_METADATA
+WHERE SERIES_ID = ?
+LIMIT 1"#,
     )
     .bind(series_id)
     .fetch_optional(&pool)
@@ -161,9 +161,9 @@ pub async fn load_series_restrictions(
     .map_err(|error| format!("query series age rating for visibility: {error}"))?;
 
     let label_rows = sqlx::query(
-        "SELECT LABEL \
-         FROM SERIES_METADATA_SHARING \
-         WHERE SERIES_ID = ?",
+        r#"SELECT LABEL
+FROM SERIES_METADATA_SHARING
+WHERE SERIES_ID = ?"#,
     )
     .bind(series_id)
     .fetch_all(&pool)
@@ -197,9 +197,9 @@ pub async fn persist_collection_create(
         .map_err(|error| format!("begin collection create tx: {error}"))?;
 
     sqlx::query(
-        "INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT, CREATED_DATE, \
-           LAST_MODIFIED_DATE) \
-         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+        r#"INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT, CREATED_DATE,
+LAST_MODIFIED_DATE)
+VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"#,
     )
     .bind(collection_id)
     .bind(name)
@@ -240,9 +240,9 @@ pub async fn persist_collection_update(
         .map_err(|error| format!("begin collection update tx: {error}"))?;
 
     let updated = sqlx::query(
-        "UPDATE COLLECTION \
-         SET NAME = ?, ORDERED = ?, SERIES_COUNT = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP \
-         WHERE ID = ?",
+        r#"UPDATE COLLECTION
+SET NAME = ?, ORDERED = ?, SERIES_COUNT = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+WHERE ID = ?"#,
     )
     .bind(name)
     .bind(ordered)
@@ -288,9 +288,9 @@ pub async fn delete_persisted_collection(
         .map_err(|error| format!("begin collection delete tx: {error}"))?;
 
     sqlx::query(
-        "DELETE \
-         FROM THUMBNAIL_COLLECTION \
-         WHERE COLLECTION_ID = ?",
+        r#"DELETE
+FROM THUMBNAIL_COLLECTION
+WHERE COLLECTION_ID = ?"#,
     )
     .bind(collection_id)
     .execute(&mut *tx)
@@ -298,9 +298,9 @@ pub async fn delete_persisted_collection(
     .map_err(|error| format!("delete persisted collection thumbnails: {error}"))?;
 
     sqlx::query(
-        "DELETE \
-         FROM COLLECTION_SERIES \
-         WHERE COLLECTION_ID = ?",
+        r#"DELETE
+FROM COLLECTION_SERIES
+WHERE COLLECTION_ID = ?"#,
     )
     .bind(collection_id)
     .execute(&mut *tx)
@@ -308,9 +308,9 @@ pub async fn delete_persisted_collection(
     .map_err(|error| format!("delete persisted collection series: {error}"))?;
 
     let deleted = sqlx::query(
-        "DELETE \
-         FROM COLLECTION \
-         WHERE ID = ?",
+        r#"DELETE
+FROM COLLECTION
+WHERE ID = ?"#,
     )
     .bind(collection_id)
     .execute(&mut *tx)
@@ -338,9 +338,9 @@ async fn replace_collection_series(
     series_ids: &[String],
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "DELETE \
-         FROM COLLECTION_SERIES \
-         WHERE COLLECTION_ID = ?",
+        r#"DELETE
+FROM COLLECTION_SERIES
+WHERE COLLECTION_ID = ?"#,
     )
     .bind(collection_id)
     .execute(&mut **tx)
@@ -348,8 +348,8 @@ async fn replace_collection_series(
 
     for (index, series_id) in series_ids.iter().enumerate() {
         sqlx::query(
-            "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) \
-             VALUES (?, ?, ?)",
+            r#"INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER)
+VALUES (?, ?, ?)"#,
         )
         .bind(collection_id)
         .bind(series_id)

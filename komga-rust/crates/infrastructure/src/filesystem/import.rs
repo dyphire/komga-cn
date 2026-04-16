@@ -239,12 +239,12 @@ async fn load_import_series_target(
         .map_err(|error| format!("open series target db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT s.ID AS SERIES_ID, s.LIBRARY_ID AS LIBRARY_ID, s.URL AS SERIES_URL, \
-                l.ROOT AS LIBRARY_ROOT, COALESCE(s.oneshot, 0) AS ONESHOT \
-         FROM SERIES s \
-         JOIN LIBRARY l ON l.ID = s.LIBRARY_ID \
-         WHERE s.ID = ? \
-         LIMIT 1",
+        r#"SELECT s.ID AS SERIES_ID, s.LIBRARY_ID AS LIBRARY_ID, s.URL AS SERIES_URL,
+            l.ROOT AS LIBRARY_ROOT, COALESCE(s.oneshot, 0) AS ONESHOT
+        FROM SERIES s
+        JOIN LIBRARY l ON l.ID = s.LIBRARY_ID
+        WHERE s.ID = ?
+        LIMIT 1"#,
     )
     .bind(series_id)
     .fetch_optional(&pool)
@@ -273,12 +273,12 @@ async fn load_import_upgrade_book_target(
         .map_err(|error| format!("open upgrade book target db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT b.SERIES_ID AS SERIES_ID, b.URL AS BOOK_URL, \
-                l.ROOT AS LIBRARY_ROOT \
-         FROM BOOK b \
-         JOIN LIBRARY l ON l.ID = b.LIBRARY_ID \
-         WHERE b.ID = ? \
-         LIMIT 1",
+        r#"SELECT b.SERIES_ID AS SERIES_ID, b.URL AS BOOK_URL,
+            l.ROOT AS LIBRARY_ROOT
+        FROM BOOK b
+        JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+        WHERE b.ID = ?
+        LIMIT 1"#,
     )
     .bind(book_id)
     .fetch_optional(&pool)
@@ -585,20 +585,20 @@ async fn migrate_upgraded_book_identity(
     }
 
     sqlx::query(
-        "INSERT INTO BOOK (ID, CREATED_DATE, LAST_MODIFIED_DATE, FILE_LAST_MODIFIED, NAME, URL, \
-           SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID, FILE_HASH, DELETED_DATE, oneshot, \
-           FILE_HASH_KOREADER) SELECT ?, \
-           CREATED_DATE, LAST_MODIFIED_DATE, FILE_LAST_MODIFIED, ?, ?, SERIES_ID, FILE_SIZE, \
-           NUMBER, LIBRARY_ID, FILE_HASH, DELETED_DATE, oneshot, FILE_HASH_KOREADER \
-         FROM BOOK \
-         WHERE ID = ? \
-         ON CONFLICT(ID) DO UPDATE \
-         SET FILE_LAST_MODIFIED = excluded.FILE_LAST_MODIFIED, NAME = excluded.NAME, \
-             URL = excluded.URL, SERIES_ID = excluded.SERIES_ID, FILE_SIZE = excluded.FILE_SIZE, \
-             NUMBER = excluded.NUMBER, LIBRARY_ID = excluded.LIBRARY_ID, \
-             FILE_HASH = excluded.FILE_HASH, DELETED_DATE = excluded.DELETED_DATE, \
-             oneshot = excluded.oneshot, FILE_HASH_KOREADER = excluded.FILE_HASH_KOREADER, \
-             LAST_MODIFIED_DATE = CURRENT_TIMESTAMP",
+        r#"INSERT INTO BOOK (ID, CREATED_DATE, LAST_MODIFIED_DATE, FILE_LAST_MODIFIED, NAME, URL,
+           SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID, FILE_HASH, DELETED_DATE, oneshot,
+           FILE_HASH_KOREADER) SELECT ?,
+           CREATED_DATE, LAST_MODIFIED_DATE, FILE_LAST_MODIFIED, ?, ?, SERIES_ID, FILE_SIZE,
+           NUMBER, LIBRARY_ID, FILE_HASH, DELETED_DATE, oneshot, FILE_HASH_KOREADER
+         FROM BOOK
+         WHERE ID = ?
+         ON CONFLICT(ID) DO UPDATE
+         SET FILE_LAST_MODIFIED = excluded.FILE_LAST_MODIFIED, NAME = excluded.NAME,
+             URL = excluded.URL, SERIES_ID = excluded.SERIES_ID, FILE_SIZE = excluded.FILE_SIZE,
+             NUMBER = excluded.NUMBER, LIBRARY_ID = excluded.LIBRARY_ID,
+             FILE_HASH = excluded.FILE_HASH, DELETED_DATE = excluded.DELETED_DATE,
+             oneshot = excluded.oneshot, FILE_HASH_KOREADER = excluded.FILE_HASH_KOREADER,
+             LAST_MODIFIED_DATE = CURRENT_TIMESTAMP"#,
     )
     .bind(new_book_id)
     .bind(destination_name)
@@ -679,10 +679,10 @@ async fn migrate_upgraded_book_identity(
     .map_err(|error| format!("move user-uploaded thumbnails during upgrade migration: {error}"))?;
 
     sqlx::query(
-        "INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) SELECT READLIST_ID, ?, NUMBER \
-         FROM READLIST_BOOK \
-         WHERE BOOK_ID = ? \
-         ON CONFLICT(READLIST_ID, BOOK_ID) DO NOTHING",
+        r#"INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) SELECT READLIST_ID, ?, NUMBER
+         FROM READLIST_BOOK
+         WHERE BOOK_ID = ?
+         ON CONFLICT(READLIST_ID, BOOK_ID) DO NOTHING"#,
     )
     .bind(new_book_id)
     .bind(old_book_id)

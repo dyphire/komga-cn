@@ -82,14 +82,13 @@ pub async fn load_book_id_by_sorted_position(
         .map_err(|error| format!("open book-id remap db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT b.ID AS ID \
-         FROM BOOK b \
-         LEFT \
-         JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
-         WHERE b.DELETED_DATE IS NULL \
-         ORDER BY COALESCE(bm.TITLE, b.NAME) COLLATE NOCASE ASC, b.ID ASC \
-         LIMIT 1 \
-         OFFSET ?",
+        r#"SELECT b.ID AS ID
+         FROM BOOK b
+         LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
+         WHERE b.DELETED_DATE IS NULL
+         ORDER BY COALESCE(bm.TITLE, b.NAME) COLLATE NOCASE ASC, b.ID ASC
+         LIMIT 1
+         OFFSET ?"#,
     )
     .bind((index - 1) as i64)
     .fetch_optional(&pool)
@@ -108,16 +107,14 @@ pub async fn load_persisted_book_resource(
         .map_err(|error| format!("open book resource db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT b.LIBRARY_ID, sm.AGE_RATING, \
-                COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS \
-         FROM BOOK b \
-         JOIN SERIES s ON s.ID = b.SERIES_ID \
-         LEFT \
-         JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
-         LEFT \
-         JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID \
-         WHERE b.ID = ? \
-         GROUP BY b.LIBRARY_ID, sm.AGE_RATING",
+        r#"SELECT b.LIBRARY_ID, sm.AGE_RATING,
+                COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS
+         FROM BOOK b
+         JOIN SERIES s ON s.ID = b.SERIES_ID
+         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
+         LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID
+         WHERE b.ID = ?
+         GROUP BY b.LIBRARY_ID, sm.AGE_RATING"#,
     )
     .bind(book_id)
     .fetch_optional(&pool)
@@ -143,58 +140,55 @@ pub async fn load_persisted_book_detail(
         .map_err(|error| format!("open book detail db: {error}"))?;
 
     let row = sqlx::query(
-        "SELECT b.ID AS ID, b.SERIES_ID AS SERIES_ID, COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE, \
-                COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) AS SERIES_TITLE_SORT, \
-                b.LIBRARY_ID AS LIBRARY_ID, b.NAME AS NAME, b.URL AS URL, b.NUMBER AS NUMBER, \
-                b.CREATED_DATE AS CREATED_DATE, b.LAST_MODIFIED_DATE AS LAST_MODIFIED_DATE, \
-                CAST(b.FILE_LAST_MODIFIED AS TEXT) AS FILE_LAST_MODIFIED, \
-                b.FILE_SIZE AS FILE_SIZE, b.FILE_HASH AS FILE_HASH, b.ONESHOT AS ONESHOT, \
-                b.DELETED_DATE AS DELETED_DATE, COALESCE(bm.TITLE, b.NAME) AS METADATA_TITLE, \
-                COALESCE(bm.SUMMARY, '') AS METADATA_SUMMARY, \
-                COALESCE(bm.NUMBER, '') AS METADATA_NUMBER, \
-                COALESCE(bm.NUMBER_SORT, CAST(0 AS REAL)) AS METADATA_NUMBER_SORT, \
-                bm.RELEASE_DATE AS METADATA_RELEASE_DATE, \
-                COALESCE(bm.TITLE_LOCK, 0) AS METADATA_TITLE_LOCK, \
-                COALESCE(bm.SUMMARY_LOCK, 0) AS METADATA_SUMMARY_LOCK, \
-                COALESCE(bm.NUMBER_LOCK, 0) AS METADATA_NUMBER_LOCK, \
-                COALESCE(bm.NUMBER_SORT_LOCK, 0) AS METADATA_NUMBER_SORT_LOCK, \
-                COALESCE(bm.RELEASE_DATE_LOCK, 0) AS METADATA_RELEASE_DATE_LOCK, \
-                COALESCE((SELECT GROUP_CONCAT(ba.NAME || X'1E' || COALESCE(ba.ROLE, ''), X'1F') \
-                          FROM BOOK_METADATA_AUTHOR ba \
-                          WHERE ba.BOOK_ID = b.ID), '') AS METADATA_AUTHORS, \
-                COALESCE(bm.AUTHORS_LOCK, 0) AS METADATA_AUTHORS_LOCK, \
-                COALESCE((SELECT GROUP_CONCAT(bt.TAG) \
-                          FROM BOOK_METADATA_TAG bt \
-                          WHERE bt.BOOK_ID = b.ID), '') AS METADATA_TAGS, \
-                COALESCE(bm.TAGS_LOCK, 0) AS METADATA_TAGS_LOCK, \
-                COALESCE(bm.ISBN, '') AS METADATA_ISBN, \
-                COALESCE(bm.CREATED_DATE, b.CREATED_DATE) AS METADATA_CREATED, \
-                COALESCE(bm.LAST_MODIFIED_DATE, b.LAST_MODIFIED_DATE) AS METADATA_LAST_MODIFIED, \
-                COALESCE(bm.ISBN_LOCK, 0) AS METADATA_ISBN_LOCK, \
-                COALESCE((SELECT GROUP_CONCAT(bl.LABEL || X'1E' || bl.URL, X'1F') \
-                          FROM BOOK_METADATA_LINK bl \
-                          WHERE bl.BOOK_ID = b.ID), '') AS METADATA_LINKS, \
-                COALESCE(bm.LINKS_LOCK, 0) AS METADATA_LINKS_LOCK, \
-                COALESCE(m.STATUS, 'UNKNOWN') AS MEDIA_STATUS, \
-                COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE, \
-                COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT, COALESCE(m.COMMENT, '') AS MEDIA_COMMENT, \
-                COALESCE(m.EPUB_DIVINA_COMPATIBLE, 0) AS EPUB_DIVINA_COMPATIBLE, \
-                COALESCE(m.EPUB_IS_KEPUB, 0) AS EPUB_IS_KEPUB, \
-                rp.PAGE AS READ_PROGRESS_PAGE, rp.COMPLETED AS READ_PROGRESS_COMPLETED, \
-                rp.READ_DATE AS READ_PROGRESS_READ_DATE, rp.CREATED_DATE AS READ_PROGRESS_CREATED, \
-                rp.LAST_MODIFIED_DATE AS READ_PROGRESS_LAST_MODIFIED, \
-                rp.DEVICE_ID AS READ_PROGRESS_DEVICE_ID, \
-                rp.DEVICE_NAME AS READ_PROGRESS_DEVICE_NAME \
-         FROM BOOK b \
-         LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
-         JOIN SERIES s ON s.ID = b.SERIES_ID \
-         LEFT \
-         JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
-         LEFT \
-         JOIN MEDIA m ON m.BOOK_ID = b.ID \
-         LEFT \
-         JOIN READ_PROGRESS rp ON rp.BOOK_ID = b.ID AND rp.USER_ID = ? \
-         WHERE b.ID = ?",
+        r#"SELECT b.ID AS ID, b.SERIES_ID AS SERIES_ID, COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE,
+                COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) AS SERIES_TITLE_SORT,
+                b.LIBRARY_ID AS LIBRARY_ID, b.NAME AS NAME, b.URL AS URL, b.NUMBER AS NUMBER,
+                b.CREATED_DATE AS CREATED_DATE, b.LAST_MODIFIED_DATE AS LAST_MODIFIED_DATE,
+                CAST(b.FILE_LAST_MODIFIED AS TEXT) AS FILE_LAST_MODIFIED,
+                b.FILE_SIZE AS FILE_SIZE, b.FILE_HASH AS FILE_HASH, b.ONESHOT AS ONESHOT,
+                b.DELETED_DATE AS DELETED_DATE, COALESCE(bm.TITLE, b.NAME) AS METADATA_TITLE,
+                COALESCE(bm.SUMMARY, '') AS METADATA_SUMMARY,
+                COALESCE(bm.NUMBER, '') AS METADATA_NUMBER,
+                COALESCE(bm.NUMBER_SORT, CAST(0 AS REAL)) AS METADATA_NUMBER_SORT,
+                bm.RELEASE_DATE AS METADATA_RELEASE_DATE,
+                COALESCE(bm.TITLE_LOCK, 0) AS METADATA_TITLE_LOCK,
+                COALESCE(bm.SUMMARY_LOCK, 0) AS METADATA_SUMMARY_LOCK,
+                COALESCE(bm.NUMBER_LOCK, 0) AS METADATA_NUMBER_LOCK,
+                COALESCE(bm.NUMBER_SORT_LOCK, 0) AS METADATA_NUMBER_SORT_LOCK,
+                COALESCE(bm.RELEASE_DATE_LOCK, 0) AS METADATA_RELEASE_DATE_LOCK,
+                COALESCE((SELECT GROUP_CONCAT(ba.NAME || X'1E' || COALESCE(ba.ROLE, ''), X'1F')
+                          FROM BOOK_METADATA_AUTHOR ba
+                          WHERE ba.BOOK_ID = b.ID), '') AS METADATA_AUTHORS,
+                COALESCE(bm.AUTHORS_LOCK, 0) AS METADATA_AUTHORS_LOCK,
+                COALESCE((SELECT GROUP_CONCAT(bt.TAG)
+                          FROM BOOK_METADATA_TAG bt
+                          WHERE bt.BOOK_ID = b.ID), '') AS METADATA_TAGS,
+                COALESCE(bm.TAGS_LOCK, 0) AS METADATA_TAGS_LOCK,
+                COALESCE(bm.ISBN, '') AS METADATA_ISBN,
+                COALESCE(bm.CREATED_DATE, b.CREATED_DATE) AS METADATA_CREATED,
+                COALESCE(bm.LAST_MODIFIED_DATE, b.LAST_MODIFIED_DATE) AS METADATA_LAST_MODIFIED,
+                COALESCE(bm.ISBN_LOCK, 0) AS METADATA_ISBN_LOCK,
+                COALESCE((SELECT GROUP_CONCAT(bl.LABEL || X'1E' || bl.URL, X'1F')
+                          FROM BOOK_METADATA_LINK bl
+                          WHERE bl.BOOK_ID = b.ID), '') AS METADATA_LINKS,
+                COALESCE(bm.LINKS_LOCK, 0) AS METADATA_LINKS_LOCK,
+                COALESCE(m.STATUS, 'UNKNOWN') AS MEDIA_STATUS,
+                COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE,
+                COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT, COALESCE(m.COMMENT, '') AS MEDIA_COMMENT,
+                COALESCE(m.EPUB_DIVINA_COMPATIBLE, 0) AS EPUB_DIVINA_COMPATIBLE,
+                COALESCE(m.EPUB_IS_KEPUB, 0) AS EPUB_IS_KEPUB,
+                rp.PAGE AS READ_PROGRESS_PAGE, rp.COMPLETED AS READ_PROGRESS_COMPLETED,
+                rp.READ_DATE AS READ_PROGRESS_READ_DATE, rp.CREATED_DATE AS READ_PROGRESS_CREATED,
+                rp.LAST_MODIFIED_DATE AS READ_PROGRESS_LAST_MODIFIED,
+                rp.DEVICE_ID AS READ_PROGRESS_DEVICE_ID,
+                rp.DEVICE_NAME AS READ_PROGRESS_DEVICE_NAME
+         FROM BOOK b
+         LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
+         JOIN SERIES s ON s.ID = b.SERIES_ID
+         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
+         LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
+         LEFT JOIN READ_PROGRESS rp ON rp.BOOK_ID = b.ID AND rp.USER_ID = ?
+         WHERE b.ID = ?"#,
     )
     .bind(user_id.unwrap_or_default())
     .bind(book_id)
@@ -278,10 +272,10 @@ pub async fn load_persisted_book_sibling_id(
         .map_err(|error| format!("open book sibling db: {error}"))?;
 
     let current = sqlx::query(
-        "SELECT b.SERIES_ID, bm.NUMBER_SORT AS NUMBER_SORT \
-         FROM BOOK b \
-         LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
-         WHERE b.ID = ?",
+        r#"SELECT b.SERIES_ID, bm.NUMBER_SORT AS NUMBER_SORT
+         FROM BOOK b
+         LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
+         WHERE b.ID = ?"#,
     )
     .bind(book_id)
     .fetch_optional(&pool)
@@ -300,13 +294,13 @@ pub async fn load_persisted_book_sibling_id(
     let sibling_row = match direction {
         PersistedBookSiblingDirectionRecord::Previous => {
             sqlx::query(
-                "SELECT b.ID \
-                 FROM BOOK b \
-                 JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
-                 WHERE b.SERIES_ID = ? \
-                 AND bm.NUMBER_SORT < ? \
-                 ORDER BY bm.NUMBER_SORT DESC \
-                 LIMIT 1",
+                r#"SELECT b.ID
+                 FROM BOOK b
+                 JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
+                 WHERE b.SERIES_ID = ?
+                 AND bm.NUMBER_SORT < ?
+                 ORDER BY bm.NUMBER_SORT DESC
+                 LIMIT 1"#,
             )
             .bind(&series_id)
             .bind(number_sort)
@@ -315,13 +309,13 @@ pub async fn load_persisted_book_sibling_id(
         }
         PersistedBookSiblingDirectionRecord::Next => {
             sqlx::query(
-                "SELECT b.ID \
-                 FROM BOOK b \
-                 JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
-                 WHERE b.SERIES_ID = ? \
-                 AND bm.NUMBER_SORT > ? \
-                 ORDER BY bm.NUMBER_SORT ASC \
-                 LIMIT 1",
+                r#"SELECT b.ID
+                 FROM BOOK b
+                 JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
+                 WHERE b.SERIES_ID = ?
+                 AND bm.NUMBER_SORT > ?
+                 ORDER BY bm.NUMBER_SORT ASC
+                 LIMIT 1"#,
             )
             .bind(&series_id)
             .bind(number_sort)

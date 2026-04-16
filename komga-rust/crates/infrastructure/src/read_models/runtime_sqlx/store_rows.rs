@@ -7,8 +7,8 @@ pub(super) async fn insert_library_row(
     row: LibraryRow,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "INSERT INTO libraries (id, name, root) \
-                 VALUES (?1, ?2, ?3)",
+        r#"INSERT INTO libraries (id, name, root)
+VALUES (?1, ?2, ?3)"#,
     )
     .bind(row.id)
     .bind(row.name)
@@ -46,10 +46,10 @@ pub(super) async fn insert_series_row(
     } = row;
 
     sqlx::query(
-        "INSERT INTO series (id, library_id, title, age_rating, language, publisher, \
-           release_date, status, complete, read_status, deleted, oneshot, created, last_modified, \
-           file_last_modified, url) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+        r#"INSERT INTO series (id, library_id, title, age_rating, language, publisher,
+   release_date, status, complete, read_status, deleted, oneshot, created, last_modified,
+   file_last_modified, url)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)"#,
     )
     .bind(&id)
     .bind(&library_id)
@@ -72,8 +72,8 @@ pub(super) async fn insert_series_row(
 
     for label in labels {
         sqlx::query(
-            "INSERT INTO series_labels (series_id, label) \
-                     VALUES (?1, ?2)",
+            r#"INSERT INTO series_labels (series_id, label)
+VALUES (?1, ?2)"#,
         )
         .bind(&id)
         .bind(label)
@@ -83,8 +83,8 @@ pub(super) async fn insert_series_row(
 
     for genre in genres {
         sqlx::query(
-            "INSERT INTO series_genres (series_id, genre) \
-                     VALUES (?1, ?2)",
+            r#"INSERT INTO series_genres (series_id, genre)
+VALUES (?1, ?2)"#,
         )
         .bind(&id)
         .bind(genre)
@@ -94,8 +94,8 @@ pub(super) async fn insert_series_row(
 
     for tag in tags {
         sqlx::query(
-            "INSERT INTO series_tags (series_id, tag) \
-                     VALUES (?1, ?2)",
+            r#"INSERT INTO series_tags (series_id, tag)
+VALUES (?1, ?2)"#,
         )
         .bind(&id)
         .bind(tag)
@@ -105,8 +105,8 @@ pub(super) async fn insert_series_row(
 
     for author in authors {
         sqlx::query(
-            "INSERT INTO series_authors (series_id, author) \
-                     VALUES (?1, ?2)",
+            r#"INSERT INTO series_authors (series_id, author)
+VALUES (?1, ?2)"#,
         )
         .bind(&id)
         .bind(author)
@@ -142,10 +142,10 @@ pub(super) async fn insert_book_row(pool: &SqlitePool, row: BookRow) -> Result<(
     } = row;
 
     sqlx::query(
-        "INSERT INTO books (id, series_id, library_id, title, url, created, last_modified, \
-           file_last_modified, size_bytes, media_status, media_profile, media_type, \
-           media_pages_count, metadata_release_date, number_sort, read_status, deleted, oneshot) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+        r#"INSERT INTO books (id, series_id, library_id, title, url, created, last_modified,
+   file_last_modified, size_bytes, media_status, media_profile, media_type,
+   media_pages_count, metadata_release_date, number_sort, read_status, deleted, oneshot)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)"#,
     )
     .bind(&id)
     .bind(&series_id)
@@ -170,8 +170,8 @@ pub(super) async fn insert_book_row(pool: &SqlitePool, row: BookRow) -> Result<(
 
     for tag in tags {
         sqlx::query(
-            "INSERT INTO book_tags (book_id, tag) \
-                     VALUES (?1, ?2)",
+            r#"INSERT INTO book_tags (book_id, tag)
+VALUES (?1, ?2)"#,
         )
         .bind(&id)
         .bind(tag)
@@ -181,8 +181,8 @@ pub(super) async fn insert_book_row(pool: &SqlitePool, row: BookRow) -> Result<(
 
     for author in authors {
         sqlx::query(
-            "INSERT INTO book_authors (book_id, author) \
-                     VALUES (?1, ?2)",
+            r#"INSERT INTO book_authors (book_id, author)
+VALUES (?1, ?2)"#,
         )
         .bind(&id)
         .bind(author)

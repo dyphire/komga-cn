@@ -221,7 +221,21 @@ async fn seed_sync_point_books(
     }
 
     let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
-        "INSERT INTO SYNC_POINT_BOOK (SYNC_POINT_ID, BOOK_ID, BOOK_CREATED_DATE, BOOK_LAST_MODIFIED_DATE, BOOK_FILE_LAST_MODIFIED, BOOK_FILE_SIZE, BOOK_FILE_HASH, BOOK_METADATA_LAST_MODIFIED_DATE, BOOK_READ_PROGRESS_LAST_MODIFIED_DATE, BOOK_THUMBNAIL_ID) ",
+        r#"
+        INSERT INTO SYNC_POINT_BOOK (
+            SYNC_POINT_ID,
+            BOOK_ID,
+            BOOK_CREATED_DATE,
+            BOOK_LAST_MODIFIED_DATE,
+            BOOK_FILE_LAST_MODIFIED,
+            BOOK_FILE_SIZE,
+            BOOK_FILE_HASH,
+            BOOK_METADATA_LAST_MODIFIED_DATE,
+            BOOK_READ_PROGRESS_LAST_MODIFIED_DATE,
+            BOOK_THUMBNAIL_ID
+        )
+        "#,
+
     );
     query.push_values(books.iter(), |mut builder, book| {
         builder
@@ -328,7 +342,16 @@ async fn seed_sync_point_ondeck(
         .to_string();
 
     sqlx::query(
-        "INSERT INTO SYNC_POINT_READLIST (SYNC_POINT_ID, READLIST_ID, READLIST_NAME, READLIST_CREATED_DATE, READLIST_LAST_MODIFIED_DATE) VALUES (?, ?, ?, ?, ?)",
+        r#"
+        INSERT INTO SYNC_POINT_READLIST (
+            SYNC_POINT_ID,
+            READLIST_ID,
+            READLIST_NAME,
+            READLIST_CREATED_DATE,
+            READLIST_LAST_MODIFIED_DATE
+        ) VALUES (?, ?, ?, ?, ?)
+        "#,
+
     )
     .bind(sync_point_id)
     .bind("KOMGA-ONDECK")

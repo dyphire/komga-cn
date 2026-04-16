@@ -242,7 +242,18 @@ mod tests {
             .expect("remove-hashed-pages failure fixture library row should be inserted");
         insert_series(&pool, "library-1", "series-1").await;
         sqlx::query(
-            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE) VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?)",
+            r#"
+            INSERT INTO BOOK (
+                ID,
+                NAME,
+                URL,
+                LIBRARY_ID,
+                SERIES_ID,
+                FILE_LAST_MODIFIED,
+                FILE_SIZE
+            )
+            VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?)
+            "#,
         )
         .bind("book-1")
         .bind("book-1")
@@ -297,7 +308,19 @@ mod tests {
             .expect("library row should be inserted for missing page hash finder fixture");
         insert_series(&pool, "library-1", "series-1").await;
         sqlx::query(
-            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE, DELETED_DATE) VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?, NULL)",
+            r#"
+            INSERT INTO BOOK (
+                ID,
+                NAME,
+                URL,
+                LIBRARY_ID,
+                SERIES_ID,
+                FILE_LAST_MODIFIED,
+                FILE_SIZE,
+                DELETED_DATE
+            )
+            VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?, NULL)
+            "#,
         )
             .bind("book-1")
             .bind("book-1")
@@ -370,7 +393,19 @@ mod tests {
             .expect("library row should be inserted for disabled page-hash fixture");
         insert_series(&pool, "library-1", "series-1").await;
         sqlx::query(
-            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE, DELETED_DATE) VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?, NULL)",
+            r#"
+            INSERT INTO BOOK (
+                ID,
+                NAME,
+                URL,
+                LIBRARY_ID,
+                SERIES_ID,
+                FILE_LAST_MODIFIED,
+                FILE_SIZE,
+                DELETED_DATE
+            )
+            VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?, NULL)
+            "#,
         )
             .bind("book-1")
             .bind("book-1")
@@ -444,7 +479,18 @@ mod tests {
             .expect("remove-hashed-pages library row should be inserted");
         insert_series(&pool, "library-1", "series-1").await;
         sqlx::query(
-            "INSERT INTO BOOK (ID, NAME, URL, LIBRARY_ID, SERIES_ID, FILE_LAST_MODIFIED, FILE_SIZE) VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?)",
+            r#"
+            INSERT INTO BOOK (
+                ID,
+                NAME,
+                URL,
+                LIBRARY_ID,
+                SERIES_ID,
+                FILE_LAST_MODIFIED,
+                FILE_SIZE
+            )
+            VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?)
+            "#,
         )
         .bind(book_id)
         .bind("book-1")
@@ -467,7 +513,19 @@ mod tests {
         .await
         .expect("remove-hashed-pages media row should be inserted");
         sqlx::query(
-            "INSERT INTO MEDIA_PAGE (FILE_NAME, MEDIA_TYPE, NUMBER, BOOK_ID, width, height, FILE_HASH, FILE_SIZE) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)",
+            r#"
+            INSERT INTO MEDIA_PAGE (
+                FILE_NAME,
+                MEDIA_TYPE,
+                NUMBER,
+                BOOK_ID,
+                width,
+                height,
+                FILE_HASH,
+                FILE_SIZE
+            )
+            VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)
+            "#,
         )
         .bind(&page_entries[0].0)
         .bind("image/png")
@@ -479,7 +537,19 @@ mod tests {
         .await
         .expect("remove-hashed-pages first page row should be inserted");
         sqlx::query(
-            "INSERT INTO MEDIA_PAGE (FILE_NAME, MEDIA_TYPE, NUMBER, BOOK_ID, width, height, FILE_HASH, FILE_SIZE) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)",
+            r#"
+            INSERT INTO MEDIA_PAGE (
+                FILE_NAME,
+                MEDIA_TYPE,
+                NUMBER,
+                BOOK_ID,
+                width,
+                height,
+                FILE_HASH,
+                FILE_SIZE
+            )
+            VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)
+            "#,
         )
         .bind(&page_entries[1].0)
         .bind("image/png")

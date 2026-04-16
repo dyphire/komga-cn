@@ -337,14 +337,43 @@ pub async fn persisted_list_authentication_activity(
     let pool = connect_pool(database_file, 1).await.ok()?;
     let rows = if let Some(user_id) = user_id {
         sqlx::query(
-            "SELECT USER_ID, EMAIL, IP, USER_AGENT, SUCCESS, ERROR, DATE_TIME, SOURCE, API_KEY_ID, API_KEY_COMMENT FROM AUTHENTICATION_ACTIVITY WHERE USER_ID = ? ORDER BY DATE_TIME DESC",
+            r#"
+            SELECT
+                USER_ID,
+                EMAIL,
+                IP,
+                USER_AGENT,
+                SUCCESS,
+                ERROR,
+                DATE_TIME,
+                SOURCE,
+                API_KEY_ID,
+                API_KEY_COMMENT
+            FROM AUTHENTICATION_ACTIVITY
+            WHERE USER_ID = ?
+            ORDER BY DATE_TIME DESC
+            "#,
         )
         .bind(user_id)
         .fetch_all(&pool)
         .await
     } else {
         sqlx::query(
-            "SELECT USER_ID, EMAIL, IP, USER_AGENT, SUCCESS, ERROR, DATE_TIME, SOURCE, API_KEY_ID, API_KEY_COMMENT FROM AUTHENTICATION_ACTIVITY ORDER BY DATE_TIME DESC",
+            r#"
+            SELECT
+                USER_ID,
+                EMAIL,
+                IP,
+                USER_AGENT,
+                SUCCESS,
+                ERROR,
+                DATE_TIME,
+                SOURCE,
+                API_KEY_ID,
+                API_KEY_COMMENT
+            FROM AUTHENTICATION_ACTIVITY
+            ORDER BY DATE_TIME DESC
+            "#,
         )
         .fetch_all(&pool)
         .await
@@ -395,7 +424,24 @@ pub async fn persisted_latest_authentication_activity_by_user_and_api_key(
 
     let pool = connect_pool(database_file, 1).await.ok()?;
     let row = sqlx::query(
-        "SELECT USER_ID, EMAIL, IP, USER_AGENT, SUCCESS, ERROR, DATE_TIME, SOURCE, API_KEY_ID, API_KEY_COMMENT FROM AUTHENTICATION_ACTIVITY WHERE USER_ID = ? AND API_KEY_ID = ? ORDER BY DATE_TIME DESC LIMIT 1",
+        r#"
+        SELECT
+            USER_ID,
+            EMAIL,
+            IP,
+            USER_AGENT,
+            SUCCESS,
+            ERROR,
+            DATE_TIME,
+            SOURCE,
+            API_KEY_ID,
+            API_KEY_COMMENT
+        FROM AUTHENTICATION_ACTIVITY
+        WHERE USER_ID = ?
+          AND API_KEY_ID = ?
+        ORDER BY DATE_TIME DESC
+        LIMIT 1
+        "#,
     )
     .bind(user_id)
     .bind(api_key_id)
@@ -433,7 +479,20 @@ pub async fn persisted_record_successful_authentication_activity(
 
     let pool = connect_pool(database_file, 1).await.ok()?;
     let insert_with_user_id = sqlx::query(
-        "INSERT INTO AUTHENTICATION_ACTIVITY (USER_ID, EMAIL, IP, USER_AGENT, SUCCESS, ERROR, DATE_TIME, SOURCE, API_KEY_ID, API_KEY_COMMENT) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)",
+        r#"
+        INSERT INTO AUTHENTICATION_ACTIVITY (
+            USER_ID,
+            EMAIL,
+            IP,
+            USER_AGENT,
+            SUCCESS,
+            ERROR,
+            DATE_TIME,
+            SOURCE,
+            API_KEY_ID,
+            API_KEY_COMMENT
+        ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)
+        "#,
     )
     .bind(user.id.as_str())
     .bind(user.email.as_str())
@@ -450,7 +509,20 @@ pub async fn persisted_record_successful_authentication_activity(
     let insert = match insert_with_user_id {
         Ok(result) => Ok(result),
         Err(_) => sqlx::query(
-            "INSERT INTO AUTHENTICATION_ACTIVITY (USER_ID, EMAIL, IP, USER_AGENT, SUCCESS, ERROR, DATE_TIME, SOURCE, API_KEY_ID, API_KEY_COMMENT) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)",
+            r#"
+            INSERT INTO AUTHENTICATION_ACTIVITY (
+                USER_ID,
+                EMAIL,
+                IP,
+                USER_AGENT,
+                SUCCESS,
+                ERROR,
+                DATE_TIME,
+                SOURCE,
+                API_KEY_ID,
+                API_KEY_COMMENT
+            ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)
+            "#,
         )
         .bind(Option::<String>::None)
         .bind(user.email.as_str())

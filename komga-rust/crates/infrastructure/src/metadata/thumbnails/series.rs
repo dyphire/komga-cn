@@ -20,10 +20,12 @@ pub async fn load_persisted_series_thumbnails(
         .await
         .map_err(|error| format!("open series thumbnails db: {error}"))?;
     let rows = sqlx::query(
-        "SELECT ID, SERIES_ID, TYPE, SELECTED, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT \
-         FROM THUMBNAIL_SERIES \
-         WHERE SERIES_ID = ? \
-         ORDER BY SELECTED DESC, LAST_MODIFIED_DATE DESC, ID ASC",
+        r#"
+        SELECT ID, SERIES_ID, TYPE, SELECTED, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT
+        FROM THUMBNAIL_SERIES
+        WHERE SERIES_ID = ?
+        ORDER BY SELECTED DESC, LAST_MODIFIED_DATE DESC, ID ASC
+        "#
     )
     .bind(series_id)
     .fetch_all(&pool)
@@ -57,11 +59,13 @@ pub async fn load_selected_series_thumbnail(
         .await
         .map_err(|error| format!("open selected series thumbnail db: {error}"))?;
     let row = sqlx::query(
-        "SELECT TYPE, MEDIA_TYPE, THUMBNAIL \
-         FROM THUMBNAIL_SERIES \
-         WHERE SERIES_ID = ? \
-         ORDER BY SELECTED DESC, LAST_MODIFIED_DATE DESC, ID ASC \
-         LIMIT 1",
+        r#"
+        SELECT TYPE, MEDIA_TYPE, THUMBNAIL
+        FROM THUMBNAIL_SERIES
+        WHERE SERIES_ID = ?
+        ORDER BY SELECTED DESC, LAST_MODIFIED_DATE DESC, ID ASC
+        LIMIT 1
+        "#
     )
     .bind(series_id)
     .fetch_optional(&pool)
@@ -89,10 +93,12 @@ pub async fn load_series_thumbnail_by_id(
         .await
         .map_err(|error| format!("open single series thumbnail db: {error}"))?;
     let row = sqlx::query(
-        "SELECT TYPE, MEDIA_TYPE, THUMBNAIL, URL \
-         FROM THUMBNAIL_SERIES \
-         WHERE ID = ? \
-         LIMIT 1",
+        r#"
+        SELECT TYPE, MEDIA_TYPE, THUMBNAIL, URL
+        FROM THUMBNAIL_SERIES
+        WHERE ID = ?
+        LIMIT 1
+        "#
     )
     .bind(thumbnail_id)
     .fetch_optional(&pool)
@@ -134,10 +140,12 @@ pub async fn insert_series_thumbnail(
         .map_err(|error| format!("begin series thumbnail create tx: {error}"))?;
 
     let exists = sqlx::query(
-        "SELECT 1 AS FOUND \
-         FROM SERIES \
-         WHERE ID = ? \
-         LIMIT 1",
+        r#"
+        SELECT 1 AS FOUND
+        FROM SERIES
+        WHERE ID = ?
+        LIMIT 1
+        "#
     )
     .bind(series_id)
     .fetch_optional(&mut *tx)
@@ -153,9 +161,11 @@ pub async fn insert_series_thumbnail(
 
     if selected {
         sqlx::query(
-            "UPDATE THUMBNAIL_SERIES \
-             SET SELECTED = 0 \
-             WHERE SERIES_ID = ?",
+            r#"
+            UPDATE THUMBNAIL_SERIES
+            SET SELECTED = 0
+            WHERE SERIES_ID = ?
+            "#
         )
         .bind(series_id)
         .execute(&mut *tx)
@@ -165,9 +175,11 @@ pub async fn insert_series_thumbnail(
 
     let id = generated_thumbnail_id("thumbnail-series");
     sqlx::query(
-        "INSERT INTO THUMBNAIL_SERIES \
-         (ID, SELECTED, THUMBNAIL, TYPE, SERIES_ID, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        r#"
+        INSERT INTO THUMBNAIL_SERIES
+            (ID, SELECTED, THUMBNAIL, TYPE, SERIES_ID, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#
     )
     .bind(&id)
     .bind(selected)
@@ -238,10 +250,12 @@ pub async fn select_series_thumbnail(
         .map_err(|error| format!("begin series thumbnail select tx: {error}"))?;
 
     let exists = sqlx::query(
-        "SELECT 1 AS FOUND \
-         FROM SERIES \
-         WHERE ID = ? \
-         LIMIT 1",
+        r#"
+        SELECT 1 AS FOUND
+        FROM SERIES
+        WHERE ID = ?
+        LIMIT 1
+        "#
     )
     .bind(series_id)
     .fetch_optional(&mut *tx)
@@ -256,10 +270,12 @@ pub async fn select_series_thumbnail(
     }
 
     let target_series_id = sqlx::query(
-        "SELECT SERIES_ID \
-         FROM THUMBNAIL_SERIES \
-         WHERE ID = ? \
-         LIMIT 1",
+        r#"
+        SELECT SERIES_ID
+        FROM THUMBNAIL_SERIES
+        WHERE ID = ?
+        LIMIT 1
+        "#
     )
     .bind(thumbnail_id)
     .fetch_optional(&mut *tx)
@@ -274,18 +290,22 @@ pub async fn select_series_thumbnail(
     };
 
     sqlx::query(
-        "UPDATE THUMBNAIL_SERIES \
-         SET SELECTED = 0 \
-         WHERE SERIES_ID = ?",
+        r#"
+        UPDATE THUMBNAIL_SERIES
+        SET SELECTED = 0
+        WHERE SERIES_ID = ?
+        "#
     )
     .bind(&target_series_id)
     .execute(&mut *tx)
     .await
     .map_err(|error| format!("clear selected series thumbnails for select: {error}"))?;
     sqlx::query(
-        "UPDATE THUMBNAIL_SERIES \
-         SET SELECTED = 1 \
-         WHERE ID = ?",
+        r#"
+        UPDATE THUMBNAIL_SERIES
+        SET SELECTED = 1
+        WHERE ID = ?
+        "#
     )
     .bind(thumbnail_id)
     .execute(&mut *tx)
@@ -316,10 +336,12 @@ pub async fn delete_series_thumbnail(
         .map_err(|error| format!("begin series thumbnail delete tx: {error}"))?;
 
     let exists = sqlx::query(
-        "SELECT 1 AS FOUND \
-         FROM SERIES \
-         WHERE ID = ? \
-         LIMIT 1",
+        r#"
+        SELECT 1 AS FOUND
+        FROM SERIES
+        WHERE ID = ?
+        LIMIT 1
+        "#
     )
     .bind(series_id)
     .fetch_optional(&mut *tx)
@@ -334,8 +356,10 @@ pub async fn delete_series_thumbnail(
     }
 
     let deleted = sqlx::query(
-        "DELETE FROM THUMBNAIL_SERIES \
-         WHERE ID = ? AND SERIES_ID = ?",
+        r#"
+        DELETE FROM THUMBNAIL_SERIES
+        WHERE ID = ? AND SERIES_ID = ?
+        "#
     )
     .bind(thumbnail_id)
     .bind(series_id)

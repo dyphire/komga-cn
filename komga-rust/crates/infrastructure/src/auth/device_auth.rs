@@ -85,45 +85,45 @@ pub async fn load_kobo_metadata_record(
 
     let pool = connect_pool(database_file, 1).await?;
     let row = sqlx::query(
-        "SELECT COALESCE(bm.TITLE, b.NAME) AS TITLE, \
-                COALESCE(bm.SUMMARY, '') AS SUMMARY, \
-                bm.RELEASE_DATE AS RELEASE_DATE, \
-                COALESCE(bm.CREATED_DATE, b.CREATED_DATE, '') AS CREATED_DATE, \
-                COALESCE(sm.LANGUAGE, 'en') AS LANGUAGE, \
-                COALESCE(b.FILE_SIZE, 0) AS FILE_SIZE, \
-                b.NAME AS FILE_NAME, \
-                COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE, \
-                NULLIF(TRIM(bm.ISBN), '') AS ISBN, \
-                NULLIF(TRIM(sm.PUBLISHER), '') AS PUBLISHER_NAME, \
-                tb.ID AS COVER_IMAGE_ID, \
-                sm.SERIES_ID AS SERIES_ID, \
-                sm.TITLE AS SERIES_NAME, \
-                NULLIF(TRIM(bm.NUMBER), '') AS SERIES_NUMBER, \
-                bm.NUMBER_SORT AS SERIES_NUMBER_FLOAT, \
-                COALESCE(b.ONESHOT, FALSE) AS ONESHOT, \
-                COALESCE(m.EPUB_IS_KEPUB, FALSE) AS EPUB_IS_KEPUB, \
-                m.EXTENSION_VALUE_BLOB AS EXTENSION_VALUE_BLOB \
-         FROM BOOK b \
-          LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
-          LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = b.SERIES_ID \
-          LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID \
-          LEFT JOIN THUMBNAIL_BOOK tb ON tb.BOOK_ID = b.ID AND tb.SELECTED = TRUE \
-         WHERE b.ID = ? \
-            AND b.DELETED_DATE IS NULL \
-            AND bm.BOOK_ID IS NOT NULL \
-          LIMIT 1",
+        r#"SELECT COALESCE(bm.TITLE, b.NAME) AS TITLE,
+       COALESCE(bm.SUMMARY, '') AS SUMMARY,
+       bm.RELEASE_DATE AS RELEASE_DATE,
+       COALESCE(bm.CREATED_DATE, b.CREATED_DATE, '') AS CREATED_DATE,
+       COALESCE(sm.LANGUAGE, 'en') AS LANGUAGE,
+       COALESCE(b.FILE_SIZE, 0) AS FILE_SIZE,
+       b.NAME AS FILE_NAME,
+       COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE,
+       NULLIF(TRIM(bm.ISBN), '') AS ISBN,
+       NULLIF(TRIM(sm.PUBLISHER), '') AS PUBLISHER_NAME,
+       tb.ID AS COVER_IMAGE_ID,
+       sm.SERIES_ID AS SERIES_ID,
+       sm.TITLE AS SERIES_NAME,
+       NULLIF(TRIM(bm.NUMBER), '') AS SERIES_NUMBER,
+       bm.NUMBER_SORT AS SERIES_NUMBER_FLOAT,
+       COALESCE(b.ONESHOT, FALSE) AS ONESHOT,
+       COALESCE(m.EPUB_IS_KEPUB, FALSE) AS EPUB_IS_KEPUB,
+       m.EXTENSION_VALUE_BLOB AS EXTENSION_VALUE_BLOB
+ FROM BOOK b
+  LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
+  LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = b.SERIES_ID
+  LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
+  LEFT JOIN THUMBNAIL_BOOK tb ON tb.BOOK_ID = b.ID AND tb.SELECTED = TRUE
+ WHERE b.ID = ?
+   AND b.DELETED_DATE IS NULL
+   AND bm.BOOK_ID IS NOT NULL
+ LIMIT 1"#,
     )
     .bind(book_id)
     .fetch_optional(&pool)
     .await?;
 
     let contributor_rows = sqlx::query(
-        "SELECT NAME \
-         FROM BOOK_METADATA_AUTHOR \
-         WHERE BOOK_ID = ? \
-           AND NAME IS NOT NULL \
-           AND TRIM(NAME) <> '' \
-         ORDER BY NAME ASC",
+        r#"SELECT NAME
+ FROM BOOK_METADATA_AUTHOR
+ WHERE BOOK_ID = ?
+   AND NAME IS NOT NULL
+   AND TRIM(NAME) <> ''
+ ORDER BY NAME ASC"#,
     )
     .bind(book_id)
     .fetch_all(&pool)
@@ -178,16 +178,14 @@ pub async fn load_book_media_file(
 
     let pool = connect_pool(database_file, 1).await?;
     let row = sqlx::query(
-        "SELECT b.NAME AS FILE_NAME, \
-                b.URL AS BOOK_URL, \
-                l.ROOT AS LIBRARY_ROOT, \
-                COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE \
-         FROM BOOK b \
-         JOIN LIBRARY l ON l.ID = b.LIBRARY_ID \
-         LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID \
-         WHERE b.ID = ? \
-           AND b.DELETED_DATE IS NULL \
-         LIMIT 1",
+        r#"SELECT b.NAME AS FILE_NAME, b.URL AS BOOK_URL, l.ROOT AS LIBRARY_ROOT,
+       COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE
+ FROM BOOK b
+ JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+ LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
+ WHERE b.ID = ?
+   AND b.DELETED_DATE IS NULL
+ LIMIT 1"#,
     )
     .bind(book_id)
     .fetch_optional(&pool)
@@ -218,12 +216,12 @@ pub async fn load_thumbnail_by_id(
 
     let pool = connect_pool(database_file, 1).await?;
     let row = sqlx::query(
-        "SELECT tb.MEDIA_TYPE, tb.THUMBNAIL, tb.URL, l.ROOT AS LIBRARY_ROOT \
-         FROM THUMBNAIL_BOOK tb \
-         LEFT JOIN BOOK b ON b.ID = tb.BOOK_ID \
-         LEFT JOIN LIBRARY l ON l.ID = b.LIBRARY_ID \
-         WHERE tb.ID = ? \
-         LIMIT 1",
+        r#"SELECT tb.MEDIA_TYPE, tb.THUMBNAIL, tb.URL, l.ROOT AS LIBRARY_ROOT
+ FROM THUMBNAIL_BOOK tb
+ LEFT JOIN BOOK b ON b.ID = tb.BOOK_ID
+ LEFT JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+ WHERE tb.ID = ?
+ LIMIT 1"#,
     )
     .bind(thumbnail_id)
     .fetch_optional(&pool)
@@ -263,11 +261,11 @@ pub async fn persisted_book_exists(
 
     let pool = connect_pool(database_file, 1).await?;
     let row = sqlx::query(
-        "SELECT 1 AS FOUND \
-         FROM BOOK \
-         WHERE ID = ? \
-           AND DELETED_DATE IS NULL \
-         LIMIT 1",
+        r#"SELECT 1 AS FOUND
+ FROM BOOK
+ WHERE ID = ?
+   AND DELETED_DATE IS NULL
+ LIMIT 1"#,
     )
     .bind(book_id)
     .fetch_optional(&pool)
@@ -282,10 +280,10 @@ pub async fn load_book_page_count(database_file: &Path, book_id: &str) -> Result
 
     let pool = connect_pool(database_file, 1).await?;
     let row = sqlx::query(
-        "SELECT COALESCE(PAGE_COUNT, 0) AS PAGE_COUNT \
-         FROM MEDIA \
-         WHERE BOOK_ID = ? \
-         LIMIT 1",
+        r#"SELECT COALESCE(PAGE_COUNT, 0) AS PAGE_COUNT
+ FROM MEDIA
+ WHERE BOOK_ID = ?
+ LIMIT 1"#,
     )
     .bind(book_id)
     .fetch_optional(&pool)
@@ -307,10 +305,10 @@ pub async fn load_book_last_epub_position_locator(
 
     let pool = connect_pool(database_file, 1).await?;
     let row = sqlx::query(
-        "SELECT EXTENSION_CLASS, EXTENSION_VALUE_BLOB \
-         FROM MEDIA \
-         WHERE BOOK_ID = ? \
-         LIMIT 1",
+        r#"SELECT EXTENSION_CLASS, EXTENSION_VALUE_BLOB
+ FROM MEDIA
+ WHERE BOOK_ID = ?
+ LIMIT 1"#,
     )
     .bind(book_id)
     .fetch_optional(&pool)
@@ -362,11 +360,11 @@ pub async fn load_book_created_timestamp(
 
     let pool = connect_pool(database_file, 1).await?;
     let row = sqlx::query(
-        "SELECT CREATED_DATE \
-         FROM BOOK \
-         WHERE ID = ? \
-           AND DELETED_DATE IS NULL \
-         LIMIT 1",
+        r#"SELECT CREATED_DATE
+ FROM BOOK
+ WHERE ID = ?
+   AND DELETED_DATE IS NULL
+ LIMIT 1"#,
     )
     .bind(book_id)
     .fetch_optional(&pool)
@@ -389,14 +387,14 @@ pub async fn load_read_progress(
 
     let pool = connect_pool(database_file, 1).await?;
     let row = sqlx::query(
-        "SELECT PAGE, COMPLETED, CREATED_DATE, LAST_MODIFIED_DATE, \
-                COALESCE(DEVICE_ID, '') AS DEVICE_ID, \
-                COALESCE(DEVICE_NAME, '') AS DEVICE_NAME, \
-                LOCATOR \
-         FROM READ_PROGRESS \
-         WHERE BOOK_ID = ? \
-           AND USER_ID = ? \
-         LIMIT 1",
+        r#"SELECT PAGE, COMPLETED, CREATED_DATE, LAST_MODIFIED_DATE,
+       COALESCE(DEVICE_ID, '') AS DEVICE_ID,
+       COALESCE(DEVICE_NAME, '') AS DEVICE_NAME,
+       LOCATOR
+ FROM READ_PROGRESS
+ WHERE BOOK_ID = ?
+   AND USER_ID = ?
+ LIMIT 1"#,
     )
     .bind(book_id)
     .bind(user_id_value)
@@ -434,10 +432,10 @@ pub async fn persist_read_progress_with_locator(
         .map_err(|error| format!("open read-progress db: {error}"))?;
 
     let user_exists = sqlx::query(
-        "SELECT 1 \
-         FROM USER \
-         WHERE ID = ? \
-         LIMIT 1",
+        r#"SELECT 1
+ FROM USER
+ WHERE ID = ?
+ LIMIT 1"#,
     )
     .bind(user_id_value)
     .fetch_optional(&pool)
@@ -454,16 +452,16 @@ pub async fn persist_read_progress_with_locator(
         .unwrap_or_default();
 
     sqlx::query(
-        "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, DEVICE_ID, DEVICE_NAME, \
-                                   LAST_MODIFIED_DATE, LOCATOR) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
-         ON CONFLICT(BOOK_ID, USER_ID) DO UPDATE \
-         SET PAGE = excluded.PAGE, \
-             COMPLETED = excluded.COMPLETED, \
-             DEVICE_ID = excluded.DEVICE_ID, \
-             DEVICE_NAME = excluded.DEVICE_NAME, \
-             LOCATOR = excluded.LOCATOR, \
-             LAST_MODIFIED_DATE = excluded.LAST_MODIFIED_DATE",
+        r#"INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, DEVICE_ID, DEVICE_NAME,
+                           LAST_MODIFIED_DATE, LOCATOR)
+ VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ ON CONFLICT(BOOK_ID, USER_ID) DO UPDATE
+ SET PAGE = excluded.PAGE,
+     COMPLETED = excluded.COMPLETED,
+     DEVICE_ID = excluded.DEVICE_ID,
+     DEVICE_NAME = excluded.DEVICE_NAME,
+     LOCATOR = excluded.LOCATOR,
+     LAST_MODIFIED_DATE = excluded.LAST_MODIFIED_DATE"#,
     )
     .bind(book_id)
     .bind(user_id_value)
@@ -492,12 +490,12 @@ pub async fn load_koreader_book_target(
         .await
         .map_err(|_| KoreaderBookLookupError::Persistence)?;
     let rows = sqlx::query(
-        "SELECT b.ID AS BOOK_ID, COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT \
-         FROM BOOK b \
-         LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID \
-         WHERE b.FILE_HASH_KOREADER = ? \
-           AND b.DELETED_DATE IS NULL \
-         ORDER BY b.ID ASC",
+        r#"SELECT b.ID AS BOOK_ID, COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT
+ FROM BOOK b
+ LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
+ WHERE b.FILE_HASH_KOREADER = ?
+   AND b.DELETED_DATE IS NULL
+ ORDER BY b.ID ASC"#,
     )
     .bind(book_hash)
     .fetch_all(&pool)

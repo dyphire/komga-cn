@@ -218,9 +218,11 @@ async fn list_books_sqlx_common(
     let scoped_to_series = requested_series_ids.is_some_and(|series_ids| !series_ids.is_empty());
 
     let mut count_builder = QueryBuilder::<Sqlite>::new(
-        "SELECT COUNT(DISTINCT b.id) \
-         FROM books b \
-         JOIN series s ON s.id = b.series_id",
+        r#"
+        SELECT COUNT(DISTINCT b.id)
+        FROM books b
+        JOIN series s ON s.id = b.series_id
+        "#,
     );
     let mut count_state = SqlxWhereState::default();
     apply_books_filters_sqlx(
@@ -247,33 +249,35 @@ async fn list_books_sqlx_common(
         .map_err(map_sqlx_error)? as usize;
 
     let mut select_builder = QueryBuilder::<Sqlite>::new(
-        "SELECT b.id AS id, b.series_id AS series_id, b.library_id AS library_id, \
-                b.title AS title, b.url AS url, CAST(b.number_sort AS INTEGER) AS number, \
-                b.created AS created, b.last_modified AS last_modified, \
-                b.file_last_modified AS file_last_modified, b.size_bytes AS size_bytes, \
-                COALESCE(b.media_status, 'UNKNOWN') AS media_status, \
-                COALESCE(b.media_type, '') AS media_type, \
-                COALESCE(b.media_pages_count, 0) AS media_pages_count, \
-                '' AS media_comment, 0 AS media_epub_divina_compatible, 0 AS media_epub_is_kepub, \
-                COALESCE(b.metadata_release_date, NULL) AS metadata_release_date, \
-                0 AS metadata_title_lock, '' AS metadata_summary, 0 AS metadata_summary_lock, \
-                CAST(b.number_sort AS TEXT) AS metadata_number, 0 AS metadata_number_lock, \
-                CAST(b.number_sort AS REAL) AS metadata_number_sort, 0 AS metadata_number_sort_lock, \
-                0 AS metadata_release_date_lock, \
-                COALESCE((SELECT GROUP_CONCAT(ba.author, X'1F') FROM book_authors ba WHERE ba.book_id = b.id), '') AS metadata_authors, \
-                0 AS metadata_authors_lock, \
-                COALESCE((SELECT GROUP_CONCAT(bt.tag) FROM book_tags bt WHERE bt.book_id = b.id), '') AS metadata_tags, \
-                0 AS metadata_tags_lock, '' AS metadata_isbn, 0 AS metadata_isbn_lock, \
-                '' AS metadata_links, 0 AS metadata_links_lock, \
-                b.created AS metadata_created, b.last_modified AS metadata_last_modified, \
-                rp.page AS read_progress_page, rp.completed AS read_progress_completed, \
-                rp.read_date AS read_progress_read_date, rp.created AS read_progress_created, \
-                rp.last_modified AS read_progress_last_modified, rp.device_id AS read_progress_device_id, \
-                rp.device_name AS read_progress_device_name, \
-                b.deleted AS deleted, '' AS file_hash, b.oneshot AS oneshot, s.title AS series_title \
-         FROM books b \
-         JOIN series s ON s.id = b.series_id \
-         LEFT JOIN read_progress rp ON rp.book_id = b.id AND rp.user_id = ",
+        r#"
+        SELECT b.id AS id, b.series_id AS series_id, b.library_id AS library_id,
+               b.title AS title, b.url AS url, CAST(b.number_sort AS INTEGER) AS number,
+               b.created AS created, b.last_modified AS last_modified,
+               b.file_last_modified AS file_last_modified, b.size_bytes AS size_bytes,
+               COALESCE(b.media_status, 'UNKNOWN') AS media_status,
+               COALESCE(b.media_type, '') AS media_type,
+               COALESCE(b.media_pages_count, 0) AS media_pages_count,
+               '' AS media_comment, 0 AS media_epub_divina_compatible, 0 AS media_epub_is_kepub,
+               COALESCE(b.metadata_release_date, NULL) AS metadata_release_date,
+               0 AS metadata_title_lock, '' AS metadata_summary, 0 AS metadata_summary_lock,
+               CAST(b.number_sort AS TEXT) AS metadata_number, 0 AS metadata_number_lock,
+               CAST(b.number_sort AS REAL) AS metadata_number_sort, 0 AS metadata_number_sort_lock,
+               0 AS metadata_release_date_lock,
+               COALESCE((SELECT GROUP_CONCAT(ba.author, X'1F') FROM book_authors ba WHERE ba.book_id = b.id), '') AS metadata_authors,
+               0 AS metadata_authors_lock,
+               COALESCE((SELECT GROUP_CONCAT(bt.tag) FROM book_tags bt WHERE bt.book_id = b.id), '') AS metadata_tags,
+               0 AS metadata_tags_lock, '' AS metadata_isbn, 0 AS metadata_isbn_lock,
+               '' AS metadata_links, 0 AS metadata_links_lock,
+               b.created AS metadata_created, b.last_modified AS metadata_last_modified,
+               rp.page AS read_progress_page, rp.completed AS read_progress_completed,
+               rp.read_date AS read_progress_read_date, rp.created AS read_progress_created,
+               rp.last_modified AS read_progress_last_modified, rp.device_id AS read_progress_device_id,
+               rp.device_name AS read_progress_device_name,
+               b.deleted AS deleted, '' AS file_hash, b.oneshot AS oneshot, s.title AS series_title
+        FROM books b
+        JOIN series s ON s.id = b.series_id
+        LEFT JOIN read_progress rp ON rp.book_id = b.id AND rp.user_id =
+        "#,
     );
     let user_id = context
         .user_id

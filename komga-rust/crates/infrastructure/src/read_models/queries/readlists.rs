@@ -193,10 +193,12 @@ async fn visible_readlist_book_ids_sqlx(
     allowed_library_ids: Option<&Vec<String>>,
 ) -> Result<Vec<String>, DiscoveryError> {
     let mut builder = QueryBuilder::<Sqlite>::new(
-        "SELECT rlb.book_id \
-         FROM readlist_books rlb \
-         JOIN books b ON b.id = rlb.book_id \
-         JOIN series s ON s.id = b.series_id",
+        r#"
+        SELECT rlb.book_id
+        FROM readlist_books rlb
+        JOIN books b ON b.id = rlb.book_id
+        JOIN series s ON s.id = b.series_id
+        "#,
     );
     let mut state = SqlxWhereState::default();
     query_filters_sqlx(
@@ -227,13 +229,15 @@ async fn list_readlist_candidate_rows_sqlx(
     search: Option<&str>,
 ) -> Result<Vec<SqlxReadListCandidateRow>, DiscoveryError> {
     let mut builder = QueryBuilder::<Sqlite>::new(
-        "SELECT DISTINCT rl.id AS id, rl.name AS name, rl.summary AS summary, \
-                rl.ordered AS ordered, rl.created_date AS created_date, \
-                rl.last_modified_date AS last_modified_date \
-         FROM readlists rl \
-         JOIN readlist_books rlb ON rlb.readlist_id = rl.id \
-         JOIN books b ON b.id = rlb.book_id \
-         JOIN series s ON s.id = b.series_id",
+        r#"
+        SELECT DISTINCT rl.id AS id, rl.name AS name, rl.summary AS summary,
+               rl.ordered AS ordered, rl.created_date AS created_date,
+               rl.last_modified_date AS last_modified_date
+        FROM readlists rl
+        JOIN readlist_books rlb ON rlb.readlist_id = rl.id
+        JOIN books b ON b.id = rlb.book_id
+        JOIN series s ON s.id = b.series_id
+        "#,
     );
     let mut state = SqlxWhereState::default();
     query_filters_sqlx(

@@ -46,7 +46,9 @@ pub async fn load_page_hashes_page(
     let pool = connect_pool(database_file, 1).await?;
     let order_by = known_page_hash_order_by(sorts);
 
-    let mut count_query = QueryBuilder::<Sqlite>::new("SELECT COUNT(*) AS COUNT FROM PAGE_HASH ph");
+    let mut count_query = QueryBuilder::<Sqlite>::new(
+        r#"SELECT COUNT(*) AS COUNT FROM PAGE_HASH ph"#,
+    );
     push_known_page_hash_action_filter(&mut count_query, actions);
     let total_elements = count_query
         .build()
@@ -58,34 +60,34 @@ pub async fn load_page_hashes_page(
     let offset = page.saturating_mul(size);
 
     let mut query = QueryBuilder::<Sqlite>::new(
-        "SELECT \
-             ph.HASH, \
-             ph.SIZE, \
-             ph.ACTION, \
-             ph.DELETE_COUNT, \
-             ph.CREATED_DATE, \
-             ph.LAST_MODIFIED_DATE, \
-             COUNT(mp.BOOK_ID) AS MATCH_COUNT \
-         FROM PAGE_HASH ph \
-         LEFT JOIN MEDIA_PAGE mp ON mp.FILE_HASH = ph.HASH",
+        r#"SELECT
+             ph.HASH,
+             ph.SIZE,
+             ph.ACTION,
+             ph.DELETE_COUNT,
+             ph.CREATED_DATE,
+             ph.LAST_MODIFIED_DATE,
+             COUNT(mp.BOOK_ID) AS MATCH_COUNT
+         FROM PAGE_HASH ph
+         LEFT JOIN MEDIA_PAGE mp ON mp.FILE_HASH = ph.HASH"#,
     );
     push_known_page_hash_action_filter(&mut query, actions);
     query.push(
-        " GROUP BY \
-             ph.HASH, \
-             ph.SIZE, \
-             ph.ACTION, \
-             ph.DELETE_COUNT, \
-             ph.CREATED_DATE, \
-             ph.LAST_MODIFIED_DATE",
+        r#" GROUP BY
+             ph.HASH,
+             ph.SIZE,
+             ph.ACTION,
+             ph.DELETE_COUNT,
+             ph.CREATED_DATE,
+             ph.LAST_MODIFIED_DATE"#,
     );
     if !order_by.is_empty() {
-        query.push(" ORDER BY ");
+        query.push(r#" ORDER BY "#);
         query.push(order_by.join(", "));
     }
-    query.push(" LIMIT ");
+    query.push(r#" LIMIT "#);
     query.push_bind((size.min(i64::MAX as u64)) as i64);
-    query.push(" OFFSET ");
+    query.push(r#" OFFSET "#);
     query.push_bind((offset.min(i64::MAX as u64)) as i64);
 
     let content = query
@@ -125,15 +127,15 @@ pub async fn load_page_hashes_unknown_page(
     let pool = connect_pool(database_file, 1).await?;
 
     let total_elements = sqlx::query(
-        "SELECT COUNT(*) AS COUNT \
-         FROM ( \
-             SELECT mp.FILE_HASH \
-             FROM MEDIA_PAGE mp \
-             WHERE mp.FILE_HASH <> '' \
-             AND NOT EXISTS (SELECT 1 FROM PAGE_HASH ph WHERE ph.HASH = mp.FILE_HASH) \
-             GROUP BY mp.FILE_HASH \
-             HAVING COUNT(mp.BOOK_ID) > 1 \
-         ) unknown_hashes",
+        r#"SELECT COUNT(*) AS COUNT
+         FROM (
+             SELECT mp.FILE_HASH
+             FROM MEDIA_PAGE mp
+             WHERE mp.FILE_HASH <> ''
+             AND NOT EXISTS (SELECT 1 FROM PAGE_HASH ph WHERE ph.HASH = mp.FILE_HASH)
+             GROUP BY mp.FILE_HASH
+             HAVING COUNT(mp.BOOK_ID) > 1
+         ) unknown_hashes"#,
     )
     .fetch_one(&pool)
     .await?
@@ -144,20 +146,20 @@ pub async fn load_page_hashes_unknown_page(
     let order_by = unknown_page_hash_order_by(sorts);
 
     let mut sql = String::from(
-        "SELECT mp.FILE_HASH AS HASH, mp.FILE_SIZE AS SIZE, COUNT(mp.BOOK_ID) AS MATCH_COUNT, \
-         (COUNT(mp.BOOK_ID) * mp.FILE_SIZE) AS TOTAL_SIZE \
-         FROM MEDIA_PAGE mp \
-         LEFT JOIN BOOK b ON b.ID = mp.BOOK_ID \
-         WHERE mp.FILE_HASH <> '' \
-         AND NOT EXISTS (SELECT 1 FROM PAGE_HASH ph WHERE ph.HASH = mp.FILE_HASH) \
-         GROUP BY mp.FILE_HASH \
-         HAVING COUNT(mp.BOOK_ID) > 1",
+        r#"SELECT mp.FILE_HASH AS HASH, mp.FILE_SIZE AS SIZE, COUNT(mp.BOOK_ID) AS MATCH_COUNT,
+         (COUNT(mp.BOOK_ID) * mp.FILE_SIZE) AS TOTAL_SIZE
+         FROM MEDIA_PAGE mp
+         LEFT JOIN BOOK b ON b.ID = mp.BOOK_ID
+         WHERE mp.FILE_HASH <> ''
+         AND NOT EXISTS (SELECT 1 FROM PAGE_HASH ph WHERE ph.HASH = mp.FILE_HASH)
+         GROUP BY mp.FILE_HASH
+         HAVING COUNT(mp.BOOK_ID) > 1"#,
     );
     if !order_by.is_empty() {
-        sql.push_str(" ORDER BY ");
+        sql.push_str(r#" ORDER BY "#);
         sql.push_str(&order_by.join(", "));
     }
-    sql.push_str(" LIMIT ? OFFSET ?");
+    sql.push_str(r#" LIMIT ? OFFSET ?"#);
 
     let content = sqlx::query(&sql)
         .bind((size.min(i64::MAX as u64)) as i64)
@@ -193,7 +195,11 @@ pub async fn load_page_hash_matches_page(
 ) -> Result<Value, sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
 
-    let total_elements = sqlx::query("SELECT COUNT(*) AS COUNT FROM MEDIA_PAGE WHERE FILE_HASH = ?")
+    let total_elements = sqlx::query(
+        r#"SELECT COUNT(*) AS COUNT
+         FROM MEDIA_PAGE
+         WHERE FILE_HASH = ?"#,
+    )
         .bind(page_hash)
         .fetch_one(&pool)
         .await?
@@ -204,18 +210,18 @@ pub async fn load_page_hash_matches_page(
     let order_by = page_hash_match_order_by(sorts)?;
 
     let mut sql = String::from(
-        "SELECT mp.BOOK_ID, b.URL, mp.NUMBER, mp.FILE_NAME, mp.FILE_SIZE, mp.MEDIA_TYPE, \
-         (SELECT COUNT(*) FROM MEDIA_PAGE mp_count WHERE mp_count.FILE_HASH = ?) AS MATCH_COUNT, \
-         ((SELECT COUNT(*) FROM MEDIA_PAGE mp_total WHERE mp_total.FILE_HASH = ?) * COALESCE(mp.FILE_SIZE, 0)) AS TOTAL_SIZE \
-         FROM MEDIA_PAGE mp \
-         LEFT JOIN BOOK b ON b.ID = mp.BOOK_ID \
-         WHERE mp.FILE_HASH = ?",
+        r#"SELECT mp.BOOK_ID, b.URL, mp.NUMBER, mp.FILE_NAME, mp.FILE_SIZE, mp.MEDIA_TYPE,
+         (SELECT COUNT(*) FROM MEDIA_PAGE mp_count WHERE mp_count.FILE_HASH = ?) AS MATCH_COUNT,
+         ((SELECT COUNT(*) FROM MEDIA_PAGE mp_total WHERE mp_total.FILE_HASH = ?) * COALESCE(mp.FILE_SIZE, 0)) AS TOTAL_SIZE
+         FROM MEDIA_PAGE mp
+         LEFT JOIN BOOK b ON b.ID = mp.BOOK_ID
+         WHERE mp.FILE_HASH = ?"#,
     );
     if !order_by.is_empty() {
-        sql.push_str(" ORDER BY ");
+        sql.push_str(r#" ORDER BY "#);
         sql.push_str(&order_by.join(", "));
     }
-    sql.push_str(" LIMIT ? OFFSET ?");
+    sql.push_str(r#" LIMIT ? OFFSET ?"#);
 
     let content = sqlx::query(&sql)
         .bind(page_hash)
@@ -259,7 +265,11 @@ pub async fn load_page_hash_thumbnail(
     page_hash: &str,
 ) -> Result<Option<Vec<u8>>, sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
-    let thumbnail = sqlx::query("SELECT THUMBNAIL FROM PAGE_HASH_THUMBNAIL WHERE HASH = ?")
+    let thumbnail = sqlx::query(
+        r#"SELECT THUMBNAIL
+         FROM PAGE_HASH_THUMBNAIL
+         WHERE HASH = ?"#,
+    )
         .bind(page_hash)
         .fetch_optional(&pool)
         .await?
@@ -273,10 +283,16 @@ pub async fn load_page_hash_delete_targets(
 ) -> Result<Vec<PageHashDeleteTarget>, sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
     let rows = sqlx::query(
-        "SELECT mp.BOOK_ID AS BOOK_ID, mp.FILE_HASH AS FILE_HASH, mp.NUMBER AS NUMBER, mp.FILE_NAME AS FILE_NAME, mp.MEDIA_TYPE AS MEDIA_TYPE, mp.FILE_SIZE AS FILE_SIZE \
-         FROM MEDIA_PAGE mp \
-         WHERE mp.FILE_HASH = ? \
-         ORDER BY mp.BOOK_ID ASC, mp.NUMBER ASC",
+        r#"SELECT
+             mp.BOOK_ID AS BOOK_ID,
+             mp.FILE_HASH AS FILE_HASH,
+             mp.NUMBER AS NUMBER,
+             mp.FILE_NAME AS FILE_NAME,
+             mp.MEDIA_TYPE AS MEDIA_TYPE,
+             mp.FILE_SIZE AS FILE_SIZE
+         FROM MEDIA_PAGE mp
+         WHERE mp.FILE_HASH = ?
+         ORDER BY mp.BOOK_ID ASC, mp.NUMBER ASC"#,
     )
     .bind(page_hash)
     .fetch_all(&pool)
@@ -309,11 +325,11 @@ pub async fn load_unknown_page_hash_match_target(
 ) -> Result<Option<PageHashUnknownMatchTarget>, sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
     let row = sqlx::query(
-        "SELECT mp.BOOK_ID AS BOOK_ID, mp.NUMBER AS NUMBER \
-         FROM MEDIA_PAGE mp \
-         WHERE mp.FILE_HASH = ? \
-         ORDER BY mp.BOOK_ID ASC, mp.NUMBER ASC \
-         LIMIT 1",
+        r#"SELECT mp.BOOK_ID AS BOOK_ID, mp.NUMBER AS NUMBER
+         FROM MEDIA_PAGE mp
+         WHERE mp.FILE_HASH = ?
+         ORDER BY mp.BOOK_ID ASC, mp.NUMBER ASC
+         LIMIT 1"#,
     )
     .bind(page_hash)
     .fetch_optional(&pool)
@@ -331,17 +347,17 @@ pub async fn load_unknown_page_hash_source(
 ) -> Result<Option<PageHashUnknownSource>, sqlx::Error> {
     let pool = connect_pool(database_file, 1).await?;
     let row = sqlx::query(
-        "SELECT \
-             l.ROOT AS LIBRARY_ROOT, \
-             b.URL AS BOOK_URL, \
-             mp.FILE_NAME AS FILE_NAME, \
-             mp.MEDIA_TYPE AS MEDIA_TYPE \
-         FROM MEDIA_PAGE mp \
-         INNER JOIN BOOK b ON b.ID = mp.BOOK_ID \
-         INNER JOIN LIBRARY l ON l.ID = b.LIBRARY_ID \
-         WHERE mp.FILE_HASH = ? \
-         ORDER BY mp.BOOK_ID ASC, mp.NUMBER ASC \
-         LIMIT 1",
+        r#"SELECT
+             l.ROOT AS LIBRARY_ROOT,
+             b.URL AS BOOK_URL,
+             mp.FILE_NAME AS FILE_NAME,
+             mp.MEDIA_TYPE AS MEDIA_TYPE
+         FROM MEDIA_PAGE mp
+         INNER JOIN BOOK b ON b.ID = mp.BOOK_ID
+         INNER JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+         WHERE mp.FILE_HASH = ?
+         ORDER BY mp.BOOK_ID ASC, mp.NUMBER ASC
+         LIMIT 1"#,
     )
     .bind(page_hash)
     .fetch_optional(&pool)
@@ -409,12 +425,12 @@ fn push_known_page_hash_action_filter(query: &mut QueryBuilder<Sqlite>, actions:
         return;
     }
 
-    query.push(" WHERE ph.ACTION IN (");
+    query.push(r#" WHERE ph.ACTION IN ("#);
     let mut separated = query.separated(", ");
     for action in actions {
         separated.push_bind(action.clone());
     }
-    separated.push_unseparated(")");
+    separated.push_unseparated(r#")"#);
 }
 
 fn known_page_hash_order_by(sorts: &[String]) -> Vec<String> {

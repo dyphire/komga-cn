@@ -31,11 +31,17 @@ pub(super) async fn list_series_collections_sqlx(
     }
 
     let mut candidate_builder = QueryBuilder::<Sqlite>::new(
-        "SELECT DISTINCT c.id AS id, c.name AS name, c.ordered AS ordered, \
-                c.created_date AS created_date, c.last_modified_date AS last_modified_date \
-         FROM collections c \
-         JOIN collection_series cs_target ON cs_target.collection_id = c.id \
-         JOIN series s ON s.id = cs_target.series_id",
+        r#"
+            SELECT DISTINCT c.id AS id,
+                            c.name AS name,
+                            c.ordered AS ordered,
+                            c.created_date AS created_date,
+                            c.last_modified_date AS last_modified_date
+            FROM collections c
+            JOIN collection_series cs_target ON cs_target.collection_id = c.id
+            JOIN series s ON s.id = cs_target.series_id
+        "#,
+
     );
     let mut candidate_state = SqlxWhereState::default();
     apply_series_collection_visibility_sqlx(
@@ -61,9 +67,12 @@ pub(super) async fn list_series_collections_sqlx(
     let mut collections = vec![];
     for candidate in candidates {
         let mut visible_builder = QueryBuilder::<Sqlite>::new(
-            "SELECT cs.series_id AS series_id \
-             FROM collection_series cs \
-             JOIN series s ON s.id = cs.series_id",
+        r#"
+            SELECT cs.series_id AS series_id
+            FROM collection_series cs
+            JOIN series s ON s.id = cs.series_id
+        "#,
+
         );
         let mut visible_state = SqlxWhereState::default();
         apply_series_collection_visibility_sqlx(
@@ -95,9 +104,12 @@ pub(super) async fn list_series_collections_sqlx(
         }
 
         let _total_count = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) \
-             FROM collection_series \
-             WHERE collection_id = ?",
+        r#"
+            SELECT COUNT(*)
+            FROM collection_series
+            WHERE collection_id = ?
+        "#,
+
         )
         .bind(candidate.id.clone())
         .fetch_one(&pool)

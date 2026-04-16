@@ -9,8 +9,8 @@ pub async fn load_book_poster_summaries(
         .map_err(|error| format!("open book poster db: {error}"))?;
 
     let rows = sqlx::query(
-        "SELECT BOOK_ID, TYPE, SELECTED \
-         FROM THUMBNAIL_BOOK",
+        r#"SELECT BOOK_ID, TYPE, SELECTED
+         FROM THUMBNAIL_BOOK"#,
     )
     .fetch_all(&pool)
     .await
@@ -81,7 +81,7 @@ async fn fetch_persisted_book_summary_rows(
     }
 
     if let Some(ids) = ids.filter(|ids| !ids.is_empty()) {
-        query.push(" WHERE b.ID IN (");
+        query.push(r#" WHERE b.ID IN ("#);
         let mut separated = query.separated(",");
         for id in ids {
             separated.push_bind(id);
@@ -236,7 +236,7 @@ pub async fn load_persisted_book_count(database_file: &FsPath) -> Result<usize, 
     let pool = connect_pool(database_file, 1)
         .await
         .map_err(|error| format!("open books db for count: {error}"))?;
-    let row = sqlx::query("SELECT COUNT(*) AS COUNT FROM BOOK")
+    let row = sqlx::query(r#"SELECT COUNT(*) AS COUNT FROM BOOK"#)
         .fetch_one(&pool)
         .await
         .map_err(|error| format!("query persisted book count: {error}"))?;
