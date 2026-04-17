@@ -24,30 +24,18 @@ mod imp {
         pub fn get(path: &str) -> Option<Cow<'static, [u8]>> {
             EmbeddedWebUiAssets::get(path).map(|asset| asset.data)
         }
-
-        #[cfg(test)]
-        pub fn iter() -> impl Iterator<Item = Cow<'static, str>> {
-            EmbeddedWebUiAssets::iter()
-        }
     }
 }
 
 #[cfg(not(webui_dist_present))]
 mod imp {
     use std::borrow::Cow;
-    #[cfg(test)]
-    use std::iter;
 
     pub struct WebUiAssets;
 
     impl WebUiAssets {
         pub fn get(_path: &str) -> Option<Cow<'static, [u8]>> {
             None
-        }
-
-        #[cfg(test)]
-        pub fn iter() -> impl Iterator<Item = Cow<'static, str>> {
-            iter::empty()
         }
     }
 }

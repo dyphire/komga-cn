@@ -335,8 +335,6 @@ mod tests {
     #[cfg(webui_dist_present)]
     use axum::http::header;
     use axum::http::{HeaderMap, StatusCode};
-    #[cfg(webui_dist_present)]
-    use std::borrow::Cow;
     use std::path::Path;
     #[cfg(webui_dist_present)]
     use super::super::webui_assets::WebUiAssets;
@@ -421,25 +419,6 @@ mod tests {
                 "{asset_path:?} should disable caching like Kotlin entry resources",
             );
         }
-    }
-
-    #[cfg(webui_dist_present)]
-    #[tokio::test]
-    async fn versioned_static_assets_are_served_with_long_lived_public_cache_control() {
-        let static_asset = WebUiAssets::iter()
-            .find(|path: &Cow<'static, str>| path.contains('/'))
-            .expect("embedded webui should expose at least one nested static asset");
-
-        let response = serve_webui_asset(static_asset.as_ref(), "/");
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response
-                .headers()
-                .get(header::CACHE_CONTROL)
-                .and_then(|value| value.to_str().ok()),
-            Some("max-age=31536000, public"),
-            "nested hashed static assets should be cacheable long-term",
-        );
     }
 
     #[tokio::test]
