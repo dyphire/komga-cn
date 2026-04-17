@@ -6,31 +6,11 @@ use komga_server::app::build_router_with_config;
 use serde_json::Value;
 use tower::util::ServiceExt;
 
-mod support {
-    pub mod persistence_contract_fixture;
-
-    pub mod runtime_router_contract_support {
-        use super::persistence_contract_fixture;
-
-        pub(crate) use super::persistence_contract_fixture::RuntimeDbPaths;
-
-        pub mod contract_seed;
-        pub mod response_helpers;
-        pub mod opds_fixture_bootstrap;
-        pub mod opds_media_file_fixtures;
-        pub mod opds_metadata_series_seeding;
-        pub mod opds_user_auth;
-    }
-}
+mod support;
 
 use support::runtime_router_contract_support::{
-    RuntimeDbPaths,
-    contract_seed::*,
-    opds_fixture_bootstrap::*,
-    opds_media_file_fixtures::*,
-    opds_metadata_series_seeding::*,
-    opds_user_auth::*,
-    response_helpers::*,
+    RuntimeDbPaths, contract_seed::*, fixture_bootstrap::*, media_file_fixtures::*,
+    metadata_series_seeding::*, response_helpers::*, user_auth::*,
 };
 
 mod opds_contract_cases;

@@ -1,5 +1,11 @@
 use super::*;
 
+fn push_unique(values: &mut Vec<String>, value: &str) {
+    if !values.iter().any(|candidate| candidate == value) {
+        values.push(value.to_string());
+    }
+}
+
 pub async fn load_persisted_library_ids(database_file: &FsPath) -> Result<Vec<String>, String> {
     persisted_backend_load_persisted_library_ids(database_file).await
 }
@@ -31,9 +37,7 @@ pub async fn remap_requested_library_ids_for_persisted(
         }
 
         if persisted_ids.iter().any(|candidate| candidate == trimmed) {
-            if !normalized.iter().any(|candidate| candidate == trimmed) {
-                normalized.push(trimmed.to_string());
-            }
+            push_unique(&mut normalized, trimmed);
             continue;
         }
 
@@ -47,9 +51,7 @@ pub async fn remap_requested_library_ids_for_persisted(
         let Some(mapped) = persisted_ids.get(index - 1) else {
             continue;
         };
-        if !normalized.iter().any(|candidate| candidate == mapped) {
-            normalized.push(mapped.clone());
-        }
+        push_unique(&mut normalized, mapped);
     }
 
     (!normalized.is_empty()).then_some(normalized)

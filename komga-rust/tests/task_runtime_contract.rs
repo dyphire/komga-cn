@@ -1,16 +1,14 @@
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
-use komga_contract_testkit::contract_matrix::assert_required_target_declared;
-use komga_application::task_processing::TaskRuntimeContext;
 use komga_application::task_processing::TaskQueueRecord;
+use komga_application::task_processing::TaskRuntimeContext;
 use komga_config::profile::RuntimeMode;
 use komga_config::writer_ownership::WriterOwnershipPolicy;
+use komga_contract_testkit::contract_matrix::assert_required_target_declared;
 use komga_infrastructure::search::analyzer_profiles::search_analyzer_version;
-use komga_infrastructure::search::index_lifecycle::{
-    SearchEntityType, SearchIndexLifecycle,
-};
-use komga_infrastructure::task_queue::queue_scheduler::TaskQueueScheduler;
+use komga_infrastructure::search::index_lifecycle::{SearchEntityType, SearchIndexLifecycle};
 use komga_infrastructure::sqlite::connect_pool;
+use komga_infrastructure::task_queue::queue_scheduler::TaskQueueScheduler;
 use komga_server::app::{
     build_router_with_config, build_router_without_runtime_workers_for_contract,
 };
@@ -19,31 +17,11 @@ use sqlx::Row;
 use std::fs;
 use tower::util::ServiceExt;
 
-mod support {
-    pub mod persistence_contract_fixture;
-
-    pub mod runtime_router_contract_support {
-        use super::persistence_contract_fixture;
-
-        pub(crate) use super::persistence_contract_fixture::RuntimeDbPaths;
-
-        pub mod contract_seed;
-        pub mod response_helpers;
-        pub mod task_runtime_fixture_bootstrap;
-        pub mod task_runtime_media_file_fixtures;
-        pub mod task_runtime_user_auth;
-        pub mod log_capture;
-    }
-}
+mod support;
 
 use support::runtime_router_contract_support::{
-    RuntimeDbPaths,
-    contract_seed::*,
-    log_capture::*,
-    response_helpers::*,
-    task_runtime_fixture_bootstrap::*,
-    task_runtime_media_file_fixtures::*,
-    task_runtime_user_auth::*,
+    RuntimeDbPaths, contract_seed::*, fixture_bootstrap::*, log_capture::*, media_file_fixtures::*,
+    response_helpers::*, user_auth::*,
 };
 
 mod task_runtime_contract_cases;
@@ -81,7 +59,8 @@ fn runtime_task_context_from_config(
                 | komga_config::writer_ownership::WriterDecision::Isolated
         ),
         owns_filesystem_scan_output: matches!(
-            config.writer_decision(komga_config::writer_ownership::WriterKind::FilesystemScanOutput),
+            config
+                .writer_decision(komga_config::writer_ownership::WriterKind::FilesystemScanOutput),
             komga_config::writer_ownership::WriterDecision::Allowed
                 | komga_config::writer_ownership::WriterDecision::Isolated
         ),

@@ -6,6 +6,8 @@ use komga_config::env_config::RuntimeConfig;
 use reqwest::Url;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 
 fn oauth2_runtime_env_for_paths(
     paths: &RuntimeDbPaths,
@@ -156,8 +158,8 @@ async fn oauth2_callback_response_for_config_with_request_metadata(
     }
 
     app.oneshot(callback_request)
-    .await
-    .expect("oauth2 callback request should complete")
+        .await
+        .expect("oauth2 callback request should complete")
 }
 
 async fn spawn_path_response_server(routes: &[(&str, u16, &str, &str)]) -> SingleResponseServer {

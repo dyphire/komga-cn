@@ -2,87 +2,11 @@
 
 use super::*;
 
-struct SingleResponseServer {
-    url: String,
-    join: tokio::task::JoinHandle<()>,
-}
-
-fn kobo_proxy_env_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
-
-fn restore_env_var(name: &str, previous: Option<String>) {
-    match previous {
-        Some(value) => unsafe { std::env::set_var(name, value) },
-        None => unsafe { std::env::remove_var(name) },
-    }
-}
-
-async fn spawn_single_response_server(
-    status_code: u16,
-    content_type: &str,
-    body: &str,
-) -> SingleResponseServer {
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("mock response server should bind");
-    let address = listener
-        .local_addr()
-        .expect("mock response server should have local addr");
-    let body = body.to_string();
-    let content_type = content_type.to_string();
-    let join = tokio::spawn(async move {
-        let (mut stream, _) = listener
-            .accept()
-            .await
-            .expect("mock response server should accept one connection");
-        let mut request = [0_u8; 2048];
-        let _ = stream.read(&mut request).await;
-        let status_text = match status_code {
-            200 => "OK",
-            404 => "Not Found",
-            500 => "Internal Server Error",
-            503 => "Service Unavailable",
-            _ => "OK",
-        };
-        let response = format!(
-            "HTTP/1.1 {status_code} {status_text}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            body.len(),
-            body
-        );
-        stream
-            .write_all(response.as_bytes())
-            .await
-            .expect("mock response server should write response");
-    });
-
-    SingleResponseServer {
-        url: format!("http://{address}/feed.json"),
-        join,
-    }
-}
-
 fn fixed_layout_extension_blob() -> Vec<u8> {
     vec![
         31, 139, 8, 0, 100, 225, 210, 105, 2, 255, 171, 86, 202, 44, 118, 203, 172, 72, 77, 241,
         73, 172, 204, 47, 45, 81, 178, 42, 41, 42, 77, 173, 5, 0, 254, 47, 201, 165, 22, 0, 0, 0,
     ]
-}
-
-async fn upsert_server_setting(paths: &RuntimeDbPaths, key: &str, value: &str) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("server settings db should open");
-
-    sqlx::query("INSERT OR REPLACE INTO SERVER_SETTINGS (KEY, VALUE) VALUES (?, ?)")
-        .bind(key)
-        .bind(value)
-        .execute(&pool)
-        .await
-        .expect("server setting should upsert");
-
-    pool.close().await;
 }
 
 #[tokio::test]

@@ -1,5 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 
+use super::common_helpers::runtime_list_request;
 use super::*;
 use crate::http::discovery::filters::{
     OperatorValidationMode, parse_runtime_series_filters_with_mode,
@@ -99,18 +100,11 @@ pub async fn runtime_owned_series_list_response(
     strict_runtime_shape: bool,
 ) -> Option<Response> {
     let query = uri.query().unwrap_or_default();
-    let sorts = query_values(query, "sort")
-        .into_iter()
-        .map(decode_query_component)
-        .collect::<Vec<_>>();
-    let page = query_value(query, "page")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let size = query_value(query, "size")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(20)
-        .max(1);
-    let unpaged = query_bool(query, "unpaged");
+    let request = runtime_list_request(query);
+    let sorts = request.sorts;
+    let page = request.page;
+    let size = request.size;
+    let unpaged = request.unpaged;
 
     let parse_mode = OperatorValidationMode::from(query_validation_mode(strict_runtime_shape));
     let mut filters = match parse_runtime_series_filters_with_mode(

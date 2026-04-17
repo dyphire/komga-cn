@@ -39,14 +39,14 @@ async fn router_discovery_book_readlists_returns_existing_persisted_readlists() 
 async fn router_book_readlists_and_siblings_accept_basic_auth_like_kotlin_clients() {
     let paths = new_router_fixture("router-book-readlists-siblings-basic-auth-compat").await;
     seed_router_contract_data(&paths).await;
-    seed_router_cbz_book(
+    seed_router_primary_series_cbz_book(
         &paths,
         "book-prev-basic-auth",
         "book-prev-basic-auth.cbz",
         "Previous Basic Auth Book",
     )
     .await;
-    seed_router_cbz_book(
+    seed_router_primary_series_cbz_book(
         &paths,
         "book-next-basic-auth",
         "book-next-basic-auth.cbz",

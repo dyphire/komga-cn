@@ -1,32 +1,5 @@
 use super::*;
 
-async fn seed_kobo_sync_api_key(paths: &RuntimeDbPaths, api_key: &str, user_id: &str) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("user api key seed db should open");
-
-    let api_key_hash = {
-        let mut hasher = Sha512::new();
-        hasher.update(api_key.as_bytes());
-        hasher
-            .finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>()
-    };
-
-    sqlx::query("INSERT INTO USER_API_KEY (ID, USER_ID, API_KEY, COMMENT) VALUES (?, ?, ?, ?)")
-        .bind(format!("api-key-{api_key}"))
-        .bind(user_id)
-        .bind(api_key_hash)
-        .bind("kobo sync")
-        .execute(&pool)
-        .await
-        .expect("user api key row should be inserted");
-
-    pool.close().await;
-}
-
 async fn load_first_kobo_sync_point_row(paths: &RuntimeDbPaths) -> (String, Option<String>) {
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await

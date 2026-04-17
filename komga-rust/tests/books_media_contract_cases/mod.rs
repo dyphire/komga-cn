@@ -5,10 +5,8 @@ use support::{
     books_list_ids, fixture_epub_positions_extension_blob,
     fixture_epub_positions_extension_blob_fixed_layout_single_position,
     fixture_epub_positions_extension_blob_total_progression_021,
-    fixture_epub_positions_extension_blob_total_progression_0995, kobo_proxy_env_lock,
-    restore_env_var, seed_kobo_sync_api_key, seed_router_cbz_book, seed_router_persisted_pdf_page,
-    spawn_single_response_server, update_book_search_fixture_title, upsert_server_setting,
-    write_router_epub_with_cover,
+    fixture_epub_positions_extension_blob_total_progression_0995, seed_router_persisted_pdf_page,
+    update_book_search_fixture_title, write_router_epub_with_cover,
 };
 
 mod authors_and_list_basics;

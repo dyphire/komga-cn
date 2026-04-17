@@ -1,3 +1,7 @@
+use super::common_helpers::{
+    TextMatchMode, any_ignore_ascii_case, any_normalized_text_matches, matches_optional_value,
+    normalized_text_matches,
+};
 use super::*;
 
 pub async fn load_persisted_series_summaries(
@@ -54,8 +58,10 @@ pub async fn load_persisted_series_page(
     }
 
     if let Some(restrictions) = context.restrictions.as_ref() {
-        if let (Some(age), Some(crate::http::discovery_auth::principal::AgeRestrictionKind::Exclude)) =
-            (restrictions.age, restrictions.age_restriction)
+        if let (
+            Some(age),
+            Some(crate::http::discovery_auth::principal::AgeRestrictionKind::Exclude),
+        ) = (restrictions.age, restrictions.age_restriction)
         {
             series = filter_rows(series, |row| {
                 row.age_rating
@@ -66,133 +72,122 @@ pub async fn load_persisted_series_page(
 
         if !restrictions.labels_exclude.is_empty() {
             series = filter_rows(series, |row| {
-                !row.labels.iter().any(|label| {
-                    restrictions
-                        .labels_exclude
-                        .iter()
-                        .any(|excluded| label.eq_ignore_ascii_case(excluded))
-                })
+                !any_ignore_ascii_case(
+                    row.labels.iter().map(String::as_str),
+                    &restrictions.labels_exclude,
+                )
             });
         }
 
         if !restrictions.labels_allow.is_empty() {
             series = filter_rows(series, |row| {
-                row.labels.iter().any(|label| {
-                    restrictions
-                        .labels_allow
-                        .iter()
-                        .any(|allowed| label.eq_ignore_ascii_case(allowed))
-                })
+                any_ignore_ascii_case(
+                    row.labels.iter().map(String::as_str),
+                    &restrictions.labels_allow,
+                )
             });
         }
     }
 
     if let Some(titles) = filters.titles.as_ref() {
         series = filter_rows(series, |row| {
-            let normalized = row.title.to_ascii_lowercase();
-            titles.contains(&normalized)
+            normalized_text_matches(&row.title, titles, TextMatchMode::Exact)
         });
     }
 
     if let Some(titles_excluded) = filters.titles_excluded.as_ref() {
         series = filter_rows(series, |row| {
-            let normalized = row.title.to_ascii_lowercase();
-            !titles_excluded.contains(&normalized)
+            !normalized_text_matches(&row.title, titles_excluded, TextMatchMode::Exact)
         });
     }
 
     if let Some(titles_contains) = filters.titles_contains.as_ref() {
         series = filter_rows(series, |row| {
-            let normalized = row.title.to_ascii_lowercase();
-            titles_contains
-                .iter()
-                .any(|value| normalized.contains(value))
+            normalized_text_matches(&row.title, titles_contains, TextMatchMode::Contains)
         });
     }
 
     if let Some(titles_contains_excluded) = filters.titles_contains_excluded.as_ref() {
         series = filter_rows(series, |row| {
-            let normalized = row.title.to_ascii_lowercase();
-            !titles_contains_excluded
-                .iter()
-                .any(|value| normalized.contains(value))
+            !normalized_text_matches(
+                &row.title,
+                titles_contains_excluded,
+                TextMatchMode::Contains,
+            )
         });
     }
 
     if let Some(titles_begins_with) = filters.titles_begins_with.as_ref() {
         series = filter_rows(series, |row| {
-            let normalized = row.title.to_ascii_lowercase();
-            titles_begins_with
-                .iter()
-                .any(|value| normalized.starts_with(value))
+            normalized_text_matches(&row.title, titles_begins_with, TextMatchMode::StartsWith)
         });
     }
 
     if let Some(titles_begins_with_excluded) = filters.titles_begins_with_excluded.as_ref() {
         series = filter_rows(series, |row| {
-            let normalized = row.title.to_ascii_lowercase();
-            !titles_begins_with_excluded
-                .iter()
-                .any(|value| normalized.starts_with(value))
+            !normalized_text_matches(
+                &row.title,
+                titles_begins_with_excluded,
+                TextMatchMode::StartsWith,
+            )
         });
     }
 
     if let Some(titles_ends_with) = filters.titles_ends_with.as_ref() {
         series = filter_rows(series, |row| {
-            let normalized = row.title.to_ascii_lowercase();
-            titles_ends_with
-                .iter()
-                .any(|value| normalized.ends_with(value))
+            normalized_text_matches(&row.title, titles_ends_with, TextMatchMode::EndsWith)
         });
     }
 
     if let Some(titles_ends_with_excluded) = filters.titles_ends_with_excluded.as_ref() {
         series = filter_rows(series, |row| {
-            let normalized = row.title.to_ascii_lowercase();
-            !titles_ends_with_excluded
-                .iter()
-                .any(|value| normalized.ends_with(value))
+            !normalized_text_matches(
+                &row.title,
+                titles_ends_with_excluded,
+                TextMatchMode::EndsWith,
+            )
         });
     }
 
     if let Some(title_sorts) = filters.title_sorts.as_ref() {
         series = filter_rows(series, |row| {
-            let normalized = row.title_sort.to_ascii_lowercase();
-            title_sorts.contains(&normalized)
+            normalized_text_matches(&row.title_sort, title_sorts, TextMatchMode::Exact)
         });
     }
 
     if let Some(title_sorts_excluded) = filters.title_sorts_excluded.as_ref() {
         series = filter_rows(series, |row| {
-            let normalized = row.title_sort.to_ascii_lowercase();
-            !title_sorts_excluded.contains(&normalized)
+            !normalized_text_matches(&row.title_sort, title_sorts_excluded, TextMatchMode::Exact)
         });
     }
 
     if let Some(title_sorts_contains) = filters.title_sorts_contains.as_ref() {
         series = filter_rows(series, |row| {
-            let normalized = row.title_sort.to_ascii_lowercase();
-            title_sorts_contains
-                .iter()
-                .any(|value| normalized.contains(value))
+            normalized_text_matches(
+                &row.title_sort,
+                title_sorts_contains,
+                TextMatchMode::Contains,
+            )
         });
     }
 
     if let Some(title_sorts_contains_excluded) = filters.title_sorts_contains_excluded.as_ref() {
         series = filter_rows(series, |row| {
-            let normalized = row.title_sort.to_ascii_lowercase();
-            !title_sorts_contains_excluded
-                .iter()
-                .any(|value| normalized.contains(value))
+            !normalized_text_matches(
+                &row.title_sort,
+                title_sorts_contains_excluded,
+                TextMatchMode::Contains,
+            )
         });
     }
 
     if let Some(title_sorts_begins_with) = filters.title_sorts_begins_with.as_ref() {
         series = filter_rows(series, |row| {
-            let normalized = row.title_sort.to_ascii_lowercase();
-            title_sorts_begins_with
-                .iter()
-                .any(|value| normalized.starts_with(value))
+            normalized_text_matches(
+                &row.title_sort,
+                title_sorts_begins_with,
+                TextMatchMode::StartsWith,
+            )
         });
     }
 
@@ -200,28 +195,31 @@ pub async fn load_persisted_series_page(
         filters.title_sorts_begins_with_excluded.as_ref()
     {
         series = filter_rows(series, |row| {
-            let normalized = row.title_sort.to_ascii_lowercase();
-            !title_sorts_begins_with_excluded
-                .iter()
-                .any(|value| normalized.starts_with(value))
+            !normalized_text_matches(
+                &row.title_sort,
+                title_sorts_begins_with_excluded,
+                TextMatchMode::StartsWith,
+            )
         });
     }
 
     if let Some(title_sorts_ends_with) = filters.title_sorts_ends_with.as_ref() {
         series = filter_rows(series, |row| {
-            let normalized = row.title_sort.to_ascii_lowercase();
-            title_sorts_ends_with
-                .iter()
-                .any(|value| normalized.ends_with(value))
+            normalized_text_matches(
+                &row.title_sort,
+                title_sorts_ends_with,
+                TextMatchMode::EndsWith,
+            )
         });
     }
 
     if let Some(title_sorts_ends_with_excluded) = filters.title_sorts_ends_with_excluded.as_ref() {
         series = filter_rows(series, |row| {
-            let normalized = row.title_sort.to_ascii_lowercase();
-            !title_sorts_ends_with_excluded
-                .iter()
-                .any(|value| normalized.ends_with(value))
+            !normalized_text_matches(
+                &row.title_sort,
+                title_sorts_ends_with_excluded,
+                TextMatchMode::EndsWith,
+            )
         });
     }
 
@@ -287,21 +285,21 @@ pub async fn load_persisted_series_page(
 
     if let Some(genres) = filters.genres.as_ref() {
         series = filter_rows(series, |row| {
-            row.genres.iter().any(|genre| {
-                let normalized = genre.to_ascii_lowercase();
-                genres.iter().any(|value| normalized.contains(value))
-            })
+            any_normalized_text_matches(
+                row.genres.iter().map(String::as_str),
+                genres,
+                TextMatchMode::Contains,
+            )
         });
     }
 
     if let Some(genres_excluded) = filters.genres_excluded.as_ref() {
         series = filter_rows(series, |row| {
-            !row.genres.iter().any(|genre| {
-                let normalized = genre.to_ascii_lowercase();
-                genres_excluded
-                    .iter()
-                    .any(|value| normalized.contains(value))
-            })
+            !any_normalized_text_matches(
+                row.genres.iter().map(String::as_str),
+                genres_excluded,
+                TextMatchMode::Contains,
+            )
         });
     }
 
@@ -311,19 +309,21 @@ pub async fn load_persisted_series_page(
 
     if let Some(tags) = filters.tags.as_ref() {
         series = filter_rows(series, |row| {
-            row.tags.iter().any(|tag| {
-                let normalized = tag.to_ascii_lowercase();
-                tags.iter().any(|value| normalized.contains(value))
-            })
+            any_normalized_text_matches(
+                row.tags.iter().map(String::as_str),
+                tags,
+                TextMatchMode::Contains,
+            )
         });
     }
 
     if let Some(tags_excluded) = filters.tags_excluded.as_ref() {
         series = filter_rows(series, |row| {
-            !row.tags.iter().any(|tag| {
-                let normalized = tag.to_ascii_lowercase();
-                tags_excluded.iter().any(|value| normalized.contains(value))
-            })
+            !any_normalized_text_matches(
+                row.tags.iter().map(String::as_str),
+                tags_excluded,
+                TextMatchMode::Contains,
+            )
         });
     }
 
@@ -333,33 +333,25 @@ pub async fn load_persisted_series_page(
 
     if let Some(languages) = filters.languages.as_ref() {
         series = filter_rows(series, |row| {
-            languages
-                .iter()
-                .any(|value| value.eq_ignore_ascii_case(&row.language))
+            any_ignore_ascii_case([row.language.as_str()], languages)
         });
     }
 
     if let Some(languages_excluded) = filters.languages_excluded.as_ref() {
         series = filter_rows(series, |row| {
-            !languages_excluded
-                .iter()
-                .any(|value| value.eq_ignore_ascii_case(&row.language))
+            !any_ignore_ascii_case([row.language.as_str()], languages_excluded)
         });
     }
 
     if let Some(publishers) = filters.publishers.as_ref() {
         series = filter_rows(series, |row| {
-            publishers
-                .iter()
-                .any(|value| value.eq_ignore_ascii_case(&row.publisher))
+            any_ignore_ascii_case([row.publisher.as_str()], publishers)
         });
     }
 
     if let Some(publishers_excluded) = filters.publishers_excluded.as_ref() {
         series = filter_rows(series, |row| {
-            !publishers_excluded
-                .iter()
-                .any(|value| value.eq_ignore_ascii_case(&row.publisher))
+            !any_ignore_ascii_case([row.publisher.as_str()], publishers_excluded)
         });
     }
 
@@ -401,23 +393,21 @@ pub async fn load_persisted_series_page(
 
     if let Some(sharing_labels) = filters.sharing_labels.as_ref() {
         series = filter_rows(series, |row| {
-            row.labels.iter().any(|label| {
-                let normalized = label.to_ascii_lowercase();
-                sharing_labels
-                    .iter()
-                    .any(|value| normalized.contains(value))
-            })
+            any_normalized_text_matches(
+                row.labels.iter().map(String::as_str),
+                sharing_labels,
+                TextMatchMode::Contains,
+            )
         });
     }
 
     if let Some(sharing_labels_excluded) = filters.sharing_labels_excluded.as_ref() {
         series = filter_rows(series, |row| {
-            !row.labels.iter().any(|label| {
-                let normalized = label.to_ascii_lowercase();
-                sharing_labels_excluded
-                    .iter()
-                    .any(|value| normalized.contains(value))
-            })
+            !any_normalized_text_matches(
+                row.labels.iter().map(String::as_str),
+                sharing_labels_excluded,
+                TextMatchMode::Contains,
+            )
         });
     }
 
@@ -427,59 +417,53 @@ pub async fn load_persisted_series_page(
 
     if let Some(authors) = filters.authors.as_ref() {
         series = filter_rows(series, |row| {
-            row.books_metadata_authors.iter().any(|author| {
-                let normalized = author.to_ascii_lowercase();
-                authors
-                    .iter()
-                    .any(|value| author_value_matches(&normalized, value))
-            })
+            row.books_metadata_authors
+                .iter()
+                .any(|author| author_matches_filter_value(author, authors))
         });
     }
 
     if let Some(authors_excluded) = filters.authors_excluded.as_ref() {
         series = filter_rows(series, |row| {
-            !row.books_metadata_authors.iter().any(|author| {
-                let normalized = author.to_ascii_lowercase();
-                authors_excluded
-                    .iter()
-                    .any(|value| author_value_matches(&normalized, value))
-            })
+            !row.books_metadata_authors
+                .iter()
+                .any(|author| author_matches_filter_value(author, authors_excluded))
         });
     }
 
     if let Some(series_statuses) = filters.series_statuses.as_ref() {
         series = filter_rows(series, |row| {
-            series_statuses
-                .iter()
-                .any(|value| value.eq_ignore_ascii_case(&row.status))
+            any_ignore_ascii_case([row.status.as_str()], series_statuses)
         });
     }
 
     if let Some(series_statuses_excluded) = filters.series_statuses_excluded.as_ref() {
         series = filter_rows(series, |row| {
-            !series_statuses_excluded
-                .iter()
-                .any(|value| value.eq_ignore_ascii_case(&row.status))
+            !any_ignore_ascii_case([row.status.as_str()], series_statuses_excluded)
         });
     }
 
     if let Some(release_dates) = filters.release_dates.as_ref() {
         series = filter_rows(series, |row| {
-            let Some(release_date) = row.books_metadata_release_date.as_ref() else {
-                return false;
-            };
-            release_dates.iter().any(|value| value == release_date)
+            matches_optional_value(
+                row.books_metadata_release_date.as_deref(),
+                false,
+                |release_date| release_dates.iter().any(|value| value == release_date),
+            )
         });
     }
 
     if let Some(release_dates_excluded) = filters.release_dates_excluded.as_ref() {
         series = filter_rows(series, |row| {
-            let Some(release_date) = row.books_metadata_release_date.as_ref() else {
-                return true;
-            };
-            !release_dates_excluded
-                .iter()
-                .any(|value| value == release_date)
+            matches_optional_value(
+                row.books_metadata_release_date.as_deref(),
+                true,
+                |release_date| {
+                    !release_dates_excluded
+                        .iter()
+                        .any(|value| value == release_date)
+                },
+            )
         });
     }
 
@@ -491,19 +475,21 @@ pub async fn load_persisted_series_page(
 
     if let Some(release_date_gt) = filters.release_date_gt.as_ref() {
         series = filter_rows(series, |row| {
-            let Some(release_date) = row.books_metadata_release_date.as_ref() else {
-                return false;
-            };
-            release_date > release_date_gt
+            matches_optional_value(
+                row.books_metadata_release_date.as_deref(),
+                false,
+                |release_date| release_date > release_date_gt.as_str(),
+            )
         });
     }
 
     if let Some(release_date_lt) = filters.release_date_lt.as_ref() {
         series = filter_rows(series, |row| {
-            let Some(release_date) = row.books_metadata_release_date.as_ref() else {
-                return false;
-            };
-            release_date < release_date_lt
+            matches_optional_value(
+                row.books_metadata_release_date.as_deref(),
+                false,
+                |release_date| release_date < release_date_lt.as_str(),
+            )
         });
     }
 
@@ -512,10 +498,11 @@ pub async fn load_persisted_series_page(
             persisted_utc_date_minus_days(database_file, release_date_in_last_days).await?
     {
         series = filter_rows(series, |row| {
-            let Some(release_date) = row.books_metadata_release_date.as_ref() else {
-                return false;
-            };
-            release_date > &cutoff
+            matches_optional_value(
+                row.books_metadata_release_date.as_deref(),
+                false,
+                |release_date| release_date > cutoff.as_str(),
+            )
         });
     }
 
@@ -524,34 +511,43 @@ pub async fn load_persisted_series_page(
             persisted_utc_date_minus_days(database_file, release_date_not_in_last_days).await?
     {
         series = filter_rows(series, |row| {
-            let Some(release_date) = row.books_metadata_release_date.as_ref() else {
-                return false;
-            };
-            release_date < &cutoff
+            matches_optional_value(
+                row.books_metadata_release_date.as_deref(),
+                false,
+                |release_date| release_date < cutoff.as_str(),
+            )
         });
     }
 
     if let Some(release_date_begins_with) = filters.release_date_begins_with.as_ref() {
         series = filter_rows(series, |row| {
-            let Some(release_date) = row.books_metadata_release_date.as_ref() else {
-                return false;
-            };
-            let normalized = release_date.to_ascii_lowercase();
-            release_date_begins_with
-                .iter()
-                .any(|value| normalized.starts_with(value))
+            matches_optional_value(
+                row.books_metadata_release_date.as_deref(),
+                false,
+                |release_date| {
+                    normalized_text_matches(
+                        release_date,
+                        release_date_begins_with,
+                        TextMatchMode::StartsWith,
+                    )
+                },
+            )
         });
     }
 
     if let Some(release_date_ends_with) = filters.release_date_ends_with.as_ref() {
         series = filter_rows(series, |row| {
-            let Some(release_date) = row.books_metadata_release_date.as_ref() else {
-                return false;
-            };
-            let normalized = release_date.to_ascii_lowercase();
-            release_date_ends_with
-                .iter()
-                .any(|value| normalized.ends_with(value))
+            matches_optional_value(
+                row.books_metadata_release_date.as_deref(),
+                false,
+                |release_date| {
+                    normalized_text_matches(
+                        release_date,
+                        release_date_ends_with,
+                        TextMatchMode::EndsWith,
+                    )
+                },
+            )
         });
     }
 
@@ -559,38 +555,50 @@ pub async fn load_persisted_series_page(
         filters.release_date_begins_with_excluded.as_ref()
     {
         series = filter_rows(series, |row| {
-            let Some(release_date) = row.books_metadata_release_date.as_ref() else {
-                return true;
-            };
-            let normalized = release_date.to_ascii_lowercase();
-            !release_date_begins_with_excluded
-                .iter()
-                .any(|value| normalized.starts_with(value))
+            matches_optional_value(
+                row.books_metadata_release_date.as_deref(),
+                true,
+                |release_date| {
+                    !normalized_text_matches(
+                        release_date,
+                        release_date_begins_with_excluded,
+                        TextMatchMode::StartsWith,
+                    )
+                },
+            )
         });
     }
 
     if let Some(release_date_ends_with_excluded) = filters.release_date_ends_with_excluded.as_ref()
     {
         series = filter_rows(series, |row| {
-            let Some(release_date) = row.books_metadata_release_date.as_ref() else {
-                return true;
-            };
-            let normalized = release_date.to_ascii_lowercase();
-            !release_date_ends_with_excluded
-                .iter()
-                .any(|value| normalized.ends_with(value))
+            matches_optional_value(
+                row.books_metadata_release_date.as_deref(),
+                true,
+                |release_date| {
+                    !normalized_text_matches(
+                        release_date,
+                        release_date_ends_with_excluded,
+                        TextMatchMode::EndsWith,
+                    )
+                },
+            )
         });
     }
 
     if let Some(release_date_contains_excluded) = filters.release_date_contains_excluded.as_ref() {
         series = filter_rows(series, |row| {
-            let Some(release_date) = row.books_metadata_release_date.as_ref() else {
-                return true;
-            };
-            let normalized = release_date.to_ascii_lowercase();
-            !release_date_contains_excluded
-                .iter()
-                .any(|value| normalized.contains(value))
+            matches_optional_value(
+                row.books_metadata_release_date.as_deref(),
+                true,
+                |release_date| {
+                    !normalized_text_matches(
+                        release_date,
+                        release_date_contains_excluded,
+                        TextMatchMode::Contains,
+                    )
+                },
+            )
         });
     }
 

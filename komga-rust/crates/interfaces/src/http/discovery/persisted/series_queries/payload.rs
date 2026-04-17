@@ -1,3 +1,4 @@
+use super::common_helpers::page_payload;
 use super::*;
 
 use crate::http::helpers::{normalized_date_time, normalized_file_last_modified};
@@ -8,39 +9,18 @@ pub fn series_page_payload(
     sorted: bool,
 ) -> Value {
     let content = page.content.iter().map(series_payload).collect::<Vec<_>>();
-    let number_of_elements = content.len();
-    let first = page.page == 0;
-    let last = page.total_pages == 0 || page.page + 1 >= page.total_pages;
     let offset = page.page.saturating_mul(page.size);
 
-    json!({
-        "content": content,
-        "pageable": {
-            "pageNumber": page.page,
-            "pageSize": page.size,
-            "sort": {
-                "empty": !sorted,
-                "sorted": sorted,
-                "unsorted": !sorted
-            },
-            "offset": offset,
-            "paged": paged,
-            "unpaged": !paged
-        },
-        "last": last,
-        "totalElements": page.total_elements,
-        "totalPages": page.total_pages,
-        "first": first,
-        "size": page.size,
-        "number": page.page,
-        "sort": {
-            "empty": !sorted,
-            "sorted": sorted,
-            "unsorted": !sorted
-        },
-        "numberOfElements": number_of_elements,
-        "empty": number_of_elements == 0
-    })
+    page_payload(
+        content,
+        page.page,
+        page.size,
+        page.total_elements,
+        page.total_pages,
+        paged,
+        sorted,
+        if paged { offset } else { 0 },
+    )
 }
 
 fn series_payload(series: &PersistedSeriesSummary) -> Value {

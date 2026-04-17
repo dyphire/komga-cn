@@ -47,6 +47,25 @@ pub(crate) fn poster_matches(
     type_matches && selected_matches
 }
 
+pub(crate) fn normalized_author_filter_value(name: &str, role: &str) -> String {
+    if role.is_empty() {
+        name.to_ascii_lowercase()
+    } else {
+        format!("{name}::{role}").to_ascii_lowercase()
+    }
+}
+
+pub(crate) fn author_matches_filter_value(author: &str, expected: &[String]) -> bool {
+    let normalized = author.to_ascii_lowercase();
+    expected
+        .iter()
+        .any(|value| author_value_matches(&normalized, value))
+}
+
+pub(crate) fn author_matches_filter(name: &str, role: &str, expected: &[String]) -> bool {
+    author_matches_filter_value(&normalized_author_filter_value(name, role), expected)
+}
+
 pub(crate) fn author_value_matches(author: &str, expected: &str) -> bool {
     if let Some((expected_name, expected_role)) = expected.split_once("::") {
         let (author_name, author_role) = author

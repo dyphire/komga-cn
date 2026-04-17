@@ -1,3 +1,4 @@
+use super::common_helpers::page_payload;
 use super::*;
 
 pub async fn load_persisted_author_names(
@@ -58,37 +59,15 @@ pub fn authors_v2_page_payload(
     } else {
         total_elements.div_ceil(page_size)
     };
-    let number = if unpaged { 0 } else { page };
-    let number_of_elements = content.len();
-    let first = number == 0;
-    let last = total_pages == 0 || number + 1 >= total_pages;
 
-    json!({
-        "content": content,
-        "number": number,
-        "size": page_size,
-        "first": first,
-        "last": last,
-        "empty": number_of_elements == 0,
-        "numberOfElements": number_of_elements,
-        "totalElements": total_elements,
-        "totalPages": total_pages,
-        "sort": {
-            "empty": false,
-            "sorted": true,
-            "unsorted": false,
-        },
-        "pageable": {
-            "pageNumber": number,
-            "pageSize": page_size,
-            "offset": if unpaged { 0 } else { offset },
-            "sort": {
-                "empty": false,
-                "sorted": true,
-                "unsorted": false,
-            },
-            "paged": true,
-            "unpaged": false,
-        },
-    })
+    page_payload(
+        content.into_iter().map(|author| json!(author)).collect(),
+        if unpaged { 0 } else { page },
+        page_size,
+        total_elements,
+        total_pages,
+        true,
+        true,
+        if unpaged { 0 } else { offset },
+    )
 }

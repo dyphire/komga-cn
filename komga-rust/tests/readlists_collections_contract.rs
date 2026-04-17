@@ -8,29 +8,11 @@ use sqlx::Row;
 use tower::util::ServiceExt;
 use zip::CompressionMethod;
 
-mod support {
-    pub mod persistence_contract_fixture;
-
-    pub mod runtime_router_contract_support {
-        use super::persistence_contract_fixture;
-
-        pub(crate) use super::persistence_contract_fixture::RuntimeDbPaths;
-
-        pub mod contract_seed;
-        pub mod response_helpers;
-        pub mod readlists_collections_fixture_bootstrap;
-        pub mod readlists_collections_media_file_fixtures;
-        pub mod readlists_collections_user_auth;
-    }
-}
+mod support;
 
 use support::runtime_router_contract_support::{
-    RuntimeDbPaths,
-    contract_seed::*,
-    readlists_collections_fixture_bootstrap::*,
-    readlists_collections_media_file_fixtures::*,
-    readlists_collections_user_auth::*,
-    response_helpers::*,
+    RuntimeDbPaths, contract_seed::*, fixture_bootstrap::*, media_file_fixtures::*,
+    response_helpers::*, user_auth::*,
 };
 
 mod readlists_collections_contract_cases;

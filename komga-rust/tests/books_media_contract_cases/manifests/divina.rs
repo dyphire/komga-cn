@@ -24,7 +24,7 @@ fn overwrite_cbz_with_single_page(
 async fn router_book_manifest_dispatches_to_divina_profile_payload() {
     let paths = new_router_fixture("router-book-manifest-default-uses-divina-profile").await;
     seed_router_contract_data(&paths).await;
-    seed_router_cbz_book(&paths, "book-3", "book-3.cbz", "Book 3").await;
+    seed_router_primary_series_cbz_book(&paths, "book-3", "book-3.cbz", "Book 3").await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
@@ -65,7 +65,7 @@ async fn router_book_manifest_dispatches_to_divina_profile_payload() {
 async fn router_opds_v2_divina_manifest_uses_page_media_type_in_reading_order() {
     let paths = new_router_fixture("router-opds-v2-divina-manifest-page-media-type").await;
     seed_router_contract_data(&paths).await;
-    seed_router_cbz_book(&paths, "book-3", "book-3.cbz", "Book 3").await;
+    seed_router_primary_series_cbz_book(&paths, "book-3", "book-3.cbz", "Book 3").await;
 
     let mut config = runtime_config_for_paths(&paths);
     config.mode = RuntimeMode::Isolated;
@@ -104,7 +104,8 @@ async fn router_opds_v2_divina_manifest_uses_page_media_type_in_reading_order() 
 async fn router_opds_v2_divina_manifest_exposes_jpeg_alternate_for_webp_pages() {
     let paths = new_router_fixture("router-opds-v2-divina-manifest-webp-alternate").await;
     seed_router_contract_data(&paths).await;
-    seed_router_cbz_book(&paths, "book-webp-1", "book-webp-1.cbz", "Book WEBP").await;
+    seed_router_primary_series_cbz_book(&paths, "book-webp-1", "book-webp-1.cbz", "Book WEBP")
+        .await;
     overwrite_cbz_with_single_page(
         &paths,
         "books/book-webp-1.cbz",
@@ -174,7 +175,7 @@ async fn router_opds_v2_divina_manifest_exposes_jpeg_alternate_for_webp_pages() 
 async fn router_book_manifest_divina_uses_page_media_type_in_reading_order() {
     let paths = new_router_fixture("router-book-manifest-divina-page-media-type").await;
     seed_router_contract_data(&paths).await;
-    seed_router_cbz_book(&paths, "book-3", "book-3.cbz", "Book 3").await;
+    seed_router_primary_series_cbz_book(&paths, "book-3", "book-3.cbz", "Book 3").await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;

@@ -10,31 +10,11 @@ use tokio::time::{Duration, sleep};
 use tower::util::ServiceExt;
 use zip::ZipArchive;
 
-mod support {
-    pub mod persistence_contract_fixture;
-
-    pub mod runtime_router_contract_support {
-        use super::persistence_contract_fixture;
-
-        pub(crate) use super::persistence_contract_fixture::RuntimeDbPaths;
-
-        pub mod contract_seed;
-        pub mod response_helpers;
-        pub mod series_fixture_bootstrap;
-        pub mod series_media_file_fixtures;
-        pub mod series_metadata_seeding;
-        pub mod series_user_auth;
-    }
-}
+mod support;
 
 use support::runtime_router_contract_support::{
-    RuntimeDbPaths,
-    contract_seed::*,
-    response_helpers::*,
-    series_fixture_bootstrap::*,
-    series_media_file_fixtures::*,
-    series_metadata_seeding::*,
-    series_user_auth::*,
+    RuntimeDbPaths, contract_seed::*, fixture_bootstrap::*, media_file_fixtures::*,
+    metadata_series_seeding::*, response_helpers::*, user_auth::*,
 };
 
 mod series_contract_cases;

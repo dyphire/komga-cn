@@ -167,12 +167,66 @@ pub async fn seed_router_pdf_book(
     write_single_page_pdf_fixture(&pdf_path);
 }
 
+pub async fn update_router_book_name(paths: &RuntimeDbPaths, book_id: &str, name: &str) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("router contract db should open for book name update");
+
+    sqlx::query("UPDATE BOOK SET NAME = ? WHERE ID = ?")
+        .bind(name)
+        .bind(book_id)
+        .execute(&pool)
+        .await
+        .expect("book name should update");
+
+    pool.close().await;
+}
+
 pub async fn seed_router_cbz_book(
     paths: &RuntimeDbPaths,
     book_id: &str,
     series_id: &str,
     file_name: &str,
     title: &str,
+) {
+    seed_router_cbz_book_with_metadata(
+        paths,
+        book_id,
+        series_id,
+        file_name,
+        title,
+        98,
+        "2024-02-02",
+    )
+    .await;
+}
+
+pub async fn seed_router_primary_series_cbz_book(
+    paths: &RuntimeDbPaths,
+    book_id: &str,
+    file_name: &str,
+    title: &str,
+) {
+    seed_router_cbz_book_with_metadata(
+        paths,
+        book_id,
+        "series-1",
+        file_name,
+        title,
+        3,
+        "2024-03-01",
+    )
+    .await;
+}
+
+async fn seed_router_cbz_book_with_metadata(
+    paths: &RuntimeDbPaths,
+    book_id: &str,
+    series_id: &str,
+    file_name: &str,
+    title: &str,
+    number: i64,
+    release_date: &str,
 ) {
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await
@@ -189,7 +243,7 @@ pub async fn seed_router_cbz_book(
     .bind(&relative_path)
     .bind(series_id)
     .bind(4_096_i64)
-    .bind(98_i64)
+    .bind(number)
     .bind("library-1")
     .execute(&pool)
     .await
@@ -210,10 +264,10 @@ pub async fn seed_router_cbz_book(
     sqlx::query(
         "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
     )
-    .bind("98")
-    .bind(98.0_f64)
+    .bind(number.to_string())
+    .bind(number as f64)
     .bind(title)
-    .bind("2024-02-02")
+    .bind(release_date)
     .bind(book_id)
     .execute(&pool)
     .await

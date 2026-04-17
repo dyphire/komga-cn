@@ -3,17 +3,38 @@ use komga_infrastructure::sqlite::connect_pool;
 
 use super::RuntimeDbPaths;
 
+async fn add_read_progress_column_if_missing(pool: &sqlx::SqlitePool, column: &str, sql: &str) {
+    match sqlx::query(sql).execute(pool).await {
+        Ok(_) => {}
+        Err(error)
+            if error.to_string().contains("duplicate column name")
+                && error.to_string().contains(column) => {}
+        Err(error) => panic!(
+            "read progress fixture schema should only ignore existing column {column}: {error}"
+        ),
+    }
+}
+
 pub async fn seed_router_contract_data(paths: &RuntimeDbPaths) {
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract db should open");
 
-    for sql in [
-        "ALTER TABLE READ_PROGRESS ADD COLUMN DEVICE_ID varchar NOT NULL DEFAULT ''",
-        "ALTER TABLE READ_PROGRESS ADD COLUMN DEVICE_NAME varchar NOT NULL DEFAULT ''",
-        "ALTER TABLE READ_PROGRESS ADD COLUMN LOCATOR blob",
+    for (column, sql) in [
+        (
+            "DEVICE_ID",
+            "ALTER TABLE READ_PROGRESS ADD COLUMN DEVICE_ID varchar NOT NULL DEFAULT ''",
+        ),
+        (
+            "DEVICE_NAME",
+            "ALTER TABLE READ_PROGRESS ADD COLUMN DEVICE_NAME varchar NOT NULL DEFAULT ''",
+        ),
+        (
+            "LOCATOR",
+            "ALTER TABLE READ_PROGRESS ADD COLUMN LOCATOR blob",
+        ),
     ] {
-        let _ = sqlx::query(sql).execute(&pool).await;
+        add_read_progress_column_if_missing(&pool, column, sql).await;
     }
 
     sqlx::query(

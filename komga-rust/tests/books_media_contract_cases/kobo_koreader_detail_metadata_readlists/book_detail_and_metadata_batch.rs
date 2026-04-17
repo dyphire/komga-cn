@@ -267,7 +267,8 @@ async fn router_discovery_book_detail_formats_file_last_modified_as_utc_timestam
 async fn router_discovery_book_detail_does_not_bridge_missing_book_n_ids() {
     let paths = new_router_fixture("router-discovery-book-detail-no-bridge-id").await;
     seed_router_contract_data(&paths).await;
-    seed_router_cbz_book(&paths, "book-z-2", "book-z-2.cbz", "Second Real Book").await;
+    seed_router_primary_series_cbz_book(&paths, "book-z-2", "book-z-2.cbz", "Second Real Book")
+        .await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;

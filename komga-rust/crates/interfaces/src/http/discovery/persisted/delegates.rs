@@ -175,10 +175,6 @@ pub(crate) fn first_group_key(title: &str) -> String {
     common_helpers::first_group_key(title)
 }
 
-pub(crate) fn decode_query_component(value: &str) -> String {
-    common_helpers::decode_query_component(value)
-}
-
 pub(crate) fn internal_error_response(error: String) -> Response {
     common_helpers::internal_error_response(error)
 }

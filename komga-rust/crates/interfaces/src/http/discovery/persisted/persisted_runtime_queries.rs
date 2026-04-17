@@ -1,42 +1,57 @@
 use super::*;
 
-pub async fn load_persisted_ondeck_books(
-    database_file: &FsPath,
-    user_id: &str,
-) -> Result<Vec<PersistedBookBrowseEntry>, String> {
-    persisted_backend_load_persisted_ondeck_books(database_file, user_id).await
+macro_rules! persisted_runtime_loader {
+    ($name:ident, $backend:ident, () -> $ret:ty) => {
+        pub async fn $name(database_file: &FsPath) -> Result<$ret, String> {
+            $backend(database_file).await
+        }
+    };
+    ($name:ident, $backend:ident, ($arg:ident : $arg_ty:ty) -> $ret:ty) => {
+        pub async fn $name(database_file: &FsPath, $arg: $arg_ty) -> Result<$ret, String> {
+            $backend(database_file, $arg).await
+        }
+    };
+    ($name:ident, $backend:ident, ($first:ident : $first_ty:ty, $second:ident : $second_ty:ty) -> $ret:ty) => {
+        pub async fn $name(
+            database_file: &FsPath,
+            $first: $first_ty,
+            $second: $second_ty,
+        ) -> Result<$ret, String> {
+            $backend(database_file, $first, $second).await
+        }
+    };
 }
 
-pub async fn load_persisted_duplicate_books(
-    database_file: &FsPath,
-) -> Result<Vec<PersistedBookBrowseEntry>, String> {
-    persisted_backend_load_persisted_duplicate_books(database_file).await
-}
-
-pub async fn load_persisted_book_tags(
-    database_file: &FsPath,
-    scope: Option<&PersistedBookTagsScope>,
-    authorized_library_ids: Option<&[String]>,
-) -> Result<Vec<String>, String> {
-    persisted_backend_load_persisted_book_tags(database_file, scope, authorized_library_ids).await
-}
-
-pub async fn persisted_utc_date_minus_days(
-    database_file: &FsPath,
-    days: i64,
-) -> Result<Option<String>, String> {
-    persisted_backend_persisted_utc_date_minus_days(database_file, days).await
-}
-
-pub async fn load_series_read_progress_counts(
-    database_file: &FsPath,
-    user_id: &str,
-) -> Result<HashMap<String, (i64, i64)>, String> {
-    persisted_backend_load_series_read_progress_counts(database_file, user_id).await
-}
-
-pub async fn load_series_total_book_counts(
-    database_file: &FsPath,
-) -> Result<HashMap<String, i64>, String> {
-    persisted_backend_load_series_total_book_counts(database_file).await
-}
+persisted_runtime_loader!(
+    load_persisted_ondeck_books,
+    persisted_backend_load_persisted_ondeck_books,
+    (user_id: &str) -> Vec<PersistedBookBrowseEntry>
+);
+persisted_runtime_loader!(
+    load_persisted_duplicate_books,
+    persisted_backend_load_persisted_duplicate_books,
+    () -> Vec<PersistedBookBrowseEntry>
+);
+persisted_runtime_loader!(
+    load_persisted_book_tags,
+    persisted_backend_load_persisted_book_tags,
+    (
+        scope: Option<&PersistedBookTagsScope>,
+        authorized_library_ids: Option<&[String]>
+    ) -> Vec<String>
+);
+persisted_runtime_loader!(
+    persisted_utc_date_minus_days,
+    persisted_backend_persisted_utc_date_minus_days,
+    (days: i64) -> Option<String>
+);
+persisted_runtime_loader!(
+    load_series_read_progress_counts,
+    persisted_backend_load_series_read_progress_counts,
+    (user_id: &str) -> HashMap<String, (i64, i64)>
+);
+persisted_runtime_loader!(
+    load_series_total_book_counts,
+    persisted_backend_load_series_total_book_counts,
+    () -> HashMap<String, i64>
+);
