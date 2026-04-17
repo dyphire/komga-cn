@@ -50,6 +50,7 @@ pub(crate) struct SeriesFilterCriteria {
     pub(crate) titles_begins_with_excluded: Option<Vec<String>>,
     pub(crate) titles_ends_with: Option<Vec<String>>,
     pub(crate) titles_ends_with_excluded: Option<Vec<String>>,
+    pub(crate) titles_regex: Option<Vec<String>>,
     pub(crate) title_sorts: Option<Vec<String>>,
     pub(crate) title_sorts_excluded: Option<Vec<String>>,
     pub(crate) title_sorts_contains: Option<Vec<String>>,
@@ -58,6 +59,7 @@ pub(crate) struct SeriesFilterCriteria {
     pub(crate) title_sorts_begins_with_excluded: Option<Vec<String>>,
     pub(crate) title_sorts_ends_with: Option<Vec<String>>,
     pub(crate) title_sorts_ends_with_excluded: Option<Vec<String>>,
+    pub(crate) title_sorts_regex: Option<Vec<String>>,
     pub(crate) deleted: Option<bool>,
     pub(crate) oneshot: Option<bool>,
     pub(crate) exclude_newly_added: bool,
@@ -91,11 +93,13 @@ pub(crate) struct SeriesFilterCriteria {
     pub(crate) release_date_in_last_days: Option<i64>,
     pub(crate) release_date_not_in_last_days: Option<i64>,
     pub(crate) sharing_labels: Option<Vec<String>>,
+    pub(crate) sharing_labels_contains: Option<Vec<String>>,
     pub(crate) sharing_labels_excluded: Option<Vec<String>>,
     pub(crate) sharing_labels_null: Option<bool>,
     pub(crate) series_statuses: Option<Vec<String>>,
     pub(crate) series_statuses_excluded: Option<Vec<String>>,
     pub(crate) complete: Option<bool>,
+    pub(crate) authors_contains: Option<Vec<String>>,
     pub(crate) authors: Option<Vec<String>>,
     pub(crate) authors_excluded: Option<Vec<String>>,
 }
@@ -103,6 +107,7 @@ pub(crate) struct SeriesFilterCriteria {
 #[derive(Clone)]
 pub(crate) struct PersistedSeriesBrowseQuery {
     pub(crate) filters: SeriesFilterCriteria,
+    pub(crate) sharing_labels_contains_groups: Vec<Vec<String>>,
     pub(crate) search: Option<String>,
     pub(crate) page: usize,
     pub(crate) size: usize,
@@ -121,6 +126,7 @@ impl PersistedSeriesBrowseQuery {
     ) -> Self {
         Self {
             filters,
+            sharing_labels_contains_groups: vec![],
             search,
             page,
             size,
@@ -145,6 +151,15 @@ impl PersistedSeriesBrowseQuery {
             unpaged,
             sort_modes,
         )
+        .with_sharing_labels_contains_groups(filters.sharing_labels_contains_groups.clone())
+    }
+
+    pub(crate) fn with_sharing_labels_contains_groups(
+        mut self,
+        sharing_labels_contains_groups: Vec<Vec<String>>,
+    ) -> Self {
+        self.sharing_labels_contains_groups = sharing_labels_contains_groups;
+        self
     }
 }
 
@@ -165,9 +180,21 @@ impl DerefMut for PersistedSeriesBrowseQuery {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PersistedSeriesSortMode {
     TitleAsc,
+    TitleDesc,
+    NameAsc,
+    NameDesc,
+    ReadDateAsc,
+    ReadDateDesc,
+    CollectionNumberAsc,
+    CollectionNumberDesc,
+    Random,
+    CreatedAsc,
     CreatedDesc,
+    LastModifiedAsc,
     LastModifiedDesc,
+    ReleaseDateAsc,
     ReleaseDateDesc,
+    BooksCountAsc,
     BooksCountDesc,
     RelevanceAsc,
     RelevanceDesc,
@@ -177,6 +204,7 @@ pub(crate) enum PersistedSeriesSortMode {
 pub struct PersistedSeriesSummary {
     pub id: String,
     pub library_id: String,
+    pub name: String,
     pub title: String,
     pub title_sort: String,
     pub labels: Vec<String>,
@@ -211,12 +239,16 @@ pub struct PersistedSeriesSummary {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RuntimeSeriesFilters {
+    pub(crate) sharing_labels_contains_groups: Vec<Vec<String>>,
     pub(crate) criteria: SeriesFilterCriteria,
 }
 
 impl RuntimeSeriesFilters {
     pub(crate) fn from_criteria(criteria: SeriesFilterCriteria) -> Self {
-        Self { criteria }
+        Self {
+            sharing_labels_contains_groups: vec![],
+            criteria,
+        }
     }
 
     pub(crate) fn into_criteria(self) -> SeriesFilterCriteria {
@@ -276,6 +308,7 @@ pub(crate) struct BooksFilterCriteria {
     pub(crate) media_profiles_excluded: Option<Vec<String>>,
     pub(crate) media_statuses: Option<Vec<String>>,
     pub(crate) media_statuses_excluded: Option<Vec<String>>,
+    pub(crate) authors_contains: Option<Vec<String>>,
     pub(crate) authors: Option<Vec<String>>,
     pub(crate) authors_excluded: Option<Vec<String>>,
     pub(crate) poster_types: Option<Vec<String>>,

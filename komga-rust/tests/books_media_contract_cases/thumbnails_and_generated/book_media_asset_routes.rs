@@ -106,17 +106,27 @@ async fn router_book_file_delete_enqueues_delete_book_even_when_book_is_missing(
     let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for missing book file delete verification");
-    let rows = sqlx::query("SELECT ID, SIMPLE_TYPE, GROUP_ID, PRIORITY FROM TASK ORDER BY ID ASC")
+    let rows = sqlx::query("SELECT ID, SIMPLE_TYPE, GROUP_ID, PRIORITY, PAYLOAD FROM TASK ORDER BY ID ASC")
         .fetch_all(&tasks_pool)
         .await
         .expect("missing book delete task rows should be queryable");
     tasks_pool.close().await;
 
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].get::<String, _>("ID"), "DELETE_BOOK:missing-book");
+    assert_eq!(rows[0].get::<String, _>("ID"), "DELETE_BOOK_missing-book");
     assert_eq!(rows[0].get::<String, _>("SIMPLE_TYPE"), "DeleteBook");
     assert_eq!(rows[0].get::<Option<String>, _>("GROUP_ID"), None);
-    assert_eq!(rows[0].get::<i32, _>("PRIORITY"), 100);
+    assert_eq!(rows[0].get::<i32, _>("PRIORITY"), 8);
+    assert_eq!(
+        serde_json::from_str::<Value>(&rows[0].get::<String, _>("PAYLOAD"))
+            .expect("missing book delete payload should be valid json"),
+        json!({
+            "bookId": "missing-book",
+            "priority": 8,
+            "groupId": Value::Null,
+            "uniqueId": "DELETE_BOOK_missing-book"
+        }),
+    );
 
     cleanup_router_fixture(paths);
 }

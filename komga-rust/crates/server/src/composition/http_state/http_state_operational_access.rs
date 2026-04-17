@@ -98,161 +98,9 @@ pub(super) fn compose_operational_runtime_access_backend() -> OperationalRuntime
         load_task_failure_count: Arc::new(|database_file| {
             Box::pin(async move {
                 infrastructure_operational_metrics::load_task_failure_count(database_file.as_path())
-                .await
+                    .await
             })
         }),
-        load_sse_snapshot: Arc::new(|database_file, user_id| {
-            Box::pin(async move {
-                let snapshot = komga_infrastructure::sqlite::read_models::sse_snapshot::load_sse_snapshot(
-                    database_file.as_path(),
-                    &user_id,
-                )
-                .await;
-                map_sse_snapshot(snapshot)
-            })
-        }),
-    }
-}
-
-fn map_sse_snapshot(
-    value: komga_infrastructure::sqlite::read_models::sse_snapshot::SseSnapshot,
-) -> InterfacesSseSnapshot {
-    InterfacesSseSnapshot {
-        libraries: value
-            .libraries
-            .into_iter()
-            .map(|(id, row)| {
-                (
-                    id,
-                    InterfacesLibrarySnapshot {
-                        last_modified: row.last_modified,
-                    },
-                )
-            })
-            .collect(),
-        series: value
-            .series
-            .into_iter()
-            .map(|(id, row)| {
-                (
-                    id,
-                    InterfacesSeriesSnapshot {
-                        library_id: row.library_id,
-                        last_modified: row.last_modified,
-                    },
-                )
-            })
-            .collect(),
-        books: value
-            .books
-            .into_iter()
-            .map(|(id, row)| {
-                (
-                    id,
-                    InterfacesBookSnapshot {
-                        series_id: row.series_id,
-                        library_id: row.library_id,
-                        last_modified: row.last_modified,
-                    },
-                )
-            })
-            .collect(),
-        readlists: value
-            .readlists
-            .into_iter()
-            .map(|(id, row)| {
-                (
-                    id,
-                    InterfacesReadListSnapshot {
-                        book_ids: row.book_ids,
-                        last_modified: row.last_modified,
-                    },
-                )
-            })
-            .collect(),
-        collections: value
-            .collections
-            .into_iter()
-            .map(|(id, row)| {
-                (
-                    id,
-                    InterfacesCollectionSnapshot {
-                        series_ids: row.series_ids,
-                        last_modified: row.last_modified,
-                    },
-                )
-            })
-            .collect(),
-        book_imports: value
-            .book_imports
-            .into_iter()
-            .map(|row| InterfacesBookImportSnapshot {
-                event_id: row.event_id,
-                book_id: row.book_id,
-                source_file: row.source_file,
-                success: row.success,
-                message: row.message,
-                timestamp: row.timestamp,
-            })
-            .collect(),
-        thumbnails_book: value
-            .thumbnails_book
-            .into_iter()
-            .map(|(id, row)| {
-                (
-                    id,
-                    InterfacesThumbnailBookSnapshot {
-                        book_id: row.book_id,
-                        series_id: row.series_id,
-                        selected: row.selected,
-                        last_modified: row.last_modified,
-                    },
-                )
-            })
-            .collect(),
-        thumbnails_series: value
-            .thumbnails_series
-            .into_iter()
-            .map(|(id, row)| {
-                (
-                    id,
-                    InterfacesThumbnailSnapshot {
-                        selected: row.selected,
-                        last_modified: row.last_modified,
-                    },
-                )
-            })
-            .collect(),
-        thumbnails_collection: value
-            .thumbnails_collection
-            .into_iter()
-            .map(|(id, row)| {
-                (
-                    id,
-                    InterfacesThumbnailCollectionSnapshot {
-                        collection_id: row.collection_id,
-                        selected: row.selected,
-                        last_modified: row.last_modified,
-                    },
-                )
-            })
-            .collect(),
-        thumbnails_readlist: value
-            .thumbnails_readlist
-            .into_iter()
-            .map(|(id, row)| {
-                (
-                    id,
-                    InterfacesThumbnailReadListSnapshot {
-                        readlist_id: row.readlist_id,
-                        selected: row.selected,
-                        last_modified: row.last_modified,
-                    },
-                )
-            })
-            .collect(),
-        read_progress: value.read_progress,
-        read_progress_series: value.read_progress_series,
     }
 }
 
@@ -596,6 +444,7 @@ pub(super) fn compose_operational_settings_access_backend() -> OperationalSettin
             InterfacesTransientBookAnalysis {
                 status: value.status,
                 media_type: value.media_type,
+                page_count: value.page_count,
                 pages: value
                     .pages
                     .into_iter()
@@ -638,7 +487,7 @@ pub(super) fn compose_operational_settings_access_backend() -> OperationalSettin
         load_transient_book_file_metadata: Arc::new(|path| {
             infrastructure_transient_books::load_transient_book_file_metadata(&path).map(|value| {
                 InterfacesTransientBookFileMetadata {
-                    file_last_modified_epoch_seconds: value.file_last_modified_epoch_seconds,
+                    file_last_modified_unix_nanos: value.file_last_modified_unix_nanos,
                     size_bytes: value.size_bytes,
                 }
             })

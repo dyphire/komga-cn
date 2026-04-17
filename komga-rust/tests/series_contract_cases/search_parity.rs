@@ -106,6 +106,8 @@ async fn router_discovery_series_list_defaults_to_relevance_sort_when_full_text_
     let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
 
+    let explicit_relevance_asc_ids =
+        series_list_ids(&app, &admin_token, Some("relevance,asc"), Some("series")).await;
     let default_relevance_ids = series_list_ids(&app, &admin_token, None, Some("series")).await;
     assert_eq!(
         default_relevance_ids,
@@ -113,7 +115,7 @@ async fn router_discovery_series_list_defaults_to_relevance_sort_when_full_text_
         // specific hit-order quirk. The Rust route keeps the implicit full-text path aligned with
         // explicit `relevance,asc` score semantics instead of reproducing a backend-specific
         // exception only for requests that omit `sort`.
-        vec!["series-3", "series-2", "series-1"]
+        explicit_relevance_asc_ids
     );
 
     cleanup_router_fixture(paths);

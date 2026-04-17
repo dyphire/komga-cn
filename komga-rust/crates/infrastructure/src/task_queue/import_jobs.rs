@@ -10,10 +10,6 @@ pub(super) fn try_execute(
     task: &TaskQueueRecord,
 ) -> Option<Result<(), TaskExecutionError>> {
     match task.simple_type.as_str() {
-        "IMPORT_BOOKS_BATCH" => Some(
-            process_import_books_batch_task(runtime, task)
-                .map(|follow_up_tasks| enqueue_follow_up_tasks(scheduler, follow_up_tasks)),
-        ),
         "IMPORT_BOOK" => Some(
             process_import_book_task(runtime, task)
                 .map(|follow_up_tasks| enqueue_follow_up_tasks(scheduler, follow_up_tasks)),
@@ -29,24 +25,6 @@ fn enqueue_follow_up_tasks(
     for follow_up in follow_up_tasks {
         scheduler.enqueue(follow_up);
     }
-}
-
-fn process_import_books_batch_task(
-    runtime: &RuntimeConfig,
-    task: &TaskQueueRecord,
-) -> Result<Vec<TaskQueueRecord>, TaskExecutionError> {
-    process_import_task(
-        runtime,
-        task,
-        "IMPORT_BOOKS_BATCH task requires serialized payload",
-        "build import books batch runtime failed",
-        "import books batch worker thread panicked",
-        |service, payload, priority| async move {
-            service
-                .process_queued_books_payload(&payload, priority)
-                .await
-        },
-    )
 }
 
 fn process_import_book_task(

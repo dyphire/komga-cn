@@ -158,6 +158,7 @@ pub(super) fn parse_series_title_filter(
         && operator != "beginswith"
         && operator != "doesnotbeginwith"
         && operator != "endswith"
+        && operator != "regex"
         && operator != "doesnotendwith"
     {
         if mode.is_strict() {
@@ -168,14 +169,23 @@ pub(super) fn parse_series_title_filter(
         return Ok(RuntimeSeriesFilters::default());
     }
 
-    let Some(value) = condition
+    let Some(raw_value) = condition
         .get("value")
         .and_then(Value::as_str)
-        .map(|raw| raw.trim().to_ascii_lowercase())
+        .map(str::trim)
         .filter(|value| !value.is_empty())
     else {
         return Ok(RuntimeSeriesFilters::default());
     };
+
+    if operator == "regex" {
+        return Ok(series_filters! {
+            titles_regex: Some(vec![raw_value.to_string()]),
+            ..SeriesFilterCriteria::default()
+        });
+    }
+
+    let value = raw_value.to_ascii_lowercase();
 
     Ok(match operator.as_str() {
         "is" => series_filters! {
@@ -229,6 +239,7 @@ pub(super) fn parse_series_title_sort_filter(
         && operator != "beginswith"
         && operator != "doesnotbeginwith"
         && operator != "endswith"
+        && operator != "regex"
         && operator != "doesnotendwith"
     {
         if mode.is_strict() {
@@ -239,14 +250,23 @@ pub(super) fn parse_series_title_sort_filter(
         return Ok(RuntimeSeriesFilters::default());
     }
 
-    let Some(value) = condition
+    let Some(raw_value) = condition
         .get("value")
         .and_then(Value::as_str)
-        .map(|raw| raw.trim().to_ascii_lowercase())
+        .map(str::trim)
         .filter(|value| !value.is_empty())
     else {
         return Ok(RuntimeSeriesFilters::default());
     };
+
+    if operator == "regex" {
+        return Ok(series_filters! {
+            title_sorts_regex: Some(vec![raw_value.to_string()]),
+            ..SeriesFilterCriteria::default()
+        });
+    }
+
+    let value = raw_value.to_ascii_lowercase();
 
     Ok(match operator.as_str() {
         "is" => series_filters! {
@@ -780,29 +800,58 @@ pub(super) fn parse_series_sharing_label_filter(
     condition: &Value,
     mode: OperatorValidationMode,
 ) -> Result<RuntimeSeriesFilters, DiscoveryError> {
-    parse_nullable_series_string_filter(
-        condition,
-        mode,
-        "SharingLabel",
-        |value| {
-            series_filters! {
-                sharing_labels: Some(vec![value]),
-                ..SeriesFilterCriteria::default()
-            }
-        },
-        |value| {
-            series_filters! {
-                sharing_labels_excluded: Some(vec![value]),
-                ..SeriesFilterCriteria::default()
-            }
-        },
-        |is_null| {
-            series_filters! {
-                sharing_labels_null: Some(is_null),
-                ..SeriesFilterCriteria::default()
-            }
-        },
-    )
+    let operator = condition
+        .get("operator")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    if operator != "is"
+        && operator != "contains"
+        && operator != "isnot"
+        && operator != "isnull"
+        && operator != "isnotnull"
+    {
+        if mode.is_strict() {
+            return Err(DiscoveryError::InvalidSemantics(format!(
+                "unsupported operator for SharingLabel: {operator}",
+            )));
+        }
+        return Ok(RuntimeSeriesFilters::default());
+    }
+
+    if operator == "isnull" {
+        return Ok(series_filters! {
+            sharing_labels_null: Some(true),
+            ..SeriesFilterCriteria::default()
+        });
+    }
+    if operator == "isnotnull" {
+        return Ok(series_filters! {
+            sharing_labels_null: Some(false),
+            ..SeriesFilterCriteria::default()
+        });
+    }
+
+    let Some(value) = condition.get("value").and_then(Value::as_str) else {
+        return Ok(RuntimeSeriesFilters::default());
+    };
+    let normalized = value.to_ascii_lowercase();
+
+    match operator.as_str() {
+        "contains" => Ok(series_filters! {
+            sharing_labels_contains: Some(vec![normalized]),
+            ..SeriesFilterCriteria::default()
+        }),
+        "isnot" => Ok(series_filters! {
+            sharing_labels_excluded: Some(vec![normalized]),
+            ..SeriesFilterCriteria::default()
+        }),
+        _ => Ok(series_filters! {
+            sharing_labels: Some(vec![normalized]),
+            ..SeriesFilterCriteria::default()
+        }),
+    }
 }
 
 pub(super) fn parse_series_status_filter(
@@ -890,7 +939,7 @@ pub(super) fn parse_series_author_filter(
     if operator == "contains" {
         return parse_series_string_filter(condition, "Author", "contains_or_is", mode, |value| {
             series_filters! {
-                authors: Some(vec![value]),
+                authors_contains: Some(vec![value]),
                 ..SeriesFilterCriteria::default()
             }
         });

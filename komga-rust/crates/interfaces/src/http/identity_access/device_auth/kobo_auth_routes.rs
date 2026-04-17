@@ -28,16 +28,15 @@ pub async fn kobo_initialization(
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
 ) -> Response {
-    if resolved_kobo_user(
+    if let Err(status) = required_kobo_user(
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
         state.runtime.database_file.as_path(),
     )
     .await
-    .is_none()
     {
-        return StatusCode::UNAUTHORIZED.into_response();
+        return status.into_response();
     }
 
     let mut resources = match initialization_resources(&state, &headers).await {
@@ -159,16 +158,15 @@ pub async fn kobo_auth_device(
     uri: axum::http::Uri,
     body: Bytes,
 ) -> Response {
-    if resolved_kobo_user(
+    if let Err(status) = required_kobo_user(
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
         state.runtime.database_file.as_path(),
     )
     .await
-    .is_none()
     {
-        return StatusCode::UNAUTHORIZED.into_response();
+        return status.into_response();
     }
 
     let user_key = match validated_kobo_auth_device_user_key(&headers, &body) {

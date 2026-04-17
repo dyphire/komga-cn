@@ -240,6 +240,187 @@ async fn router_opds_v2_collections_use_kotlin_top_level_shape() {
 }
 
 #[tokio::test]
+async fn router_opds_v2_collections_include_kotlin_paging_metadata_and_links() {
+    let paths = new_router_fixture("router-opds-v2-collections-paging-metadata").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("opds v2 collections paging db should open");
+    sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("collection-2")
+        .bind("Collection 2")
+        .bind(false)
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("second collection should be inserted");
+    sqlx::query(
+        "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
+    )
+    .bind("collection-2")
+    .bind("series-1")
+    .bind(0_i64)
+    .execute(&pool)
+    .await
+    .expect("second collection series should be inserted");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    for (route, expected_self_href, expected_next_href) in [
+        (
+            "/opds/v2/libraries/collections?size=1",
+            "http://localhost/opds/v2/libraries/collections",
+            "http://localhost/opds/v2/libraries/collections?page=1",
+        ),
+        (
+            "/opds/v2/libraries/library-1/collections?size=1",
+            "http://localhost/opds/v2/libraries/library-1/collections",
+            "http://localhost/opds/v2/libraries/library-1/collections?page=1",
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header("x-auth-token", &auth_token)
+                    .body(Body::empty())
+                    .expect("opds v2 collections paging request should build"),
+            )
+            .await
+            .expect("opds v2 collections paging request should complete");
+
+        assert_eq!(response.status(), StatusCode::OK, "route: {route}");
+        let payload = response_json(response).await;
+        let metadata = payload.get("metadata").expect("collections metadata should be present");
+        assert_eq!(
+            metadata.get("itemsPerPage").and_then(Value::as_u64),
+            Some(1),
+            "route: {route}"
+        );
+        assert_eq!(
+            metadata.get("currentPage").and_then(Value::as_u64),
+            Some(1),
+            "route: {route}"
+        );
+        assert_eq!(
+            metadata.get("numberOfItems").and_then(Value::as_u64),
+            Some(2),
+            "route: {route}"
+        );
+
+        let links = payload
+            .get("links")
+            .and_then(Value::as_array)
+            .expect("collections links should be present");
+        let self_link = links
+            .iter()
+            .find(|link| link.get("rel").and_then(Value::as_str) == Some("self"))
+            .expect("collections self link should be present");
+        assert_eq!(
+            self_link.get("href").and_then(Value::as_str),
+            Some(expected_self_href),
+            "route: {route}"
+        );
+        let next_link = links
+            .iter()
+            .find(|link| link.get("rel").and_then(Value::as_str) == Some("next"))
+            .expect("collections next link should be present");
+        assert_eq!(
+            next_link.get("href").and_then(Value::as_str),
+            Some(expected_next_href),
+            "route: {route}"
+        );
+
+        let groups = payload
+            .get("groups")
+            .and_then(Value::as_array)
+            .expect("collections groups should be present");
+        let collection_titles = groups[0]
+            .get("navigation")
+            .and_then(Value::as_array)
+            .expect("collections group navigation should be present")
+            .iter()
+            .filter_map(|entry| entry.get("title").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        assert_eq!(collection_titles, vec!["Collection 1"], "route: {route}");
+    }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_collections_keep_restricted_collections_in_groups_like_kotlin() {
+    let paths = new_router_fixture("router-opds-v2-collections-restricted-group-visibility").await;
+    seed_router_contract_data(&paths).await;
+    update_router_series_age_rating(&paths, "series-1", 21).await;
+    seed_router_age_exclude_user(
+        &paths,
+        "restricted-user",
+        "restricted@example.org",
+        "router-contract-restricted-123",
+        12,
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "restricted@example.org",
+        "router-contract-restricted-123",
+    )
+    .await;
+
+    for route in [
+        "/opds/v2/libraries/collections",
+        "/opds/v2/libraries/library-1/collections",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header("x-auth-token", &auth_token)
+                    .body(Body::empty())
+                    .expect("opds v2 collections restricted request should build"),
+            )
+            .await
+            .expect("opds v2 collections restricted request should complete");
+
+        assert_eq!(response.status(), StatusCode::OK, "route: {route}");
+        let payload = response_json(response).await;
+        assert_eq!(
+            payload
+                .get("metadata")
+                .and_then(|metadata| metadata.get("numberOfItems"))
+                .and_then(Value::as_u64),
+            Some(1),
+            "route: {route}"
+        );
+
+        let groups = payload
+            .get("groups")
+            .and_then(Value::as_array)
+            .expect("collections groups should be present");
+        let collection_titles = groups[0]
+            .get("navigation")
+            .and_then(Value::as_array)
+            .expect("collections group navigation should be present")
+            .iter()
+            .filter_map(|entry| entry.get("title").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        assert_eq!(collection_titles, vec!["Collection 1"], "route: {route}");
+    }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_opds_v2_collections_top_level_navigation_hides_empty_subsections() {
     let paths = new_router_fixture("router-opds-v2-collections-empty-subsections").await;
     seed_router_contract_data(&paths).await;
@@ -502,7 +683,66 @@ async fn router_opds_v2_collection_returns_empty_feed_when_series_are_filtered_b
             .and_then(Value::as_u64),
         Some(0)
     );
-    assert!(payload.get("navigation").is_none());
+    assert_eq!(
+        payload
+            .get("navigation")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(0)
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_opds_v2_collection_keeps_empty_navigation_for_out_of_range_pages() {
+    let paths = new_router_fixture("router-opds-v2-collection-out-of-range-empty-page").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_custom_series(&paths, "series-2", "Alpha Display", "library-1").await;
+    update_router_series_metadata_titles(&paths, "series-1", "Zeta Display", "Zulu Sort").await;
+    update_router_series_metadata_titles(&paths, "series-2", "Alpha Display", "Alpha Sort").await;
+    seed_router_collection_series_entry(&paths, "collection-1", "series-2", 99).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v2/collections/collection-1?page=2&size=1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v2 collection out-of-range request should build"),
+        )
+        .await
+        .expect("opds v2 collection out-of-range request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload
+            .get("metadata")
+            .and_then(|metadata| metadata.get("numberOfItems"))
+            .and_then(Value::as_u64),
+        Some(2)
+    );
+    assert_eq!(
+        payload
+            .get("navigation")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(0)
+    );
+    let links = payload
+        .get("links")
+        .and_then(Value::as_array)
+        .expect("collection out-of-range links should be present");
+    assert!(links.iter().any(|link| {
+        link.get("rel").and_then(Value::as_str) == Some("previous")
+            && link.get("href").and_then(Value::as_str)
+                == Some("http://localhost/opds/v2/collections/collection-1?page=1")
+    }));
 
     cleanup_router_fixture(paths);
 }

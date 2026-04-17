@@ -275,7 +275,14 @@ pub async fn seed_router_contract_data(paths: &RuntimeDbPaths) {
     .await
     .expect("admin user should be inserted");
 
-    for role in ["USER", "ADMIN", "FILE_DOWNLOAD", "PAGE_STREAMING"] {
+    for role in [
+        "USER",
+        "ADMIN",
+        "FILE_DOWNLOAD",
+        "PAGE_STREAMING",
+        "KOBO_SYNC",
+        "KOREADER_SYNC",
+    ] {
         sqlx::query(
             "INSERT INTO USER_ROLE (USER_ID, ROLE) \
                      VALUES (?, ?)",

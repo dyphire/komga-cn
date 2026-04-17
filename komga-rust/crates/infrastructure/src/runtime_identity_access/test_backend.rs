@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::auth::{
-    device_auth, device_auth_config, kobo_sync,
-    runtime_identity_access as infrastructure_auth, session_store,
+    device_auth, device_auth_config, kobo_sync, runtime_identity_access as infrastructure_auth,
+    session_store,
 };
 
 use super::backend_contract::{
@@ -180,17 +180,13 @@ pub(super) fn compose_test_runtime_identity_access_backend() -> RuntimeIdentityA
         configured_api_key: Arc::new(device_auth_config::configured_api_key),
         load_book_created_timestamp: Arc::new(|database_file, book_id| {
             Box::pin(async move {
-                device_auth::load_book_created_timestamp(database_file.as_path(), &book_id)
-                    .await
+                device_auth::load_book_created_timestamp(database_file.as_path(), &book_id).await
             })
         }),
         load_book_last_epub_position_locator: Arc::new(|database_file, book_id| {
             Box::pin(async move {
-                device_auth::load_book_last_epub_position_locator(
-                    database_file.as_path(),
-                    &book_id,
-                )
-                .await
+                device_auth::load_book_last_epub_position_locator(database_file.as_path(), &book_id)
+                    .await
             })
         }),
         load_book_media_file: Arc::new(|database_file, book_id| {
@@ -246,8 +242,7 @@ pub(super) fn compose_test_runtime_identity_access_backend() -> RuntimeIdentityA
         }),
         load_thumbnail_by_id: Arc::new(|database_file, thumbnail_id| {
             Box::pin(async move {
-                device_auth::load_thumbnail_by_id(database_file.as_path(), &thumbnail_id)
-                    .await
+                device_auth::load_thumbnail_by_id(database_file.as_path(), &thumbnail_id).await
             })
         }),
         persist_read_progress_with_locator: Arc::new(
@@ -293,8 +288,7 @@ pub(super) fn compose_test_runtime_identity_access_backend() -> RuntimeIdentityA
         }),
         remove_sync_point: Arc::new(|database_file, sync_point_id| {
             Box::pin(async move {
-                kobo_sync::remove_sync_point(database_file.as_path(), &sync_point_id)
-                    .await
+                kobo_sync::remove_sync_point(database_file.as_path(), &sync_point_id).await
             })
         }),
         open_auth_pool: Arc::new(|database_file| {
@@ -329,18 +323,15 @@ fn map_test_persisted_read_progress_record(
     }
 }
 
-fn map_test_koreader_book_target(
-    record: device_auth::KoreaderBookTarget,
-) -> KoreaderBookTarget {
+fn map_test_koreader_book_target(record: device_auth::KoreaderBookTarget) -> KoreaderBookTarget {
     KoreaderBookTarget {
         id: record.id,
         page_count: record.page_count,
+        media_type: record.media_type,
     }
 }
 
-fn map_test_kobo_metadata_record(
-    record: device_auth::KoboMetadataRecord,
-) -> KoboMetadataRecord {
+fn map_test_kobo_metadata_record(record: device_auth::KoboMetadataRecord) -> KoboMetadataRecord {
     KoboMetadataRecord {
         title: record.title,
         summary: record.summary,
@@ -368,9 +359,7 @@ fn map_test_koreader_lookup_error(
     error: device_auth::KoreaderBookLookupError,
 ) -> KoreaderBookLookupError {
     match error {
-        device_auth::KoreaderBookLookupError::Persistence => {
-            KoreaderBookLookupError::Persistence
-        }
+        device_auth::KoreaderBookLookupError::Persistence => KoreaderBookLookupError::Persistence,
         device_auth::KoreaderBookLookupError::Conflict => KoreaderBookLookupError::Conflict,
     }
 }

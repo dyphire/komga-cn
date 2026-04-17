@@ -51,6 +51,11 @@ persisted_runtime_loader!(
     (user_id: &str) -> HashMap<String, (i64, i64)>
 );
 persisted_runtime_loader!(
+    load_series_read_dates,
+    persisted_backend_load_series_read_dates,
+    (user_id: &str) -> HashMap<String, String>
+);
+persisted_runtime_loader!(
     load_series_total_book_counts,
     persisted_backend_load_series_total_book_counts,
     () -> HashMap<String, i64>

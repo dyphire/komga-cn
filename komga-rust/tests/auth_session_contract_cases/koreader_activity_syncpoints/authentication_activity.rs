@@ -1,4 +1,5 @@
 use super::*;
+use crate::support::runtime_router_contract_support::metadata_series_seeding::seed_router_read_progress;
 use axum::extract::ConnectInfo;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use std::net::SocketAddr;
@@ -188,6 +189,97 @@ async fn router_users_by_id_authentication_activity_latest_uses_connect_info_for
     assert_eq!(
         payload["userAgent"],
         json!("router-contract-koreader-device")
+    );
+    assert_eq!(payload["source"], json!("ApiKey"));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_users_by_id_authentication_activity_latest_tracks_koreader_progress_api_key_auth() {
+    let paths =
+        new_router_fixture("router-user-latest-auth-activity-koreader-progress-api-key").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_read_progress(&paths, false).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v2/users/me/api-keys")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "comment": "KOReader progress auth" }).to_string(),
+                ))
+                .expect("api key create request should build"),
+        )
+        .await
+        .expect("api key create request should complete");
+
+    assert_eq!(create_response.status(), StatusCode::OK);
+    let created_api_key = response_json(create_response).await;
+    let created_api_key_id = created_api_key
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("api key create response should expose id")
+        .to_string();
+    let created_api_key_secret = created_api_key
+        .get("key")
+        .and_then(Value::as_str)
+        .expect("api key create response should expose raw key")
+        .to_string();
+
+    let connect_info_addr = "198.51.100.88:43124"
+        .parse::<SocketAddr>()
+        .expect("socket address should parse");
+    let koreader_progress_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/koreader/syncs/progress/hash-book-1")
+                .header("x-auth-user", &created_api_key_secret)
+                .header(
+                    header::USER_AGENT,
+                    "router-contract-koreader-progress-device",
+                )
+                .extension(ConnectInfo(connect_info_addr))
+                .body(Body::empty())
+                .expect("koreader progress request should build"),
+        )
+        .await
+        .expect("koreader progress request should complete");
+
+    assert_eq!(koreader_progress_response.status(), StatusCode::OK);
+
+    let latest_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/api/v2/users/admin-user/authentication-activity/latest?apikey_id={created_api_key_id}"
+                ))
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("latest auth activity progress api key request should build"),
+        )
+        .await
+        .expect("latest auth activity progress api key request should complete");
+
+    assert_eq!(latest_response.status(), StatusCode::OK);
+    let payload = response_json(latest_response).await;
+    assert_eq!(payload["email"], json!("admin@example.org"));
+    assert_eq!(payload["apiKeyId"], json!(created_api_key_id));
+    assert_eq!(payload["apiKeyComment"], json!("KOReader progress auth"));
+    assert_eq!(payload["ip"], json!("198.51.100.88"));
+    assert_eq!(
+        payload["userAgent"],
+        json!("router-contract-koreader-progress-device")
     );
     assert_eq!(payload["source"], json!("ApiKey"));
 

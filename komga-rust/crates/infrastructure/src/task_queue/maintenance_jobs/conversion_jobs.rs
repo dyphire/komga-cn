@@ -36,7 +36,7 @@ pub(super) fn try_execute(
                 scheduler.enqueue(runtime_follow_up_task(RuntimeFollowUpTask::ConvertBook {
                     book_id: book.book_id,
                     series_id: book.series_id,
-                    priority: task.priority.saturating_sub(5),
+                    priority: task.priority + 1,
                 }));
             }
             Ok(())
@@ -155,10 +155,11 @@ mod tests {
         let runtime = fixture.runtime_context(true, true);
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         let task = TaskQueueRecord::new(
-            "FIND_BOOKS_TO_CONVERT:library-1",
+            "FIND_BOOKS_TO_CONVERT_library-1",
             1_000,
             Some("library-1".to_string()),
-        );
+        )
+        .with_simple_type("FIND_BOOKS_TO_CONVERT");
 
         let result = try_execute(&mut scheduler, &runtime, &task, Some("library-1"));
         assert!(matches!(result, Some(Ok(()))));
@@ -174,17 +175,29 @@ mod tests {
         let tasks_pool = connect_pool(fixture.tasks_db_file.as_path(), 1)
             .await
             .expect("tasks db should open for convert-book grouping verification");
-        let row =
-            sqlx::query("SELECT ID, GROUP_ID FROM TASK WHERE SIMPLE_TYPE = 'CONVERT_BOOK' LIMIT 1")
+        let row = sqlx::query(
+            "SELECT ID, GROUP_ID, PRIORITY, PAYLOAD FROM TASK WHERE SIMPLE_TYPE = 'ConvertBook' LIMIT 1",
+        )
                 .fetch_one(&tasks_pool)
                 .await
                 .expect("convert-book task row should be queryable");
         tasks_pool.close().await;
 
-        assert_eq!(row.get::<String, _>("ID"), "CONVERT_BOOK:book-1");
+        assert_eq!(row.get::<String, _>("ID"), "CONVERT_BOOK_book-1");
         assert_eq!(
             row.get::<Option<String>, _>("GROUP_ID"),
             Some("series-1".to_string())
+        );
+        assert_eq!(row.get::<i64, _>("PRIORITY"), 1_001);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&row.get::<String, _>("PAYLOAD"))
+                .expect("convert-book payload should be valid JSON"),
+            serde_json::json!({
+                "bookId": "book-1",
+                "priority": 1001,
+                "groupId": "series-1",
+                "uniqueId": "CONVERT_BOOK_book-1"
+            }),
         );
 
         fixture.cleanup().await;
@@ -243,10 +256,11 @@ mod tests {
         let runtime = fixture.runtime_context(true, true);
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         let task = TaskQueueRecord::new(
-            "FIND_BOOKS_TO_CONVERT:library-1",
+            "FIND_BOOKS_TO_CONVERT_library-1",
             1_000,
             Some("library-1".to_string()),
-        );
+        )
+        .with_simple_type("FIND_BOOKS_TO_CONVERT");
 
         let result = try_execute(&mut scheduler, &runtime, &task, Some("library-1"));
         assert!(matches!(result, Some(Ok(()))));
@@ -334,7 +348,7 @@ mod tests {
         let runtime = fixture.runtime_context(false, true);
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         let task = TaskQueueRecord::new(
-            format!("CONVERT_BOOK:{book_id}"),
+            format!("CONVERT_BOOK_{book_id}"),
             900,
             Some("series-1".to_string()),
         )
@@ -424,7 +438,7 @@ mod tests {
         let runtime = fixture.runtime_context(false, true);
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         let task = TaskQueueRecord::new(
-            format!("CONVERT_BOOK:{book_id}"),
+            format!("CONVERT_BOOK_{book_id}"),
             900,
             Some("series-1".to_string()),
         )
@@ -554,7 +568,7 @@ mod tests {
         let runtime = fixture.runtime_context(false, false);
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         let task = TaskQueueRecord::new(
-            format!("CONVERT_BOOK:{book_id}"),
+            format!("CONVERT_BOOK_{book_id}"),
             900,
             Some("series-1".to_string()),
         )

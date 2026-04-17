@@ -75,6 +75,17 @@ fn resolve_oauth2_clients_from_layered(layered: &LayeredConfig) -> Vec<OAuth2Cli
         else {
             continue;
         };
+        let user_info_uri = read_object_string(
+            provider,
+            &[
+                "user-info-uri",
+                "userInfoUri",
+                "user_info_uri",
+                "userinfo-uri",
+                "userinfoUri",
+                "userinfo_uri",
+            ],
+        );
 
         clients.push(OAuth2ClientConfig {
             registration_id: registration_id.to_string(),
@@ -83,6 +94,7 @@ fn resolve_oauth2_clients_from_layered(layered: &LayeredConfig) -> Vec<OAuth2Cli
             client_secret,
             authorization_uri,
             token_uri,
+            user_info_uri,
             scopes,
         });
     }
@@ -158,6 +170,11 @@ fn resolve_oauth2_clients_from_env(env: &BTreeMap<String, String>) -> Vec<OAuth2
         else {
             continue;
         };
+        let user_info_uri = env
+            .get(&format!(
+                "SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_{provider_key}_USER_INFO_URI"
+            ))
+            .cloned();
 
         clients.push(OAuth2ClientConfig {
             registration_id,
@@ -166,6 +183,7 @@ fn resolve_oauth2_clients_from_env(env: &BTreeMap<String, String>) -> Vec<OAuth2
             client_secret,
             authorization_uri,
             token_uri,
+            user_info_uri,
             scopes,
         });
     }

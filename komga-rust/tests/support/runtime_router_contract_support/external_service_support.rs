@@ -244,3 +244,7 @@ pub(crate) async fn seed_kobo_sync_api_key(paths: &RuntimeDbPaths, api_key: &str
 
     pool.close().await;
 }
+
+pub(crate) async fn seed_admin_kobo_path_token(paths: &RuntimeDbPaths) {
+    seed_kobo_sync_api_key(paths, "any-token", "admin-user").await;
+}

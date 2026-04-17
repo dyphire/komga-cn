@@ -83,6 +83,32 @@ pub fn invalidate_remember_me_token(token: &str) {
     invalidate_remember_me_session_token(session_token_store(), token)
 }
 
+pub fn store_oauth2_authorization_state(
+    runtime_key: &str,
+    session_token: &str,
+    registration_id: &str,
+    state: &str,
+) {
+    session_token_store().store_oauth2_authorization_state(
+        runtime_key,
+        session_token,
+        registration_id,
+        state,
+    );
+}
+
+pub fn take_oauth2_authorization_state(
+    runtime_key: &str,
+    session_token: &str,
+    registration_id: &str,
+) -> Option<String> {
+    session_token_store().take_oauth2_authorization_state(
+        runtime_key,
+        session_token,
+        registration_id,
+    )
+}
+
 pub async fn persisted_basic_user(
     headers: &HeaderMap,
     database_file: &Path,
@@ -508,8 +534,9 @@ pub async fn persisted_record_successful_authentication_activity(
 
     let insert = match insert_with_user_id {
         Ok(result) => Ok(result),
-        Err(_) => sqlx::query(
-            r#"
+        Err(_) => {
+            sqlx::query(
+                r#"
             INSERT INTO AUTHENTICATION_ACTIVITY (
                 USER_ID,
                 EMAIL,
@@ -523,21 +550,81 @@ pub async fn persisted_record_successful_authentication_activity(
                 API_KEY_COMMENT
             ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)
             "#,
-        )
-        .bind(Option::<String>::None)
-        .bind(user.email.as_str())
-        .bind(ip)
-        .bind(user_agent)
-        .bind(true)
-        .bind(Option::<String>::None)
-        .bind(source)
-        .bind(api_key_id)
-        .bind(api_key_comment)
-        .execute(&pool)
-        .await,
+            )
+            .bind(Option::<String>::None)
+            .bind(user.email.as_str())
+            .bind(ip)
+            .bind(user_agent)
+            .bind(true)
+            .bind(Option::<String>::None)
+            .bind(source)
+            .bind(api_key_id)
+            .bind(api_key_comment)
+            .execute(&pool)
+            .await
+        }
     };
 
     insert.ok().map(|_| ())
+}
+
+pub async fn persisted_record_failed_authentication_activity(
+    database_file: &Path,
+    email: Option<&str>,
+    source: &str,
+    error: &str,
+    ip: Option<&str>,
+    user_agent: Option<&str>,
+) -> Option<()> {
+    if !database_file.exists() {
+        return None;
+    }
+
+    let normalized_email = email
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let pool = connect_pool(database_file, 1).await.ok()?;
+    let user_id = if let Some(email) = normalized_email.as_deref() {
+        sqlx::query("SELECT ID FROM USER WHERE lower(EMAIL) = lower(?) LIMIT 1")
+            .bind(email)
+            .fetch_optional(&pool)
+            .await
+            .ok()?
+            .map(|row| row.get::<String, _>("ID"))
+    } else {
+        None
+    };
+
+    sqlx::query(
+        r#"
+        INSERT INTO AUTHENTICATION_ACTIVITY (
+            USER_ID,
+            EMAIL,
+            IP,
+            USER_AGENT,
+            SUCCESS,
+            ERROR,
+            DATE_TIME,
+            SOURCE,
+            API_KEY_ID,
+            API_KEY_COMMENT
+        ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)
+        "#,
+    )
+    .bind(user_id)
+    .bind(normalized_email)
+    .bind(ip)
+    .bind(user_agent)
+    .bind(false)
+    .bind(Some(error.to_string()))
+    .bind(source)
+    .bind(Option::<String>::None)
+    .bind(Option::<String>::None)
+    .execute(&pool)
+    .await
+    .ok()
+    .map(|_| ())
 }
 
 pub async fn ensure_oauth_user(
@@ -579,7 +666,7 @@ pub async fn ensure_oauth_user(
     .bind(&user_id_value)
     .bind(email)
     .bind(password_hash)
-    .bind(false)
+    .bind(true)
     .execute(&pool)
     .await?;
 

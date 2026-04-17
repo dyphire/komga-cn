@@ -1,4 +1,6 @@
 use super::*;
+use komga_application::runtime_sse::register_runtime_sse_event;
+use serde_json::json;
 
 use crate::discovery_detail_access::series as series_access;
 
@@ -323,7 +325,21 @@ pub async fn persist_series_metadata_update(
     series_id: &str,
     update: SeriesMetadataUpdateRecord,
 ) -> Result<bool, String> {
-    series_access::persist_series_metadata_update(database_file, series_id, update).await
+    let updated = series_access::persist_series_metadata_update(database_file, series_id, update).await?;
+    if updated
+        && let Some(series) = load_persisted_series_resource(database_file, series_id).await?
+    {
+        register_runtime_sse_event(
+            "SeriesChanged",
+            json!({
+                "seriesId": series_id,
+                "libraryId": series.library_id,
+            }),
+            false,
+            None,
+        );
+    }
+    Ok(updated)
 }
 
 pub async fn sync_series_search_documents_after_metadata_update(

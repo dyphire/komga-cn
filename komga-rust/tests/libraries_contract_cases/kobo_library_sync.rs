@@ -96,6 +96,7 @@ async fn update_series_read_progress_date(
 async fn router_kobo_library_sync_returns_nested_dto_shape_and_sync_token() {
     let paths = new_router_fixture("router-kobo-library-sync-shape").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
@@ -242,6 +243,7 @@ async fn router_kobo_library_sync_respects_shared_library_scope() {
         &["library-1"],
     )
     .await;
+    seed_kobo_sync_api_key(&paths, "any-token", "kobo-library-user").await;
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await
         .expect("user role seed db should open");
@@ -308,6 +310,7 @@ async fn router_kobo_library_sync_respects_age_restrictions() {
         &["USER", "KOBO_SYNC"],
     )
     .await;
+    seed_kobo_sync_api_key(&paths, "any-token", "kobo-age-user").await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_credentials_and_get_token(
@@ -350,6 +353,7 @@ async fn router_kobo_library_sync_respects_age_restrictions() {
 async fn router_kobo_library_sync_excludes_regular_readlist_tags_without_ondeck() {
     let paths = new_router_fixture("router-kobo-library-sync-excludes-regular-readlist-tags").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
@@ -393,6 +397,7 @@ async fn router_kobo_library_sync_excludes_regular_readlist_tags_without_ondeck(
 async fn router_kobo_library_sync_uses_series_read_date_for_ondeck_last_modified() {
     let paths = new_router_fixture("router-kobo-library-sync-ondeck-last-modified").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
     seed_second_book_in_primary_series(&paths).await;
     seed_router_read_progress(&paths, true).await;
     seed_router_series_read_progress(&paths, 1, 0).await;
@@ -514,7 +519,7 @@ async fn router_kobo_library_sync_uses_request_api_key_identity_when_session_aut
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/kobo/any-token/v1/library/sync")
+                .uri("/kobo/validkobotoken/v1/library/sync")
                 .header("x-auth-token", &auth_token)
                 .header("x-api-key", "validkobotoken")
                 .body(Body::empty())
@@ -535,6 +540,7 @@ async fn router_kobo_library_sync_uses_request_api_key_identity_when_session_aut
 async fn router_kobo_library_sync_rejects_bare_base64_komga_tokens_as_invalid() {
     let paths = new_router_fixture("router-kobo-library-sync-bare-base64-komga-token").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
@@ -601,6 +607,7 @@ async fn router_kobo_library_sync_rejects_bare_base64_komga_tokens_as_invalid() 
 async fn router_kobo_library_sync_removed_book_matches_kotlin_placeholder_metadata() {
     let paths = new_router_fixture("router-kobo-library-sync-removed-book-metadata").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;

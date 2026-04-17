@@ -1,4 +1,3 @@
-use super::*;
 use super::filters::{OperatorValidationMode, parse_runtime_series_filters_with_mode};
 use super::persisted::common_helpers::decode_query_component;
 use super::persisted::delegates::{
@@ -8,8 +7,12 @@ use super::persisted::delegates::{
     runtime_owned_series_list_response, series_page_payload,
 };
 use super::persisted::models::{
-    PersistedSeriesBrowseQuery, PersistedSeriesSortMode, SeriesFilterCriteria,
+    PersistedSeriesBrowseQuery, PersistedSeriesSortMode, PersistedSeriesSummary,
+    SeriesFilterCriteria,
 };
+use super::persisted::series_queries::parse_persisted_series_sort_modes;
+use super::series_routes::author_query_to_author_match;
+use super::*;
 use komga_domain::discovery::PageEnvelope;
 
 fn optional_query_bool(query: &str, key: &str) -> Result<Option<bool>, ()> {
@@ -19,6 +22,97 @@ fn optional_query_bool(query: &str, key: &str) -> Result<Option<bool>, ()> {
         Some(_) => Err(()),
         None => Ok(None),
     }
+}
+
+fn decoded_query_values(query: &str, key: &str) -> Option<Vec<String>> {
+    let values = query_values(query, key)
+        .into_iter()
+        .map(|value| decode_query_component(value.trim()))
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+
+    (!values.is_empty()).then_some(values)
+}
+
+fn decoded_delimited_pair(query: &str, key: &str) -> Option<(String, String)> {
+    let value = query_value(query, key)?;
+    let value = decode_query_component(value);
+    if value.trim().is_empty() {
+        return None;
+    }
+
+    value
+        .rsplit_once(',')
+        .map(|(left, right)| (left.to_string(), right.to_string()))
+}
+
+#[derive(Clone, Debug, Default)]
+struct LegacyAgeRatingFilter {
+    ratings: Vec<u16>,
+    include_null: bool,
+}
+
+fn parse_legacy_age_rating_filter(values: Option<&Vec<String>>) -> Option<LegacyAgeRatingFilter> {
+    let values = values?;
+    let mut filter = LegacyAgeRatingFilter::default();
+    for value in values {
+        match value.parse::<u16>() {
+            Ok(value) => filter.ratings.push(value),
+            Err(_) => filter.include_null = true,
+        }
+    }
+
+    if filter.ratings.is_empty() && !filter.include_null {
+        None
+    } else {
+        Some(filter)
+    }
+}
+
+fn apply_legacy_age_rating_filter(
+    page: PageEnvelope<PersistedSeriesSummary>,
+    filter: &LegacyAgeRatingFilter,
+    requested_page: usize,
+    requested_size: usize,
+    unpaged: bool,
+) -> PageEnvelope<PersistedSeriesSummary> {
+    let filtered = page
+        .content
+        .into_iter()
+        .filter(|row| {
+            row.age_rating
+                .map(|rating| filter.ratings.contains(&rating))
+                .unwrap_or(filter.include_null)
+        })
+        .collect::<Vec<_>>();
+
+    let total_elements = filtered.len();
+    if unpaged {
+        return PageEnvelope::from_slice(filtered, 0, total_elements.max(1), total_elements);
+    }
+
+    let offset = requested_page.saturating_mul(requested_size);
+    let content = if offset >= total_elements {
+        vec![]
+    } else {
+        filtered
+            .into_iter()
+            .skip(offset)
+            .take(requested_size)
+            .collect::<Vec<_>>()
+    };
+
+    PageEnvelope::from_slice(content, requested_page, requested_size, total_elements)
+}
+
+fn series_page_response(
+    page: PageEnvelope<PersistedSeriesSummary>,
+    unpaged: bool,
+    sorted: bool,
+) -> Response {
+    let mut response = Json(series_page_payload(page, !unpaged, sorted)).into_response();
+    mark_runtime_owned(&mut response);
+    response
 }
 
 fn normalize_kotlin_unpaged_page_shape<T>(mut page: PageEnvelope<T>) -> PageEnvelope<T> {
@@ -33,71 +127,45 @@ fn normalize_kotlin_unpaged_page_shape<T>(mut page: PageEnvelope<T>) -> PageEnve
     page
 }
 
-fn deprecated_boolean_series_condition(kind: &str, value: bool) -> Value {
-    json!({
-        "type": kind,
-        "operator": if value { "isTrue" } else { "isFalse" },
-    })
+fn author_query_to_filter_token(value: String) -> Option<String> {
+    let encoded = author_query_to_author_match(value);
+    let object = encoded.as_object()?;
+    let name = object
+        .get("name")
+        .and_then(Value::as_str)
+        .map(|value| value.to_ascii_lowercase());
+    let role = object
+        .get("role")
+        .and_then(Value::as_str)
+        .map(|value| value.to_ascii_lowercase());
+
+    match (name, role) {
+        (Some(name), Some(role)) => Some(format!("{name}::{role}")),
+        (Some(name), None) => Some(name),
+        (None, Some(role)) => Some(format!("::{role}")),
+        (None, None) => None,
+    }
 }
 
-fn deprecated_any_of_series_conditions(kind: &str, values: Vec<String>) -> Value {
-    if values.len() == 1 {
-        return json!({
-            "type": kind,
-            "operator": "is",
-            "value": values.into_iter().next().unwrap_or_default(),
+fn parse_legacy_persisted_series_sort_modes(
+    sorts: &[String],
+    search: Option<&str>,
+    collection_ids: Option<&Vec<String>>,
+) -> Vec<PersistedSeriesSortMode> {
+    let mut sort_modes =
+        parse_persisted_series_sort_modes(sorts, if sorts.is_empty() { search } else { None });
+
+    if collection_ids.map(|ids| ids.is_empty()).unwrap_or(true) {
+        sort_modes.retain(|mode| {
+            !matches!(
+                mode,
+                PersistedSeriesSortMode::CollectionNumberAsc
+                    | PersistedSeriesSortMode::CollectionNumberDesc
+            )
         });
     }
 
-    json!({
-        "type": "AnyOfSeries",
-        "conditions": values
-            .into_iter()
-            .map(|value| json!({
-                "type": kind,
-                "operator": "is",
-                "value": value,
-            }))
-            .collect::<Vec<_>>(),
-    })
-}
-
-fn deprecated_series_query_condition(
-    library_ids: Option<Vec<String>>,
-    genres: Option<Vec<String>>,
-    tags: Option<Vec<String>>,
-    deleted: Option<bool>,
-    oneshot: Option<bool>,
-) -> Option<Value> {
-    let mut conditions = Vec::new();
-
-    if let Some(library_ids) = library_ids.filter(|values| !values.is_empty()) {
-        conditions.push(deprecated_any_of_series_conditions(
-            "LibraryId",
-            library_ids,
-        ));
-    }
-    if let Some(genres) = genres.filter(|values| !values.is_empty()) {
-        conditions.push(deprecated_any_of_series_conditions("Genre", genres));
-    }
-    if let Some(tags) = tags.filter(|values| !values.is_empty()) {
-        conditions.push(deprecated_any_of_series_conditions("Tag", tags));
-    }
-    if let Some(deleted) = deleted {
-        conditions.push(deprecated_boolean_series_condition("Deleted", deleted));
-    }
-    if let Some(oneshot) = oneshot {
-        conditions.push(deprecated_boolean_series_condition("OneShot", oneshot));
-    }
-
-    match conditions.len() {
-        0 => None,
-        1 => conditions.into_iter().next(),
-        _ => Some(json!({
-            "type": "AllOfSeries",
-            "conditions": conditions,
-        })),
-    }
+    sort_modes
 }
 
 fn empty_series_page_response(page: usize, size: usize, unpaged: bool, sorted: bool) -> Response {
@@ -142,7 +210,7 @@ async fn series_feed(
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    let page = query_value(query, "page")
+    let requested_page = query_value(query, "page")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
     let size = query_value(query, "size")
@@ -171,7 +239,7 @@ async fn series_feed(
                 ..SeriesFilterCriteria::default()
             },
             None,
-            page,
+            requested_page,
             size,
             unpaged,
             vec![sort_mode],
@@ -235,8 +303,34 @@ pub async fn series_deprecated_get(
     let library_ids =
         remap_requested_library_ids_for_persisted(database_file, requested_library_ids.as_ref())
             .await;
-    let genres = requested_query_values(query, "genre");
-    let tags = requested_query_values(query, "tag");
+    let collection_ids = decoded_query_values(query, "collection_id");
+    let metadata_status = decoded_query_values(query, "status");
+    let read_status = decoded_query_values(query, "read_status");
+    let publishers = decoded_query_values(query, "publisher");
+    let languages = decoded_query_values(query, "language");
+    let genres = decoded_query_values(query, "genre").map(|values| {
+        values
+            .into_iter()
+            .map(|value| value.to_ascii_lowercase())
+            .collect::<Vec<_>>()
+    });
+    let tags = decoded_query_values(query, "tag").map(|values| {
+        values
+            .into_iter()
+            .map(|value| value.to_ascii_lowercase())
+            .collect::<Vec<_>>()
+    });
+    let age_ratings = decoded_query_values(query, "age_rating");
+    let legacy_age_ratings = parse_legacy_age_rating_filter(age_ratings.as_ref());
+    let release_years = decoded_query_values(query, "release_year");
+    let sharing_labels = decoded_query_values(query, "sharing_label").map(|values| {
+        values
+            .into_iter()
+            .map(|value| value.to_ascii_lowercase())
+            .collect::<Vec<_>>()
+    });
+    let authors = decoded_query_values(query, "author");
+    let search_regex = decoded_delimited_pair(query, "search_regex");
     let context = match auth_state
         .resolve_query_context_with_persistence(&headers, library_ids.as_deref(), database_file)
         .await
@@ -245,7 +339,7 @@ pub async fn series_deprecated_get(
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    let page = query_value(query, "page")
+    let requested_page = query_value(query, "page")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
     let size = query_value(query, "size")
@@ -261,6 +355,10 @@ pub async fn series_deprecated_get(
         Ok(value) => value,
         Err(()) => return StatusCode::BAD_REQUEST.into_response(),
     };
+    let complete = match optional_query_bool(query, "complete") {
+        Ok(value) => value,
+        Err(()) => return StatusCode::BAD_REQUEST.into_response(),
+    };
     let search = requested_query_values(query, "search")
         .and_then(|values| values.into_iter().next())
         .filter(|value| !value.trim().is_empty());
@@ -268,41 +366,48 @@ pub async fn series_deprecated_get(
         .into_iter()
         .map(decode_query_component)
         .collect::<Vec<_>>();
-    let sorted = !sorts.is_empty() || search.is_some();
     let requested_non_empty_library_ids = requested_library_ids
         .as_ref()
         .is_some_and(|values| !values.is_empty());
     if requested_non_empty_library_ids && library_ids.is_none() {
-        return empty_series_page_response(page, size, unpaged, sorted);
-    }
-    let payload = deprecated_series_query_condition(
-        library_ids.clone(),
-        genres.clone(),
-        tags.clone(),
-        deleted,
-        oneshot,
-    )
-    .map(|condition| json!({ "condition": condition }));
-
-    if let Some(runtime_response) = runtime_owned_series_list_response(
-        &headers,
-        &uri,
-        payload.as_ref(),
-        search.clone(),
-        &auth_state,
-        database_file,
-        true,
-    )
-    .await
-    {
-        return runtime_response;
+        return empty_series_page_response(requested_page, size, unpaged, false);
     }
 
-    let sort_modes = if search.is_some() {
-        vec![PersistedSeriesSortMode::RelevanceAsc]
-    } else {
-        vec![PersistedSeriesSortMode::TitleAsc]
+    let (titles_regex, title_sorts_regex) = match search_regex.as_ref() {
+        Some((pattern, field)) if field.eq_ignore_ascii_case("title") => {
+            (Some(vec![pattern.clone()]), None)
+        }
+        Some((pattern, field)) if field.eq_ignore_ascii_case("title_sort") => {
+            (None, Some(vec![pattern.clone()]))
+        }
+        _ => (None, None),
     };
+
+    let requires_age_post_filter = legacy_age_ratings
+        .as_ref()
+        .is_some_and(|filter| filter.include_null && !filter.ratings.is_empty());
+    let age_ratings_filter = legacy_age_ratings.as_ref().and_then(|filter| {
+        if requires_age_post_filter || filter.ratings.is_empty() {
+            None
+        } else {
+            Some(filter.ratings.clone())
+        }
+    });
+    let age_ratings_null = legacy_age_ratings.as_ref().and_then(|filter| {
+        if filter.include_null && filter.ratings.is_empty() {
+            Some(true)
+        } else {
+            None
+        }
+    });
+
+    let sort_modes = parse_legacy_persisted_series_sort_modes(
+        &sorts,
+        search.as_deref(),
+        collection_ids.as_ref(),
+    );
+    let sorted = !sort_modes.is_empty();
+    let requested_unpaged = unpaged || requires_age_post_filter;
 
     match load_persisted_series_page(
         database_file,
@@ -310,22 +415,62 @@ pub async fn series_deprecated_get(
         PersistedSeriesBrowseQuery::from_filters(
             SeriesFilterCriteria {
                 library_ids,
+                collection_ids,
+                read_statuses: read_status,
+                publishers,
+                languages,
                 deleted,
                 oneshot,
+                age_ratings: age_ratings_filter,
+                age_ratings_null,
                 genres,
                 tags,
+                release_date_begins_with: release_years
+                    .as_ref()
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(|value| {
+                                value.parse::<i32>().ok().map(|year| year.to_string())
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .filter(|values| !values.is_empty()),
+                sharing_labels,
+                series_statuses: metadata_status,
+                complete,
+                authors: authors
+                    .map(|values| {
+                        values
+                            .into_iter()
+                            .filter_map(author_query_to_filter_token)
+                            .collect::<Vec<_>>()
+                    })
+                    .filter(|values| !values.is_empty()),
+                titles_regex,
+                title_sorts_regex,
                 ..SeriesFilterCriteria::default()
             },
             search.clone(),
-            page,
+            requested_page,
             size,
-            unpaged,
+            requested_unpaged,
             sort_modes,
         ),
     )
     .await
     {
-        Ok(page) => Json(series_page_payload(page, !unpaged, sorted)).into_response(),
+        Ok(page) => {
+            let page = if let Some(filter) = legacy_age_ratings
+                .as_ref()
+                .filter(|_| requires_age_post_filter)
+            {
+                apply_legacy_age_rating_filter(page, filter, requested_page, size, unpaged)
+            } else {
+                page
+            };
+            series_page_response(page, unpaged, sorted)
+        }
         Err(error) => internal_error_response(error),
     }
 }

@@ -56,11 +56,14 @@ async fn runtime_aggregate_series_metadata_refreshes_series_books_metadata_surfa
     let config = runtime_config_for_paths(&paths);
     let runtime = runtime_task_context_from_config(&config);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(TaskQueueRecord::new(
-        "AGGREGATE_SERIES_METADATA:series-1",
-        1_000,
-        Some("series-1".to_string()),
-    ));
+    scheduler.enqueue(
+        TaskQueueRecord::new(
+            "AGGREGATE_SERIES_METADATA_series-1",
+            1_000,
+            Some("series-1".to_string()),
+        )
+        .with_simple_type("AGGREGATE_SERIES_METADATA"),
+    );
     let processed = scheduler
         .process_available(&runtime)
         .expect("aggregate-series-metadata task should process for series booksMetadata fixture");
@@ -172,11 +175,14 @@ async fn runtime_aggregate_series_metadata_preserves_series_metadata_title_and_s
     let config = runtime_config_for_paths(&paths);
     let runtime = runtime_task_context_from_config(&config);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(TaskQueueRecord::new(
-        "AGGREGATE_SERIES_METADATA:series-1",
-        1_000,
-        Some("series-1".to_string()),
-    ));
+    scheduler.enqueue(
+        TaskQueueRecord::new(
+            "AGGREGATE_SERIES_METADATA_series-1",
+            1_000,
+            Some("series-1".to_string()),
+        )
+        .with_simple_type("AGGREGATE_SERIES_METADATA"),
+    );
     let processed = scheduler
         .process_available(&runtime)
         .expect("aggregate-series-metadata task should preserve series metadata title fields");

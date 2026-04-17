@@ -4,17 +4,19 @@ use serde_json::Value;
 
 pub(crate) async fn opds_v2_libraries_collections(
     headers: HeaderMap,
+    uri: Uri,
     database_file: &Path,
 ) -> Response {
-    opds_v2_collections_feed(headers, database_file, None).await
+    opds_v2_collections_feed(headers, uri, database_file, None).await
 }
 
 pub(crate) async fn opds_v2_library_collections(
     headers: HeaderMap,
+    uri: Uri,
     database_file: &Path,
     library_id: &str,
 ) -> Response {
-    opds_v2_collections_feed(headers, database_file, Some(library_id)).await
+    opds_v2_collections_feed(headers, uri, database_file, Some(library_id)).await
 }
 
 pub(crate) async fn opds_v2_collection(
@@ -157,6 +159,7 @@ pub(crate) async fn opds_v2_collection(
                     "numberOfItems": total_filtered_series,
                 },
                 "links": links,
+                "navigation": [],
             })),
         )
             .into_response();

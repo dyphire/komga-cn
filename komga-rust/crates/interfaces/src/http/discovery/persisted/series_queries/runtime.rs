@@ -51,36 +51,45 @@ pub fn parse_persisted_series_sort_modes(
     sorts: &[String],
     full_text_search: Option<&str>,
 ) -> Vec<PersistedSeriesSortMode> {
+    let has_full_text_search = full_text_search
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some();
     let mut modes = sorts
         .iter()
         .filter_map(|sort| match sort.as_str() {
-            "metadata.titleSort,asc" => Some(PersistedSeriesSortMode::TitleAsc),
-            "titleSort,asc" => Some(PersistedSeriesSortMode::TitleAsc),
+            "metadata.titleSort,asc" | "titleSort,asc" => Some(PersistedSeriesSortMode::TitleAsc),
+            "metadata.titleSort,desc" | "titleSort,desc" => {
+                Some(PersistedSeriesSortMode::TitleDesc)
+            }
+            "name,asc" => Some(PersistedSeriesSortMode::NameAsc),
+            "name,desc" => Some(PersistedSeriesSortMode::NameDesc),
+            "readDate,asc" => Some(PersistedSeriesSortMode::ReadDateAsc),
+            "readDate,desc" => Some(PersistedSeriesSortMode::ReadDateDesc),
+            "collection.number,asc" => Some(PersistedSeriesSortMode::CollectionNumberAsc),
+            "collection.number,desc" => Some(PersistedSeriesSortMode::CollectionNumberDesc),
+            "random,asc" | "random,desc" => Some(PersistedSeriesSortMode::Random),
+            "createdDate,asc" | "created,asc" => Some(PersistedSeriesSortMode::CreatedAsc),
             "createdDate,desc" | "created,desc" => Some(PersistedSeriesSortMode::CreatedDesc),
+            "lastModifiedDate,asc" | "lastModified,asc" => {
+                Some(PersistedSeriesSortMode::LastModifiedAsc)
+            }
             "lastModifiedDate,desc" | "lastModified,desc" => {
                 Some(PersistedSeriesSortMode::LastModifiedDesc)
             }
+            "booksMetadata.releaseDate,asc" => Some(PersistedSeriesSortMode::ReleaseDateAsc),
             "booksMetadata.releaseDate,desc" => Some(PersistedSeriesSortMode::ReleaseDateDesc),
+            "booksCount,asc" => Some(PersistedSeriesSortMode::BooksCountAsc),
             "booksCount,desc" => Some(PersistedSeriesSortMode::BooksCountDesc),
-            "relevance,asc" => Some(PersistedSeriesSortMode::RelevanceAsc),
-            "relevance,desc" => Some(PersistedSeriesSortMode::RelevanceDesc),
+            "relevance,asc" if has_full_text_search => Some(PersistedSeriesSortMode::RelevanceAsc),
+            "relevance,desc" if has_full_text_search => {
+                Some(PersistedSeriesSortMode::RelevanceDesc)
+            }
             _ => None,
         })
         .collect::<Vec<_>>();
     modes.dedup();
-    if modes.is_empty()
-        && full_text_search
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .is_some()
-    {
-        // Intentional divergence from Kotlin's implicit Sort.by("relevance") behavior:
-        // Kotlin's Lucene-backed default ordering depends on Lucene hit ordering, which can
-        // disagree with the actual relevance scores Rust gets from Tantivy. Reproducing that
-        // backend-specific quirk only for the implicit no-sort path would make default full-text
-        // ordering behave differently from explicit `relevance,asc`, which is harder to reason
-        // about and less internally consistent. We intentionally keep the implicit full-text path
-        // aligned with Rust's explicit ascending relevance semantics.
+    if modes.is_empty() && sorts.is_empty() && has_full_text_search {
         modes.push(PersistedSeriesSortMode::RelevanceAsc);
     }
     modes
@@ -102,6 +111,8 @@ pub async fn runtime_owned_series_list_response(
     let query = uri.query().unwrap_or_default();
     let request = runtime_list_request(query);
     let sorts = request.sorts;
+    let resolved_sort_modes =
+        parse_persisted_series_sort_modes(&sorts, full_text_search.as_deref());
     let page = request.page;
     let size = request.size;
     let unpaged = request.unpaged;
@@ -162,11 +173,7 @@ pub async fn runtime_owned_series_list_response(
                 let mut response = Json(series_page_payload(
                     page,
                     !unpaged,
-                    !sorts.is_empty()
-                        || full_text_search
-                            .as_ref()
-                            .map(|value| !value.trim().is_empty())
-                            .unwrap_or(false),
+                    !resolved_sort_modes.is_empty(),
                 ))
                 .into_response();
                 mark_runtime_owned(&mut response);

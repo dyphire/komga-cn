@@ -47,7 +47,7 @@ impl ScannerPersistenceFixture {
 }
 
 pub(super) fn scan_library_task_id(library_id: &str, deep_scan: bool) -> String {
-    format!("SCAN_LIBRARY:{library_id}:DEEP:{deep_scan}")
+    format!("SCAN_LIBRARY_{library_id}_DEEP_{deep_scan}")
 }
 
 pub(super) fn scan_library_task_payload(
@@ -103,7 +103,8 @@ pub(super) fn runtime_task_context_from_config(config: &RuntimeConfig) -> TaskRu
                 | komga_config::writer_ownership::WriterDecision::Isolated
         ),
         owns_filesystem_scan_output: matches!(
-            config.writer_decision(komga_config::writer_ownership::WriterKind::FilesystemScanOutput),
+            config
+                .writer_decision(komga_config::writer_ownership::WriterKind::FilesystemScanOutput),
             komga_config::writer_ownership::WriterDecision::Allowed
                 | komga_config::writer_ownership::WriterDecision::Isolated
         ),
@@ -254,6 +255,20 @@ pub(super) async fn load_active_series_id_for_book_url(main_db: &Path, book_url:
             .get::<String, _>("SERIES_ID");
     pool.close().await;
     series_id
+}
+
+pub(super) async fn load_active_book_id_by_url(main_db: &Path, book_url: &str) -> String {
+    let pool = connect_pool(main_db, 1)
+        .await
+        .expect("sqlite pool should open for active book id lookup");
+    let book_id = sqlx::query("SELECT ID FROM BOOK WHERE URL = ? AND DELETED_DATE IS NULL LIMIT 1")
+        .bind(book_url)
+        .fetch_one(&pool)
+        .await
+        .expect("active book row should be queryable for id lookup")
+        .get::<String, _>("ID");
+    pool.close().await;
+    book_id
 }
 
 pub(super) async fn load_series_url_by_id(main_db: &Path, series_id: &str) -> String {

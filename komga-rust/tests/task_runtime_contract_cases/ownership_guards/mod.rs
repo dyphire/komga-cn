@@ -198,11 +198,14 @@ async fn runtime_refresh_series_metadata_applies_oneshot_provider_fields() {
         ..runtime_task_context(&paths)
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(TaskQueueRecord::new(
-        "REFRESH_SERIES_METADATA:series-oneshot",
-        1_000,
-        Some("series-oneshot".to_string()),
-    ));
+    scheduler.enqueue(
+        TaskQueueRecord::new(
+            "REFRESH_SERIES_METADATA_series-oneshot",
+            1_000,
+            Some("series-oneshot".to_string()),
+        )
+        .with_simple_type("REFRESH_SERIES_METADATA"),
+    );
     scheduler
         .process_available(&runtime)
         .expect("oneshot refresh-series-metadata task should process successfully");

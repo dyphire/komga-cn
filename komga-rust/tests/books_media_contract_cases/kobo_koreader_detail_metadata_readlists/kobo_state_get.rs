@@ -6,6 +6,7 @@ use super::*;
 async fn router_kobo_state_empty_payload_omits_progress_fields_and_location() {
     let paths = new_router_fixture("router-kobo-state-empty-shape").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
@@ -50,6 +51,7 @@ async fn router_kobo_state_empty_payload_omits_progress_fields_and_location() {
 async fn router_kobo_state_existing_progress_without_locator_omits_progress_fields_and_location() {
     let paths = new_router_fixture("router-kobo-state-missing-locator").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
 
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await
@@ -117,6 +119,7 @@ async fn router_kobo_state_existing_progress_without_locator_omits_progress_fiel
 async fn router_kobo_state_existing_progress_preserves_empty_string_locator_fields() {
     let paths = new_router_fixture("router-kobo-state-empty-string-locator").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
 
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await
@@ -203,6 +206,7 @@ async fn router_kobo_state_proxies_missing_book_when_kobo_proxy_enabled() {
 
     let paths = new_router_fixture("router-kobo-state-proxy-missing-book").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
     upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
@@ -238,6 +242,7 @@ async fn router_kobo_state_proxies_missing_book_when_kobo_proxy_enabled() {
 async fn router_kobo_state_returns_not_found_for_missing_book_when_proxy_disabled() {
     let paths = new_router_fixture("router-kobo-state-missing-book-local").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;

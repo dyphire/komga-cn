@@ -14,8 +14,7 @@ use crate::tasks::cleanup_workflow::{cleanup_empty_sets_rows, empty_trash_rows};
 use crate::tasks::library_scan_profiles::load_library_scan_profiles;
 use crate::tasks::media_queries::{
     load_books_for_extension_repair, load_books_requiring_analysis,
-    load_books_with_missing_file_hash, load_library_hashing_flags,
-    load_library_maintenance_flags,
+    load_books_with_missing_file_hash, load_library_hashing_flags, load_library_maintenance_flags,
 };
 
 use super::{
@@ -426,7 +425,7 @@ mod tests {
             .into_queue_records();
 
         assert_eq!(scheduled.len(), 1);
-        assert_eq!(scheduled[0].id, "SCAN_LIBRARY:library-1:DEEP:false");
+        assert_eq!(scheduled[0].id, "SCAN_LIBRARY_library-1_DEEP_false");
         assert_eq!(scheduled[0].simple_type, "SCAN_LIBRARY");
         assert_eq!(scheduled[0].priority, 4);
 
@@ -461,7 +460,7 @@ mod tests {
             .into_queue_records();
 
         assert_eq!(scheduled.len(), 1);
-        assert_eq!(scheduled[0].id, "SCAN_LIBRARY:library-due:DEEP:false");
+        assert_eq!(scheduled[0].id, "SCAN_LIBRARY_library-due_DEEP_false");
 
         let _ = std::fs::remove_file(db_path);
     }

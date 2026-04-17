@@ -149,13 +149,8 @@ pub(crate) async fn verify_login_set_cookie_returns_session_cookie_for_header_se
 }
 
 #[tokio::test]
-async fn existing_session_when_exchanging_for_cookies_then_session_is_returned_in_cookies() {
-    verify_login_set_cookie_returns_session_cookie_for_header_session().await;
-}
-
-#[tokio::test]
-async fn router_logout_get_clears_session_cookie() {
-    let paths = new_router_fixture("router-logout-get-clears-session-cookie").await;
+async fn router_logout_post_clears_session_cookie() {
+    let paths = new_router_fixture("router-logout-post-clears-session-cookie").await;
     seed_router_contract_data(&paths).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
@@ -164,14 +159,14 @@ async fn router_logout_get_clears_session_cookie() {
     let response = app
         .oneshot(
             Request::builder()
-                .method("GET")
+                .method("POST")
                 .uri("/api/logout")
                 .header("x-auth-token", &auth_token)
                 .body(Body::empty())
-                .expect("logout get request should build"),
+                .expect("logout post request should build"),
         )
         .await
-        .expect("logout get request should complete");
+        .expect("logout post request should complete");
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
     let cookies = response

@@ -2,20 +2,14 @@ use serde_json::Value;
 
 pub(super) fn author_query_to_author_match(value: String) -> Value {
     let normalized = super::persisted::common_helpers::decode_query_component(&value);
-    let (name, role) = normalized
+    let Some((name, role)) = normalized
         .split_once(',')
         .map(|(name, role)| (name.trim(), role.trim()))
-        .unwrap_or((normalized.trim(), ""));
+    else {
+        return Value::Object(serde_json::Map::new());
+    };
 
-    let mut payload = serde_json::Map::new();
-    if !name.is_empty() {
-        payload.insert("name".to_string(), Value::String(name.to_string()));
-    }
-    if !role.is_empty() {
-        payload.insert("role".to_string(), Value::String(role.to_string()));
-    }
-
-    Value::Object(payload)
+    serde_json::json!({ "name": name, "role": role })
 }
 #[cfg(test)]
 mod tests {

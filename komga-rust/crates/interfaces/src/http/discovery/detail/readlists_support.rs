@@ -1,4 +1,5 @@
 use super::*;
+use komga_application::runtime_sse::register_runtime_sse_event;
 
 use crate::discovery_detail_access::readlists as readlists_access;
 use crate::http::helpers::normalized_date_time;
@@ -204,6 +205,16 @@ pub async fn persist_readlist_create(
     )
     .await?;
 
+    register_runtime_sse_event(
+        "ReadListAdded",
+        json!({
+            "readListId": readlist_id,
+            "bookIds": input.book_ids,
+        }),
+        false,
+        None,
+    );
+
     Ok(readlist_id)
 }
 
@@ -212,7 +223,7 @@ pub async fn persist_readlist_update(
     readlist_id: &str,
     input: &PersistedReadlistWriteInput,
 ) -> Result<bool, String> {
-    readlists_access::persist_readlist_update(
+    let updated = readlists_access::persist_readlist_update(
         database_file,
         readlist_id,
         &input.name,
@@ -220,14 +231,39 @@ pub async fn persist_readlist_update(
         input.ordered,
         &input.book_ids,
     )
-    .await
+    .await?;
+    if updated {
+        register_runtime_sse_event(
+            "ReadListChanged",
+            json!({
+                "readListId": readlist_id,
+                "bookIds": input.book_ids,
+            }),
+            false,
+            None,
+        );
+    }
+    Ok(updated)
 }
 
 pub async fn delete_persisted_readlist(
     database_file: &FsPath,
     readlist_id: &str,
 ) -> Result<bool, String> {
-    readlists_access::delete_persisted_readlist(database_file, readlist_id).await
+    let existing = load_persisted_readlist_detail(database_file, readlist_id, None).await?;
+    let deleted = readlists_access::delete_persisted_readlist(database_file, readlist_id).await?;
+    if deleted && let Some(readlist) = existing {
+        register_runtime_sse_event(
+            "ReadListDeleted",
+            json!({
+                "readListId": readlist_id,
+                "bookIds": readlist.book_ids,
+            }),
+            false,
+            None,
+        );
+    }
+    Ok(deleted)
 }
 
 pub async fn upsert_readlist_search_document(

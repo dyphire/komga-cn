@@ -227,8 +227,7 @@ pub async fn collection_thumbnail_select(
     }
 
     match select_collection_thumbnail(auth_db.database_file.as_path(), &thumbnail_id).await {
-        Ok(true) => StatusCode::ACCEPTED.into_response(),
-        Ok(false) => StatusCode::NOT_FOUND.into_response(),
+        Ok(_) => StatusCode::ACCEPTED.into_response(),
         Err(error) => internal_error_response(error),
     }
 }

@@ -141,6 +141,7 @@ fn persisted_series_summary(
     PersistedSeriesSummary {
         id: row.id,
         library_id: row.library_id,
+        name: row.name,
         title: row.title,
         title_sort: row.title_sort,
         labels: row.labels,
@@ -205,7 +206,9 @@ pub(super) fn compose_persisted_discovery_access_backend(
             |database_file, scope, authorized_library_ids| {
                 Box::pin(async move {
                     let mapped_scope = match scope {
-                        PersistedAuthorsScope::All => infrastructure_discovery_models::AuthorsScope::All,
+                        PersistedAuthorsScope::All => {
+                            infrastructure_discovery_models::AuthorsScope::All
+                        }
                         PersistedAuthorsScope::Libraries(ids) => {
                             infrastructure_discovery_models::AuthorsScope::Libraries(ids)
                         }
@@ -237,9 +240,10 @@ pub(super) fn compose_persisted_discovery_access_backend(
         ),
         load_book_poster_summaries: Arc::new(|database_file| {
             Box::pin(async move {
-                let rows =
-                    infrastructure_discovery_books::load_book_poster_summaries(database_file.as_path())
-                        .await?;
+                let rows = infrastructure_discovery_books::load_book_poster_summaries(
+                    database_file.as_path(),
+                )
+                .await?;
                 Ok(rows
                     .into_iter()
                     .map(|(book_id, values)| {
@@ -280,7 +284,8 @@ pub(super) fn compose_persisted_discovery_access_backend(
         }),
         load_persisted_book_count: Arc::new(|database_file| {
             Box::pin(async move {
-                infrastructure_discovery_books::load_persisted_book_count(database_file.as_path()).await
+                infrastructure_discovery_books::load_persisted_book_count(database_file.as_path())
+                    .await
             })
         }),
         load_persisted_genres: forward_string_facet_loader!(
@@ -309,17 +314,35 @@ pub(super) fn compose_persisted_discovery_access_backend(
         ),
         load_persisted_library_ids: Arc::new(|database_file| {
             Box::pin(async move {
-                infrastructure_discovery_library_mappings::load_persisted_library_ids(database_file.as_path()).await
+                infrastructure_discovery_library_mappings::load_persisted_library_ids(
+                    database_file.as_path(),
+                )
+                .await
             })
         }),
         load_collection_memberships: Arc::new(|database_file| {
             Box::pin(async move {
-                infrastructure_discovery_library_mappings::load_collection_memberships(database_file.as_path()).await
+                infrastructure_discovery_library_mappings::load_collection_memberships(
+                    database_file.as_path(),
+                )
+                .await
+            })
+        }),
+        load_collection_ordering: Arc::new(|database_file, collection_id| {
+            Box::pin(async move {
+                infrastructure_discovery_library_mappings::load_collection_ordering(
+                    database_file.as_path(),
+                    &collection_id,
+                )
+                .await
             })
         }),
         load_readlist_memberships: Arc::new(|database_file| {
             Box::pin(async move {
-                infrastructure_discovery_library_mappings::load_readlist_memberships(database_file.as_path()).await
+                infrastructure_discovery_library_mappings::load_readlist_memberships(
+                    database_file.as_path(),
+                )
+                .await
             })
         }),
         load_persisted_ondeck_books: Arc::new(|database_file, user_id| {
@@ -334,17 +357,20 @@ pub(super) fn compose_persisted_discovery_access_backend(
         }),
         load_persisted_duplicate_books: Arc::new(|database_file| {
             Box::pin(async move {
-                let rows = infrastructure_discovery_runtime_queries::load_persisted_duplicate_books(
-                    database_file.as_path(),
-                )
-                .await?;
+                let rows =
+                    infrastructure_discovery_runtime_queries::load_persisted_duplicate_books(
+                        database_file.as_path(),
+                    )
+                    .await?;
                 Ok(rows.into_iter().map(persisted_book_browse_entry).collect())
             })
         }),
         load_persisted_book_tags: Arc::new(|database_file, scope, authorized_library_ids| {
             Box::pin(async move {
                 let mapped_scope = scope.map(|scope| match scope {
-                    PersistedBookTagsScope::All => infrastructure_discovery_models::BookTagsScope::All,
+                    PersistedBookTagsScope::All => {
+                        infrastructure_discovery_models::BookTagsScope::All
+                    }
                     PersistedBookTagsScope::Series(series_id) => {
                         infrastructure_discovery_models::BookTagsScope::Series(series_id)
                     }
@@ -381,10 +407,21 @@ pub(super) fn compose_persisted_discovery_access_backend(
                 .await
             })
         }),
+        load_series_read_dates: Arc::new(|database_file, user_id| {
+            Box::pin(async move {
+                infrastructure_discovery_runtime_queries::load_series_read_dates(
+                    database_file.as_path(),
+                    &user_id,
+                )
+                .await
+            })
+        }),
         load_series_total_book_counts: Arc::new(|database_file| {
             Box::pin(async move {
-                infrastructure_discovery_runtime_queries::load_series_total_book_counts(database_file.as_path())
-                    .await
+                infrastructure_discovery_runtime_queries::load_series_total_book_counts(
+                    database_file.as_path(),
+                )
+                .await
             })
         }),
         load_persisted_series_summaries: Arc::new(|database_file| {
@@ -408,12 +445,16 @@ pub(super) fn compose_persisted_discovery_access_backend(
         }),
         load_persisted_series_count: Arc::new(|database_file| {
             Box::pin(async move {
-                infrastructure_discovery_series::load_persisted_series_count(database_file.as_path()).await
+                infrastructure_discovery_series::load_persisted_series_count(
+                    database_file.as_path(),
+                )
+                .await
             })
         }),
         persisted_series_exist: Arc::new(|database_file| {
             Box::pin(async move {
-                infrastructure_discovery_series::persisted_series_exist(database_file.as_path()).await
+                infrastructure_discovery_series::persisted_series_exist(database_file.as_path())
+                    .await
             })
         }),
         search_book_ids: Arc::new({

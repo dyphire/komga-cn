@@ -4,6 +4,7 @@ use super::*;
 async fn router_download_routes_do_not_get_shallow_etag_headers() {
     let paths = new_router_fixture("router-download-routes-no-shallow-etag").await;
     seed_router_contract_data(&paths).await;
+    seed_kobo_sync_api_key(&paths, "any-token", "admin-user").await;
     let books_dir = paths.config_dir.join("books");
     std::fs::create_dir_all(&books_dir)
         .expect("books directory should be created for download exclusion test");

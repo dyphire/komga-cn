@@ -8,14 +8,26 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use crate::http::identity_access::auth::{require_admin, resolved_auth_user, user_is_admin};
+#[cfg(unix)]
+use std::ffi::CString;
+#[cfg(windows)]
+use std::iter::once;
+#[cfg(windows)]
+use std::os::windows::ffi::OsStrExt;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+
+use crate::http::identity_access::auth::{
+    require_admin, resolved_request_auth_user, user_is_admin,
+};
 use crate::operational_runtime_access::metrics as operational_metrics_access;
 
 use super::super::OperationalState;
 
-const PRODUCT_GROUP: &str = "moe.huihui";
+const PRODUCT_GROUP: &str = "huihuimoe";
 const PRODUCT_ARTIFACT: &str = "komga";
 const PRODUCT_NAME: &str = "komga-rust";
+const DEFAULT_DISK_SPACE_THRESHOLD_BYTES: u64 = 10 * 1024 * 1024;
 
 pub(crate) async fn actuator_root(headers: HeaderMap) -> Response {
     if let Some(response) = require_admin(&headers) {
@@ -39,36 +51,188 @@ pub(crate) async fn actuator_health(
     headers: HeaderMap,
     Extension(state): Extension<OperationalState>,
 ) -> Response {
-    let db_ready = state.runtime.database_file.exists();
-    let tasks_ready = state.runtime.tasks_db_file.exists();
-    let status = if db_ready { "UP" } else { "DOWN" };
+    let db = db_health_component(&state);
+    let disk_space_probe_path = disk_space_probe_path(&state);
+    let disk_space = disk_space_component(&disk_space_probe_path);
+    let ping = ping_component();
+    let status = aggregate_health_status([db.is_up, disk_space.is_up, ping.is_up]);
 
-    if resolved_auth_user(&headers)
-        .as_ref()
-        .is_none_or(|user| !user_is_admin(user))
-    {
+    let request_auth_user =
+        resolved_request_auth_user(&headers, state.runtime.database_file.as_path()).await;
+    if request_auth_user.as_ref().is_none_or(|user| !user_is_admin(user)) {
         return Json(json!({ "status": status })).into_response();
     }
 
     Json(json!({
         "status": status,
         "components": {
-            "db": {
-                "status": if db_ready { "UP" } else { "DOWN" },
-                "details": {
-                    "database": "sqlite",
-                    "path": state.runtime.database_file.to_string_lossy().to_string(),
-                }
-            },
-            "tasksDb": {
-                "status": if tasks_ready { "UP" } else { "DOWN" },
-                "details": {
-                    "path": state.runtime.tasks_db_file.to_string_lossy().to_string(),
-                }
-            }
+            "db": db.payload,
+            "diskSpace": disk_space.payload,
+            "ping": ping.payload,
         }
     }))
     .into_response()
+}
+
+fn aggregate_health_status(statuses: impl IntoIterator<Item = bool>) -> &'static str {
+    component_status(aggregate_health_is_up(statuses))
+}
+
+fn aggregate_health_is_up(statuses: impl IntoIterator<Item = bool>) -> bool {
+    statuses.into_iter().all(|status| status)
+}
+
+fn component_status(is_up: bool) -> &'static str {
+    if is_up {
+        "UP"
+    } else {
+        "DOWN"
+    }
+}
+
+fn db_health_component(state: &OperationalState) -> HealthComponentPayload {
+    let sqlite_rw_ready = state.runtime.database_file.exists();
+    let sqlite_ro_ready = sqlite_rw_ready;
+    let tasks_rw_ready = state.runtime.tasks_db_file.exists();
+    let tasks_ro_ready = tasks_rw_ready;
+    let is_up = aggregate_health_is_up([
+        sqlite_rw_ready,
+        sqlite_ro_ready,
+        tasks_rw_ready,
+        tasks_ro_ready,
+    ]);
+
+    HealthComponentPayload {
+        is_up,
+        payload: json!({
+            "status": component_status(is_up),
+            "components": {
+                "sqliteDataSourceRW": sqlite_datasource_health_component(sqlite_rw_ready),
+                "sqliteDataSourceRO": sqlite_datasource_health_component(sqlite_ro_ready),
+                "tasksDataSourceRW": sqlite_datasource_health_component(tasks_rw_ready),
+                "tasksDataSourceRO": sqlite_datasource_health_component(tasks_ro_ready),
+            }
+        }),
+    }
+}
+
+fn sqlite_datasource_health_component(is_up: bool) -> Value {
+    json!({
+        "status": component_status(is_up),
+        "details": {
+            "database": "SQLite",
+            "validationQuery": "isValid()",
+        }
+    })
+}
+
+struct HealthComponentPayload {
+    is_up: bool,
+    payload: Value,
+}
+
+fn ping_component() -> HealthComponentPayload {
+    HealthComponentPayload {
+        is_up: true,
+        payload: json!({ "status": "UP" }),
+    }
+}
+
+fn disk_space_component(path: &Path) -> HealthComponentPayload {
+    match disk_space_details(path) {
+        Some(details) => {
+            let is_up = details.free >= DEFAULT_DISK_SPACE_THRESHOLD_BYTES;
+            HealthComponentPayload {
+                is_up,
+                payload: json!({
+                    "status": component_status(is_up),
+                    "details": {
+                        "total": details.total,
+                        "free": details.free,
+                        "threshold": DEFAULT_DISK_SPACE_THRESHOLD_BYTES,
+                        "path": details.path,
+                    }
+                }),
+            }
+        }
+        None => HealthComponentPayload {
+            is_up: false,
+            payload: json!({
+                "status": "DOWN",
+                "details": {
+                    "threshold": DEFAULT_DISK_SPACE_THRESHOLD_BYTES,
+                    "path": path.to_string_lossy().to_string(),
+                }
+            }),
+        },
+    }
+}
+
+fn disk_space_probe_path(state: &OperationalState) -> std::path::PathBuf {
+    std::env::current_dir()
+        .ok()
+        .or_else(|| state.runtime.config_dir.clone())
+        .or_else(|| state.runtime.database_file.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| Path::new(".").to_path_buf())
+}
+
+struct DiskSpaceDetails {
+    total: u64,
+    free: u64,
+    path: String,
+}
+
+#[cfg(unix)]
+fn disk_space_details(path: &Path) -> Option<DiskSpaceDetails> {
+    let path_cstr = CString::new(path.as_os_str().as_encoded_bytes()).ok()?;
+    let mut stats = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    let result = unsafe { libc::statvfs(path_cstr.as_ptr(), stats.as_mut_ptr()) };
+    if result != 0 {
+        return None;
+    }
+    let stats = unsafe { stats.assume_init() };
+    let fragment_size = u64::try_from(stats.f_frsize).ok()?;
+    Some(DiskSpaceDetails {
+        total: u64::try_from(stats.f_blocks)
+            .ok()?
+            .saturating_mul(fragment_size),
+        free: u64::try_from(stats.f_bavail)
+            .ok()?
+            .saturating_mul(fragment_size),
+        path: path.to_string_lossy().to_string(),
+    })
+}
+
+#[cfg(windows)]
+fn disk_space_details(path: &Path) -> Option<DiskSpaceDetails> {
+    let wide_path = path.as_os_str().encode_wide().chain(once(0)).collect::<Vec<u16>>();
+    let mut total = 0_u64;
+    let mut free = 0_u64;
+    let result = unsafe {
+        GetDiskFreeSpaceExW(
+            wide_path.as_ptr(),
+            std::ptr::null_mut(),
+            &mut total,
+            &mut free,
+        )
+    };
+    if result == 0 {
+        return None;
+    }
+    Some(DiskSpaceDetails {
+        total,
+        free,
+        path: path.to_string_lossy().to_string(),
+    })
+}
+
+#[cfg(not(any(unix, windows)))]
+fn disk_space_details(path: &Path) -> Option<DiskSpaceDetails> {
+    Some(DiskSpaceDetails {
+        total: 0,
+        free: DEFAULT_DISK_SPACE_THRESHOLD_BYTES,
+        path: path.to_string_lossy().to_string(),
+    })
 }
 
 pub(crate) async fn actuator_info(

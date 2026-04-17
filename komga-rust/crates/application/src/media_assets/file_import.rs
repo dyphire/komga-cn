@@ -1,16 +1,17 @@
-use std::collections::VecDeque;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
+use crate::runtime_sse::{
+    current_runtime_sse_event_cursor, pending_runtime_sse_events, register_runtime_sse_event,
+};
 use crate::task_processing::TaskQueueRecord;
 
 static GENERATED_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
-const MAX_RUNTIME_BOOK_IMPORT_EVENTS: usize = 256;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RuntimeBookImportEvent {
@@ -20,14 +21,6 @@ pub struct RuntimeBookImportEvent {
     pub success: bool,
     pub message: Option<String>,
 }
-
-#[derive(Default)]
-struct RuntimeBookImportEventState {
-    last_event_id: u64,
-    events: VecDeque<RuntimeBookImportEvent>,
-}
-
-static RUNTIME_BOOK_IMPORT_EVENTS: OnceLock<Mutex<RuntimeBookImportEventState>> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -111,8 +104,11 @@ where
                 })
                 .map_err(|error| format!("serialize books import payload: {error}"))?;
 
-                Ok(TaskQueueRecord::new(next_task_id(), 100, Some(group_id))
-                    .with_payload(task_payload))
+                Ok(
+                    TaskQueueRecord::new(next_task_id(), 100, Some(group_id))
+                        .with_simple_type("IMPORT_BOOK")
+                        .with_payload(task_payload),
+                )
             })
             .collect()
     }
@@ -149,16 +145,6 @@ where
         Ok(follow_up_tasks)
     }
 
-    pub async fn process_queued_books_payload(
-        &self,
-        task_payload: &str,
-        import_priority: i32,
-    ) -> Result<Vec<TaskQueueRecord>, String> {
-        let payload = serde_json::from_str::<BooksImportPayload>(task_payload)
-            .map_err(|error| format!("parse queued import payload: {error}"))?;
-        self.process_books_payload(payload, import_priority).await
-    }
-
     pub async fn process_queued_book_payload(
         &self,
         task_payload: &str,
@@ -182,10 +168,11 @@ fn import_follow_up_analyze_task(
     series_id: &str,
 ) -> TaskQueueRecord {
     TaskQueueRecord::new(
-        format!("ANALYZE_BOOK:{book_id}"),
+        format!("ANALYZE_BOOK_{book_id}"),
         import_priority.saturating_add(1),
         Some(series_id.to_string()),
     )
+    .with_simple_type("ANALYZE_BOOK")
 }
 
 fn import_follow_up_metadata_task(book_id: &str, series_id: &str) -> TaskQueueRecord {
@@ -232,15 +219,8 @@ pub fn generate_prefixed_id(prefix: &str) -> String {
     format!("{prefix}-{timestamp:032x}{counter:016x}")
 }
 
-fn runtime_book_import_events() -> &'static Mutex<RuntimeBookImportEventState> {
-    RUNTIME_BOOK_IMPORT_EVENTS.get_or_init(|| Mutex::new(RuntimeBookImportEventState::default()))
-}
-
 pub fn current_runtime_book_import_event_cursor() -> u64 {
-    runtime_book_import_events()
-        .lock()
-        .expect("runtime book import event state lock should not be poisoned")
-        .last_event_id
+    current_runtime_sse_event_cursor()
 }
 
 pub fn register_runtime_book_import_event(
@@ -249,39 +229,54 @@ pub fn register_runtime_book_import_event(
     success: bool,
     message: Option<String>,
 ) {
-    let mut state = runtime_book_import_events()
-        .lock()
-        .expect("runtime book import event state lock should not be poisoned");
-    state.last_event_id += 1;
-    let event_id = state.last_event_id;
-    state.events.push_back(RuntimeBookImportEvent {
-        id: event_id,
-        book_id,
-        source_file: source_file.into(),
-        success,
-        message,
-    });
-
-    while state.events.len() > MAX_RUNTIME_BOOK_IMPORT_EVENTS {
-        state.events.pop_front();
-    }
+    register_runtime_sse_event(
+        "BookImported",
+        json!({
+            "bookId": book_id,
+            "sourceFile": source_file.into(),
+            "success": success,
+            "message": message,
+        }),
+        true,
+        None,
+    );
 }
 
 pub fn pending_runtime_book_import_events(
     last_seen_event_id: u64,
 ) -> (u64, Vec<RuntimeBookImportEvent>) {
-    let state = runtime_book_import_events()
-        .lock()
-        .expect("runtime book import event state lock should not be poisoned");
-    let current_cursor = state.last_event_id;
-    let events = state
-        .events
+    let (current_cursor, events) = pending_runtime_sse_events(last_seen_event_id, "", true);
+    let mapped = events
         .iter()
-        .filter(|event| event.id > last_seen_event_id)
-        .cloned()
+        .filter(|event| event.name == "BookImported")
+        .filter_map(|event| {
+            Some(RuntimeBookImportEvent {
+                id: event.id,
+                book_id: event.payload.get("bookId").and_then(|value| {
+                    (!value.is_null())
+                        .then(|| value.as_str().map(str::to_string))
+                        .flatten()
+                }),
+                source_file: event
+                    .payload
+                    .get("sourceFile")
+                    .and_then(|value| value.as_str())?
+                    .to_string(),
+                success: event
+                    .payload
+                    .get("success")
+                    .and_then(|value| value.as_bool())?,
+                message: event
+                    .payload
+                    .get("message")
+                    .and_then(|value| (!value.is_null()).then(|| value.as_str()))
+                    .flatten()
+                    .map(str::to_string),
+            })
+        })
         .collect::<Vec<_>>();
 
-    (current_cursor, events)
+    (current_cursor, mapped)
 }
 
 #[cfg(test)]
@@ -356,7 +351,7 @@ mod tests {
             "analyze and artwork refresh should both be queued"
         );
         assert!(tasks.iter().any(|task| {
-            task.id == "ANALYZE_BOOK:book-1"
+            task.id == "ANALYZE_BOOK_book-1"
                 && task.group == Some("series-1".to_string())
                 && task.simple_type == "ANALYZE_BOOK"
                 && task.priority == 101
@@ -399,7 +394,7 @@ mod tests {
         .expect("kotlin-style import payload should parse successfully");
 
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].id, "ANALYZE_BOOK:book-1");
+        assert_eq!(tasks[0].id, "ANALYZE_BOOK_book-1");
         assert_eq!(tasks[0].simple_type, "ANALYZE_BOOK");
         assert_eq!(tasks[0].priority, 101);
         assert_eq!(tasks[0].group.as_deref(), Some("series-1"));

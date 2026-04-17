@@ -152,21 +152,32 @@ async fn router_books_import_enqueues_individual_tasks_in_tasks_db() {
         &paths,
         "SELECT GROUP_ID, PAYLOAD \
          FROM TASK \
-         WHERE SIMPLE_TYPE = 'ImportBook' \
-         ORDER BY ID DESC \
-         LIMIT 2",
+         WHERE SIMPLE_TYPE = 'ImportBook'",
         "import task payload-shape rows should be queryable",
     )
     .await;
 
-    assert_eq!(rows.len(), 2);
+    let mut parsed_rows = rows
+        .iter()
+        .map(|row| {
+            let payload = serde_json::from_str::<Value>(&row.get::<String, _>("PAYLOAD"))
+                .expect("import payload should be valid JSON");
+            let source_file = payload
+                .get("sourceFile")
+                .and_then(Value::as_str)
+                .expect("import payload should expose sourceFile")
+                .to_string();
+            (row, payload, source_file)
+        })
+        .filter(|(_, payload, _)| payload.get("copyMode").and_then(Value::as_str) == Some("HARDLINK"))
+        .collect::<Vec<_>>();
+    assert_eq!(parsed_rows.len(), 2);
+    parsed_rows.sort_by(|(_, _, left_source), (_, _, right_source)| left_source.cmp(right_source));
 
-    for (row, expected_group, expected_destination, expected_upgrade) in [
-        (&rows[1], "series-1", Some("dest-a"), Some("book-1")),
-        (&rows[0], "series-2", Some("dest-b"), None),
+    for ((row, payload, _), expected_group, expected_destination, expected_upgrade) in [
+        (&parsed_rows[0], "series-1", Some("dest-a"), Some("book-1")),
+        (&parsed_rows[1], "series-2", Some("dest-b"), None),
     ] {
-        let payload = serde_json::from_str::<Value>(&row.get::<String, _>("PAYLOAD"))
-            .expect("import payload should be valid JSON");
         assert_eq!(
             row.get::<Option<String>, _>("GROUP_ID"),
             Some(expected_group.to_string())
@@ -189,6 +200,113 @@ async fn router_books_import_enqueues_individual_tasks_in_tasks_db() {
         );
         assert!(payload.get("sourceFile").is_some());
     }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_books_import_accepts_missing_books_like_kotlin() {
+    let paths = new_router_fixture("router-books-import-missing-books").await;
+    seed_router_contract_data(&paths).await;
+
+    enqueue_books_import(
+        &paths,
+        json!({
+            "copyMode": "COPY"
+        }),
+        "books/import request without books should complete",
+    )
+    .await;
+
+    let rows = load_import_task_rows(
+        &paths,
+        "SELECT ID FROM TASK WHERE SIMPLE_TYPE = 'ImportBook'",
+        "import task rows should be queryable after missing-books request",
+    )
+    .await;
+
+    assert!(rows.is_empty());
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_books_import_reuses_kotlin_style_unique_id_for_duplicate_series_and_source() {
+    let paths = new_router_fixture("router-books-import-deterministic-unique-id").await;
+    seed_router_contract_data(&paths).await;
+    let app = build_router_without_runtime_workers_for_contract(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let source = paths.config_dir.join("incoming-dedup.cbz");
+    std::fs::write(&source, b"import-dedup-fixture").expect("dedup source should be writable");
+    let expected_id = format!("IMPORT_BOOK_series-1_{}", source.to_string_lossy());
+
+    for (context, payload) in [
+        (
+            "books/import first deterministic-id request should complete",
+            json!({
+                "copyMode": "COPY",
+                "books": [
+                    {
+                        "sourceFile": source.to_string_lossy(),
+                        "seriesId": "series-1"
+                    }
+                ]
+            }),
+        ),
+        (
+            "books/import second deterministic-id request should complete",
+            json!({
+                "copyMode": "HARDLINK",
+                "books": [
+                    {
+                        "sourceFile": source.to_string_lossy(),
+                        "seriesId": "series-1",
+                        "destinationName": "dedup-destination",
+                        "upgradeBookId": "book-1"
+                    }
+                ]
+            }),
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/books/import")
+                    .header("x-auth-token", &auth_token)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(payload.to_string()))
+                    .expect("deterministic books/import request should build"),
+            )
+            .await
+            .expect(context);
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+    }
+
+    let rows = load_import_task_rows(
+        &paths,
+        "SELECT ID, PAYLOAD \
+         FROM TASK \
+         WHERE SIMPLE_TYPE = 'ImportBook'",
+        "deterministic import task rows should be queryable",
+    )
+    .await;
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].get::<String, _>("ID"), expected_id);
+
+    let payload = serde_json::from_str::<Value>(&rows[0].get::<String, _>("PAYLOAD"))
+        .expect("deterministic import payload should be valid JSON");
+    assert_eq!(payload.get("uniqueId").and_then(Value::as_str), Some(expected_id.as_str()));
+    assert_eq!(payload.get("copyMode").and_then(Value::as_str), Some("HARDLINK"));
+    assert_eq!(
+        payload.get("destinationName").and_then(Value::as_str),
+        Some("dedup-destination")
+    );
+    assert_eq!(payload.get("upgradeBookId").and_then(Value::as_str), Some("book-1"));
 
     cleanup_router_fixture(paths);
 }
@@ -272,7 +390,7 @@ async fn router_books_import_runtime_follow_up_enqueues_analyze_book_instead_of_
         "import runtime follow-up must not fall back to library scan tasks",
     );
     assert!(
-        follow_up_tasks[0].id.starts_with("ANALYZE_BOOK:"),
+        follow_up_tasks[0].id.starts_with("ANALYZE_BOOK_"),
         "import runtime follow-up should enqueue analyze-book task ids",
     );
     assert_eq!(follow_up_tasks[0].simple_type, "ANALYZE_BOOK");

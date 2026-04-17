@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 use std::path::Path;
 
+use komga_application::runtime_sse::register_runtime_sse_event;
+use serde_json::json;
 use sqlx::Row;
 
 use super::run_database_query;
@@ -8,8 +10,9 @@ use super::run_database_query;
 pub fn aggregate_series_metadata(database_file: &Path, series_id: &str) -> Result<(), String> {
     let database_file = database_file.to_path_buf();
     let series_id = series_id.to_string();
+    let series_id_for_events = series_id.clone();
 
-    run_database_query(database_file, move |pool| {
+    let library_id = run_database_query(database_file, move |pool| {
         let series_id = series_id.clone();
         Box::pin(async move {
             let mut tx = pool.begin().await.map_err(|error| {
@@ -34,7 +37,7 @@ pub fn aggregate_series_metadata(database_file: &Path, series_id: &str) -> Resul
             })?;
 
             let Some(row) = row else {
-                return Ok(());
+                return Ok(None);
             };
 
             let _series_id = row.get::<String, _>("ID");
@@ -150,9 +153,38 @@ pub fn aggregate_series_metadata(database_file: &Path, series_id: &str) -> Resul
                 )
             })?;
 
-            Ok(())
+            sqlx::query(
+                r#"
+                SELECT LIBRARY_ID
+                FROM SERIES
+                WHERE ID = ?
+                LIMIT 1
+                "#,
+            )
+            .bind(&series_id)
+            .fetch_optional(&pool)
+            .await
+            .map_err(|error| {
+                format!(
+                    "failed to resolve LIBRARY_ID after series aggregation '{series_id}': {error}"
+                )
+            })
+            .map(|row| row.and_then(|row| row.get::<Option<String>, _>("LIBRARY_ID")))
         })
-    })
+    })?;
+
+    if let Some(library_id) = library_id.as_deref() {
+        register_runtime_sse_event(
+            "SeriesChanged",
+            json!({
+                "seriesId": series_id_for_events,
+                "libraryId": library_id,
+            }),
+            false,
+            None,
+        );
+    }
+    Ok(())
 }
 
 #[derive(Default)]

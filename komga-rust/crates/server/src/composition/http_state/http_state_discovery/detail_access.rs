@@ -493,7 +493,7 @@ pub(super) fn compose_discovery_detail_access_backends() -> DiscoveryDetailAcces
                     infrastructure_discovery_runtime_queries::load_series_total_book_counts(
                         database_file.as_path(),
                     )
-                        .await
+                    .await
                 })
             }),
             load_series_read_progress_counts: Arc::new(|database_file, user_id| {

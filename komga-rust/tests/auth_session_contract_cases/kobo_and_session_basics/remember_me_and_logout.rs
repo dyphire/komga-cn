@@ -168,11 +168,6 @@ pub(crate) async fn verify_remember_me_reauthenticates_after_session_expiry() {
     cleanup_router_fixture(paths);
 }
 
-#[tokio::test]
-async fn remember_me_reauthenticates_after_session_expiry() {
-    verify_remember_me_reauthenticates_after_session_expiry().await;
-}
-
 pub(crate) async fn verify_remember_me_auto_login_records_remember_me_source() {
     let _guard = lock_remember_me_contract().await;
 
@@ -228,11 +223,6 @@ pub(crate) async fn verify_remember_me_auto_login_records_remember_me_source() {
 }
 
 #[tokio::test]
-async fn remember_me_auto_login_records_remember_me_source() {
-    verify_remember_me_auto_login_records_remember_me_source().await;
-}
-
-#[tokio::test]
 async fn logout_clears_session_and_remember_me_replay() {
     let _guard = lock_remember_me_contract().await;
     let paths = new_router_fixture("router-logout-clears-session-and-remember-me-replay").await;
@@ -257,7 +247,7 @@ async fn logout_clears_session_and_remember_me_replay() {
         .clone()
         .oneshot(
             Request::builder()
-                .method("GET")
+                .method("POST")
                 .uri("/api/logout")
                 .header(
                     header::COOKIE,

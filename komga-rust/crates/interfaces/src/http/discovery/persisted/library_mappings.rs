@@ -63,6 +63,13 @@ pub async fn load_collection_memberships(
     persisted_backend_load_collection_memberships(database_file).await
 }
 
+pub async fn load_collection_ordering(
+    database_file: &FsPath,
+    collection_id: &str,
+) -> Result<HashMap<String, i64>, String> {
+    persisted_backend_load_collection_ordering(database_file, collection_id).await
+}
+
 pub async fn load_readlist_memberships(
     database_file: &FsPath,
 ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {

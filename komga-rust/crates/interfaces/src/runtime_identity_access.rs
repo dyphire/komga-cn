@@ -81,6 +81,7 @@ pub struct UpdateAuthUserResult {
 pub struct KoreaderBookTarget {
     pub id: String,
     pub page_count: u64,
+    pub media_type: String,
 }
 
 #[derive(Clone)]
@@ -136,6 +137,9 @@ pub struct RuntimeIdentityAccessBackend {
     pub invalidate_user_sessions_with_runtime_key: Arc<dyn Fn(String, String) + Send + Sync>,
     pub invalidate_session_token: Arc<dyn Fn(String) + Send + Sync>,
     pub invalidate_remember_me_token: Arc<dyn Fn(String) + Send + Sync>,
+    pub store_oauth2_authorization_state: Arc<dyn Fn(String, String, String, String) + Send + Sync>,
+    pub take_oauth2_authorization_state:
+        Arc<dyn Fn(String, String, String) -> Option<String> + Send + Sync>,
     pub persisted_basic_user:
         Arc<dyn Fn(HeaderMap, PathBuf) -> BoxFuture<Option<AuthOutcome>> + Send + Sync>,
     pub persisted_api_key_user:
@@ -164,6 +168,16 @@ pub struct RuntimeIdentityAccessBackend {
         Arc<dyn Fn(PathBuf) -> BoxFuture<Option<u64>> + Send + Sync>,
     pub persisted_latest_authentication_activity_by_user_and_api_key: Arc<
         dyn Fn(PathBuf, String, String) -> BoxFuture<Option<PersistedAuthenticationActivity>>
+            + Send
+            + Sync,
+    >,
+    pub persisted_record_failed_authentication_activity: Arc<
+        dyn Fn(
+                PathBuf,
+                Option<String>,
+                AuthenticationActivityWriteInput,
+                String,
+            ) -> BoxFuture<Option<()>>
             + Send
             + Sync,
     >,
@@ -306,6 +320,7 @@ fn backend() -> &'static RuntimeIdentityAccessBackend {
 struct RuntimeIdentityAccessTestState {
     session_users: HashMap<String, AuthUser>,
     remember_me_users: HashMap<String, AuthUser>,
+    oauth2_authorization_states: HashMap<(String, String, String), String>,
     koreader_book_targets:
         HashMap<(PathBuf, String), Result<Option<KoreaderBookTarget>, KoreaderBookLookupError>>,
 }
@@ -358,6 +373,22 @@ fn default_test_backend() -> RuntimeIdentityAccessBackend {
         invalidate_user_sessions_with_runtime_key: Arc::new(|_, _| {}),
         invalidate_session_token: Arc::new(|_| {}),
         invalidate_remember_me_token: Arc::new(|_| {}),
+        store_oauth2_authorization_state: Arc::new(
+            |runtime_key, session_token, registration_id, state| {
+                test_state()
+                    .lock()
+                    .expect("runtime identity access test state lock should not be poisoned")
+                    .oauth2_authorization_states
+                    .insert((runtime_key, session_token, registration_id), state);
+            },
+        ),
+        take_oauth2_authorization_state: Arc::new(|runtime_key, session_token, registration_id| {
+            test_state()
+                .lock()
+                .expect("runtime identity access test state lock should not be poisoned")
+                .oauth2_authorization_states
+                .remove(&(runtime_key, session_token, registration_id))
+        }),
         persisted_basic_user: Arc::new(|_, _| Box::pin(async { Some(AuthOutcome::Missing) })),
         persisted_api_key_user: Arc::new(|_, _| Box::pin(async { Some(AuthOutcome::Missing) })),
         persisted_api_key_user_by_token: Arc::new(|_, _| Box::pin(async { None })),
@@ -372,6 +403,9 @@ fn default_test_backend() -> RuntimeIdentityAccessBackend {
         persisted_cleanup_authentication_activity: Arc::new(|_| Box::pin(async { Some(0) })),
         persisted_latest_authentication_activity_by_user_and_api_key: Arc::new(|_, _, _| {
             Box::pin(async { None })
+        }),
+        persisted_record_failed_authentication_activity: Arc::new(|_, _, _, _| {
+            Box::pin(async { Some(()) })
         }),
         persisted_record_successful_authentication_activity: Arc::new(|_, _, _| {
             Box::pin(async { Some(()) })
@@ -496,6 +530,32 @@ pub fn invalidate_remember_me_token(token: &str) {
     (backend().invalidate_remember_me_token)(token.to_string())
 }
 
+pub fn store_oauth2_authorization_state(
+    runtime_key: &str,
+    session_token: &str,
+    registration_id: &str,
+    state: &str,
+) {
+    (backend().store_oauth2_authorization_state)(
+        runtime_key.to_string(),
+        session_token.to_string(),
+        registration_id.to_string(),
+        state.to_string(),
+    )
+}
+
+pub fn take_oauth2_authorization_state(
+    runtime_key: &str,
+    session_token: &str,
+    registration_id: &str,
+) -> Option<String> {
+    (backend().take_oauth2_authorization_state)(
+        runtime_key.to_string(),
+        session_token.to_string(),
+        registration_id.to_string(),
+    )
+}
+
 pub async fn persisted_basic_user(
     headers: &HeaderMap,
     database_file: &Path,
@@ -612,6 +672,21 @@ pub async fn persisted_latest_authentication_activity_by_user_and_api_key(
         database_file.to_path_buf(),
         user_id.to_string(),
         api_key_id.to_string(),
+    )
+    .await
+}
+
+pub async fn persisted_record_failed_authentication_activity(
+    database_file: &Path,
+    email: Option<&str>,
+    input: AuthenticationActivityWriteInput,
+    error: &str,
+) -> Option<()> {
+    (backend().persisted_record_failed_authentication_activity)(
+        database_file.to_path_buf(),
+        email.map(ToString::to_string),
+        input,
+        error.to_string(),
     )
     .await
 }

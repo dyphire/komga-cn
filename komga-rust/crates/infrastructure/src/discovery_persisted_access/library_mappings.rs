@@ -53,6 +53,35 @@ pub async fn load_collection_memberships(
     Ok(memberships)
 }
 
+pub async fn load_collection_ordering(
+    database_file: &FsPath,
+    collection_id: &str,
+) -> Result<HashMap<String, i64>, String> {
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("open collection ordering db: {error}"))?;
+
+    let rows = sqlx::query(
+        r#"SELECT SERIES_ID, NUMBER
+         FROM COLLECTION_SERIES
+         WHERE COLLECTION_ID = ?"#,
+    )
+    .bind(collection_id)
+    .fetch_all(&pool)
+    .await
+    .map_err(|error| format!("query collection ordering: {error}"))?;
+
+    let mut ordering = HashMap::new();
+    for row in rows {
+        ordering.insert(
+            row.get::<String, _>("SERIES_ID"),
+            row.get::<i64, _>("NUMBER"),
+        );
+    }
+
+    Ok(ordering)
+}
+
 pub async fn load_readlist_memberships(
     database_file: &FsPath,
 ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {

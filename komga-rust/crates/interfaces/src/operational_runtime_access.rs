@@ -41,90 +41,6 @@ impl ServerSettingsStore {
     }
 }
 
-#[derive(Clone, Default)]
-pub struct SseSnapshot {
-    pub libraries: HashMap<String, LibrarySnapshot>,
-    pub series: HashMap<String, SeriesSnapshot>,
-    pub books: HashMap<String, BookSnapshot>,
-    pub readlists: HashMap<String, ReadListSnapshot>,
-    pub collections: HashMap<String, CollectionSnapshot>,
-    pub book_imports: Vec<BookImportSnapshot>,
-    pub thumbnails_book: HashMap<String, ThumbnailBookSnapshot>,
-    pub thumbnails_series: HashMap<String, ThumbnailSnapshot>,
-    pub thumbnails_collection: HashMap<String, ThumbnailCollectionSnapshot>,
-    pub thumbnails_readlist: HashMap<String, ThumbnailReadListSnapshot>,
-    pub read_progress: HashMap<String, String>,
-    pub read_progress_series: HashMap<String, String>,
-}
-
-#[derive(Clone, Eq, PartialEq)]
-pub struct LibrarySnapshot {
-    pub last_modified: String,
-}
-
-#[derive(Clone, Eq, PartialEq)]
-pub struct SeriesSnapshot {
-    pub library_id: String,
-    pub last_modified: String,
-}
-
-#[derive(Clone, Eq, PartialEq)]
-pub struct BookSnapshot {
-    pub series_id: String,
-    pub library_id: String,
-    pub last_modified: String,
-}
-
-#[derive(Clone, Eq, PartialEq)]
-pub struct ReadListSnapshot {
-    pub book_ids: Vec<String>,
-    pub last_modified: String,
-}
-
-#[derive(Clone, Eq, PartialEq)]
-pub struct CollectionSnapshot {
-    pub series_ids: Vec<String>,
-    pub last_modified: String,
-}
-
-#[derive(Clone, Eq, PartialEq)]
-pub struct BookImportSnapshot {
-    pub event_id: String,
-    pub book_id: Option<String>,
-    pub source_file: String,
-    pub success: bool,
-    pub message: Option<String>,
-    pub timestamp: String,
-}
-
-#[derive(Clone, Eq, PartialEq)]
-pub struct ThumbnailBookSnapshot {
-    pub book_id: String,
-    pub series_id: String,
-    pub selected: bool,
-    pub last_modified: String,
-}
-
-#[derive(Clone, Eq, PartialEq)]
-pub struct ThumbnailSnapshot {
-    pub selected: bool,
-    pub last_modified: String,
-}
-
-#[derive(Clone, Eq, PartialEq)]
-pub struct ThumbnailReadListSnapshot {
-    pub readlist_id: String,
-    pub selected: bool,
-    pub last_modified: String,
-}
-
-#[derive(Clone, Eq, PartialEq)]
-pub struct ThumbnailCollectionSnapshot {
-    pub collection_id: String,
-    pub selected: bool,
-    pub last_modified: String,
-}
-
 #[derive(Clone)]
 pub struct OperationalRuntimeAccessBackend {
     pub load_task_execution_values:
@@ -143,7 +59,6 @@ pub struct OperationalRuntimeAccessBackend {
     pub load_readlists_count: Arc<dyn Fn(PathBuf) -> BoxFuture<Result<f64, String>> + Send + Sync>,
     pub load_task_failure_count:
         Arc<dyn Fn(PathBuf) -> BoxFuture<Result<f64, String>> + Send + Sync>,
-    pub load_sse_snapshot: Arc<dyn Fn(PathBuf, String) -> BoxFuture<SseSnapshot> + Send + Sync>,
 }
 
 static BACKEND: OnceLock<OperationalRuntimeAccessBackend> = OnceLock::new();
@@ -206,18 +121,4 @@ pub(crate) mod metrics {
     pub(crate) async fn load_task_failure_count(database_file: &Path) -> Result<f64, String> {
         (backend().load_task_failure_count)(database_file.to_path_buf()).await
     }
-}
-
-pub(crate) mod sse_snapshot {
-    pub(crate) use super::{
-        BookSnapshot, CollectionSnapshot, LibrarySnapshot, ReadListSnapshot, SeriesSnapshot,
-        SseSnapshot, ThumbnailBookSnapshot, ThumbnailCollectionSnapshot, ThumbnailReadListSnapshot,
-        ThumbnailSnapshot,
-    };
-
-    pub(crate) async fn load_sse_snapshot(database_file: &Path, user_id: &str) -> SseSnapshot {
-        (super::backend().load_sse_snapshot)(database_file.to_path_buf(), user_id.to_string()).await
-    }
-
-    use std::path::Path;
 }

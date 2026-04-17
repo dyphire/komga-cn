@@ -10,9 +10,10 @@ pub use read_progress::{
     readlist_tachiyomi_counters,
 };
 pub use refresh::{
-    RefreshBookMetadataOutcome, aggregate_series_metadata, generate_book_thumbnail,
-    refresh_book_local_artwork, refresh_book_metadata, refresh_series_local_artwork,
-    refresh_series_metadata,
+    RefreshBookMetadataOutcome, TransientMetadataProviderInference, aggregate_series_metadata,
+    generate_book_thumbnail, infer_transient_comicinfo_provider_metadata,
+    infer_transient_epub_provider_metadata, refresh_book_local_artwork, refresh_book_metadata,
+    refresh_series_local_artwork, refresh_series_metadata,
 };
 pub use thumbnails::{
     delete_book_thumbnail, delete_collection_thumbnail, delete_readlist_thumbnail,

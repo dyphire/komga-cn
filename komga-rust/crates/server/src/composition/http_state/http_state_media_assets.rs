@@ -21,21 +21,6 @@ impl RuntimeMediaImportService for ComposedMediaImportService {
         self.inner.enqueue_books(payload, next_task_id)
     }
 
-    fn process_queued_books_payload<'a>(
-        &'a self,
-        task_payload: &'a str,
-        import_priority: i32,
-    ) -> futures_util::future::BoxFuture<
-        'a,
-        Result<Vec<komga_application::task_processing::TaskQueueRecord>, String>,
-    > {
-        Box::pin(async move {
-            self.inner
-                .process_queued_books_payload(task_payload, import_priority)
-                .await
-        })
-    }
-
     fn process_queued_book_payload<'a>(
         &'a self,
         task_payload: &'a str,
@@ -125,9 +110,7 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
                 .ok()
                 .and_then(|meta| i64::try_from(meta.len()).ok())
         }),
-        load_epub_cover_bytes: Arc::new(|media| {
-            infrastructure_epub::load_epub_cover_bytes(&media)
-        }),
+        load_epub_cover_bytes: Arc::new(|media| infrastructure_epub::load_epub_cover_bytes(&media)),
         load_persisted_book_media: Arc::new(|database_file, book_id| {
             Box::pin(async move {
                 infrastructure_media_queries::load_persisted_book_media(
@@ -232,8 +215,11 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
         }),
         load_series_book_ids: Arc::new(|database_file, series_id| {
             Box::pin(async move {
-                infrastructure_media_queries::load_series_book_ids(database_file.as_path(), &series_id)
-                    .await
+                infrastructure_media_queries::load_series_book_ids(
+                    database_file.as_path(),
+                    &series_id,
+                )
+                .await
             })
         }),
         refresh_series_read_progress_row: Arc::new(|database_file, series_id, user_id| {
@@ -549,8 +535,11 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
         }),
         load_book_restrictions: Arc::new(|database_file, book_id| {
             Box::pin(async move {
-                infrastructure_media_queries::load_book_restrictions(database_file.as_path(), &book_id)
-                    .await
+                infrastructure_media_queries::load_book_restrictions(
+                    database_file.as_path(),
+                    &book_id,
+                )
+                .await
             })
         }),
         load_readlist_archive_entries: Arc::new(|database_file, readlist_id| {
@@ -588,8 +577,11 @@ pub(super) fn compose_media_assets_runtime_access_backend() -> MediaAssetsRuntim
         }),
         persisted_book_exists: Arc::new(|database_file, book_id| {
             Box::pin(async move {
-                infrastructure_media_queries::persisted_book_exists(database_file.as_path(), &book_id)
-                    .await
+                infrastructure_media_queries::persisted_book_exists(
+                    database_file.as_path(),
+                    &book_id,
+                )
+                .await
             })
         }),
         persisted_book_ids: Arc::new(|database_file| {

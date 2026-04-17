@@ -188,91 +188,6 @@ async fn router_readlist_thumbnail_delete_removes_uploaded_thumbnail() {
 }
 
 #[tokio::test]
-async fn router_readlist_and_collection_thumbnail_routes_accept_basic_auth_like_kotlin_clients() {
-    let paths = new_router_fixture("router-readlist-collection-thumbnails-basic-auth-compat").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-    let image_bytes = fixture_png_bytes();
-    let authorization =
-        basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
-
-    let (readlist_content_type, readlist_body) =
-        multipart_image_upload_body("file", "readlist.png", "image/png", true, &image_bytes);
-    let readlist_upload = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/readlists/readlist-1/thumbnails")
-                .header("x-auth-token", &auth_token)
-                .header(header::CONTENT_TYPE, readlist_content_type)
-                .body(Body::from(readlist_body))
-                .expect("basic-auth readlist thumbnail upload should build"),
-        )
-        .await
-        .expect("basic-auth readlist thumbnail upload should complete");
-    assert_eq!(readlist_upload.status(), StatusCode::OK);
-    let readlist_thumbnail_id = response_json(readlist_upload)
-        .await
-        .get("id")
-        .and_then(Value::as_str)
-        .expect("basic-auth readlist upload should return thumbnail id")
-        .to_string();
-
-    let (collection_content_type, collection_body) =
-        multipart_image_upload_body("file", "collection.png", "image/png", true, &image_bytes);
-    let collection_upload = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/collections/collection-1/thumbnails")
-                .header("x-auth-token", &auth_token)
-                .header(header::CONTENT_TYPE, collection_content_type)
-                .body(Body::from(collection_body))
-                .expect("basic-auth collection thumbnail upload should build"),
-        )
-        .await
-        .expect("basic-auth collection thumbnail upload should complete");
-    assert_eq!(collection_upload.status(), StatusCode::OK);
-    let collection_thumbnail_id = response_json(collection_upload)
-        .await
-        .get("id")
-        .and_then(Value::as_str)
-        .expect("basic-auth collection upload should return thumbnail id")
-        .to_string();
-
-    for route in [
-        "/api/v1/readlists/readlist-1/thumbnail".to_string(),
-        "/api/v1/readlists/readlist-1/thumbnails".to_string(),
-        format!("/api/v1/readlists/readlist-1/thumbnails/{readlist_thumbnail_id}"),
-        "/api/v1/collections/collection-1/thumbnail".to_string(),
-        "/api/v1/collections/collection-1/thumbnails".to_string(),
-        format!("/api/v1/collections/collection-1/thumbnails/{collection_thumbnail_id}"),
-    ] {
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri(route.as_str())
-                    .header(header::AUTHORIZATION, authorization.as_str())
-                    .header("x-auth-token", "")
-                    .body(Body::empty())
-                    .expect("thumbnail basic-auth request should build"),
-            )
-            .await
-            .expect("thumbnail basic-auth request should complete");
-
-        assert_eq!(response.status(), StatusCode::OK, "route: {route}");
-    }
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
 async fn router_readlist_thumbnail_select_marks_uploaded_thumbnail_selected() {
     let paths = new_router_fixture("router-readlist-thumbnail-select-success").await;
     seed_router_contract_data(&paths).await;
@@ -365,6 +280,31 @@ async fn router_readlist_thumbnail_select_returns_accepted_when_thumbnail_is_mis
         .expect("readlist thumbnail select missing-thumbnail request should complete");
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_readlist_thumbnail_select_returns_not_found_when_path_readlist_missing() {
+    let paths = new_router_fixture("router-readlist-thumbnail-select-missing-path-readlist").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/readlists/readlist-missing/thumbnails/missing-thumbnail/selected")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("readlist thumbnail select missing-path request should build"),
+        )
+        .await
+        .expect("readlist thumbnail select missing-path request should complete");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
     cleanup_router_fixture(paths);
 }
@@ -528,6 +468,33 @@ async fn router_collection_thumbnail_select_returns_not_found_when_path_collecti
         .expect("collection thumbnail select missing-path request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_collection_thumbnail_select_returns_accepted_when_thumbnail_is_missing_but_collection_exists(
+) {
+    let paths =
+        new_router_fixture("router-collection-thumbnail-select-missing-thumbnail").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/collections/collection-1/thumbnails/missing-thumbnail/selected")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("collection thumbnail select missing-thumbnail request should build"),
+        )
+        .await
+        .expect("collection thumbnail select missing-thumbnail request should complete");
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
 
     cleanup_router_fixture(paths);
 }

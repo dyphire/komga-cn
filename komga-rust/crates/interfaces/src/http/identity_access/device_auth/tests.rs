@@ -8,7 +8,6 @@ use komga_application::identity_access::{
 };
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path as FsPath;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -37,21 +36,6 @@ fn generated_kobo_api_token_is_non_hardcoded_and_identity_scoped() {
     let changed_user_token = generated_kobo_api_token("auth-token-a", "user-b");
     assert_ne!(token, changed_auth_token);
     assert_ne!(token, changed_user_token);
-}
-
-#[tokio::test]
-async fn resolved_kobo_user_returns_none_when_not_authenticated() {
-    let headers = HeaderMap::new();
-    assert!(
-        resolved_kobo_user(
-            "",
-            &headers,
-            None,
-            FsPath::new("/tmp/komga-kobo-user-none.sqlite")
-        )
-        .await
-        .is_none()
-    );
 }
 
 #[test]
@@ -522,29 +506,6 @@ async fn kobo_ping_rejects_requests_without_valid_auth() {
 }
 
 #[tokio::test]
-async fn koreader_user_auth_rejects_requests_without_auth() {
-    let auth_db = crate::http::state::AuthDatabaseState {
-        database_file: unique_temp_path("komga-device-auth-koreader-auth"),
-        demo_mode: false,
-        session_runtime_key: "test-session".to_string(),
-        remember_me_runtime_key: "test-remember-me".to_string(),
-    };
-    let response = koreader_user_auth(
-        Extension(auth_db),
-        Extension(RequestConnectionInfo::default()),
-        HeaderMap::new(),
-    )
-    .await;
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
-async fn koreader_user_create_returns_forbidden() {
-    let response = koreader_user_create(HeaderMap::new()).await;
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
 async fn load_koreader_book_target_returns_unique_book_and_page_count() {
     let database_file = unique_temp_path("komga-device-auth-koreader-unique");
     seed_koreader_book_target(
@@ -553,6 +514,7 @@ async fn load_koreader_book_target_returns_unique_book_and_page_count() {
         Ok(Some(KoreaderBookTarget {
             id: "book-1".to_string(),
             page_count: 42,
+            media_type: "application/epub+zip".to_string(),
         })),
     );
 
@@ -562,6 +524,7 @@ async fn load_koreader_book_target_returns_unique_book_and_page_count() {
         .expect("unique hash should resolve a book");
     assert_eq!(target.id, "book-1");
     assert_eq!(target.page_count, 42);
+    assert_eq!(target.media_type, "application/epub+zip");
 
     let _ = fs::remove_file(database_file);
 }

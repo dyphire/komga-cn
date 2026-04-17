@@ -77,6 +77,8 @@ pub struct PersistedDiscoveryAccessBackend {
         Arc<dyn Fn(PathBuf) -> BoxFutureResult<Vec<String>> + Send + Sync>,
     pub load_collection_memberships:
         Arc<dyn Fn(PathBuf) -> BoxFutureResult<BTreeMap<String, BTreeSet<String>>> + Send + Sync>,
+    pub load_collection_ordering:
+        Arc<dyn Fn(PathBuf, String) -> BoxFutureResult<HashMap<String, i64>> + Send + Sync>,
     pub load_readlist_memberships:
         Arc<dyn Fn(PathBuf) -> BoxFutureResult<BTreeMap<String, BTreeSet<String>>> + Send + Sync>,
     pub load_persisted_ondeck_books: Arc<
@@ -97,6 +99,8 @@ pub struct PersistedDiscoveryAccessBackend {
         Arc<dyn Fn(PathBuf, i64) -> BoxFutureResult<Option<String>> + Send + Sync>,
     pub load_series_read_progress_counts:
         Arc<dyn Fn(PathBuf, String) -> BoxFutureResult<HashMap<String, (i64, i64)>> + Send + Sync>,
+    pub load_series_read_dates:
+        Arc<dyn Fn(PathBuf, String) -> BoxFutureResult<HashMap<String, String>> + Send + Sync>,
     pub load_series_total_book_counts:
         Arc<dyn Fn(PathBuf) -> BoxFutureResult<HashMap<String, i64>> + Send + Sync>,
     pub load_persisted_series_summaries:
@@ -335,6 +339,14 @@ pub(super) async fn persisted_backend_load_collection_memberships(
     (backend.load_collection_memberships)(database_file.to_path_buf()).await
 }
 
+pub(super) async fn persisted_backend_load_collection_ordering(
+    database_file: &FsPath,
+    collection_id: &str,
+) -> Result<HashMap<String, i64>, String> {
+    let backend = persisted_discovery_backend()?;
+    (backend.load_collection_ordering)(database_file.to_path_buf(), collection_id.to_string()).await
+}
+
 pub(super) async fn persisted_backend_load_readlist_memberships(
     database_file: &FsPath,
 ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
@@ -386,6 +398,14 @@ pub(super) async fn persisted_backend_load_series_read_progress_counts(
     let backend = persisted_discovery_backend()?;
     (backend.load_series_read_progress_counts)(database_file.to_path_buf(), user_id.to_string())
         .await
+}
+
+pub(super) async fn persisted_backend_load_series_read_dates(
+    database_file: &FsPath,
+    user_id: &str,
+) -> Result<HashMap<String, String>, String> {
+    let backend = persisted_discovery_backend()?;
+    (backend.load_series_read_dates)(database_file.to_path_buf(), user_id.to_string()).await
 }
 
 pub(super) async fn persisted_backend_load_series_total_book_counts(

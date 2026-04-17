@@ -1,5 +1,13 @@
 use super::*;
 
+fn build_page_hash_delete_tasks_router(paths: &RuntimeDbPaths) -> axum::Router {
+    // These contracts assert queued TASK rows, so runtime workers must stay off or the
+    // background consumer can claim and delete the rows before the assertions inspect them.
+    komga_server::app::build_router_without_runtime_workers_for_contract(&runtime_config_for_paths(
+        paths,
+    ))
+}
+
 #[tokio::test]
 async fn router_post_page_hash_delete_all_enqueues_remove_hashed_pages_tasks_without_touching_media_rows()
  {
@@ -24,7 +32,7 @@ async fn router_post_page_hash_delete_all_enqueues_remove_hashed_pages_tasks_wit
     .expect("second duplicate page row should be inserted");
     setup_pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_page_hash_delete_tasks_router(&paths);
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -143,7 +151,7 @@ async fn router_post_page_hash_delete_all_accepts_missing_hash_without_enqueuing
     let paths = new_router_fixture("router-page-hash-delete-all-missing-hash").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_page_hash_delete_tasks_router(&paths);
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -182,7 +190,7 @@ async fn router_post_page_hash_delete_match_enqueues_remove_hashed_pages_task_wi
     seed_router_contract_data(&paths).await;
     seed_known_page_hash_samples(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_page_hash_delete_tasks_router(&paths);
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -275,7 +283,7 @@ async fn router_post_page_hash_delete_match_accepts_missing_hash_and_still_enque
     let paths = new_router_fixture("router-page-hash-delete-match-missing-hash").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_page_hash_delete_tasks_router(&paths);
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

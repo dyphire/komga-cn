@@ -70,7 +70,7 @@ fn series_payload(series: &PersistedSeriesSummary) -> Value {
     json!({
         "id": series.id.as_str(),
         "libraryId": series.library_id.as_str(),
-        "name": series.title.as_str(),
+        "name": series.name.as_str(),
         "url": format!("series/{}", series.id),
         "created": normalized_date_time(&series.created),
         "lastModified": normalized_date_time(&series.last_modified),
@@ -97,6 +97,7 @@ mod tests {
                 content: vec![PersistedSeriesSummary {
                     id: "series-1".to_string(),
                     library_id: "library-1".to_string(),
+                    name: "Series File Name".to_string(),
                     title: "Series".to_string(),
                     title_sort: "Series".to_string(),
                     labels: vec!["Team".to_string()],

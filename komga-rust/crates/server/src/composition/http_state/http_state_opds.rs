@@ -416,10 +416,12 @@ fn map_opds_book_feed_entry(
         authors: row
             .authors
             .into_iter()
-            .map(|author| komga_interfaces::opds_catalog_access::OpdsBookAuthorEntry {
-                name: author.name,
-                role: author.role,
-            })
+            .map(
+                |author| komga_interfaces::opds_catalog_access::OpdsBookAuthorEntry {
+                    name: author.name,
+                    role: author.role,
+                },
+            )
             .collect(),
         tags: row.tags,
         file_name: row.file_name,

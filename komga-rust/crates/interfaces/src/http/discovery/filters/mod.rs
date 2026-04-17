@@ -1,7 +1,7 @@
-use super::*;
 use super::persisted::models::{
     BooksFilterCriteria, RuntimeBooksFilters, RuntimeSeriesFilters, SeriesFilterCriteria,
 };
+use super::*;
 
 mod books;
 mod dispatch;
@@ -235,6 +235,7 @@ pub(super) fn parse_books_composite_filters(
     let mut media_profile_excluded_groups: Vec<Vec<String>> = vec![];
     let mut media_status_groups: Vec<Vec<String>> = vec![];
     let mut media_status_excluded_groups: Vec<Vec<String>> = vec![];
+    let mut author_contains_groups: Vec<Vec<String>> = vec![];
     let mut author_groups: Vec<Vec<String>> = vec![];
     let mut author_excluded_groups: Vec<Vec<String>> = vec![];
     let mut poster_type_groups: Vec<Vec<String>> = vec![];
@@ -283,6 +284,7 @@ pub(super) fn parse_books_composite_filters(
             && parsed.media_profiles_excluded.is_none()
             && parsed.media_statuses.is_none()
             && parsed.media_statuses_excluded.is_none()
+            && parsed.authors_contains.is_none()
             && parsed.authors.is_none()
             && parsed.authors_excluded.is_none()
             && parsed.poster_types.is_none()
@@ -371,6 +373,9 @@ pub(super) fn parse_books_composite_filters(
         }
         if let Some(media_statuses_excluded) = parsed.media_statuses_excluded {
             media_status_excluded_groups.push(media_statuses_excluded);
+        }
+        if let Some(authors_contains) = parsed.authors_contains {
+            author_contains_groups.push(authors_contains);
         }
         if let Some(authors) = parsed.authors {
             author_groups.push(authors);
@@ -467,6 +472,7 @@ pub(super) fn parse_books_composite_filters(
     aggregate.media_profiles_excluded = merge_string_groups(media_profile_excluded_groups, all_of);
     aggregate.media_statuses = merge_string_groups(media_status_groups, all_of);
     aggregate.media_statuses_excluded = merge_string_groups(media_status_excluded_groups, all_of);
+    aggregate.authors_contains = merge_string_groups(author_contains_groups, all_of);
     aggregate.authors = merge_string_groups(author_groups, all_of);
     aggregate.authors_excluded = merge_string_groups(author_excluded_groups, all_of);
     aggregate.poster_types = merge_string_groups(poster_type_groups, all_of);
@@ -641,6 +647,7 @@ pub(super) fn parse_composite_filters(
     let mut title_begins_with_excluded_groups: Vec<Vec<String>> = vec![];
     let mut title_ends_with_groups: Vec<Vec<String>> = vec![];
     let mut title_ends_with_excluded_groups: Vec<Vec<String>> = vec![];
+    let mut title_regex_groups: Vec<Vec<String>> = vec![];
     let mut title_sort_groups: Vec<Vec<String>> = vec![];
     let mut title_sort_excluded_groups: Vec<Vec<String>> = vec![];
     let mut title_sort_contains_groups: Vec<Vec<String>> = vec![];
@@ -649,6 +656,7 @@ pub(super) fn parse_composite_filters(
     let mut title_sort_begins_with_excluded_groups: Vec<Vec<String>> = vec![];
     let mut title_sort_ends_with_groups: Vec<Vec<String>> = vec![];
     let mut title_sort_ends_with_excluded_groups: Vec<Vec<String>> = vec![];
+    let mut title_sort_regex_groups: Vec<Vec<String>> = vec![];
     let mut read_status_groups: Vec<Vec<String>> = vec![];
     let mut read_status_excluded_groups: Vec<Vec<String>> = vec![];
     let mut genre_groups: Vec<Vec<String>> = vec![];
@@ -671,9 +679,11 @@ pub(super) fn parse_composite_filters(
     let mut release_date_in_last_days_bounds: Vec<i64> = vec![];
     let mut release_date_not_in_last_days_bounds: Vec<i64> = vec![];
     let mut sharing_label_groups: Vec<Vec<String>> = vec![];
+    let mut sharing_label_contains_groups: Vec<Vec<String>> = vec![];
     let mut sharing_label_excluded_groups: Vec<Vec<String>> = vec![];
     let mut series_status_groups: Vec<Vec<String>> = vec![];
     let mut series_status_excluded_groups: Vec<Vec<String>> = vec![];
+    let mut author_contains_groups: Vec<Vec<String>> = vec![];
     let mut author_groups: Vec<Vec<String>> = vec![];
     let mut author_excluded_groups: Vec<Vec<String>> = vec![];
     let mut age_rating_groups: Vec<Vec<u16>> = vec![];
@@ -683,6 +693,7 @@ pub(super) fn parse_composite_filters(
 
     for child in children {
         let parsed = parse_runtime_series_filters_with_mode(Some(child), mode)?;
+        let child_sharing_label_contains_groups = parsed.sharing_labels_contains_groups.clone();
         let parsed = parsed.criteria;
         if let Some(ids) = parsed.library_ids {
             library_groups.push(ids);
@@ -711,6 +722,9 @@ pub(super) fn parse_composite_filters(
         if let Some(titles_ends_with_excluded) = parsed.titles_ends_with_excluded {
             title_ends_with_excluded_groups.push(titles_ends_with_excluded);
         }
+        if let Some(titles_regex) = parsed.titles_regex {
+            title_regex_groups.push(titles_regex);
+        }
         if let Some(title_sorts) = parsed.title_sorts {
             title_sort_groups.push(title_sorts);
         }
@@ -734,6 +748,9 @@ pub(super) fn parse_composite_filters(
         }
         if let Some(title_sorts_ends_with_excluded) = parsed.title_sorts_ends_with_excluded {
             title_sort_ends_with_excluded_groups.push(title_sorts_ends_with_excluded);
+        }
+        if let Some(title_sorts_regex) = parsed.title_sorts_regex {
+            title_sort_regex_groups.push(title_sorts_regex);
         }
         if let Some(read_statuses) = parsed.read_statuses {
             read_status_groups.push(read_statuses);
@@ -813,6 +830,26 @@ pub(super) fn parse_composite_filters(
         if let Some(sharing_labels) = parsed.sharing_labels {
             sharing_label_groups.push(sharing_labels);
         }
+        if let Some(sharing_labels_contains) = parsed.sharing_labels_contains {
+            sharing_label_contains_groups.push(sharing_labels_contains);
+        }
+        if !child_sharing_label_contains_groups.is_empty() {
+            if all_of {
+                sharing_label_contains_groups.extend(child_sharing_label_contains_groups);
+            } else {
+                let mut merged = vec![];
+                for group in child_sharing_label_contains_groups {
+                    for candidate in group {
+                        if !merged.contains(&candidate) {
+                            merged.push(candidate);
+                        }
+                    }
+                }
+                if !merged.is_empty() {
+                    sharing_label_contains_groups.push(merged);
+                }
+            }
+        }
         if let Some(sharing_labels_excluded) = parsed.sharing_labels_excluded {
             sharing_label_excluded_groups.push(sharing_labels_excluded);
         }
@@ -821,6 +858,9 @@ pub(super) fn parse_composite_filters(
         }
         if let Some(series_statuses_excluded) = parsed.series_statuses_excluded {
             series_status_excluded_groups.push(series_statuses_excluded);
+        }
+        if let Some(authors_contains) = parsed.authors_contains {
+            author_contains_groups.push(authors_contains);
         }
         if let Some(authors) = parsed.authors {
             author_groups.push(authors);
@@ -875,6 +915,7 @@ pub(super) fn parse_composite_filters(
     aggregate.titles_ends_with = merge_string_groups(title_ends_with_groups, all_of);
     aggregate.titles_ends_with_excluded =
         merge_string_groups(title_ends_with_excluded_groups, all_of);
+    aggregate.titles_regex = merge_string_groups(title_regex_groups, all_of);
     aggregate.title_sorts = merge_string_groups(title_sort_groups, all_of);
     aggregate.title_sorts_excluded = merge_string_groups(title_sort_excluded_groups, all_of);
     aggregate.title_sorts_contains = merge_string_groups(title_sort_contains_groups, all_of);
@@ -886,6 +927,7 @@ pub(super) fn parse_composite_filters(
     aggregate.title_sorts_ends_with = merge_string_groups(title_sort_ends_with_groups, all_of);
     aggregate.title_sorts_ends_with_excluded =
         merge_string_groups(title_sort_ends_with_excluded_groups, all_of);
+    aggregate.title_sorts_regex = merge_string_groups(title_sort_regex_groups, all_of);
     aggregate.genres = merge_string_groups(genre_groups, all_of);
     aggregate.genres_excluded = merge_string_groups(genre_excluded_groups, all_of);
     aggregate.tags = merge_string_groups(tag_groups, all_of);
@@ -916,9 +958,17 @@ pub(super) fn parse_composite_filters(
     aggregate.release_date_not_in_last_days =
         merge_release_date_not_in_last_days_bound(release_date_not_in_last_days_bounds, all_of);
     aggregate.sharing_labels = merge_string_groups(sharing_label_groups, all_of);
+    if all_of {
+        aggregate.sharing_labels_contains_groups = sharing_label_contains_groups.clone();
+        aggregate.sharing_labels_contains = None;
+    } else {
+        aggregate.sharing_labels_contains =
+            merge_string_groups(sharing_label_contains_groups, all_of);
+    }
     aggregate.sharing_labels_excluded = merge_string_groups(sharing_label_excluded_groups, all_of);
     aggregate.series_statuses = merge_string_groups(series_status_groups, all_of);
     aggregate.series_statuses_excluded = merge_string_groups(series_status_excluded_groups, all_of);
+    aggregate.authors_contains = merge_string_groups(author_contains_groups, all_of);
     aggregate.authors = merge_string_groups(author_groups, all_of);
     aggregate.authors_excluded = merge_string_groups(author_excluded_groups, all_of);
 

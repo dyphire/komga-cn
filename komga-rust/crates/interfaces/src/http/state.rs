@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures_util::future::BoxFuture;
 use komga_application::library_catalog::{
@@ -59,6 +60,7 @@ pub struct OAuth2ClientConfig {
     pub client_secret: String,
     pub authorization_uri: String,
     pub token_uri: String,
+    pub user_info_uri: Option<String>,
     pub scopes: Vec<String>,
 }
 
@@ -226,6 +228,8 @@ pub struct RemoteCacheEntry {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct TransientBooksStore {
     pub records: HashMap<String, TransientBookRecord>,
+    #[serde(default)]
+    last_access_epoch_seconds: HashMap<String, i64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -233,10 +237,12 @@ pub struct TransientBookRecord {
     pub id: String,
     pub name: String,
     pub path: String,
-    pub file_last_modified_epoch_seconds: i64,
+    pub file_last_modified_unix_nanos: i128,
     pub size_bytes: u64,
     pub status: String,
     pub media_type: String,
+    #[serde(default)]
+    pub page_count: u32,
     #[serde(default)]
     pub pages: Vec<TransientBookPageRecord>,
     #[serde(default)]
@@ -261,8 +267,74 @@ pub struct TransientBookPageRecord {
 
 impl TransientBooksStore {
     pub fn with_records(records: HashMap<String, TransientBookRecord>) -> Self {
-        Self { records }
+        let last_access_epoch_seconds = records
+            .keys()
+            .cloned()
+            .map(|id| (id, current_unix_epoch_seconds()))
+            .collect();
+        Self {
+            records,
+            last_access_epoch_seconds,
+        }
     }
+
+    pub fn get_cloned(&mut self, id: &str) -> Option<TransientBookRecord> {
+        self.prune_expired();
+        self.touch(id)?;
+        self.records.get(id).cloned()
+    }
+
+    pub fn get_mut(&mut self, id: &str) -> Option<&mut TransientBookRecord> {
+        self.prune_expired();
+        self.touch(id)?;
+        self.records.get_mut(id)
+    }
+
+    pub fn insert(&mut self, record: TransientBookRecord) {
+        self.prune_expired();
+        let id = record.id.clone();
+        self.last_access_epoch_seconds
+            .insert(id.clone(), current_unix_epoch_seconds());
+        self.records.insert(id, record);
+    }
+
+    fn prune_expired(&mut self) {
+        let now = current_unix_epoch_seconds();
+        let expired_ids = self
+            .last_access_epoch_seconds
+            .iter()
+            .filter(|(_, last_access)| {
+                now.saturating_sub(**last_access)
+                    >= TRANSIENT_BOOKS_EXPIRE_AFTER_ACCESS.as_secs() as i64
+            })
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+
+        for id in expired_ids {
+            self.last_access_epoch_seconds.remove(&id);
+            self.records.remove(&id);
+        }
+    }
+
+    fn touch(&mut self, id: &str) -> Option<()> {
+        if !self.records.contains_key(id) {
+            self.last_access_epoch_seconds.remove(id);
+            return None;
+        }
+
+        self.last_access_epoch_seconds
+            .insert(id.to_string(), current_unix_epoch_seconds());
+        Some(())
+    }
+}
+
+const TRANSIENT_BOOKS_EXPIRE_AFTER_ACCESS: Duration = Duration::from_secs(60 * 60);
+
+fn current_unix_epoch_seconds() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 #[derive(Clone, Default)]

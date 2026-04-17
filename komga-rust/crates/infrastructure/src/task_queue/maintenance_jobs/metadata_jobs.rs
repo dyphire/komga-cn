@@ -29,7 +29,7 @@ pub(super) fn try_execute(
                 scheduler.enqueue(runtime_follow_up_task(
                     RuntimeFollowUpTask::RefreshSeriesMetadata {
                         series_id,
-                        priority: task.priority.saturating_sub(5),
+                        priority: task.priority - 1,
                     },
                 ));
             }
@@ -49,7 +49,7 @@ pub(super) fn try_execute(
             scheduler.enqueue(runtime_follow_up_task(
                 RuntimeFollowUpTask::AggregateSeriesMetadata {
                     series_id: series_id.to_string(),
-                    priority: task.priority.saturating_sub(5),
+                    priority: task.priority,
                 },
             ));
             Ok(())

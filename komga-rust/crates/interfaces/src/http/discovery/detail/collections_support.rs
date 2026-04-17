@@ -1,5 +1,6 @@
 use super::*;
 
+use komga_application::runtime_sse::register_runtime_sse_event;
 use crate::discovery_detail_access::collections as collections_access;
 use time::PrimitiveDateTime;
 use time::macros::format_description;
@@ -186,6 +187,16 @@ pub async fn persist_collection_create(
     )
     .await?;
 
+    register_runtime_sse_event(
+        "CollectionAdded",
+        json!({
+            "collectionId": collection_id,
+            "seriesIds": input.series_ids,
+        }),
+        false,
+        None,
+    );
+
     Ok(collection_id)
 }
 
@@ -194,21 +205,46 @@ pub async fn persist_collection_update(
     collection_id: &str,
     input: &PersistedCollectionWriteInput,
 ) -> Result<bool, String> {
-    collections_access::persist_collection_update(
+    let updated = collections_access::persist_collection_update(
         database_file,
         collection_id,
         &input.name,
         input.ordered,
         &input.series_ids,
     )
-    .await
+    .await?;
+    if updated {
+        register_runtime_sse_event(
+            "CollectionChanged",
+            json!({
+                "collectionId": collection_id,
+                "seriesIds": input.series_ids,
+            }),
+            false,
+            None,
+        );
+    }
+    Ok(updated)
 }
 
 pub async fn delete_persisted_collection(
     database_file: &FsPath,
     collection_id: &str,
 ) -> Result<bool, String> {
-    collections_access::delete_persisted_collection(database_file, collection_id).await
+    let existing = load_persisted_collection_detail(database_file, collection_id).await?;
+    let deleted = collections_access::delete_persisted_collection(database_file, collection_id).await?;
+    if deleted && let Some(collection) = existing {
+        register_runtime_sse_event(
+            "CollectionDeleted",
+            json!({
+                "collectionId": collection_id,
+                "seriesIds": collection.series_ids,
+            }),
+            false,
+            None,
+        );
+    }
+    Ok(deleted)
 }
 
 pub async fn upsert_collection_search_document(

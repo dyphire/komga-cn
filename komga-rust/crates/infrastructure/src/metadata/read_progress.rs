@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use komga_application::runtime_sse::register_runtime_sse_event;
 use serde_json::Value;
+use serde_json::json;
 use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 
 use crate::sqlite::connect_pool;
@@ -117,6 +119,63 @@ async fn sync_series_read_progress_for_book(
     sync_series_read_progress(pool, &series_id, user_id_value, query_context).await
 }
 
+async fn persisted_series_read_progress_exists(
+    pool: &SqlitePool,
+    series_id: &str,
+    user_id_value: &str,
+    query_context: &str,
+) -> Result<bool, String> {
+    sqlx::query(
+        "SELECT 1 AS FOUND FROM READ_PROGRESS_SERIES WHERE SERIES_ID = ? AND USER_ID = ? LIMIT 1",
+    )
+    .bind(series_id)
+    .bind(user_id_value)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| format!("query {query_context} series read progress row: {error}"))
+    .map(|row| row.is_some())
+}
+
+fn emit_read_progress_changed(book_id: &str, user_id_value: &str) {
+    register_runtime_sse_event(
+        "ReadProgressChanged",
+        json!({
+            "bookId": book_id,
+            "userId": user_id_value,
+        }),
+        false,
+        Some(user_id_value.to_string()),
+    );
+}
+
+fn emit_read_progress_deleted(book_id: &str, user_id_value: &str) {
+    register_runtime_sse_event(
+        "ReadProgressDeleted",
+        json!({
+            "bookId": book_id,
+            "userId": user_id_value,
+        }),
+        false,
+        Some(user_id_value.to_string()),
+    );
+}
+
+fn emit_read_progress_series_event(series_id: &str, user_id_value: &str, exists: bool) {
+    register_runtime_sse_event(
+        if exists {
+            "ReadProgressSeriesChanged"
+        } else {
+            "ReadProgressSeriesDeleted"
+        },
+        json!({
+            "seriesId": series_id,
+            "userId": user_id_value,
+        }),
+        false,
+        Some(user_id_value.to_string()),
+    );
+}
+
 pub async fn persist_read_progress(
     database_file: &Path,
     book_id: &str,
@@ -152,7 +211,20 @@ pub async fn persist_read_progress(
     .await
     .map_err(|error| format!("persist read-progress: {error}"))?;
 
+    let series_id = load_book_series_id(&pool, book_id, "read-progress").await?;
     sync_series_read_progress_for_book(&pool, book_id, user_id_value, "read-progress").await?;
+
+    emit_read_progress_changed(book_id, user_id_value);
+    if let Some(series_id) = series_id {
+        let exists = persisted_series_read_progress_exists(
+            &pool,
+            &series_id,
+            user_id_value,
+            "read-progress",
+        )
+        .await?;
+        emit_read_progress_series_event(&series_id, user_id_value, exists);
+    }
 
     Ok(())
 }
@@ -220,7 +292,15 @@ pub async fn persist_book_progression(
     .await
     .map_err(|error| format!("persist book progression: {error}"))?;
 
+    let series_id = load_book_series_id(&pool, book_id, "progression").await?;
     sync_series_read_progress_for_book(&pool, book_id, user_id_value, "progression").await?;
+
+    emit_read_progress_changed(book_id, user_id_value);
+    if let Some(series_id) = series_id {
+        let exists = persisted_series_read_progress_exists(&pool, &series_id, user_id_value, "progression")
+            .await?;
+        emit_read_progress_series_event(&series_id, user_id_value, exists);
+    }
 
     Ok(())
 }
@@ -332,7 +412,17 @@ pub async fn delete_persisted_read_progress(
 
     if let Some(series_id) = series_id {
         sync_series_read_progress(&pool, &series_id, user_id_value, "read-progress delete").await?;
+        let exists = persisted_series_read_progress_exists(
+            &pool,
+            &series_id,
+            user_id_value,
+            "read-progress delete",
+        )
+        .await?;
+        emit_read_progress_series_event(&series_id, user_id_value, exists);
     }
+
+    emit_read_progress_deleted(book_id, user_id_value);
 
     Ok(())
 }

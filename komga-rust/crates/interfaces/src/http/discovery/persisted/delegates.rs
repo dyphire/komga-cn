@@ -161,6 +161,13 @@ pub(crate) async fn load_collection_memberships(
     library_mappings::load_collection_memberships(database_file).await
 }
 
+pub(crate) async fn load_collection_ordering(
+    database_file: &FsPath,
+    collection_id: &str,
+) -> Result<HashMap<String, i64>, String> {
+    library_mappings::load_collection_ordering(database_file, collection_id).await
+}
+
 pub(crate) async fn load_readlist_memberships(
     database_file: &FsPath,
 ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
@@ -199,6 +206,13 @@ pub(crate) async fn load_series_read_progress_counts(
     user_id: &str,
 ) -> Result<HashMap<String, (i64, i64)>, String> {
     persisted_runtime_queries::load_series_read_progress_counts(database_file, user_id).await
+}
+
+pub(crate) async fn load_series_read_dates(
+    database_file: &FsPath,
+    user_id: &str,
+) -> Result<HashMap<String, String>, String> {
+    persisted_runtime_queries::load_series_read_dates(database_file, user_id).await
 }
 
 pub(crate) async fn load_series_total_book_counts(

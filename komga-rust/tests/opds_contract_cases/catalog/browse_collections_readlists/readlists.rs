@@ -232,5 +232,48 @@ async fn router_opds_v2_readlists_use_kotlin_grouped_feed_shape() {
         );
     }
 
+    for route in [
+        "/opds/v2/libraries/readlists?page=2&size=1",
+        "/opds/v2/libraries/library-1/readlists?page=2&size=1",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header("x-auth-token", &auth_token)
+                    .body(Body::empty())
+                    .expect("opds v2 empty-page readlists request should build"),
+            )
+            .await
+            .expect("opds v2 empty-page readlists request should complete");
+
+        assert_eq!(response.status(), StatusCode::OK, "route: {route}");
+        let payload = response_json(response).await;
+        let groups = payload
+            .get("groups")
+            .and_then(Value::as_array)
+            .expect("readlists groups should be present on empty pages too");
+        let readlists_group = groups
+            .iter()
+            .find(|group| {
+                group
+                    .get("metadata")
+                    .and_then(|metadata| metadata.get("title"))
+                    .and_then(Value::as_str)
+                    == Some("Read Lists")
+            })
+            .expect("readlists group should be present on empty pages too");
+        assert_eq!(
+            readlists_group
+                .get("navigation")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(0),
+            "route: {route}, Kotlin keeps empty group navigation arrays"
+        );
+    }
+
     cleanup_router_fixture(paths);
 }

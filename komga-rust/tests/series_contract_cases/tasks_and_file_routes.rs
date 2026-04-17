@@ -719,16 +719,16 @@ async fn router_series_file_delete_enqueues_delete_series_without_group_id() {
 
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].get::<String, _>("SIMPLE_TYPE"), "DeleteSeries");
-    assert_eq!(rows[0].get::<i32, _>("PRIORITY"), 100);
+    assert_eq!(rows[0].get::<i32, _>("PRIORITY"), 8);
     assert_eq!(rows[0].get::<Option<String>, _>("GROUP_ID"), None);
     assert_eq!(
         serde_json::from_str::<Value>(&rows[0].get::<String, _>("PAYLOAD"))
             .expect("series delete payload should be valid json"),
         json!({
             "seriesId": "series-1",
-            "priority": 100,
+            "priority": 8,
             "groupId": Value::Null,
-            "uniqueId": "DELETE_SERIES:series-1"
+            "uniqueId": "DELETE_SERIES_series-1"
         }),
         "series file delete route should persist the Kotlin-compatible DeleteSeries payload shape",
     );
@@ -816,7 +816,7 @@ async fn router_series_metadata_refresh_enqueues_kotlin_style_task_groups() {
         vec![
             "REFRESH_BOOK_LOCAL_ARTWORK_book-1".to_string(),
             "REFRESH_BOOK_METADATA_book-1".to_string(),
-            "REFRESH_SERIES_LOCAL_ARTWORK:series-1".to_string(),
+            "REFRESH_SERIES_LOCAL_ARTWORK_series-1".to_string(),
         ]
     );
     assert_eq!(rows[0].get::<Option<String>, _>("GROUP_ID"), None);
@@ -843,7 +843,7 @@ async fn router_series_metadata_refresh_enqueues_kotlin_style_task_groups() {
                 "THUMBNAILS",
                 "LINKS"
             ],
-            "priority": 80,
+            "priority": 6,
             "groupId": "series-1",
             "uniqueId": "REFRESH_BOOK_METADATA_book-1"
         })
@@ -887,7 +887,7 @@ async fn router_series_metadata_refresh_does_not_canonicalize_series_id() {
     assert_eq!(rows.len(), 1);
     assert_eq!(
         rows[0].get::<String, _>("ID"),
-        "REFRESH_SERIES_LOCAL_ARTWORK:series-2"
+        "REFRESH_SERIES_LOCAL_ARTWORK_series-2"
     );
     assert_eq!(
         rows[0].get::<String, _>("SIMPLE_TYPE"),

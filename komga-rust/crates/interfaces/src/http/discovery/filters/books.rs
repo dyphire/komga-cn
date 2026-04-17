@@ -627,7 +627,7 @@ pub(super) fn parse_books_author_filter(
     if operator == "contains" {
         return parse_books_string_filter(condition, "Author", "contains_or_is", mode, |value| {
             books_filters! {
-                authors: Some(vec![value]),
+                authors_contains: Some(vec![value]),
                 ..BooksFilterCriteria::default()
             }
         });

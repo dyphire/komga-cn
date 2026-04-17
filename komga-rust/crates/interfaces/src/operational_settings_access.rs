@@ -41,6 +41,7 @@ pub struct TransientBookPage {
 pub struct TransientBookAnalysis {
     pub status: String,
     pub media_type: String,
+    pub page_count: u32,
     pub pages: Vec<TransientBookPage>,
     pub files: Vec<String>,
     pub comment: String,
@@ -50,7 +51,7 @@ pub struct TransientBookAnalysis {
 
 #[derive(Clone)]
 pub struct TransientBookFileMetadata {
-    pub file_last_modified_epoch_seconds: i64,
+    pub file_last_modified_unix_nanos: i128,
     pub size_bytes: u64,
 }
 
@@ -355,6 +356,7 @@ fn default_test_backend() -> OperationalSettingsAccessBackend {
         analyze_transient_book: Arc::new(|_| TransientBookAnalysis {
             status: "ERROR".to_string(),
             media_type: String::new(),
+            page_count: 0,
             pages: Vec::new(),
             files: Vec::new(),
             comment: "ERR_1005".to_string(),

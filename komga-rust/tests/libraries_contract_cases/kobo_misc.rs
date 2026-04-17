@@ -9,6 +9,7 @@ fn libraries_contract_target_is_registered() {
 async fn router_kobo_catch_all_returns_empty_json_when_proxy_disabled() {
     let paths = new_router_fixture("router-kobo-catch-all-disabled").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;

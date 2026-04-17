@@ -120,6 +120,49 @@ async fn get_server_settings_returns_empty_string_placeholders_for_missing_strin
     std::fs::remove_dir_all(&fixture_root).expect("fixture root should be removed");
 }
 
+#[tokio::test]
+async fn get_server_settings_returns_runtime_server_port_configuration_source() {
+    let fixture_root = unique_fixture_root("server-settings-runtime-port-source");
+    std::fs::create_dir_all(&fixture_root).expect("fixture root should be created");
+    let database_file = fixture_root.join("main.db");
+    let persisted_settings = Arc::new(Mutex::new(HashMap::from([
+        ("SERVER_PORT".to_string(), Some("9090".to_string())),
+    ])));
+    let settings_store = Arc::new(fake_settings_store(
+        persisted_settings,
+        Arc::new(AtomicUsize::new(0)),
+    ));
+
+    let mut state = test_operational_state(
+        database_file,
+        fixture_root.clone(),
+        settings_store,
+        |_value| Ok(()),
+    );
+    state.runtime.bind_address = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8081));
+    let headers = admin_headers(&fixture_root);
+
+    let response = get_server_settings(Extension(state), headers).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("settings response body should be readable");
+    let response_body: Value =
+        serde_json::from_slice(&response_body).expect("settings response should be valid JSON");
+
+    assert_eq!(
+        response_body.get("serverPort"),
+        Some(&json!({
+            "configurationSource": 8081,
+            "databaseSource": 9090,
+            "effectiveValue": 9090,
+        }))
+    );
+
+    std::fs::remove_dir_all(&fixture_root).expect("fixture root should be removed");
+}
+
 fn test_operational_state<F>(
     database_file: PathBuf,
     fixture_root: PathBuf,

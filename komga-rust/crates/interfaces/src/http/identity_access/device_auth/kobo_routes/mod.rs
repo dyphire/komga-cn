@@ -28,16 +28,15 @@ async fn kobo_book_thumbnail_response(
     width: &str,
     height: &str,
 ) -> Response {
-    if resolved_kobo_user(
+    if let Err(status) = required_kobo_user(
         auth_token,
         headers,
         remote_addr,
         state.runtime.database_file.as_path(),
     )
     .await
-    .is_none()
     {
-        return StatusCode::UNAUTHORIZED.into_response();
+        return status.into_response();
     }
 
     match load_thumbnail_by_id(state.runtime.database_file.as_path(), thumbnail_id).await {
@@ -263,15 +262,16 @@ pub async fn kobo_library_sync(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Response {
-    let Some(current_user) = resolved_kobo_user(
+    let current_user = match required_kobo_user(
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
         state.runtime.database_file.as_path(),
     )
     .await
-    else {
-        return StatusCode::UNAUTHORIZED.into_response();
+    {
+        Ok(current_user) => current_user,
+        Err(status) => return status.into_response(),
     };
     let user_id_value = user_id(&current_user).to_string();
     let current_api_key_id = resolved_kobo_request_api_key_metadata(
@@ -416,16 +416,15 @@ pub async fn kobo_library_book_metadata(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Response {
-    if resolved_kobo_user(
+    if let Err(status) = required_kobo_user(
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
         state.runtime.database_file.as_path(),
     )
     .await
-    .is_none()
     {
-        return StatusCode::UNAUTHORIZED.into_response();
+        return status.into_response();
     }
 
     let database_file = state.runtime.database_file.as_path();
@@ -558,15 +557,16 @@ pub async fn kobo_library_book_state(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Response {
-    let Some(current_user) = resolved_kobo_user(
+    let current_user = match required_kobo_user(
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
         state.runtime.database_file.as_path(),
     )
     .await
-    else {
-        return StatusCode::UNAUTHORIZED.into_response();
+    {
+        Ok(current_user) => current_user,
+        Err(status) => return status.into_response(),
     };
 
     let database_file = state.runtime.database_file.as_path();
@@ -622,15 +622,16 @@ pub async fn kobo_library_book_state_update(
     uri: axum::http::Uri,
     body: Bytes,
 ) -> Response {
-    let Some(current_user) = resolved_kobo_user(
+    let current_user = match required_kobo_user(
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
         state.runtime.database_file.as_path(),
     )
     .await
-    else {
-        return StatusCode::UNAUTHORIZED.into_response();
+    {
+        Ok(current_user) => current_user,
+        Err(status) => return status.into_response(),
     };
 
     let database_file = state.runtime.database_file.as_path();
@@ -809,15 +810,16 @@ pub async fn kobo_book_file_epub(
     headers: HeaderMap,
     Query(query): Query<KoboBookFileQuery>,
 ) -> Response {
-    let Some(current_user) = resolved_kobo_user(
+    let current_user = match required_kobo_user(
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
         state.runtime.database_file.as_path(),
     )
     .await
-    else {
-        return StatusCode::UNAUTHORIZED.into_response();
+    {
+        Ok(current_user) => current_user,
+        Err(status) => return status.into_response(),
     };
 
     if !user_is_admin(&current_user) && !user_has_role(&current_user, "FILE_DOWNLOAD") {
@@ -950,16 +952,15 @@ pub async fn kobo_catch_all(
     uri: axum::http::Uri,
     body: Bytes,
 ) -> Response {
-    if resolved_kobo_user(
+    if let Err(status) = required_kobo_user(
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
         state.runtime.database_file.as_path(),
     )
     .await
-    .is_none()
     {
-        return StatusCode::UNAUTHORIZED.into_response();
+        return status.into_response();
     }
 
     if !load_kobo_proxy_enabled(&state).await {

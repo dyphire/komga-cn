@@ -74,6 +74,7 @@ pub struct UpdateAuthUserResult {
 pub struct KoreaderBookTarget {
     pub id: String,
     pub page_count: u64,
+    pub media_type: String,
 }
 
 #[derive(Clone)]

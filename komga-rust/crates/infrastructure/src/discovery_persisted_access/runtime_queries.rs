@@ -258,6 +258,36 @@ pub async fn load_series_read_progress_counts(
     Ok(counts)
 }
 
+pub async fn load_series_read_dates(
+    database_file: &FsPath,
+    user_id: &str,
+) -> Result<HashMap<String, String>, String> {
+    let pool = connect_pool(database_file, 1)
+        .await
+        .map_err(|error| format!("open series read-date db: {error}"))?;
+
+    let rows = sqlx::query(
+        r#"SELECT SERIES_ID, MOST_RECENT_READ_DATE
+         FROM READ_PROGRESS_SERIES
+         WHERE USER_ID = ?
+           AND MOST_RECENT_READ_DATE IS NOT NULL"#,
+    )
+    .bind(user_id)
+    .fetch_all(&pool)
+    .await
+    .map_err(|error| format!("query series read dates: {error}"))?;
+
+    let mut dates = HashMap::new();
+    for row in rows {
+        dates.insert(
+            row.get::<String, _>("SERIES_ID"),
+            row.get::<String, _>("MOST_RECENT_READ_DATE"),
+        );
+    }
+
+    Ok(dates)
+}
+
 pub async fn load_series_total_book_counts(
     database_file: &FsPath,
 ) -> Result<HashMap<String, i64>, String> {

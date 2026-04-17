@@ -310,7 +310,7 @@ fn settings_json(runtime: &crate::http::RuntimeState, settings: &OperationalSett
         "thumbnailSize": settings.thumbnail_size,
         "taskPoolSize": settings.task_pool_size,
         "serverPort": multi_source_number(
-            None,
+            Some(u64::from(runtime.bind_address.port())),
             settings.server_port.map(u64::from),
             effective_server_port(runtime, settings).map(u64::from),
         ),

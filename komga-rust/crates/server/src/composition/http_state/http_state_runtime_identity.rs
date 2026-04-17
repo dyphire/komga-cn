@@ -56,6 +56,23 @@ pub(super) fn compose_runtime_identity_access_backend() -> RuntimeIdentityAccess
         invalidate_remember_me_token: Arc::new(|token| {
             infrastructure_runtime_identity_access::invalidate_remember_me_token(&token)
         }),
+        store_oauth2_authorization_state: Arc::new(
+            |runtime_key, session_token, registration_id, state| {
+                infrastructure_auth_runtime_identity::store_oauth2_authorization_state(
+                    &runtime_key,
+                    &session_token,
+                    &registration_id,
+                    &state,
+                )
+            },
+        ),
+        take_oauth2_authorization_state: Arc::new(|runtime_key, session_token, registration_id| {
+            infrastructure_auth_runtime_identity::take_oauth2_authorization_state(
+                &runtime_key,
+                &session_token,
+                &registration_id,
+            )
+        }),
         persisted_basic_user: Arc::new(|headers, database_file| {
             Box::pin(async move {
                 infrastructure_runtime_identity_access::persisted_basic_user(
@@ -176,6 +193,21 @@ pub(super) fn compose_runtime_identity_access_backend() -> RuntimeIdentityAccess
                 })
             },
         ),
+        persisted_record_failed_authentication_activity: Arc::new(
+            |database_file, email, input, error| {
+                Box::pin(async move {
+                    infrastructure_auth_runtime_identity::persisted_record_failed_authentication_activity(
+                        database_file.as_path(),
+                        email.as_deref(),
+                        &input.source,
+                        &error,
+                        input.ip.as_deref(),
+                        input.user_agent.as_deref(),
+                    )
+                    .await
+                })
+            },
+        ),
         persisted_record_successful_authentication_activity: Arc::new(
             |database_file, user, input| {
                 Box::pin(async move {
@@ -227,8 +259,8 @@ pub(super) fn compose_runtime_identity_access_backend() -> RuntimeIdentityAccess
                     database_file.as_path(),
                     &book_id,
                 )
-                    .await
-                    .map(|value| value.map(map_persisted_book_media_file))
+                .await
+                .map(|value| value.map(map_persisted_book_media_file))
             })
         }),
         load_kobo_metadata_record: Arc::new(|database_file, book_id| {
@@ -237,8 +269,8 @@ pub(super) fn compose_runtime_identity_access_backend() -> RuntimeIdentityAccess
                     database_file.as_path(),
                     &book_id,
                 )
-                    .await
-                    .map(|value| value.map(map_kobo_metadata_record))
+                .await
+                .map(|value| value.map(map_kobo_metadata_record))
             })
         }),
         load_kobo_sync_page: Arc::new(
@@ -270,8 +302,8 @@ pub(super) fn compose_runtime_identity_access_backend() -> RuntimeIdentityAccess
                     &book_hash,
                 )
                 .await
-                    .map(|value| value.map(map_koreader_book_target))
-                    .map_err(map_koreader_lookup_error)
+                .map(|value| value.map(map_koreader_book_target))
+                .map_err(map_koreader_lookup_error)
             })
         }),
         load_read_progress: Arc::new(|database_file, book_id, user_id| {
@@ -282,7 +314,7 @@ pub(super) fn compose_runtime_identity_access_backend() -> RuntimeIdentityAccess
                     &user_id,
                 )
                 .await
-                    .map(|value| value.map(map_persisted_read_progress_record))
+                .map(|value| value.map(map_persisted_read_progress_record))
             })
         }),
         load_thumbnail_by_id: Arc::new(|database_file, thumbnail_id| {
@@ -291,7 +323,7 @@ pub(super) fn compose_runtime_identity_access_backend() -> RuntimeIdentityAccess
                     database_file.as_path(),
                     &thumbnail_id,
                 )
-                    .await
+                .await
             })
         }),
         persist_read_progress_with_locator: Arc::new(
@@ -345,7 +377,7 @@ pub(super) fn compose_runtime_identity_access_backend() -> RuntimeIdentityAccess
                     database_file.as_path(),
                     &sync_point_id,
                 )
-                    .await
+                .await
             })
         }),
         create_auth_user: Arc::new(|database_file, input| {
@@ -409,15 +441,18 @@ pub(super) fn compose_runtime_identity_access_backend() -> RuntimeIdentityAccess
                     },
                 )
                 .await
-                .map(|result| komga_interfaces::runtime_identity_access::UpdateAuthUserResult {
-                    updated: result.updated,
-                    expire_sessions: result.expire_sessions,
+                .map(|result| {
+                    komga_interfaces::runtime_identity_access::UpdateAuthUserResult {
+                        updated: result.updated,
+                        expire_sessions: result.expire_sessions,
+                    }
                 })
             })
         }),
         open_auth_pool: Arc::new(|database_file| {
             Box::pin(async move {
-                infrastructure_runtime_identity_access::open_auth_pool(database_file.as_path()).await
+                infrastructure_runtime_identity_access::open_auth_pool(database_file.as_path())
+                    .await
             })
         }),
     }
@@ -453,6 +488,7 @@ fn map_koreader_book_target(
     InterfacesKoreaderBookTarget {
         id: record.id,
         page_count: record.page_count,
+        media_type: record.media_type,
     }
 }
 

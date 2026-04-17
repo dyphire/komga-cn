@@ -3,9 +3,70 @@
 use super::*;
 
 #[tokio::test]
+async fn router_kobo_initialization_returns_forbidden_for_session_user_without_kobo_sync_role() {
+    let paths = new_router_fixture("router-kobo-initialization-missing-kobo-sync-role").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_age_exclude_user_with_roles(
+        &paths,
+        "member-no-kobo-sync",
+        "member-no-kobo-sync@example.org",
+        "member-no-kobo-sync-123",
+        99,
+        &["USER", "PAGE_STREAMING"],
+    )
+    .await;
+    seed_kobo_sync_api_key(&paths, "membernokobosync", "member-no-kobo-sync").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/kobo/membernokobosync/v1/initialization")
+                .header(header::HOST, "127.0.0.1")
+                .body(Body::empty())
+                .expect("kobo initialization request should build"),
+        )
+        .await
+        .expect("kobo initialization request should complete");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_kobo_initialization_returns_unauthorized_for_invalid_path_token_even_with_kobo_sync_session()
+ {
+    let paths = new_router_fixture("router-kobo-initialization-invalid-path-token").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/kobo/any-token/v1/initialization")
+                .header(header::HOST, "127.0.0.1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("kobo invalid path token request should build"),
+        )
+        .await
+        .expect("kobo invalid path token request should complete");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_kobo_initialization_returns_fixed_api_token_header_and_absolute_local_urls() {
     let paths = new_router_fixture("router-kobo-initialization-api-token").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
 
     let config = runtime_config_for_paths(&paths);
     let expected_host = format!("http://127.0.0.1:{}", config.bind_address.port());
@@ -78,6 +139,7 @@ async fn router_kobo_initialization_returns_fixed_api_token_header_and_absolute_
 async fn router_kobo_initialization_uses_kobo_port_when_host_omits_port() {
     let paths = new_router_fixture("router-kobo-initialization-kobo-port").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
     upsert_server_setting(&paths, "KOBO_PORT", "8085").await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
@@ -110,6 +172,7 @@ async fn router_kobo_initialization_uses_kobo_port_when_host_omits_port() {
 async fn router_kobo_initialization_prefers_forwarded_host_over_kobo_port() {
     let paths = new_router_fixture("router-kobo-initialization-forwarded-host").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
     upsert_server_setting(&paths, "KOBO_PORT", "8085").await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
@@ -159,6 +222,7 @@ async fn router_kobo_initialization_uses_proxied_resources_and_overrides_local_u
 
     let paths = new_router_fixture("router-kobo-initialization-proxy-success").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
     upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
 
     let config = runtime_config_for_paths(&paths);
@@ -224,6 +288,7 @@ async fn router_kobo_initialization_falls_back_to_native_resources_for_non_401_p
 
     let paths = new_router_fixture("router-kobo-initialization-proxy-fallback").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
     upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
@@ -274,6 +339,7 @@ async fn router_kobo_initialization_preserves_unauthorized_from_proxy() {
 
     let paths = new_router_fixture("router-kobo-initialization-proxy-unauthorized").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
     upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
@@ -316,6 +382,7 @@ async fn router_kobo_auth_device_uses_proxied_response_when_proxy_enabled() {
 
     let paths = new_router_fixture("router-kobo-auth-device-proxy-success").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
     upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
@@ -375,6 +442,7 @@ async fn router_kobo_auth_device_falls_back_to_dummy_payload_when_proxy_returns_
 
     let paths = new_router_fixture("router-kobo-auth-device-proxy-unauthorized").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
     upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
@@ -439,6 +507,7 @@ async fn router_kobo_auth_device_falls_back_to_dummy_payload_when_proxy_returns_
 async fn router_kobo_auth_device_falls_back_to_dummy_payload_when_proxy_is_disabled() {
     let paths = new_router_fixture("router-kobo-auth-device-proxy-disabled").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;

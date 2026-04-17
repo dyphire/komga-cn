@@ -9,8 +9,10 @@ use komga_application::media_assets::{
     BookMediaRecord, BookMetadata, BookMetadataAuthor, BookMetadataLink, BookPageRecord,
     book_media_is_epub, book_media_is_pdf, book_media_is_single_image,
 };
+use komga_application::runtime_sse::register_runtime_sse_event;
 use pdfium_render::prelude::*;
 use rxing::{BarcodeFormat, DecodeHints, helpers as rxing_helpers};
+use serde_json::json;
 use sqlx::{Row, SqlitePool};
 
 use crate::filesystem::media_access::epub::load_epub_package_document;
@@ -33,20 +35,109 @@ mod support;
 pub use artwork_refresh::{
     generate_book_thumbnail, refresh_book_local_artwork, refresh_series_local_artwork,
 };
-use epub::extract_epub_book_patch;
+use epub::{extract_epub_book_patch, extract_epub_series_patch};
 pub use series_aggregation::aggregate_series_metadata;
 use series_metadata::{
     apply_mylar_series_import, apply_oneshot_series_metadata_import,
     apply_series_metadata_from_book_imports,
 };
 use sidecar_query::load_sidecar_url_for_parent;
-use sources::{extract_comicinfo_book_patch, extract_comicinfo_readlists};
+use sources::{
+    extract_comicinfo_book_patch, extract_comicinfo_readlists, extract_comicinfo_series_patch,
+};
 use support::{generated_readlist_id, normalize_isbn13};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RefreshBookMetadataOutcome {
     pub series_id: Option<String>,
+    pub library_id: Option<String>,
     pub changed_readlist_ids: Vec<String>,
+    pub book_changed: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TransientMetadataProviderInference {
+    pub series_titles: Vec<String>,
+    pub number: Option<f64>,
+}
+
+fn push_transient_series_title(series_titles: &mut Vec<String>, title: Option<String>) {
+    let Some(title) = title.map(|value| value.trim().to_string()) else {
+        return;
+    };
+    if title.is_empty() || series_titles.iter().any(|existing| existing == &title) {
+        return;
+    }
+    series_titles.push(title);
+}
+
+pub fn infer_transient_epub_provider_metadata(
+    package_document: &[u8],
+) -> TransientMetadataProviderInference {
+    let book_patch = extract_epub_book_patch(package_document);
+    let series_patch = extract_epub_series_patch(package_document);
+    let mut series_titles = Vec::new();
+    push_transient_series_title(&mut series_titles, series_patch.title);
+
+    TransientMetadataProviderInference {
+        series_titles,
+        number: book_patch.number_sort,
+    }
+}
+
+pub fn infer_transient_comicinfo_provider_metadata(xml: &str) -> TransientMetadataProviderInference {
+    let book_patch = extract_comicinfo_book_patch(xml);
+    let append_volume_patch = extract_comicinfo_series_patch(xml, true);
+    let plain_patch = extract_comicinfo_series_patch(xml, false);
+    let mut series_titles = Vec::new();
+    push_transient_series_title(&mut series_titles, append_volume_patch.title);
+    push_transient_series_title(&mut series_titles, plain_patch.title);
+
+    TransientMetadataProviderInference {
+        series_titles,
+        number: book_patch.number_sort,
+    }
+}
+
+fn emit_book_changed_event(book_id: &str, series_id: &str, library_id: &str) {
+    register_runtime_sse_event(
+        "BookChanged",
+        json!({
+            "bookId": book_id,
+            "seriesId": series_id,
+            "libraryId": library_id,
+        }),
+        false,
+        None,
+    );
+}
+
+fn emit_readlist_event(readlist_id: &str, book_ids: &[String], created: bool) {
+    register_runtime_sse_event(
+        if created {
+            "ReadListAdded"
+        } else {
+            "ReadListChanged"
+        },
+        json!({
+            "readListId": readlist_id,
+            "bookIds": book_ids,
+        }),
+        false,
+        None,
+    );
+}
+
+fn emit_series_changed_event(series_id: &str, library_id: &str) {
+    register_runtime_sse_event(
+        "SeriesChanged",
+        json!({
+            "seriesId": series_id,
+            "libraryId": library_id,
+        }),
+        false,
+        None,
+    );
 }
 
 fn thumbnail_max_edge_from_setting(value: Option<&str>) -> u32 {
@@ -65,13 +156,15 @@ pub fn refresh_book_metadata(
 ) -> Result<RefreshBookMetadataOutcome, String> {
     let database_file = database_file.to_path_buf();
     let book_id = book_id.to_string();
+    let book_id_for_events = book_id.clone();
     let capabilities = capabilities.clone();
 
-    run_database_query(database_file, move |pool| {
+    let outcome = run_database_query(database_file, move |pool| {
         let book_id = book_id.clone();
         let capabilities = capabilities.clone();
         Box::pin(async move {
             let mut changed_readlist_ids = BTreeSet::new();
+            let mut should_emit_book_changed = false;
             let book_row = sqlx::query(
                 r#"
                 SELECT b.URL AS BOOK_URL,
@@ -101,6 +194,12 @@ pub fn refresh_book_metadata(
                     book_row.get::<bool, _>("IMPORT_COMICINFO_READLIST");
                 let import_epub_book = book_row.get::<bool, _>("IMPORT_EPUB_BOOK");
                 let import_barcode_isbn = book_row.get::<bool, _>("IMPORT_BARCODE_ISBN");
+                should_emit_book_changed |=
+                    import_comicinfo_book && comicinfo_provider_matches_capabilities(&capabilities);
+                should_emit_book_changed |=
+                    import_epub_book && epub_provider_matches_capabilities(&capabilities);
+                should_emit_book_changed |=
+                    import_barcode_isbn && barcode_provider_matches_capabilities(&capabilities);
                 if let Some(sidecar_url) =
                     load_sidecar_url_for_parent(&pool, &book_url, true).await?
                 {
@@ -165,9 +264,9 @@ pub fn refresh_book_metadata(
                 format!("failed to refresh BOOK row timestamp for '{book_id}': {error}")
             })?;
 
-            let series_id = sqlx::query(
+            let book_context = sqlx::query(
                 r#"
-                SELECT SERIES_ID
+                SELECT SERIES_ID, LIBRARY_ID
                 FROM BOOK
                 WHERE ID = ?
                 LIMIT 1
@@ -176,15 +275,33 @@ pub fn refresh_book_metadata(
             .bind(&book_id)
             .fetch_optional(&pool)
             .await
-            .map_err(|error| format!("failed to resolve SERIES_ID for '{book_id}': {error}"))?
-            .and_then(|row| row.get::<Option<String>, _>("SERIES_ID"));
+            .map_err(|error| {
+                format!("failed to resolve book SSE context for '{book_id}': {error}")
+            })?;
+            let series_id = book_context
+                .as_ref()
+                .and_then(|row| row.get::<Option<String>, _>("SERIES_ID"));
+            let library_id = book_context
+                .as_ref()
+                .and_then(|row| row.get::<Option<String>, _>("LIBRARY_ID"));
 
             Ok(RefreshBookMetadataOutcome {
                 series_id,
+                library_id,
                 changed_readlist_ids: changed_readlist_ids.into_iter().collect(),
+                book_changed: should_emit_book_changed,
             })
         })
-    })
+    })?;
+
+    if outcome.book_changed
+        && let (Some(series_id), Some(library_id)) =
+            (outcome.series_id.as_deref(), outcome.library_id.as_deref())
+    {
+        emit_book_changed_event(&book_id_for_events, series_id, library_id);
+    }
+
+    Ok(outcome)
 }
 
 struct ComicInfoReadListEntry {
@@ -749,6 +866,22 @@ async fn persist_book_metadata_for_refresh(
     Ok(true)
 }
 
+async fn load_readlist_book_ids(
+    pool: &SqlitePool,
+    readlist_id: &str,
+) -> Result<Vec<String>, String> {
+    sqlx::query("SELECT BOOK_ID FROM READLIST_BOOK WHERE READLIST_ID = ? ORDER BY NUMBER ASC")
+        .bind(readlist_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|error| format!("failed to load readlist books for '{readlist_id}': {error}"))
+        .map(|rows| {
+            rows.into_iter()
+                .map(|row| row.get::<String, _>("BOOK_ID"))
+                .collect()
+        })
+}
+
 async fn upsert_comicinfo_readlist(
     pool: &SqlitePool,
     book_id: &str,
@@ -766,8 +899,8 @@ async fn upsert_comicinfo_readlist(
         })?
         .map(|row| row.get::<String, _>("ID"));
 
-    let readlist_id = match readlist_id {
-        Some(readlist_id) => readlist_id,
+    let (readlist_id, created) = match readlist_id {
+        Some(readlist_id) => (readlist_id, false),
         None => {
             let generated_id = generated_readlist_id(&readlist.name);
             sqlx::query(
@@ -783,7 +916,7 @@ async fn upsert_comicinfo_readlist(
                     readlist.name, book_id,
                 )
             })?;
-            generated_id
+            (generated_id, true)
         }
     };
 
@@ -845,6 +978,9 @@ async fn upsert_comicinfo_readlist(
         )
     })?;
 
+    let readlist_book_ids = load_readlist_book_ids(pool, &readlist_id).await?;
+    emit_readlist_event(&readlist_id, &readlist_book_ids, created);
+
     Ok(Some(readlist_id))
 }
 
@@ -885,11 +1021,15 @@ async fn assign_comicinfo_readlist_number(
 pub fn refresh_series_metadata(database_file: &Path, series_id: &str) -> Result<(), String> {
     let database_file = database_file.to_path_buf();
     let series_id = series_id.to_string();
+    let series_id_for_events = series_id.clone();
 
-    run_database_query(database_file, move |pool| {
-        let series_id = series_id.clone();
-        Box::pin(async move {
-            let series_row = sqlx::query(
+    let (library_id, should_emit_series_changed) = run_database_query(
+        database_file,
+        move |pool| {
+            let series_id = series_id.clone();
+            Box::pin(async move {
+                let mut should_emit_series_changed = false;
+                let series_row = sqlx::query(
                 r#"
                 SELECT s.URL AS SERIES_URL,
                        l.ROOT AS LIBRARY_ROOT,
@@ -912,74 +1052,108 @@ pub fn refresh_series_metadata(database_file: &Path, series_id: &str) -> Result<
                 format!("failed to resolve series path for metadata refresh '{series_id}': {error}")
             })?;
 
-            if let Some(series_row) = &series_row {
-                let series_url = series_row.get::<String, _>("SERIES_URL");
-                let library_root = series_row.get::<String, _>("LIBRARY_ROOT");
-                let resolved_library_root = resolve_stored_path(&library_root);
-                let oneshot = series_row.get::<i64, _>("ONESHOT") != 0;
-                let import_comicinfo_series = series_row.get::<bool, _>("IMPORT_COMICINFO_SERIES");
-                let import_comicinfo_collection =
-                    series_row.get::<bool, _>("IMPORT_COMICINFO_COLLECTION");
-                let import_comicinfo_series_append_volume =
-                    series_row.get::<bool, _>("IMPORT_COMICINFO_SERIES_APPEND_VOLUME");
-                let import_epub_series = series_row.get::<bool, _>("IMPORT_EPUB_SERIES");
-                let import_mylar_series = series_row.get::<bool, _>("IMPORT_MYLAR_SERIES");
+                if let Some(series_row) = &series_row {
+                    let series_url = series_row.get::<String, _>("SERIES_URL");
+                    let library_root = series_row.get::<String, _>("LIBRARY_ROOT");
+                    let resolved_library_root = resolve_stored_path(&library_root);
+                    let oneshot = series_row.get::<i64, _>("ONESHOT") != 0;
+                    let import_comicinfo_series =
+                        series_row.get::<bool, _>("IMPORT_COMICINFO_SERIES");
+                    let import_comicinfo_collection =
+                        series_row.get::<bool, _>("IMPORT_COMICINFO_COLLECTION");
+                    let import_comicinfo_series_append_volume =
+                        series_row.get::<bool, _>("IMPORT_COMICINFO_SERIES_APPEND_VOLUME");
+                    let import_epub_series = series_row.get::<bool, _>("IMPORT_EPUB_SERIES");
+                    let import_mylar_series = series_row.get::<bool, _>("IMPORT_MYLAR_SERIES");
+                    should_emit_series_changed = import_comicinfo_series
+                        || import_epub_series
+                        || import_mylar_series
+                        || oneshot;
 
-                apply_series_metadata_from_book_imports(
-                    &pool,
-                    &series_id,
-                    resolved_library_root.as_path(),
-                    import_comicinfo_series,
-                    import_comicinfo_collection,
-                    import_comicinfo_series_append_volume,
-                    import_epub_series,
-                )
-                .await?;
+                    apply_series_metadata_from_book_imports(
+                        &pool,
+                        &series_id,
+                        resolved_library_root.as_path(),
+                        import_comicinfo_series,
+                        import_comicinfo_collection,
+                        import_comicinfo_series_append_volume,
+                        import_epub_series,
+                    )
+                    .await?;
 
-                apply_mylar_series_import(
-                    &pool,
-                    &series_id,
-                    resolved_library_root.as_path(),
-                    &series_url,
-                    import_mylar_series,
-                    oneshot,
-                )
-                .await?;
+                    apply_mylar_series_import(
+                        &pool,
+                        &series_id,
+                        resolved_library_root.as_path(),
+                        &series_url,
+                        import_mylar_series,
+                        oneshot,
+                    )
+                    .await?;
 
-                if oneshot {
-                    apply_oneshot_series_metadata_import(&pool, &series_id).await?;
+                    if oneshot {
+                        apply_oneshot_series_metadata_import(&pool, &series_id).await?;
+                    }
                 }
-            }
 
-            sqlx::query(
-                r#"
+                sqlx::query(
+                    r#"
                 UPDATE SERIES_METADATA
                 SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
                 WHERE SERIES_ID = ?
                 "#,
-            )
-            .bind(&series_id)
-            .execute(&pool)
-            .await
-            .map_err(|error| {
-                format!("failed to refresh SERIES_METADATA for '{series_id}': {error}")
-            })?;
+                )
+                .bind(&series_id)
+                .execute(&pool)
+                .await
+                .map_err(|error| {
+                    format!("failed to refresh SERIES_METADATA for '{series_id}': {error}")
+                })?;
 
-            sqlx::query(
-                r#"
+                sqlx::query(
+                    r#"
                 UPDATE SERIES
                 SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
                 WHERE ID = ?
                 "#,
-            )
-            .bind(&series_id)
-            .execute(&pool)
-            .await
-            .map_err(|error| format!("failed to refresh SERIES row for '{series_id}': {error}"))?;
+                )
+                .bind(&series_id)
+                .execute(&pool)
+                .await
+                .map_err(|error| {
+                    format!("failed to refresh SERIES row for '{series_id}': {error}")
+                })?;
 
-            Ok(())
-        })
-    })
+                sqlx::query(
+                    r#"
+                SELECT LIBRARY_ID
+                FROM SERIES
+                WHERE ID = ?
+                LIMIT 1
+                "#,
+                )
+                .bind(&series_id)
+                .fetch_optional(&pool)
+                .await
+                .map_err(|error| {
+                    format!(
+                        "failed to resolve LIBRARY_ID for refreshed series '{series_id}': {error}"
+                    )
+                })
+                .map(|row| {
+                    (
+                        row.and_then(|row| row.get::<Option<String>, _>("LIBRARY_ID")),
+                        should_emit_series_changed,
+                    )
+                })
+            })
+        },
+    )?;
+
+    if should_emit_series_changed && let Some(library_id) = library_id.as_deref() {
+        emit_series_changed_event(&series_id_for_events, library_id);
+    }
+    Ok(())
 }
 
 type BoxFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, String>> + Send>>;

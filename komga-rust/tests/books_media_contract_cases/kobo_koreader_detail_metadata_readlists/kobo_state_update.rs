@@ -35,6 +35,7 @@ async fn router_kobo_state_update_proxies_missing_book_when_kobo_proxy_enabled()
 
     let paths = new_router_fixture("router-kobo-state-update-proxy-missing-book").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
     upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
@@ -94,6 +95,7 @@ async fn router_kobo_state_update_proxies_missing_book_when_kobo_proxy_enabled()
 async fn router_kobo_state_update_returns_not_found_for_missing_book_when_proxy_disabled() {
     let paths = new_router_fixture("router-kobo-state-update-missing-book-local").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
@@ -231,6 +233,7 @@ async fn router_kobo_state_update_uses_path_api_key_identity_for_valid_epub_upda
 async fn router_kobo_state_update_returns_failure_for_invalid_epub_progression() {
     let paths = new_router_fixture("router-kobo-state-update-invalid-epub-progression").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
     seed_kobo_state_epub_extension(&paths, fixture_epub_positions_extension_blob()).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
@@ -298,6 +301,7 @@ async fn router_kobo_state_update_returns_failure_for_invalid_epub_progression()
 async fn router_kobo_state_update_uses_matched_epub_total_progression_for_page_and_completion() {
     let paths = new_router_fixture("router-kobo-state-update-matched-total-progression").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
     seed_kobo_state_epub_extension(
         &paths,
         fixture_epub_positions_extension_blob_total_progression_021(),
@@ -376,6 +380,7 @@ async fn router_kobo_state_update_uses_matched_epub_total_progression_for_page_a
 async fn router_kobo_state_update_finished_uses_last_epub_position_semantics() {
     let paths = new_router_fixture("router-kobo-state-update-finished-last-position").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
     seed_kobo_state_epub_extension(
         &paths,
         fixture_epub_positions_extension_blob_fixed_layout_single_position(),
@@ -453,6 +458,7 @@ async fn router_kobo_state_update_finished_uses_last_epub_position_semantics() {
 async fn router_kobo_state_update_returns_failure_for_older_progression() {
     let paths = new_router_fixture("router-kobo-state-update-older-progression").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
     seed_kobo_state_epub_extension(&paths, fixture_epub_positions_extension_blob()).await;
 
     let pool = connect_pool(paths.main_db.as_path(), 1)

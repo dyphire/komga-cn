@@ -4,6 +4,7 @@ use super::*;
 async fn router_kobo_book_file_epub_convert_kepub_uses_kepub_attachment_name() {
     let paths = new_router_fixture("router-kobo-book-file-convert-kepub").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
     write_router_epub_with_cover(&paths, "books/book-1.epub");
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));

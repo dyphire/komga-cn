@@ -107,7 +107,7 @@ pub(super) fn try_execute(
                 scheduler.enqueue(runtime_follow_up_task(
                     RuntimeFollowUpTask::GenerateBookThumbnail {
                         book_id,
-                        priority: task.priority.saturating_sub(5),
+                        priority: task.priority,
                     },
                 ));
             }
@@ -431,7 +431,7 @@ mod tests {
         };
         let mut scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "thumbnail-finder-test");
-        let finder_task = TaskQueueRecord::new("FIND_BOOK_THUMBNAILS_TO_REGENERATE", 0, None)
+        let finder_task = TaskQueueRecord::new("FIND_BOOK_THUMBNAILS_TO_REGENERATE", 6, None)
             .with_payload(serde_json::json!({ "for_bigger_result_only": false }).to_string());
 
         let result = try_execute(&mut scheduler, &runtime, &finder_task, None);
@@ -444,6 +444,7 @@ mod tests {
 
         assert_eq!(generated.id, "GENERATE_BOOK_THUMBNAIL_book-1");
         assert_eq!(generated.simple_type, "GENERATE_BOOK_THUMBNAIL");
+        assert_eq!(generated.priority, 6);
         assert_eq!(generated.group, None);
 
         let _ = std::fs::remove_file(database_file);
@@ -498,28 +499,28 @@ mod tests {
         };
         let mut scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "thumbnail-finder-all-books-test");
-        let finder_task = TaskQueueRecord::new("FIND_BOOK_THUMBNAILS_TO_REGENERATE", 0, None)
+        let finder_task = TaskQueueRecord::new("FIND_BOOK_THUMBNAILS_TO_REGENERATE", 6, None)
             .with_payload(serde_json::json!({ "for_bigger_result_only": false }).to_string());
 
         let result = try_execute(&mut scheduler, &runtime, &finder_task, None);
         assert!(matches!(result, Some(Ok(()))));
 
-        let mut generated_ids = Vec::new();
+        let mut generated = Vec::new();
         while let Some(task) = scheduler
             .admin_mut()
             .take_available("thumbnail-finder-all-books-assert")
         {
-            generated_ids.push(task.id);
+            generated.push((task.id, task.priority));
         }
-        generated_ids.sort();
+        generated.sort_by(|left, right| left.0.cmp(&right.0));
 
         assert_eq!(
-            generated_ids,
+            generated,
             vec![
-                "GENERATE_BOOK_THUMBNAIL_book-1".to_string(),
-                "GENERATE_BOOK_THUMBNAIL_book-2".to_string(),
+                ("GENERATE_BOOK_THUMBNAIL_book-1".to_string(), 6),
+                ("GENERATE_BOOK_THUMBNAIL_book-2".to_string(), 6),
             ],
-            "full thumbnail regeneration should target every non-deleted book, even if one already has a selected thumbnail",
+            "full thumbnail regeneration should target every non-deleted book and keep the finder task priority for Kotlin parity",
         );
 
         let _ = std::fs::remove_file(database_file);

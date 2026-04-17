@@ -32,6 +32,7 @@ pub struct PersistedReadProgressRecord {
 pub struct KoreaderBookTarget {
     pub id: String,
     pub page_count: u64,
+    pub media_type: String,
 }
 
 #[derive(Clone)]
@@ -468,10 +469,12 @@ pub async fn load_koreader_book_target(
         .await
         .map_err(|_| KoreaderBookLookupError::Persistence)?;
     let rows = sqlx::query(
-        r#"SELECT b.ID AS BOOK_ID, COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT
- FROM BOOK b
- LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
- WHERE b.FILE_HASH_KOREADER = ?
+        r#"SELECT b.ID AS BOOK_ID,
+         COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT,
+         COALESCE(m.MEDIA_TYPE, '') AS MEDIA_TYPE
+  FROM BOOK b
+  LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
+  WHERE b.FILE_HASH_KOREADER = ?
    AND b.DELETED_DATE IS NULL
  ORDER BY b.ID ASC"#,
     )
@@ -491,6 +494,7 @@ pub async fn load_koreader_book_target(
     Ok(Some(KoreaderBookTarget {
         id: row.get::<String, _>("BOOK_ID"),
         page_count: row.get::<i64, _>("PAGE_COUNT").max(0) as u64,
+        media_type: row.get::<String, _>("MEDIA_TYPE"),
     }))
 }
 

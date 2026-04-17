@@ -3,7 +3,7 @@ use std::path::Path;
 use axum::Json;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use serde_json::{Value, json};
+use serde_json::json;
 
 use crate::http::identity_access::auth::{require_auth, resolved_auth_user, user_id};
 use crate::http::request_urls::app_absolute_url;
@@ -15,7 +15,8 @@ use crate::opds_catalog_access::{
 use super::auth_payload::opds_catalog_unauthorized_response;
 use super::feeds::{
     normalize_opds_updated, opds_navigation_response_with_paging, opds_publication_for_feed_entry,
-    opds_publications_response_with_paging, opds_subsection_navigation_link, parse_page_size,
+    opds_publications_response_with_paging, opds_subsection_navigation_link, paginate_vec,
+    parse_page_size,
 };
 use super::persisted::{
     allowed_library_ids, content_allowed_by_restrictions, has_visible_collections_for_scope,
@@ -403,7 +404,7 @@ pub(super) async fn opds_v2_latest_series_feed(
         .collect::<Vec<_>>();
 
     let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
-    let self_path = format!("/opds/v2/libraries{library_segment}/books/latest");
+    let self_path = format!("/opds/v2/libraries{library_segment}/series/latest");
     let modified = selected_library
         .map(|library| library.last_modified.as_str())
         .filter(|value| !value.is_empty());
@@ -479,6 +480,7 @@ async fn load_visible_latest_series_page(
 
 pub(super) async fn opds_v2_collections_feed(
     headers: HeaderMap,
+    uri: Uri,
     database_file: &Path,
     library_id: Option<&str>,
 ) -> Response {
@@ -508,6 +510,7 @@ pub(super) async fn opds_v2_collections_feed(
     let selected_library =
         library_id.and_then(|id| libraries.iter().find(|library| library.id == id));
     let restrictions = opds_restrictions(&headers);
+    let (page, size) = parse_page_size(uri.query().unwrap_or_default());
 
     let collections = match load_collections(database_file, library_id).await {
         Ok(collections) => collections,
@@ -520,30 +523,35 @@ pub(super) async fn opds_v2_collections_feed(
         }
     };
 
-    let mut collection_navigation = Vec::new();
+    let mut visible_collections = Vec::new();
     for collection in collections {
         let series =
             match load_collection_series(database_file, &collection.id, collection.ordered).await {
                 Ok(series) => series,
                 Err(_) => continue,
             };
-        if series.iter().any(|series| {
-            library_visible(&allowed_library_ids, &series.library_id)
-                && content_allowed_by_restrictions(
-                    restrictions.as_ref(),
-                    series.age_rating,
-                    &series.sharing_labels,
-                )
-        }) {
-            collection_navigation.push(json!({
+        if series
+            .iter()
+            .any(|series| library_visible(&allowed_library_ids, &series.library_id))
+        {
+            visible_collections.push(collection);
+        }
+    }
+    let total_visible_collections = visible_collections.len();
+    let (paged_collections, has_next) = paginate_vec(visible_collections, page, size);
+    let collection_navigation = paged_collections
+        .into_iter()
+        .map(|collection| {
+            json!({
                 "title": collection.name,
                 "href": app_absolute_url(&headers, format!("/opds/v2/collections/{}", collection.id).as_str()),
                 "type": "application/opds+json",
-            }));
-        }
-    }
+            })
+        })
+        .collect::<Vec<_>>();
 
     let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
+    let self_path = format!("/opds/v2/libraries{library_segment}/collections");
     let has_visible_collections = has_visible_collections_for_scope(
         database_file,
         &allowed_library_ids,
@@ -593,8 +601,40 @@ pub(super) async fn opds_v2_collections_feed(
     let modified = selected_library
         .map(|library| library.last_modified.as_str())
         .filter(|value| !value.is_empty())
-        .map(str::to_string)
+        .map(normalize_opds_updated)
         .unwrap_or_else(super::feeds::opds_now_timestamp);
+
+    let mut links = vec![
+        json!({
+            "rel": "self",
+            "href": app_absolute_url(&headers, self_path.as_str()),
+        }),
+        json!({
+            "title": "Home",
+            "rel": "start",
+            "href": app_absolute_url(&headers, "/opds/v2/catalog"),
+            "type": "application/opds+json",
+        }),
+        json!({
+            "title": "Search",
+            "rel": "search",
+            "href": app_absolute_url(&headers, "/opds/v2/search{?query}"),
+            "type": "application/opds+json",
+            "templated": true,
+        }),
+    ];
+    if page > 0 {
+        links.push(json!({
+            "rel": "previous",
+            "href": app_absolute_url(&headers, format!("{self_path}?page={}", page.saturating_sub(1)).as_str()),
+        }));
+    }
+    if has_next {
+        links.push(json!({
+            "rel": "next",
+            "href": app_absolute_url(&headers, format!("{self_path}?page={}", page + 1).as_str()),
+        }));
+    }
 
     (
         StatusCode::OK,
@@ -609,26 +649,11 @@ pub(super) async fn opds_v2_collections_feed(
                     .map(|library| format!("{} - Collections", library.name))
                     .unwrap_or_else(|| "All libraries - Collections".to_string()),
                 "modified": modified,
+                "itemsPerPage": size,
+                "currentPage": page + 1,
+                "numberOfItems": total_visible_collections,
             },
-            "links": [
-                {
-                    "rel": "self",
-                    "href": app_absolute_url(&headers, format!("/opds/v2/libraries{library_segment}/collections").as_str()),
-                },
-                {
-                    "title": "Home",
-                    "rel": "start",
-                    "href": app_absolute_url(&headers, "/opds/v2/catalog"),
-                    "type": "application/opds+json",
-                },
-                {
-                    "title": "Search",
-                    "rel": "search",
-                    "href": app_absolute_url(&headers, "/opds/v2/search{?query}"),
-                    "type": "application/opds+json",
-                    "templated": true,
-                }
-            ],
+            "links": links,
             "navigation": navigation,
             "groups": [
                 {
@@ -807,17 +832,12 @@ pub(super) async fn opds_v2_readlists_feed(
         }));
     }
 
-    let mut readlists_group = json!({
+    let readlists_group = json!({
         "metadata": {
             "title": "Read Lists",
         },
+        "navigation": readlist_navigation,
     });
-    if !readlist_navigation.is_empty() {
-        readlists_group
-            .as_object_mut()
-            .expect("readlists group should be an object")
-            .insert("navigation".to_string(), Value::Array(readlist_navigation));
-    }
 
     (
         StatusCode::OK,

@@ -1,6 +1,7 @@
 use axum::Json;
 use axum::extract::Extension;
 use axum::extract::Path as AxumPath;
+use axum::http::HeaderMap;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use rust_embed::Embed;
@@ -11,6 +12,8 @@ use std::path::Path;
 use crate::operational_settings_access::fonts::{
     list_font_families, load_font_family_css, load_font_file,
 };
+use crate::http::identity_access::auth::require_request_auth;
+use crate::http::state::AuthDatabaseState;
 
 use super::super::super::OperationalState;
 
@@ -18,7 +21,15 @@ use super::super::super::OperationalState;
 #[folder = "../../../komga/src/main/resources/embeddedFonts"]
 struct EmbeddedFonts;
 
-pub(crate) async fn get_fonts_families(Extension(state): Extension<OperationalState>) -> Response {
+pub(crate) async fn get_fonts_families(
+    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(state): Extension<OperationalState>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+        return response;
+    }
+
     let families = merged_font_families(state.runtime.fonts_data_directory.as_path());
     Json(Value::Array(
         families.into_iter().map(Value::String).collect(),

@@ -18,12 +18,6 @@ pub trait RuntimeMediaImportService: Send + Sync {
         next_task_id: &mut dyn FnMut() -> String,
     ) -> Result<Vec<TaskQueueRecord>, String>;
 
-    fn process_queued_books_payload<'a>(
-        &'a self,
-        task_payload: &'a str,
-        import_priority: i32,
-    ) -> futures_util::future::BoxFuture<'a, Result<Vec<TaskQueueRecord>, String>>;
-
     fn process_queued_book_payload<'a>(
         &'a self,
         task_payload: &'a str,

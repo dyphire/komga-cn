@@ -156,12 +156,12 @@ async fn router_opds_v2_latest_series_uses_kotlin_self_links() {
         (
             "/opds/v2/libraries/series/latest",
             "All libraries - Latest Series",
-            "http://localhost/opds/v2/libraries/books/latest",
+            "http://localhost/opds/v2/libraries/series/latest",
         ),
         (
             "/opds/v2/libraries/library-1/series/latest",
             "Library 1 - Latest Series",
-            "http://localhost/opds/v2/libraries/library-1/books/latest",
+            "http://localhost/opds/v2/libraries/library-1/series/latest",
         ),
     ] {
         let response = app
@@ -326,7 +326,7 @@ async fn router_opds_v2_latest_series_includes_page_metadata_and_filters_one_sho
         .expect("latest series previous link should be present");
     assert_eq!(
         previous_link.get("href").and_then(Value::as_str),
-        Some("http://localhost/opds/v2/libraries/library-1/books/latest?page=0")
+        Some("http://localhost/opds/v2/libraries/library-1/series/latest?page=0")
     );
     let next_link = links
         .iter()
@@ -334,7 +334,7 @@ async fn router_opds_v2_latest_series_includes_page_metadata_and_filters_one_sho
         .expect("latest series next link should be present");
     assert_eq!(
         next_link.get("href").and_then(Value::as_str),
-        Some("http://localhost/opds/v2/libraries/library-1/books/latest?page=2")
+        Some("http://localhost/opds/v2/libraries/library-1/series/latest?page=2")
     );
 
     let navigation = payload

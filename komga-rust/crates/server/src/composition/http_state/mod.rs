@@ -35,9 +35,8 @@ use komga_interfaces::http::discovery::detail::{
     PersistedCollectionAccessRecord, PersistedComicrackMatchCandidateRecord,
     PersistedReadProgressRecord as PersistedBookReadProgressRecord, PersistedReadlistBookRecord,
     PersistedReadlistRecord, PersistedSeriesCollectionRecord, PersistedSeriesDetailRecord,
-    PersistedSeriesResourceRecord, PersistedSeriesRestrictionRecord,
-    SeriesAlternateTitleRecord, SeriesMetadataLinkRecord, SeriesSummaryRecord,
-    install_discovery_detail_access_backends,
+    PersistedSeriesResourceRecord, PersistedSeriesRestrictionRecord, SeriesAlternateTitleRecord,
+    SeriesMetadataLinkRecord, SeriesSummaryRecord, install_discovery_detail_access_backends,
 };
 use komga_interfaces::http::discovery::persisted::backend::{
     PersistedDiscoveryAccessBackend, install_persisted_discovery_access,
@@ -65,8 +64,8 @@ use komga_interfaces::opds_catalog_access::{
     BrowsePublisherEntry as InterfacesBrowsePublisherEntry,
     BrowseSeriesNavigationEntry as InterfacesBrowseSeriesNavigationEntry,
     OpdsBookFeedEntry as InterfacesOpdsBookFeedEntry, OpdsCatalogAccessBackend,
-    OpdsReadlistEntry as InterfacesOpdsReadlistEntry,
-    OpdsSeriesEntry as InterfacesOpdsSeriesEntry, install_opds_catalog_access,
+    OpdsReadlistEntry as InterfacesOpdsReadlistEntry, OpdsSeriesEntry as InterfacesOpdsSeriesEntry,
+    install_opds_catalog_access,
 };
 use komga_interfaces::opds_persisted_access::{
     OpdsPersistedAccessBackend, PersistedBookAuthorRecord as InterfacesPersistedBookAuthorRecord,
@@ -82,23 +81,12 @@ use komga_interfaces::opds_persisted_access::{
     install_opds_persisted_access,
 };
 use komga_interfaces::operational_runtime_access::{
-    BookImportSnapshot as InterfacesBookImportSnapshot,
-    BookSnapshot as InterfacesBookSnapshot,
-    CollectionSnapshot as InterfacesCollectionSnapshot,
-    LibrarySnapshot as InterfacesLibrarySnapshot, OperationalRuntimeAccessBackend,
-    ReadListSnapshot as InterfacesReadListSnapshot,
-    SeriesSnapshot as InterfacesSeriesSnapshot,
-    ServerSettingsStore as InterfacesServerSettingsStore,
-    SseSnapshot as InterfacesSseSnapshot,
-    ThumbnailBookSnapshot as InterfacesThumbnailBookSnapshot,
-    ThumbnailCollectionSnapshot as InterfacesThumbnailCollectionSnapshot,
-    ThumbnailReadListSnapshot as InterfacesThumbnailReadListSnapshot,
-    ThumbnailSnapshot as InterfacesThumbnailSnapshot, install_operational_runtime_access,
+    OperationalRuntimeAccessBackend, ServerSettingsStore as InterfacesServerSettingsStore,
+    install_operational_runtime_access,
 };
 use komga_interfaces::operational_settings_access::{
     ClaimInitialAdminUserResult as InterfacesClaimInitialAdminUserResult,
-    OperationalSettingsAccessBackend,
-    PageHashDeleteTarget as InterfacesPageHashDeleteTarget,
+    OperationalSettingsAccessBackend, PageHashDeleteTarget as InterfacesPageHashDeleteTarget,
     PageHashDeleteTargetPage as InterfacesPageHashDeleteTargetPage,
     PageHashThumbnail as InterfacesPageHashThumbnail,
     PersistedServerSettings as InterfacesPersistedServerSettings,
@@ -117,9 +105,9 @@ use komga_interfaces::runtime_identity_access::{
 use sha2::Digest;
 use tokio::sync::watch;
 
+use crate::runtime::background_workers::RuntimeBackgroundState;
 use komga_config::env_config::RuntimeConfig;
 use komga_config::profile::RuntimeProfile as ConfigRuntimeProfile;
-use crate::runtime::background_workers::RuntimeBackgroundState;
 
 mod http_state_discovery;
 mod http_state_media_assets;

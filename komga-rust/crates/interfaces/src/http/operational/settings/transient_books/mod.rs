@@ -90,54 +90,28 @@ pub(crate) async fn post_transient_books(
         let Some(file_metadata) = load_transient_book_file_metadata(path) else {
             continue;
         };
-        let id = transient_book_id(path);
-        let existing = store.records.get(&id).cloned();
-        let status = existing
-            .as_ref()
-            .map(|record| record.status.clone())
-            .unwrap_or_else(|| "UNKNOWN".to_string());
-        let media_type = existing
-            .as_ref()
-            .map(|record| record.media_type.clone())
-            .unwrap_or_default();
-        let pages = existing
-            .as_ref()
-            .map(|record| record.pages.clone())
-            .unwrap_or_default();
-        let files = existing
-            .as_ref()
-            .map(|record| record.files.clone())
-            .unwrap_or_default();
-        let comment = existing
-            .as_ref()
-            .map(|record| record.comment.clone())
-            .unwrap_or_default();
-        let number = existing.as_ref().and_then(|record| record.number);
-        let series_id = existing
-            .as_ref()
-            .and_then(|record| record.series_id.clone());
+        let id = transient_book_id();
 
         let record = TransientBookRecord {
             id: id.clone(),
             name: name.to_string(),
             path: path.to_string(),
-            file_last_modified_epoch_seconds: file_metadata.file_last_modified_epoch_seconds,
+            file_last_modified_unix_nanos: file_metadata.file_last_modified_unix_nanos,
             size_bytes: file_metadata.size_bytes,
-            status,
-            media_type,
-            pages,
-            files,
-            comment,
-            number,
-            series_id,
+            status: "UNKNOWN".to_string(),
+            media_type: String::new(),
+            page_count: 0,
+            pages: Vec::new(),
+            files: Vec::new(),
+            comment: String::new(),
+            number: None,
+            series_id: None,
         };
-        store.records.insert(id, record.clone());
+        store.insert(record.clone());
         payload.push(transient_book_payload(&record));
     }
 
-    let records = store.records.clone();
     drop(store);
-    let _ = (state.persist_transient_books_records)(&records);
     payload.sort_by(|left, right| {
         left["url"]
             .as_str()
@@ -157,11 +131,11 @@ pub(crate) async fn post_transient_book_analyze(
     }
 
     let record = {
-        let store = state
+        let mut store = state
             .transient_books
             .lock()
             .expect("transient books state lock should not be poisoned");
-        store.records.get(&transient_book_id).cloned()
+        store.get_cloned(&transient_book_id)
     };
     let Some(record) = record else {
         return StatusCode::NOT_FOUND.into_response();
@@ -170,7 +144,7 @@ pub(crate) async fn post_transient_book_analyze(
     let analysis = analyze_transient_book(record.path.as_str());
     let inferred_series_and_number = infer_transient_series_and_number(
         state.runtime.database_file.as_path(),
-        record.name.as_str(),
+        record.path.as_str(),
     )
     .await;
 
@@ -178,13 +152,14 @@ pub(crate) async fn post_transient_book_analyze(
         .transient_books
         .lock()
         .expect("transient books state lock should not be poisoned");
-    let Some(entry) = store.records.get_mut(&transient_book_id) else {
+    let Some(entry) = store.get_mut(&transient_book_id) else {
         return StatusCode::NOT_FOUND.into_response();
     };
 
     let (inferred_series_id, inferred_number) = inferred_series_and_number;
     entry.status = analysis.status;
     entry.media_type = analysis.media_type;
+    entry.page_count = analysis.page_count;
     entry.pages = analysis
         .pages
         .into_iter()
@@ -203,9 +178,7 @@ pub(crate) async fn post_transient_book_analyze(
     entry.series_id = analysis.series_id.or(inferred_series_id);
 
     let payload = transient_book_payload(entry);
-    let records = store.records.clone();
     drop(store);
-    let _ = (state.persist_transient_books_records)(&records);
 
     Json(payload).into_response()
 }
@@ -225,11 +198,14 @@ pub(crate) async fn get_transient_book_page(
         );
     }
     let page_number = page_number as u32;
-    let store = state
-        .transient_books
-        .lock()
-        .expect("transient books state lock should not be poisoned");
-    let Some(record) = store.records.get(&transient_book_id) else {
+    let record = {
+        let mut store = state
+            .transient_books
+            .lock()
+            .expect("transient books state lock should not be poisoned");
+        store.get_cloned(&transient_book_id)
+    };
+    let Some(record) = record else {
         return StatusCode::NOT_FOUND.into_response();
     };
     if !record.status.eq_ignore_ascii_case("READY") {
@@ -240,6 +216,15 @@ pub(crate) async fn get_transient_book_page(
             StatusCode::NOT_FOUND,
             "File not found, it may have moved",
         );
+    }
+    if record.media_type == "application/epub+zip" && record.pages.is_empty() {
+        if record.page_count > 0 && page_number > record.page_count {
+            return transient_books_json_error_response(
+                StatusCode::BAD_REQUEST,
+                "Page number does not exist",
+            );
+        }
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
     let pages = record

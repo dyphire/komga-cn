@@ -1,7 +1,7 @@
 use super::*;
 use http_body_util::BodyExt;
-use komga_contract_testkit::sse::parse_event_log;
 use komga_application::media_assets::{BooksImportEntry, ImportCopyMode, MediaImportPort};
+use komga_contract_testkit::sse::parse_event_log;
 use komga_infrastructure::filesystem::import::FilesystemImportPort;
 use std::fs;
 use std::path::Path;
@@ -38,25 +38,6 @@ pub(super) async fn read_sse_until(
             buffer.push_str(&String::from_utf8_lossy(&data));
         }
     }
-}
-
-async fn update_router_library_last_modified(
-    main_db: &Path,
-    library_id: &str,
-    last_modified: &str,
-) {
-    let pool = connect_pool(main_db, 1)
-        .await
-        .expect("sse library update db should open");
-
-    sqlx::query("UPDATE LIBRARY SET LAST_MODIFIED_DATE = ? WHERE ID = ?")
-        .bind(last_modified)
-        .bind(library_id)
-        .execute(&pool)
-        .await
-        .expect("sse library last modified should update");
-
-    pool.close().await;
 }
 
 fn temp_import_source_file(case_id: &str, file_name: &str) -> PathBuf {
@@ -188,6 +169,7 @@ async fn router_sse_events_emit_library_changed_without_five_second_poll_delay()
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -199,15 +181,25 @@ async fn router_sse_events_emit_library_changed_without_five_second_poll_delay()
         .await
         .expect("sse library change request should complete");
 
-    let update_main_db = paths.main_db.clone();
+    let update_app = app.clone();
+    let update_auth_token = auth_token.clone();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(400)).await;
-        update_router_library_last_modified(
-            update_main_db.as_path(),
-            "library-1",
-            "2024-01-01 00:00:01",
-        )
-        .await;
+        let response = update_app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/api/v1/libraries/library-1")
+                    .header("x-auth-token", &update_auth_token)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({ "name": "Updated Library 1" }).to_string(),
+                    ))
+                    .expect("sse library patch request should build"),
+            )
+            .await
+            .expect("sse library patch request should complete");
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
     });
 
     let body = read_sse_until(
@@ -222,7 +214,7 @@ async fn router_sse_events_emit_library_changed_without_five_second_poll_delay()
             event.name == "LibraryChanged"
                 && event.payload.get("libraryId") == Some(&Value::String("library-1".to_string()))
         }),
-        "SSE should emit LibraryChanged promptly after database mutation: {body}"
+        "SSE should emit LibraryChanged promptly after library update mutation: {body}"
     );
 
     cleanup_router_fixture(paths);
@@ -416,6 +408,46 @@ async fn router_sse_events_emit_session_expired_for_invalidated_user_sessions() 
         }),
         "SSE should emit SessionExpired for invalidated sessions: {body}"
     );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_sse_events_rejects_new_connections_after_shutdown_with_internal_server_error() {
+    let _guard = auth_session_runtime_env_lock().lock().await;
+    let paths = new_router_fixture("router-sse-events-shutdown-rejects-new-connections").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let shutdown_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/actuator/shutdown")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("actuator shutdown request should build"),
+        )
+        .await
+        .expect("actuator shutdown request should complete");
+    assert_eq!(shutdown_response.status(), StatusCode::OK);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/sse/v1/events")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("sse shutdown rejection request should build"),
+        )
+        .await
+        .expect("sse shutdown rejection request should complete");
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
     cleanup_router_fixture(paths);
 }

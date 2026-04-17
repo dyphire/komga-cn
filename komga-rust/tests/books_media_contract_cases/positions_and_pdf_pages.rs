@@ -230,6 +230,156 @@ async fn router_book_raw_page_returns_bad_request_with_message_for_non_pdf_media
 }
 
 #[tokio::test]
+async fn router_book_raw_page_returns_bad_request_for_non_pdf_media_even_when_not_ready() {
+    let paths = new_router_fixture("router-book-raw-page-single-image-not-ready").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for single-image raw not-ready fixture");
+    sqlx::query(
+        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("book-image-raw-not-ready-1")
+    .bind(0_i64)
+    .bind("cover.png")
+    .bind("books/cover-raw-not-ready.png")
+    .bind("series-1")
+    .bind(1_i64)
+    .bind(7_i64)
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("single-image raw not-ready book row should be inserted");
+    sqlx::query("INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("image/png")
+        .bind("OUTDATED")
+        .bind("book-image-raw-not-ready-1")
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("single-image raw not-ready media row should be inserted");
+    sqlx::query(
+        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("7")
+    .bind(7.0_f64)
+    .bind("Cover Raw Not Ready Book")
+    .bind("2024-02-04")
+    .bind("book-image-raw-not-ready-1")
+    .execute(&pool)
+    .await
+    .expect("single-image raw not-ready metadata row should be inserted");
+    pool.close().await;
+
+    let image_path = paths.config_dir.join("books/cover-raw-not-ready.png");
+    if let Some(parent) = image_path.parent() {
+        std::fs::create_dir_all(parent)
+            .expect("single-image raw not-ready parent directory should be created");
+    }
+    std::fs::write(&image_path, fixture_png_bytes())
+        .expect("single-image raw not-ready fixture should be written");
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-image-raw-not-ready-1/pages/1/raw")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("single-image raw not-ready page request should build"),
+        )
+        .await
+        .expect("single-image raw not-ready page request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("error"),
+        Some(&Value::String(
+            "Extractor does not support raw extraction of pages".to_string()
+        ))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_raw_page_returns_bad_request_for_non_pdf_media_before_missing_file() {
+    let paths = new_router_fixture("router-book-raw-page-single-image-file-missing").await;
+    seed_router_contract_data(&paths).await;
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for single-image raw missing-file fixture");
+    sqlx::query(
+        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("book-image-raw-missing-file-1")
+    .bind(0_i64)
+    .bind("cover.png")
+    .bind("books/cover-raw-missing.png")
+    .bind("series-1")
+    .bind(1_i64)
+    .bind(8_i64)
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("single-image raw missing-file book row should be inserted");
+    sqlx::query("INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("image/png")
+        .bind("READY")
+        .bind("book-image-raw-missing-file-1")
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("single-image raw missing-file media row should be inserted");
+    sqlx::query(
+        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("8")
+    .bind(8.0_f64)
+    .bind("Cover Raw Missing File Book")
+    .bind("2024-02-05")
+    .bind("book-image-raw-missing-file-1")
+    .execute(&pool)
+    .await
+    .expect("single-image raw missing-file metadata row should be inserted");
+    pool.close().await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-image-raw-missing-file-1/pages/1/raw")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("single-image raw missing-file page request should build"),
+        )
+        .await
+        .expect("single-image raw missing-file page request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("error"),
+        Some(&Value::String(
+            "Extractor does not support raw extraction of pages".to_string()
+        ))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_book_pages_generated_pdf_fallback_matches_kotlin_page_shape() {
     let paths = new_router_fixture("router-book-pages-pdf-dimensions").await;
     seed_router_contract_data(&paths).await;

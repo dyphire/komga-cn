@@ -35,10 +35,11 @@ pub struct RememberMeRuntimeSettings {
 
 #[derive(Clone)]
 struct SessionTokenRecord {
-    user: AuthUserSessionSnapshot,
+    user: Option<AuthUserSessionSnapshot>,
     issued_at_epoch_seconds: u64,
     last_accessed_epoch_seconds: u64,
     runtime_key: String,
+    oauth2_authorization_states: HashMap<String, String>,
 }
 
 const DEFAULT_REMEMBER_ME_DURATION_DAYS: u64 = 365;
@@ -134,8 +135,86 @@ impl SessionRegistry {
             .lock()
             .expect("session registry lock should not be poisoned");
         sessions.retain(|_, entry| {
-            !(entry.runtime_key == runtime_key && entry.user.id == target_user_id)
+            !(entry.runtime_key == runtime_key
+                && entry
+                    .user
+                    .as_ref()
+                    .is_some_and(|user| user.id == target_user_id))
         });
+    }
+
+    pub fn store_oauth2_authorization_state(
+        &self,
+        runtime_key: &str,
+        session_token: &str,
+        registration_id: &str,
+        state: &str,
+    ) {
+        let runtime_key = normalized_runtime_key(runtime_key);
+        let now = now_epoch_seconds();
+        let session_max_inactive_seconds =
+            self.session_max_inactive_seconds_for_runtime_key(runtime_key.as_str());
+        let mut sessions = self
+            .sessions
+            .lock()
+            .expect("session registry lock should not be poisoned");
+
+        if session_record_expired(
+            sessions.get(session_token),
+            runtime_key.as_str(),
+            session_max_inactive_seconds,
+            now,
+        ) {
+            sessions.remove(session_token);
+        }
+
+        let session = sessions
+            .entry(session_token.to_string())
+            .or_insert_with(|| SessionTokenRecord {
+                user: None,
+                issued_at_epoch_seconds: now,
+                last_accessed_epoch_seconds: now,
+                runtime_key: runtime_key.clone(),
+                oauth2_authorization_states: HashMap::new(),
+            });
+        session.runtime_key = runtime_key;
+        session.last_accessed_epoch_seconds = now;
+        session
+            .oauth2_authorization_states
+            .insert(registration_id.to_string(), state.to_string());
+    }
+
+    pub fn take_oauth2_authorization_state(
+        &self,
+        runtime_key: &str,
+        session_token: &str,
+        registration_id: &str,
+    ) -> Option<String> {
+        let runtime_key = normalized_runtime_key(runtime_key);
+        let now = now_epoch_seconds();
+        let session_max_inactive_seconds =
+            self.session_max_inactive_seconds_for_runtime_key(runtime_key.as_str());
+        let mut sessions = self
+            .sessions
+            .lock()
+            .expect("session registry lock should not be poisoned");
+
+        if session_record_expired(
+            sessions.get(session_token),
+            runtime_key.as_str(),
+            session_max_inactive_seconds,
+            now,
+        ) {
+            sessions.remove(session_token);
+            return None;
+        }
+
+        let session = sessions.get_mut(session_token)?;
+        if session.runtime_key != runtime_key {
+            return None;
+        }
+        session.last_accessed_epoch_seconds = now;
+        session.oauth2_authorization_states.remove(registration_id)
     }
 }
 
@@ -199,10 +278,11 @@ impl SessionRuntime for SessionRegistry {
         sessions.insert(
             token.clone(),
             SessionTokenRecord {
-                user: user_session_snapshot(user),
+                user: Some(user_session_snapshot(user)),
                 issued_at_epoch_seconds: now_epoch_seconds(),
                 last_accessed_epoch_seconds: now_epoch_seconds(),
                 runtime_key,
+                oauth2_authorization_states: HashMap::new(),
             },
         );
         token
@@ -228,7 +308,7 @@ impl SessionRuntime for SessionRegistry {
                 should_remove = true;
             } else {
                 entry.last_accessed_epoch_seconds = now;
-                resolved_user = Some(user_from_session_snapshot(&entry.user));
+                resolved_user = entry.user.as_ref().map(user_from_session_snapshot);
             }
         }
 
@@ -244,7 +324,12 @@ impl SessionRuntime for SessionRegistry {
             .sessions
             .lock()
             .expect("session registry lock should not be poisoned");
-        sessions.retain(|_, entry| entry.user.id != target_user_id);
+        sessions.retain(|_, entry| {
+            entry
+                .user
+                .as_ref()
+                .is_none_or(|user| user.id != target_user_id)
+        });
     }
 
     fn invalidate_session_token(&self, token: &str) {
@@ -254,6 +339,24 @@ impl SessionRuntime for SessionRegistry {
             .expect("session registry lock should not be poisoned");
         sessions.remove(token);
     }
+}
+
+fn session_record_expired(
+    session: Option<&SessionTokenRecord>,
+    runtime_key: &str,
+    session_max_inactive_seconds: u64,
+    now: u64,
+) -> bool {
+    let Some(session) = session else {
+        return false;
+    };
+    if session.runtime_key != runtime_key {
+        return true;
+    }
+    let last_seen = session
+        .last_accessed_epoch_seconds
+        .max(session.issued_at_epoch_seconds);
+    now.saturating_sub(last_seen) >= session_max_inactive_seconds
 }
 
 fn now_epoch_seconds() -> u64 {

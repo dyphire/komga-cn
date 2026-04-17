@@ -31,7 +31,9 @@ macro_rules! task_service_op {
 
 fn with_task_queue<T>(
     task_queue: &SharedTaskQueue,
-    operation: impl FnOnce(&mut komga_infrastructure::task_queue::queue_scheduler::TaskQueueScheduler) -> T,
+    operation: impl FnOnce(
+        &mut komga_infrastructure::task_queue::queue_scheduler::TaskQueueScheduler,
+    ) -> T,
 ) -> Result<T, String> {
     let mut queue = task_queue
         .lock()
@@ -52,8 +54,6 @@ pub(super) fn compose_operational_state(
     let count_task_queue = task_queue.clone();
     let apply_task_queue = task_queue.clone();
     let build_metadata = current_build_metadata();
-    let transient_books_state_file = http_state_runtime_config::transient_books_state_file(config);
-
     OperationalState {
         runtime: RuntimeState {
             database_file: config.database_file.clone(),
@@ -117,25 +117,9 @@ pub(super) fn compose_operational_state(
         })),
         announcements_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
         releases_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
-        load_transient_books_records: Arc::new({
-            let state_file = transient_books_state_file.clone();
-            move || http_state_runtime_config::load_transient_books_records(state_file.as_path())
-        }),
-        persist_transient_books_records: Arc::new({
-            let state_file = transient_books_state_file.clone();
-            move |records| {
-                http_state_runtime_config::persist_transient_books_records(
-                    state_file.as_path(),
-                    records,
-                )
-            }
-        }),
-        transient_books: Arc::new(Mutex::new(TransientBooksStore::with_records(
-            http_state_runtime_config::load_transient_books_records(
-                transient_books_state_file.as_path(),
-            )
-            .unwrap_or_default(),
-        ))),
+        load_transient_books_records: Arc::new(|| Ok(std::collections::HashMap::new())),
+        persist_transient_books_records: Arc::new(|_| Ok(())),
+        transient_books: Arc::new(Mutex::new(TransientBooksStore::default())),
         shutdown_trigger,
     }
 }
@@ -206,6 +190,7 @@ fn oauth2_clients(config: &RuntimeConfig) -> Vec<OAuth2ClientConfig> {
             client_secret: client.client_secret.clone(),
             authorization_uri: client.authorization_uri.clone(),
             token_uri: client.token_uri.clone(),
+            user_info_uri: client.user_info_uri.clone(),
             scopes: client.scopes.clone(),
         })
         .collect()
@@ -220,15 +205,15 @@ mod tests {
     use std::time::Duration;
 
     fn scan_library_task() -> TaskQueueRecord {
-        TaskQueueRecord::new("SCAN_LIBRARY:library-1:DEEP:false", 100, None)
+        TaskQueueRecord::new("SCAN_LIBRARY_library-1_DEEP_false", 8, None)
             .with_simple_type("SCAN_LIBRARY")
             .with_payload(
                 json!({
                     "libraryId": "library-1",
                     "scanDeep": false,
-                    "priority": 100,
+                    "priority": 8,
                     "groupId": serde_json::Value::Null,
-                    "uniqueId": "SCAN_LIBRARY:library-1:DEEP:false",
+                    "uniqueId": "SCAN_LIBRARY_library-1_DEEP_false",
                 })
                 .to_string(),
             )
@@ -237,8 +222,9 @@ mod tests {
     #[tokio::test]
     async fn enqueue_task_records_respects_urgent_wakeup_policy() {
         for (urgent, timeout_ms, should_notify) in [(true, 100_u64, true), (false, 25_u64, false)] {
-            let config =
-                RuntimeConfig::for_runtime_profile(komga_config::profile::RuntimeProfile::LiveLocaldb);
+            let config = RuntimeConfig::for_runtime_profile(
+                komga_config::profile::RuntimeProfile::LiveLocaldb,
+            );
             let task_queue = Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
                 crate::config::task_runtime_context(&config),
                 "rust-main",

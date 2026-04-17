@@ -1,5 +1,12 @@
 use super::support::*;
 use super::*;
+use std::sync::OnceLock;
+use tokio::sync::Mutex;
+
+fn scanner_runtime_sse_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 #[tokio::test]
 async fn scanner_deep_scan_reanalyzes_changed_existing_books() {
@@ -548,6 +555,225 @@ async fn scanner_rescan_soft_deletes_missing_series_while_leaving_sidecar_rows_v
     assert_eq!(
         remaining_sidecars, 2,
         "current scanner rescan semantics soft-delete missing series/book rows without deleting the persisted sidecar records in the same pass",
+    );
+
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn scanner_runtime_sse_scan_events_follow_kotlin_lifecycle_order() {
+    let _guard = scanner_runtime_sse_lock().lock().await;
+    let fixture = ScannerPersistenceFixture::new("scanner-persistence-sse-order")
+        .await
+        .expect("scanner SSE order fixture should be created");
+    let book_url = fixture
+        .library_root
+        .join("Series-A")
+        .join("Book-001.cbz")
+        .to_string_lossy()
+        .to_string();
+
+    let initial_cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
+    let runtime = runtime_task_context_from_config(&fixture.config);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .process_available(&runtime)
+        .expect("initial scan should publish runtime SSE events successfully");
+
+    let expected_series_id =
+        load_active_series_id_for_book_url(&fixture.paths.main_db, &book_url).await;
+    let expected_book_id = load_active_book_id_by_url(&fixture.paths.main_db, &book_url).await;
+
+    let (_, initial_events) = komga_application::runtime_sse::pending_runtime_sse_events(
+        initial_cursor,
+        "scanner-contract-admin",
+        true,
+    );
+    let initial_scan_names = initial_events
+        .iter()
+        .filter_map(|event| match event.name.as_str() {
+            "SeriesAdded"
+                if event
+                    .payload
+                    .get("seriesId")
+                    .and_then(|value| value.as_str())
+                    == Some(expected_series_id.as_str()) =>
+            {
+                Some(event.name.as_str())
+            }
+            "BookAdded"
+                if event.payload.get("bookId").and_then(|value| value.as_str())
+                    == Some(expected_book_id.as_str())
+                    && event
+                        .payload
+                        .get("seriesId")
+                        .and_then(|value| value.as_str())
+                        == Some(expected_series_id.as_str()) =>
+            {
+                Some(event.name.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        initial_scan_names,
+        vec!["SeriesAdded", "BookAdded"],
+        "scanner runtime SSE should mirror Kotlin createSeries->addBooks ordering during initial discovery",
+    );
+
+    let rescan_cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
+    fs::remove_dir_all(fixture.library_root.join("Series-A"))
+        .expect("series directory should be removable for scanner SSE order contract");
+    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .process_available(&runtime)
+        .expect("missing-series rescan should publish runtime SSE events successfully");
+
+    let (_, rescan_events) = komga_application::runtime_sse::pending_runtime_sse_events(
+        rescan_cursor,
+        "scanner-contract-admin",
+        true,
+    );
+    let rescan_names = rescan_events
+        .iter()
+        .filter_map(|event| match event.name.as_str() {
+            "BookChanged"
+                if event.payload.get("bookId").and_then(|value| value.as_str())
+                    == Some(expected_book_id.as_str())
+                    && event
+                        .payload
+                        .get("seriesId")
+                        .and_then(|value| value.as_str())
+                        == Some(expected_series_id.as_str()) =>
+            {
+                Some(event.name.as_str())
+            }
+            "SeriesChanged"
+                if event
+                    .payload
+                    .get("seriesId")
+                    .and_then(|value| value.as_str())
+                    == Some(expected_series_id.as_str()) =>
+            {
+                Some(event.name.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        rescan_names,
+        vec!["BookChanged", "SeriesChanged"],
+        "scanner runtime SSE should soft-delete books before series, matching Kotlin SeriesLifecycle.softDeleteMany semantics",
+    );
+
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn scanner_runtime_sse_mixed_rescan_deletes_missing_items_before_adding_new_ones() {
+    let _guard = scanner_runtime_sse_lock().lock().await;
+    let fixture = ScannerPersistenceFixture::new("scanner-persistence-sse-mixed-order")
+        .await
+        .expect("scanner SSE mixed-order fixture should be created");
+    let original_book_url = fixture
+        .library_root
+        .join("Series-A")
+        .join("Book-001.cbz")
+        .to_string_lossy()
+        .to_string();
+
+    let runtime = runtime_task_context_from_config(&fixture.config);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .process_available(&runtime)
+        .expect("initial scan should seed scanner SSE mixed-order fixture successfully");
+
+    let original_series_id =
+        load_active_series_id_for_book_url(&fixture.paths.main_db, &original_book_url).await;
+    let original_book_id =
+        load_active_book_id_by_url(&fixture.paths.main_db, &original_book_url).await;
+
+    let previous_series_dir = fixture.library_root.join("Series-A");
+    let renamed_series_dir = fixture.library_root.join("Series-B");
+    fs::rename(&previous_series_dir, &renamed_series_dir)
+        .expect("series directory rename should succeed for mixed scanner SSE ordering");
+    let renamed_book_url = renamed_series_dir
+        .join("Book-001.cbz")
+        .to_string_lossy()
+        .to_string();
+
+    let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
+    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .process_available(&runtime)
+        .expect("mixed rescan should publish runtime SSE events successfully");
+
+    let renamed_series_id =
+        load_active_series_id_for_book_url(&fixture.paths.main_db, &renamed_book_url).await;
+    let renamed_book_id =
+        load_active_book_id_by_url(&fixture.paths.main_db, &renamed_book_url).await;
+
+    let (_, events) = komga_application::runtime_sse::pending_runtime_sse_events(
+        cursor,
+        "scanner-contract-admin",
+        true,
+    );
+    let mixed_rescan_names = events
+        .iter()
+        .filter_map(|event| match event.name.as_str() {
+            "BookChanged"
+                if event.payload.get("bookId").and_then(|value| value.as_str())
+                    == Some(original_book_id.as_str())
+                    && event
+                        .payload
+                        .get("seriesId")
+                        .and_then(|value| value.as_str())
+                        == Some(original_series_id.as_str()) =>
+            {
+                Some(event.name.as_str())
+            }
+            "SeriesChanged"
+                if event
+                    .payload
+                    .get("seriesId")
+                    .and_then(|value| value.as_str())
+                    == Some(original_series_id.as_str()) =>
+            {
+                Some(event.name.as_str())
+            }
+            "SeriesAdded"
+                if event
+                    .payload
+                    .get("seriesId")
+                    .and_then(|value| value.as_str())
+                    == Some(renamed_series_id.as_str()) =>
+            {
+                Some(event.name.as_str())
+            }
+            "BookAdded"
+                if event.payload.get("bookId").and_then(|value| value.as_str())
+                    == Some(renamed_book_id.as_str())
+                    && event
+                        .payload
+                        .get("seriesId")
+                        .and_then(|value| value.as_str())
+                        == Some(renamed_series_id.as_str()) =>
+            {
+                Some(event.name.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        mixed_rescan_names.starts_with(&[
+            "BookChanged",
+            "SeriesChanged",
+            "SeriesAdded",
+            "BookAdded",
+        ]),
+        "scanner mixed rescans must begin with Kotlin's delete-missing phase before add/update phase ordering: {mixed_rescan_names:?}",
     );
 
     fixture.cleanup();

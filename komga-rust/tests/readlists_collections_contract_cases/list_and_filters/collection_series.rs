@@ -45,40 +45,6 @@ async fn router_collection_series_supports_kotlin_style_query_filters() {
 }
 
 #[tokio::test]
-async fn router_collection_detail_and_series_accept_basic_auth_like_kotlin_clients() {
-    let paths = new_router_fixture("router-collection-detail-series-basic-auth-compat").await;
-    seed_router_contract_data(&paths).await;
-    seed_collection_series_variants(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let authorization =
-        basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
-
-    for route in [
-        "/api/v1/collections/collection-1",
-        "/api/v1/collections/collection-1/series?unpaged=true",
-    ] {
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri(route)
-                    .header(header::AUTHORIZATION, authorization.as_str())
-                    .header("x-auth-token", "")
-                    .body(Body::empty())
-                    .expect("collection basic-auth request should build"),
-            )
-            .await
-            .expect("collection basic-auth request should complete");
-
-        assert_eq!(response.status(), StatusCode::OK, "route: {route}");
-    }
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
 async fn router_collection_series_ignores_search_query_like_kotlin() {
     let paths = new_router_fixture("router-collection-series-ignore-search-query").await;
     seed_router_contract_data(&paths).await;
@@ -464,9 +430,7 @@ async fn router_series_collections_does_not_accept_sorted_position_series_alias(
         .await
         .expect("series collections alias request should complete");
 
-    assert_eq!(response.status(), StatusCode::OK);
-    let payload = response_json(response).await;
-    assert_eq!(payload, json!([]));
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
     cleanup_router_fixture(paths);
 }

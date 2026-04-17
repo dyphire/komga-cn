@@ -29,14 +29,6 @@ impl RuntimeMediaImportService for DefaultRuntimeMediaImportService {
         Ok(vec![])
     }
 
-    fn process_queued_books_payload<'a>(
-        &'a self,
-        _task_payload: &'a str,
-        _import_priority: i32,
-    ) -> futures_util::future::BoxFuture<'a, Result<Vec<TaskQueueRecord>, String>> {
-        Box::pin(async { Ok(vec![]) })
-    }
-
     fn process_queued_book_payload<'a>(
         &'a self,
         _task_payload: &'a str,

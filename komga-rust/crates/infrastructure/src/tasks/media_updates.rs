@@ -3,10 +3,48 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use komga_application::runtime_sse::register_runtime_sse_event;
+use serde_json::json;
 use sqlx::{Row, Sqlite, SqlitePool};
 
-use crate::sqlite::connect_private_pool;
 use super::media_queries::PersistedHashedPageToDelete;
+use crate::sqlite::connect_private_pool;
+
+#[derive(Clone)]
+struct BookSseContext {
+    series_id: String,
+    library_id: String,
+}
+
+fn emit_book_changed(book_id: &str, context: &BookSseContext) {
+    register_runtime_sse_event(
+        "BookChanged",
+        json!({
+            "bookId": book_id,
+            "seriesId": context.series_id,
+            "libraryId": context.library_id,
+        }),
+        false,
+        None,
+    );
+}
+
+async fn load_book_sse_context(
+    pool: &SqlitePool,
+    book_id: &str,
+) -> Result<Option<BookSseContext>, String> {
+    sqlx::query("SELECT SERIES_ID, LIBRARY_ID FROM BOOK WHERE ID = ? LIMIT 1")
+        .bind(book_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| format!("failed to load book SSE context for '{book_id}': {error}"))
+        .map(|row| {
+            row.map(|row| BookSseContext {
+                series_id: row.get::<String, _>("SERIES_ID"),
+                library_id: row.get::<String, _>("LIBRARY_ID"),
+            })
+        })
+}
 
 pub fn persist_book_hash(
     database_file: &Path,
@@ -59,9 +97,10 @@ pub fn persist_removed_hashed_pages(
 ) -> Result<(), String> {
     let database_file = database_file.to_path_buf();
     let book_id = book_id.to_string();
+    let book_id_for_events = book_id.clone();
     let deleted_count_by_hash = deleted_count_by_hash.clone();
 
-    run_database_query(database_file, move |pool| {
+    let book_context = run_database_query(database_file, move |pool| {
         let book_id = book_id.clone();
         let deleted_count_by_hash = deleted_count_by_hash.clone();
         Box::pin(async move {
@@ -109,9 +148,14 @@ pub fn persist_removed_hashed_pages(
                 format!("failed to commit remove-hashed-pages transaction for '{book_id}': {error}")
             })?;
 
-            Ok(())
+            load_book_sse_context(&pool, &book_id).await
         })
-    })
+    })?;
+
+    if let Some(book_context) = book_context {
+        emit_book_changed(&book_id_for_events, &book_context);
+    }
+    Ok(())
 }
 
 pub fn persist_book_extension_repair(
@@ -200,11 +244,12 @@ pub fn persist_book_conversion(
 ) -> Result<(), String> {
     let database_file = database_file.to_path_buf();
     let book_id = book_id.to_string();
+    let book_id_for_events = book_id.clone();
     let library_id = library_id.to_string();
     let book_url = book_url.to_string();
     let destination_url = destination_url.to_string();
 
-    run_database_query(database_file, move |pool| {
+    let book_context = run_database_query(database_file, move |pool| {
         let book_id = book_id.clone();
         let library_id = library_id.clone();
         let book_url = book_url.clone();
@@ -273,9 +318,14 @@ pub fn persist_book_conversion(
                 format!("failed to commit convert-book transaction for '{book_id}': {error}")
             })?;
 
-            Ok(())
+            load_book_sse_context(&pool, &book_id).await
         })
-    })
+    })?;
+
+    if let Some(book_context) = book_context {
+        emit_book_changed(&book_id_for_events, &book_context);
+    }
+    Ok(())
 }
 
 pub fn adjust_analyzed_book_read_progress(
@@ -353,7 +403,7 @@ pub fn adjust_analyzed_book_read_progress(
             }
 
             if !series_id.is_empty() {
-                for user_id in affected_user_ids {
+                for user_id in &affected_user_ids {
                     upsert_series_read_progress_row(&mut tx, &series_id, &user_id)
                         .await
                         .map_err(|error| {

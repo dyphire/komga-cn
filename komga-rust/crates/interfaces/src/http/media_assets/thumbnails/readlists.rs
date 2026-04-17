@@ -216,11 +216,17 @@ pub async fn readlist_thumbnail_select(
         return response;
     }
 
+    if !persisted_readlist_exists(auth_db.database_file.as_path(), &readlist_id)
+        .await
+        .unwrap_or(false)
+    {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
     match select_readlist_thumbnail(auth_db.database_file.as_path(), &readlist_id, &thumbnail_id)
         .await
     {
-        Ok(true) => StatusCode::ACCEPTED.into_response(),
-        Ok(false) => StatusCode::NOT_FOUND.into_response(),
+        Ok(_) => StatusCode::ACCEPTED.into_response(),
         Err(error) => internal_error_response(error),
     }
 }

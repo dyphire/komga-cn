@@ -3,6 +3,118 @@ use std::io::Write;
 
 use time::OffsetDateTime;
 
+fn assert_health_datasource_component(
+    db_components: &serde_json::Map<String, Value>,
+    component_name: &str,
+    expected_status: &str,
+    payload: &Value,
+) {
+    let datasource = db_components
+        .get(component_name)
+        .and_then(Value::as_object)
+        .unwrap_or_else(|| panic!("db contributor should expose {component_name}: {payload:?}"));
+    assert_eq!(
+        datasource.get("status").and_then(Value::as_str),
+        Some(expected_status)
+    );
+    let details = datasource
+        .get("details")
+        .and_then(Value::as_object)
+        .unwrap_or_else(|| panic!("{component_name} should expose details: {payload:?}"));
+    assert_eq!(details.get("database").and_then(Value::as_str), Some("SQLite"));
+    assert_eq!(
+        details.get("validationQuery").and_then(Value::as_str),
+        Some("isValid()")
+    );
+}
+
+fn assert_admin_actuator_health_payload(
+    payload: &Value,
+    expected_status: &str,
+    expected_sqlite_status: &str,
+    expected_tasks_status: &str,
+) {
+    assert_eq!(
+        payload.get("status").and_then(Value::as_str),
+        Some(expected_status)
+    );
+
+    let components = payload
+        .get("components")
+        .and_then(Value::as_object)
+        .expect("admin actuator health should expose components");
+    assert!(
+        components.get("tasksDb").is_none(),
+        "health should not expose tasksDb: {payload:?}"
+    );
+
+    let db = components
+        .get("db")
+        .and_then(Value::as_object)
+        .expect("health should expose db component");
+    assert_eq!(db.get("status").and_then(Value::as_str), Some(expected_status));
+    assert!(
+        db.get("details").is_none(),
+        "db should be a composite contributor: {payload:?}"
+    );
+    let db_components = db
+        .get("components")
+        .and_then(Value::as_object)
+        .expect("db component should expose nested datasource contributors");
+
+    for component_name in ["sqliteDataSourceRW", "sqliteDataSourceRO"] {
+        assert_health_datasource_component(
+            db_components,
+            component_name,
+            expected_sqlite_status,
+            payload,
+        );
+    }
+    for component_name in ["tasksDataSourceRW", "tasksDataSourceRO"] {
+        assert_health_datasource_component(
+            db_components,
+            component_name,
+            expected_tasks_status,
+            payload,
+        );
+    }
+
+    let disk_space = components
+        .get("diskSpace")
+        .and_then(Value::as_object)
+        .expect("health should expose diskSpace component");
+    assert_eq!(disk_space.get("status").and_then(Value::as_str), Some("UP"));
+    let disk_space_details = disk_space
+        .get("details")
+        .and_then(Value::as_object)
+        .expect("diskSpace component should expose details");
+    assert_eq!(
+        disk_space_details.get("threshold").and_then(Value::as_u64),
+        Some(10 * 1024 * 1024)
+    );
+    assert!(
+        disk_space_details
+            .get("path")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.is_empty()),
+        "diskSpace path should be non-empty: {payload:?}"
+    );
+    assert!(
+        disk_space_details.get("total").and_then(Value::as_u64).is_some(),
+        "diskSpace total should be numeric: {payload:?}"
+    );
+    assert!(
+        disk_space_details.get("free").and_then(Value::as_u64).is_some(),
+        "diskSpace free should be numeric: {payload:?}"
+    );
+
+    let ping = components
+        .get("ping")
+        .and_then(Value::as_object)
+        .expect("health should expose ping component");
+    assert_eq!(ping.get("status").and_then(Value::as_str), Some("UP"));
+}
+
 #[tokio::test]
 async fn router_actuator_root_exposed_by_default_without_beans_link() {
     let paths = new_router_fixture("router-actuator-root-omits-beans-link").await;
@@ -779,6 +891,116 @@ async fn router_actuator_health_hides_details_for_authenticated_non_admin() {
         payload.get("components").is_none(),
         "non-admin actuator health should not expose component details: {payload:?}"
     );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_actuator_health_exposes_spring_style_components_for_admin() {
+    let paths = new_router_fixture("router-actuator-health-admin-components").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/actuator/health")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("admin actuator health request should build"),
+        )
+        .await
+        .expect("admin actuator health request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_admin_actuator_health_payload(&payload, "UP", "UP", "UP");
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_actuator_health_exposes_details_for_admin_basic_auth_like_kotlin() {
+    let paths = new_router_fixture("router-actuator-health-admin-basic-auth").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let authorization =
+        basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/actuator/health")
+                .header(header::AUTHORIZATION, authorization.as_str())
+                .body(Body::empty())
+                .expect("basic-auth actuator health request should build"),
+        )
+        .await
+        .expect("basic-auth actuator health request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_admin_actuator_health_payload(&payload, "UP", "UP", "UP");
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_actuator_health_exposes_details_for_admin_api_key_like_kotlin() {
+    let paths = new_router_fixture("router-actuator-health-admin-api-key").await;
+    seed_router_contract_data(&paths).await;
+    seed_kobo_sync_api_key(&paths, "actuator-health-admin-api-key", "admin-user").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/actuator/health")
+                .header("x-api-key", "actuator-health-admin-api-key")
+                .body(Body::empty())
+                .expect("api-key actuator health request should build"),
+        )
+        .await
+        .expect("api-key actuator health request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_admin_actuator_health_payload(&payload, "UP", "UP", "UP");
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_actuator_health_aggregates_down_when_database_file_is_missing() {
+    let paths = new_router_fixture("router-actuator-health-down-when-db-missing").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    std::fs::remove_file(&paths.main_db).expect("main db should be removable for health down test");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/actuator/health")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("down actuator health request should build"),
+        )
+        .await
+        .expect("down actuator health request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_admin_actuator_health_payload(&payload, "DOWN", "DOWN", "UP");
 
     cleanup_router_fixture(paths);
 }

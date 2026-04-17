@@ -663,8 +663,7 @@ pub fn build_router(
         )
         .route(
             "/api/logout",
-            get(identity_access::content_auth::logout_route)
-                .post(identity_access::content_auth::logout_route),
+            post(identity_access::content_auth::logout_route),
         )
         .route("/sse/v1/events", get(operational::sse_events))
         .route("/", get(operational::webui_entrypoint))

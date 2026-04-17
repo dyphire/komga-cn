@@ -3,6 +3,8 @@ use std::io::Read;
 use std::path::Path;
 
 use komga_application::media_assets::{BookMediaRecord, book_media_is_epub};
+use komga_application::runtime_sse::register_runtime_sse_event;
+use serde_json::json;
 use sqlx::{Row, SqlitePool};
 
 use crate::filesystem::media_access::epub::load_epub_package_document;
@@ -48,6 +50,22 @@ struct PersistedCollectionMembership {
     name: String,
     ordered: bool,
     series_ids: Vec<String>,
+}
+
+fn emit_collection_event(collection_id: &str, series_ids: &[String], created: bool) {
+    register_runtime_sse_event(
+        if created {
+            "CollectionAdded"
+        } else {
+            "CollectionChanged"
+        },
+        json!({
+            "collectionId": collection_id,
+            "seriesIds": series_ids,
+        }),
+        false,
+        None,
+    );
 }
 
 async fn load_series_books_for_refresh(
@@ -501,6 +519,10 @@ async fn add_series_to_collection_for_refresh(
         tx.commit().await.map_err(|error| {
             format!("failed to commit collection update for '{collection_name}': {error}")
         })?;
+
+        let mut series_ids = existing.series_ids;
+        series_ids.push(series_id.to_string());
+        emit_collection_event(&existing.id, &series_ids, false);
         return Ok(());
     }
 
@@ -538,6 +560,7 @@ async fn add_series_to_collection_for_refresh(
     tx.commit().await.map_err(|error| {
         format!("failed to commit collection create for '{collection_name}': {error}")
     })?;
+    emit_collection_event(&collection_id, &[series_id.to_string()], true);
     Ok(())
 }
 

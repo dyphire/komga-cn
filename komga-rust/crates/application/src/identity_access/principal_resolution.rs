@@ -1,4 +1,4 @@
-use super::user_models::{AuthOutcome, AuthUser, user_id};
+use super::user_models::{AuthOutcome, AuthUser, user_has_role, user_id};
 
 pub fn resolve_kobo_user(
     api_key_user: Option<AuthOutcome>,
@@ -11,25 +11,12 @@ pub fn resolve_kobo_user(
     }
 }
 
-pub fn resolve_koreader_user_id(
-    session_user: Option<&AuthUser>,
-    header_user: Option<&str>,
-    configured_api_key: Option<&str>,
-) -> Option<String> {
-    if let Some(user) = session_user {
-        return Some(user_id(user).to_string());
-    }
-
-    match_configured_api_key(header_user, configured_api_key)
-        .then(|| "koreader-api-key".to_string())
+pub fn resolve_koreader_user_id(session_user: Option<&AuthUser>) -> Option<String> {
+    role_scoped_session_user(session_user, "KOREADER_SYNC").map(|user| user_id(user).to_string())
 }
 
-pub fn koreader_authorized(
-    session_user: Option<&AuthUser>,
-    header_user: Option<&str>,
-    configured_api_key: Option<&str>,
-) -> bool {
-    session_user.is_some() || match_configured_api_key(header_user, configured_api_key)
+pub fn koreader_authorized(session_user: Option<&AuthUser>) -> bool {
+    role_scoped_session_user(session_user, "KOREADER_SYNC").is_some()
 }
 
 pub fn configured_api_key_identity(
@@ -48,10 +35,55 @@ pub fn configured_api_key_identity(
     }
 }
 
-fn match_configured_api_key(header_user: Option<&str>, configured_api_key: Option<&str>) -> bool {
-    let Some(header_user) = header_user.map(str::trim).filter(|value| !value.is_empty()) else {
-        return false;
-    };
+fn role_scoped_session_user<'a>(
+    session_user: Option<&'a AuthUser>,
+    required_role: &str,
+) -> Option<&'a AuthUser> {
+    session_user.filter(|user| user_has_role(user, required_role))
+}
 
-    configured_api_key.is_some_and(|api_key| header_user == api_key)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn auth_user_with_roles(roles: &[&str]) -> AuthUser {
+        AuthUser {
+            id: "user-1".to_string(),
+            email: "user@example.org".to_string(),
+            password: "password".to_string(),
+            roles: roles.iter().map(|role| role.to_string()).collect(),
+            shared_all_libraries: true,
+            shared_library_ids: Vec::new(),
+            labels_allow: Vec::new(),
+            labels_exclude: Vec::new(),
+            age_restriction: None,
+        }
+    }
+
+    #[test]
+    fn koreader_authorized_requires_koreader_sync_role() {
+        let plain_user = auth_user_with_roles(&["USER"]);
+        let sync_user = auth_user_with_roles(&["USER", "KOREADER_SYNC"]);
+
+        assert!(!koreader_authorized(Some(&plain_user)));
+        assert!(koreader_authorized(Some(&sync_user)));
+    }
+
+    #[test]
+    fn resolve_koreader_user_id_rejects_session_user_without_koreader_sync_role() {
+        let plain_user = auth_user_with_roles(&["USER"]);
+        let sync_user = auth_user_with_roles(&["USER", "KOREADER_SYNC"]);
+
+        assert_eq!(resolve_koreader_user_id(Some(&plain_user)), None);
+        assert_eq!(
+            resolve_koreader_user_id(Some(&sync_user)),
+            Some("user-1".to_string())
+        );
+    }
+
+    #[test]
+    fn koreader_helpers_return_none_without_sync_scoped_user() {
+        assert!(!koreader_authorized(None));
+        assert_eq!(resolve_koreader_user_id(None), None);
+    }
 }

@@ -17,6 +17,71 @@ async fn soft_delete_series(paths: &RuntimeDbPaths, series_ids: &[&str]) {
     pool.close().await;
 }
 
+async fn update_series_metadata_title(paths: &RuntimeDbPaths, series_id: &str, title: &str) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("series metadata title fixture db should open");
+
+    sqlx::query("UPDATE SERIES_METADATA SET TITLE = ?, TITLE_SORT = ? WHERE SERIES_ID = ?")
+        .bind(title)
+        .bind(title)
+        .bind(series_id)
+        .execute(&pool)
+        .await
+        .expect("series metadata title should update");
+
+    pool.close().await;
+}
+
+async fn update_collection_series_number(
+    paths: &RuntimeDbPaths,
+    collection_id: &str,
+    series_id: &str,
+    number: i64,
+) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("collection number fixture db should open");
+
+    sqlx::query(
+        "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?) \
+         ON CONFLICT (COLLECTION_ID, SERIES_ID) DO UPDATE SET NUMBER = excluded.NUMBER",
+    )
+    .bind(collection_id)
+    .bind(series_id)
+    .bind(number)
+    .execute(&pool)
+    .await
+    .expect("collection membership number should upsert");
+
+    pool.close().await;
+}
+
+async fn update_series_read_date(paths: &RuntimeDbPaths, series_id: &str, read_date: &str) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("series read date fixture db should open");
+
+    sqlx::query(
+        "INSERT INTO READ_PROGRESS_SERIES (SERIES_ID, USER_ID, READ_COUNT, IN_PROGRESS_COUNT, MOST_RECENT_READ_DATE) \
+         VALUES (?, ?, ?, ?, ?) \
+         ON CONFLICT (SERIES_ID, USER_ID) DO UPDATE \
+         SET MOST_RECENT_READ_DATE = excluded.MOST_RECENT_READ_DATE, \
+             READ_COUNT = excluded.READ_COUNT, \
+             IN_PROGRESS_COUNT = excluded.IN_PROGRESS_COUNT",
+    )
+    .bind(series_id)
+    .bind("admin-user")
+    .bind(1_i64)
+    .bind(0_i64)
+    .bind(read_date)
+    .execute(&pool)
+    .await
+    .expect("series read date should upsert");
+
+    pool.close().await;
+}
+
 fn series_page_ids(payload: &Value) -> Vec<String> {
     payload
         .get("content")
@@ -28,6 +93,25 @@ fn series_page_ids(payload: &Value) -> Vec<String> {
         .collect()
 }
 
+fn series_page_names(payload: &Value) -> Vec<String> {
+    payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("series page payload should expose content array")
+        .iter()
+        .filter_map(|entry| entry.get("name").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect()
+}
+
+fn series_page_sorted(payload: &Value) -> bool {
+    payload
+        .get("sort")
+        .and_then(|value| value.get("sorted"))
+        .and_then(Value::as_bool)
+        .expect("series page payload should expose sort.sorted")
+}
+
 fn book_page_ids(payload: &Value) -> Vec<String> {
     payload
         .get("content")
@@ -37,6 +121,176 @@ fn book_page_ids(payload: &Value) -> Vec<String> {
         .filter_map(|entry| entry.get("id").and_then(Value::as_str))
         .map(str::to_string)
         .collect()
+}
+
+struct LegacySeriesFixture<'a> {
+    series_id: &'a str,
+    title: &'a str,
+    age_rating: Option<i64>,
+    release_date: Option<&'a str>,
+    sharing_label: Option<&'a str>,
+    author: Option<(&'a str, &'a str)>,
+    collection_id: Option<&'a str>,
+}
+
+async fn seed_legacy_series_fixture(paths: &RuntimeDbPaths, fixture: LegacySeriesFixture<'_>) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("legacy series fixture db should open");
+
+    let book_id = format!("book-for-{}", fixture.series_id);
+    sqlx::query(
+        "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, BOOK_COUNT) \
+         VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(fixture.series_id)
+    .bind(0_i64)
+    .bind(fixture.title)
+    .bind(format!("series/{}", fixture.series_id))
+    .bind("library-1")
+    .bind(1_i64)
+    .execute(&pool)
+    .await
+    .expect("legacy series fixture row should be inserted");
+
+    sqlx::query(
+        "INSERT INTO SERIES_METADATA (STATUS, TITLE, TITLE_SORT, PUBLISHER, LANGUAGE, AGE_RATING, TOTAL_BOOK_COUNT, SERIES_ID) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("ONGOING")
+    .bind(fixture.title)
+    .bind(fixture.title)
+    .bind("PubHouse")
+    .bind("EN")
+    .bind(fixture.age_rating)
+    .bind(Some(1_i64))
+    .bind(fixture.series_id)
+    .execute(&pool)
+    .await
+    .expect("legacy series fixture metadata should be inserted");
+
+    sqlx::query(
+        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&book_id)
+    .bind(0_i64)
+    .bind(format!("{book_id}.epub"))
+    .bind(format!("books/{book_id}.epub"))
+    .bind(fixture.series_id)
+    .bind(1_024_i64)
+    .bind(1_i64)
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("legacy series fixture book should be inserted");
+
+    sqlx::query(
+        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) \
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("1")
+    .bind(1.0_f64)
+    .bind(fixture.title)
+    .bind(fixture.release_date)
+    .bind(&book_id)
+    .execute(&pool)
+    .await
+    .expect("legacy series fixture book metadata should be inserted");
+
+    sqlx::query(
+        "INSERT INTO BOOK_METADATA_AGGREGATION (RELEASE_DATE, SUMMARY, SUMMARY_NUMBER, SERIES_ID) \
+         VALUES (?, ?, ?, ?)",
+    )
+    .bind(fixture.release_date)
+    .bind("")
+    .bind("")
+    .bind(fixture.series_id)
+    .execute(&pool)
+    .await
+    .expect("legacy series fixture aggregation should be inserted");
+
+    if let Some(label) = fixture.sharing_label {
+        sqlx::query("INSERT INTO SERIES_METADATA_SHARING (SERIES_ID, LABEL) VALUES (?, ?)")
+            .bind(fixture.series_id)
+            .bind(label)
+            .execute(&pool)
+            .await
+            .expect("legacy series fixture sharing label should be inserted");
+    }
+
+    if let Some((name, role)) = fixture.author {
+        sqlx::query(
+            "INSERT INTO BOOK_METADATA_AGGREGATION_AUTHOR (SERIES_ID, NAME, ROLE) VALUES (?, ?, ?)",
+        )
+        .bind(fixture.series_id)
+        .bind(name)
+        .bind(role)
+        .execute(&pool)
+        .await
+        .expect("legacy series fixture author should be inserted");
+    }
+
+    if let Some(collection_id) = fixture.collection_id {
+        sqlx::query(
+            "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
+        )
+        .bind(collection_id)
+        .bind(fixture.series_id)
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("legacy series fixture collection membership should be inserted");
+    }
+
+    pool.close().await;
+}
+
+async fn seed_series_read_progress_for(
+    paths: &RuntimeDbPaths,
+    series_id: &str,
+    read_count: i64,
+    in_progress_count: i64,
+) {
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("legacy series read-progress db should open");
+
+    sqlx::query(
+        "INSERT INTO READ_PROGRESS_SERIES (SERIES_ID, USER_ID, READ_COUNT, IN_PROGRESS_COUNT) \
+         VALUES (?, ?, ?, ?) \
+         ON CONFLICT (SERIES_ID, USER_ID) DO UPDATE \
+         SET READ_COUNT = excluded.READ_COUNT, IN_PROGRESS_COUNT = excluded.IN_PROGRESS_COUNT",
+    )
+    .bind(series_id)
+    .bind("admin-user")
+    .bind(read_count)
+    .bind(in_progress_count)
+    .execute(&pool)
+    .await
+    .expect("legacy series read-progress should be upserted");
+
+    pool.close().await;
+}
+
+async fn legacy_series_get_ids(app: &axum::Router, auth_token: &str, uri: &str) -> Vec<String> {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(uri)
+                .header("x-auth-token", auth_token)
+                .body(Body::empty())
+                .expect("legacy series GET request should build"),
+        )
+        .await
+        .expect("legacy series GET request should complete");
+
+    let status = response.status();
+    let payload = response_json(response).await;
+    assert_eq!(status, StatusCode::OK, "uri: {uri}, payload: {payload}");
+    series_page_ids(&payload)
 }
 
 #[tokio::test]
@@ -61,8 +315,9 @@ async fn router_discovery_series_get_routes_match_paperback_compatibility_shape(
         .await
         .expect("deprecated series GET request should complete");
 
-    assert_eq!(search_response.status(), StatusCode::OK);
+    let search_status = search_response.status();
     let search_payload = response_json(search_response).await;
+    assert_eq!(search_status, StatusCode::OK, "payload: {search_payload}");
     assert_eq!(series_page_ids(&search_payload), vec!["series-1"]);
 
     let detail_response = app
@@ -83,6 +338,467 @@ async fn router_discovery_series_get_routes_match_paperback_compatibility_shape(
         detail_payload.get("id"),
         Some(&Value::String("series-1".to_string()))
     );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_get_supports_kotlin_legacy_filters_and_regex() {
+    let paths = new_router_fixture("router-discovery-series-get-kotlin-legacy-filters").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_series_counts(&paths, 1, Some(1)).await;
+    seed_router_series_read_progress(&paths, 1, 0).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/series?page=0&size=20&collection_id=collection-1&status=ONGOING&read_status=READ&publisher=PubHouse&language=EN&age_rating=16&release_year=2024&sharing_label=Family&complete=true&author=John+Doe,writer&search_regex=%5Eseries,title_sort")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("legacy series GET filter request should build"),
+        )
+        .await
+        .expect("legacy series GET filter request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(series_page_ids(&payload), vec!["series-1"]);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_get_keeps_collection_filter_when_combined_with_other_filters() {
+    let paths = new_router_fixture("router-discovery-series-get-collection-filter-retained").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_series_counts(&paths, 1, Some(1)).await;
+    seed_router_series_read_progress(&paths, 1, 0).await;
+    seed_legacy_series_fixture(
+        &paths,
+        LegacySeriesFixture {
+            series_id: "series-2",
+            title: "Series Outside Collection",
+            age_rating: Some(16),
+            release_date: Some("2024-02-01"),
+            sharing_label: Some("Family"),
+            author: Some(("John Doe", "writer")),
+            collection_id: None,
+        },
+    )
+    .await;
+    seed_series_read_progress_for(&paths, "series-2", 1, 0).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let ids = legacy_series_get_ids(
+        &app,
+        &auth_token,
+        "/api/v1/series?page=0&size=20&collection_id=collection-1&read_status=READ&sharing_label=Family&author=John+Doe,writer",
+    )
+    .await;
+
+    assert_eq!(ids, vec!["series-1"]);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_get_treats_release_year_values_as_or() {
+    let paths = new_router_fixture("router-discovery-series-get-release-year-or").await;
+    seed_router_contract_data(&paths).await;
+    seed_legacy_series_fixture(
+        &paths,
+        LegacySeriesFixture {
+            series_id: "series-2",
+            title: "Alpha 2022",
+            age_rating: Some(16),
+            release_date: Some("2022-06-15"),
+            sharing_label: None,
+            author: None,
+            collection_id: None,
+        },
+    )
+    .await;
+    seed_legacy_series_fixture(
+        &paths,
+        LegacySeriesFixture {
+            series_id: "series-3",
+            title: "Beta 2023",
+            age_rating: Some(16),
+            release_date: Some("2023-07-20"),
+            sharing_label: None,
+            author: None,
+            collection_id: None,
+        },
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let mut ids = legacy_series_get_ids(
+        &app,
+        &auth_token,
+        "/api/v1/series?page=0&size=20&release_year=2022&release_year=2024&sort=metadata.titleSort,asc",
+    )
+    .await;
+    ids.sort();
+
+    assert_eq!(ids, vec!["series-1", "series-2"]);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_get_matches_sharing_label_and_author_exactly() {
+    let paths = new_router_fixture("router-discovery-series-get-sharing-author-exact").await;
+    seed_router_contract_data(&paths).await;
+    seed_legacy_series_fixture(
+        &paths,
+        LegacySeriesFixture {
+            series_id: "series-2",
+            title: "Near Match Series",
+            age_rating: Some(16),
+            release_date: Some("2024-03-01"),
+            sharing_label: Some("Family Friendly"),
+            author: Some(("John Doe Jr", "writer")),
+            collection_id: None,
+        },
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let ids = legacy_series_get_ids(
+        &app,
+        &auth_token,
+        "/api/v1/series?page=0&size=20&sharing_label=Family&author=John+Doe",
+    )
+    .await;
+
+    assert_eq!(ids, vec!["series-1"]);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_get_only_applies_author_filter_when_query_contains_name_and_role() {
+    let paths = new_router_fixture("router-discovery-series-get-author-delimiter-semantics").await;
+    seed_router_contract_data(&paths).await;
+    seed_legacy_series_fixture(
+        &paths,
+        LegacySeriesFixture {
+            series_id: "series-2",
+            title: "Second Author Series",
+            age_rating: Some(16),
+            release_date: Some("2024-03-02"),
+            sharing_label: None,
+            author: Some(("Jane Roe", "writer")),
+            collection_id: None,
+        },
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let ignored_author_ids = legacy_series_get_ids(
+        &app,
+        &auth_token,
+        "/api/v1/series?page=0&size=20&author=John+Doe",
+    )
+    .await;
+    assert_eq!(ignored_author_ids, vec!["series-1", "series-2"]);
+
+    let empty_name_ids = legacy_series_get_ids(
+        &app,
+        &auth_token,
+        "/api/v1/series?page=0&size=20&author=%2Cwriter",
+    )
+    .await;
+    assert!(empty_name_ids.is_empty());
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_get_supports_legacy_age_rating_numeric_or_null_values() {
+    let paths = new_router_fixture("router-discovery-series-get-age-rating-null-or").await;
+    seed_router_contract_data(&paths).await;
+    seed_legacy_series_fixture(
+        &paths,
+        LegacySeriesFixture {
+            series_id: "series-2",
+            title: "Null Age Series",
+            age_rating: None,
+            release_date: Some("2024-04-01"),
+            sharing_label: None,
+            author: None,
+            collection_id: None,
+        },
+    )
+    .await;
+    seed_legacy_series_fixture(
+        &paths,
+        LegacySeriesFixture {
+            series_id: "series-3",
+            title: "Adult Age Series",
+            age_rating: Some(18),
+            release_date: Some("2024-05-01"),
+            sharing_label: None,
+            author: None,
+            collection_id: None,
+        },
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let mut ids = legacy_series_get_ids(
+        &app,
+        &auth_token,
+        "/api/v1/series?page=0&size=20&age_rating=16&age_rating=bad-value&sort=metadata.titleSort,asc",
+    )
+    .await;
+    ids.sort();
+
+    assert_eq!(ids, vec!["series-1", "series-2"]);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_get_keeps_kotlin_unsorted_default_when_no_sort_or_search() {
+    let paths = new_router_fixture("router-discovery-series-get-unsorted-default").await;
+    seed_router_contract_data(&paths).await;
+    seed_legacy_series_fixture(
+        &paths,
+        LegacySeriesFixture {
+            series_id: "series-2",
+            title: "A Sorted First Title",
+            age_rating: Some(16),
+            release_date: Some("2024-06-01"),
+            sharing_label: None,
+            author: None,
+            collection_id: None,
+        },
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let ids = legacy_series_get_ids(&app, &auth_token, "/api/v1/series?page=0&size=20").await;
+
+    assert_eq!(ids, vec!["series-1", "series-2"]);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_get_sorts_by_series_name_and_returns_name_field() {
+    let paths = new_router_fixture("router-discovery-series-get-sort-by-name").await;
+    seed_router_contract_data(&paths).await;
+    seed_legacy_series_fixture(
+        &paths,
+        LegacySeriesFixture {
+            series_id: "series-2",
+            title: "Alpha Shelf Name",
+            age_rating: Some(16),
+            release_date: Some("2024-06-02"),
+            sharing_label: None,
+            author: None,
+            collection_id: None,
+        },
+    )
+    .await;
+    update_series_metadata_title(&paths, "series-2", "Zeta Display Title").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/series?page=0&size=20&sort=name,asc")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("legacy series GET sort=name request should build"),
+        )
+        .await
+        .expect("legacy series GET sort=name request should complete");
+
+    let status = response.status();
+    let payload = response_json(response).await;
+    assert_eq!(status, StatusCode::OK, "payload: {payload}");
+    assert_eq!(series_page_ids(&payload), vec!["series-2", "series-1"]);
+    assert_eq!(
+        series_page_names(&payload),
+        vec!["Alpha Shelf Name", "Series 1"]
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_get_sorts_by_collection_number_when_requested() {
+    let paths = new_router_fixture("router-discovery-series-get-sort-by-collection-number").await;
+    seed_router_contract_data(&paths).await;
+    seed_legacy_series_fixture(
+        &paths,
+        LegacySeriesFixture {
+            series_id: "series-2",
+            title: "Collection Number Two",
+            age_rating: Some(16),
+            release_date: Some("2024-06-03"),
+            sharing_label: None,
+            author: None,
+            collection_id: Some("collection-1"),
+        },
+    )
+    .await;
+    update_collection_series_number(&paths, "collection-1", "series-2", 5).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let ids = legacy_series_get_ids(
+        &app,
+        &auth_token,
+        "/api/v1/series?page=0&size=20&collection_id=collection-1&sort=collection.number,desc",
+    )
+    .await;
+
+    assert_eq!(ids, vec!["series-2", "series-1"]);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_get_treats_collection_number_sort_as_unsorted_without_collection_filter()
+{
+    let paths =
+        new_router_fixture("router-discovery-series-get-collection-number-without-filter").await;
+    seed_router_contract_data(&paths).await;
+    seed_legacy_series_fixture(
+        &paths,
+        LegacySeriesFixture {
+            series_id: "series-2",
+            title: "Collection Number Detached",
+            age_rating: Some(16),
+            release_date: Some("2024-06-03"),
+            sharing_label: None,
+            author: None,
+            collection_id: Some("collection-1"),
+        },
+    )
+    .await;
+    update_collection_series_number(&paths, "collection-1", "series-2", 5).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/series?page=0&size=20&sort=collection.number,desc")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("legacy series GET collection.number without filter request should build"),
+        )
+        .await
+        .expect("legacy series GET collection.number without filter request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(series_page_sorted(&payload), false);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_get_sorts_by_read_date_when_requested() {
+    let paths = new_router_fixture("router-discovery-series-get-sort-by-read-date").await;
+    seed_router_contract_data(&paths).await;
+    seed_legacy_series_fixture(
+        &paths,
+        LegacySeriesFixture {
+            series_id: "series-2",
+            title: "Read Later Series",
+            age_rating: Some(16),
+            release_date: Some("2024-06-04"),
+            sharing_label: None,
+            author: None,
+            collection_id: None,
+        },
+    )
+    .await;
+    update_series_read_date(&paths, "series-1", "2024-06-10T00:00:00Z").await;
+    update_series_read_date(&paths, "series-2", "2024-06-11T00:00:00Z").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let ids = legacy_series_get_ids(
+        &app,
+        &auth_token,
+        "/api/v1/series?page=0&size=20&sort=readDate,desc",
+    )
+    .await;
+
+    assert_eq!(ids, vec!["series-2", "series-1"]);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_discovery_series_get_does_not_inject_relevance_for_unsupported_explicit_sort() {
+    let paths = new_router_fixture("router-discovery-series-get-unsupported-sort-with-search").await;
+    seed_router_contract_data(&paths).await;
+    seed_legacy_series_fixture(
+        &paths,
+        LegacySeriesFixture {
+            series_id: "series-2",
+            title: "Series 1 Companion",
+            age_rating: Some(16),
+            release_date: Some("2024-06-05"),
+            sharing_label: None,
+            author: None,
+            collection_id: None,
+        },
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/series?page=0&size=20&search=Series%201&sort=unsupported.sort,asc")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("legacy series GET unsupported sort with search request should build"),
+        )
+        .await
+        .expect("legacy series GET unsupported sort with search request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(series_page_sorted(&payload), false);
 
     cleanup_router_fixture(paths);
 }

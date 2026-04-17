@@ -1,3 +1,5 @@
+use quick_xml::Reader as XmlReader;
+use quick_xml::events::Event as XmlEvent;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -11,13 +13,18 @@ use sqlx::Row;
 use zip::ZipArchive;
 
 use crate::load_pdfium;
+use crate::metadata::{
+    infer_transient_comicinfo_provider_metadata, infer_transient_epub_provider_metadata,
+};
 use crate::rar_support::{detect_rar_media_type, list_rar_entries, read_rar_entry_bytes};
 use crate::resolve_stored_path;
 use crate::sqlite::connect_pool;
 
+const EPUB_DIVINA_LETTER_COUNT_THRESHOLD: usize = 15;
+const KOTLIN_PDF_MIN_EDGE: f64 = 3200.0;
 #[derive(Clone, Debug)]
 pub struct TransientBookFileMetadata {
-    pub file_last_modified_epoch_seconds: i64,
+    pub file_last_modified_unix_nanos: i128,
     pub size_bytes: u64,
 }
 
@@ -25,6 +32,7 @@ pub struct TransientBookFileMetadata {
 pub struct TransientBookAnalysis {
     pub status: String,
     pub media_type: String,
+    pub page_count: u32,
     pub pages: Vec<TransientBookPage>,
     pub files: Vec<String>,
     pub comment: String,
@@ -42,12 +50,25 @@ pub struct TransientBookPage {
     pub size_bytes: Option<u64>,
 }
 
+#[derive(Default)]
+struct TransientMetadataInference {
+    series_titles: Vec<String>,
+    number: Option<f64>,
+}
+
+#[derive(Clone)]
+struct TransientEpubManifestItem {
+    href: String,
+    media_type: String,
+}
+
 pub async fn infer_transient_series_and_number(
     database_file: &Path,
-    file_name: &str,
+    path_or_name: &str,
 ) -> (Option<String>, Option<f64>) {
-    let (series_title_candidate, number) = parse_transient_series_and_number_candidate(file_name);
-    if series_title_candidate.is_empty() {
+    let inferred = infer_transient_metadata(path_or_name);
+    let number = inferred.number;
+    if inferred.series_titles.is_empty() {
         return (None, number);
     }
 
@@ -56,23 +77,28 @@ pub async fn infer_transient_series_and_number(
         Err(_) => return (None, number),
     };
 
-    let exact_match = sqlx::query(
-        r#"SELECT s.ID AS ID
-         FROM SERIES s
-         LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
-         WHERE LOWER(COALESCE(sm.TITLE, s.NAME)) = LOWER(?)
-         ORDER BY s.LAST_MODIFIED_DATE DESC, s.ID ASC
-         LIMIT 1"#,
-    )
-    .bind(series_title_candidate.as_str())
-    .fetch_optional(&pool)
-    .await
-    .ok()
-    .flatten()
-    .map(|row| row.get::<String, _>("ID"));
+    for series_title in &inferred.series_titles {
+        let exact_match = sqlx::query(
+            r#"SELECT s.ID AS ID
+             FROM SERIES s
+             LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
+             WHERE LOWER(COALESCE(sm.TITLE, s.NAME)) = LOWER(?)
+             ORDER BY s.LAST_MODIFIED_DATE DESC, s.ID ASC
+             LIMIT 1"#,
+        )
+        .bind(series_title.as_str())
+        .fetch_optional(&pool)
+        .await
+        .ok()
+        .flatten()
+        .map(|row| row.get::<String, _>("ID"));
+        if let Some(series_id) = exact_match {
+            return (Some(series_id), number);
+        }
+    }
 
-    let fuzzy_match = if exact_match.is_none() {
-        sqlx::query(
+    for series_title in &inferred.series_titles {
+        let fuzzy_match = sqlx::query(
             r#"SELECT s.ID AS ID
              FROM SERIES s
              LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
@@ -80,17 +106,18 @@ pub async fn infer_transient_series_and_number(
              ORDER BY s.LAST_MODIFIED_DATE DESC, s.ID ASC
              LIMIT 1"#,
         )
-        .bind(format!("%{}%", series_title_candidate))
+        .bind(format!("%{}%", series_title))
         .fetch_optional(&pool)
         .await
         .ok()
         .flatten()
-        .map(|row| row.get::<String, _>("ID"))
-    } else {
-        None
-    };
+        .map(|row| row.get::<String, _>("ID"));
+        if let Some(series_id) = fuzzy_match {
+            return (Some(series_id), number);
+        }
+    }
 
-    (exact_match.or(fuzzy_match), number)
+    (None, number)
 }
 
 pub async fn validate_transient_scan_root(database_file: &Path, root: &Path) -> Result<(), String> {
@@ -126,7 +153,10 @@ pub fn transient_book_exists(path: &str) -> bool {
 pub fn load_transient_book_file_metadata(path: &str) -> Option<TransientBookFileMetadata> {
     let metadata = fs::metadata(path).ok()?;
     Some(TransientBookFileMetadata {
-        file_last_modified_epoch_seconds: to_unix_seconds(metadata.modified().ok()),
+        file_last_modified_unix_nanos: to_unix_nanos(newest_file_system_time(
+            metadata.created().ok(),
+            metadata.modified().ok(),
+        )),
         size_bytes: metadata.len(),
     })
 }
@@ -152,17 +182,12 @@ pub fn analyze_transient_book(path: &str) -> TransientBookAnalysis {
 
     let analysis_result = if media_type.starts_with("image/") {
         Ok(analyze_transient_image(path))
-    } else if matches!(
-        media_type.as_str(),
-        "application/zip" | "application/epub+zip"
-    ) {
-        analyze_transient_zip_archive(path, media_type == "application/epub+zip").map_err(|_| {
-            if media_type == "application/epub+zip" {
-                "ERR_1032"
-            } else {
-                "ERR_1008"
-            }
-        })
+    } else if media_type == "application/epub+zip" {
+        return analyze_transient_epub(path).unwrap_or_else(|error_code| {
+            transient_analysis_error("ERROR", media_type, error_code)
+        });
+    } else if media_type == "application/zip" {
+        analyze_transient_zip_archive(path).map_err(|_| "ERR_1008")
     } else if matches!(
         media_type.as_str(),
         "application/vnd.comicbook-rar"
@@ -189,6 +214,7 @@ pub fn analyze_transient_book(path: &str) -> TransientBookAnalysis {
     TransientBookAnalysis {
         status: "READY".to_string(),
         media_type,
+        page_count: pages.len() as u32,
         pages,
         files,
         comment: String::new(),
@@ -205,6 +231,7 @@ fn transient_analysis_error(
     TransientBookAnalysis {
         status: status.to_string(),
         media_type,
+        page_count: 0,
         pages: Vec::new(),
         files: Vec::new(),
         comment: comment.to_string(),
@@ -368,9 +395,67 @@ fn analyze_transient_image(path: &str) -> (Vec<TransientBookPage>, Vec<String>) 
     )
 }
 
+fn analyze_transient_epub(path: &str) -> Result<TransientBookAnalysis, &'static str> {
+    let file = fs::File::open(path).map_err(|_| "ERR_1032")?;
+    let mut archive = ZipArchive::new(file).map_err(|_| "ERR_1032")?;
+    let container_xml = read_zip_entry_bytes_normalized(&mut archive, "META-INF/container.xml")
+        .ok_or("ERR_1032")?;
+    let rootfile_path = parse_transient_epub_rootfile_path(&container_xml).ok_or("ERR_1032")?;
+    let package_document =
+        read_zip_entry_bytes_normalized(&mut archive, &rootfile_path).ok_or("ERR_1032")?;
+    let manifest = parse_transient_epub_manifest_items(&package_document, &rootfile_path);
+    let spine = parse_transient_epub_spine_items(&package_document, &manifest);
+    let page_count = compute_transient_epub_page_count(&mut archive, &spine);
+    let pages = extract_transient_epub_divina_pages(&mut archive, &manifest, &spine)
+        .map_err(|_| "ERR_1032")?;
+    let mut files = manifest
+        .values()
+        .map(|item| item.href.clone())
+        .collect::<Vec<_>>();
+    files.sort();
+
+    Ok(TransientBookAnalysis {
+        status: "READY".to_string(),
+        media_type: "application/epub+zip".to_string(),
+        page_count: if pages.is_empty() {
+            page_count
+        } else {
+            pages.len() as u32
+        },
+        pages,
+        files,
+        comment: String::new(),
+        number: None,
+        series_id: None,
+    })
+}
+
+fn compute_transient_epub_page_count<R: Read + std::io::Seek>(
+    archive: &mut ZipArchive<R>,
+    spine: &[TransientEpubManifestItem],
+) -> u32 {
+    let spine_paths = spine
+        .iter()
+        .map(|item| item.href.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let mut page_count = 0_u64;
+
+    for index in 0..archive.len() {
+        let Ok(entry) = archive.by_index(index) else {
+            continue;
+        };
+        let normalized_name = normalize_transient_epub_zip_path(entry.name());
+        if !spine_paths.contains(normalized_name.as_str()) {
+            continue;
+        }
+        page_count = page_count.saturating_add(entry.compressed_size().div_ceil(1024));
+    }
+
+    page_count.min(u32::MAX as u64) as u32
+}
+
 fn analyze_transient_zip_archive(
     path: &str,
-    include_epub_resources: bool,
 ) -> Result<(Vec<TransientBookPage>, Vec<String>), String> {
     let file = fs::File::open(path).map_err(|error| format!("open archive: {error}"))?;
     let mut archive = ZipArchive::new(file).map_err(|error| format!("read archive: {error}"))?;
@@ -387,12 +472,7 @@ fn analyze_transient_zip_archive(
         }
 
         files.push(file_name.clone());
-        let include = if include_epub_resources {
-            is_epub_page_resource_file_name(&file_name)
-        } else {
-            is_supported_page_image_file_name(&file_name)
-        };
-        if !include {
+        if !is_supported_page_image_file_name(&file_name) {
             continue;
         }
 
@@ -409,6 +489,61 @@ fn analyze_transient_zip_archive(
 
     files.sort();
     Ok((pages, files))
+}
+
+fn extract_transient_epub_divina_pages<R: Read + std::io::Seek>(
+    archive: &mut ZipArchive<R>,
+    manifest: &std::collections::HashMap<String, TransientEpubManifestItem>,
+    spine: &[TransientEpubManifestItem],
+) -> Result<Vec<TransientBookPage>, String> {
+    let mut pages = Vec::new();
+
+    for item in spine {
+        let page = if item.media_type.starts_with("image/") {
+            let bytes = read_zip_entry_bytes_normalized(archive, &item.href)
+                .ok_or_else(|| format!("missing epub resource {}", item.href))?;
+            let dimensions = image_dimensions_from_bytes(&bytes);
+            TransientBookPage {
+                number: (pages.len() as u32) + 1,
+                file_name: item.href.clone(),
+                media_type: item.media_type.clone(),
+                width: dimensions.map(|(width, _)| width),
+                height: dimensions.map(|(_, height)| height),
+                size_bytes: Some(bytes.len() as u64),
+            }
+        } else if is_transient_epub_html_media_type(&item.media_type) {
+            let resource_bytes = read_zip_entry_bytes_normalized(archive, &item.href)
+                .ok_or_else(|| format!("missing epub resource {}", item.href))?;
+            let Some(image_href) =
+                parse_transient_epub_divina_image_href(&resource_bytes, &item.href)
+            else {
+                return Ok(Vec::new());
+            };
+            let Some(image_item) = manifest.values().find(|entry| entry.href == image_href) else {
+                return Ok(Vec::new());
+            };
+            if !image_item.media_type.starts_with("image/") {
+                return Ok(Vec::new());
+            }
+            let image_bytes = read_zip_entry_bytes_normalized(archive, &image_href)
+                .ok_or_else(|| format!("missing epub image resource {image_href}"))?;
+            let dimensions = image_dimensions_from_bytes(&image_bytes);
+            TransientBookPage {
+                number: (pages.len() as u32) + 1,
+                file_name: image_href,
+                media_type: image_item.media_type.clone(),
+                width: dimensions.map(|(width, _)| width),
+                height: dimensions.map(|(_, height)| height),
+                size_bytes: Some(image_bytes.len() as u64),
+            }
+        } else {
+            return Ok(Vec::new());
+        };
+
+        pages.push(page);
+    }
+
+    Ok(pages)
 }
 
 fn analyze_transient_rar_archive(
@@ -450,11 +585,11 @@ fn analyze_transient_pdf(path: &str) -> Result<(Vec<TransientBookPage>, Vec<Stri
     let page_count = document.get_pages().len() as u32;
     let pages = (1..=page_count)
         .map(|number| {
-            let dimensions = pdf_page_dimensions(&document, number);
+            let dimensions = pdf_page_dimensions(&document, number).map(scale_pdf_page_dimensions);
             TransientBookPage {
                 number,
-                file_name: format!("page-{number}.pdf"),
-                media_type: "application/pdf".to_string(),
+                file_name: number.to_string(),
+                media_type: "image/jpeg".to_string(),
                 width: dimensions.map(|(width, _)| width),
                 height: dimensions.map(|(_, height)| height),
                 size_bytes: None,
@@ -558,17 +693,6 @@ fn is_supported_page_image_file_name(file_name: &str) -> bool {
     )
 }
 
-fn is_epub_page_resource_file_name(file_name: &str) -> bool {
-    matches!(
-        file_name
-            .rsplit_once('.')
-            .map(|(_, ext)| ext.to_ascii_lowercase())
-            .unwrap_or_default()
-            .as_str(),
-        "xhtml" | "html" | "htm"
-    )
-}
-
 fn image_dimensions_from_bytes(bytes: &[u8]) -> Option<(u32, u32)> {
     let image = image::load_from_memory(bytes).ok()?;
     Some(image.dimensions())
@@ -580,59 +704,385 @@ fn image_dimensions_from_reader(reader: &mut dyn Read) -> Option<(u32, u32)> {
     image_dimensions_from_bytes(&bytes)
 }
 
-fn to_unix_seconds(time: Option<SystemTime>) -> i64 {
+fn scale_pdf_page_dimensions((width, height): (u32, u32)) -> (u32, u32) {
+    let min_edge = f64::from(width.min(height));
+    if min_edge <= 0.0 {
+        return (width, height);
+    }
+
+    let scale = KOTLIN_PDF_MIN_EDGE / min_edge;
+    let scaled_width = (f64::from(width) * scale).round().max(1.0) as u32;
+    let scaled_height = (f64::from(height) * scale).round().max(1.0) as u32;
+    (scaled_width, scaled_height)
+}
+
+fn infer_transient_metadata(path_or_name: &str) -> TransientMetadataInference {
+    let media_type = transient_book_media_type(path_or_name);
+    if media_type == "application/epub+zip"
+        && let Some(inferred) = infer_transient_epub_metadata_from_path(path_or_name)
+    {
+        return inferred;
+    }
+
+    if matches!(
+        media_type.as_str(),
+        "application/zip"
+            | "application/vnd.comicbook-rar"
+            | "application/x-rar-compressed"
+            | "application/x-rar-compressed; version=4"
+            | "application/x-rar-compressed; version=5"
+    ) && let Some(inferred) =
+        infer_transient_comicinfo_provider_metadata_from_path(path_or_name, media_type.as_str())
+    {
+        return inferred;
+    }
+
+    TransientMetadataInference::default()
+}
+
+fn merge_transient_metadata_inference(
+    target: &mut TransientMetadataInference,
+    incoming: TransientMetadataInference,
+) {
+    for title in incoming.series_titles {
+        if !title.trim().is_empty()
+            && !target
+                .series_titles
+                .iter()
+                .any(|existing| existing == &title)
+        {
+            target.series_titles.push(title);
+        }
+    }
+
+    if target.number.is_none() {
+        target.number = incoming.number;
+    }
+}
+
+fn transient_metadata_inference_from_provider(
+    provider_inference: crate::metadata::TransientMetadataProviderInference,
+) -> TransientMetadataInference {
+    TransientMetadataInference {
+        series_titles: provider_inference.series_titles,
+        number: provider_inference.number,
+    }
+}
+
+fn infer_transient_comicinfo_provider_metadata_from_path(
+    path: &str,
+    media_type: &str,
+) -> Option<TransientMetadataInference> {
+    let comicinfo_bytes = if media_type == "application/zip" {
+        let file = fs::File::open(path).ok()?;
+        let mut archive = ZipArchive::new(file).ok()?;
+        let mut entry = archive.by_name("ComicInfo.xml").ok()?;
+        let mut bytes = Vec::new();
+        entry.read_to_end(&mut bytes).ok()?;
+        bytes
+    } else {
+        read_rar_entry_bytes(Path::new(path), "ComicInfo.xml")
+            .ok()
+            .flatten()?
+    };
+    let comicinfo_xml = String::from_utf8(comicinfo_bytes).ok()?;
+    Some(transient_metadata_inference_from_provider(
+        infer_transient_comicinfo_provider_metadata(&comicinfo_xml),
+    ))
+}
+
+fn infer_transient_epub_metadata_from_path(path: &str) -> Option<TransientMetadataInference> {
+    let file = fs::File::open(path).ok()?;
+    let mut archive = ZipArchive::new(file).ok()?;
+    let container_xml = read_zip_entry_bytes_normalized(&mut archive, "META-INF/container.xml")?;
+    let rootfile_path = parse_transient_epub_rootfile_path(&container_xml)?;
+    let package_document = read_zip_entry_bytes_normalized(&mut archive, &rootfile_path)?;
+    let manifest = parse_transient_epub_manifest_items(&package_document, &rootfile_path);
+    let mut inferred = transient_metadata_inference_from_provider(
+        infer_transient_epub_provider_metadata(&package_document),
+    );
+    inferred.number = None;
+
+    if let Some(comicinfo_inference) =
+        infer_transient_comicinfo_provider_metadata_from_epub_archive(&mut archive, &manifest)
+    {
+        merge_transient_metadata_inference(&mut inferred, comicinfo_inference);
+    }
+
+    Some(inferred)
+}
+
+fn infer_transient_comicinfo_provider_metadata_from_epub_archive<R: Read + std::io::Seek>(
+    archive: &mut ZipArchive<R>,
+    manifest: &std::collections::HashMap<String, TransientEpubManifestItem>,
+) -> Option<TransientMetadataInference> {
+    let comicinfo_path = manifest
+        .values()
+        .find(|item| item.href == "ComicInfo.xml")
+        .map(|item| item.href.as_str())?;
+    let comicinfo_bytes = read_zip_entry_bytes_normalized(archive, comicinfo_path)?;
+    let comicinfo_xml = String::from_utf8(comicinfo_bytes).ok()?;
+    Some(transient_metadata_inference_from_provider(
+        infer_transient_comicinfo_provider_metadata(&comicinfo_xml),
+    ))
+}
+
+fn read_zip_entry_bytes_normalized<R: Read + std::io::Seek>(
+    archive: &mut ZipArchive<R>,
+    path: &str,
+) -> Option<Vec<u8>> {
+    let normalized = normalize_transient_epub_zip_path(path);
+    let mut entry = archive.by_name(normalized.as_str()).ok()?;
+    let mut bytes = Vec::new();
+    entry.read_to_end(&mut bytes).ok()?;
+    Some(bytes)
+}
+
+fn parse_transient_epub_rootfile_path(container_xml: &[u8]) -> Option<String> {
+    let mut reader = XmlReader::from_reader(container_xml);
+    reader.config_mut().trim_text(true);
+    let mut buffer = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buffer).ok()? {
+            XmlEvent::Start(event) | XmlEvent::Empty(event) => {
+                if !transient_xml_name_matches(event.name().as_ref(), b"rootfile") {
+                    buffer.clear();
+                    continue;
+                }
+                let Some(path) = transient_xml_attribute_value(&event, b"full-path") else {
+                    buffer.clear();
+                    continue;
+                };
+                return Some(normalize_transient_epub_zip_path(&path));
+            }
+            XmlEvent::Eof => break,
+            _ => {}
+        }
+        buffer.clear();
+    }
+    None
+}
+
+fn parse_transient_epub_manifest_items(
+    package_document: &[u8],
+    rootfile_path: &str,
+) -> std::collections::HashMap<String, TransientEpubManifestItem> {
+    let mut reader = XmlReader::from_reader(package_document);
+    reader.config_mut().trim_text(true);
+    let mut buffer = Vec::new();
+    let mut manifest = std::collections::HashMap::new();
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(XmlEvent::Start(event)) | Ok(XmlEvent::Empty(event)) => {
+                if !transient_xml_name_matches(event.name().as_ref(), b"item") {
+                    buffer.clear();
+                    continue;
+                }
+                let Some(id) = transient_xml_attribute_value(&event, b"id") else {
+                    buffer.clear();
+                    continue;
+                };
+                let Some(href) = transient_xml_attribute_value(&event, b"href") else {
+                    buffer.clear();
+                    continue;
+                };
+                let media_type = transient_xml_attribute_value(&event, b"media-type")
+                    .unwrap_or_else(|| "application/octet-stream".to_string());
+                manifest.insert(
+                    id,
+                    TransientEpubManifestItem {
+                        href: normalize_transient_epub_resource_href(rootfile_path, &href),
+                        media_type,
+                    },
+                );
+            }
+            Ok(XmlEvent::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buffer.clear();
+    }
+    manifest
+}
+
+fn parse_transient_epub_spine_items(
+    package_document: &[u8],
+    manifest: &std::collections::HashMap<String, TransientEpubManifestItem>,
+) -> Vec<TransientEpubManifestItem> {
+    let mut reader = XmlReader::from_reader(package_document);
+    reader.config_mut().trim_text(true);
+    let mut buffer = Vec::new();
+    let mut spine = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(XmlEvent::Start(event)) | Ok(XmlEvent::Empty(event)) => {
+                if !transient_xml_name_matches(event.name().as_ref(), b"itemref") {
+                    buffer.clear();
+                    continue;
+                }
+                let Some(idref) = transient_xml_attribute_value(&event, b"idref") else {
+                    buffer.clear();
+                    continue;
+                };
+                if let Some(item) = manifest.get(&idref) {
+                    spine.push(item.clone());
+                }
+            }
+            Ok(XmlEvent::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buffer.clear();
+    }
+    spine
+}
+
+fn parse_transient_epub_divina_image_href(
+    resource_bytes: &[u8],
+    page_href: &str,
+) -> Option<String> {
+    let mut reader = XmlReader::from_reader(resource_bytes);
+    reader.config_mut().trim_text(false);
+    let mut buffer = Vec::new();
+    let mut inside_body = false;
+    let mut text_len = 0usize;
+    let mut image_sources = Vec::<String>::new();
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(XmlEvent::Start(event)) => {
+                if transient_xml_name_matches(event.name().as_ref(), b"body") {
+                    inside_body = true;
+                }
+                if inside_body
+                    && transient_xml_name_matches(event.name().as_ref(), b"img")
+                    && let Some(src) = transient_xml_attribute_value(&event, b"src")
+                    && !src.trim().is_empty()
+                {
+                    image_sources.push(src);
+                }
+            }
+            Ok(XmlEvent::Empty(event)) => {
+                if inside_body
+                    && transient_xml_name_matches(event.name().as_ref(), b"img")
+                    && let Some(src) = transient_xml_attribute_value(&event, b"src")
+                    && !src.trim().is_empty()
+                {
+                    image_sources.push(src);
+                }
+            }
+            Ok(XmlEvent::Text(text)) if inside_body => {
+                text_len += String::from_utf8_lossy(text.as_ref())
+                    .chars()
+                    .filter(|character| !character.is_whitespace())
+                    .count();
+            }
+            Ok(XmlEvent::CData(text)) if inside_body => {
+                text_len += String::from_utf8_lossy(text.as_ref())
+                    .chars()
+                    .filter(|character| !character.is_whitespace())
+                    .count();
+            }
+            Ok(XmlEvent::End(event))
+                if transient_xml_name_matches(event.name().as_ref(), b"body") =>
+            {
+                inside_body = false;
+            }
+            Ok(XmlEvent::Eof) => break,
+            Err(_) => return None,
+            _ => {}
+        }
+        buffer.clear();
+    }
+
+    if text_len > EPUB_DIVINA_LETTER_COUNT_THRESHOLD {
+        return None;
+    }
+    image_sources.sort();
+    image_sources.dedup();
+    if image_sources.len() > 1 {
+        return None;
+    }
+    let image_href = image_sources.into_iter().next()?;
+
+    Some(normalize_transient_epub_resource_href(
+        page_href,
+        &image_href,
+    ))
+}
+
+fn is_transient_epub_html_media_type(media_type: &str) -> bool {
+    matches!(
+        media_type,
+        "application/xhtml+xml" | "text/html" | "application/xml" | "text/xml"
+    )
+}
+
+fn normalize_transient_epub_resource_href(rootfile_path: &str, href: &str) -> String {
+    let href = href.split('#').next().unwrap_or_default();
+    if href.starts_with('/') {
+        return normalize_transient_epub_zip_path(href);
+    }
+    let base = rootfile_path
+        .rsplit_once('/')
+        .map(|(parent, _)| parent)
+        .unwrap_or_default();
+    let joined = if base.is_empty() {
+        href.to_string()
+    } else {
+        format!("{base}/{href}")
+    };
+    normalize_transient_epub_zip_path(&joined)
+}
+
+fn normalize_transient_epub_zip_path(path: &str) -> String {
+    let normalized_path = path.replace('\\', "/");
+    let mut normalized_segments = Vec::<&str>::new();
+    for segment in normalized_path.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                normalized_segments.pop();
+            }
+            _ => normalized_segments.push(segment),
+        }
+    }
+    normalized_segments.join("/")
+}
+
+fn transient_xml_name_matches(actual: &[u8], expected: &[u8]) -> bool {
+    actual == expected || actual.ends_with(expected)
+}
+
+fn transient_xml_attribute_value(
+    event: &quick_xml::events::BytesStart<'_>,
+    attribute_name: &[u8],
+) -> Option<String> {
+    event.attributes().flatten().find_map(|attribute| {
+        transient_xml_name_matches(attribute.key.as_ref(), attribute_name).then(|| {
+            attribute
+                .unescape_value()
+                .ok()
+                .map(|value| value.into_owned())
+        })?
+    })
+}
+
+fn to_unix_nanos(time: Option<SystemTime>) -> i128 {
     time.and_then(|value| value.duration_since(UNIX_EPOCH).ok())
-        .map(|value| value.as_secs() as i64)
+        .map(|value| value.as_nanos() as i128)
         .unwrap_or_default()
 }
 
-fn parse_transient_series_and_number_candidate(file_name: &str) -> (String, Option<f64>) {
-    let file_path = PathBuf::from(file_name);
-    let stem = file_path
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or(file_name)
-        .trim();
-    if stem.is_empty() {
-        return (String::new(), None);
+fn newest_file_system_time(
+    left: Option<SystemTime>,
+    right: Option<SystemTime>,
+) -> Option<SystemTime> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(std::cmp::max(left, right)),
+        (Some(value), None) | (None, Some(value)) => Some(value),
+        (None, None) => None,
     }
-
-    let normalized = stem
-        .chars()
-        .map(|ch| {
-            if ch == '_' || ch == '-' || ch == '.' {
-                ' '
-            } else {
-                ch
-            }
-        })
-        .collect::<String>();
-
-    let mut parts = normalized
-        .split_whitespace()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    if parts.is_empty() {
-        return (String::new(), None);
-    }
-
-    let mut number = None;
-    if let Some(last) = parts.last()
-        && let Ok(parsed_number) = last.parse::<f64>()
-    {
-        number = Some(parsed_number);
-        let _ = parts.pop();
-    }
-
-    let series_title_candidate = if parts.is_empty() {
-        normalized.trim().to_string()
-    } else {
-        parts.join(" ")
-    };
-
-    (series_title_candidate, number)
 }
 
 fn collect_transient_book_entries(path: &Path, entries: &mut Vec<Value>) {
@@ -646,6 +1096,14 @@ fn collect_transient_book_entries(path: &Path, entries: &mut Vec<Value>) {
         };
 
         let entry_path = entry.path();
+        let is_hidden = entry_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .is_some_and(|name| name.starts_with('.'));
+        if is_hidden {
+            continue;
+        }
+
         if file_type.is_dir() {
             collect_transient_book_entries(&entry_path, entries);
             continue;
@@ -818,8 +1276,8 @@ mod tests {
 
         assert_eq!(analysis.status, "READY");
         assert_eq!(analysis.pages.len(), 1);
-        assert_eq!(analysis.pages[0].width, Some(595));
-        assert_eq!(analysis.pages[0].height, Some(842));
+        assert_eq!(analysis.pages[0].width, Some(3200));
+        assert_eq!(analysis.pages[0].height, Some(4528));
 
         let _ = fs::remove_file(path);
     }

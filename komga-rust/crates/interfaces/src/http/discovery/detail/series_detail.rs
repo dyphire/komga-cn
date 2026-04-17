@@ -81,16 +81,10 @@ pub async fn series_collections(
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let has_unrestricted_access =
-        context.authorized_library_ids.is_none() && context.restrictions.is_none();
-
     let Some(resource) = (match load_persisted_series_resource(database_file, &series_id).await {
         Ok(resource) => resource,
         Err(error) => return internal_error_response(error),
     }) else {
-        if has_unrestricted_access {
-            return Json(json!([])).into_response();
-        }
         return StatusCode::NOT_FOUND.into_response();
     };
 

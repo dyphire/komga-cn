@@ -161,11 +161,14 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
     .expect("oneshot series publisher should be updated");
     pool.close().await;
 
-    scheduler.enqueue(TaskQueueRecord::new(
-        "REFRESH_SERIES_METADATA:series-oneshot",
-        1_000,
-        Some("series-oneshot".to_string()),
-    ));
+    scheduler.enqueue(
+        TaskQueueRecord::new(
+            "REFRESH_SERIES_METADATA_series-oneshot",
+            1_000,
+            Some("series-oneshot".to_string()),
+        )
+        .with_simple_type("REFRESH_SERIES_METADATA"),
+    );
     scheduler
         .process_available(&runtime)
         .expect("refresh-series-metadata task should process for incremental sync contract");

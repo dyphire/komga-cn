@@ -1,5 +1,84 @@
 use super::*;
 
+fn assert_spring_forbidden(payload: &Value, message: &str, path: &str) {
+    assert_eq!(
+        payload.get("error"),
+        Some(&Value::String("Forbidden".to_string()))
+    );
+    assert_eq!(
+        payload.get("message"),
+        Some(&Value::String(message.to_string()))
+    );
+    assert_eq!(payload.get("status"), Some(&Value::from(403)));
+    assert_eq!(payload.get("path"), Some(&Value::String(path.to_string())));
+    assert!(
+        payload.get("timestamp").and_then(Value::as_u64).is_some(),
+        "expected numeric timestamp in spring-style error payload: {payload:?}"
+    );
+}
+
+#[tokio::test]
+async fn router_koreader_user_auth_rejects_valid_x_auth_user_api_key_without_koreader_sync_role() {
+    let paths = new_router_fixture("router-koreader-user-auth-missing-sync-role").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_age_exclude_user_with_roles(
+        &paths,
+        "member-no-koreader-sync",
+        "member-no-koreader-sync@example.org",
+        "member-no-koreader-sync-123",
+        99,
+        &["USER", "PAGE_STREAMING"],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "member-no-koreader-sync@example.org",
+        "member-no-koreader-sync-123",
+    )
+    .await;
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v2/users/me/api-keys")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "comment": "KOReader auth without sync role" }).to_string(),
+                ))
+                .expect("api key create request should build"),
+        )
+        .await
+        .expect("api key create request should complete");
+    assert_eq!(create_response.status(), StatusCode::OK);
+    let api_key = response_json(create_response)
+        .await
+        .get("key")
+        .and_then(Value::as_str)
+        .expect("api key create response should expose key")
+        .to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/koreader/users/auth")
+                .header("x-auth-user", &api_key)
+                .body(Body::empty())
+                .expect("koreader users auth valid-api-key request should build"),
+        )
+        .await
+        .expect("koreader users auth valid-api-key request should complete");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    cleanup_router_fixture(paths);
+}
+
 #[tokio::test]
 async fn router_koreader_user_create_returns_unauthorized_for_invalid_x_auth_user() {
     let paths = new_router_fixture("router-koreader-user-create-invalid-auth-header").await;
@@ -49,6 +128,173 @@ async fn router_koreader_user_create_ignores_invalid_x_api_key_for_koreader_auth
 }
 
 #[tokio::test]
+async fn router_koreader_user_create_returns_forbidden_without_x_auth_user_or_session() {
+    let paths = new_router_fixture("router-koreader-user-create-missing-header").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/koreader/users/create")
+                .body(Body::empty())
+                .expect("koreader users create missing-header request should build"),
+        )
+        .await
+        .expect("koreader users create missing-header request should complete");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("koreader users create missing-header body should be readable");
+    assert!(body.is_empty(), "security gate should reject before disabled payload");
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_koreader_user_create_rejects_valid_x_auth_user_api_key_without_koreader_sync_role() {
+    let paths = new_router_fixture("router-koreader-user-create-missing-sync-role").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_age_exclude_user_with_roles(
+        &paths,
+        "member-no-koreader-sync",
+        "member-no-koreader-sync@example.org",
+        "member-no-koreader-sync-123",
+        99,
+        &["USER", "PAGE_STREAMING"],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "member-no-koreader-sync@example.org",
+        "member-no-koreader-sync-123",
+    )
+    .await;
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v2/users/me/api-keys")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "comment": "KOReader create without sync role" }).to_string(),
+                ))
+                .expect("api key create request should build"),
+        )
+        .await
+        .expect("api key create request should complete");
+    assert_eq!(create_response.status(), StatusCode::OK);
+    let api_key = response_json(create_response)
+        .await
+        .get("key")
+        .and_then(Value::as_str)
+        .expect("api key create response should expose key")
+        .to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/koreader/users/create")
+                .header("x-auth-user", &api_key)
+                .body(Body::empty())
+                .expect("koreader users create valid-api-key request should build"),
+        )
+        .await
+        .expect("koreader users create valid-api-key request should complete");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("koreader users create valid-api-key body should be readable");
+    assert!(body.is_empty(), "role gate should reject before disabled payload");
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_koreader_user_create_returns_spring_forbidden_payload_when_creation_is_disabled() {
+    let paths = new_router_fixture("router-koreader-user-create-disabled-spring-error").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v2/users/me/api-keys")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "comment": "KOReader disabled user creation" }).to_string(),
+                ))
+                .expect("api key create request should build"),
+        )
+        .await
+        .expect("api key create request should complete");
+    assert_eq!(create_response.status(), StatusCode::OK);
+    let api_key = response_json(create_response)
+        .await
+        .get("key")
+        .and_then(Value::as_str)
+        .expect("api key create response should expose key")
+        .to_string();
+
+    let session_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/koreader/users/create")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("koreader users create session request should build"),
+        )
+        .await
+        .expect("koreader users create session request should complete");
+
+    assert_eq!(session_response.status(), StatusCode::FORBIDDEN);
+    let session_payload = response_json(session_response).await;
+    assert_spring_forbidden(
+        &session_payload,
+        "User creation is disabled",
+        "/koreader/users/create",
+    );
+
+    let api_key_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/koreader/users/create")
+                .header("x-auth-user", &api_key)
+                .body(Body::empty())
+                .expect("koreader users create disabled request should build"),
+        )
+        .await
+        .expect("koreader users create disabled request should complete");
+
+    assert_eq!(api_key_response.status(), StatusCode::FORBIDDEN);
+    let payload = response_json(api_key_response).await;
+    assert_spring_forbidden(
+        &payload,
+        "User creation is disabled",
+        "/koreader/users/create",
+    );
+
+    cleanup_router_fixture(paths);
+}
+#[tokio::test]
 async fn router_koreader_user_auth_returns_forbidden_without_x_auth_user() {
     let paths = new_router_fixture("router-koreader-user-auth-missing-header").await;
     seed_router_contract_data(&paths).await;
@@ -67,6 +313,58 @@ async fn router_koreader_user_auth_returns_forbidden_without_x_auth_user() {
         .expect("koreader users auth missing-header request should complete");
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_koreader_user_auth_accepts_koreader_sync_session_without_x_auth_user() {
+    let paths = new_router_fixture("router-koreader-user-auth-session-success").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/koreader/users/auth")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("koreader users auth session request should build"),
+        )
+        .await
+        .expect("koreader users auth session request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response_json(response).await, json!({ "authorized": "OK" }));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_koreader_user_auth_rejects_empty_x_auth_user_even_with_koreader_sync_session() {
+    let paths = new_router_fixture("router-koreader-user-auth-empty-header").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/koreader/users/auth")
+                .header("x-auth-token", &auth_token)
+                .header("x-auth-user", "")
+                .body(Body::empty())
+                .expect("koreader users auth empty-header request should build"),
+        )
+        .await
+        .expect("koreader users auth empty-header request should complete");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
     cleanup_router_fixture(paths);
 }

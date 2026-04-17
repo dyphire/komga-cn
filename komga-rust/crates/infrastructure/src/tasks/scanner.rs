@@ -3,6 +3,8 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
+use komga_application::runtime_sse::register_runtime_sse_event;
+use serde_json::json;
 use sqlx::{Row, SqlitePool};
 
 use super::cleanup_workflow::compare_book_names_kotlin_like;
@@ -93,6 +95,159 @@ pub(crate) enum ScannedSidecarSource {
 pub(crate) enum ScannedSidecarType {
     Metadata,
     Artwork,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RuntimeSseMutationKind {
+    Added,
+    Changed,
+}
+
+#[derive(Clone, Debug)]
+struct RuntimeSeriesSseRecord {
+    series_id: String,
+    library_id: String,
+    kind: RuntimeSseMutationKind,
+}
+
+#[derive(Clone, Debug)]
+struct RuntimeBookSseRecord {
+    book_id: String,
+    series_id: String,
+    library_id: String,
+    kind: RuntimeSseMutationKind,
+}
+
+#[derive(Clone, Debug)]
+enum RuntimeSseRecord {
+    Series(RuntimeSeriesSseRecord),
+    Book(RuntimeBookSseRecord),
+}
+
+#[derive(Default)]
+struct RuntimeSseEventBuffer {
+    events: Vec<RuntimeSseRecord>,
+    series_indices: HashMap<String, usize>,
+    book_indices: HashMap<String, usize>,
+}
+
+struct PersistScannedLibraryOutcome {
+    renumbered_book_ids: Vec<String>,
+    library_changed: bool,
+    runtime_events: Vec<RuntimeSseRecord>,
+}
+
+fn merge_runtime_sse_mutation_kind(
+    existing: RuntimeSseMutationKind,
+    next: RuntimeSseMutationKind,
+) -> RuntimeSseMutationKind {
+    if matches!(existing, RuntimeSseMutationKind::Added)
+        || matches!(next, RuntimeSseMutationKind::Added)
+    {
+        RuntimeSseMutationKind::Added
+    } else {
+        RuntimeSseMutationKind::Changed
+    }
+}
+
+fn record_series_runtime_sse_event(
+    events: &mut RuntimeSseEventBuffer,
+    series_id: &str,
+    library_id: &str,
+    kind: RuntimeSseMutationKind,
+) {
+    if let Some(index) = events.series_indices.get(series_id).copied() {
+        let RuntimeSseRecord::Series(existing) = &mut events.events[index] else {
+            unreachable!("series indices should only point at series events")
+        };
+        existing.kind = merge_runtime_sse_mutation_kind(existing.kind, kind);
+        return;
+    }
+
+    let index = events.events.len();
+    events
+        .events
+        .push(RuntimeSseRecord::Series(RuntimeSeriesSseRecord {
+            series_id: series_id.to_string(),
+            library_id: library_id.to_string(),
+            kind,
+        }));
+    events.series_indices.insert(series_id.to_string(), index);
+}
+
+fn record_book_runtime_sse_event(
+    events: &mut RuntimeSseEventBuffer,
+    book_id: &str,
+    series_id: &str,
+    library_id: &str,
+    kind: RuntimeSseMutationKind,
+) {
+    if let Some(index) = events.book_indices.get(book_id).copied() {
+        let RuntimeSseRecord::Book(existing) = &mut events.events[index] else {
+            unreachable!("book indices should only point at book events")
+        };
+        existing.kind = merge_runtime_sse_mutation_kind(existing.kind, kind);
+        return;
+    }
+
+    let index = events.events.len();
+    events
+        .events
+        .push(RuntimeSseRecord::Book(RuntimeBookSseRecord {
+            book_id: book_id.to_string(),
+            series_id: series_id.to_string(),
+            library_id: library_id.to_string(),
+            kind,
+        }));
+    events.book_indices.insert(book_id.to_string(), index);
+}
+
+fn emit_scanned_library_runtime_sse_events(
+    library_id: &str,
+    outcome: &PersistScannedLibraryOutcome,
+) {
+    if outcome.library_changed {
+        register_runtime_sse_event(
+            "LibraryChanged",
+            json!({ "libraryId": library_id }),
+            false,
+            None,
+        );
+    }
+
+    for event in &outcome.runtime_events {
+        match event {
+            RuntimeSseRecord::Series(event) => {
+                register_runtime_sse_event(
+                    match event.kind {
+                        RuntimeSseMutationKind::Added => "SeriesAdded",
+                        RuntimeSseMutationKind::Changed => "SeriesChanged",
+                    },
+                    json!({
+                        "seriesId": event.series_id,
+                        "libraryId": event.library_id,
+                    }),
+                    false,
+                    None,
+                );
+            }
+            RuntimeSseRecord::Book(event) => {
+                register_runtime_sse_event(
+                    match event.kind {
+                        RuntimeSseMutationKind::Added => "BookAdded",
+                        RuntimeSseMutationKind::Changed => "BookChanged",
+                    },
+                    json!({
+                        "bookId": event.book_id,
+                        "seriesId": event.series_id,
+                        "libraryId": event.library_id,
+                    }),
+                    false,
+                    None,
+                );
+            }
+        }
+    }
 }
 
 pub(crate) fn load_library_scan_config(
@@ -386,10 +541,27 @@ pub(crate) fn persist_scanned_library(
 ) -> Result<Vec<String>, String> {
     let database_file = database_file.to_path_buf();
     let library_id = library_id.to_string();
+    let library_id_for_events = library_id.clone();
     let scanned = scanned.clone();
 
-    run_database_query(database_file, move |pool| {
+    let outcome = run_database_query(database_file, move |pool| {
         Box::pin(async move {
+            let mut runtime_events = RuntimeSseEventBuffer::default();
+            let library_was_unavailable = sqlx::query(
+                r#"SELECT UNAVAILABLE_DATE
+FROM LIBRARY
+WHERE ID = ?
+LIMIT 1"#,
+            )
+            .bind(&library_id)
+            .fetch_optional(&pool)
+            .await
+            .map_err(|error| {
+                format!("failed to load library availability state for '{library_id}': {error}")
+            })?
+            .and_then(|row| row.get::<Option<String>, _>("UNAVAILABLE_DATE"))
+            .is_some();
+
             if !scanned.root_available {
                 sqlx::query(
                     r#"UPDATE LIBRARY
@@ -399,8 +571,14 @@ WHERE ID = ?"#,
                 .bind(&library_id)
                 .execute(&pool)
                 .await
-                .map_err(|error| format!("failed to mark library unavailable for '{library_id}': {error}"))?;
-                return Ok(Vec::new());
+                .map_err(|error| {
+                    format!("failed to mark library unavailable for '{library_id}': {error}")
+                })?;
+                return Ok(PersistScannedLibraryOutcome {
+                    renumbered_book_ids: Vec::new(),
+                    library_changed: !library_was_unavailable,
+                    runtime_events: runtime_events.events,
+                });
             }
 
             sqlx::query(
@@ -418,9 +596,123 @@ WHERE ID = ?"#,
             let discovered_series_ids = scanned.discovered_series_ids.clone();
             let discovered_book_ids = scanned.discovered_book_ids.clone();
 
+            if scanned.root_available {
+                let existing_series = sqlx::query(
+                    r#"SELECT ID
+FROM SERIES
+WHERE LIBRARY_ID = ?
+  AND DELETED_DATE IS NULL"#,
+                )
+                .bind(&library_id)
+                .fetch_all(&pool)
+                .await
+                .map_err(|error| {
+                    format!("failed to query existing SERIES rows for '{library_id}': {error}")
+                })?;
+                let existing_books = sqlx::query(
+                    r#"SELECT ID, SERIES_ID
+FROM BOOK
+WHERE LIBRARY_ID = ?
+  AND DELETED_DATE IS NULL"#,
+                )
+                .bind(&library_id)
+                .fetch_all(&pool)
+                .await
+                .map_err(|error| {
+                    format!("failed to query existing BOOK rows for '{library_id}': {error}")
+                })?
+                .into_iter()
+                .map(|row| {
+                    (
+                        row.get::<String, _>("ID"),
+                        row.get::<String, _>("SERIES_ID"),
+                    )
+                })
+                .collect::<Vec<_>>();
+                let missing_series_ids = existing_series
+                    .into_iter()
+                    .map(|row| row.get::<String, _>("ID"))
+                    .filter(|series_id| !discovered_series_ids.contains(series_id))
+                    .collect::<Vec<_>>();
+                let missing_series_id_set =
+                    missing_series_ids.iter().cloned().collect::<HashSet<_>>();
+
+                for (book_id, series_id) in &existing_books {
+                    if discovered_book_ids.contains(book_id)
+                        || !missing_series_id_set.contains(series_id)
+                    {
+                        continue;
+                    }
+                    sqlx::query(
+                        r#"UPDATE BOOK
+SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+WHERE ID = ?"#,
+                    )
+                    .bind(book_id)
+                    .execute(&pool)
+                    .await
+                    .map_err(|error| {
+                        format!("failed to soft-delete missing BOOK '{book_id}': {error}")
+                    })?;
+                    record_book_runtime_sse_event(
+                        &mut runtime_events,
+                        book_id,
+                        series_id,
+                        &library_id,
+                        RuntimeSseMutationKind::Changed,
+                    );
+                }
+
+                for series_id in &missing_series_ids {
+                    sqlx::query(
+                        r#"UPDATE SERIES
+SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+WHERE ID = ?"#,
+                    )
+                    .bind(&series_id)
+                    .execute(&pool)
+                    .await
+                    .map_err(|error| {
+                        format!("failed to soft-delete missing SERIES '{series_id}': {error}")
+                    })?;
+                    record_series_runtime_sse_event(
+                        &mut runtime_events,
+                        series_id,
+                        &library_id,
+                        RuntimeSseMutationKind::Changed,
+                    );
+                }
+
+                for (book_id, series_id) in &existing_books {
+                    if discovered_book_ids.contains(book_id)
+                        || missing_series_id_set.contains(series_id)
+                    {
+                        continue;
+                    }
+                    sqlx::query(
+                        r#"UPDATE BOOK
+SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+WHERE ID = ?"#,
+                    )
+                    .bind(book_id)
+                    .execute(&pool)
+                    .await
+                    .map_err(|error| {
+                        format!("failed to soft-delete missing BOOK '{book_id}': {error}")
+                    })?;
+                    record_book_runtime_sse_event(
+                        &mut runtime_events,
+                        book_id,
+                        series_id,
+                        &library_id,
+                        RuntimeSseMutationKind::Changed,
+                    );
+                }
+            }
+
             for series in &scanned.series_rows {
                 let series_updated = sqlx::query(
-                r#"UPDATE SERIES
+                    r#"UPDATE SERIES
 SET FILE_LAST_MODIFIED = datetime(?, 'unixepoch'), NAME = ?, URL = ?, LIBRARY_ID = ?, oneshot = ?,
     LAST_MODIFIED_DATE = CURRENT_TIMESTAMP, DELETED_DATE = NULL
 WHERE ID = ?"#,
@@ -450,6 +742,12 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)"#,
                     .execute(&pool)
                     .await
                     .map_err(|error| format!("failed to insert SERIES rows: {error}"))?;
+                    record_series_runtime_sse_event(
+                        &mut runtime_events,
+                        &series.series_id,
+                        &library_id,
+                        RuntimeSseMutationKind::Added,
+                    );
                 }
 
                 ensure_series_metadata_seed(&pool, series)
@@ -497,6 +795,13 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?)"#,
                         .execute(&pool)
                         .await
                         .map_err(|error| format!("failed to insert BOOK rows: {error}"))?;
+                        record_book_runtime_sse_event(
+                            &mut runtime_events,
+                            &book.book_id,
+                            &series.series_id,
+                            &library_id,
+                            RuntimeSseMutationKind::Added,
+                        );
                     }
 
                     ensure_book_metadata_seed(&pool, book)
@@ -584,64 +889,6 @@ VALUES (?, ?, ?, ?)"#,
                 }
             }
 
-            if scanned.root_available {
-                let existing_series = sqlx::query(
-                    r#"SELECT ID
-FROM SERIES
-WHERE LIBRARY_ID = ?
-  AND DELETED_DATE IS NULL"#,
-                )
-                .bind(&library_id)
-                .fetch_all(&pool)
-                .await
-                .map_err(|error| {
-                    format!("failed to query existing SERIES rows for '{library_id}': {error}")
-                })?;
-                for row in existing_series {
-                    let series_id = row.get::<String, _>("ID");
-                    if discovered_series_ids.contains(&series_id) {
-                        continue;
-                    }
-                    sqlx::query(
-                        r#"UPDATE SERIES
-SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-WHERE ID = ?"#,
-                    )
-                    .bind(&series_id)
-                    .execute(&pool)
-                    .await
-                    .map_err(|error| format!("failed to soft-delete missing SERIES '{series_id}': {error}"))?;
-                }
-
-                let existing_books = sqlx::query(
-                    r#"SELECT ID
-FROM BOOK
-WHERE LIBRARY_ID = ?
-  AND DELETED_DATE IS NULL"#,
-                )
-                .bind(&library_id)
-                .fetch_all(&pool)
-                .await
-                .map_err(|error| {
-                    format!("failed to query existing BOOK rows for '{library_id}': {error}")
-                })?;
-                for row in existing_books {
-                    let book_id = row.get::<String, _>("ID");
-                    if discovered_book_ids.contains(&book_id) {
-                        continue;
-                    }
-                    sqlx::query(
-                        r#"UPDATE BOOK
-SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-WHERE ID = ?"#,
-                    )
-                    .bind(&book_id)
-                    .execute(&pool)
-                    .await
-                    .map_err(|error| format!("failed to soft-delete missing BOOK '{book_id}': {error}"))?;
-                }
-            }
-
             sqlx::query(
                 r#"UPDATE SERIES
 SET BOOK_COUNT = (SELECT COUNT(*)
@@ -668,9 +915,16 @@ WHERE LIBRARY_ID = ?"#,
                     },
                 )?;
 
-            Ok(renumbered_book_ids)
+            Ok(PersistScannedLibraryOutcome {
+                renumbered_book_ids,
+                library_changed: library_was_unavailable,
+                runtime_events: runtime_events.events,
+            })
         })
-    })
+    })?;
+
+    emit_scanned_library_runtime_sse_events(&library_id_for_events, &outcome);
+    Ok(outcome.renumbered_book_ids)
 }
 
 async fn resort_scanned_series_books(

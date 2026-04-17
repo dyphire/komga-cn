@@ -11,11 +11,10 @@ use komga_application::identity_access::{
     build_kobo_changed_product_metadata, build_kobo_changed_reading_state, build_kobo_changed_tag,
     build_kobo_deleted_tag, build_kobo_new_entitlement, build_kobo_new_tag,
     build_komga_sync_token_payload, decode_or_passthrough_sync_token, generated_kobo_token_triplet,
-    is_kobo_store_sync_token_candidate, now_sync_marker, parse_komga_sync_token_payload,
-    resolve_koreader_user_id, user_id,
+    is_kobo_store_sync_token_candidate, now_sync_marker, parse_komga_sync_token_payload, user_id,
 };
 use oauth2::{
-    AuthUrl, ClientId, ClientSecret, CsrfToken, RedirectUrl, Scope, TokenUrl, basic::BasicClient,
+    AuthUrl, ClientId, ClientSecret, CsrfToken, RedirectUrl, Scope, basic::BasicClient,
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -37,11 +36,11 @@ use crate::media_assets_runtime_access::facade::{
     load_persisted_book_media, persist_book_progression, read_media_file_bytes,
 };
 use crate::runtime_identity_access::{
-    KoreaderBookLookupError, PersistedReadProgressRecord, configured_api_key, ensure_oauth_user,
+    KoreaderBookLookupError, PersistedReadProgressRecord, ensure_oauth_user,
     load_book_created_timestamp, load_book_last_epub_position_locator, load_kobo_metadata_record,
     load_kobo_sync_page, load_koreader_book_target, load_read_progress, load_thumbnail_by_id,
-    persist_read_progress_with_locator, persisted_book_exists, proxy_kobo_store_library_sync,
-    remove_sync_point,
+    persisted_book_exists, proxy_kobo_store_library_sync,
+    remove_sync_point, store_oauth2_authorization_state, take_oauth2_authorization_state,
 };
 
 mod auth_resolvers;

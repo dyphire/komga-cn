@@ -105,9 +105,10 @@ async fn router_kobo_book_file_epub_returns_forbidden_for_restricted_user() {
         "restricted-kobo-file@example.org",
         "router-contract-restricted-kobo-file-123",
         16,
-        &["USER", "FILE_DOWNLOAD"],
+        &["USER", "FILE_DOWNLOAD", "KOBO_SYNC"],
     )
     .await;
+    seed_kobo_sync_api_key(&paths, "any-token", "restricted-kobo-file-user").await;
     let books_dir = paths.config_dir.join("books");
     std::fs::create_dir_all(&books_dir)
         .expect("books directory should be created for restricted kobo file test");
@@ -154,6 +155,7 @@ async fn router_kobo_book_file_epub_returns_forbidden_for_restricted_user() {
 async fn router_kobo_book_file_epub_returns_not_found_with_message_when_file_is_missing() {
     let paths = new_router_fixture("router-kobo-book-file-missing-file").await;
     seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;

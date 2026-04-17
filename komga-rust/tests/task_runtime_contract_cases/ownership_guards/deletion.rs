@@ -1,5 +1,27 @@
 use super::*;
 
+fn enqueue_delete_book(scheduler: &mut TaskQueueScheduler, book_id: &str) {
+    scheduler.enqueue(
+        TaskQueueRecord::new(
+            format!("DELETE_BOOK_{book_id}"),
+            1_000,
+            Some(book_id.to_string()),
+        )
+        .with_simple_type("DELETE_BOOK"),
+    );
+}
+
+fn enqueue_delete_series(scheduler: &mut TaskQueueScheduler, series_id: &str) {
+    scheduler.enqueue(
+        TaskQueueRecord::new(
+            format!("DELETE_SERIES_{series_id}"),
+            1_000,
+            Some(series_id.to_string()),
+        )
+        .with_simple_type("DELETE_SERIES"),
+    );
+}
+
 #[tokio::test]
 async fn runtime_blocks_book_delete_when_main_database_is_external_owned() {
     let paths = new_router_fixture("runtime-blocked-main-database-delete-book").await;
@@ -10,11 +32,7 @@ async fn runtime_blocks_book_delete_when_main_database_is_external_owned() {
         ..runtime_task_context(&paths)
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(TaskQueueRecord::new(
-        "DELETE_BOOK:book-1",
-        1_000,
-        Some("book-1".to_string()),
-    ));
+    enqueue_delete_book(&mut scheduler, "book-1");
     scheduler
         .process_available(&runtime)
         .expect("blocked main-database delete-book should still drain cleanly");
@@ -34,6 +52,101 @@ async fn runtime_blocks_book_delete_when_main_database_is_external_owned() {
         book_rows, 1,
         "runtime must not delete books when main database is external-owned",
     );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn runtime_blocks_series_delete_when_main_database_is_external_owned() {
+    let paths = new_router_fixture("runtime-blocked-main-database-delete-series").await;
+    seed_router_contract_data(&paths).await;
+
+    let series_dir = paths.config_dir.join("blocked-delete-series/series-1");
+    std::fs::create_dir_all(&series_dir)
+        .expect("blocked delete-series fixture series directory should exist");
+    let book_file = series_dir.join("book-1.epub");
+    let book_sidecar_thumbnail = series_dir.join("book-1.png");
+    let series_sidecar_thumbnail = series_dir.join("cover.png");
+    std::fs::write(&book_file, b"blocked-delete-series-book")
+        .expect("blocked delete-series book file should be written");
+    std::fs::write(&book_sidecar_thumbnail, fixture_png_bytes())
+        .expect("blocked delete-series book sidecar should be written");
+    std::fs::write(&series_sidecar_thumbnail, fixture_png_bytes())
+        .expect("blocked delete-series series sidecar should be written");
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for blocked delete-series fixture setup");
+    sqlx::query("UPDATE SERIES SET URL = ? WHERE ID = ?")
+        .bind("blocked-delete-series/series-1")
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("blocked delete-series series url should be updated");
+    sqlx::query("UPDATE BOOK SET URL = ? WHERE ID = ?")
+        .bind("blocked-delete-series/series-1/book-1.epub")
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("blocked delete-series book url should be updated");
+    sqlx::query(
+        "INSERT INTO THUMBNAIL_BOOK (ID, BOOK_ID, TYPE, URL, SELECTED) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("thumb-book-sidecar-blocked-delete-series")
+    .bind("book-1")
+    .bind("SIDECAR")
+    .bind("blocked-delete-series/series-1/book-1.png")
+    .bind(false)
+    .execute(&pool)
+    .await
+    .expect("blocked delete-series book sidecar row should be inserted");
+    sqlx::query(
+        "INSERT INTO THUMBNAIL_SERIES (ID, SERIES_ID, TYPE, URL, SELECTED) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("thumb-series-sidecar-blocked-delete-series")
+    .bind("series-1")
+    .bind("SIDECAR")
+    .bind("blocked-delete-series/series-1/cover.png")
+    .bind(true)
+    .execute(&pool)
+    .await
+    .expect("blocked delete-series series sidecar row should be inserted");
+    pool.close().await;
+
+    let runtime = TaskRuntimeContext {
+        owns_main_database: false,
+        ..runtime_task_context(&paths)
+    };
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    enqueue_delete_series(&mut scheduler, "series-1");
+    scheduler
+        .process_available(&runtime)
+        .expect("blocked main-database delete-series should still drain cleanly");
+
+    assert!(
+        book_file.exists() && book_sidecar_thumbnail.exists() && series_sidecar_thumbnail.exists(),
+        "runtime must not delete series files when the main database is external-owned",
+    );
+
+    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for blocked delete-series verification");
+    let book_rows = sqlx::query("SELECT COUNT(*) AS COUNT FROM BOOK WHERE ID = ?")
+        .bind("book-1")
+        .fetch_one(&verify_pool)
+        .await
+        .expect("blocked delete-series book row count should be queryable")
+        .get::<i64, _>("COUNT");
+    let series_rows = sqlx::query("SELECT COUNT(*) AS COUNT FROM SERIES WHERE ID = ?")
+        .bind("series-1")
+        .fetch_one(&verify_pool)
+        .await
+        .expect("blocked delete-series series row count should be queryable")
+        .get::<i64, _>("COUNT");
+    verify_pool.close().await;
+
+    assert_eq!(book_rows, 1);
+    assert_eq!(series_rows, 1);
 
     cleanup_router_fixture(paths);
 }
@@ -94,11 +207,7 @@ async fn runtime_delete_book_soft_deletes_rows_and_removes_book_sidecar_files() 
 
     let runtime = runtime_task_context(&paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(TaskQueueRecord::new(
-        "DELETE_BOOK:book-1",
-        1_000,
-        Some("book-1".to_string()),
-    ));
+    enqueue_delete_book(&mut scheduler, "book-1");
     scheduler
         .process_available(&runtime)
         .expect("delete-book runtime should stage soft deletion cleanly");
@@ -250,11 +359,7 @@ async fn runtime_delete_book_oneshot_soft_deletes_series_and_removes_series_side
 
     let runtime = runtime_task_context(&paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(TaskQueueRecord::new(
-        "DELETE_BOOK:book-1",
-        1_000,
-        Some("book-1".to_string()),
-    ));
+    enqueue_delete_book(&mut scheduler, "book-1");
     scheduler
         .process_available(&runtime)
         .expect("delete-book oneshot runtime should stage soft deletion cleanly");
@@ -351,6 +456,151 @@ async fn runtime_delete_book_oneshot_soft_deletes_series_and_removes_series_side
 }
 
 #[tokio::test]
+async fn runtime_delete_book_oneshot_deletes_every_book_in_the_series() {
+    let paths = new_router_fixture("runtime-delete-book-oneshot-deletes-full-series").await;
+    seed_router_contract_data(&paths).await;
+
+    let series_dir = paths.config_dir.join("delete-oneshot-full-series/series-1");
+    std::fs::create_dir_all(&series_dir)
+        .expect("delete-book oneshot full-series directory should exist");
+    let first_book_file = series_dir.join("book-1.epub");
+    let first_book_sidecar = series_dir.join("book-1.png");
+    let second_book_file = series_dir.join("book-2.epub");
+    let second_book_sidecar = series_dir.join("book-2.png");
+    let series_sidecar_thumbnail = series_dir.join("cover.png");
+    std::fs::write(&first_book_file, b"delete-book-oneshot-full-series-book-1")
+        .expect("delete-book oneshot full-series first book should be written");
+    std::fs::write(&first_book_sidecar, fixture_png_bytes())
+        .expect("delete-book oneshot full-series first sidecar should be written");
+    std::fs::write(&second_book_file, b"delete-book-oneshot-full-series-book-2")
+        .expect("delete-book oneshot full-series second book should be written");
+    std::fs::write(&second_book_sidecar, fixture_png_bytes())
+        .expect("delete-book oneshot full-series second sidecar should be written");
+    std::fs::write(&series_sidecar_thumbnail, fixture_png_bytes())
+        .expect("delete-book oneshot full-series series sidecar should be written");
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for delete-book oneshot full-series fixture setup");
+    sqlx::query("UPDATE SERIES SET URL = ?, ONESHOT = 1 WHERE ID = ?")
+        .bind("delete-oneshot-full-series/series-1")
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("delete-book oneshot full-series series row should be updated");
+    sqlx::query("UPDATE BOOK SET URL = ?, ONESHOT = 1 WHERE ID = ?")
+        .bind("delete-oneshot-full-series/series-1/book-1.epub")
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("delete-book oneshot full-series first book row should be updated");
+    sqlx::query(
+        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID, ONESHOT) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("book-2")
+    .bind(0_i64)
+    .bind("book-2.epub")
+    .bind("delete-oneshot-full-series/series-1/book-2.epub")
+    .bind("series-1")
+    .bind(2_048_i64)
+    .bind(2_i64)
+    .bind("library-1")
+    .bind(false)
+    .execute(&pool)
+    .await
+    .expect("delete-book oneshot full-series second book row should be inserted");
+    sqlx::query("INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("application/epub+zip")
+        .bind("READY")
+        .bind("book-2")
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("delete-book oneshot full-series second media row should be inserted");
+    sqlx::query(
+        "INSERT INTO THUMBNAIL_BOOK (ID, BOOK_ID, TYPE, URL, SELECTED) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("thumb-book-sidecar-full-series-1")
+    .bind("book-1")
+    .bind("SIDECAR")
+    .bind("delete-oneshot-full-series/series-1/book-1.png")
+    .bind(false)
+    .execute(&pool)
+    .await
+    .expect("delete-book oneshot full-series first sidecar row should be inserted");
+    sqlx::query(
+        "INSERT INTO THUMBNAIL_BOOK (ID, BOOK_ID, TYPE, URL, SELECTED) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("thumb-book-sidecar-full-series-2")
+    .bind("book-2")
+    .bind("SIDECAR")
+    .bind("delete-oneshot-full-series/series-1/book-2.png")
+    .bind(false)
+    .execute(&pool)
+    .await
+    .expect("delete-book oneshot full-series second sidecar row should be inserted");
+    sqlx::query(
+        "INSERT INTO THUMBNAIL_SERIES (ID, SERIES_ID, TYPE, URL, SELECTED) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("thumb-series-sidecar-full-series")
+    .bind("series-1")
+    .bind("SIDECAR")
+    .bind("delete-oneshot-full-series/series-1/cover.png")
+    .bind(true)
+    .execute(&pool)
+    .await
+    .expect("delete-book oneshot full-series series sidecar row should be inserted");
+    pool.close().await;
+
+    let runtime = runtime_task_context(&paths);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    enqueue_delete_book(&mut scheduler, "book-1");
+    scheduler
+        .process_available(&runtime)
+        .expect("delete-book oneshot full-series runtime should process successfully");
+
+    assert!(
+        !first_book_file.exists()
+            && !second_book_file.exists()
+            && !first_book_sidecar.exists()
+            && !second_book_sidecar.exists()
+            && !series_sidecar_thumbnail.exists()
+            && !series_dir.exists(),
+        "delete-book oneshot should delete every book file and sidecar in the series, then remove the empty series directory",
+    );
+
+    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for delete-book oneshot full-series verification");
+    let first_book_deleted = sqlx::query("SELECT DELETED_DATE FROM BOOK WHERE ID = ? LIMIT 1")
+        .bind("book-1")
+        .fetch_one(&verify_pool)
+        .await
+        .expect("delete-book oneshot full-series first book row should be queryable")
+        .get::<Option<String>, _>("DELETED_DATE");
+    let second_book_deleted = sqlx::query("SELECT DELETED_DATE FROM BOOK WHERE ID = ? LIMIT 1")
+        .bind("book-2")
+        .fetch_one(&verify_pool)
+        .await
+        .expect("delete-book oneshot full-series second book row should be queryable")
+        .get::<Option<String>, _>("DELETED_DATE");
+    let series_deleted = sqlx::query("SELECT DELETED_DATE FROM SERIES WHERE ID = ? LIMIT 1")
+        .bind("series-1")
+        .fetch_one(&verify_pool)
+        .await
+        .expect("delete-book oneshot full-series series row should be queryable")
+        .get::<Option<String>, _>("DELETED_DATE");
+    verify_pool.close().await;
+
+    assert!(
+        first_book_deleted.is_some() && second_book_deleted.is_some() && series_deleted.is_some(),
+        "delete-book oneshot should soft-delete every book row and the series row once the series path passes filesystem preconditions",
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn runtime_delete_book_skips_soft_delete_when_book_file_is_missing() {
     let paths = new_router_fixture("runtime-delete-book-missing-file-no-staging").await;
     seed_router_contract_data(&paths).await;
@@ -397,11 +647,7 @@ async fn runtime_delete_book_skips_soft_delete_when_book_file_is_missing() {
 
     let runtime = runtime_task_context(&paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(TaskQueueRecord::new(
-        "DELETE_BOOK:book-1",
-        1_000,
-        Some("book-1".to_string()),
-    ));
+    enqueue_delete_book(&mut scheduler, "book-1");
     scheduler
         .process_available(&runtime)
         .expect("delete-book missing-file runtime should still drain cleanly");
@@ -516,11 +762,7 @@ async fn runtime_delete_book_oneshot_skips_soft_delete_when_series_directory_is_
 
     let runtime = runtime_task_context(&paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(TaskQueueRecord::new(
-        "DELETE_BOOK:book-1",
-        1_000,
-        Some("book-1".to_string()),
-    ));
+    enqueue_delete_book(&mut scheduler, "book-1");
     scheduler
         .process_available(&runtime)
         .expect("delete-book oneshot readonly runtime should still drain cleanly");
@@ -648,11 +890,7 @@ async fn runtime_delete_series_soft_deletes_rows_and_removes_series_sidecar_file
 
     let runtime = runtime_task_context(&paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(TaskQueueRecord::new(
-        "DELETE_SERIES:series-1",
-        1_000,
-        Some("series-1".to_string()),
-    ));
+    enqueue_delete_series(&mut scheduler, "series-1");
     scheduler
         .process_available(&runtime)
         .expect("delete-series runtime should stage soft deletion cleanly");
@@ -763,11 +1001,7 @@ async fn runtime_delete_series_skips_soft_delete_when_series_directory_is_missin
 
     let runtime = runtime_task_context(&paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(TaskQueueRecord::new(
-        "DELETE_SERIES:series-1",
-        1_000,
-        Some("series-1".to_string()),
-    ));
+    enqueue_delete_series(&mut scheduler, "series-1");
     scheduler
         .process_available(&runtime)
         .expect("delete-series missing-directory runtime should still drain cleanly");

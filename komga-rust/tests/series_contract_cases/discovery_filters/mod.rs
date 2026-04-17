@@ -257,6 +257,17 @@ async fn router_discovery_series_list_supports_anyof_and_allof_in_runtime_owned_
     let paths = new_router_fixture("router-discovery-series-list-strict-anyof-allof").await;
     seed_router_contract_data(&paths).await;
 
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("series allOf sharing-label db should open");
+    sqlx::query("INSERT INTO SERIES_METADATA_SHARING (SERIES_ID, LABEL) VALUES (?, ?)")
+        .bind("series-1")
+        .bind("Teamwork")
+        .execute(&pool)
+        .await
+        .expect("secondary sharing label should be inserted for allOf contains coverage");
+    pool.close().await;
+
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
@@ -325,6 +336,80 @@ async fn router_discovery_series_list_supports_anyof_and_allof_in_runtime_owned_
         .and_then(Value::as_array)
         .expect("strict series allOf miss payload should expose content array");
     assert_eq!(all_of_miss_content.len(), 0);
+
+    let all_of_contains_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/series/list?page=0&size=20")
+                .header("x-auth-token", &auth_token)
+                .header("x-komga-runtime-search-ownership", "runtime-rust-owned")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "condition": {
+                            "type": "AllOfSeries",
+                            "conditions": [
+                                {"type": "SharingLabel", "operator": "contains", "value": "fam"},
+                                {"type": "SharingLabel", "operator": "contains", "value": "work"}
+                            ]
+                        }
+                    })
+                    .to_string(),
+                ))
+                .expect("strict series/list allOf sharing-label contains request should build"),
+        )
+        .await
+        .expect("strict series/list allOf sharing-label contains request should complete");
+    assert_eq!(all_of_contains_response.status(), StatusCode::OK);
+    let all_of_contains_payload = response_json(all_of_contains_response).await;
+    let all_of_contains_content = all_of_contains_payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("strict series allOf sharing-label contains payload should expose content array");
+    assert_eq!(all_of_contains_content.len(), 1);
+
+    let nested_all_of_contains_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/series/list?page=0&size=20")
+                .header("x-auth-token", &auth_token)
+                .header("x-komga-runtime-search-ownership", "runtime-rust-owned")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "condition": {
+                            "type": "AllOfSeries",
+                            "conditions": [
+                                {"type": "LibraryId", "operator": "is", "value": "library-1"},
+                                {
+                                    "type": "AllOfSeries",
+                                    "conditions": [
+                                        {"type": "SharingLabel", "operator": "contains", "value": "fam"},
+                                        {"type": "SharingLabel", "operator": "contains", "value": "work"}
+                                    ]
+                                }
+                            ]
+                        }
+                    })
+                    .to_string(),
+                ))
+                .expect("strict series/list nested allOf sharing-label contains request should build"),
+        )
+        .await
+        .expect("strict series/list nested allOf sharing-label contains request should complete");
+    assert_eq!(nested_all_of_contains_response.status(), StatusCode::OK);
+    let nested_all_of_contains_payload = response_json(nested_all_of_contains_response).await;
+    let nested_all_of_contains_content = nested_all_of_contains_payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect(
+            "strict series nested allOf sharing-label contains payload should expose content array",
+        );
+    assert_eq!(nested_all_of_contains_content.len(), 1);
 
     let any_of_match_response = app
         .clone()

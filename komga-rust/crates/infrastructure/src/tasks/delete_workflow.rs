@@ -312,6 +312,69 @@ pub fn soft_delete_series_rows(database_file: &Path, series_id: &str) -> Result<
     })
 }
 
+pub fn soft_delete_series_book_rows(database_file: &Path, series_id: &str) -> Result<(), String> {
+    let database_file = database_file.to_path_buf();
+    let series_id = series_id.to_string();
+
+    run_database_query(database_file, move |pool| {
+        let series_id = series_id.clone();
+        Box::pin(async move {
+            let mut tx = pool.begin().await.map_err(|error| {
+                format!(
+                    "failed to start soft-delete-series-books transaction for '{series_id}': {error}"
+                )
+            })?;
+
+            sqlx::query(
+                r#"
+                UPDATE BOOK
+                SET DELETED_DATE = CURRENT_TIMESTAMP,
+                    LAST_MODIFIED_DATE = STRFTIME('%Y-%m-%d %H:%M:%f', 'now')
+                WHERE SERIES_ID = ?
+                "#,
+            )
+            .bind(&series_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| {
+                format!(
+                    "failed to soft-delete BOOK rows for series '{series_id}': {error}"
+                )
+            })?;
+
+            sqlx::query(
+                r#"
+                UPDATE SERIES
+                SET BOOK_COUNT = (
+                    SELECT COUNT(*)
+                    FROM BOOK
+                    WHERE BOOK.SERIES_ID = SERIES.ID
+                      AND BOOK.DELETED_DATE IS NULL
+                ),
+                    LAST_MODIFIED_DATE = STRFTIME('%Y-%m-%d %H:%M:%f', 'now')
+                WHERE ID = ?
+                "#,
+            )
+            .bind(&series_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| {
+                format!(
+                    "failed to refresh active series count for '{series_id}' while soft-deleting series books: {error}"
+                )
+            })?;
+
+            tx.commit().await.map_err(|error| {
+                format!(
+                    "failed to commit soft-delete-series-books transaction for '{series_id}': {error}"
+                )
+            })?;
+
+            Ok(())
+        })
+    })
+}
+
 type BoxFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, String>> + Send>>;
 
 fn run_database_query<T>(

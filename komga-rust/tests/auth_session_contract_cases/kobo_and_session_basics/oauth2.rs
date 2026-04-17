@@ -1,6 +1,7 @@
 use super::*;
 use axum::extract::ConnectInfo;
 use axum::response::Response;
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use komga_config::cli_args::RuntimeCli;
 use komga_config::env_config::RuntimeConfig;
 use reqwest::Url;
@@ -14,6 +15,7 @@ fn oauth2_runtime_env_for_paths(
     registration_id: &str,
     authorization_uri: &str,
     token_uri: &str,
+    user_info_uri: Option<&str>,
     scopes: &str,
 ) -> BTreeMap<String, String> {
     let registration_key = registration_id.to_ascii_uppercase();
@@ -56,6 +58,12 @@ fn oauth2_runtime_env_for_paths(
         format!("SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_{provider_key}_TOKEN_URI"),
         token_uri.to_string(),
     );
+    if let Some(user_info_uri) = user_info_uri {
+        env.insert(
+            format!("SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_{provider_key}_USER_INFO_URI"),
+            user_info_uri.to_string(),
+        );
+    }
     env
 }
 
@@ -70,6 +78,7 @@ fn oauth2_runtime_config_for_base_url(
         registration_id,
         format!("{base_url}/oauth/authorize").as_str(),
         format!("{base_url}/oauth/token").as_str(),
+        Some(format!("{base_url}/oauth/userinfo").as_str()),
         scopes,
     );
     RuntimeConfig::resolve_with_env(&RuntimeCli::default(), &env)
@@ -272,6 +281,28 @@ async fn spawn_path_response_server(routes: &[(&str, u16, &str, &str)]) -> Singl
     }
 }
 
+fn unsigned_jwt_token(claims: Value) -> String {
+    let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"none","typ":"JWT"}"#);
+    let payload = URL_SAFE_NO_PAD.encode(claims.to_string());
+    format!("{header}.{payload}.")
+}
+
+fn oidc_token_payload(email: Option<&str>, email_verified: Option<bool>) -> String {
+    let mut claims = serde_json::Map::new();
+    if let Some(email) = email {
+        claims.insert("email".to_string(), Value::String(email.to_string()));
+    }
+    if let Some(email_verified) = email_verified {
+        claims.insert("email_verified".to_string(), Value::Bool(email_verified));
+    }
+
+    json!({
+        "access_token": "oidc-token",
+        "id_token": unsigned_jwt_token(Value::Object(claims)),
+    })
+    .to_string()
+}
+
 async fn oauth2_callback_response(
     paths: &RuntimeDbPaths,
     registration_id: &str,
@@ -292,6 +323,17 @@ async fn oauth2_callback_response(
         .expect("oauth2 token mock server should finish");
 
     response
+}
+
+fn assert_redirect_location(response: &Response, expected_location: &str) {
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok()),
+        Some(expected_location)
+    );
 }
 
 #[tokio::test]
@@ -398,16 +440,123 @@ async fn router_oauth2_authorization_uses_session_cookie_instead_of_state_cookie
 }
 
 #[tokio::test]
+async fn router_oauth2_authorization_includes_forwarded_prefix_in_redirect_uri() {
+    let paths = new_router_fixture("router-oauth2-authorization-forwarded-prefix").await;
+    seed_router_contract_data(&paths).await;
+
+    let config =
+        oauth2_runtime_config_for_base_url(&paths, "github", "https://github.example", "read:user");
+    let app = build_router_with_config(&config);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/oauth2/authorization/github")
+                .header(header::HOST, "komga.example")
+                .header("x-forwarded-proto", "https")
+                .header("x-forwarded-prefix", "/komga")
+                .body(Body::empty())
+                .expect("oauth2 authorization forwarded-prefix request should build"),
+        )
+        .await
+        .expect("oauth2 authorization forwarded-prefix request should complete");
+
+    assert_eq!(response.status(), StatusCode::FOUND);
+    let location = response
+        .headers()
+        .get(header::LOCATION)
+        .and_then(|value| value.to_str().ok())
+        .expect("oauth2 authorization forwarded-prefix response should redirect");
+    let redirect_uri = Url::parse(location)
+        .expect("oauth2 authorization forwarded-prefix location should be a valid url")
+        .query_pairs()
+        .find_map(|(key, value)| (key == "redirect_uri").then_some(value.into_owned()))
+        .expect("oauth2 authorization forwarded-prefix redirect should include redirect_uri query");
+    assert_eq!(
+        redirect_uri,
+        "https://komga.example/komga/login/oauth2/code/github"
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_oauth2_callback_expires_authorization_state_with_session_lifetime() {
+    let paths = new_router_fixture("router-oauth2-callback-session-lifetime-state").await;
+    seed_router_contract_data(&paths).await;
+
+    let mut config =
+        oauth2_runtime_config_for_base_url(&paths, "github", "https://github.example", "read:user");
+    config.session_max_inactive_seconds = 1;
+    let app = build_router_with_config(&config);
+
+    let authorization_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/oauth2/authorization/github")
+                .header(header::HOST, "komga.example")
+                .body(Body::empty())
+                .expect("oauth2 authorization session-lifetime request should build"),
+        )
+        .await
+        .expect("oauth2 authorization session-lifetime request should complete");
+    let authorization_location = authorization_response
+        .headers()
+        .get(header::LOCATION)
+        .and_then(|value| value.to_str().ok())
+        .expect("oauth2 authorization session-lifetime response should redirect");
+    let state = Url::parse(authorization_location)
+        .expect("oauth2 authorization session-lifetime location should be a valid url")
+        .query_pairs()
+        .find_map(|(key, value)| (key == "state").then_some(value.into_owned()))
+        .expect("oauth2 authorization session-lifetime redirect should include state query");
+    let session_cookie = authorization_response
+        .headers()
+        .get(header::SET_COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .expect("oauth2 authorization session-lifetime should issue standard session cookie")
+        .to_string();
+
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    let callback_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/login/oauth2/code/github?code=valid-code&state={state}"
+                ))
+                .header(header::HOST, "komga.example")
+                .header(header::COOKIE, session_cookie)
+                .body(Body::empty())
+                .expect("oauth2 callback session-lifetime request should build"),
+        )
+        .await
+        .expect("oauth2 callback session-lifetime request should complete");
+
+    assert_eq!(callback_response.status(), StatusCode::FOUND);
+    assert_eq!(
+        callback_response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok()),
+        Some("/login?server_redirect=Y&error=oauth2_state_missing")
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_oauth2_callback_requires_email_verified_claim_for_oidc() {
     let paths = new_router_fixture("router-oauth2-callback-requires-email-verified-claim").await;
     seed_router_contract_data(&paths).await;
 
-    let response = oauth2_callback_response(
-        &paths,
-        "oidc",
-        r#"{"access_token":"oidc-token","email":"admin@example.org"}"#,
-    )
-    .await;
+    let token_payload = oidc_token_payload(Some("admin@example.org"), None);
+    let response = oauth2_callback_response(&paths, "oidc", token_payload.as_str()).await;
 
     assert_eq!(response.status(), StatusCode::FOUND);
     assert_eq!(
@@ -429,7 +578,7 @@ async fn router_oauth2_callback_rejects_unverified_email_for_oidc() {
     let token_server = spawn_single_response_server(
         200,
         "application/json",
-        r#"{"access_token":"oidc-token","email":"admin@example.org","email_verified":false}"#,
+        oidc_token_payload(Some("admin@example.org"), Some(false)).as_str(),
     )
     .await;
     let env = oauth2_runtime_env_for_paths(
@@ -437,6 +586,7 @@ async fn router_oauth2_callback_rejects_unverified_email_for_oidc() {
         "oidc",
         token_server.url.as_str(),
         token_server.url.as_str(),
+        Some(format!("{}/oauth/userinfo", token_server.url).as_str()),
         "openid email",
     );
     let config = RuntimeConfig::resolve_with_env(&RuntimeCli::default(), &env)
@@ -468,7 +618,7 @@ async fn router_oauth2_callback_allows_missing_email_verified_when_disabled_for_
     let token_server = spawn_single_response_server(
         200,
         "application/json",
-        r#"{"access_token":"oidc-token","email":"admin@example.org"}"#,
+        oidc_token_payload(Some("admin@example.org"), None).as_str(),
     )
     .await;
     let mut env = oauth2_runtime_env_for_paths(
@@ -476,6 +626,7 @@ async fn router_oauth2_callback_allows_missing_email_verified_when_disabled_for_
         "oidc",
         token_server.url.as_str(),
         token_server.url.as_str(),
+        Some(format!("{}/oauth/userinfo", token_server.url).as_str()),
         "openid email",
     );
     env.insert(
@@ -521,7 +672,7 @@ pub(crate) async fn verify_oauth2_callback_success_uses_session_cookie_without_a
     let token_server = spawn_single_response_server(
         200,
         "application/json",
-        r#"{"access_token":"oidc-token","email":"admin@example.org","email_verified":true}"#,
+        oidc_token_payload(Some("admin@example.org"), Some(true)).as_str(),
     )
     .await;
     let env = oauth2_runtime_env_for_paths(
@@ -529,6 +680,7 @@ pub(crate) async fn verify_oauth2_callback_success_uses_session_cookie_without_a
         "oidc",
         token_server.url.as_str(),
         token_server.url.as_str(),
+        Some(format!("{}/oauth/userinfo", token_server.url).as_str()),
         "openid email",
     );
     let config = RuntimeConfig::resolve_with_env(&RuntimeCli::default(), &env)
@@ -807,6 +959,243 @@ async fn router_oauth2_callback_respects_komga_oauth2_account_creation_config() 
             .and_then(|value| value.to_str().ok()),
         Some("/?server_redirect=Y")
     );
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for oauth2 account creation verification");
+    let shared_all_libraries = sqlx::query_scalar::<_, i64>(
+        "SELECT SHARED_ALL_LIBRARIES FROM USER WHERE lower(EMAIL) = lower(?) LIMIT 1",
+    )
+    .bind("new-oauth-user@example.org")
+    .fetch_one(&pool)
+    .await
+    .expect("oauth2 account creation should persist a new user");
+    pool.close().await;
+
+    assert_eq!(shared_all_libraries, 1);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_oauth2_callback_respects_user_info_endpoint_configuration() {
+    let configured_paths =
+        new_router_fixture("router-oauth2-callback-explicit-user-info-uri").await;
+    seed_router_contract_data(&configured_paths).await;
+
+    let configured_server = spawn_path_response_server(&[
+        (
+            "/oauth/token/custom",
+            200,
+            "application/json",
+            r#"{"access_token":"oauth-token"}"#,
+        ),
+        (
+            "/api/v3/profile",
+            200,
+            "application/json",
+            r#"{"email":"admin@example.org"}"#,
+        ),
+    ])
+    .await;
+    let configured_env = oauth2_runtime_env_for_paths(
+        &configured_paths,
+        "custom",
+        format!("{}/oauth/authorize/custom", configured_server.url).as_str(),
+        format!("{}/oauth/token/custom", configured_server.url).as_str(),
+        Some(format!("{}/api/v3/profile", configured_server.url).as_str()),
+        "profile email",
+    );
+    let configured_config =
+        RuntimeConfig::resolve_with_env(&RuntimeCli::default(), &configured_env)
+            .expect("runtime config should resolve custom oauth2 user-info-uri env");
+
+    let configured_response =
+        oauth2_callback_response_for_config(&configured_config, "custom").await;
+
+    configured_server
+        .join
+        .await
+        .expect("oauth2 path response server should finish");
+    assert_redirect_location(&configured_response, "/?server_redirect=Y");
+
+    cleanup_router_fixture(configured_paths);
+
+    let omitted_paths = new_router_fixture("router-oauth2-callback-no-userinfo-guessing").await;
+    seed_router_contract_data(&omitted_paths).await;
+
+    let omitted_server = spawn_path_response_server(&[
+        (
+            "/oauth/token",
+            200,
+            "application/json",
+            r#"{"access_token":"oauth-token"}"#,
+        ),
+        (
+            "/oauth/userinfo",
+            200,
+            "application/json",
+            r#"{"email":"admin@example.org"}"#,
+        ),
+    ])
+    .await;
+    let omitted_env = oauth2_runtime_env_for_paths(
+        &omitted_paths,
+        "generic",
+        format!("{}/oauth/authorize", omitted_server.url).as_str(),
+        format!("{}/oauth/token", omitted_server.url).as_str(),
+        None,
+        "profile email",
+    );
+    let omitted_config = RuntimeConfig::resolve_with_env(&RuntimeCli::default(), &omitted_env)
+        .expect("runtime config should resolve oauth2 callback env without user_info_uri");
+
+    let omitted_response = oauth2_callback_response_for_config(&omitted_config, "generic").await;
+
+    omitted_server
+        .join
+        .await
+        .expect("oauth2 path response server should finish");
+    assert_redirect_location(&omitted_response, "/login?server_redirect=Y&error=ERR_1024");
+
+    cleanup_router_fixture(omitted_paths);
+}
+
+#[tokio::test]
+async fn router_oidc_callback_accepts_id_token_claims_without_user_info_endpoint() {
+    let paths = new_router_fixture("router-oidc-callback-id-token-without-userinfo").await;
+    seed_router_contract_data(&paths).await;
+
+    let token_payload = oidc_token_payload(Some("admin@example.org"), Some(true));
+    let token_server =
+        spawn_single_response_server(200, "application/json", token_payload.as_str()).await;
+    let env = oauth2_runtime_env_for_paths(
+        &paths,
+        "oidc",
+        token_server.url.as_str(),
+        token_server.url.as_str(),
+        None,
+        "openid email",
+    );
+    let config = RuntimeConfig::resolve_with_env(&RuntimeCli::default(), &env)
+        .expect("runtime config should resolve oidc callback env without user_info_uri");
+
+    let response = oauth2_callback_response_for_config(&config, "oidc").await;
+
+    token_server
+        .join
+        .await
+        .expect("oauth2 token mock server should finish");
+
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok()),
+        Some("/?server_redirect=Y")
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_oauth2_callback_records_failure_activity() {
+    let paths = new_router_fixture("router-oauth2-callback-records-failure-activity").await;
+    seed_router_contract_data(&paths).await;
+
+    let config = oauth2_runtime_config_for_base_url(
+        &paths,
+        "oidc",
+        "https://issuer.example",
+        "openid email",
+    );
+    let app = build_router_with_config(&config);
+
+    let authorization_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/oauth2/authorization/oidc")
+                .header(header::HOST, "komga.example")
+                .body(Body::empty())
+                .expect("oauth2 authorization request should build for failure audit"),
+        )
+        .await
+        .expect("oauth2 authorization request should complete for failure audit");
+    let authorization_location = authorization_response
+        .headers()
+        .get(header::LOCATION)
+        .and_then(|value| value.to_str().ok())
+        .expect("oauth2 authorization should redirect for failure audit");
+    let state = Url::parse(authorization_location)
+        .expect("oauth2 authorization location should be a valid url for failure audit")
+        .query_pairs()
+        .find_map(|(key, value)| (key == "state").then_some(value.into_owned()))
+        .expect("oauth2 authorization redirect should include state for failure audit");
+    let session_cookie = authorization_response
+        .headers()
+        .get(header::SET_COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .expect("oauth2 authorization should issue session cookie for failure audit")
+        .to_string();
+
+    let mut callback_request = Request::builder()
+        .method("GET")
+        .uri(format!(
+            "/login/oauth2/code/oidc?error=access_denied&state={state}"
+        ))
+        .header(header::HOST, "komga.example")
+        .header(header::COOKIE, session_cookie)
+        .header(header::USER_AGENT, "oauth2-failure-agent")
+        .body(Body::empty())
+        .expect("oauth2 callback request should build for failure audit");
+    callback_request.extensions_mut().insert(ConnectInfo(
+        "203.0.113.88:41000"
+            .parse::<SocketAddr>()
+            .expect("oauth2 failure audit socket addr should parse"),
+    ));
+
+    let response = app
+        .oneshot(callback_request)
+        .await
+        .expect("oauth2 callback request should complete for failure audit");
+
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok()),
+        Some("/login?server_redirect=Y&error=access_denied")
+    );
+
+    let pool = connect_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for oauth2 failure activity verification");
+    let (success, error, source, ip, user_agent, email): (
+        bool,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT SUCCESS, ERROR, SOURCE, IP, USER_AGENT, EMAIL FROM AUTHENTICATION_ACTIVITY ORDER BY DATE_TIME DESC LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("oauth2 callback failure should record authentication activity");
+    pool.close().await;
+
+    assert!(!success);
+    assert_eq!(error.as_deref(), Some("access_denied"));
+    assert_eq!(source.as_deref(), Some("OAuth2:oidc"));
+    assert_eq!(ip.as_deref(), Some("203.0.113.88"));
+    assert_eq!(user_agent.as_deref(), Some("oauth2-failure-agent"));
+    assert_eq!(email, None);
 
     cleanup_router_fixture(paths);
 }

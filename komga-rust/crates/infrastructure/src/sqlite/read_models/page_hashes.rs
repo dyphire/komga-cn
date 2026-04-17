@@ -46,9 +46,8 @@ pub async fn load_page_hashes_page(
     let pool = connect_pool(database_file, 1).await?;
     let order_by = known_page_hash_order_by(sorts);
 
-    let mut count_query = QueryBuilder::<Sqlite>::new(
-        r#"SELECT COUNT(*) AS COUNT FROM PAGE_HASH ph"#,
-    );
+    let mut count_query =
+        QueryBuilder::<Sqlite>::new(r#"SELECT COUNT(*) AS COUNT FROM PAGE_HASH ph"#);
     push_known_page_hash_action_filter(&mut count_query, actions);
     let total_elements = count_query
         .build()
@@ -200,10 +199,10 @@ pub async fn load_page_hash_matches_page(
          FROM MEDIA_PAGE
          WHERE FILE_HASH = ?"#,
     )
-        .bind(page_hash)
-        .fetch_one(&pool)
-        .await?
-        .get::<i64, _>("COUNT") as u64;
+    .bind(page_hash)
+    .fetch_one(&pool)
+    .await?
+    .get::<i64, _>("COUNT") as u64;
 
     let size = size.max(1);
     let offset = page.saturating_mul(size);
@@ -270,10 +269,10 @@ pub async fn load_page_hash_thumbnail(
          FROM PAGE_HASH_THUMBNAIL
          WHERE HASH = ?"#,
     )
-        .bind(page_hash)
-        .fetch_optional(&pool)
-        .await?
-        .map(|row| row.get::<Vec<u8>, _>("THUMBNAIL"));
+    .bind(page_hash)
+    .fetch_optional(&pool)
+    .await?
+    .map(|row| row.get::<Vec<u8>, _>("THUMBNAIL"));
     Ok(thumbnail)
 }
 

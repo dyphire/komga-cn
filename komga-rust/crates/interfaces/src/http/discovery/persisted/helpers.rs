@@ -66,28 +66,37 @@ pub(crate) fn author_matches_filter(name: &str, role: &str, expected: &[String])
     author_matches_filter_value(&normalized_author_filter_value(name, role), expected)
 }
 
-pub(crate) fn author_value_matches(author: &str, expected: &str) -> bool {
-    if let Some((expected_name, expected_role)) = expected.split_once("::") {
-        let (author_name, author_role) = author
-            .split_once("::")
-            .map(|(name, role)| (name, Some(role)))
-            .unwrap_or((author, None));
+pub(crate) fn author_contains_filter_value(author: &str, expected: &[String]) -> bool {
+    let normalized = author.to_ascii_lowercase();
+    expected.iter().any(|value| normalized.contains(value))
+}
 
-        if expected_name.is_empty() {
-            return author_role
-                .map(|role| role.eq_ignore_ascii_case(expected_role))
-                .unwrap_or(false);
-        }
+pub(crate) fn author_contains_filter(name: &str, role: &str, expected: &[String]) -> bool {
+    author_contains_filter_value(&normalized_author_filter_value(name, role), expected)
+}
 
-        if expected_role.is_empty() {
-            return author_name.eq_ignore_ascii_case(expected_name);
-        }
-
-        return author_name.eq_ignore_ascii_case(expected_name)
-            && author_role
-                .map(|role| role.eq_ignore_ascii_case(expected_role))
-                .unwrap_or(false);
+fn split_author_components(value: &str) -> (&str, Option<&str>) {
+    if let Some(role) = value.strip_prefix("::") {
+        return ("", Some(role));
     }
 
-    author.contains(expected)
+    if let Some((name, role)) = value.split_once("::").or_else(|| value.split_once(',')) {
+        return (name, Some(role));
+    }
+
+    (value, None)
+}
+
+pub(crate) fn author_value_matches(author: &str, expected: &str) -> bool {
+    if expected.contains("::") || expected.contains(',') {
+        let (expected_name, expected_role) = split_author_components(expected);
+        let (author_name, author_role) = split_author_components(author);
+        return author_name.eq_ignore_ascii_case(expected_name)
+            && author_role
+                .unwrap_or_default()
+                .eq_ignore_ascii_case(expected_role.unwrap_or_default());
+    }
+
+    let (author_name, _) = split_author_components(author);
+    author_name.eq_ignore_ascii_case(expected)
 }

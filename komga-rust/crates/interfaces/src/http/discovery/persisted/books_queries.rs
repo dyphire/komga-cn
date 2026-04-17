@@ -304,6 +304,14 @@ pub async fn load_persisted_books_page(
         });
     }
 
+    if let Some(authors_contains) = filters.authors_contains.as_ref() {
+        books = filter_rows(books, |row| {
+            row.metadata_authors
+                .iter()
+                .any(|author| author_contains_filter(&author.name, &author.role, authors_contains))
+        });
+    }
+
     if let Some(authors_excluded) = filters.authors_excluded.as_ref() {
         books = filter_rows(books, |row| {
             !row.metadata_authors

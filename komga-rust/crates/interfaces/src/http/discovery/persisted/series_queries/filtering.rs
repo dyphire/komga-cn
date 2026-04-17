@@ -3,6 +3,69 @@ use super::common_helpers::{
     normalized_text_matches,
 };
 use super::*;
+use regex::{Regex, RegexBuilder};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+fn compile_case_insensitive_regexes(
+    patterns: Option<&Vec<String>>,
+    field: &str,
+) -> Result<Option<Vec<Regex>>, String> {
+    patterns
+        .map(|patterns| {
+            patterns
+                .iter()
+                .map(|pattern| {
+                    RegexBuilder::new(pattern)
+                        .case_insensitive(true)
+                        .build()
+                        .map_err(|error| format!("invalid {field} regex `{pattern}`: {error}"))
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()
+}
+
+fn matches_any_regex(value: &str, regexes: &[Regex]) -> bool {
+    regexes.iter().any(|regex| regex.is_match(value))
+}
+
+fn compare_rank_order(
+    order: &HashMap<String, usize>,
+    left_id: &str,
+    right_id: &str,
+    descending: bool,
+) -> std::cmp::Ordering {
+    let left_rank = order.get(left_id).copied();
+    let right_rank = order.get(right_id).copied();
+    match (left_rank, right_rank) {
+        (Some(left), Some(right)) if descending => {
+            left.cmp(&right).then_with(|| left_id.cmp(right_id))
+        }
+        (Some(left), Some(right)) => right.cmp(&left).then_with(|| left_id.cmp(right_id)),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => left_id.cmp(right_id),
+    }
+}
+
+fn random_sort_keys(series: &[PersistedSeriesSummary]) -> HashMap<String, u64> {
+    let seed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos() as u64)
+        .unwrap_or(0);
+
+    series
+        .iter()
+        .map(|row| {
+            let mut hasher = DefaultHasher::new();
+            seed.hash(&mut hasher);
+            row.id.hash(&mut hasher);
+            (row.id.clone(), hasher.finish())
+        })
+        .collect()
+}
 
 pub async fn load_persisted_series_summaries(
     database_file: &FsPath,
@@ -17,7 +80,10 @@ pub async fn load_persisted_series_page(
 ) -> Result<PageEnvelope<PersistedSeriesSummary>, String> {
     let mut series = Vec::new();
     let filters = &query.filters;
-    let mut relevance_scores: HashMap<String, f32> = HashMap::new();
+    let title_regexes = compile_case_insensitive_regexes(filters.titles_regex.as_ref(), "title")?;
+    let title_sort_regexes =
+        compile_case_insensitive_regexes(filters.title_sorts_regex.as_ref(), "titleSort")?;
+    let mut search_order: HashMap<String, usize> = HashMap::new();
     if let Some(search) = query.search.as_ref().map(|value| value.trim())
         && !search.is_empty()
     {
@@ -32,9 +98,10 @@ pub async fn load_persisted_series_page(
         if candidate_ids.is_empty() {
             series.clear();
         } else {
-            relevance_scores = ranked_candidates
+            search_order = ranked_candidates
                 .iter()
-                .map(|(score, id)| (id.clone(), *score))
+                .enumerate()
+                .map(|(index, (_, id))| (id.clone(), index))
                 .collect();
             series = persisted_backend_load_persisted_series_summaries_by_ids(
                 database_file,
@@ -149,6 +216,10 @@ pub async fn load_persisted_series_page(
         });
     }
 
+    if let Some(title_regexes) = title_regexes.as_ref() {
+        series = filter_rows(series, |row| matches_any_regex(&row.title, title_regexes));
+    }
+
     if let Some(title_sorts) = filters.title_sorts.as_ref() {
         series = filter_rows(series, |row| {
             normalized_text_matches(&row.title_sort, title_sorts, TextMatchMode::Exact)
@@ -220,6 +291,12 @@ pub async fn load_persisted_series_page(
                 title_sorts_ends_with_excluded,
                 TextMatchMode::EndsWith,
             )
+        });
+    }
+
+    if let Some(title_sort_regexes) = title_sort_regexes.as_ref() {
+        series = filter_rows(series, |row| {
+            matches_any_regex(&row.title_sort, title_sort_regexes)
         });
     }
 
@@ -393,9 +470,25 @@ pub async fn load_persisted_series_page(
 
     if let Some(sharing_labels) = filters.sharing_labels.as_ref() {
         series = filter_rows(series, |row| {
+            any_ignore_ascii_case(row.labels.iter().map(String::as_str), sharing_labels)
+        });
+    }
+
+    if !query.sharing_labels_contains_groups.is_empty() {
+        for sharing_labels_contains in &query.sharing_labels_contains_groups {
+            series = filter_rows(series, |row| {
+                any_normalized_text_matches(
+                    row.labels.iter().map(String::as_str),
+                    sharing_labels_contains,
+                    TextMatchMode::Contains,
+                )
+            });
+        }
+    } else if let Some(sharing_labels_contains) = filters.sharing_labels_contains.as_ref() {
+        series = filter_rows(series, |row| {
             any_normalized_text_matches(
                 row.labels.iter().map(String::as_str),
-                sharing_labels,
+                sharing_labels_contains,
                 TextMatchMode::Contains,
             )
         });
@@ -403,10 +496,9 @@ pub async fn load_persisted_series_page(
 
     if let Some(sharing_labels_excluded) = filters.sharing_labels_excluded.as_ref() {
         series = filter_rows(series, |row| {
-            !any_normalized_text_matches(
+            !any_ignore_ascii_case(
                 row.labels.iter().map(String::as_str),
                 sharing_labels_excluded,
-                TextMatchMode::Contains,
             )
         });
     }
@@ -420,6 +512,14 @@ pub async fn load_persisted_series_page(
             row.books_metadata_authors
                 .iter()
                 .any(|author| author_matches_filter_value(author, authors))
+        });
+    }
+
+    if let Some(authors_contains) = filters.authors_contains.as_ref() {
+        series = filter_rows(series, |row| {
+            row.books_metadata_authors
+                .iter()
+                .any(|author| author_contains_filter_value(author, authors_contains))
         });
     }
 
@@ -613,6 +713,47 @@ pub async fn load_persisted_series_page(
         });
     }
 
+    let collection_ordering = if query.sort_modes.iter().any(|mode| {
+        matches!(
+            mode,
+            PersistedSeriesSortMode::CollectionNumberAsc
+                | PersistedSeriesSortMode::CollectionNumberDesc
+        )
+    }) {
+        if let Some(collection_id) = filters.collection_ids.as_ref().and_then(|ids| ids.first()) {
+            load_collection_ordering(database_file, collection_id).await?
+        } else {
+            HashMap::new()
+        }
+    } else {
+        HashMap::new()
+    };
+
+    let read_dates = if query.sort_modes.iter().any(|mode| {
+        matches!(
+            mode,
+            PersistedSeriesSortMode::ReadDateAsc | PersistedSeriesSortMode::ReadDateDesc
+        )
+    }) {
+        if let Some(user_id) = context.user_id.as_deref() {
+            load_series_read_dates(database_file, user_id).await?
+        } else {
+            HashMap::new()
+        }
+    } else {
+        HashMap::new()
+    };
+
+    let random_keys = if query
+        .sort_modes
+        .iter()
+        .any(|mode| matches!(mode, PersistedSeriesSortMode::Random))
+    {
+        random_sort_keys(&series)
+    } else {
+        HashMap::new()
+    };
+
     if !query.sort_modes.is_empty() {
         series.sort_by(|left, right| {
             for sort_mode in &query.sort_modes {
@@ -621,21 +762,58 @@ pub async fn load_persisted_series_page(
                         .title_sort
                         .to_ascii_lowercase()
                         .cmp(&right.title_sort.to_ascii_lowercase()),
+                    PersistedSeriesSortMode::TitleDesc => right
+                        .title_sort
+                        .to_ascii_lowercase()
+                        .cmp(&left.title_sort.to_ascii_lowercase()),
+                    PersistedSeriesSortMode::NameAsc => left
+                        .name
+                        .to_ascii_lowercase()
+                        .cmp(&right.name.to_ascii_lowercase()),
+                    PersistedSeriesSortMode::NameDesc => right
+                        .name
+                        .to_ascii_lowercase()
+                        .cmp(&left.name.to_ascii_lowercase()),
+                    PersistedSeriesSortMode::ReadDateAsc => {
+                        read_dates.get(&left.id).cmp(&read_dates.get(&right.id))
+                    }
+                    PersistedSeriesSortMode::ReadDateDesc => {
+                        read_dates.get(&right.id).cmp(&read_dates.get(&left.id))
+                    }
+                    PersistedSeriesSortMode::CollectionNumberAsc => collection_ordering
+                        .get(&left.id)
+                        .cmp(&collection_ordering.get(&right.id)),
+                    PersistedSeriesSortMode::CollectionNumberDesc => collection_ordering
+                        .get(&right.id)
+                        .cmp(&collection_ordering.get(&left.id)),
+                    PersistedSeriesSortMode::Random => {
+                        random_keys.get(&left.id).cmp(&random_keys.get(&right.id))
+                    }
+                    PersistedSeriesSortMode::CreatedAsc => left.created.cmp(&right.created),
                     PersistedSeriesSortMode::CreatedDesc => right.created.cmp(&left.created),
+                    PersistedSeriesSortMode::LastModifiedAsc => {
+                        left.last_modified.cmp(&right.last_modified)
+                    }
                     PersistedSeriesSortMode::LastModifiedDesc => {
                         right.last_modified.cmp(&left.last_modified)
                     }
+                    PersistedSeriesSortMode::ReleaseDateAsc => left
+                        .books_metadata_release_date
+                        .cmp(&right.books_metadata_release_date),
                     PersistedSeriesSortMode::ReleaseDateDesc => right
                         .books_metadata_release_date
                         .cmp(&left.books_metadata_release_date),
+                    PersistedSeriesSortMode::BooksCountAsc => {
+                        left.books_count.cmp(&right.books_count)
+                    }
                     PersistedSeriesSortMode::BooksCountDesc => {
                         right.books_count.cmp(&left.books_count)
                     }
                     PersistedSeriesSortMode::RelevanceAsc => {
-                        compare_relevance_scores(&relevance_scores, &left.id, &right.id, false)
+                        compare_rank_order(&search_order, &left.id, &right.id, false)
                     }
                     PersistedSeriesSortMode::RelevanceDesc => {
-                        compare_relevance_scores(&relevance_scores, &left.id, &right.id, true)
+                        compare_rank_order(&search_order, &left.id, &right.id, true)
                     }
                 };
                 if ordering != std::cmp::Ordering::Equal {
@@ -670,21 +848,4 @@ pub async fn load_persisted_series_page(
         page_size,
         total_elements,
     ))
-}
-
-fn compare_relevance_scores(
-    relevance_scores: &HashMap<String, f32>,
-    left_id: &str,
-    right_id: &str,
-    descending: bool,
-) -> std::cmp::Ordering {
-    let left_score = relevance_scores.get(left_id).copied();
-    let right_score = relevance_scores.get(right_id).copied();
-    match (left_score, right_score) {
-        (Some(left), Some(right)) if descending => {
-            right.total_cmp(&left).then_with(|| left_id.cmp(right_id))
-        }
-        (Some(left), Some(right)) => left.total_cmp(&right).then_with(|| left_id.cmp(right_id)),
-        _ => std::cmp::Ordering::Equal,
-    }
 }

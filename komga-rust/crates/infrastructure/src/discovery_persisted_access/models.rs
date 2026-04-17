@@ -103,6 +103,7 @@ pub struct ReadProgressSummary {
 pub struct SeriesSummary {
     pub id: String,
     pub library_id: String,
+    pub name: String,
     pub title: String,
     pub title_sort: String,
     pub labels: Vec<String>,

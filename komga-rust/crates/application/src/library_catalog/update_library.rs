@@ -234,7 +234,7 @@ mod tests {
         .expect("enabling convert-to-cbz should succeed");
 
         assert_eq!(result.task_records.len(), 1);
-        assert_eq!(result.task_records[0].id, "FIND_BOOKS_TO_CONVERT:library-1");
+        assert_eq!(result.task_records[0].id, "FIND_BOOKS_TO_CONVERT_library-1");
         assert_eq!(result.task_records[0].simple_type, "FIND_BOOKS_TO_CONVERT");
         assert_eq!(result.task_records[0].priority, 0);
         assert_eq!(result.task_records[0].group, None);

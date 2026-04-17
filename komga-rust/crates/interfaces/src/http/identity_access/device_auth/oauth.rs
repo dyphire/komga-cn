@@ -1,20 +1,10 @@
 use super::*;
 use axum_extra::extract::cookie::{Cookie, SameSite};
-use std::collections::HashMap;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use std::io::Read;
-use std::sync::{LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-static OAUTH2_AUTHORIZATION_STATES: LazyLock<
-    Mutex<HashMap<(String, String), OAuth2AuthorizationStateRecord>>,
-> = LazyLock::new(|| Mutex::new(HashMap::new()));
-
-const OAUTH2_AUTHORIZATION_STATE_MAX_AGE_SECONDS: u64 = 10 * 60;
-
-struct OAuth2AuthorizationStateRecord {
-    state: String,
-    issued_at_epoch_seconds: u64,
-}
+use crate::runtime_identity_access::persisted_record_failed_authentication_activity;
 
 pub async fn oauth2_authorization(
     Extension(state): Extension<OperationalState>,
@@ -26,27 +16,24 @@ pub async fn oauth2_authorization(
         .iter()
         .find(|client| client.registration_id == registration_id)
     else {
-        return StatusCode::UNAUTHORIZED.into_response();
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
 
     let Ok(auth_url) = AuthUrl::new(client.authorization_uri.clone()) else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-    let Ok(token_url) = TokenUrl::new(client.token_uri.clone()) else {
-        return StatusCode::UNAUTHORIZED.into_response();
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
     let base_url = request_base_url(&headers);
+    let context_base_url = format!("{base_url}{}", request_context_path(&headers));
     let Ok(redirect_url) = RedirectUrl::new(format!(
-        "{base_url}/login/oauth2/code/{}",
+        "{context_base_url}/login/oauth2/code/{}",
         client.registration_id
     )) else {
-        return StatusCode::UNAUTHORIZED.into_response();
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
 
     let oauth_client = BasicClient::new(ClientId::new(client.client_id.clone()))
         .set_client_secret(ClientSecret::new(client.client_secret.clone()))
         .set_auth_uri(auth_url)
-        .set_token_uri(token_url)
         .set_redirect_uri(redirect_url);
 
     let authorization_request = client.scopes.iter().cloned().fold(
@@ -60,6 +47,7 @@ pub async fn oauth2_authorization(
         .clone()
         .unwrap_or_else(issue_oauth2_session_token);
     store_oauth2_authorization_state(
+        state.remember_me_runtime_key.as_str(),
         session_token.as_str(),
         client.registration_id.as_str(),
         csrf_state.secret(),
@@ -104,38 +92,98 @@ pub async fn oauth2_login_code(
     else {
         return oauth2_login_error_redirect("oauth2_provider_not_found");
     };
+    let client_name = client_config.client_name.as_str();
 
     if let Some(error) = query.error.as_deref() {
-        return oauth2_login_error_redirect(error);
+        return oauth2_login_error_response(
+            &auth_db,
+            &headers,
+            &connection_info,
+            client_name,
+            error,
+            None,
+        )
+        .await;
     }
 
-    let _ = query.state.as_deref();
-
     let Some(code) = query.code.as_deref() else {
-        return oauth2_login_error_redirect("oauth2_missing_code");
+        return oauth2_login_error_response(
+            &auth_db,
+            &headers,
+            &connection_info,
+            client_name,
+            "oauth2_missing_code",
+            None,
+        )
+        .await;
     };
 
     let Some(received_state) = query.state.as_deref() else {
-        return oauth2_login_error_redirect("oauth2_state_missing");
+        return oauth2_login_error_response(
+            &auth_db,
+            &headers,
+            &connection_info,
+            client_name,
+            "oauth2_state_missing",
+            None,
+        )
+        .await;
     };
     let Some(session_token) = oauth2_session_cookie_token(&headers) else {
-        return oauth2_login_error_redirect("oauth2_state_missing");
+        return oauth2_login_error_response(
+            &auth_db,
+            &headers,
+            &connection_info,
+            client_name,
+            "oauth2_state_missing",
+            None,
+        )
+        .await;
     };
-    let Some(expected_state) =
-        take_oauth2_authorization_state(session_token.as_str(), registration_id.as_str())
-    else {
-        return oauth2_login_error_redirect("oauth2_state_missing");
+    let Some(expected_state) = take_oauth2_authorization_state(
+        auth_db.session_runtime_key.as_str(),
+        session_token.as_str(),
+        registration_id.as_str(),
+    ) else {
+        return oauth2_login_error_response(
+            &auth_db,
+            &headers,
+            &connection_info,
+            client_name,
+            "oauth2_state_missing",
+            None,
+        )
+        .await;
     };
     if received_state != expected_state {
-        return oauth2_login_error_redirect("oauth2_state_mismatch");
+        return oauth2_login_error_response(
+            &auth_db,
+            &headers,
+            &connection_info,
+            client_name,
+            "oauth2_state_mismatch",
+            None,
+        )
+        .await;
     }
 
     let base_url = request_base_url(&headers);
-    let redirect_uri = format!("{base_url}/login/oauth2/code/{registration_id}");
+    let context_base_url = format!("{base_url}{}", request_context_path(&headers));
+    let redirect_uri = format!("{context_base_url}/login/oauth2/code/{registration_id}");
 
     let token_payload = match exchange_oauth2_token(client_config, code, &redirect_uri).await {
         Ok(payload) => payload,
-        Err(error) => return oauth2_login_error_redirect(error.as_str()),
+        Err(error) => {
+            return oauth2_login_error_response(
+                &auth_db,
+                &headers,
+                &connection_info,
+                client_name,
+                error.as_str(),
+                None,
+            )
+            .await;
+        }
     };
 
     let access_token = token_payload
@@ -144,19 +192,55 @@ pub async fn oauth2_login_code(
         .filter(|value| !value.trim().is_empty());
 
     let Some(access_token) = access_token else {
-        return oauth2_login_error_redirect("oauth2_missing_access_token");
+        return oauth2_login_error_response(
+            &auth_db,
+            &headers,
+            &connection_info,
+            client_name,
+            "oauth2_missing_access_token",
+            None,
+        )
+        .await;
     };
 
     let email = if oauth2_client_uses_oidc(client_config) {
         let claims = resolve_oidc_claims(client_config, &token_payload, access_token).await;
         let Some(email) = claims.email else {
-            return oauth2_login_error_redirect("ERR_1028");
+            return oauth2_login_error_response(
+                &auth_db,
+                &headers,
+                &connection_info,
+                client_name,
+                "ERR_1028",
+                None,
+            )
+            .await;
         };
         if state.oidc_email_verification {
             match claims.email_verified {
                 Some(true) => email,
-                Some(false) => return oauth2_login_error_redirect("ERR_1026"),
-                None => return oauth2_login_error_redirect("ERR_1027"),
+                Some(false) => {
+                    return oauth2_login_error_response(
+                        &auth_db,
+                        &headers,
+                        &connection_info,
+                        client_name,
+                        "ERR_1026",
+                        Some(email.as_str()),
+                    )
+                    .await;
+                }
+                None => {
+                    return oauth2_login_error_response(
+                        &auth_db,
+                        &headers,
+                        &connection_info,
+                        client_name,
+                        "ERR_1027",
+                        Some(email.as_str()),
+                    )
+                    .await;
+                }
             }
         } else {
             email
@@ -164,7 +248,15 @@ pub async fn oauth2_login_code(
     } else {
         let email = resolve_oauth2_email(client_config, access_token).await;
         let Some(email) = email else {
-            return oauth2_login_error_redirect("ERR_1024");
+            return oauth2_login_error_response(
+                &auth_db,
+                &headers,
+                &connection_info,
+                client_name,
+                "ERR_1024",
+                None,
+            )
+            .await;
         };
         email
     };
@@ -174,10 +266,21 @@ pub async fn oauth2_login_code(
         .await
     {
         Ok(Some(user)) => user,
-        Ok(None) => return oauth2_login_error_redirect("ERR_1025"),
+        Ok(None) => {
+            return oauth2_login_error_response(
+                &auth_db,
+                &headers,
+                &connection_info,
+                client_name,
+                "ERR_1025",
+                Some(email.as_str()),
+            )
+            .await;
+        }
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
+    let source = format!("OAuth2:{client_name}");
     let _ = persisted_record_successful_authentication_activity(
         auth_db.database_file.as_path(),
         &user,
@@ -186,7 +289,7 @@ pub async fn oauth2_login_code(
                 &headers,
                 connection_info.remote_addr(),
             ),
-            format!("OAuth2:{}", client_config.client_name).as_str(),
+            source.as_str(),
             None,
             None,
         ),
@@ -264,47 +367,6 @@ fn oauth2_session_cookie_token(headers: &HeaderMap) -> Option<String> {
 
 fn issue_oauth2_session_token() -> String {
     format!("komga-session-oauth-{}", random_hex_token(24))
-}
-
-fn store_oauth2_authorization_state(session_token: &str, registration_id: &str, state: &str) {
-    let mut states = OAUTH2_AUTHORIZATION_STATES
-        .lock()
-        .expect("oauth2 authorization state lock should not be poisoned");
-    prune_oauth2_authorization_states(&mut states);
-    states.insert(
-        (session_token.to_string(), registration_id.to_string()),
-        OAuth2AuthorizationStateRecord {
-            state: state.to_string(),
-            issued_at_epoch_seconds: now_epoch_seconds(),
-        },
-    );
-}
-
-fn take_oauth2_authorization_state(session_token: &str, registration_id: &str) -> Option<String> {
-    let mut states = OAUTH2_AUTHORIZATION_STATES
-        .lock()
-        .expect("oauth2 authorization state lock should not be poisoned");
-    prune_oauth2_authorization_states(&mut states);
-    states
-        .remove(&(session_token.to_string(), registration_id.to_string()))
-        .map(|record| record.state)
-}
-
-fn prune_oauth2_authorization_states(
-    states: &mut HashMap<(String, String), OAuth2AuthorizationStateRecord>,
-) {
-    let now = now_epoch_seconds();
-    states.retain(|_, record| {
-        now.saturating_sub(record.issued_at_epoch_seconds)
-            < OAUTH2_AUTHORIZATION_STATE_MAX_AGE_SECONDS
-    });
-}
-
-fn now_epoch_seconds() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
 }
 
 fn random_hex_token(byte_len: usize) -> String {
@@ -414,6 +476,11 @@ async fn resolve_oidc_claims(
     token_payload: &Value,
     access_token: &str,
 ) -> OidcIdentityClaims {
+    let mut claims = extract_oidc_claims_from_id_token(token_payload).unwrap_or_default();
+    if client.user_info_uri.is_none() {
+        return claims;
+    }
+
     let http = Client::new();
     for endpoint in oauth2_userinfo_candidates(client) {
         let request = http
@@ -432,13 +499,27 @@ async fn resolve_oidc_claims(
         let Ok(payload) = response.json::<Value>().await else {
             continue;
         };
-        let claims = extract_oidc_claims(&payload);
-        if claims.email.is_some() || claims.email_verified.is_some() {
-            return claims;
+        let userinfo_claims = extract_oidc_claims(&payload);
+        if userinfo_claims.email.is_some() {
+            claims.email = userinfo_claims.email;
+        }
+        if userinfo_claims.email_verified.is_some() {
+            claims.email_verified = userinfo_claims.email_verified;
         }
     }
 
-    extract_oidc_claims(token_payload)
+    claims
+}
+
+fn extract_oidc_claims_from_id_token(token_payload: &Value) -> Option<OidcIdentityClaims> {
+    let id_token = token_payload.get("id_token")?.as_str()?.trim();
+    if id_token.is_empty() {
+        return None;
+    }
+    let payload_segment = id_token.split('.').nth(1)?;
+    let decoded = URL_SAFE_NO_PAD.decode(payload_segment).ok()?;
+    let payload = serde_json::from_slice::<Value>(&decoded).ok()?;
+    Some(extract_oidc_claims(&payload))
 }
 
 fn extract_oidc_claims(payload: &Value) -> OidcIdentityClaims {
@@ -510,64 +591,52 @@ fn oauth2_userinfo_candidates(
     client: &crate::http::state::OAuth2ClientConfig,
 ) -> Vec<OAuth2UserinfoCandidate> {
     let mut candidates = Vec::new();
-    if let Ok(token_url) = reqwest::Url::parse(client.token_uri.as_str()) {
-        let mut userinfo = token_url.clone();
-        if let Ok(mut segments) = userinfo.path_segments_mut() {
-            segments.pop_if_empty();
-            segments.pop();
-            segments.push("userinfo");
-        }
+    if let Some(user_info_uri) = client.user_info_uri.as_ref() {
         push_userinfo_candidate(
             &mut candidates,
-            userinfo.to_string(),
-            OAuth2UserinfoKind::Standard,
-        );
-    }
-
-    if let Ok(auth_url) = reqwest::Url::parse(client.authorization_uri.as_str()) {
-        let mut userinfo = auth_url.clone();
-        if let Ok(mut segments) = userinfo.path_segments_mut() {
-            segments.pop_if_empty();
-            segments.pop();
-            segments.push("userinfo");
-        }
-        push_userinfo_candidate(
-            &mut candidates,
-            userinfo.to_string(),
+            user_info_uri.clone(),
             OAuth2UserinfoKind::Standard,
         );
 
-        if auth_url
-            .host_str()
-            .is_some_and(|host| host.contains("github.com"))
-        {
+        if oauth2_client_supports_github_email_lookup(client) {
             push_userinfo_candidate(
                 &mut candidates,
-                "https://api.github.com/user".to_string(),
-                OAuth2UserinfoKind::Standard,
-            );
-            push_userinfo_candidate(
-                &mut candidates,
-                "https://api.github.com/user/emails".to_string(),
+                format!("{}/emails", user_info_uri.trim_end_matches('/')),
                 OAuth2UserinfoKind::GithubEmails,
             );
         }
-    }
 
-    if oauth2_client_supports_github_email_lookup(client) {
-        let derived_emails = candidates
-            .iter()
-            .filter(|candidate| matches!(candidate.kind, OAuth2UserinfoKind::Standard))
-            .map(|candidate| format!("{}/emails", candidate.endpoint.trim_end_matches('/')))
-            .collect::<Vec<_>>();
-        for endpoint in derived_emails {
-            push_userinfo_candidate(&mut candidates, endpoint, OAuth2UserinfoKind::GithubEmails);
-        }
+        return candidates;
     }
-
-    candidates.sort_by(|left, right| left.endpoint.cmp(&right.endpoint));
-    candidates.dedup_by(|left, right| left.endpoint == right.endpoint);
     candidates
+}
+
+async fn oauth2_login_error_response(
+    auth_db: &AuthDatabaseState,
+    headers: &HeaderMap,
+    connection_info: &RequestConnectionInfo,
+    client_name: &str,
+    error: &str,
+    email: Option<&str>,
+) -> Response {
+    let source = format!("OAuth2:{client_name}");
+    let _ = persisted_record_failed_authentication_activity(
+        auth_db.database_file.as_path(),
+        email,
+        authentication_activity_write_input(
+            &authentication_activity_headers_metadata_with_remote_addr(
+                headers,
+                connection_info.remote_addr(),
+            ),
+            source.as_str(),
+            None,
+            None,
+        ),
+        error,
+    )
+    .await;
+
+    oauth2_login_error_redirect(error)
 }
 
 fn push_userinfo_candidate(

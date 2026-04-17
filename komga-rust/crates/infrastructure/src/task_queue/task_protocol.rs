@@ -121,7 +121,7 @@ where
             } => self.plan_task(
                 PlannedTaskKind::AnalyzeBook,
                 TaskSchedule::Background,
-                format!("ANALYZE_BOOK:{book_id}"),
+                format!("ANALYZE_BOOK_{book_id}"),
                 priority,
                 Some(series_id),
                 None,
@@ -141,25 +141,43 @@ where
             RuntimeFollowUpTask::RefreshSeriesMetadata {
                 series_id,
                 priority,
-            } => self.plan_task(
-                PlannedTaskKind::RefreshSeriesMetadata,
-                TaskSchedule::Background,
-                format!("REFRESH_SERIES_METADATA:{series_id}"),
-                priority,
-                Some(series_id),
-                None,
-            ),
+            } => {
+                let task_id = format!("REFRESH_SERIES_METADATA_{series_id}");
+                self.plan_task(
+                    PlannedTaskKind::RefreshSeriesMetadata,
+                    TaskSchedule::Background,
+                    task_id.clone(),
+                    priority,
+                    Some(series_id.clone()),
+                    Some(book_task_payload(
+                        "seriesId",
+                        &series_id,
+                        priority,
+                        Some(series_id.as_str()),
+                        &task_id,
+                    )),
+                )
+            }
             RuntimeFollowUpTask::AggregateSeriesMetadata {
                 series_id,
                 priority,
-            } => self.plan_task(
-                PlannedTaskKind::AggregateSeriesMetadata,
-                TaskSchedule::Background,
-                format!("AGGREGATE_SERIES_METADATA:{series_id}"),
-                priority,
-                Some(series_id),
-                None,
-            ),
+            } => {
+                let task_id = format!("AGGREGATE_SERIES_METADATA_{series_id}");
+                self.plan_task(
+                    PlannedTaskKind::AggregateSeriesMetadata,
+                    TaskSchedule::Background,
+                    task_id.clone(),
+                    priority,
+                    Some(series_id.clone()),
+                    Some(book_task_payload(
+                        "seriesId",
+                        &series_id,
+                        priority,
+                        Some(series_id.as_str()),
+                        &task_id,
+                    )),
+                )
+            }
             RuntimeFollowUpTask::RefreshBookLocalArtwork { book_id, priority } => self.plan_task(
                 PlannedTaskKind::RefreshBookLocalArtwork,
                 TaskSchedule::Background,
@@ -174,7 +192,7 @@ where
             } => self.plan_task(
                 PlannedTaskKind::RefreshSeriesLocalArtwork,
                 TaskSchedule::Background,
-                format!("REFRESH_SERIES_LOCAL_ARTWORK:{series_id}"),
+                format!("REFRESH_SERIES_LOCAL_ARTWORK_{series_id}"),
                 priority,
                 None,
                 None,
@@ -290,26 +308,44 @@ where
             RuntimeFollowUpTask::FindBooksToConvert {
                 library_id,
                 priority,
-            } => self.plan_task(
-                PlannedTaskKind::FindBooksToConvert,
-                TaskSchedule::Background,
-                format!("FIND_BOOKS_TO_CONVERT:{library_id}"),
-                priority,
-                None,
-                None,
-            ),
+            } => {
+                let task_id = format!("FIND_BOOKS_TO_CONVERT_{library_id}");
+                self.plan_task(
+                    PlannedTaskKind::FindBooksToConvert,
+                    TaskSchedule::Background,
+                    task_id.clone(),
+                    priority,
+                    None,
+                    Some(book_task_payload(
+                        "libraryId",
+                        &library_id,
+                        priority,
+                        None,
+                        &task_id,
+                    )),
+                )
+            }
             RuntimeFollowUpTask::ConvertBook {
                 book_id,
                 series_id,
                 priority,
-            } => self.plan_task(
-                PlannedTaskKind::ConvertBook,
-                TaskSchedule::Background,
-                format!("CONVERT_BOOK:{book_id}"),
-                priority,
-                Some(series_id),
-                None,
-            ),
+            } => {
+                let task_id = format!("CONVERT_BOOK_{book_id}");
+                self.plan_task(
+                    PlannedTaskKind::ConvertBook,
+                    TaskSchedule::Background,
+                    task_id.clone(),
+                    priority,
+                    Some(series_id.clone()),
+                    Some(book_task_payload(
+                        "bookId",
+                        &book_id,
+                        priority,
+                        Some(series_id.as_str()),
+                        &task_id,
+                    )),
+                )
+            }
         }
     }
 
@@ -382,9 +418,15 @@ mod tests {
             series_id: "series-3".to_string(),
             priority: 4,
         });
-        assert_eq!(convert.id, "CONVERT_BOOK:book-3");
+        assert_eq!(convert.id, "CONVERT_BOOK_book-3");
         assert_eq!(convert.simple_type, "CONVERT_BOOK");
         assert_eq!(convert.group.as_deref(), Some("series-3"));
+        assert_eq!(
+            convert.payload.as_deref(),
+            Some(
+                r#"{"bookId":"book-3","groupId":"series-3","priority":4,"uniqueId":"CONVERT_BOOK_book-3"}"#,
+            ),
+        );
     }
 
     #[test]
@@ -393,9 +435,15 @@ mod tests {
             series_id: "series-1".to_string(),
             priority: 7,
         });
-        assert_eq!(aggregate.id, "AGGREGATE_SERIES_METADATA:series-1");
+        assert_eq!(aggregate.id, "AGGREGATE_SERIES_METADATA_series-1");
         assert_eq!(aggregate.simple_type, "AGGREGATE_SERIES_METADATA");
         assert_eq!(aggregate.group.as_deref(), Some("series-1"));
+        assert_eq!(
+            aggregate.payload.as_deref(),
+            Some(
+                r#"{"groupId":"series-1","priority":7,"seriesId":"series-1","uniqueId":"AGGREGATE_SERIES_METADATA_series-1"}"#,
+            ),
+        );
 
         let remove = runtime_follow_up_task(RuntimeFollowUpTask::RemoveHashedPages {
             book_id: "book-5".to_string(),
@@ -415,6 +463,19 @@ mod tests {
             page_hash.payload.as_deref(),
             Some(
                 r#"{"groupId":null,"libraryId":"library-9","priority":0,"uniqueId":"FIND_BOOKS_WITH_MISSING_PAGE_HASH_library-9"}"#,
+            ),
+        );
+
+        let convert_scan = runtime_follow_up_task(RuntimeFollowUpTask::FindBooksToConvert {
+            library_id: "library-1".to_string(),
+            priority: 0,
+        });
+        assert_eq!(convert_scan.id, "FIND_BOOKS_TO_CONVERT_library-1");
+        assert_eq!(convert_scan.simple_type, "FIND_BOOKS_TO_CONVERT");
+        assert_eq!(
+            convert_scan.payload.as_deref(),
+            Some(
+                r#"{"groupId":null,"libraryId":"library-1","priority":0,"uniqueId":"FIND_BOOKS_TO_CONVERT_library-1"}"#,
             ),
         );
     }

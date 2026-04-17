@@ -1,21 +1,13 @@
-use std::fmt::Write as _;
-
-use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
+use serde_json::{json, Value};
 use time::OffsetDateTime;
+use tsid::create_tsid_256;
 
 use crate::http::helpers::api_file_path;
 
 use super::{TransientBookPageRecord, TransientBookRecord};
 
-pub(super) fn transient_book_id(path: &str) -> String {
-    let digest = Sha256::digest(path.as_bytes());
-    let mut id = String::with_capacity(26);
-    id.push_str("transient-");
-    for byte in digest.iter().take(8) {
-        write!(&mut id, "{byte:02x}").expect("writing digest to string should not fail");
-    }
-    id
+pub(super) fn transient_book_id() -> String {
+    create_tsid_256().to_string()
 }
 
 pub(super) fn transient_book_payload(record: &TransientBookRecord) -> Value {
@@ -23,7 +15,7 @@ pub(super) fn transient_book_payload(record: &TransientBookRecord) -> Value {
         "id": record.id,
         "name": record.name,
         "url": api_file_path(&record.path),
-        "fileLastModified": format_local_datetime(record.file_last_modified_epoch_seconds),
+        "fileLastModified": format_local_datetime(record.file_last_modified_unix_nanos),
         "sizeBytes": record.size_bytes,
         "size": format_size_bytes(record.size_bytes),
         "status": record.status,
@@ -57,11 +49,12 @@ pub(super) fn format_size_bytes(size_bytes: u64) -> String {
     }
 }
 
-fn format_local_datetime(epoch_seconds: i64) -> String {
-    let datetime = OffsetDateTime::from_unix_timestamp(epoch_seconds)
+fn format_local_datetime(unix_nanos: i128) -> String {
+    let local_offset = time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC);
+    let datetime = OffsetDateTime::from_unix_timestamp_nanos(unix_nanos)
         .unwrap_or(OffsetDateTime::UNIX_EPOCH)
-        .to_offset(time::UtcOffset::UTC);
-    format!(
+        .to_offset(local_offset);
+    let mut formatted = format!(
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
         datetime.year(),
         datetime.month() as u8,
@@ -69,7 +62,13 @@ fn format_local_datetime(epoch_seconds: i64) -> String {
         datetime.hour(),
         datetime.minute(),
         datetime.second(),
-    )
+    );
+    if datetime.nanosecond() > 0 {
+        let fraction = format!("{:09}", datetime.nanosecond());
+        formatted.push('.');
+        formatted.push_str(fraction.trim_end_matches('0'));
+    }
+    formatted
 }
 
 fn transient_page_payload(page: &TransientBookPageRecord) -> Value {
@@ -89,13 +88,25 @@ fn transient_page_payload(page: &TransientBookPageRecord) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::transient_book_id;
+    use super::{format_local_datetime, transient_book_id};
 
     #[test]
-    fn transient_book_id_keeps_legacy_prefix_and_length() {
-        assert_eq!(
-            transient_book_id("/tmp/Transient Book.cbz"),
-            "transient-bb005341c2e74c7d"
+    fn transient_book_id_uses_kotlin_compatible_tsid_shape() {
+        let id = transient_book_id();
+
+        assert_eq!(id.len(), 13);
+        assert!(matches!(id.chars().next(), Some('0'..='9' | 'A'..='F')));
+        assert!(id
+            .chars()
+            .all(|ch| "0123456789ABCDEFGHJKMNPQRSTVWXYZ".contains(ch)));
+    }
+
+    #[test]
+    fn format_local_datetime_preserves_subsecond_precision() {
+        let formatted = format_local_datetime(123_456_789_i128);
+        assert!(
+            formatted.contains(".123456789"),
+            "expected Kotlin-style local datetime formatting to keep subsecond precision: {formatted}"
         );
     }
 }

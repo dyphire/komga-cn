@@ -253,6 +253,13 @@ pub async fn book_page_raw(
             return StatusCode::FORBIDDEN.into_response();
         }
 
+        if !book_media_is_pdf(&media) {
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                "Extractor does not support raw extraction of pages",
+            );
+        }
+
         if !book_media_is_ready_status(auth_db.database_file.as_path(), &resolved_book_id)
             .await
             .unwrap_or(false)
@@ -262,13 +269,6 @@ pub async fn book_page_raw(
 
         if !media.file_path.exists() {
             return json_error_response(StatusCode::NOT_FOUND, "File not found, it may have moved");
-        }
-
-        if !book_media_is_pdf(&media) {
-            return json_error_response(
-                StatusCode::BAD_REQUEST,
-                "Extractor does not support raw extraction of pages",
-            );
         }
 
         let page_count = detect_pdf_page_count(&media).unwrap_or(media.page_count);

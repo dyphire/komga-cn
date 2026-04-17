@@ -1,11 +1,11 @@
 use super::{LibraryScanInterval, TaskQueueRecord};
 use serde_json::json;
 
-const MANUAL_SCAN_PRIORITY: i32 = 100;
+const MANUAL_SCAN_PRIORITY: i32 = 8;
 const BACKGROUND_SCAN_PRIORITY: i32 = 4;
-const ANALYZE_LIBRARY_PRIORITY: i32 = 90;
-const METADATA_REFRESH_PRIORITY: i32 = 80;
-const EMPTY_TRASH_PRIORITY: i32 = 70;
+const ANALYZE_LIBRARY_PRIORITY: i32 = 6;
+const METADATA_REFRESH_PRIORITY: i32 = 6;
+const EMPTY_TRASH_PRIORITY: i32 = 6;
 const LOWEST_PRIORITY: i32 = 0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -52,7 +52,6 @@ pub enum PlannedTaskKind {
     AnalyzeBook,
     EmptyTrash,
     ImportBook,
-    ImportBooksBatch,
     FindBooksWithMissingPageHash,
     FindDuplicatePagesToDelete,
     FindBookThumbnailsToRegenerate,
@@ -105,25 +104,23 @@ impl PlannedTaskKind {
                 persisted_simple_type: "ImportBook",
                 persisted_class_name: "org.gotson.komga.application.tasks.Task$ImportBook",
             },
-            Self::ImportBooksBatch => TaskDescriptor {
-                runtime_simple_type: "IMPORT_BOOKS_BATCH",
-                persisted_simple_type: "IMPORT_BOOKS_BATCH",
-                persisted_class_name: "org.gotson.komga.task.import_books_batch.RuntimeTask",
-            },
             Self::FindBooksWithMissingPageHash => TaskDescriptor {
                 runtime_simple_type: "FIND_BOOKS_WITH_MISSING_PAGE_HASH",
                 persisted_simple_type: "FindBooksWithMissingPageHash",
-                persisted_class_name: "org.gotson.komga.application.tasks.Task$FindBooksWithMissingPageHash",
+                persisted_class_name:
+                    "org.gotson.komga.application.tasks.Task$FindBooksWithMissingPageHash",
             },
             Self::FindDuplicatePagesToDelete => TaskDescriptor {
                 runtime_simple_type: "FIND_DUPLICATE_PAGES_TO_DELETE",
                 persisted_simple_type: "FindDuplicatePagesToDelete",
-                persisted_class_name: "org.gotson.komga.application.tasks.Task$FindDuplicatePagesToDelete",
+                persisted_class_name:
+                    "org.gotson.komga.application.tasks.Task$FindDuplicatePagesToDelete",
             },
             Self::FindBookThumbnailsToRegenerate => TaskDescriptor {
                 runtime_simple_type: "FIND_BOOK_THUMBNAILS_TO_REGENERATE",
                 persisted_simple_type: "FindBookThumbnailsToRegenerate",
-                persisted_class_name: "org.gotson.komga.application.tasks.Task$FindBookThumbnailsToRegenerate",
+                persisted_class_name:
+                    "org.gotson.komga.application.tasks.Task$FindBookThumbnailsToRegenerate",
             },
             Self::RefreshBookMetadata => TaskDescriptor {
                 runtime_simple_type: "REFRESH_BOOK_METADATA",
@@ -133,22 +130,26 @@ impl PlannedTaskKind {
             Self::RefreshBookLocalArtwork => TaskDescriptor {
                 runtime_simple_type: "REFRESH_BOOK_LOCAL_ARTWORK",
                 persisted_simple_type: "RefreshBookLocalArtwork",
-                persisted_class_name: "org.gotson.komga.application.tasks.Task$RefreshBookLocalArtwork",
+                persisted_class_name:
+                    "org.gotson.komga.application.tasks.Task$RefreshBookLocalArtwork",
             },
             Self::RefreshSeriesLocalArtwork => TaskDescriptor {
                 runtime_simple_type: "REFRESH_SERIES_LOCAL_ARTWORK",
                 persisted_simple_type: "RefreshSeriesLocalArtwork",
-                persisted_class_name: "org.gotson.komga.application.tasks.Task$RefreshSeriesLocalArtwork",
+                persisted_class_name:
+                    "org.gotson.komga.application.tasks.Task$RefreshSeriesLocalArtwork",
             },
             Self::RefreshSeriesMetadata => TaskDescriptor {
                 runtime_simple_type: "REFRESH_SERIES_METADATA",
-                persisted_simple_type: "REFRESH_SERIES_METADATA",
-                persisted_class_name: "org.gotson.komga.task.refresh_series_metadata.RuntimeTask",
+                persisted_simple_type: "RefreshSeriesMetadata",
+                persisted_class_name:
+                    "org.gotson.komga.application.tasks.Task$RefreshSeriesMetadata",
             },
             Self::AggregateSeriesMetadata => TaskDescriptor {
                 runtime_simple_type: "AGGREGATE_SERIES_METADATA",
-                persisted_simple_type: "AGGREGATE_SERIES_METADATA",
-                persisted_class_name: "org.gotson.komga.task.aggregate_series_metadata.RuntimeTask",
+                persisted_simple_type: "AggregateSeriesMetadata",
+                persisted_class_name:
+                    "org.gotson.komga.application.tasks.Task$AggregateSeriesMetadata",
             },
             Self::RepairExtension => TaskDescriptor {
                 runtime_simple_type: "REPAIR_EXTENSION",
@@ -158,7 +159,8 @@ impl PlannedTaskKind {
             Self::GenerateBookThumbnail => TaskDescriptor {
                 runtime_simple_type: "GENERATE_BOOK_THUMBNAIL",
                 persisted_simple_type: "GenerateBookThumbnail",
-                persisted_class_name: "org.gotson.komga.application.tasks.Task$GenerateBookThumbnail",
+                persisted_class_name:
+                    "org.gotson.komga.application.tasks.Task$GenerateBookThumbnail",
             },
             Self::HashBook => TaskDescriptor {
                 runtime_simple_type: "HASH_BOOK",
@@ -202,13 +204,13 @@ impl PlannedTaskKind {
             },
             Self::FindBooksToConvert => TaskDescriptor {
                 runtime_simple_type: "FIND_BOOKS_TO_CONVERT",
-                persisted_simple_type: "FIND_BOOKS_TO_CONVERT",
-                persisted_class_name: "org.gotson.komga.task.find_books_to_convert.RuntimeTask",
+                persisted_simple_type: "FindBooksToConvert",
+                persisted_class_name: "org.gotson.komga.application.tasks.Task$FindBooksToConvert",
             },
             Self::ConvertBook => TaskDescriptor {
                 runtime_simple_type: "CONVERT_BOOK",
-                persisted_simple_type: "CONVERT_BOOK",
-                persisted_class_name: "org.gotson.komga.task.convert_book.RuntimeTask",
+                persisted_simple_type: "ConvertBook",
+                persisted_class_name: "org.gotson.komga.application.tasks.Task$ConvertBook",
             },
         }
     }
@@ -324,7 +326,6 @@ impl TaskProtocolCatalog for DefaultTaskProtocolCatalog {
             "ANALYZE_BOOK" => Some(PlannedTaskKind::AnalyzeBook),
             "EMPTY_TRASH" => Some(PlannedTaskKind::EmptyTrash),
             "IMPORT_BOOK" => Some(PlannedTaskKind::ImportBook),
-            "IMPORT_BOOKS_BATCH" => Some(PlannedTaskKind::ImportBooksBatch),
             "FIND_BOOKS_WITH_MISSING_PAGE_HASH" => {
                 Some(PlannedTaskKind::FindBooksWithMissingPageHash)
             }
@@ -335,8 +336,12 @@ impl TaskProtocolCatalog for DefaultTaskProtocolCatalog {
             "REFRESH_BOOK_METADATA" => Some(PlannedTaskKind::RefreshBookMetadata),
             "REFRESH_BOOK_LOCAL_ARTWORK" => Some(PlannedTaskKind::RefreshBookLocalArtwork),
             "REFRESH_SERIES_LOCAL_ARTWORK" => Some(PlannedTaskKind::RefreshSeriesLocalArtwork),
-            "REFRESH_SERIES_METADATA" => Some(PlannedTaskKind::RefreshSeriesMetadata),
-            "AGGREGATE_SERIES_METADATA" => Some(PlannedTaskKind::AggregateSeriesMetadata),
+            "RefreshSeriesMetadata" | "REFRESH_SERIES_METADATA" => {
+                Some(PlannedTaskKind::RefreshSeriesMetadata)
+            }
+            "AggregateSeriesMetadata" | "AGGREGATE_SERIES_METADATA" => {
+                Some(PlannedTaskKind::AggregateSeriesMetadata)
+            }
             "REPAIR_EXTENSION" => Some(PlannedTaskKind::RepairExtension),
             "GENERATE_BOOK_THUMBNAIL" => Some(PlannedTaskKind::GenerateBookThumbnail),
             "HASH_BOOK" => Some(PlannedTaskKind::HashBook),
@@ -347,8 +352,10 @@ impl TaskProtocolCatalog for DefaultTaskProtocolCatalog {
             "REMOVE_HASHED_PAGES" => Some(PlannedTaskKind::RemoveHashedPages),
             "DELETE_BOOK" => Some(PlannedTaskKind::DeleteBook),
             "DELETE_SERIES" => Some(PlannedTaskKind::DeleteSeries),
-            "FIND_BOOKS_TO_CONVERT" => Some(PlannedTaskKind::FindBooksToConvert),
-            "CONVERT_BOOK" => Some(PlannedTaskKind::ConvertBook),
+            "FindBooksToConvert" | "FIND_BOOKS_TO_CONVERT" => {
+                Some(PlannedTaskKind::FindBooksToConvert)
+            }
+            "ConvertBook" | "CONVERT_BOOK" => Some(PlannedTaskKind::ConvertBook),
             _ => None,
         }
     }
@@ -359,7 +366,6 @@ impl TaskProtocolCatalog for DefaultTaskProtocolCatalog {
             "AnalyzeBook" => Some(PlannedTaskKind::AnalyzeBook),
             "EmptyTrash" => Some(PlannedTaskKind::EmptyTrash),
             "ImportBook" => Some(PlannedTaskKind::ImportBook),
-            "IMPORT_BOOKS_BATCH" => Some(PlannedTaskKind::ImportBooksBatch),
             "FindBooksWithMissingPageHash" => Some(PlannedTaskKind::FindBooksWithMissingPageHash),
             "FindDuplicatePagesToDelete" => Some(PlannedTaskKind::FindDuplicatePagesToDelete),
             "FindBookThumbnailsToRegenerate" => {
@@ -368,8 +374,12 @@ impl TaskProtocolCatalog for DefaultTaskProtocolCatalog {
             "RefreshBookMetadata" => Some(PlannedTaskKind::RefreshBookMetadata),
             "RefreshBookLocalArtwork" => Some(PlannedTaskKind::RefreshBookLocalArtwork),
             "RefreshSeriesLocalArtwork" => Some(PlannedTaskKind::RefreshSeriesLocalArtwork),
-            "REFRESH_SERIES_METADATA" => Some(PlannedTaskKind::RefreshSeriesMetadata),
-            "AGGREGATE_SERIES_METADATA" => Some(PlannedTaskKind::AggregateSeriesMetadata),
+            "RefreshSeriesMetadata" | "REFRESH_SERIES_METADATA" => {
+                Some(PlannedTaskKind::RefreshSeriesMetadata)
+            }
+            "AggregateSeriesMetadata" | "AGGREGATE_SERIES_METADATA" => {
+                Some(PlannedTaskKind::AggregateSeriesMetadata)
+            }
             "RepairExtension" => Some(PlannedTaskKind::RepairExtension),
             "GenerateBookThumbnail" => Some(PlannedTaskKind::GenerateBookThumbnail),
             "HashBook" => Some(PlannedTaskKind::HashBook),
@@ -380,8 +390,10 @@ impl TaskProtocolCatalog for DefaultTaskProtocolCatalog {
             "RemoveHashedPages" => Some(PlannedTaskKind::RemoveHashedPages),
             "DeleteBook" => Some(PlannedTaskKind::DeleteBook),
             "DeleteSeries" => Some(PlannedTaskKind::DeleteSeries),
-            "FIND_BOOKS_TO_CONVERT" => Some(PlannedTaskKind::FindBooksToConvert),
-            "CONVERT_BOOK" => Some(PlannedTaskKind::ConvertBook),
+            "FindBooksToConvert" | "FIND_BOOKS_TO_CONVERT" => {
+                Some(PlannedTaskKind::FindBooksToConvert)
+            }
+            "ConvertBook" | "CONVERT_BOOK" => Some(PlannedTaskKind::ConvertBook),
             _ => None,
         }
     }
@@ -483,7 +495,7 @@ where
                 schedule,
             } => {
                 let priority = schedule.scan_priority();
-                let task_id = format!("SCAN_LIBRARY:{library_id}:DEEP:{deep_scan}");
+                let task_id = format!("SCAN_LIBRARY_{library_id}_DEEP_{deep_scan}");
                 LibraryTaskBatch::new(vec![self.catalog.plan_task(
                     PlannedTaskKind::ScanLibrary,
                     schedule,
@@ -505,7 +517,7 @@ where
                         self.catalog.plan_task(
                             PlannedTaskKind::AnalyzeBook,
                             TaskSchedule::Manual,
-                            format!("ANALYZE_BOOK:{}", book.book_id),
+                            format!("ANALYZE_BOOK_{}", book.book_id),
                             ANALYZE_LIBRARY_PRIORITY,
                             Some(book.series_id),
                             None,
@@ -539,7 +551,7 @@ where
                     tasks.push(self.catalog.plan_task(
                         PlannedTaskKind::RefreshSeriesLocalArtwork,
                         TaskSchedule::Manual,
-                        format!("REFRESH_SERIES_LOCAL_ARTWORK:{series_id}"),
+                        format!("REFRESH_SERIES_LOCAL_ARTWORK_{series_id}"),
                         METADATA_REFRESH_PRIORITY,
                         None,
                         None,
@@ -551,7 +563,7 @@ where
                 LibraryTaskBatch::new(vec![self.catalog.plan_task(
                     PlannedTaskKind::EmptyTrash,
                     TaskSchedule::Manual,
-                    format!("EMPTY_TRASH:{library_id}"),
+                    format!("EMPTY_TRASH_{library_id}"),
                     EMPTY_TRASH_PRIORITY,
                     None,
                     None,
@@ -633,13 +645,20 @@ where
                     .collect(),
             ),
             LibraryTaskCommand::FindBooksToConvert { library_id } => {
+                let task_id = format!("FIND_BOOKS_TO_CONVERT_{library_id}");
                 LibraryTaskBatch::new(vec![self.catalog.plan_task(
                     PlannedTaskKind::FindBooksToConvert,
                     TaskSchedule::Background,
-                    format!("FIND_BOOKS_TO_CONVERT:{library_id}"),
+                    task_id.clone(),
                     LOWEST_PRIORITY,
                     None,
-                    None,
+                    Some(book_task_payload(
+                        "libraryId",
+                        &library_id,
+                        LOWEST_PRIORITY,
+                        None,
+                        &task_id,
+                    )),
                 )])
             }
         }

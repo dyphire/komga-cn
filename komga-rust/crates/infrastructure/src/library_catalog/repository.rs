@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use komga_application::library_catalog::{
     LibraryCatalogMutationPort, LibraryCatalogReadPort, LibraryRecord,
 };
+use komga_application::runtime_sse::register_runtime_sse_event;
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
+use serde_json::json;
 
 use crate::read_models::{get_persisted_library, list_persisted_libraries};
 use crate::sqlite::write_models::libraries::{
@@ -61,19 +63,44 @@ impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
     async fn create_library(&self, library: &LibraryRecord) -> Result<(), String> {
         persist_library_create(self.database_file.as_path(), &library.clone().into())
             .await
-            .map_err(|error| format!("persist library create: {error}"))
+            .map_err(|error| format!("persist library create: {error}"))?;
+        register_runtime_sse_event(
+            "LibraryAdded",
+            json!({ "libraryId": library.id }),
+            false,
+            None,
+        );
+        Ok(())
     }
 
     async fn update_library(&self, library: &LibraryRecord) -> Result<bool, String> {
-        persist_library_update(self.database_file.as_path(), &library.clone().into())
+        let updated = persist_library_update(self.database_file.as_path(), &library.clone().into())
             .await
-            .map_err(|error| format!("persist library update: {error}"))
+            .map_err(|error| format!("persist library update: {error}"))?;
+        if updated {
+            register_runtime_sse_event(
+                "LibraryChanged",
+                json!({ "libraryId": library.id }),
+                false,
+                None,
+            );
+        }
+        Ok(updated)
     }
 
     async fn delete_library(&self, library_id: &str) -> Result<bool, String> {
-        delete_persisted_library(self.database_file.as_path(), library_id)
+        let deleted = delete_persisted_library(self.database_file.as_path(), library_id)
             .await
-            .map_err(|error| format!("delete persisted library: {error}"))
+            .map_err(|error| format!("delete persisted library: {error}"))?;
+        if deleted {
+            register_runtime_sse_event(
+                "LibraryDeleted",
+                json!({ "libraryId": library_id }),
+                false,
+                None,
+            );
+        }
+        Ok(deleted)
     }
 
     async fn library_book_ids_with_empty_hash(

@@ -233,10 +233,10 @@ async fn runtime_blocks_find_books_to_convert_when_main_database_is_external_own
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler.enqueue(TaskQueueRecord::new(
-        "FIND_BOOKS_TO_CONVERT:library-1",
+        "FIND_BOOKS_TO_CONVERT_library-1",
         1_000,
         Some("library-1".to_string()),
-    ));
+    ).with_simple_type("FIND_BOOKS_TO_CONVERT"));
     let processed = scheduler
         .process_available(&runtime)
         .expect("blocked main-database find-books-to-convert should still drain cleanly");

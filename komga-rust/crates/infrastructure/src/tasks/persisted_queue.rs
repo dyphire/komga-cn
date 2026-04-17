@@ -323,21 +323,6 @@ fn known_persisted_row<C: TaskProtocolCatalog>(
     }
 }
 
-#[cfg(test)]
-fn runtime_simple_type(simple_type: &str) -> String {
-    compatibility()
-        .catalog
-        .known_kind_from_persisted_simple_type(simple_type)
-        .map(|kind| {
-            compatibility()
-                .catalog
-                .descriptor(kind)
-                .runtime_simple_type
-                .to_string()
-        })
-        .unwrap_or_else(|| simple_type.to_string())
-}
-
 fn runtime_task_class_name(simple_type: &str) -> String {
     format!(
         "org.gotson.komga.task.{}.RuntimeTask",
@@ -620,6 +605,14 @@ fn refresh_book_local_artwork_payload(task: &PersistedTaskStoreRecord) -> Option
     target_task_payload(task, "REFRESH_BOOK_LOCAL_ARTWORK", "bookId")
 }
 
+fn refresh_series_metadata_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
+    target_task_payload(task, "REFRESH_SERIES_METADATA", "seriesId")
+}
+
+fn aggregate_series_metadata_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
+    target_task_payload(task, "AGGREGATE_SERIES_METADATA", "seriesId")
+}
+
 fn refresh_series_local_artwork_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
     target_task_payload(task, "REFRESH_SERIES_LOCAL_ARTWORK", "seriesId")
 }
@@ -652,6 +645,14 @@ fn delete_series_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
     target_task_payload(task, "DELETE_SERIES", "seriesId")
 }
 
+fn find_books_to_convert_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
+    library_target_task_payload(task, "FIND_BOOKS_TO_CONVERT")
+}
+
+fn convert_book_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
+    target_task_payload(task, "CONVERT_BOOK", "bookId")
+}
+
 fn rebuild_index_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
     (task.simple_type == "REBUILD_INDEX").then(|| {
         let entities = task
@@ -668,6 +669,11 @@ fn rebuild_index_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
         })
         .to_string()
     })
+}
+
+fn upgrade_index_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
+    (task.simple_type == "UPGRADE_INDEX")
+        .then(|| task_payload(task, std::iter::empty::<(&'static str, Value)>()))
 }
 
 fn persisted_compatibility_payload(
@@ -688,6 +694,8 @@ fn persisted_compatibility_payload(
         }
         PlannedTaskKind::RefreshBookMetadata => refresh_book_metadata_payload(task),
         PlannedTaskKind::RefreshBookLocalArtwork => refresh_book_local_artwork_payload(task),
+        PlannedTaskKind::RefreshSeriesMetadata => refresh_series_metadata_payload(task),
+        PlannedTaskKind::AggregateSeriesMetadata => aggregate_series_metadata_payload(task),
         PlannedTaskKind::RefreshSeriesLocalArtwork => refresh_series_local_artwork_payload(task),
         PlannedTaskKind::RepairExtension => repair_extension_payload(task),
         PlannedTaskKind::GenerateBookThumbnail => generate_book_thumbnail_payload(task),
@@ -695,15 +703,12 @@ fn persisted_compatibility_payload(
         PlannedTaskKind::HashBookKoreader => hash_book_koreader_payload(task),
         PlannedTaskKind::HashBookPages => hash_book_pages_payload(task),
         PlannedTaskKind::RebuildIndex => rebuild_index_payload(task),
+        PlannedTaskKind::UpgradeIndex => upgrade_index_payload(task),
         PlannedTaskKind::DeleteBook => delete_book_payload(task),
         PlannedTaskKind::DeleteSeries => delete_series_payload(task),
-        PlannedTaskKind::UpgradeIndex
-        | PlannedTaskKind::ImportBooksBatch
-        | PlannedTaskKind::RefreshSeriesMetadata
-        | PlannedTaskKind::AggregateSeriesMetadata
-        | PlannedTaskKind::RemoveHashedPages
-        | PlannedTaskKind::FindBooksToConvert
-        | PlannedTaskKind::ConvertBook => None,
+        PlannedTaskKind::FindBooksToConvert => find_books_to_convert_payload(task),
+        PlannedTaskKind::ConvertBook => convert_book_payload(task),
+        PlannedTaskKind::RemoveHashedPages => None,
     };
 
     compatibility_payload
@@ -826,6 +831,35 @@ mod tests {
     }
 
     #[test]
+    fn persisted_find_books_to_convert_uses_kotlin_task_shape() {
+        let row = persisted_row(PersistedTaskStoreRecord {
+            id: "FIND_BOOKS_TO_CONVERT_library-1".to_string(),
+            simple_type: "FIND_BOOKS_TO_CONVERT".to_string(),
+            priority: 0,
+            group: None,
+            payload: None,
+            owner: None,
+        });
+
+        assert_eq!(row.id, "FIND_BOOKS_TO_CONVERT_library-1");
+        assert_eq!(row.simple_type, "FindBooksToConvert");
+        assert_eq!(
+            row.class_name,
+            "org.gotson.komga.application.tasks.Task$FindBooksToConvert"
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&row.payload)
+                .expect("find books to convert payload should be valid JSON"),
+            json!({
+                "libraryId": "library-1",
+                "priority": 0,
+                "groupId": Value::Null,
+                "uniqueId": "FIND_BOOKS_TO_CONVERT_library-1"
+            })
+        );
+    }
+
+    #[test]
     fn persisted_rebuild_index_uses_kotlin_task_shape() {
         let row = persisted_row(PersistedTaskStoreRecord {
             id: "REBUILD_INDEX".to_string(),
@@ -855,8 +889,61 @@ mod tests {
     }
 
     #[test]
-    fn kotlin_rebuild_index_simple_type_round_trips_back_to_runtime_type() {
-        assert_eq!(runtime_simple_type("RebuildIndex"), "REBUILD_INDEX");
+    fn persisted_refresh_series_metadata_uses_kotlin_task_shape() {
+        let row = persisted_row(PersistedTaskStoreRecord {
+            id: "REFRESH_SERIES_METADATA_series-1".to_string(),
+            simple_type: "REFRESH_SERIES_METADATA".to_string(),
+            priority: 5,
+            group: Some("series-1".to_string()),
+            payload: None,
+            owner: None,
+        });
+
+        assert_eq!(row.id, "REFRESH_SERIES_METADATA_series-1");
+        assert_eq!(row.simple_type, "RefreshSeriesMetadata");
+        assert_eq!(
+            row.class_name,
+            "org.gotson.komga.application.tasks.Task$RefreshSeriesMetadata"
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&row.payload)
+                .expect("refresh series metadata payload should be valid JSON"),
+            json!({
+                "seriesId": "series-1",
+                "priority": 5,
+                "groupId": "series-1",
+                "uniqueId": "REFRESH_SERIES_METADATA_series-1"
+            })
+        );
+    }
+
+    #[test]
+    fn persisted_aggregate_series_metadata_uses_kotlin_task_shape() {
+        let row = persisted_row(PersistedTaskStoreRecord {
+            id: "AGGREGATE_SERIES_METADATA_series-1".to_string(),
+            simple_type: "AGGREGATE_SERIES_METADATA".to_string(),
+            priority: 6,
+            group: Some("series-1".to_string()),
+            payload: None,
+            owner: None,
+        });
+
+        assert_eq!(row.id, "AGGREGATE_SERIES_METADATA_series-1");
+        assert_eq!(row.simple_type, "AggregateSeriesMetadata");
+        assert_eq!(
+            row.class_name,
+            "org.gotson.komga.application.tasks.Task$AggregateSeriesMetadata"
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&row.payload)
+                .expect("aggregate series metadata payload should be valid JSON"),
+            json!({
+                "seriesId": "series-1",
+                "priority": 6,
+                "groupId": "series-1",
+                "uniqueId": "AGGREGATE_SERIES_METADATA_series-1"
+            })
+        );
     }
 
     #[test]
@@ -880,17 +967,11 @@ mod tests {
             serde_json::from_str::<Value>(&row.payload)
                 .expect("upgrade index payload should be valid JSON"),
             json!({
-                "id": "UPGRADE_INDEX",
-                "simpleType": "UPGRADE_INDEX",
                 "priority": 9,
                 "groupId": Value::Null,
+                "uniqueId": "UPGRADE_INDEX"
             })
         );
-    }
-
-    #[test]
-    fn kotlin_upgrade_index_simple_type_round_trips_back_to_runtime_type() {
-        assert_eq!(runtime_simple_type("UpgradeIndex"), "UPGRADE_INDEX");
     }
 
     #[test]
@@ -967,15 +1048,31 @@ mod tests {
     }
 
     #[test]
-    fn kotlin_import_book_simple_type_round_trips_back_to_runtime_type() {
-        assert_eq!(runtime_simple_type("ImportBook"), "IMPORT_BOOK");
-    }
+    fn persisted_convert_book_uses_kotlin_task_shape() {
+        let row = persisted_row(PersistedTaskStoreRecord {
+            id: "CONVERT_BOOK_book-1".to_string(),
+            simple_type: "CONVERT_BOOK".to_string(),
+            priority: 7,
+            group: Some("series-1".to_string()),
+            payload: None,
+            owner: None,
+        });
 
-    #[test]
-    fn kotlin_find_book_thumbnails_to_regenerate_simple_type_round_trips_back_to_runtime_type() {
+        assert_eq!(row.id, "CONVERT_BOOK_book-1");
+        assert_eq!(row.simple_type, "ConvertBook");
         assert_eq!(
-            runtime_simple_type("FindBookThumbnailsToRegenerate"),
-            "FIND_BOOK_THUMBNAILS_TO_REGENERATE"
+            row.class_name,
+            "org.gotson.komga.application.tasks.Task$ConvertBook"
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&row.payload)
+                .expect("convert book payload should be valid JSON"),
+            json!({
+                "bookId": "book-1",
+                "priority": 7,
+                "groupId": "series-1",
+                "uniqueId": "CONVERT_BOOK_book-1"
+            })
         );
     }
 
@@ -1009,17 +1106,9 @@ mod tests {
     }
 
     #[test]
-    fn kotlin_refresh_book_local_artwork_simple_type_round_trips_back_to_runtime_type() {
-        assert_eq!(
-            runtime_simple_type("RefreshBookLocalArtwork"),
-            "REFRESH_BOOK_LOCAL_ARTWORK"
-        );
-    }
-
-    #[test]
     fn persisted_refresh_series_local_artwork_uses_kotlin_task_shape() {
         let row = persisted_row(PersistedTaskStoreRecord {
-            id: "REFRESH_SERIES_LOCAL_ARTWORK:series-1".to_string(),
+            id: "REFRESH_SERIES_LOCAL_ARTWORK_series-1".to_string(),
             simple_type: "REFRESH_SERIES_LOCAL_ARTWORK".to_string(),
             priority: 80,
             group: None,
@@ -1027,7 +1116,7 @@ mod tests {
             owner: None,
         });
 
-        assert_eq!(row.id, "REFRESH_SERIES_LOCAL_ARTWORK:series-1");
+        assert_eq!(row.id, "REFRESH_SERIES_LOCAL_ARTWORK_series-1");
         assert_eq!(row.simple_type, "RefreshSeriesLocalArtwork");
         assert_eq!(
             row.class_name,
@@ -1040,16 +1129,8 @@ mod tests {
                 "seriesId": "series-1",
                 "priority": 80,
                 "groupId": Value::Null,
-                "uniqueId": "REFRESH_SERIES_LOCAL_ARTWORK:series-1"
+                "uniqueId": "REFRESH_SERIES_LOCAL_ARTWORK_series-1"
             })
-        );
-    }
-
-    #[test]
-    fn kotlin_refresh_series_local_artwork_simple_type_round_trips_back_to_runtime_type() {
-        assert_eq!(
-            runtime_simple_type("RefreshSeriesLocalArtwork"),
-            "REFRESH_SERIES_LOCAL_ARTWORK"
         );
     }
 
@@ -1083,11 +1164,6 @@ mod tests {
     }
 
     #[test]
-    fn kotlin_repair_extension_simple_type_round_trips_back_to_runtime_type() {
-        assert_eq!(runtime_simple_type("RepairExtension"), "REPAIR_EXTENSION");
-    }
-
-    #[test]
     fn persisted_hash_book_pages_uses_kotlin_task_shape() {
         let row = persisted_row(PersistedTaskStoreRecord {
             id: "HASH_BOOK_PAGES_book-1".to_string(),
@@ -1114,11 +1190,6 @@ mod tests {
                 "uniqueId": "HASH_BOOK_PAGES_book-1"
             })
         );
-    }
-
-    #[test]
-    fn kotlin_hash_book_pages_simple_type_round_trips_back_to_runtime_type() {
-        assert_eq!(runtime_simple_type("HashBookPages"), "HASH_BOOK_PAGES");
     }
 
     #[test]
@@ -1151,25 +1222,17 @@ mod tests {
     }
 
     #[test]
-    fn kotlin_hash_book_koreader_simple_type_round_trips_back_to_runtime_type() {
-        assert_eq!(
-            runtime_simple_type("HashBookKoreader"),
-            "HASH_BOOK_KOREADER"
-        );
-    }
-
-    #[test]
     fn persisted_delete_book_uses_kotlin_task_shape() {
         let row = persisted_row(PersistedTaskStoreRecord {
-            id: "DELETE_BOOK:book-1".to_string(),
+            id: "DELETE_BOOK_book-1".to_string(),
             simple_type: "DELETE_BOOK".to_string(),
-            priority: 100,
+            priority: 8,
             group: None,
             payload: None,
             owner: None,
         });
 
-        assert_eq!(row.id, "DELETE_BOOK:book-1");
+        assert_eq!(row.id, "DELETE_BOOK_book-1");
         assert_eq!(row.simple_type, "DeleteBook");
         assert_eq!(
             row.class_name,
@@ -1180,15 +1243,40 @@ mod tests {
                 .expect("delete-book payload should be valid JSON"),
             json!({
                 "bookId": "book-1",
-                "priority": 100,
+                "priority": 8,
                 "groupId": Value::Null,
-                "uniqueId": "DELETE_BOOK:book-1"
+                "uniqueId": "DELETE_BOOK_book-1"
             })
         );
     }
 
     #[test]
-    fn kotlin_delete_book_simple_type_round_trips_back_to_runtime_type() {
-        assert_eq!(runtime_simple_type("DeleteBook"), "DELETE_BOOK");
+    fn persisted_delete_series_uses_kotlin_task_shape() {
+        let row = persisted_row(PersistedTaskStoreRecord {
+            id: "DELETE_SERIES_series-1".to_string(),
+            simple_type: "DELETE_SERIES".to_string(),
+            priority: 8,
+            group: None,
+            payload: None,
+            owner: None,
+        });
+
+        assert_eq!(row.id, "DELETE_SERIES_series-1");
+        assert_eq!(row.simple_type, "DeleteSeries");
+        assert_eq!(
+            row.class_name,
+            "org.gotson.komga.application.tasks.Task$DeleteSeries"
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&row.payload)
+                .expect("delete-series payload should be valid JSON"),
+            json!({
+                "seriesId": "series-1",
+                "priority": 8,
+                "groupId": Value::Null,
+                "uniqueId": "DELETE_SERIES_series-1"
+            })
+        );
     }
+
 }

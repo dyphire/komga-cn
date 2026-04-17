@@ -482,16 +482,19 @@ pub(crate) async fn opds_v2_library_browse_route(
 pub(crate) async fn opds_v2_libraries_collections_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
+    uri: Uri,
 ) -> Response {
-    v2::opds_v2_libraries_collections(headers, auth_db.database_file.as_path()).await
+    v2::opds_v2_libraries_collections(headers, uri, auth_db.database_file.as_path()).await
 }
 
 pub(crate) async fn opds_v2_library_collections_route(
     Extension(auth_db): Extension<AuthDatabaseState>,
     headers: HeaderMap,
+    uri: Uri,
     AxumPath(library_id): AxumPath<String>,
 ) -> Response {
-    v2::opds_v2_library_collections(headers, auth_db.database_file.as_path(), &library_id).await
+    v2::opds_v2_library_collections(headers, uri, auth_db.database_file.as_path(), &library_id)
+        .await
 }
 
 pub(crate) async fn opds_v2_collection_route(
