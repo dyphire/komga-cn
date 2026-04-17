@@ -12,17 +12,31 @@ use tokio::net::TcpListener;
 use tokio::sync::Mutex as AsyncMutex;
 use tower::util::ServiceExt;
 
-mod support;
+mod support {
+    pub mod persistence_contract_fixture;
+
+    pub mod runtime_router_contract_support {
+        use super::persistence_contract_fixture;
+
+        pub(crate) use super::persistence_contract_fixture::RuntimeDbPaths;
+
+        pub mod auth_session_fixture_bootstrap;
+        pub mod auth_session_log_capture;
+        pub mod auth_session_media_file_fixtures;
+        pub mod auth_session_user_auth;
+        pub mod contract_seed;
+        pub mod response_helpers;
+    }
+}
 
 use support::runtime_router_contract_support::{
     RuntimeDbPaths,
+    auth_session_fixture_bootstrap::*,
+    auth_session_log_capture::*,
+    auth_session_media_file_fixtures::*,
+    auth_session_user_auth::*,
     contract_seed::*,
-    fixture_bootstrap::*,
-    log_capture::*,
-    media_file_fixtures::*,
-    metadata_series_seeding::*,
     response_helpers::*,
-    user_auth::*,
 };
 
 mod auth_session_contract_cases;

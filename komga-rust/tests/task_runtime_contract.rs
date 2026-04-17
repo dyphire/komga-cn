@@ -19,17 +19,31 @@ use sqlx::Row;
 use std::fs;
 use tower::util::ServiceExt;
 
-mod support;
+mod support {
+    pub mod persistence_contract_fixture;
+
+    pub mod runtime_router_contract_support {
+        use super::persistence_contract_fixture;
+
+        pub(crate) use super::persistence_contract_fixture::RuntimeDbPaths;
+
+        pub mod contract_seed;
+        pub mod response_helpers;
+        pub mod task_runtime_fixture_bootstrap;
+        pub mod task_runtime_media_file_fixtures;
+        pub mod task_runtime_user_auth;
+        pub mod log_capture;
+    }
+}
 
 use support::runtime_router_contract_support::{
     RuntimeDbPaths,
     contract_seed::*,
-    fixture_bootstrap::*,
     log_capture::*,
-    media_file_fixtures::*,
-    metadata_series_seeding::*,
     response_helpers::*,
-    user_auth::*,
+    task_runtime_fixture_bootstrap::*,
+    task_runtime_media_file_fixtures::*,
+    task_runtime_user_auth::*,
 };
 
 mod task_runtime_contract_cases;

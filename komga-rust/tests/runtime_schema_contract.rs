@@ -6,7 +6,9 @@ use komga_infrastructure::sqlite::{
 use sqlx::Row;
 use std::path::Path;
 
-mod support;
+mod support {
+    pub mod persistence_contract_fixture;
+}
 
 use support::persistence_contract_fixture;
 

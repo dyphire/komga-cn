@@ -9,21 +9,6 @@ use zip::write::SimpleFileOptions;
 
 use super::RuntimeDbPaths;
 
-pub async fn update_router_book_name(paths: &RuntimeDbPaths, book_id: &str, name: &str) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("router contract db should open for book rename");
-
-    sqlx::query("UPDATE BOOK SET NAME = ? WHERE ID = ?")
-        .bind(name)
-        .bind(book_id)
-        .execute(&pool)
-        .await
-        .expect("book name should be updated");
-
-    pool.close().await;
-}
-
 pub fn write_router_epub_resource(
     paths: &RuntimeDbPaths,
     relative_book_path: &str,

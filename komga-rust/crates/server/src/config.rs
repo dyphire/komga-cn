@@ -2,8 +2,6 @@ use komga_application::task_processing::TaskRuntimeContext;
 use komga_config::env_config::RuntimeConfig;
 use komga_config::writer_ownership::{WriterDecision, WriterKind};
 
-pub(crate) use komga_config::env_config::AdminActionConfig;
-
 pub(crate) fn task_runtime_context(config: &RuntimeConfig) -> TaskRuntimeContext {
     TaskRuntimeContext {
         database_file: config.database_file.clone(),

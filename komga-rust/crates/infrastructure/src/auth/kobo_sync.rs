@@ -2,14 +2,14 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use komga_application::identity_access::{
-    AuthUser, KoboStoreSyncMergeResult, KoboSyncDeltas, KoboSyncPage, KoboSyncPointBook,
+    AuthUser, KoboStoreSyncMergeResult, KoboSyncPage, KoboSyncPointBook,
     KoboSyncReadListSnapshot, decode_or_passthrough_sync_token, now_sync_marker, random_uuid_like,
 };
 use reqwest::header::{HeaderName, HeaderValue};
-use serde_json::{Value, json};
+use serde_json::Value;
 use sqlx::Row;
 
-use crate::sqlite::{connect_pool, connect_private_pool};
+use crate::sqlite::connect_private_pool;
 
 #[derive(Clone, Debug)]
 struct PersistedSyncPoint {
@@ -1378,146 +1378,6 @@ async fn exists_readlists_removed(
     .fetch_optional(&mut **tx)
     .await?
     .is_some())
-}
-
-pub async fn load_kobo_sync_deltas(
-    database_file: &Path,
-    user_id: &str,
-    since: Option<&str>,
-) -> Result<KoboSyncDeltas, sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
-    let since_value = since.unwrap_or_default();
-
-    let rows = sqlx::query(
-        r#"
-        SELECT b.ID AS BOOK_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE
-        FROM BOOK b
-        LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
-        WHERE b.DELETED_DATE IS NULL
-          AND (? = '' OR COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') > ?)
-        ORDER BY b.ID ASC
-        "#,
-    )
-    .bind(since_value)
-    .bind(since_value)
-    .fetch_all(&pool)
-    .await?;
-
-    let deleted_rows = sqlx::query(
-        r#"
-        SELECT b.ID AS BOOK_ID
-        FROM BOOK b
-        WHERE b.DELETED_DATE IS NOT NULL
-          AND (? = '' OR COALESCE(b.DELETED_DATE, '') > ?)
-        ORDER BY b.DELETED_DATE ASC, b.ID ASC
-        "#,
-    )
-    .bind(since_value)
-    .bind(since_value)
-    .fetch_all(&pool)
-    .await?;
-
-    let read_progress_rows = sqlx::query(
-        r#"
-        SELECT
-            rp.BOOK_ID AS BOOK_ID,
-            rp.PAGE AS PAGE,
-            rp.COMPLETED AS COMPLETED,
-            COALESCE(rp.LAST_MODIFIED_DATE, rp.CREATED_DATE, '') AS LAST_MODIFIED_DATE
-        FROM READ_PROGRESS rp
-        JOIN BOOK b ON b.ID = rp.BOOK_ID
-        WHERE rp.USER_ID = ?
-          AND b.DELETED_DATE IS NULL
-          AND (? = '' OR COALESCE(rp.LAST_MODIFIED_DATE, rp.CREATED_DATE, '') > ?)
-        ORDER BY LAST_MODIFIED_DATE ASC, rp.BOOK_ID ASC
-        "#,
-    )
-    .bind(user_id)
-    .bind(since_value)
-    .bind(since_value)
-    .fetch_all(&pool)
-    .await?;
-
-    let tag_rows = sqlx::query(
-        r#"
-        SELECT DISTINCT bt.TAG AS TAG
-        FROM BOOK_METADATA_TAG bt
-        JOIN BOOK b ON b.ID = bt.BOOK_ID
-        WHERE b.DELETED_DATE IS NULL
-          AND (? = '' OR COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') > ?)
-        ORDER BY lower(bt.TAG), bt.TAG
-        "#,
-    )
-    .bind(since_value)
-    .bind(since_value)
-    .fetch_all(&pool)
-    .await?;
-
-    let mut entitlement = Vec::with_capacity(rows.len());
-    let mut metadata = Vec::with_capacity(rows.len());
-    let mut deleted_entitlement = Vec::with_capacity(deleted_rows.len());
-    let mut deleted_book_metadata = Vec::with_capacity(deleted_rows.len());
-    let mut new_reading_state = Vec::with_capacity(read_progress_rows.len());
-    let mut new_tag = Vec::with_capacity(tag_rows.len());
-
-    for row in rows {
-        let book_id = row.get::<String, _>("BOOK_ID");
-        let title = row.get::<String, _>("TITLE");
-        entitlement.push(json!({
-            "BookId": book_id,
-            "BookMetadataId": book_id,
-            "IsRemoved": false,
-        }));
-        metadata.push(json!({
-            "BookId": book_id,
-            "Title": title,
-        }));
-    }
-
-    for row in deleted_rows {
-        let book_id = row.get::<String, _>("BOOK_ID");
-        deleted_entitlement.push(json!({
-            "BookId": book_id,
-            "BookMetadataId": book_id,
-        }));
-        deleted_book_metadata.push(json!({
-            "BookId": book_id,
-        }));
-    }
-
-    for row in read_progress_rows {
-        let book_id = row.get::<String, _>("BOOK_ID");
-        let page = row.get::<i64, _>("PAGE").max(0) as u64;
-        let completed = row.get::<bool, _>("COMPLETED");
-        let last_modified = row.get::<String, _>("LAST_MODIFIED_DATE");
-        new_reading_state.push(json!({
-            "EntitlementId": book_id,
-            "LastModified": last_modified,
-            "StatusInfo": {
-                "Status": if completed { "Finished" } else { "Reading" },
-                "TimesStartedReading": if page > 0 { 1 } else { 0 },
-            },
-        }));
-    }
-
-    for row in tag_rows {
-        let tag = row.get::<String, _>("TAG");
-        new_tag.push(json!({
-            "Name": tag,
-            "Type": "BookTag",
-        }));
-    }
-
-    Ok(KoboSyncDeltas {
-        new_entitlement: entitlement,
-        deleted_entitlement,
-        new_tag,
-        deleted_tag: vec![],
-        new_book_metadata: metadata,
-        deleted_book_metadata,
-        new_reading_state,
-        deleted_reading_state: vec![],
-    })
 }
 
 pub async fn proxy_kobo_store_library_sync(

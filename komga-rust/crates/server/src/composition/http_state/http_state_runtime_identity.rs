@@ -185,6 +185,8 @@ pub(super) fn compose_runtime_identity_access_backend() -> RuntimeIdentityAccess
                         &input.source,
                         input.api_key_id.as_deref(),
                         input.api_key_comment.as_deref(),
+                        input.ip.as_deref(),
+                        input.user_agent.as_deref(),
                     )
                     .await
                 })

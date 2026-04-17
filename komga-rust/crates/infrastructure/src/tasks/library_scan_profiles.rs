@@ -70,6 +70,7 @@ pub fn load_library_scan_profiles(database_file: &Path) -> Result<Vec<LibrarySca
     })
 }
 
+#[cfg(test)]
 pub fn load_persisted_library_ids(database_file: &Path) -> Result<Vec<String>, String> {
     if !database_file.exists() {
         return Ok(Vec::new());

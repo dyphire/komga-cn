@@ -59,7 +59,7 @@ pub struct ComicRackRequestMatchGroup {
 
 pub type PersistedVisibleReadlistBook = BookDetailReadModel;
 
-pub async fn load_persisted_readlists(
+pub(super) async fn load_persisted_readlists(
     database_file: &FsPath,
     library_ids: Option<&[String]>,
 ) -> Result<Vec<ReadListReadModel>, String> {
@@ -102,7 +102,7 @@ pub async fn load_persisted_book_authors(
     readlists_access::load_persisted_book_authors(database_file, book_id).await
 }
 
-pub async fn load_persisted_readlist_detail(
+pub(super) async fn load_persisted_readlist_detail(
     database_file: &FsPath,
     readlist_id: &str,
     library_ids: Option<&[String]>,
@@ -497,7 +497,7 @@ fn decoded_query_values(query: &str, key: &str) -> Vec<String> {
         .collect()
 }
 
-pub async fn load_visible_persisted_readlist_books(
+pub(super) async fn load_visible_persisted_readlist_books(
     database_file: &FsPath,
     auth_state: &DiscoveryAuthState,
     headers: &HeaderMap,
@@ -584,7 +584,7 @@ pub async fn load_visible_persisted_readlist_books(
     Ok(Some(visible))
 }
 
-pub fn sort_visible_persisted_readlist_books(
+pub(super) fn sort_visible_persisted_readlist_books(
     books: &mut [PersistedVisibleReadlistBook],
     ordered: bool,
 ) {
@@ -668,7 +668,7 @@ fn persisted_read_status(book: &BookDetailReadModel) -> &'static str {
     }
 }
 
-pub fn paginate_persisted_readlist_books(
+pub(super) fn paginate_persisted_readlist_books(
     books: Vec<PersistedVisibleReadlistBook>,
     query: &PersistedReadlistBooksQuery,
 ) -> PageEnvelope<BookDetailReadModel> {
@@ -758,7 +758,7 @@ pub fn parse_readlists_sort(value: &str) -> ReadListsSort {
     }
 }
 
-pub fn readlists_page_payload(page: PageEnvelope<ReadListReadModel>) -> Value {
+pub(super) fn readlists_page_payload(page: PageEnvelope<ReadListReadModel>) -> Value {
     let content = page
         .content
         .iter()
@@ -799,7 +799,7 @@ pub fn readlists_page_payload(page: PageEnvelope<ReadListReadModel>) -> Value {
     })
 }
 
-pub fn readlist_payload(readlist: &ReadListReadModel) -> Value {
+pub(super) fn readlist_payload(readlist: &ReadListReadModel) -> Value {
     json!({
         "id": readlist.id,
         "name": readlist.name,

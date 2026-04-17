@@ -152,7 +152,15 @@ pub struct RuntimeIdentityAccessBackend {
             + Sync,
     >,
     pub persisted_record_successful_authentication_activity: Arc<
-        dyn Fn(PathBuf, AuthUser, String, Option<String>, Option<String>) -> BoxFuture<Option<()>>
+        dyn Fn(
+                PathBuf,
+                AuthUser,
+                String,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+            ) -> BoxFuture<Option<()>>
             + Send
             + Sync,
     >,

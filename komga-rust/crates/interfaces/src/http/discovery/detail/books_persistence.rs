@@ -57,7 +57,7 @@ pub async fn load_persisted_book_resource(
     Ok(resource)
 }
 
-pub async fn load_persisted_book_detail(
+pub(super) async fn load_persisted_book_detail(
     database_file: &FsPath,
     book_id: &str,
     user_id: Option<&str>,
@@ -158,7 +158,7 @@ fn parse_metadata_links(raw: &str) -> Vec<BookMetadataLinkReadModel> {
         .collect()
 }
 
-pub async fn load_persisted_book_sibling_detail(
+pub(super) async fn load_persisted_book_sibling_detail(
     database_file: &FsPath,
     book_id: &str,
     direction: PersistedBookSiblingDirection,

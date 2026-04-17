@@ -152,7 +152,7 @@ pub(super) fn compose_test_runtime_identity_access_backend() -> RuntimeIdentityA
             },
         ),
         persisted_record_successful_authentication_activity: Arc::new(
-            |database_file, user, source, api_key_id, api_key_comment| {
+            |database_file, user, source, api_key_id, api_key_comment, ip, user_agent| {
                 Box::pin(async move {
                     infrastructure_auth::persisted_record_successful_authentication_activity(
                         database_file.as_path(),
@@ -160,8 +160,8 @@ pub(super) fn compose_test_runtime_identity_access_backend() -> RuntimeIdentityA
                         &source,
                         api_key_id.as_deref(),
                         api_key_comment.as_deref(),
-                        None,
-                        None,
+                        ip.as_deref(),
+                        user_agent.as_deref(),
                     )
                     .await
                 })

@@ -6,6 +6,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use komga_infrastructure::sqlite::write_models::bootstrap_users::{
+    InitialBootstrapUserWriteModel, persist_initial_bootstrap_users,
+};
+
 fn run_cli(args: &[&str]) -> std::process::Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_komga-rust"));
     command
@@ -66,7 +70,7 @@ fn prepare_action_fixture_with_users(config_dir: &Path, users: &[(&str, &str)]) 
                 let hashed_password = hash_bcrypt_password(password, DEFAULT_COST)
                     .expect("CLI action fixture password hash should be created");
 
-                komga_infrastructure::sqlite::write_models::InitialBootstrapUserWriteModel {
+                InitialBootstrapUserWriteModel {
                     id: format!("cli-user-{index}"),
                     email: (*email).to_string(),
                     hashed_password,
@@ -75,12 +79,9 @@ fn prepare_action_fixture_with_users(config_dir: &Path, users: &[(&str, &str)]) 
             })
             .collect::<Vec<_>>();
 
-        komga_infrastructure::sqlite::write_models::persist_initial_bootstrap_users(
-            &database_file,
-            &user_write_models,
-        )
-        .await
-        .expect("CLI action fixture user should persist");
+        persist_initial_bootstrap_users(&database_file, &user_write_models)
+            .await
+            .expect("CLI action fixture user should persist");
     });
 }
 

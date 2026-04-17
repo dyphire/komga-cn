@@ -3,7 +3,9 @@ use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsS
 use komga_infrastructure::sqlite::connect_persistence_context;
 use komga_infrastructure::sqlite::connect_pool;
 
-mod support;
+mod support {
+    pub mod persistence_contract_fixture;
+}
 
 use support::persistence_contract_fixture;
 

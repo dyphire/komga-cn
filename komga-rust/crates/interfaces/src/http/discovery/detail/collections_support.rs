@@ -14,7 +14,7 @@ pub async fn persisted_collections_exist(database_file: &FsPath) -> Result<bool,
     collections_access::persisted_collections_exist(database_file).await
 }
 
-pub async fn load_persisted_collections(
+pub(super) async fn load_persisted_collections(
     database_file: &FsPath,
 ) -> Result<Vec<CollectionReadModel>, String> {
     let rows = collections_access::load_persisted_collections(database_file).await?;
@@ -40,7 +40,7 @@ pub async fn load_persisted_collections(
     Ok(collections)
 }
 
-pub async fn load_persisted_collection_detail(
+pub(super) async fn load_persisted_collection_detail(
     database_file: &FsPath,
     collection_id: &str,
 ) -> Result<Option<CollectionReadModel>, String> {
@@ -231,7 +231,7 @@ fn generated_collection_id() -> String {
     format!("collection-{}", random_hex_token(12))
 }
 
-pub fn collections_page_payload(page: PageEnvelope<CollectionReadModel>) -> Value {
+pub(super) fn collections_page_payload(page: PageEnvelope<CollectionReadModel>) -> Value {
     let content = page
         .content
         .iter()
@@ -272,7 +272,7 @@ pub fn collections_page_payload(page: PageEnvelope<CollectionReadModel>) -> Valu
     })
 }
 
-pub fn collections_unpaged_payload(content: Vec<CollectionReadModel>) -> Value {
+pub(super) fn collections_unpaged_payload(content: Vec<CollectionReadModel>) -> Value {
     let total_elements = content.len();
     let content = content.iter().map(collection_payload).collect::<Vec<_>>();
 
@@ -306,7 +306,7 @@ pub fn collections_unpaged_payload(content: Vec<CollectionReadModel>) -> Value {
     })
 }
 
-pub fn collection_payload(collection: &CollectionReadModel) -> Value {
+pub(super) fn collection_payload(collection: &CollectionReadModel) -> Value {
     json!({
         "id": collection.id,
         "name": collection.name,

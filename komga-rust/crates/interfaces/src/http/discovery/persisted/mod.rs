@@ -31,9 +31,8 @@ use helpers::*;
 use models::{
     BooksFilterCriteria, PersistedAuthorEntry, PersistedAuthorsScope, PersistedBookBrowseEntry,
     PersistedBookPosterSummary, PersistedBookSummary, PersistedBookTagsScope,
-    PersistedBooksBrowseQuery, PersistedBooksSortMode, PersistedReadProgressSummary,
-    PersistedSeriesBrowseQuery, PersistedSeriesSortMode, PersistedSeriesSummary,
-    PersistedWebLinkEntry, RuntimeBooksFilters, RuntimeSeriesFilters, SeriesFilterCriteria,
+    PersistedBooksBrowseQuery, PersistedBooksSortMode, PersistedSeriesBrowseQuery,
+    PersistedSeriesSortMode, PersistedSeriesSummary, RuntimeBooksFilters, RuntimeSeriesFilters,
 };
 
 use backend::{

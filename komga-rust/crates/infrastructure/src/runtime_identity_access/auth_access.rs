@@ -188,6 +188,8 @@ pub async fn persisted_record_successful_authentication_activity(
     source: &str,
     api_key_id: Option<&str>,
     api_key_comment: Option<&str>,
+    ip: Option<&str>,
+    user_agent: Option<&str>,
 ) -> Option<()> {
     (backend().persisted_record_successful_authentication_activity)(
         database_file.to_path_buf(),
@@ -195,6 +197,8 @@ pub async fn persisted_record_successful_authentication_activity(
         source.to_string(),
         api_key_id.map(str::to_string),
         api_key_comment.map(str::to_string),
+        ip.map(str::to_string),
+        user_agent.map(str::to_string),
     )
     .await
 }

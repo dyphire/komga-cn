@@ -273,28 +273,6 @@ pub async fn persisted_book_exists(
     Ok(row.is_some())
 }
 
-pub async fn load_book_page_count(database_file: &Path, book_id: &str) -> Result<u64, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(1);
-    }
-
-    let pool = connect_pool(database_file, 1).await?;
-    let row = sqlx::query(
-        r#"SELECT COALESCE(PAGE_COUNT, 0) AS PAGE_COUNT
- FROM MEDIA
- WHERE BOOK_ID = ?
- LIMIT 1"#,
-    )
-    .bind(book_id)
-    .fetch_optional(&pool)
-    .await?;
-
-    Ok(row
-        .map(|row| row.get::<i64, _>("PAGE_COUNT").max(0) as u64)
-        .unwrap_or(1)
-        .max(1))
-}
-
 pub async fn load_book_last_epub_position_locator(
     database_file: &Path,
     book_id: &str,

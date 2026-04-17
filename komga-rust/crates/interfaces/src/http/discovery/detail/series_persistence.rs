@@ -83,7 +83,7 @@ pub async fn resolve_series_id_for_persisted(
     }
 }
 
-pub async fn load_persisted_series_detail(
+pub(super) async fn load_persisted_series_detail(
     database_file: &FsPath,
     series_id: &str,
     user_id: Option<&str>,
@@ -259,7 +259,7 @@ fn parse_aggregated_series_authors(raw: &[String]) -> Vec<BookMetadataAuthorRead
         .collect()
 }
 
-pub async fn load_persisted_series_collections(
+pub(super) async fn load_persisted_series_collections(
     database_file: &FsPath,
     series_id: &str,
 ) -> Result<Vec<CollectionReadModel>, String> {

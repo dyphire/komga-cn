@@ -30,17 +30,6 @@ pub(crate) async fn refresh_book_search_documents_after_metadata_update(
     .await
 }
 
-pub(crate) async fn persist_book_page_hashes_with_media_content(
-    database_file: &Path,
-    book_id: &str,
-) -> Result<(), String> {
-    (backend().persist_book_page_hashes_with_media_content)(
-        database_file.to_path_buf(),
-        book_id.to_string(),
-    )
-    .await
-}
-
 pub(crate) fn decode_epub_positions(blob: &[u8]) -> Result<Vec<serde_json::Value>, String> {
     (backend().decode_epub_positions)(blob.to_vec())
 }

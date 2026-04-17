@@ -76,20 +76,22 @@ pub use detail_access_series::{
 
 pub use books_detail::{book_detail, book_readlists, book_sibling_next, book_sibling_previous};
 pub use books_persistence::{
-    PersistedBookSiblingDirection, load_persisted_book_detail, load_persisted_book_resource,
-    load_persisted_book_series_id, load_persisted_book_sibling_detail,
+    PersistedBookSiblingDirection, load_persisted_book_resource, load_persisted_book_series_id,
     resolve_book_id_for_persisted,
 };
+use books_persistence::load_persisted_book_sibling_detail;
 pub use collections::{
     collection_create, collection_delete, collection_detail, collection_series, collection_update,
     collections,
 };
 pub use collections_support::{
-    collection_payload, collections_page_payload, collections_unpaged_payload,
-    delete_collection_search_document, delete_persisted_collection,
-    load_persisted_collection_detail, load_persisted_collections, load_series_library_id,
+    delete_collection_search_document, delete_persisted_collection, load_series_library_id,
     persist_collection_create, persist_collection_update, persisted_collections_exist,
     series_visible_to_context, upsert_collection_search_document,
+};
+use collections_support::{
+    collection_payload, collections_page_payload, collections_unpaged_payload,
+    load_persisted_collection_detail, load_persisted_collections,
 };
 pub use detail_utils::{
     format_size_bytes, internal_error_response, media_profile_for_media_type, parse_csv_values,
@@ -101,19 +103,21 @@ pub use readlists::{
 };
 pub use readlists_support::{
     PersistedReadlistBooksQuery, ReadListsSort, decode_query_component, delete_persisted_readlist,
-    delete_readlist_search_document, load_persisted_readlist_detail, load_persisted_readlists,
-    load_visible_persisted_readlist_books, match_comicrack_readlist,
-    paginate_persisted_readlist_books, parse_comicrack_readlist,
+    delete_readlist_search_document, match_comicrack_readlist, parse_comicrack_readlist,
     parse_persisted_readlist_books_query, parse_readlists_sort, persist_readlist_create,
-    persist_readlist_update, readlist_payload, readlists_page_payload,
-    sort_visible_persisted_readlist_books, upsert_readlist_search_document,
+    persist_readlist_update, upsert_readlist_search_document,
+};
+use readlists_support::{
+    load_persisted_readlist_detail, load_persisted_readlists, load_visible_persisted_readlist_books,
+    paginate_persisted_readlist_books, readlist_payload, readlists_page_payload,
+    sort_visible_persisted_readlist_books,
 };
 pub use series_detail::{series_collections, series_detail, series_metadata_update};
 pub use series_persistence::{
-    load_existing_series_metadata, load_persisted_series_collections, load_persisted_series_detail,
-    load_persisted_series_resource, persist_series_metadata_update,
+    load_existing_series_metadata, load_persisted_series_resource, persist_series_metadata_update,
     resolve_series_id_for_persisted, sync_series_search_documents_after_metadata_update,
 };
+use series_persistence::{load_persisted_series_collections, load_persisted_series_detail};
 
 #[derive(Clone)]
 struct PersistedReadProgress {
@@ -346,6 +350,14 @@ pub(crate) async fn load_persisted_webpub_metadata_additions(
     }
 
     Ok(Some((metadata, book.media_epub_divina_compatible)))
+}
+
+pub(super) async fn load_persisted_book_detail(
+    database_file: &FsPath,
+    book_id: &str,
+    user_id: Option<&str>,
+) -> Result<Option<BookDetailReadModel>, String> {
+    books_persistence::load_persisted_book_detail(database_file, book_id, user_id).await
 }
 
 fn normalize_webpub_modified(value: &str) -> String {

@@ -25,6 +25,7 @@ mod imp {
             EmbeddedWebUiAssets::get(path).map(|asset| asset.data)
         }
 
+        #[cfg(test)]
         pub fn iter() -> impl Iterator<Item = Cow<'static, str>> {
             EmbeddedWebUiAssets::iter()
         }
@@ -34,6 +35,7 @@ mod imp {
 #[cfg(not(webui_dist_present))]
 mod imp {
     use std::borrow::Cow;
+    #[cfg(test)]
     use std::iter;
 
     pub struct WebUiAssets;
@@ -43,6 +45,7 @@ mod imp {
             None
         }
 
+        #[cfg(test)]
         pub fn iter() -> impl Iterator<Item = Cow<'static, str>> {
             iter::empty()
         }

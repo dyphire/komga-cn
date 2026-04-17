@@ -92,6 +92,7 @@ pub async fn oauth2_authorization(
 pub async fn oauth2_login_code(
     Extension(state): Extension<OperationalState>,
     Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(connection_info): Extension<RequestConnectionInfo>,
     Path(registration_id): Path<String>,
     headers: HeaderMap,
     Query(query): Query<OAuth2CallbackQuery>,
@@ -181,7 +182,10 @@ pub async fn oauth2_login_code(
         auth_db.database_file.as_path(),
         &user,
         authentication_activity_write_input(
-            &authentication_activity_headers_metadata_with_remote_addr(&headers, None),
+            &authentication_activity_headers_metadata_with_remote_addr(
+                &headers,
+                connection_info.remote_addr(),
+            ),
             format!("OAuth2:{}", client_config.client_name).as_str(),
             None,
             None,

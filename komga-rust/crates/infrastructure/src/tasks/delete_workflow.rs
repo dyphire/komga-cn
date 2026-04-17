@@ -2,9 +2,6 @@ use std::path::{Path, PathBuf};
 
 use sqlx::{Row, SqlitePool};
 
-use crate::sql::task_queue::{
-    DELETE_BOOK_DEPENDENCY_SQL, DELETE_SERIES_BOOK_DEPENDENCY_SQL, DELETE_SERIES_DEPENDENCY_SQL,
-};
 use crate::sqlite::connect_pool;
 use crate::{resolve_library_item_path, resolve_optional_library_item_path};
 
@@ -24,7 +21,6 @@ pub struct PersistedDeleteBookWork {
 #[derive(Clone, Debug)]
 pub struct PersistedDeleteSeriesWork {
     pub book_ids: Vec<String>,
-    pub book_paths: Vec<PathBuf>,
     pub series_path: Option<PathBuf>,
     pub sidecar_thumbnail_paths: Vec<PathBuf>,
 }
@@ -190,67 +186,6 @@ pub fn soft_delete_book_rows(
     })
 }
 
-pub fn delete_book_rows(
-    database_file: &Path,
-    book_id: &str,
-    series_id: &str,
-) -> Result<(), String> {
-    let database_file = database_file.to_path_buf();
-    let book_id = book_id.to_string();
-    let series_id = series_id.to_string();
-
-    run_database_query(database_file, move |pool| {
-        let book_id = book_id.clone();
-        let series_id = series_id.clone();
-        Box::pin(async move {
-            let mut tx = pool.begin().await.map_err(|error| {
-                format!("failed to start delete-book transaction for '{book_id}': {error}")
-            })?;
-
-            for sql in DELETE_BOOK_DEPENDENCY_SQL {
-                sqlx::query(sql)
-                    .bind(&book_id)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|error| format!("failed to delete dependent rows while deleting book '{book_id}': {error}"))?;
-            }
-
-            sqlx::query(
-                r#"
-                DELETE FROM BOOK
-                WHERE ID = ?
-                "#,
-            )
-            .bind(&book_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| format!("failed to delete BOOK row for '{book_id}': {error}"))?;
-
-            sqlx::query(
-                r#"
-                UPDATE SERIES
-                SET BOOK_COUNT = (
-                SELECT COUNT(*)
-                FROM BOOK
-                WHERE BOOK.SERIES_ID = SERIES.ID
-                )
-                WHERE ID = ?
-                "#,
-            )
-            .bind(&series_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| format!("failed to refresh series count for '{series_id}' while deleting book '{book_id}': {error}"))?;
-
-            tx.commit().await.map_err(|error| {
-                format!("failed to commit delete-book transaction for '{book_id}': {error}")
-            })?;
-
-            Ok(())
-        })
-    })
-}
-
 pub fn load_series_delete_work(
     database_file: &Path,
     series_id: &str,
@@ -320,15 +255,6 @@ pub fn load_series_delete_work(
                     .iter()
                     .map(|row| row.get::<String, _>("BOOK_ID"))
                     .collect(),
-                book_paths: rows
-                    .iter()
-                    .map(|row| {
-                        resolve_library_item_path(
-                            row.get::<String, _>("LIBRARY_ROOT").as_str(),
-                            row.get::<String, _>("BOOK_URL").as_str(),
-                        )
-                    })
-                    .collect(),
                 series_path: series_row.map(|row| {
                     resolve_library_item_path(
                         row.get::<String, _>("LIBRARY_ROOT").as_str(),
@@ -379,76 +305,6 @@ pub fn soft_delete_series_rows(database_file: &Path, series_id: &str) -> Result<
                 format!(
                     "failed to commit soft-delete-series transaction for '{series_id}': {error}"
                 )
-            })?;
-
-            Ok(())
-        })
-    })
-}
-
-pub fn delete_series_rows(
-    database_file: &Path,
-    series_id: &str,
-    book_ids: &[String],
-) -> Result<(), String> {
-    let database_file = database_file.to_path_buf();
-    let series_id = series_id.to_string();
-    let book_ids = book_ids.to_vec();
-
-    run_database_query(database_file, move |pool| {
-        let series_id = series_id.clone();
-        let book_ids = book_ids.clone();
-        Box::pin(async move {
-            let mut tx = pool.begin().await.map_err(|error| {
-                format!("failed to start delete-series transaction for '{series_id}': {error}")
-            })?;
-
-            for book_id in &book_ids {
-                for sql in DELETE_SERIES_BOOK_DEPENDENCY_SQL {
-                    sqlx::query(sql)
-                        .bind(book_id)
-                        .execute(&mut *tx)
-                        .await
-                        .map_err(|error| format!("failed to delete dependent rows while deleting series '{series_id}': {error}"))?;
-                }
-            }
-
-            sqlx::query(
-                r#"
-                DELETE FROM BOOK
-                WHERE SERIES_ID = ?
-                "#,
-            )
-            .bind(&series_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| {
-                format!("failed to delete BOOK rows for series '{series_id}': {error}")
-            })?;
-
-            for sql in DELETE_SERIES_DEPENDENCY_SQL {
-                sqlx::query(sql)
-                    .bind(&series_id)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|error| {
-                        format!("failed to delete series dependent rows for '{series_id}': {error}")
-                    })?;
-            }
-
-            sqlx::query(
-                r#"
-                DELETE FROM SERIES
-                WHERE ID = ?
-                "#,
-            )
-            .bind(&series_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| format!("failed to delete SERIES row '{series_id}': {error}"))?;
-
-            tx.commit().await.map_err(|error| {
-                format!("failed to commit delete-series transaction for '{series_id}': {error}")
             })?;
 
             Ok(())

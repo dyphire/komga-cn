@@ -2,7 +2,7 @@ use axum::http::{HeaderMap, header};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
 use komga_application::identity_access::AuthOutcome;
-use komga_infrastructure::auth::{
+use komga_infrastructure::runtime_identity_access::{
     persisted_basic_user, persisted_update_password_by_user_id,
 };
 use komga_infrastructure::sqlite::{connect_pool, setup};

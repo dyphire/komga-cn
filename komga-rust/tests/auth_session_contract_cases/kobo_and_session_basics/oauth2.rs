@@ -1,9 +1,11 @@
 use super::*;
+use axum::extract::ConnectInfo;
 use axum::response::Response;
 use komga_config::cli_args::RuntimeCli;
 use komga_config::env_config::RuntimeConfig;
 use reqwest::Url;
 use std::collections::BTreeMap;
+use std::net::SocketAddr;
 
 fn oauth2_runtime_env_for_paths(
     paths: &RuntimeDbPaths,
@@ -93,6 +95,16 @@ async fn oauth2_callback_response_for_config(
     config: &RuntimeConfig,
     registration_id: &str,
 ) -> Response {
+    oauth2_callback_response_for_config_with_request_metadata(config, registration_id, None, None)
+        .await
+}
+
+async fn oauth2_callback_response_for_config_with_request_metadata(
+    config: &RuntimeConfig,
+    registration_id: &str,
+    remote_addr: Option<SocketAddr>,
+    user_agent: Option<&str>,
+) -> Response {
     let app = build_router_with_config(config);
     let authorization_response = app
         .clone()
@@ -124,17 +136,26 @@ async fn oauth2_callback_response_for_config(
         .expect("oauth2 authorization should issue standard session cookie")
         .to_string();
 
-    app.oneshot(
-        Request::builder()
-            .method("GET")
-            .uri(format!(
-                "/login/oauth2/code/{registration_id}?code=valid-code&state={state}"
-            ))
-            .header(header::HOST, "komga.example")
-            .header(header::COOKIE, session_cookie)
-            .body(Body::empty())
-            .expect("oauth2 callback request should build"),
-    )
+    let mut callback_request = Request::builder()
+        .method("GET")
+        .uri(format!(
+            "/login/oauth2/code/{registration_id}?code=valid-code&state={state}"
+        ))
+        .header(header::HOST, "komga.example")
+        .header(header::COOKIE, session_cookie);
+    if let Some(user_agent) = user_agent {
+        callback_request = callback_request.header(header::USER_AGENT, user_agent);
+    }
+    let mut callback_request = callback_request
+        .body(Body::empty())
+        .expect("oauth2 callback request should build");
+    if let Some(remote_addr) = remote_addr {
+        callback_request
+            .extensions_mut()
+            .insert(ConnectInfo(remote_addr));
+    }
+
+    app.oneshot(callback_request)
     .await
     .expect("oauth2 callback request should complete")
 }
@@ -510,7 +531,17 @@ pub(crate) async fn verify_oauth2_callback_success_uses_session_cookie_without_a
     );
     let config = RuntimeConfig::resolve_with_env(&RuntimeCli::default(), &env)
         .expect("runtime config should resolve oauth2 callback env");
-    let response = oauth2_callback_response_for_config(&config, "oidc").await;
+    let response = oauth2_callback_response_for_config_with_request_metadata(
+        &config,
+        "oidc",
+        Some(
+            "203.0.113.27:43123"
+                .parse()
+                .expect("oauth2 callback socket addr should parse"),
+        ),
+        Some("oauth2-contract-agent"),
+    )
+    .await;
 
     token_server
         .join
@@ -539,8 +570,8 @@ pub(crate) async fn verify_oauth2_callback_success_uses_session_cookie_without_a
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for oauth2 activity assertion");
-    let source = sqlx::query_scalar::<_, Option<String>>(
-        "SELECT SOURCE FROM AUTHENTICATION_ACTIVITY WHERE EMAIL = ? ORDER BY DATE_TIME DESC LIMIT 1",
+    let (ip, user_agent, source): (Option<String>, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT IP, USER_AGENT, SOURCE FROM AUTHENTICATION_ACTIVITY WHERE EMAIL = ? ORDER BY DATE_TIME DESC LIMIT 1",
     )
     .bind("admin@example.org")
     .fetch_one(&pool)
@@ -548,6 +579,8 @@ pub(crate) async fn verify_oauth2_callback_success_uses_session_cookie_without_a
     .expect("oauth2 login should record authentication activity");
     pool.close().await;
 
+    assert_eq!(ip.as_deref(), Some("203.0.113.27"));
+    assert_eq!(user_agent.as_deref(), Some("oauth2-contract-agent"));
     assert_eq!(source.as_deref(), Some("OAuth2:oidc"));
 
     cleanup_router_fixture(paths);

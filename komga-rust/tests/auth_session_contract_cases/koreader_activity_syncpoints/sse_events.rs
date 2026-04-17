@@ -2,7 +2,7 @@ use super::*;
 use http_body_util::BodyExt;
 use komga_contract_testkit::sse::parse_event_log;
 use komga_application::media_assets::{BooksImportEntry, ImportCopyMode, MediaImportPort};
-use komga_infrastructure::filesystem::FilesystemImportPort;
+use komga_infrastructure::filesystem::import::FilesystemImportPort;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
