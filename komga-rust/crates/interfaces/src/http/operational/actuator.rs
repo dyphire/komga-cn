@@ -231,10 +231,10 @@ fn disk_space_details(path: &Path) -> Option<DiskSpaceDetails> {
         return None;
     }
     let stats = unsafe { stats.assume_init() };
-    let fragment_size = stats.f_frsize;
+    let fragment_size = u64::from(stats.f_frsize);
     Some(DiskSpaceDetails {
-        total: stats.f_blocks.saturating_mul(fragment_size),
-        free: stats.f_bavail.saturating_mul(fragment_size),
+        total: u64::from(stats.f_blocks).saturating_mul(fragment_size),
+        free: u64::from(stats.f_bavail).saturating_mul(fragment_size),
         path: path.to_string_lossy().to_string(),
     })
 }
