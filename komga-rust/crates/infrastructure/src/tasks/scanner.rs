@@ -669,7 +669,7 @@ WHERE ID = ?"#,
 SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
 WHERE ID = ?"#,
                     )
-                    .bind(&series_id)
+                    .bind(series_id)
                     .execute(&pool)
                     .await
                     .map_err(|error| {

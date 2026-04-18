@@ -1,4 +1,4 @@
-use super::common_helpers::page_payload;
+use super::common_helpers::{PagePayloadMetadata, page_payload};
 use super::*;
 
 use crate::http::helpers::{normalized_date_time, normalized_file_last_modified};
@@ -13,13 +13,15 @@ pub fn series_page_payload(
 
     page_payload(
         content,
-        page.page,
-        page.size,
-        page.total_elements,
-        page.total_pages,
-        paged,
-        sorted,
-        if paged { offset } else { 0 },
+        PagePayloadMetadata {
+            page: page.page,
+            size: page.size,
+            total_elements: page.total_elements,
+            total_pages: page.total_pages,
+            paged,
+            sorted,
+            offset: if paged { offset } else { 0 },
+        },
     )
 }
 

@@ -14,8 +14,9 @@ use komga_domain::discovery::DiscoveryQueryContext;
 
 use crate::http::identity_access::auth::session_token_for_user_with_runtime_key;
 use crate::http::state::{
-    BookImportSseEvent, LibraryCatalogOperations, OAuth2ClientConfig, OperationalBuildMetadata,
-    RemoteCacheEntry, RuntimeState, SseOperationalState, TransientBooksStore,
+    BookImportSseEvent, HttpServerRequestsState, LibraryCatalogOperations, OAuth2ClientConfig,
+    OperationalBuildMetadata, RemoteCacheEntry, RuntimeState, SseOperationalState,
+    StartupTimingState, TransientBooksStore,
 };
 use crate::operational_runtime_access::ServerSettingsStore;
 
@@ -183,6 +184,8 @@ where
             bind_address: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)),
             server_context_path: None,
         },
+        startup_timing: StartupTimingState::default(),
+        http_server_requests: HttpServerRequestsState::default(),
         remember_me_runtime_key: "settings-test-runtime".to_string(),
         build_metadata: OperationalBuildMetadata {
             version: "0.1.0".to_string(),

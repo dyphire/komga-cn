@@ -13,6 +13,8 @@ use axum::middleware::Next;
 use axum::response::Response;
 use tracing::Span;
 
+use crate::http::state::{HttpServerRequestMetricKey, HttpServerRequestsState, OperationalState};
+
 const ANONYMOUS_USER_ID: &str = "anonymous";
 static ACCESS_LOG_REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -62,7 +64,7 @@ pub fn on_response<B>(response: &Response<B>, latency: Duration, span: &Span) {
         emit_access_event(
             &state.context,
             response.status(),
-            duration_ms(latency),
+            latency,
             None,
             None,
             span,
@@ -85,6 +87,10 @@ pub async fn prepare_access_log_middleware(request: Request, next: Next) -> Resp
     let started_at = Instant::now();
     let request_id = next_request_id();
     let mut request = request;
+    let http_server_requests = request
+        .extensions()
+        .get::<OperationalState>()
+        .map(|state| state.http_server_requests.clone());
     let remote_addr = request
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
@@ -102,6 +108,19 @@ pub async fn prepare_access_log_middleware(request: Request, next: Next) -> Resp
             let mut response = next.run(request).await;
             let Some(mode) = access_log_mode(metadata.route.as_str(), metadata.path.as_str())
             else {
+                let context = metadata.into_context(
+                    request_id,
+                    current_access_log_user_id(),
+                    started_at,
+                    span.clone(),
+                    http_server_requests,
+                );
+                record_http_request_metric(
+                    &context,
+                    response.status(),
+                    context.started_at.elapsed(),
+                    None,
+                );
                 return response;
             };
 
@@ -111,6 +130,7 @@ pub async fn prepare_access_log_middleware(request: Request, next: Next) -> Resp
                     current_access_log_user_id(),
                     started_at,
                     span,
+                    http_server_requests,
                 ),
                 status_code: response.status().as_u16(),
                 mode,
@@ -185,6 +205,7 @@ impl AccessLogRequestMetadata {
         user_id: String,
         started_at: Instant,
         span: Span,
+        http_server_requests: Option<HttpServerRequestsState>,
     ) -> AccessLogContext {
         AccessLogContext {
             request_id,
@@ -194,6 +215,7 @@ impl AccessLogRequestMetadata {
             user_id,
             started_at,
             span,
+            http_server_requests,
         }
     }
 }
@@ -211,10 +233,11 @@ impl AccessLogBody {
 
         let status = StatusCode::from_u16(self.state.status_code)
             .expect("stored access log status code should remain valid");
+        let latency = self.state.context.started_at.elapsed();
         emit_access_event(
             &self.state.context,
             status,
-            self.elapsed_ms(),
+            latency,
             self.first_byte_ms,
             outcome_override,
             &self.state.context.span,
@@ -275,6 +298,7 @@ struct AccessLogContext {
     user_id: String,
     started_at: Instant,
     span: Span,
+    http_server_requests: Option<HttpServerRequestsState>,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -344,12 +368,14 @@ fn is_deferred_first_byte_route(route: &str) -> bool {
 fn emit_access_event(
     context: &AccessLogContext,
     status: StatusCode,
-    latency_ms: u64,
+    latency: Duration,
     first_byte_ms: Option<u64>,
     outcome_override: Option<&'static str>,
     span: &Span,
 ) {
+    record_http_request_metric(context, status, latency, outcome_override);
     let outcome = outcome_override.unwrap_or_else(|| outcome_for_status(status));
+    let latency_ms = duration_ms(latency);
     span.record("status_code", status.as_u16());
     span.record("outcome", outcome);
     span.record("latency_ms", latency_ms);
@@ -399,4 +425,35 @@ fn next_request_id() -> String {
         "req-{:016x}",
         ACCESS_LOG_REQUEST_COUNTER.fetch_add(1, Ordering::Relaxed)
     )
+}
+
+fn record_http_request_metric(
+    context: &AccessLogContext,
+    status: StatusCode,
+    latency: Duration,
+    outcome_override: Option<&'static str>,
+) {
+    let Some(http_server_requests) = &context.http_server_requests else {
+        return;
+    };
+
+    http_server_requests.record(
+        HttpServerRequestMetricKey {
+            exception: String::from("None"),
+            method: context.method.clone(),
+            outcome: request_metrics_outcome(status, outcome_override).to_string(),
+            status: status.as_u16().to_string(),
+            uri: context.route.clone(),
+        },
+        latency,
+    );
+}
+
+fn request_metrics_outcome(status: StatusCode, outcome_override: Option<&'static str>) -> &'static str {
+    match outcome_override.unwrap_or_else(|| outcome_for_status(status)) {
+        "success" => "SUCCESS",
+        "redirect" => "REDIRECTION",
+        "client_error" => "CLIENT_ERROR",
+        _ => "SERVER_ERROR",
+    }
 }

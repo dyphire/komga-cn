@@ -12,6 +12,17 @@ use crate::sqlite::setup;
 
 pub const DEFAULT_MAX_CONNECTIONS: u32 = 4;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SharedSqlitePoolSnapshot {
+    pub path: PathBuf,
+    pub max_connections: u32,
+    pub min_connections: u32,
+    pub total_connections: u32,
+    pub idle_connections: u32,
+    pub in_use_connections: u32,
+    pub is_closed: bool,
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct PoolKey {
     path: PathBuf,
@@ -40,6 +51,47 @@ fn absolute_pool_path(path: &Path) -> PathBuf {
 fn shared_pools() -> &'static Mutex<HashMap<PoolKey, SqlitePool>> {
     static SHARED_POOLS: OnceLock<Mutex<HashMap<PoolKey, SqlitePool>>> = OnceLock::new();
     SHARED_POOLS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub fn shared_pool_snapshots_for_paths(paths: &[PathBuf]) -> Vec<SharedSqlitePoolSnapshot> {
+    if paths.is_empty() {
+        return Vec::new();
+    }
+
+    let target_paths = paths
+        .iter()
+        .map(|path| absolute_pool_path(path.as_path()))
+        .collect::<HashSet<_>>();
+    let mut pools = shared_pools()
+        .lock()
+        .expect("shared sqlite pool map lock should not be poisoned");
+
+    let closed_keys = pools
+        .iter()
+        .filter(|(_, pool)| pool.is_closed())
+        .map(|(pool_key, _)| pool_key.clone())
+        .collect::<Vec<_>>();
+    for pool_key in closed_keys {
+        pools.remove(&pool_key);
+    }
+
+    pools
+        .iter()
+        .filter(|(pool_key, _)| target_paths.contains(&pool_key.path))
+        .map(|(pool_key, pool)| {
+            let total_connections = pool.size();
+            let idle_connections = u32::try_from(pool.num_idle()).unwrap_or(u32::MAX);
+            SharedSqlitePoolSnapshot {
+                path: pool_key.path.clone(),
+                max_connections: pool.options().get_max_connections(),
+                min_connections: pool.options().get_min_connections(),
+                total_connections,
+                idle_connections,
+                in_use_connections: total_connections.saturating_sub(idle_connections),
+                is_closed: pool.is_closed(),
+            }
+        })
+        .collect()
 }
 
 pub async fn close_all_shared_pools() {
@@ -319,5 +371,49 @@ mod tests {
             !shm_path.exists(),
             "temp pool cleanup should remove the shared-memory sidecar file",
         );
+    }
+
+    #[tokio::test]
+    async fn shared_pool_snapshots_report_live_sqlx_pool_stats_by_path_and_capacity() {
+        let temp_pool = SqliteTempPool::new("shared-pool-snapshot-live-stats")
+            .await
+            .expect("temp pool should open");
+
+        let _pool_one = connect_pool(temp_pool.db_path(), 1)
+            .await
+            .expect("shared pool with max=1 should open");
+        let _pool_two = connect_pool(temp_pool.db_path(), 2)
+            .await
+            .expect("shared pool with max=2 should open");
+
+        let snapshots = shared_pool_snapshots_for_paths(&[temp_pool.db_path().to_path_buf()]);
+        assert_eq!(snapshots.len(), 2, "each shared sqlx pool topology should be reported separately");
+
+        let snapshot_one = snapshots
+            .iter()
+            .find(|snapshot| snapshot.max_connections == 1)
+            .expect("max=1 snapshot should exist");
+        assert_eq!(snapshot_one.path, absolute_pool_path(temp_pool.db_path()));
+        assert!(snapshot_one.total_connections >= 1);
+        assert!(snapshot_one.idle_connections >= 1);
+        assert_eq!(
+            snapshot_one.total_connections,
+            snapshot_one.idle_connections + snapshot_one.in_use_connections,
+            "total connections should split into idle + in-use",
+        );
+
+        let snapshot_two = snapshots
+            .iter()
+            .find(|snapshot| snapshot.max_connections == 2)
+            .expect("max=2 snapshot should exist");
+        assert_eq!(snapshot_two.path, absolute_pool_path(temp_pool.db_path()));
+        assert!(snapshot_two.total_connections >= 1);
+        assert_eq!(
+            snapshot_two.total_connections,
+            snapshot_two.idle_connections + snapshot_two.in_use_connections,
+            "total connections should split into idle + in-use",
+        );
+
+        temp_pool.cleanup().await;
     }
 }

@@ -9,6 +9,17 @@ use std::sync::{Arc, OnceLock};
 
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SqlitePoolSnapshot {
+    pub path: PathBuf,
+    pub max_connections: u32,
+    pub min_connections: u32,
+    pub total_connections: u32,
+    pub idle_connections: u32,
+    pub in_use_connections: u32,
+    pub is_closed: bool,
+}
+
 #[derive(Clone)]
 pub struct ServerSettingsStore {
     load_map_fn:
@@ -59,6 +70,8 @@ pub struct OperationalRuntimeAccessBackend {
     pub load_readlists_count: Arc<dyn Fn(PathBuf) -> BoxFuture<Result<f64, String>> + Send + Sync>,
     pub load_task_failure_count:
         Arc<dyn Fn(PathBuf) -> BoxFuture<Result<f64, String>> + Send + Sync>,
+    pub load_sqlite_pool_snapshots:
+        Arc<dyn Fn(Vec<PathBuf>) -> BoxFuture<Result<Vec<SqlitePoolSnapshot>, String>> + Send + Sync>,
 }
 
 static BACKEND: OnceLock<OperationalRuntimeAccessBackend> = OnceLock::new();
@@ -120,5 +133,11 @@ pub(crate) mod metrics {
 
     pub(crate) async fn load_task_failure_count(database_file: &Path) -> Result<f64, String> {
         (backend().load_task_failure_count)(database_file.to_path_buf()).await
+    }
+
+    pub(crate) async fn load_sqlite_pool_snapshots(
+        paths: &[PathBuf],
+    ) -> Result<Vec<SqlitePoolSnapshot>, String> {
+        (backend().load_sqlite_pool_snapshots)(paths.to_vec()).await
     }
 }

@@ -488,7 +488,8 @@ async fn router_discovery_series_get_matches_sharing_label_and_author_exactly() 
 }
 
 #[tokio::test]
-async fn router_discovery_series_get_only_applies_author_filter_when_query_contains_name_and_role() {
+async fn router_discovery_series_get_only_applies_author_filter_when_query_contains_name_and_role()
+{
     let paths = new_router_fixture("router-discovery-series-get-author-delimiter-semantics").await;
     seed_router_contract_data(&paths).await;
     seed_legacy_series_fixture(
@@ -685,7 +686,7 @@ async fn router_discovery_series_get_sorts_by_collection_number_when_requested()
 
 #[tokio::test]
 async fn router_discovery_series_get_treats_collection_number_sort_as_unsorted_without_collection_filter()
-{
+ {
     let paths =
         new_router_fixture("router-discovery-series-get-collection-number-without-filter").await;
     seed_router_contract_data(&paths).await;
@@ -722,7 +723,7 @@ async fn router_discovery_series_get_treats_collection_number_sort_as_unsorted_w
 
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
-    assert_eq!(series_page_sorted(&payload), false);
+    assert!(!series_page_sorted(&payload));
 
     cleanup_router_fixture(paths);
 }
@@ -764,7 +765,8 @@ async fn router_discovery_series_get_sorts_by_read_date_when_requested() {
 
 #[tokio::test]
 async fn router_discovery_series_get_does_not_inject_relevance_for_unsupported_explicit_sort() {
-    let paths = new_router_fixture("router-discovery-series-get-unsupported-sort-with-search").await;
+    let paths =
+        new_router_fixture("router-discovery-series-get-unsupported-sort-with-search").await;
     seed_router_contract_data(&paths).await;
     seed_legacy_series_fixture(
         &paths,
@@ -798,7 +800,7 @@ async fn router_discovery_series_get_does_not_inject_relevance_for_unsupported_e
 
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
-    assert_eq!(series_page_sorted(&payload), false);
+    assert!(!series_page_sorted(&payload));
 
     cleanup_router_fixture(paths);
 }

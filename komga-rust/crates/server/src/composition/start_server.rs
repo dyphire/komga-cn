@@ -1,9 +1,11 @@
 use axum::Router;
+use komga_interfaces::http::state::StartupTimingState;
 use komga_infrastructure::search::index_lifecycle::{
     SearchStartupLifecycle, decide_startup_lifecycle, prepare_for_rebuild,
 };
 use komga_infrastructure::sqlite::close_all_shared_pools;
 use std::net::SocketAddr;
+use std::time::Instant;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::signal;
@@ -64,7 +66,11 @@ fn plan_startup_search_task(config: &RuntimeConfig) -> std::io::Result<StartupSe
     }
 }
 
-pub fn build_router_with_config(config: &RuntimeConfig) -> Router {
+pub fn build_router_with_config(
+    config: &RuntimeConfig,
+    startup_timing: StartupTimingState,
+    startup_started_at: Instant,
+) -> Router {
     let background = prepare_task_queue(config, None);
     spawn_runtime_workers(
         background.task_queue.clone(),
@@ -72,17 +78,31 @@ pub fn build_router_with_config(config: &RuntimeConfig) -> Router {
         background.task_wakeup.clone(),
         None,
     );
-    build_http_router(compose_http_runtime(config, background, None))
+    finalize_router_startup(
+        compose_http_runtime(config, background, None, startup_timing.clone()),
+        startup_timing,
+        startup_started_at,
+    )
 }
 
-pub fn build_router_without_runtime_workers(config: &RuntimeConfig) -> Router {
+pub fn build_router_without_runtime_workers(
+    config: &RuntimeConfig,
+    startup_timing: StartupTimingState,
+    startup_started_at: Instant,
+) -> Router {
     let background = prepare_task_queue(config, None);
-    build_http_router(compose_http_runtime(config, background, None))
+    finalize_router_startup(
+        compose_http_runtime(config, background, None, startup_timing.clone()),
+        startup_timing,
+        startup_started_at,
+    )
 }
 
 pub async fn serve_with_config(
     listener: TcpListener,
     config: RuntimeConfig,
+    startup_timing: StartupTimingState,
+    startup_started_at: Instant,
 ) -> std::io::Result<()> {
     crate::bootstrap::emit_startup_banner_and_runtime_event(&config);
     let startup_search_plan = plan_startup_search_task_with_logging(&config)?;
@@ -98,11 +118,16 @@ pub async fn serve_with_config(
         background.task_wakeup.clone(),
         Some(worker_shutdown_rx),
     );
-    let router = build_http_router(compose_http_runtime(
-        &config,
-        background,
-        Some(shutdown_tx.clone()),
-    ));
+    let router = finalize_router_startup(
+        compose_http_runtime(
+            &config,
+            background,
+            Some(shutdown_tx.clone()),
+            startup_timing.clone(),
+        ),
+        startup_timing,
+        startup_started_at,
+    );
 
     serve_router_with_shutdown_timeout(
         listener,
@@ -152,6 +177,17 @@ fn build_http_router(runtime: HttpRuntimeState) -> Router {
         runtime.auth_db,
         runtime.operational,
     )
+}
+
+fn finalize_router_startup(
+    runtime: HttpRuntimeState,
+    startup_timing: StartupTimingState,
+    startup_started_at: Instant,
+) -> Router {
+    startup_timing.record_application_started(startup_started_at.elapsed());
+    let router = build_http_router(runtime);
+    startup_timing.record_application_ready(startup_started_at.elapsed());
+    router
 }
 
 async fn shutdown_signal(

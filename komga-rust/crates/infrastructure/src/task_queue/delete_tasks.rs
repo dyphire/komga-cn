@@ -50,7 +50,12 @@ fn delete_book(runtime: &RuntimeConfig, book_id: &str) -> Result<(), TaskExecuti
         return Ok(());
     };
 
-    if !deletion_prerequisites_met(&work.book_path) {
+    if !deletion_prerequisites_met(&work.book_path)
+        || !empty_parent_directory_cleanup_prerequisites_met(
+            &work.book_path,
+            &work.sidecar_thumbnail_paths,
+        )
+    {
         return Ok(());
     }
 
@@ -79,6 +84,37 @@ fn remove_empty_parent_directory(target_path: &Path) -> Result<(), TaskExecution
     remove_empty_directory(parent_directory)
 }
 
+fn empty_parent_directory_cleanup_prerequisites_met(
+    target_path: &Path,
+    sidecar_thumbnail_paths: &[std::path::PathBuf],
+) -> bool {
+    let Some(parent_directory) = target_path.parent() else {
+        return true;
+    };
+    let Ok(entries) = fs::read_dir(parent_directory) else {
+        return false;
+    };
+
+    let mut pending_deletions = sidecar_thumbnail_paths
+        .iter()
+        .filter(|path| path.parent() == Some(parent_directory))
+        .cloned()
+        .collect::<Vec<_>>();
+    pending_deletions.push(target_path.to_path_buf());
+
+    if entries
+        .filter_map(Result::ok)
+        .any(|entry| !pending_deletions.iter().any(|path| path == &entry.path()))
+    {
+        return true;
+    }
+
+    // A delete-book task promises to remove the now-empty parent directory too. If that final
+    // directory cleanup would fail, skipping early avoids partially deleting files and then
+    // bailing out on Windows readonly directories.
+    directory_delete_prerequisites_met(parent_directory)
+}
+
 fn remove_empty_directory(target_directory: &Path) -> Result<(), TaskExecutionError> {
     if !target_directory.exists() {
         return Ok(());
@@ -100,9 +136,20 @@ fn deletion_prerequisites_met(target_path: &Path) -> bool {
         return false;
     }
     if target_path.is_dir() {
-        return directory_is_writable(target_path);
+        return directory_delete_prerequisites_met(target_path);
     }
     fs::OpenOptions::new().write(true).open(target_path).is_ok()
+}
+
+fn directory_delete_prerequisites_met(target_directory: &Path) -> bool {
+    // Windows can still allow child-file creation inside a readonly directory while refusing to
+    // remove the directory itself, so delete preconditions must reject readonly metadata before
+    // treating the directory as safe for book/series cleanup.
+    match fs::metadata(target_directory) {
+        Ok(metadata) if metadata.permissions().readonly() => false,
+        Ok(_) => directory_is_writable(target_directory),
+        Err(_) => false,
+    }
 }
 
 fn remove_sidecar_thumbnail_files<T: AsRef<Path>>(

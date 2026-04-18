@@ -1,7 +1,11 @@
 use std::path::Path;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::{SharedSqlitePoolSnapshot, connect_pool, shared_pool_snapshots_for_paths};
 use sqlx::Row;
+
+pub fn load_sqlite_pool_snapshots(paths: &[std::path::PathBuf]) -> Vec<SharedSqlitePoolSnapshot> {
+    shared_pool_snapshots_for_paths(paths)
+}
 
 pub async fn load_task_execution_values(
     tasks_db_file: &Path,

@@ -61,17 +61,17 @@ pub(super) fn extract_epub_book_patch(package_document: &[u8]) -> BookMetadataIm
                     current_text.clear();
                 }
             }
-            Ok(XmlEvent::Empty(event)) => {
-                if xml_name_matches_local(event.name().as_ref(), b"meta") {
-                    handle_epub_meta_event(
-                        &event,
-                        &mut current_target,
-                        &mut current_text,
-                        &mut refined_roles,
-                        &mut collection_id,
-                        &mut group_positions,
-                    );
-                }
+            Ok(XmlEvent::Empty(event))
+                if xml_name_matches_local(event.name().as_ref(), b"meta") =>
+            {
+                handle_epub_meta_event(
+                    &event,
+                    &mut current_target,
+                    &mut current_text,
+                    &mut refined_roles,
+                    &mut collection_id,
+                    &mut group_positions,
+                );
             }
             Ok(XmlEvent::Text(text)) if current_target.is_some() => {
                 current_text.push_str(String::from_utf8_lossy(text.as_ref()).as_ref());

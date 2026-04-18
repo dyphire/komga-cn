@@ -147,41 +147,43 @@ pub fn matches_optional_value<T>(
     }
 }
 
-pub fn page_payload(
-    content: Vec<Value>,
-    page: usize,
-    size: usize,
-    total_elements: usize,
-    total_pages: usize,
-    paged: bool,
-    sorted: bool,
-    offset: usize,
-) -> Value {
+#[derive(Clone, Copy)]
+pub struct PagePayloadMetadata {
+    pub page: usize,
+    pub size: usize,
+    pub total_elements: usize,
+    pub total_pages: usize,
+    pub paged: bool,
+    pub sorted: bool,
+    pub offset: usize,
+}
+
+pub fn page_payload(content: Vec<Value>, metadata: PagePayloadMetadata) -> Value {
     let number_of_elements = content.len();
-    let first = page == 0;
-    let last = total_pages == 0 || page + 1 >= total_pages;
+    let first = metadata.page == 0;
+    let last = metadata.total_pages == 0 || metadata.page + 1 >= metadata.total_pages;
     let sort = json!({
-        "empty": !sorted,
-        "sorted": sorted,
-        "unsorted": !sorted,
+        "empty": !metadata.sorted,
+        "sorted": metadata.sorted,
+        "unsorted": !metadata.sorted,
     });
 
     json!({
         "content": content,
         "pageable": {
-            "pageNumber": page,
-            "pageSize": size,
+            "pageNumber": metadata.page,
+            "pageSize": metadata.size,
             "sort": sort.clone(),
-            "offset": offset,
-            "paged": paged,
-            "unpaged": !paged,
+            "offset": metadata.offset,
+            "paged": metadata.paged,
+            "unpaged": !metadata.paged,
         },
         "last": last,
-        "totalElements": total_elements,
-        "totalPages": total_pages,
+        "totalElements": metadata.total_elements,
+        "totalPages": metadata.total_pages,
         "first": first,
-        "size": size,
-        "number": page,
+        "size": metadata.size,
+        "number": metadata.page,
         "sort": sort,
         "numberOfElements": number_of_elements,
         "empty": number_of_elements == 0,
@@ -260,13 +262,15 @@ mod tests {
     fn page_payload_builds_expected_metadata() {
         let payload = super::page_payload(
             vec![json!({ "id": "book-1" })],
-            2,
-            20,
-            41,
-            3,
-            true,
-            true,
-            40,
+            super::PagePayloadMetadata {
+                page: 2,
+                size: 20,
+                total_elements: 41,
+                total_pages: 3,
+                paged: true,
+                sorted: true,
+                offset: 40,
+            },
         );
 
         assert_eq!(payload.get("number"), Some(&json!(2)));

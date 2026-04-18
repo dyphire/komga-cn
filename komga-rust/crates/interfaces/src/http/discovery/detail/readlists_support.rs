@@ -305,10 +305,8 @@ pub fn parse_comicrack_readlist(bytes: &[u8]) -> Result<ComicRackReadListRequest
                     books.push(parse_comicrack_book(&event)?);
                 }
             }
-            Ok(XmlEvent::Empty(event)) => {
-                if xml_name_matches(event.name().as_ref(), b"Book") {
-                    books.push(parse_comicrack_book(&event)?);
-                }
+            Ok(XmlEvent::Empty(event)) if xml_name_matches(event.name().as_ref(), b"Book") => {
+                books.push(parse_comicrack_book(&event)?);
             }
             Ok(XmlEvent::Text(text)) if reading_name => {
                 let value = String::from_utf8_lossy(text.as_ref()).trim().to_string();
@@ -850,12 +848,12 @@ pub(super) fn readlist_payload(readlist: &ReadListReadModel) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use super::super::{
+        BookDetailReadModel, BookMetadataAuthorReadModel, BookMetadataLinkReadModel,
+    };
     use super::{
         ComicRackReadListRequest, ComicRackReadListRequestBook, comicrack_payload,
         decode_query_component, parse_comicrack_readlist, sort_visible_persisted_readlist_books,
-    };
-    use super::super::{
-        BookDetailReadModel, BookMetadataAuthorReadModel, BookMetadataLinkReadModel,
     };
     use serde_json::json;
 

@@ -1,4 +1,5 @@
 use super::*;
+use komga_interfaces::operational_runtime_access::SqlitePoolSnapshot;
 use komga_infrastructure::filesystem::browser as infrastructure_browser;
 use komga_infrastructure::filesystem::fonts as infrastructure_fonts;
 use komga_infrastructure::filesystem::transient_books as infrastructure_transient_books;
@@ -99,6 +100,24 @@ pub(super) fn compose_operational_runtime_access_backend() -> OperationalRuntime
             Box::pin(async move {
                 infrastructure_operational_metrics::load_task_failure_count(database_file.as_path())
                     .await
+            })
+        }),
+        load_sqlite_pool_snapshots: Arc::new(|paths| {
+            Box::pin(async move {
+                Ok(infrastructure_operational_metrics::load_sqlite_pool_snapshots(
+                    paths.as_slice(),
+                )
+                .into_iter()
+                .map(|snapshot| SqlitePoolSnapshot {
+                    path: snapshot.path,
+                    max_connections: snapshot.max_connections,
+                    min_connections: snapshot.min_connections,
+                    total_connections: snapshot.total_connections,
+                    idle_connections: snapshot.idle_connections,
+                    in_use_connections: snapshot.in_use_connections,
+                    is_closed: snapshot.is_closed,
+                })
+                .collect())
             })
         }),
     }

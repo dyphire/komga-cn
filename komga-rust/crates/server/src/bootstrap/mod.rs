@@ -1,10 +1,12 @@
 use tokio::net::TcpListener;
+use std::time::Instant;
 
 use crate::build_metadata::current_build_metadata;
 use crate::composition::start_server;
 use komga_config::env_config::RuntimeConfig;
 use komga_config::profile::{RuntimeMode, RuntimeProfile};
 use komga_config::writer_ownership::{WriterDecision, WriterKind};
+use komga_interfaces::http::state::StartupTimingState;
 
 pub mod admin_cli;
 pub mod noclaim_bootstrap;
@@ -162,7 +164,12 @@ async fn run_server() {
         })
         .expect("failed to bind address");
 
-    start_server::serve_with_config(listener, config)
+    start_server::serve_with_config(
+        listener,
+        config,
+        StartupTimingState::default(),
+        Instant::now(),
+    )
         .await
         .expect("server error");
 }

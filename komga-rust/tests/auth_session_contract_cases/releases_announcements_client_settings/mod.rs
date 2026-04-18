@@ -2,4 +2,4 @@ use super::*;
 
 mod fonts;
 mod history_and_filesystem;
-mod releases_announcements_client_settings;
+mod releases_announcements_and_client_settings;

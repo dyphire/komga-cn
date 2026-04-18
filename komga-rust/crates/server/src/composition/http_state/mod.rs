@@ -52,9 +52,10 @@ use komga_interfaces::http::identity_access::auth::{
     sync_session_runtime_settings,
 };
 use komga_interfaces::http::state::{
-    AuthDatabaseState, BookImportSseEvent, LibraryCatalogOperations, OAuth2ClientConfig,
-    OperationalBuildMetadata, OperationalState, ReadProgressState, RemoteCacheEntry,
-    RuntimeProfile, RuntimeState, SseOperationalState, TransientBooksStore,
+    AuthDatabaseState, BookImportSseEvent, HttpServerRequestsState, LibraryCatalogOperations,
+    OAuth2ClientConfig, OperationalBuildMetadata, OperationalState, ReadProgressState,
+    RemoteCacheEntry, RuntimeProfile, RuntimeState, SseOperationalState, StartupTimingState,
+    TransientBooksStore,
 };
 use komga_interfaces::media_assets_runtime_access::{
     MediaAssetsRuntimeAccessBackend, PersistedMediaFileRecord, RuntimeBookMetadataService,
@@ -129,6 +130,7 @@ pub fn compose_http_runtime(
     config: &RuntimeConfig,
     background: RuntimeBackgroundState,
     shutdown_trigger: Option<watch::Sender<bool>>,
+    startup_timing: StartupTimingState,
 ) -> HttpRuntimeState {
     install_runtime_identity_access(
         http_state_runtime_identity::compose_runtime_identity_access_backend(),
@@ -180,6 +182,7 @@ pub fn compose_http_runtime(
     };
     let operational = http_state_operational_state::compose_operational_state(
         config,
+        startup_timing,
         remember_me_runtime_key.clone(),
         background.task_queue,
         background.task_wakeup,

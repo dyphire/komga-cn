@@ -1,9 +1,10 @@
 use axum::Router;
+use std::time::Instant;
 use tokio::net::TcpListener;
 
 use crate::composition::start_server;
 use komga_config::env_config::RuntimeConfig;
-use komga_interfaces::http::state::RuntimeProfile;
+use komga_interfaces::http::state::{RuntimeProfile, StartupTimingState};
 
 pub fn build_router() -> Router {
     let config = RuntimeConfig::from_env().expect("invalid runtime config");
@@ -19,23 +20,27 @@ pub fn build_router_with_profile(profile: RuntimeProfile) -> Router {
 }
 
 pub fn build_router_with_config(config: &RuntimeConfig) -> Router {
+    let startup_started_at = Instant::now();
+    let startup_timing = StartupTimingState::default();
     if matches!(
         config.runtime_profile,
         komga_config::profile::RuntimeProfile::LiveLocaldb
     ) {
         crate::runtime::startup_scan::bootstrap_library_scan(config);
     }
-    start_server::build_router_with_config(config)
+    start_server::build_router_with_config(config, startup_timing, startup_started_at)
 }
 
 pub fn build_router_without_runtime_workers_for_contract(config: &RuntimeConfig) -> Router {
+    let startup_started_at = Instant::now();
+    let startup_timing = StartupTimingState::default();
     if matches!(
         config.runtime_profile,
         komga_config::profile::RuntimeProfile::LiveLocaldb
     ) {
         crate::runtime::startup_scan::bootstrap_library_scan(config);
     }
-    start_server::build_router_without_runtime_workers(config)
+    start_server::build_router_without_runtime_workers(config, startup_timing, startup_started_at)
 }
 
 pub fn prepare_startup_search_task_for_contract(
@@ -53,13 +58,15 @@ pub async fn serve_with_config(
     listener: TcpListener,
     config: RuntimeConfig,
 ) -> std::io::Result<()> {
+    let startup_started_at = Instant::now();
+    let startup_timing = StartupTimingState::default();
     if matches!(
         config.runtime_profile,
         komga_config::profile::RuntimeProfile::LiveLocaldb
     ) {
         crate::runtime::startup_scan::bootstrap_library_scan(&config);
     }
-    start_server::serve_with_config(listener, config).await
+    start_server::serve_with_config(listener, config, startup_timing, startup_started_at).await
 }
 
 pub async fn validate_startup_schema_gate_for_contract(

@@ -1,7 +1,53 @@
 use super::*;
+use std::fs;
 use std::io::Write;
 
 use time::OffsetDateTime;
+
+const ACTUATOR_V3_JSON: &str = "application/vnd.spring-boot.actuator.v3+json";
+
+fn measurement_value(payload: &Value, statistic: &str) -> f64 {
+    payload
+        .get("measurements")
+        .and_then(Value::as_array)
+        .and_then(|measurements| {
+            measurements.iter().find_map(|measurement| {
+                (measurement.get("statistic").and_then(Value::as_str) == Some(statistic))
+                    .then(|| measurement.get("value").and_then(Value::as_f64))
+                    .flatten()
+            })
+        })
+        .unwrap_or_else(|| panic!("metric should expose {statistic} measurement: {payload:?}"))
+}
+
+#[cfg(target_os = "linux")]
+fn expected_process_cpu_usage_fraction() -> Option<f64> {
+    let schedstat = fs::read_to_string("/proc/self/schedstat").ok()?;
+    let cpu_runtime_seconds = schedstat.split_whitespace().next()?.parse::<f64>().ok()? / 1_000_000_000.0;
+    let process_uptime_seconds = expected_process_uptime_seconds()?;
+    if process_uptime_seconds <= 0.0 {
+        return None;
+    }
+    let cpu_count = std::thread::available_parallelism().ok()?.get() as f64;
+    Some((cpu_runtime_seconds / process_uptime_seconds / cpu_count).clamp(0.0, 1.0))
+}
+
+#[cfg(target_os = "linux")]
+fn expected_process_uptime_seconds() -> Option<f64> {
+    let uptime = fs::read_to_string("/proc/uptime").ok()?;
+    let system_uptime_seconds = uptime.split_whitespace().next()?.parse::<f64>().ok()?;
+    let stat = fs::read_to_string("/proc/self/stat").ok()?;
+    let after_paren = stat.split_once(") ")?.1;
+    let fields = after_paren.split_whitespace().collect::<Vec<_>>();
+    let ticks_since_boot = fields.get(19)?.parse::<f64>().ok()?;
+    let ticks_per_second = std::process::Command::new("getconf")
+        .arg("CLK_TCK")
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .and_then(|value| value.trim().parse::<f64>().ok())?;
+    Some((system_uptime_seconds - (ticks_since_boot / ticks_per_second)).max(0.0))
+}
 
 fn assert_health_datasource_component(
     db_components: &serde_json::Map<String, Value>,
@@ -116,8 +162,8 @@ fn assert_admin_actuator_health_payload(
 }
 
 #[tokio::test]
-async fn router_actuator_root_exposed_by_default_without_beans_link() {
-    let paths = new_router_fixture("router-actuator-root-omits-beans-link").await;
+async fn router_actuator_root_exposes_spring_boot_style_discovery_links() {
+    let paths = new_router_fixture("router-actuator-root-spring-boot-discovery-links").await;
     seed_router_contract_data(&paths).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
@@ -136,12 +182,45 @@ async fn router_actuator_root_exposed_by_default_without_beans_link() {
         .expect("actuator root request should complete");
 
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some(ACTUATOR_V3_JSON)
+    );
     let payload = response_json(response).await;
     let links = payload
         .get("_links")
         .and_then(Value::as_object)
         .expect("actuator root should include links object");
-    assert!(links.get("beans").is_none());
+    for link_name in ["self", "health", "info", "metrics", "shutdown"] {
+        assert!(
+            links
+                .get(link_name)
+                .and_then(Value::as_object)
+                .and_then(|link| link.get("href"))
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.is_empty()),
+            "actuator root should expose {link_name} href: {payload:?}"
+        );
+    }
+    assert_eq!(
+        links
+            .get("metrics-requiredMetricName")
+            .and_then(Value::as_object)
+            .and_then(|link| link.get("templated"))
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        links
+            .get("health-path")
+            .and_then(Value::as_object)
+            .and_then(|link| link.get("templated"))
+            .and_then(Value::as_bool),
+        Some(true)
+    );
 
     cleanup_router_fixture(paths);
 }
@@ -190,7 +269,7 @@ async fn router_actuator_root_returns_forbidden_for_authenticated_non_admin() {
     )
     .await;
 
-    let response = app
+    let response = app.clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -228,6 +307,13 @@ async fn router_actuator_info_returns_build_and_os_metadata_for_admin() {
         .expect("actuator info request should complete");
 
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some(ACTUATOR_V3_JSON)
+    );
     let payload = response_json(response).await;
 
     let build = payload
@@ -236,38 +322,10 @@ async fn router_actuator_info_returns_build_and_os_metadata_for_admin() {
         .expect("actuator info should include build object");
     assert!(
         build
-            .get("artifact")
-            .and_then(Value::as_str)
-            .is_some_and(|value| !value.is_empty()),
-        "actuator info build.artifact should be non-empty: {payload:?}"
-    );
-    assert!(
-        build
-            .get("name")
-            .and_then(Value::as_str)
-            .is_some_and(|value| !value.is_empty()),
-        "actuator info build.name should be non-empty: {payload:?}"
-    );
-    assert!(
-        build
-            .get("group")
-            .and_then(Value::as_str)
-            .is_some_and(|value| !value.is_empty()),
-        "actuator info build.group should be non-empty: {payload:?}"
-    );
-    assert!(
-        build
             .get("version")
             .and_then(Value::as_str)
             .is_some_and(|value| !value.is_empty()),
         "actuator info build.version should be non-empty: {payload:?}"
-    );
-    assert!(
-        build
-            .get("time")
-            .and_then(Value::as_str)
-            .is_some_and(|value| !value.is_empty()),
-        "actuator info build.time should be non-empty: {payload:?}"
     );
 
     if let Some(git) = payload.get("git").and_then(Value::as_object) {
@@ -311,6 +369,25 @@ async fn router_actuator_info_returns_build_and_os_metadata_for_admin() {
             .is_some_and(|value| !value.is_empty()),
         "actuator info os.arch should be non-empty: {payload:?}"
     );
+    assert!(
+        os.get("version")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.is_empty()),
+        "actuator info os.version should be non-empty: {payload:?}"
+    );
+
+    let process = payload
+        .get("process")
+        .and_then(Value::as_object)
+        .expect("actuator info should include process object");
+    assert!(
+        process
+            .get("pid")
+            .and_then(Value::as_u64)
+            .is_some_and(|value| value > 0),
+        "actuator info process.pid should be positive: {payload:?}"
+    );
+    assert!(process.get("memory").and_then(Value::as_object).is_some());
 
     cleanup_router_fixture(paths);
 }
@@ -723,6 +800,18 @@ async fn router_actuator_metrics_returns_metric_names_for_admin() {
             .any(|value| value.as_str() == Some("komga.books")),
         "actuator metrics names should include komga.books: {payload:?}"
     );
+    for metric_name in ["komga.tasks.execution", "komga.books", "http.server.requests"] {
+        assert!(
+            names.iter().any(|value| value.as_str() == Some(metric_name)),
+            "actuator metrics names should include {metric_name}: {payload:?}"
+        );
+    }
+    assert!(
+        !names
+            .iter()
+            .any(|value| value.as_str() == Some("logback.events")),
+        "actuator metrics names should not include removed logback.events metric: {payload:?}"
+    );
 
     cleanup_router_fixture(paths);
 }
@@ -756,6 +845,367 @@ async fn router_actuator_metric_detail_includes_base_unit_for_books_filesize() {
     assert_eq!(
         payload.get("baseUnit").and_then(Value::as_str),
         Some("bytes")
+    );
+    assert!(
+        payload
+            .get("measurements")
+            .and_then(Value::as_array)
+            .is_some_and(|measurements| !measurements.is_empty()),
+        "actuator metric detail should expose measurements: {payload:?}"
+    );
+    let available_tags = payload
+        .get("availableTags")
+        .and_then(Value::as_array)
+        .expect("actuator metric detail should expose availableTags array");
+    assert!(
+        available_tags.iter().any(|tag| {
+            tag.get("tag").and_then(Value::as_str) == Some("library")
+                && tag
+                    .get("values")
+                    .and_then(Value::as_array)
+                    .is_some_and(|values| !values.is_empty())
+        }),
+        "actuator metric detail should expose library tag values: {payload:?}"
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_actuator_metric_detail_uses_runtime_startup_timings_for_admin() {
+    let paths = new_router_fixture("router-actuator-metric-detail-runtime-startup-timings").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let started_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/actuator/metrics/application.started.time")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("application.started.time request should build"),
+        )
+        .await
+        .expect("application.started.time request should complete");
+    let ready_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/actuator/metrics/application.ready.time")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("application.ready.time request should build"),
+        )
+        .await
+        .expect("application.ready.time request should complete");
+
+    assert_eq!(started_response.status(), StatusCode::OK);
+    assert_eq!(ready_response.status(), StatusCode::OK);
+    let started_payload = response_json(started_response).await;
+    let ready_payload = response_json(ready_response).await;
+    let started_seconds = measurement_value(&started_payload, "TOTAL_TIME");
+    let ready_seconds = measurement_value(&ready_payload, "TOTAL_TIME");
+
+    assert!(started_seconds > 0.0, "application.started.time should be positive: {started_payload:?}");
+    assert!(
+        ready_seconds >= started_seconds,
+        "application.ready.time should be >= application.started.time: started={started_seconds}, ready={ready_seconds}"
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_actuator_metric_detail_uses_runtime_process_cpu_usage_for_admin() {
+    let paths = new_router_fixture("router-actuator-metric-detail-runtime-process-cpu").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/actuator/metrics/process.cpu.usage")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("process.cpu.usage request should build"),
+        )
+        .await
+        .expect("process.cpu.usage request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let cpu_usage = measurement_value(&payload, "VALUE");
+
+    assert!((0.0..=1.0).contains(&cpu_usage), "process.cpu.usage should be a fraction: {payload:?}");
+
+    #[cfg(target_os = "linux")]
+    {
+        let expected = expected_process_cpu_usage_fraction()
+            .expect("linux test host should expose process cpu usage via /proc");
+        assert!(
+            (cpu_usage - expected).abs() <= 0.05,
+            "process.cpu.usage should track /proc-derived process cpu usage: actual={cpu_usage}, expected={expected}, payload={payload:?}"
+        );
+    }
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_actuator_metric_detail_exposes_datasource_tags_for_admin() {
+    let paths = new_router_fixture("router-actuator-metric-detail-datasource-tags").await;
+    seed_router_contract_data(&paths).await;
+
+    let _main_pool_one = komga_infrastructure::sqlite::connect_pool(&paths.main_db, 1)
+        .await
+        .expect("main shared sqlx pool with max=1 should open");
+    let _main_pool_two = komga_infrastructure::sqlite::connect_pool(&paths.main_db, 2)
+        .await
+        .expect("main shared sqlx pool with max=2 should open");
+    let _tasks_pool_one = komga_infrastructure::sqlite::connect_pool(&paths.tasks_db, 1)
+        .await
+        .expect("tasks shared sqlx pool with max=1 should open");
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/actuator/metrics/jdbc.connections.active")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("admin actuator datasource metric detail request should build"),
+        )
+        .await
+        .expect("admin actuator datasource metric detail request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("name").and_then(Value::as_str),
+        Some("jdbc.connections.active")
+    );
+    let available_tags = payload
+        .get("availableTags")
+        .and_then(Value::as_array)
+        .expect("datasource metric should expose availableTags array");
+    assert!(
+        available_tags.iter().any(|tag| {
+            tag.get("tag").and_then(Value::as_str) == Some("name")
+                && tag
+                    .get("values")
+                    .and_then(Value::as_array)
+                    .is_some_and(|values| values.iter().any(|value| value.as_str() == Some("main-pool-max-2")))
+        }),
+        "datasource metric should expose live sqlx pool entry names: {payload:?}"
+    );
+
+    let filtered_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/actuator/metrics/jdbc.connections.max?tag=name:main-pool-max-2")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("filtered datasource metric detail request should build"),
+        )
+        .await
+        .expect("filtered datasource metric detail request should complete");
+
+    assert_eq!(filtered_response.status(), StatusCode::OK);
+    let filtered_payload = response_json(filtered_response).await;
+    assert!(
+        filtered_payload
+            .get("measurements")
+            .and_then(Value::as_array)
+            .is_some_and(|measurements| measurements.iter().any(|measurement| {
+                measurement.get("statistic").and_then(Value::as_str) == Some("VALUE")
+                    && measurement.get("value").and_then(Value::as_f64) == Some(2.0)
+            })),
+        "filtered datasource metric detail should reflect the real sqlx pool max_connections: {filtered_payload:?}"
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_actuator_metric_detail_exposes_task_timer_shape_for_admin() {
+    let paths = new_router_fixture("router-actuator-metric-detail-task-timer-shape").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/actuator/metrics/komga.tasks.execution")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("admin actuator task execution detail request should build"),
+        )
+        .await
+        .expect("admin actuator task execution detail request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let measurements = payload
+        .get("measurements")
+        .and_then(Value::as_array)
+        .expect("task execution metric should expose measurements");
+    for statistic in ["COUNT", "TOTAL_TIME", "MAX"] {
+        assert!(
+            measurements.iter().any(|measurement| {
+                measurement.get("statistic").and_then(Value::as_str) == Some(statistic)
+            }),
+            "task execution metric should expose {statistic}: {payload:?}"
+        );
+    }
+    let available_tags = payload
+        .get("availableTags")
+        .and_then(Value::as_array)
+        .expect("task execution metric should expose availableTags array");
+    assert!(
+        available_tags
+            .iter()
+            .any(|tag| tag.get("tag").and_then(Value::as_str) == Some("type")),
+        "task execution metric should expose type tag: {payload:?}"
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_actuator_metric_detail_exposes_task_failure_tags_for_admin() {
+    let paths = new_router_fixture("router-actuator-metric-detail-task-failure-tags").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/actuator/metrics/komga.tasks.failure")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("admin actuator task failure detail request should build"),
+        )
+        .await
+        .expect("admin actuator task failure detail request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let available_tags = payload
+        .get("availableTags")
+        .and_then(Value::as_array)
+        .expect("task failure metric should expose availableTags array");
+    assert!(
+        available_tags.iter().any(|tag| {
+            tag.get("tag").and_then(Value::as_str) == Some("type")
+                && tag
+                    .get("values")
+                    .and_then(Value::as_array)
+                    .is_some_and(|values| !values.is_empty())
+        }),
+        "task failure metric should expose type tag values: {payload:?}"
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_actuator_metric_detail_reflects_real_http_requests_for_admin() {
+    let paths = new_router_fixture("router-actuator-metric-detail-real-http-requests").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let info_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/actuator/info")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("actuator info request should build"),
+        )
+        .await
+        .expect("actuator info request should complete");
+    assert_eq!(info_response.status(), StatusCode::OK);
+
+    let unauthorized_root_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/actuator")
+                .body(Body::empty())
+                .expect("anonymous actuator root request should build"),
+        )
+        .await
+        .expect("anonymous actuator root request should complete");
+    assert_eq!(unauthorized_root_response.status(), StatusCode::UNAUTHORIZED);
+
+    let info_metric_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/actuator/metrics/http.server.requests?tag=exception:None&tag=method:GET&tag=outcome:SUCCESS&tag=status:200&tag=uri:/actuator/info")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("filtered http.server.requests success detail request should build"),
+        )
+        .await
+        .expect("filtered http.server.requests success detail request should complete");
+    assert_eq!(info_metric_response.status(), StatusCode::OK);
+    let info_metric_payload = response_json(info_metric_response).await;
+    assert_eq!(
+        measurement_value(&info_metric_payload, "COUNT"),
+        1.0,
+        "http.server.requests should count the real /actuator/info request: {info_metric_payload:?}"
+    );
+    assert!(
+        measurement_value(&info_metric_payload, "TOTAL_TIME") > 0.0,
+        "http.server.requests should accumulate real latency for /actuator/info: {info_metric_payload:?}"
+    );
+    assert!(
+        measurement_value(&info_metric_payload, "MAX") > 0.0,
+        "http.server.requests should expose a real max latency for /actuator/info: {info_metric_payload:?}"
+    );
+
+    let unauthorized_metric_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/actuator/metrics/http.server.requests?tag=exception:None&tag=method:GET&tag=outcome:CLIENT_ERROR&tag=status:401&tag=uri:/actuator")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("filtered http.server.requests unauthorized detail request should build"),
+        )
+        .await
+        .expect("filtered http.server.requests unauthorized detail request should complete");
+    assert_eq!(unauthorized_metric_response.status(), StatusCode::OK);
+    let unauthorized_metric_payload = response_json(unauthorized_metric_response).await;
+    assert_eq!(
+        measurement_value(&unauthorized_metric_payload, "COUNT"),
+        1.0,
+        "http.server.requests should count the real anonymous /actuator request: {unauthorized_metric_payload:?}"
     );
 
     cleanup_router_fixture(paths);

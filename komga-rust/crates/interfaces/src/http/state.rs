@@ -43,6 +43,84 @@ pub struct RuntimeState {
     pub server_context_path: Option<String>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StartupTimingSnapshot {
+    pub application_started_time_seconds: f64,
+    pub application_ready_time_seconds: f64,
+}
+
+#[derive(Clone, Default)]
+pub struct StartupTimingState {
+    snapshot: Arc<Mutex<StartupTimingSnapshot>>,
+}
+
+impl StartupTimingState {
+    pub fn snapshot(&self) -> StartupTimingSnapshot {
+        self.snapshot
+            .lock()
+            .expect("startup timing snapshot lock should not be poisoned")
+            .clone()
+    }
+
+    pub fn record_application_started(&self, elapsed: Duration) {
+        self.snapshot
+            .lock()
+            .expect("startup timing snapshot lock should not be poisoned")
+            .application_started_time_seconds = elapsed.as_secs_f64();
+    }
+
+    pub fn record_application_ready(&self, elapsed: Duration) {
+        self.snapshot
+            .lock()
+            .expect("startup timing snapshot lock should not be poisoned")
+            .application_ready_time_seconds = elapsed.as_secs_f64();
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct HttpServerRequestMetricKey {
+    pub exception: String,
+    pub method: String,
+    pub outcome: String,
+    pub status: String,
+    pub uri: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct HttpServerRequestMetricSummary {
+    pub count: u64,
+    pub total_time_seconds: f64,
+    pub max_time_seconds: f64,
+}
+
+#[derive(Clone, Default)]
+pub struct HttpServerRequestsState {
+    metrics: Arc<Mutex<HashMap<HttpServerRequestMetricKey, HttpServerRequestMetricSummary>>>,
+}
+
+impl HttpServerRequestsState {
+    pub fn record(&self, key: HttpServerRequestMetricKey, elapsed: Duration) {
+        let elapsed_seconds = elapsed.as_secs_f64();
+        let mut metrics = self
+            .metrics
+            .lock()
+            .expect("http server request metrics lock should not be poisoned");
+        let entry = metrics.entry(key).or_default();
+        entry.count += 1;
+        entry.total_time_seconds += elapsed_seconds;
+        entry.max_time_seconds = entry.max_time_seconds.max(elapsed_seconds);
+    }
+
+    pub fn snapshot(&self) -> Vec<(HttpServerRequestMetricKey, HttpServerRequestMetricSummary)> {
+        self.metrics
+            .lock()
+            .expect("http server request metrics lock should not be poisoned")
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect()
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OperationalBuildMetadata {
     pub version: String,
@@ -146,6 +224,8 @@ pub struct LibraryCatalogOperations {
 #[derive(Clone)]
 pub struct OperationalState {
     pub runtime: RuntimeState,
+    pub startup_timing: StartupTimingState,
+    pub http_server_requests: HttpServerRequestsState,
     pub remember_me_runtime_key: String,
     pub build_metadata: OperationalBuildMetadata,
     pub settings_store: Arc<ServerSettingsStore>,

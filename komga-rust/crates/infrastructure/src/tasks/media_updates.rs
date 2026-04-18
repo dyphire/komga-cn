@@ -404,7 +404,7 @@ pub fn adjust_analyzed_book_read_progress(
 
             if !series_id.is_empty() {
                 for user_id in &affected_user_ids {
-                    upsert_series_read_progress_row(&mut tx, &series_id, &user_id)
+                    upsert_series_read_progress_row(&mut tx, &series_id, user_id)
                         .await
                         .map_err(|error| {
                             format!(

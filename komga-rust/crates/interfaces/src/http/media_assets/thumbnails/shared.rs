@@ -41,7 +41,7 @@ fn encode_mosaic_jpeg(image_bytes: &[Vec<u8>]) -> Option<Vec<u8>> {
         (i64::from(cell_width), i64::from(cell_height)),
     ];
 
-    for (bytes, (x, y)) in image_bytes.iter().zip(placements.into_iter()) {
+    for (bytes, (x, y)) in image_bytes.iter().zip(placements) {
         let tile = image::load_from_memory(bytes)
             .ok()?
             .thumbnail(cell_width, cell_height)

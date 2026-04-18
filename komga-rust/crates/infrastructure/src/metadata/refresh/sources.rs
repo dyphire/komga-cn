@@ -144,7 +144,7 @@ pub(super) fn extract_comicinfo_readlists(xml: &str) -> Vec<ComicInfoReadListEnt
                     .map(|name| ComicInfoReadListEntry { name, number: None }),
             );
         } else {
-            for (name, number) in arcs.into_iter().zip(numbers.into_iter()) {
+            for (name, number) in arcs.into_iter().zip(numbers) {
                 if let Some(number) = number {
                     readlists.push(ComicInfoReadListEntry {
                         name,

@@ -43,6 +43,7 @@ fn with_task_queue<T>(
 
 pub(super) fn compose_operational_state(
     config: &RuntimeConfig,
+    startup_timing: StartupTimingState,
     remember_me_runtime_key: String,
     task_queue: SharedTaskQueue,
     task_wakeup: TaskQueueWakeSignal,
@@ -65,6 +66,8 @@ pub(super) fn compose_operational_state(
             bind_address: config.bind_address,
             server_context_path: config.server_context_path.clone(),
         },
+        startup_timing,
+        http_server_requests: HttpServerRequestsState::default(),
         remember_me_runtime_key,
         build_metadata: OperationalBuildMetadata {
             version: build_metadata.version,
@@ -232,6 +235,7 @@ mod tests {
             let task_wakeup = Arc::new(tokio::sync::Notify::new());
             let state = compose_operational_state(
                 &config,
+                StartupTimingState::default(),
                 "test-runtime".to_string(),
                 task_queue.clone(),
                 task_wakeup.clone(),

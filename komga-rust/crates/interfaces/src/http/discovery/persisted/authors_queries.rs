@@ -1,4 +1,4 @@
-use super::common_helpers::page_payload;
+use super::common_helpers::{PagePayloadMetadata, page_payload};
 use super::*;
 
 pub async fn load_persisted_author_names(
@@ -62,12 +62,14 @@ pub fn authors_v2_page_payload(
 
     page_payload(
         content.into_iter().map(|author| json!(author)).collect(),
-        if unpaged { 0 } else { page },
-        page_size,
-        total_elements,
-        total_pages,
-        true,
-        true,
-        if unpaged { 0 } else { offset },
+        PagePayloadMetadata {
+            page: if unpaged { 0 } else { page },
+            size: page_size,
+            total_elements,
+            total_pages,
+            paged: true,
+            sorted: true,
+            offset: if unpaged { 0 } else { offset },
+        },
     )
 }

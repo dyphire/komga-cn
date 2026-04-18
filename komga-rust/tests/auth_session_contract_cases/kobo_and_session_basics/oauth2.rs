@@ -10,6 +10,15 @@ use std::net::SocketAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
+type AuthenticationActivityRow = (
+    bool,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
 fn oauth2_runtime_env_for_paths(
     paths: &RuntimeDbPaths,
     registration_id: &str,
@@ -1175,14 +1184,7 @@ async fn router_oauth2_callback_records_failure_activity() {
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for oauth2 failure activity verification");
-    let (success, error, source, ip, user_agent, email): (
-        bool,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-    ) = sqlx::query_as(
+    let (success, error, source, ip, user_agent, email): AuthenticationActivityRow = sqlx::query_as(
         "SELECT SUCCESS, ERROR, SOURCE, IP, USER_AGENT, EMAIL FROM AUTHENTICATION_ACTIVITY ORDER BY DATE_TIME DESC LIMIT 1",
     )
     .fetch_one(&pool)
