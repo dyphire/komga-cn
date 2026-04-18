@@ -1,21 +1,21 @@
 use axum::Router;
-use komga_interfaces::http::state::StartupTimingState;
 use komga_infrastructure::search::index_lifecycle::{
     SearchStartupLifecycle, decide_startup_lifecycle, prepare_for_rebuild,
 };
 use komga_infrastructure::sqlite::close_all_shared_pools;
+use komga_interfaces::http::state::StartupTimingState;
 use std::net::SocketAddr;
-use std::time::Instant;
 use std::time::Duration;
+use std::time::Instant;
 use tokio::net::TcpListener;
 use tokio::signal;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 
 use crate::composition::http_state::{HttpRuntimeState, compose_http_runtime};
+use crate::runtime::background_workers::{prepare_task_queue, spawn_runtime_workers};
 use komga_config::env_config::RuntimeConfig;
 use komga_config::writer_ownership::WriterKind;
-use crate::runtime::background_workers::{prepare_task_queue, spawn_runtime_workers};
 
 #[derive(Clone, Copy)]
 struct StartupSearchPlan {
@@ -72,14 +72,20 @@ pub fn build_router_with_config(
     startup_started_at: Instant,
 ) -> Router {
     let background = prepare_task_queue(config, None);
-    spawn_runtime_workers(
+    let worker_runtime_guard = spawn_runtime_workers(
         background.task_queue.clone(),
         config.clone(),
         background.task_wakeup.clone(),
         None,
     );
     finalize_router_startup(
-        compose_http_runtime(config, background, None, startup_timing.clone()),
+        compose_http_runtime(
+            config,
+            background,
+            Some(worker_runtime_guard),
+            None,
+            startup_timing.clone(),
+        ),
         startup_timing,
         startup_started_at,
     )
@@ -92,7 +98,7 @@ pub fn build_router_without_runtime_workers(
 ) -> Router {
     let background = prepare_task_queue(config, None);
     finalize_router_startup(
-        compose_http_runtime(config, background, None, startup_timing.clone()),
+        compose_http_runtime(config, background, None, None, startup_timing.clone()),
         startup_timing,
         startup_started_at,
     )
@@ -112,7 +118,7 @@ pub async fn serve_with_config(
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let background = prepare_task_queue(&config, startup_search_task);
     let worker_shutdown_rx = shutdown_rx.clone();
-    spawn_runtime_workers(
+    let worker_runtime_guard = spawn_runtime_workers(
         background.task_queue.clone(),
         config.clone(),
         background.task_wakeup.clone(),
@@ -122,6 +128,7 @@ pub async fn serve_with_config(
         compose_http_runtime(
             &config,
             background,
+            Some(worker_runtime_guard),
             Some(shutdown_tx.clone()),
             startup_timing.clone(),
         ),
@@ -350,7 +357,9 @@ async fn complete_shutdown_lifecycle() {
     );
 }
 
-fn search_writer_decision_label(decision: komga_config::writer_ownership::WriterDecision) -> &'static str {
+fn search_writer_decision_label(
+    decision: komga_config::writer_ownership::WriterDecision,
+) -> &'static str {
     match decision {
         komga_config::writer_ownership::WriterDecision::Allowed => "allowed",
         komga_config::writer_ownership::WriterDecision::Isolated => "isolated",
@@ -360,7 +369,8 @@ fn search_writer_decision_label(decision: komga_config::writer_ownership::Writer
 
 fn search_writer_reason(decision: komga_config::writer_ownership::WriterDecision) -> &'static str {
     match decision {
-        komga_config::writer_ownership::WriterDecision::Allowed | komga_config::writer_ownership::WriterDecision::Isolated => "",
+        komga_config::writer_ownership::WriterDecision::Allowed
+        | komga_config::writer_ownership::WriterDecision::Isolated => "",
         komga_config::writer_ownership::WriterDecision::Blocked { reason } => reason,
     }
 }

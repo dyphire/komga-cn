@@ -1,7 +1,9 @@
 use super::*;
 
 use crate::build_metadata::current_build_metadata;
-use crate::runtime::background_workers::{SharedTaskQueue, TaskQueueWakeSignal};
+use crate::runtime::background_workers::{
+    SharedTaskQueue, TaskQueueWakeSignal, WorkerRuntimeGuard,
+};
 
 macro_rules! query_service_op {
     ($adapter:expr, |$service:ident, $($arg:ident),*| $body:expr) => {{
@@ -47,13 +49,15 @@ pub(super) fn compose_operational_state(
     remember_me_runtime_key: String,
     task_queue: SharedTaskQueue,
     task_wakeup: TaskQueueWakeSignal,
+    worker_runtime_guard: Option<WorkerRuntimeGuard>,
     shutdown_trigger: Option<watch::Sender<bool>>,
 ) -> OperationalState {
-    let runtime_for_apply = crate::config::task_runtime_context(config);
+    let enqueue_worker_runtime_guard = worker_runtime_guard.clone();
     let enqueue_task_queue = task_queue.clone();
     let clear_task_queue = task_queue.clone();
     let count_task_queue = task_queue.clone();
     let apply_task_queue = task_queue.clone();
+    let apply_task_wakeup = task_wakeup.clone();
     let build_metadata = current_build_metadata();
     OperationalState {
         runtime: RuntimeState {
@@ -85,6 +89,7 @@ pub(super) fn compose_operational_state(
         oauth2_account_creation: config.oauth2_account_creation,
         oidc_email_verification: config.oidc_email_verification,
         enqueue_task_records: Arc::new(move |task_records, urgent| {
+            let _worker_runtime_guard = enqueue_worker_runtime_guard.clone();
             with_task_queue(&enqueue_task_queue, |queue| {
                 for task_record in task_records {
                     queue.enqueue(task_record);
@@ -104,12 +109,9 @@ pub(super) fn compose_operational_state(
                 .expect("task queue state lock should not be poisoned")
         }),
         apply_task_pool_size: Arc::new(move |value| {
-            with_task_queue(&apply_task_queue, |queue| {
-                queue.set_task_pool_size(value);
-                queue.process_available(&runtime_for_apply)
-            })?
-            .map(|_| ())
-            .map_err(|error: TaskProcessingError| error.to_string())
+            with_task_queue(&apply_task_queue, |queue| queue.set_task_pool_size(value))?;
+            apply_task_wakeup.notify_one();
+            Ok(())
         }),
         library_catalog: compose_library_catalog_operations(&config.database_file),
         sse: Arc::new(Mutex::new(SseOperationalState {
@@ -239,6 +241,7 @@ mod tests {
                 "test-runtime".to_string(),
                 task_queue.clone(),
                 task_wakeup.clone(),
+                None,
                 None,
             );
 

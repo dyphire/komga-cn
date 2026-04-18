@@ -196,9 +196,7 @@ impl TaskQueueScheduler {
                     Err(error) => {
                         let error_message = error.to_string();
                         self.fail_claimed_task(&task, error_message.as_str());
-                        for remaining in batch_iter {
-                            self.disown_claimed_task(&remaining);
-                        }
+                        self.disown_claimed_tasks_after_failure(batch_iter.collect());
                         self.log_process_available(
                             "failed",
                             processed,
@@ -236,6 +234,19 @@ impl TaskQueueScheduler {
 
         if self.admin.disown(&task.id) {
             self.log_task_event("task_disown", task, "disowned", None);
+        }
+    }
+
+    fn disown_claimed_tasks_after_failure(&mut self, remaining_batch: Vec<TaskQueueRecord>) {
+        if self.persisted_store.is_some() {
+            for task in self.current_owned_tasks() {
+                self.disown_claimed_task(&task);
+            }
+            return;
+        }
+
+        for task in remaining_batch {
+            self.disown_claimed_task(&task);
         }
     }
 

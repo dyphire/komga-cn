@@ -6,7 +6,6 @@ use komga_application::library_catalog::{
     CreateLibraryService, DeleteLibraryService, LibraryCatalogQueryService, LibraryTaskService,
     UpdateLibraryService,
 };
-use komga_application::task_processing::TaskProcessingError;
 use komga_infrastructure::discovery_detail_access::{
     books as infrastructure_detail_books, collections as infrastructure_detail_collections,
     readlists as infrastructure_detail_readlists, series as infrastructure_detail_series,
@@ -107,6 +106,7 @@ use sha2::Digest;
 use tokio::sync::watch;
 
 use crate::runtime::background_workers::RuntimeBackgroundState;
+use crate::runtime::background_workers::WorkerRuntimeGuard;
 use komga_config::env_config::RuntimeConfig;
 use komga_config::profile::RuntimeProfile as ConfigRuntimeProfile;
 
@@ -129,6 +129,7 @@ pub struct HttpRuntimeState {
 pub fn compose_http_runtime(
     config: &RuntimeConfig,
     background: RuntimeBackgroundState,
+    worker_runtime_guard: Option<WorkerRuntimeGuard>,
     shutdown_trigger: Option<watch::Sender<bool>>,
     startup_timing: StartupTimingState,
 ) -> HttpRuntimeState {
@@ -186,6 +187,7 @@ pub fn compose_http_runtime(
         remember_me_runtime_key.clone(),
         background.task_queue,
         background.task_wakeup,
+        worker_runtime_guard,
         shutdown_trigger,
     );
 
