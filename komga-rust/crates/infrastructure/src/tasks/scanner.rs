@@ -377,9 +377,12 @@ pub(crate) fn scan_library(
             }
 
             if is_supported_book_file(path.as_path(), &scan_config) {
-                let book_id = route_safe_scanner_id("book", path.as_path());
                 let book_url = path.to_string_lossy().to_string();
                 let book_url_key = scanner_url_key(root.as_path(), &book_url);
+                let book_id = existing_books_by_url
+                    .get(&book_url_key)
+                    .map(|existing| existing.book_id.clone())
+                    .unwrap_or_else(|| route_safe_scanner_id("book", path.as_path()));
                 let file_last_modified_unix_seconds = metadata_updated_unix_seconds(&metadata);
                 let book_name = path
                     .file_stem()
