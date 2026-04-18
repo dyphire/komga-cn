@@ -151,10 +151,9 @@ pub fn persist_book_analysis(
     let index_dir = index_dir.to_path_buf();
     let book_id = book_id.to_string();
     let analysis = analysis.clone();
-    db::run_database_query(database_file, move |pool| {
+    let document = db::run_database_query(database_file, move |pool| {
         let book_id = book_id.clone();
         let analysis = analysis.clone();
-        let index_dir = index_dir.clone();
         Box::pin(async move {
             let mut tx = pool.begin().await.map_err(|error| {
                 format!("failed to start analyze-book transaction for '{book_id}': {error}")
@@ -231,21 +230,24 @@ pub fn persist_book_analysis(
             })?;
 
             if update_search_index {
-                let document = loaders::load_book_search_document(pool.clone(), &book_id).await?;
-                let index = bootstrap_runtime_owned_index_for_sync(
-                    database_file_for_sync.as_path(),
-                    index_dir.as_path(),
-                )?;
-                if let Some(document) = document {
-                    index
-                        .apply_event(SearchEvent::Upsert(document))
-                        .map_err(|error| format!("failed to upsert search document: {error}"))?;
-                }
+                loaders::load_book_search_document(pool, &book_id).await
+            } else {
+                Ok(None)
             }
-
-            Ok(())
         })
-    })
+    })?;
+
+    if let Some(document) = document {
+        let index = bootstrap_runtime_owned_index_for_sync(
+            database_file_for_sync.as_path(),
+            index_dir.as_path(),
+        )?;
+        index
+            .apply_event(SearchEvent::Upsert(document))
+            .map_err(|error| format!("failed to upsert search document: {error}"))?;
+    }
+
+    Ok(())
 }
 
 pub fn sync_entity_upsert_from_database(
@@ -259,11 +261,10 @@ pub fn sync_entity_upsert_from_database(
     let database_file_for_sync = database_file.clone();
     let index_dir = index_dir.to_path_buf();
     let entity_id = entity_id.to_string();
-    db::run_database_query_with_max_connections(database_file, 2, move |pool| {
-        let index_dir = index_dir.clone();
+    let document = db::run_database_query_with_max_connections(database_file, 2, move |pool| {
         let entity_id = entity_id.clone();
         Box::pin(async move {
-            let document = match entity_type {
+            Ok(match entity_type {
                 SearchEntityType::Book => {
                     loaders::load_book_search_document(pool.clone(), &entity_id).await?
                 }
@@ -276,22 +277,22 @@ pub fn sync_entity_upsert_from_database(
                 SearchEntityType::ReadList => {
                     loaders::load_readlist_search_document(pool.clone(), &entity_id).await?
                 }
-            };
-
-            let Some(document) = document else {
-                return Ok(false);
-            };
-
-            let index = bootstrap_runtime_owned_index_for_sync(
-                database_file_for_sync.as_path(),
-                index_dir.as_path(),
-            )?;
-            index
-                .apply_event(SearchEvent::Upsert(document))
-                .map_err(|error| format!("failed to upsert search document: {error}"))?;
-            Ok(true)
+            })
         })
-    })
+    })?;
+
+    let Some(document) = document else {
+        return Ok(false);
+    };
+
+    let index = bootstrap_runtime_owned_index_for_sync(
+        database_file_for_sync.as_path(),
+        index_dir.as_path(),
+    )?;
+    index
+        .apply_event(SearchEvent::Upsert(document))
+        .map_err(|error| format!("failed to upsert search document: {error}"))?;
+    Ok(true)
 }
 
 pub fn sync_series_and_oneshot_books_after_metadata_update(
@@ -304,37 +305,37 @@ pub fn sync_series_and_oneshot_books_after_metadata_update(
     let database_file_for_sync = database_file.clone();
     let index_dir = index_dir.to_path_buf();
     let series_id = series_id.to_string();
-    db::run_database_query_with_max_connections(database_file, 2, move |pool| {
-        let index_dir = index_dir.clone();
-        let series_id = series_id.clone();
-        Box::pin(async move {
-            let series_document =
-                loaders::load_series_search_document(pool.clone(), &series_id).await?;
-            let oneshot_documents =
-                loaders::load_oneshot_book_search_documents(pool.clone(), &series_id).await?;
+    let (series_document, oneshot_documents) =
+        db::run_database_query_with_max_connections(database_file, 2, move |pool| {
+            let series_id = series_id.clone();
+            Box::pin(async move {
+                let series_document =
+                    loaders::load_series_search_document(pool.clone(), &series_id).await?;
+                let oneshot_documents =
+                    loaders::load_oneshot_book_search_documents(pool.clone(), &series_id).await?;
 
-            let index = bootstrap_runtime_owned_index_for_sync(
-                database_file_for_sync.as_path(),
-                index_dir.as_path(),
-            )?;
+                Ok((series_document, oneshot_documents))
+            })
+        })?;
 
-            if let Some(document) = series_document {
-                index
-                    .apply_event(SearchEvent::Upsert(document))
-                    .map_err(|error| format!("failed to upsert series search document: {error}"))?;
-            }
+    let index = bootstrap_runtime_owned_index_for_sync(
+        database_file_for_sync.as_path(),
+        index_dir.as_path(),
+    )?;
 
-            for document in oneshot_documents {
-                index
-                    .apply_event(SearchEvent::Upsert(document))
-                    .map_err(|error| {
-                        format!("failed to upsert oneshot book search document: {error}")
-                    })?;
-            }
+    if let Some(document) = series_document {
+        index
+            .apply_event(SearchEvent::Upsert(document))
+            .map_err(|error| format!("failed to upsert series search document: {error}"))?;
+    }
 
-            Ok(())
-        })
-    })
+    for document in oneshot_documents {
+        index
+            .apply_event(SearchEvent::Upsert(document))
+            .map_err(|error| format!("failed to upsert oneshot book search document: {error}"))?;
+    }
+
+    Ok(())
 }
 
 pub fn sync_entity_delete_from_index(

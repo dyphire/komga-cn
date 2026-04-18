@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use crate::sqlite::connect_pool;
 use crate::search::index_lifecycle::SearchFieldEntry;
+use crate::sqlite::connect_pool;
 
 pub(super) type BoxFuture<T> =
     std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, String>> + Send>>;
