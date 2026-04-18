@@ -9,7 +9,7 @@ use sqlx::{Row, SqlitePool};
 
 use super::cleanup_workflow::compare_book_names_kotlin_like;
 use crate::persisted_paths::{resolve_rooted_path, resolve_stored_path};
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_private_pool;
 
 #[derive(Clone, Debug)]
 pub(crate) struct LibraryScanConfig {
@@ -1432,7 +1432,7 @@ where
             .map_err(|error| format!("failed to build task runtime: {error}"))?;
 
         runtime.block_on(async move {
-            let pool = connect_pool(&database_file, 1)
+            let pool = connect_private_pool(&database_file, 1)
                 .await
                 .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
             operation(pool).await

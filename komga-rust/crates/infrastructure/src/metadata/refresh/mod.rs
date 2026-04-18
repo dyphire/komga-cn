@@ -20,7 +20,7 @@ use crate::filesystem::media_access::page_content::{
     load_archive_page_row, resolve_book_page_bytes,
 };
 use crate::load_pdfium;
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_private_pool;
 use crate::{resolve_library_item_path, resolve_stored_path};
 
 mod artwork_refresh;
@@ -85,7 +85,9 @@ pub fn infer_transient_epub_provider_metadata(
     }
 }
 
-pub fn infer_transient_comicinfo_provider_metadata(xml: &str) -> TransientMetadataProviderInference {
+pub fn infer_transient_comicinfo_provider_metadata(
+    xml: &str,
+) -> TransientMetadataProviderInference {
     let book_patch = extract_comicinfo_book_patch(xml);
     let append_volume_patch = extract_comicinfo_series_patch(xml, true);
     let plain_patch = extract_comicinfo_series_patch(xml, false);
@@ -1172,7 +1174,7 @@ where
             .map_err(|error| format!("failed to build metadata runtime: {error}"))?;
 
         runtime.block_on(async move {
-            let pool = connect_pool(&database_file, 1)
+            let pool = connect_private_pool(&database_file, 1)
                 .await
                 .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
             operation(pool).await

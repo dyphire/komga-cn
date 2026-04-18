@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use sqlx::{Row, SqlitePool};
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_private_pool;
 use crate::{resolve_library_item_path, resolve_optional_library_item_path};
 
 #[derive(Clone, Debug)]
@@ -337,9 +337,7 @@ pub fn soft_delete_series_book_rows(database_file: &Path, series_id: &str) -> Re
             .execute(&mut *tx)
             .await
             .map_err(|error| {
-                format!(
-                    "failed to soft-delete BOOK rows for series '{series_id}': {error}"
-                )
+                format!("failed to soft-delete BOOK rows for series '{series_id}': {error}")
             })?;
 
             sqlx::query(
@@ -391,7 +389,7 @@ where
             .map_err(|error| format!("failed to build task runtime: {error}"))?;
 
         runtime.block_on(async move {
-            let pool = connect_pool(&database_file, 1)
+            let pool = connect_private_pool(&database_file, 1)
                 .await
                 .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
             operation(pool).await
