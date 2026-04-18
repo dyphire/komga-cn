@@ -1,5 +1,13 @@
 use super::*;
 
+fn build_series_task_contract_router(paths: &RuntimeDbPaths) -> axum::Router {
+    // These contracts assert queued TASK rows themselves, so runtime workers must stay off or the
+    // background consumer can claim and delete the rows before the assertions inspect them.
+    komga_server::app::build_router_without_runtime_workers_for_contract(&runtime_config_for_paths(
+        paths,
+    ))
+}
+
 #[tokio::test]
 async fn router_series_media_assets_forbid_age_restricted_user() {
     let paths = new_router_fixture("router-series-media-assets-restricted-user").await;
@@ -690,7 +698,7 @@ async fn router_series_file_delete_enqueues_delete_series_without_group_id() {
     let paths = new_router_fixture("router-series-file-delete-group-null").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_series_task_contract_router(&paths);
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -741,7 +749,7 @@ async fn router_series_analyze_enqueues_book_tasks_grouped_by_series_id() {
     let paths = new_router_fixture("router-series-analyze-group-series-id").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_series_task_contract_router(&paths);
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -782,7 +790,7 @@ async fn router_series_metadata_refresh_enqueues_kotlin_style_task_groups() {
     let paths = new_router_fixture("router-series-metadata-refresh-groups").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_series_task_contract_router(&paths);
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -858,7 +866,7 @@ async fn router_series_metadata_refresh_does_not_canonicalize_series_id() {
     seed_router_contract_data(&paths).await;
     seed_router_custom_series(&paths, "custom-series-2", "Series 2", "library-1").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_series_task_contract_router(&paths);
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

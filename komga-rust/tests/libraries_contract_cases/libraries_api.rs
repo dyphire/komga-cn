@@ -1,5 +1,13 @@
 use super::*;
 
+fn build_library_task_contract_router(paths: &RuntimeDbPaths) -> axum::Router {
+    // These contracts assert queued TASK rows themselves, so runtime workers must stay off or the
+    // background consumer can claim and delete the rows before the assertions inspect them.
+    komga_server::app::build_router_without_runtime_workers_for_contract(&runtime_config_for_paths(
+        paths,
+    ))
+}
+
 async fn count_query_rows(paths: &RuntimeDbPaths, sql: &str, bind: &str) -> i64 {
     let pool = connect_pool(paths.main_db.as_path(), 1)
         .await
@@ -254,7 +262,7 @@ async fn router_api_library_create_and_scan_enqueue_expected_scan_tasks() {
         .join("created-library-root");
     std::fs::create_dir_all(&new_root).expect("created library root should be creatable");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_library_task_contract_router(&paths);
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -297,7 +305,7 @@ async fn router_api_library_create_and_scan_enqueue_expected_scan_tasks() {
     let paths = new_router_fixture("router-api-library-scan-task-shape").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_library_task_contract_router(&paths);
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -331,7 +339,7 @@ async fn router_api_library_scan_returns_not_found_for_missing_library() {
     let paths = new_router_fixture("router-api-library-scan-missing-library").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_library_task_contract_router(&paths);
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -359,7 +367,7 @@ async fn router_api_library_analyze_enqueues_analyze_book_tasks_grouped_by_serie
     let paths = new_router_fixture("router-api-library-analyze-task-groups").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_library_task_contract_router(&paths);
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -399,7 +407,7 @@ async fn router_api_library_metadata_refresh_leaves_series_local_artwork_ungroup
     let paths = new_router_fixture("router-api-library-metadata-refresh-task-shape").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_library_task_contract_router(&paths);
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -455,7 +463,7 @@ async fn router_api_library_empty_trash_enqueues_ungrouped_task() {
     let paths = new_router_fixture("router-api-library-empty-trash-task-shape").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_library_task_contract_router(&paths);
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

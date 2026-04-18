@@ -86,7 +86,11 @@ async fn router_book_file_delete_enqueues_delete_book_even_when_book_is_missing(
     let paths = new_router_fixture("router-book-file-delete-missing-book").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    // This contract inspects the queued TASK row itself, so runtime workers must stay off or the
+    // background consumer can claim and delete the missing-book delete task before verification.
+    let app = komga_server::app::build_router_without_runtime_workers_for_contract(
+        &runtime_config_for_paths(&paths),
+    );
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
