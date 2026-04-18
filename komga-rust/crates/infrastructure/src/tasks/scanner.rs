@@ -8,6 +8,7 @@ use serde_json::json;
 use sqlx::{Row, SqlitePool};
 
 use super::cleanup_workflow::compare_book_names_kotlin_like;
+use crate::persisted_paths::{resolve_rooted_path, resolve_stored_path};
 use crate::sqlite::connect_pool;
 
 #[derive(Clone, Debug)]
@@ -318,10 +319,18 @@ pub(crate) fn scan_library(
         .as_ref()
         .map(|value| value.to_ascii_lowercase());
 
-    let root = PathBuf::from(&scan_config.root);
+    let root = resolve_stored_path(&scan_config.root);
     if !root.exists() {
         return Ok(unavailable_scanned_library());
     }
+    let existing_books_by_url = existing_books_by_url
+        .into_iter()
+        .map(|(url, row)| (scanner_url_key(root.as_path(), &url), row))
+        .collect::<HashMap<_, _>>();
+    let existing_series_by_url = existing_series_by_url
+        .into_iter()
+        .map(|(url, row)| (scanner_url_key(root.as_path(), &url), row))
+        .collect::<HashMap<_, _>>();
 
     let mut discovered = Vec::new();
     collect_series_directories(
@@ -370,6 +379,7 @@ pub(crate) fn scan_library(
             if is_supported_book_file(path.as_path(), &scan_config) {
                 let book_id = route_safe_scanner_id("book", path.as_path());
                 let book_url = path.to_string_lossy().to_string();
+                let book_url_key = scanner_url_key(root.as_path(), &book_url);
                 let file_last_modified_unix_seconds = metadata_updated_unix_seconds(&metadata);
                 let book_name = path
                     .file_stem()
@@ -382,11 +392,11 @@ pub(crate) fn scan_library(
                     .unwrap_or_default()
                     .to_string();
 
-                if let Some(existing) = existing_books_by_url.get(&book_url)
+                if let Some(existing) = existing_books_by_url.get(&book_url_key)
                     && existing.file_last_modified_unix_seconds != file_last_modified_unix_seconds
                 {
                     let candidate_series_id = if series_is_oneshot {
-                        resolve_oneshot_series_id(&existing_books_by_url, &book_url)
+                        resolve_oneshot_series_id(&existing_books_by_url, root.as_path(), &book_url)
                     } else {
                         regular_series_id.clone()
                     };
@@ -428,7 +438,7 @@ pub(crate) fn scan_library(
             series_dir_last_modified_unix_seconds
         };
         let series_changed = existing_series_by_url
-            .get(&series_url)
+            .get(&scanner_url_key(root.as_path(), &series_url))
             .is_some_and(|existing| {
                 existing.file_last_modified_unix_seconds != series_last_modified_unix_seconds
             });
@@ -442,7 +452,11 @@ pub(crate) fn scan_library(
 
         if series_is_oneshot {
             for book in &books {
-                let series_id = resolve_oneshot_series_id(&existing_books_by_url, &book.book_url);
+                let series_id = resolve_oneshot_series_id(
+                    &existing_books_by_url,
+                    root.as_path(),
+                    &book.book_url,
+                );
                 discovered_series_ids.insert(series_id.clone());
                 series_rows.push(ScannedSeriesRow {
                     series_id,
@@ -1287,12 +1301,22 @@ fn is_library_path_excluded(path: &Path, root: &Path, exclusions: &[String]) -> 
 
 fn resolve_oneshot_series_id(
     existing_books_by_url: &HashMap<String, ExistingScannedBookRow>,
+    library_root: &Path,
     book_url: &str,
 ) -> String {
     existing_books_by_url
-        .get(book_url)
+        .get(&scanner_url_key(library_root, book_url))
         .map(|existing| existing.series_id.clone())
-        .unwrap_or_else(|| route_safe_scanner_id("series", PathBuf::from(book_url).as_path()))
+        .unwrap_or_else(|| {
+            let resolved_path = resolve_rooted_path(library_root, book_url);
+            route_safe_scanner_id("series", resolved_path.as_path())
+        })
+}
+
+fn scanner_url_key(library_root: &Path, stored_url: &str) -> String {
+    resolve_rooted_path(library_root, stored_url)
+        .to_string_lossy()
+        .to_string()
 }
 
 fn route_safe_scanner_id(prefix: &str, path: &Path) -> String {

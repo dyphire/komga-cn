@@ -2,6 +2,7 @@ use std::path::Path;
 
 use sqlx::{Row, Sqlite, Transaction};
 
+use crate::persisted_paths::resolve_stored_path;
 use crate::sql::content_libraries::DELETE_LIBRARY_DEPENDENCY_SQL;
 use crate::sqlite::connect_pool;
 
@@ -178,7 +179,7 @@ pub async fn validate_library_before_persist(
     database_file: &Path,
     library: &PersistedLibraryWriteModel,
 ) -> Result<(), String> {
-    let root_path = Path::new(&library.root);
+    let root_path = resolve_stored_path(&library.root);
     if !root_path.exists() {
         return Err("library root does not exist".to_string());
     }
@@ -531,7 +532,8 @@ fn map_persisted_library_row(row: sqlx::sqlite::SqliteRow) -> PersistedLibraryWr
 }
 
 fn normalize_library_root(root: &str) -> String {
-    root.trim()
+    resolve_stored_path(root.trim())
+        .to_string_lossy()
         .replace('\\', "/")
         .trim_end_matches('/')
         .to_string()

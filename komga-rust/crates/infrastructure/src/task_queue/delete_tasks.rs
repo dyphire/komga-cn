@@ -50,12 +50,15 @@ fn delete_book(runtime: &RuntimeConfig, book_id: &str) -> Result<(), TaskExecuti
         return Ok(());
     };
 
-    if !deletion_prerequisites_met(&work.book_path)
-        || !empty_parent_directory_cleanup_prerequisites_met(
-            &work.book_path,
-            &work.sidecar_thumbnail_paths,
-        )
-    {
+    // Delete tasks must still reconcile database state when the target file already vanished
+    // before the worker runs; only existing paths should block on writability checks.
+    if work.book_path.exists() && !deletion_prerequisites_met(&work.book_path) {
+        return Ok(());
+    }
+    if !empty_parent_directory_cleanup_prerequisites_met(
+        &work.book_path,
+        &work.sidecar_thumbnail_paths,
+    ) {
         return Ok(());
     }
 
@@ -91,6 +94,9 @@ fn empty_parent_directory_cleanup_prerequisites_met(
     let Some(parent_directory) = target_path.parent() else {
         return true;
     };
+    if !parent_directory.exists() {
+        return true;
+    }
     let Ok(entries) = fs::read_dir(parent_directory) else {
         return false;
     };
@@ -179,7 +185,7 @@ pub(super) fn delete_series(
     let Some(series_path) = &work.series_path else {
         return Ok(());
     };
-    if !deletion_prerequisites_met(series_path) {
+    if series_path.exists() && !deletion_prerequisites_met(series_path) {
         return Ok(());
     }
 

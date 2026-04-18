@@ -231,9 +231,12 @@ fn disk_space_details(path: &Path) -> Option<DiskSpaceDetails> {
         return None;
     }
     let stats = unsafe { stats.assume_init() };
+    #[allow(clippy::useless_conversion)]
     let fragment_size = u64::from(stats.f_frsize);
     Some(DiskSpaceDetails {
+        #[allow(clippy::useless_conversion)]
         total: u64::from(stats.f_blocks).saturating_mul(fragment_size),
+        #[allow(clippy::useless_conversion)]
         free: u64::from(stats.f_bavail).saturating_mul(fragment_size),
         path: path.to_string_lossy().to_string(),
     })

@@ -386,10 +386,9 @@ mod tests {
             .collect()
     }
 
-    fn analyzed_fixture_page_count(file_name: &str, book_url: &str) -> i64 {
+    fn analyzed_fixture_page_count(file_name: &str, _book_url: &str) -> i64 {
         super::super::media_helpers::analyze_book_media_file(
             &archive_fixture_path(file_name),
-            book_url,
             false,
         )
         .expect("analyze-book fixture should be analyzable")

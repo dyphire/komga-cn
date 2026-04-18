@@ -601,8 +601,8 @@ async fn runtime_delete_book_oneshot_deletes_every_book_in_the_series() {
 }
 
 #[tokio::test]
-async fn runtime_delete_book_skips_soft_delete_when_book_file_is_missing() {
-    let paths = new_router_fixture("runtime-delete-book-missing-file-no-staging").await;
+async fn runtime_delete_book_soft_deletes_rows_when_book_file_is_already_missing() {
+    let paths = new_router_fixture("runtime-delete-book-missing-file-soft-delete").await;
     seed_router_contract_data(&paths).await;
 
     let delete_dir = paths.config_dir.join("delete-book-missing");
@@ -657,8 +657,12 @@ async fn runtime_delete_book_skips_soft_delete_when_book_file_is_missing() {
         "delete-book missing-file fixture intentionally keeps the main file absent"
     );
     assert!(
-        sidecar_thumbnail.exists(),
-        "delete-book missing-file should not delete sidecar thumbnails when the main file precondition fails"
+        !sidecar_thumbnail.exists(),
+        "delete-book missing-file should still delete sidecar thumbnails while soft-deleting the book"
+    );
+    assert!(
+        !delete_dir.exists(),
+        "delete-book missing-file should still remove the now-empty parent directory"
     );
 
     let verify_pool = connect_pool(paths.main_db.as_path(), 1)
@@ -684,14 +688,20 @@ async fn runtime_delete_book_skips_soft_delete_when_book_file_is_missing() {
             .await
             .expect("read progress rows should be queryable after missing-file delete attempt")
             .get::<i64, _>("COUNT");
+    let series_row = sqlx::query("SELECT BOOK_COUNT FROM SERIES WHERE ID = ? LIMIT 1")
+        .bind("series-1")
+        .fetch_one(&verify_pool)
+        .await
+        .expect("series row should be queryable after missing-file delete attempt");
     verify_pool.close().await;
 
     assert!(
-        book_deleted.is_none(),
-        "delete-book missing-file should not soft-delete the book when filesystem preconditions fail",
+        book_deleted.is_some(),
+        "delete-book missing-file should still soft-delete the book when the file is already gone",
     );
     assert_eq!(thumbnail_count, 2);
     assert_eq!(read_progress_count, 1);
+    assert_eq!(series_row.get::<i64, _>("BOOK_COUNT"), 0);
 
     cleanup_router_fixture(paths);
 }

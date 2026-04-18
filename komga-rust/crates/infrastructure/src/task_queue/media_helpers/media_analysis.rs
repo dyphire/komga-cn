@@ -40,10 +40,9 @@ pub(in crate::task_queue) struct BookMediaAnalysis {
 
 pub(in crate::task_queue) fn analyze_book_media_file(
     file_path: &PathBuf,
-    book_url: &str,
     analyze_dimensions: bool,
 ) -> Result<BookMediaAnalysis, String> {
-    let media_type = match media_type_from_path(book_url).as_str() {
+    let media_type = match media_type_from_path(file_path.to_string_lossy().as_ref()).as_str() {
         "application/vnd.comicbook-rar" => detect_rar_media_type(file_path).to_string(),
         other => other.to_string(),
     };
@@ -321,7 +320,7 @@ mod tests {
         ));
         fs::write(&fixture_path, b"not a real pdf").expect("invalid pdf fixture should be written");
 
-        let analysis = analyze_book_media_file(&fixture_path, "broken.pdf", false)
+        let analysis = analyze_book_media_file(&fixture_path, false)
             .expect("invalid pdf analysis should not raise runtime error");
 
         assert_eq!(analysis.status, "ERROR");
@@ -335,7 +334,7 @@ mod tests {
         let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../komga/src/test/resources/archives/rar4.rar");
 
-        let analysis = analyze_book_media_file(&fixture_path, "archives/rar4.cbr", false)
+        let analysis = analyze_book_media_file(&fixture_path, false)
             .expect("rar4 fixture analysis should succeed");
 
         assert_eq!(analysis.status, "READY");

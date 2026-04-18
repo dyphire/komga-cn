@@ -702,7 +702,8 @@ pub fn load_books_for_extension_repair(
                     let media_type = row.get::<String, _>("MEDIA_TYPE");
                     let expected_extension = expected_extension_for_extension_repair(&media_type)?;
                     let book_url = row.get::<String, _>("BOOK_URL");
-                    let current_extension = PathBuf::from(&book_url)
+                    let library_root = row.get::<String, _>("LIBRARY_ROOT");
+                    let current_extension = resolve_library_item_path(&library_root, &book_url)
                         .extension()
                         .and_then(|value| value.to_str())
                         .map(|value| value.to_ascii_lowercase())
@@ -713,7 +714,7 @@ pub fn load_books_for_extension_repair(
                             series_id: row.get::<String, _>("SERIES_ID"),
                             library_id: row.get::<String, _>("LIBRARY_ID"),
                             book_url,
-                            library_root: row.get::<String, _>("LIBRARY_ROOT"),
+                            library_root,
                             media_type,
                         }
                     })
