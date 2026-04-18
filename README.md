@@ -1,4 +1,4 @@
-[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/huihuimoe/komga-riir/tests.yml?branch=master)](https://github.com/huihuimoe/komga-riir/actions?query=workflow%3ATests+branch%3Amaster)
+[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/huihuimoe/komga-riir/tests.yml?branch=riir)](https://github.com/huihuimoe/komga-riir/actions?query=workflow%3ATests+branch%3Ariir)
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/huihuimoe/komga-riir?color=blue&label=download&sort=semver)](https://github.com/huihuimoe/komga-riir/releases) [![GitHub all releases](https://img.shields.io/github/downloads/huihuimoe/komga-riir/total?color=blue&label=github%20downloads)](https://github.com/huihuimoe/komga-riir/releases)
 
 [![Translation status](https://hosted.weblate.org/widgets/komga/-/webui/svg-badge.svg)](https://hosted.weblate.org/engage/komga/)

@@ -185,7 +185,10 @@ pub(super) fn delete_series(
     let Some(series_path) = &work.series_path else {
         return Ok(());
     };
-    if series_path.exists() && !deletion_prerequisites_met(series_path) {
+    // A delete-series task promises to remove the series directory itself. If that directory is
+    // already missing or cannot be deleted safely, abort before cascading into child soft-deletes
+    // so the database never drifts ahead of the filesystem preconditions.
+    if !deletion_prerequisites_met(series_path) {
         return Ok(());
     }
 
