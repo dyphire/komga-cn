@@ -473,10 +473,9 @@ async fn router_collection_thumbnail_select_returns_not_found_when_path_collecti
 }
 
 #[tokio::test]
-async fn router_collection_thumbnail_select_returns_accepted_when_thumbnail_is_missing_but_collection_exists(
-) {
-    let paths =
-        new_router_fixture("router-collection-thumbnail-select-missing-thumbnail").await;
+async fn router_collection_thumbnail_select_returns_accepted_when_thumbnail_is_missing_but_collection_exists()
+ {
+    let paths = new_router_fixture("router-collection-thumbnail-select-missing-thumbnail").await;
     seed_router_contract_data(&paths).await;
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
@@ -538,7 +537,7 @@ async fn router_collection_delete_removes_persisted_thumbnails() {
         .expect("collection delete request should complete");
     assert_eq!(delete.status(), StatusCode::NO_CONTENT);
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for collection thumbnail verification");
     let remaining =

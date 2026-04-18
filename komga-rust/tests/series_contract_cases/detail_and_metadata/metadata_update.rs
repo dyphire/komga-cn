@@ -379,7 +379,7 @@ async fn router_discovery_series_metadata_update_clamps_legacy_numeric_values_to
         new_router_fixture("router-discovery-series-metadata-clamps-legacy-numeric-values").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("legacy numeric parity db should open");
     sqlx::query(

@@ -6,7 +6,7 @@ pub async fn load_persisted_author_names(
     search: &str,
     authorized_library_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open author names db: {error}"))?;
 
@@ -51,7 +51,7 @@ pub async fn load_persisted_author_roles(
     database_file: &FsPath,
     authorized_library_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open author roles db: {error}"))?;
 
@@ -103,7 +103,7 @@ pub async fn load_persisted_authors_by_scope(
     scope: &AuthorsScope,
     authorized_library_ids: Option<&[String]>,
 ) -> Result<Vec<AuthorEntry>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open v2 authors db: {error}"))?;
 

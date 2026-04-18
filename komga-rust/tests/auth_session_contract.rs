@@ -1,7 +1,7 @@
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use komga_contract_testkit::contract_matrix::assert_required_target_declared;
-use komga_infrastructure::sqlite::connect_pool;
+use komga_infrastructure::sqlite::connect_test_pool;
 use komga_server::app::build_router_with_config;
 use serde_json::{Value, json};
 use sqlx::Row;
@@ -80,7 +80,7 @@ async fn self_password_change_keeps_session_but_invalidates_old_remember_me() {
 }
 
 async fn seed_syncpoint_user(paths: &RuntimeDbPaths, user_id: &str, email: &str) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("syncpoint user db should open");
 
@@ -104,7 +104,7 @@ async fn seed_global_client_setting(
     value: &str,
     allow_unauthorized: bool,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("global client settings db should open");
 
@@ -122,7 +122,7 @@ async fn seed_global_client_setting(
 }
 
 async fn load_announcement_read_ids_for_user(paths: &RuntimeDbPaths, user_id: &str) -> Vec<String> {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("announcements read query db should open");
 
@@ -156,7 +156,7 @@ fn auth_session_runtime_env_lock() -> &'static AsyncMutex<()> {
 }
 
 async fn seed_announcement_read_ids(paths: &RuntimeDbPaths, user_id: &str, ids: &[&str]) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("announcements seed db should open");
 
@@ -173,7 +173,7 @@ async fn seed_announcement_read_ids(paths: &RuntimeDbPaths, user_id: &str, ids: 
 }
 
 async fn seed_syncpoints(paths: &RuntimeDbPaths, rows: &[(&str, &str, Option<&str>)]) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("syncpoint db should open");
 
@@ -191,7 +191,7 @@ async fn seed_syncpoints(paths: &RuntimeDbPaths, rows: &[(&str, &str, Option<&st
 }
 
 async fn seed_syncpoint_children(paths: &RuntimeDbPaths, sync_point_id: &str) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("syncpoint child db should open");
 
@@ -249,7 +249,7 @@ async fn seed_syncpoint_children(paths: &RuntimeDbPaths, sync_point_id: &str) {
 }
 
 async fn load_syncpoint_child_counts(paths: &RuntimeDbPaths, sync_point_id: &str) -> [i64; 5] {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("syncpoint child count db should open");
 
@@ -281,7 +281,7 @@ async fn load_syncpoint_child_count(
 }
 
 async fn load_syncpoint_ids(paths: &RuntimeDbPaths) -> Vec<String> {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("syncpoint query db should open");
 

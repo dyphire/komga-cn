@@ -5,7 +5,7 @@ use komga_application::task_processing::TaskRuntimeContext;
 use sqlx::SqlitePool;
 
 use crate::sqlite::{
-    connect_persistence_context, connect_tasks_pool, evict_shared_pools_for_paths,
+    connect_main_write_context, connect_write_pool, evict_shared_pools_for_paths, setup,
 };
 
 pub(crate) struct RuntimeTestFixture {
@@ -26,7 +26,7 @@ impl RuntimeTestFixture {
     }
 
     pub(crate) async fn main_pool(&self) -> SqlitePool {
-        connect_persistence_context(&self.database_file, 1)
+        connect_main_write_context(&self.database_file)
             .await
             .expect("runtime test main db should bootstrap")
             .pool()
@@ -34,9 +34,13 @@ impl RuntimeTestFixture {
     }
 
     pub(crate) async fn tasks_pool(&self) -> SqlitePool {
-        connect_tasks_pool(&self.tasks_db_file, 1)
+        let pool = connect_write_pool(&self.tasks_db_file)
             .await
-            .expect("runtime test tasks db should bootstrap")
+            .expect("runtime test tasks db should open");
+        setup::bootstrap_tasks_pool(&pool)
+            .await
+            .expect("runtime test tasks db should bootstrap");
+        pool
     }
 
     pub(crate) fn runtime_context(

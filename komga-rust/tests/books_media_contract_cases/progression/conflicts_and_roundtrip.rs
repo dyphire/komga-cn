@@ -5,7 +5,7 @@ async fn router_book_progression_put_returns_conflict_for_older_progression() {
     let paths = new_router_fixture("router-book-progression-put-conflict").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for progression conflict seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -92,7 +92,7 @@ async fn router_book_progression_put_returns_conflict_for_same_modified_retry() 
     let paths = new_router_fixture("router-book-progression-put-same-modified-conflict").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for same-modified retry seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -172,7 +172,7 @@ async fn router_book_progression_put_persists_modified_device_and_locator() {
 
     let extension_blob = fixture_epub_positions_extension_blob();
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for progression full-payload seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -244,7 +244,7 @@ async fn router_book_progression_put_roundtrips_on_opds_v2_route() {
     let paths = new_router_fixture("router-book-progression-opds-v2-roundtrip").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for opds progression seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")

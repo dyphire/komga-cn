@@ -244,7 +244,7 @@ async fn router_opds_v2_collections_include_kotlin_paging_metadata_and_links() {
     let paths = new_router_fixture("router-opds-v2-collections-paging-metadata").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v2 collections paging db should open");
     sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
@@ -296,7 +296,9 @@ async fn router_opds_v2_collections_include_kotlin_paging_metadata_and_links() {
 
         assert_eq!(response.status(), StatusCode::OK, "route: {route}");
         let payload = response_json(response).await;
-        let metadata = payload.get("metadata").expect("collections metadata should be present");
+        let metadata = payload
+            .get("metadata")
+            .expect("collections metadata should be present");
         assert_eq!(
             metadata.get("itemsPerPage").and_then(Value::as_u64),
             Some(1),
@@ -503,7 +505,7 @@ async fn router_opds_v2_collection_returns_not_found_for_missing_or_out_of_scope
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v2 collection scope db should open");
     sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
@@ -763,7 +765,7 @@ async fn router_opds_v2_series_uses_kotlin_shape_tag_filter_and_facets() {
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v2 series detail db should open");
     sqlx::query("UPDATE SERIES_METADATA SET SUMMARY = ? WHERE SERIES_ID = ?")
@@ -948,7 +950,7 @@ async fn router_opds_v2_series_facets_keep_tags_from_non_ready_books() {
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v2 series hidden-tag db should open");
     sqlx::query("UPDATE MEDIA SET STATUS = ? WHERE BOOK_ID = ?")

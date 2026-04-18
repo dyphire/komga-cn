@@ -156,7 +156,7 @@ pub(super) fn try_execute(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sqlite::connect_pool;
+    use crate::sqlite::connect_test_pool;
     use crate::task_queue::test_support::RuntimeTestFixture;
     use komga_application::task_processing::TaskQueueAdminPort;
     use komga_application::task_processing::TaskRuntimeContext;
@@ -322,16 +322,16 @@ mod tests {
             VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?, NULL)
             "#,
         )
-            .bind("book-1")
-            .bind("book-1")
-            .bind("books/book-1.cbz")
-            .bind("library-1")
-            .bind("series-1")
-            .bind(0_i64)
-            .bind(0_i64)
-            .execute(&pool)
-            .await
-            .expect("book row should be inserted for missing page hash finder fixture");
+        .bind("book-1")
+        .bind("book-1")
+        .bind("books/book-1.cbz")
+        .bind("library-1")
+        .bind("series-1")
+        .bind(0_i64)
+        .bind(0_i64)
+        .execute(&pool)
+        .await
+        .expect("book row should be inserted for missing page hash finder fixture");
         sqlx::query(
             "INSERT INTO MEDIA_PAGE (FILE_NAME, MEDIA_TYPE, NUMBER, BOOK_ID, FILE_HASH) VALUES (?, ?, ?, ?, ?)",
         )
@@ -407,16 +407,16 @@ mod tests {
             VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?, NULL)
             "#,
         )
-            .bind("book-1")
-            .bind("book-1")
-            .bind("books/book-1.cbz")
-            .bind("library-1")
-            .bind("series-1")
-            .bind(0_i64)
-            .bind(0_i64)
-            .execute(&pool)
-            .await
-            .expect("book row should be inserted for disabled page-hash fixture");
+        .bind("book-1")
+        .bind("book-1")
+        .bind("books/book-1.cbz")
+        .bind("library-1")
+        .bind("series-1")
+        .bind(0_i64)
+        .bind(0_i64)
+        .execute(&pool)
+        .await
+        .expect("book row should be inserted for disabled page-hash fixture");
         sqlx::query(
             "INSERT INTO MEDIA_PAGE (FILE_NAME, MEDIA_TYPE, NUMBER, BOOK_ID, FILE_HASH) VALUES (?, ?, ?, ?, ?)",
         )
@@ -607,7 +607,7 @@ mod tests {
         assert_eq!(generated.id, "GENERATE_BOOK_THUMBNAIL_book-1");
         assert_eq!(generated.simple_type, "GENERATE_BOOK_THUMBNAIL");
 
-        let verify_pool = connect_pool(fixture.database_file.as_path(), 1)
+        let verify_pool = connect_test_pool(fixture.database_file.as_path(), 1)
             .await
             .expect("remove-hashed-pages verify db should open");
         let remaining_pages = sqlx::query(

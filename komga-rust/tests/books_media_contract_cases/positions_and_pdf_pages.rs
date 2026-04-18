@@ -5,7 +5,7 @@ async fn router_book_pages_single_image_fallback_includes_dimensions() {
     let paths = new_router_fixture("router-book-pages-single-image-dimensions").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for single-image page fixture");
     sqlx::query(
@@ -92,7 +92,7 @@ async fn router_book_positions_follow_direct_basic_auth_and_book_visibility() {
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for basic-auth positions seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -155,7 +155,7 @@ async fn router_book_raw_page_returns_bad_request_with_message_for_non_pdf_media
     let paths = new_router_fixture("router-book-raw-page-single-image").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for single-image raw fixture");
     sqlx::query(
@@ -234,7 +234,7 @@ async fn router_book_raw_page_returns_bad_request_for_non_pdf_media_even_when_no
     let paths = new_router_fixture("router-book-raw-page-single-image-not-ready").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for single-image raw not-ready fixture");
     sqlx::query(
@@ -313,7 +313,7 @@ async fn router_book_raw_page_returns_bad_request_for_non_pdf_media_before_missi
     let paths = new_router_fixture("router-book-raw-page-single-image-file-missing").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for single-image raw missing-file fixture");
     sqlx::query(
@@ -579,7 +579,7 @@ async fn router_book_progression_get_returns_full_r2_progression_shape() {
         "koboSpan": "kobo-span-2"
     });
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for progression shape seed");
     sqlx::query(
@@ -660,7 +660,7 @@ async fn router_book_positions_returns_epub_extension_positions_and_supports_not
     ]);
     let extension_blob = fixture_epub_positions_extension_blob();
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for epub extension positions seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")

@@ -47,7 +47,7 @@ async fn runtime_blocks_import_book_when_main_database_is_external_owned() {
         .process_available(&runtime)
         .expect("blocked main-database import should still drain cleanly");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for import verification");
     let historical_events =
@@ -58,7 +58,7 @@ async fn runtime_blocks_import_book_when_main_database_is_external_owned() {
             .get::<i64, _>("COUNT");
     verify_pool.close().await;
 
-    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for blocked import follow-up verification");
     let analyze_follow_ups =
@@ -100,7 +100,7 @@ async fn runtime_blocks_extension_repair_when_main_database_is_external_owned() 
     std::fs::write(&source_path, b"repair-extension-fixture")
         .expect("book file should be written for extension-repair fixture");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for extension-repair fixture setup");
     sqlx::query("UPDATE LIBRARY SET REPAIR_EXTENSIONS = 1 WHERE ID = ?")
@@ -161,7 +161,7 @@ async fn runtime_blocks_extension_repair_when_main_database_is_external_owned() 
         .process_available(&runtime)
         .expect("blocked main-database extension repair should still drain cleanly");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for extension-repair verification");
     let url = sqlx::query("SELECT URL FROM BOOK WHERE ID = ? LIMIT 1")
@@ -192,7 +192,7 @@ async fn runtime_blocks_extension_repair_when_main_database_is_external_owned() 
 async fn runtime_blocks_find_books_to_convert_when_main_database_is_external_owned() {
     let paths = new_router_fixture("runtime-blocked-main-database-find-books-to-convert").await;
     seed_router_contract_data(&paths).await;
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for find-books-to-convert fixture setup");
     sqlx::query("UPDATE LIBRARY SET CONVERT_TO_CBZ = 1 WHERE ID = ?")
@@ -232,11 +232,14 @@ async fn runtime_blocks_find_books_to_convert_when_main_database_is_external_own
         ..runtime_task_context(&paths)
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(TaskQueueRecord::new(
-        "FIND_BOOKS_TO_CONVERT_library-1",
-        1_000,
-        Some("library-1".to_string()),
-    ).with_simple_type("FIND_BOOKS_TO_CONVERT"));
+    scheduler.enqueue(
+        TaskQueueRecord::new(
+            "FIND_BOOKS_TO_CONVERT_library-1",
+            1_000,
+            Some("library-1".to_string()),
+        )
+        .with_simple_type("FIND_BOOKS_TO_CONVERT"),
+    );
     let processed = scheduler
         .process_available(&runtime)
         .expect("blocked main-database find-books-to-convert should still drain cleanly");

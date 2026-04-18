@@ -21,7 +21,7 @@ use sqlx::Row;
 
 use super::session_store::RememberMeRuntimeSettings;
 use super::session_store::session_token_store;
-use crate::sqlite::connect_pool;
+use crate::sqlite::{connect_read_pool, connect_write_pool};
 
 static API_KEY_NONCE: AtomicU64 = AtomicU64::new(0);
 
@@ -153,7 +153,7 @@ pub async fn persisted_api_key_user_by_token(
 
     let mut users = open_persisted_users(database_file).await?;
     let api_key_hash = sha512_hex(api_key);
-    let pool = match connect_pool(database_file, 1).await {
+    let pool = match connect_read_pool(database_file).await {
         Ok(pool) => pool,
         Err(_) => return None,
     };
@@ -188,7 +188,7 @@ pub async fn persisted_api_key_metadata(
 
     let api_key = api_key_header_value(headers)?;
     let api_key_hash = sha512_hex(&api_key);
-    let pool = connect_pool(database_file, 1).await.ok()?;
+    let pool = connect_read_pool(database_file).await.ok()?;
     let row = sqlx::query("SELECT ID, COMMENT FROM USER_API_KEY WHERE API_KEY = ? LIMIT 1")
         .bind(api_key_hash)
         .fetch_optional(&pool)
@@ -215,7 +215,7 @@ pub async fn persisted_update_password_by_user_id(
     }
 
     let hashed_password = hash_bcrypt_password(password, DEFAULT_COST).ok()?;
-    let pool = connect_pool(database_file, 1).await.ok()?;
+    let pool = connect_write_pool(database_file).await.ok()?;
     let update = sqlx::query("UPDATE USER SET PASSWORD = ? WHERE ID = ?")
         .bind(hashed_password)
         .bind(user_id)
@@ -241,7 +241,7 @@ pub async fn persisted_create_api_key(
     if normalized_comment.is_empty() {
         return None;
     }
-    let pool = connect_pool(database_file, 1).await.ok()?;
+    let pool = connect_write_pool(database_file).await.ok()?;
 
     let insert =
         sqlx::query("INSERT INTO USER_API_KEY (ID, USER_ID, API_KEY, COMMENT) VALUES (?, ?, ?, ?)")
@@ -289,7 +289,7 @@ pub async fn persisted_api_key_comment_exists(
         return Some(false);
     }
 
-    let pool = connect_pool(database_file, 1).await.ok()?;
+    let pool = connect_read_pool(database_file).await.ok()?;
     let row = sqlx::query(
         "SELECT 1 FROM USER_API_KEY WHERE USER_ID = ? AND LOWER(COMMENT) = LOWER(?) LIMIT 1",
     )
@@ -310,7 +310,7 @@ pub async fn persisted_list_api_keys(
         return None;
     }
 
-    let pool = connect_pool(database_file, 1).await.ok()?;
+    let pool = connect_read_pool(database_file).await.ok()?;
     let rows = sqlx::query(
         "SELECT ID, USER_ID, COMMENT, CREATED_DATE, LAST_MODIFIED_DATE FROM USER_API_KEY WHERE USER_ID = ? ORDER BY CREATED_DATE DESC, ID DESC",
     )
@@ -342,7 +342,7 @@ pub async fn persisted_delete_api_key_by_id(
         return None;
     }
 
-    let pool = connect_pool(database_file, 1).await.ok()?;
+    let pool = connect_write_pool(database_file).await.ok()?;
     let delete = sqlx::query("DELETE FROM USER_API_KEY WHERE ID = ? AND USER_ID = ?")
         .bind(api_key_id)
         .bind(user_id)
@@ -360,7 +360,7 @@ pub async fn persisted_list_authentication_activity(
         return None;
     }
 
-    let pool = connect_pool(database_file, 1).await.ok()?;
+    let pool = connect_read_pool(database_file).await.ok()?;
     let rows = if let Some(user_id) = user_id {
         sqlx::query(
             r#"
@@ -429,7 +429,7 @@ pub async fn persisted_cleanup_authentication_activity(database_file: &Path) -> 
         return Some(0);
     }
 
-    let pool = connect_pool(database_file, 1).await.ok()?;
+    let pool = connect_write_pool(database_file).await.ok()?;
     let deleted = sqlx::query(
         "DELETE FROM AUTHENTICATION_ACTIVITY WHERE datetime(DATE_TIME) < datetime('now', '-1 month')",
     )
@@ -448,7 +448,7 @@ pub async fn persisted_latest_authentication_activity_by_user_and_api_key(
         return None;
     }
 
-    let pool = connect_pool(database_file, 1).await.ok()?;
+    let pool = connect_read_pool(database_file).await.ok()?;
     let row = sqlx::query(
         r#"
         SELECT
@@ -503,7 +503,7 @@ pub async fn persisted_record_successful_authentication_activity(
         return None;
     }
 
-    let pool = connect_pool(database_file, 1).await.ok()?;
+    let pool = connect_write_pool(database_file).await.ok()?;
     let insert_with_user_id = sqlx::query(
         r#"
         INSERT INTO AUTHENTICATION_ACTIVITY (
@@ -584,7 +584,7 @@ pub async fn persisted_record_failed_authentication_activity(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    let pool = connect_pool(database_file, 1).await.ok()?;
+    let pool = connect_write_pool(database_file).await.ok()?;
     let user_id = if let Some(email) = normalized_email.as_deref() {
         sqlx::query("SELECT ID FROM USER WHERE lower(EMAIL) = lower(?) LIMIT 1")
             .bind(email)
@@ -659,7 +659,7 @@ pub async fn ensure_oauth_user(
     let password_hash = hash_bcrypt_password(generated_password.as_str(), DEFAULT_COST)
         .unwrap_or_else(|_| "oauth2-disabled-password".to_string());
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_write_pool(database_file).await?;
     let insert_result = sqlx::query(
         "INSERT OR IGNORE INTO USER (ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES) VALUES (?, ?, ?, ?)",
     )
@@ -697,7 +697,7 @@ pub async fn ensure_oauth_user(
 }
 
 pub async fn open_auth_pool(database_file: &Path) -> Result<sqlx::SqlitePool, sqlx::Error> {
-    connect_pool(database_file, 1).await
+    connect_read_pool(database_file).await
 }
 
 fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
@@ -760,7 +760,7 @@ async fn open_persisted_users(database_file: &Path) -> Option<Vec<AuthUser>> {
         return None;
     }
 
-    let pool = connect_pool(database_file, 1).await.ok()?;
+    let pool = connect_read_pool(database_file).await.ok()?;
     let user_rows = sqlx::query(
         "SELECT ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES, AGE_RESTRICTION, AGE_RESTRICTION_ALLOW_ONLY FROM USER ORDER BY EMAIL",
     )

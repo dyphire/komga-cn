@@ -1,22 +1,36 @@
 use std::path::PathBuf;
 
 use crate::search::index_lifecycle::SearchFieldEntry;
-use crate::sqlite::connect_pool;
+use crate::sqlite::{connect_private_task_pool, connect_private_write_pool};
 
 pub(super) type BoxFuture<T> =
     std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, String>> + Send>>;
 
-pub(super) fn run_database_query<T>(
+pub(super) fn run_task_database_query<T>(
     database_file: PathBuf,
     operation: impl FnOnce(sqlx::SqlitePool) -> BoxFuture<T> + Send + 'static,
 ) -> Result<T, String>
 where
     T: Send + 'static,
 {
-    run_database_query_with_max_connections(database_file, 1, operation)
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| format!("failed to build task runtime: {error}"))?;
+
+        runtime.block_on(async move {
+            let pool = connect_private_write_pool(&database_file)
+                .await
+                .map_err(|error| format!("failed to open private sqlite write pool: {error}"))?;
+            operation(pool).await
+        })
+    })
+    .join()
+    .map_err(|_| "database operation worker thread panicked".to_string())?
 }
 
-pub(super) fn run_database_query_with_max_connections<T>(
+pub(super) fn run_task_database_query_with_max_connections<T>(
     database_file: PathBuf,
     max_connections: u32,
     operation: impl FnOnce(sqlx::SqlitePool) -> BoxFuture<T> + Send + 'static,
@@ -31,9 +45,9 @@ where
             .map_err(|error| format!("failed to build task runtime: {error}"))?;
 
         runtime.block_on(async move {
-            let pool = connect_pool(&database_file, max_connections)
+            let pool = connect_private_task_pool(&database_file, max_connections)
                 .await
-                .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
+                .map_err(|error| format!("failed to open private sqlite task pool: {error}"))?;
             operation(pool).await
         })
     })

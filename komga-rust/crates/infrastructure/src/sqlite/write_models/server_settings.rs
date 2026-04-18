@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use sqlx::Row;
 
 use crate::context::SqlitePersistenceContext;
-use crate::sqlite::connect_persistence_context;
+use crate::sqlite::connect_main_write_context;
 
 #[derive(Clone)]
 pub struct ServerSettingsStore {
@@ -33,7 +33,7 @@ impl ServerSettingsStore {
     async fn context(&self) -> Result<SqlitePersistenceContext, sqlx::Error> {
         match &self.backend {
             StoreBackend::DatabaseFile(database_file) => {
-                connect_persistence_context(database_file, 1).await
+                connect_main_write_context(database_file).await
             }
             StoreBackend::Context(context) => Ok(context.clone()),
         }

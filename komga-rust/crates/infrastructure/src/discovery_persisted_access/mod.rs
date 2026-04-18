@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path as FsPath;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_read_pool;
 use sqlx::{QueryBuilder, Row, Sqlite};
 
 pub mod authors;

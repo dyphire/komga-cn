@@ -9,7 +9,7 @@ fn build_library_task_contract_router(paths: &RuntimeDbPaths) -> axum::Router {
 }
 
 async fn count_query_rows(paths: &RuntimeDbPaths, sql: &str, bind: &str) -> i64 {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("count query db should open");
     let count = sqlx::query(sql)
@@ -23,7 +23,7 @@ async fn count_query_rows(paths: &RuntimeDbPaths, sql: &str, bind: &str) -> i64 
 }
 
 async fn load_task_rows(paths: &RuntimeDbPaths, sql: &str) -> Vec<sqlx::sqlite::SqliteRow> {
-    let pool = connect_pool(paths.tasks_db.as_path(), 1)
+    let pool = connect_test_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open");
     let rows = sqlx::query(sql)
@@ -195,7 +195,7 @@ async fn router_api_library_patch_accepts_null_scan_directory_exclusions_as_clea
     let paths = new_router_fixture("router-api-library-patch-null-exclusions").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract db should open for library exclusions seed");
     sqlx::query("INSERT INTO LIBRARY_EXCLUSIONS (LIBRARY_ID, EXCLUSION) VALUES (?, ?), (?, ?)")
@@ -621,7 +621,7 @@ async fn router_api_library_delete_cascades_library_rows_like_kotlin() {
     let paths = new_router_fixture("router-api-library-delete-cascade").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("library delete cascade seed db should open");
     sqlx::query("INSERT INTO LIBRARY_EXCLUSIONS (LIBRARY_ID, EXCLUSION) VALUES (?, ?)")

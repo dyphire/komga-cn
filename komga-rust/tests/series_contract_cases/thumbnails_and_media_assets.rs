@@ -6,7 +6,7 @@ async fn seed_book_thumbnail_bytes(
     media_type: &str,
     bytes: &[u8],
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series contract db should open for book thumbnail seed");
     sqlx::query("UPDATE THUMBNAIL_BOOK SET MEDIA_TYPE = ?, THUMBNAIL = ? WHERE ID = ?")
@@ -97,7 +97,7 @@ async fn router_series_thumbnail_upload_rejects_oneshot_series() {
     let paths = new_router_fixture("router-series-thumbnail-upload-oneshot-rejected").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series thumbnail oneshot db should open");
     sqlx::query("UPDATE SERIES SET ONESHOT = ? WHERE ID = ?")
@@ -130,7 +130,7 @@ async fn router_series_thumbnail_upload_rejects_oneshot_series() {
 
     assert_eq!(upload.status(), StatusCode::BAD_REQUEST);
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series thumbnail oneshot verify db should open");
     let count =
@@ -224,7 +224,7 @@ async fn router_oneshot_series_thumbnail_falls_back_to_book_thumbnail() {
     seed_router_contract_data(&paths).await;
 
     let png_bytes = fixture_png_bytes();
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("oneshot series thumbnail db should open");
     sqlx::query("UPDATE SERIES SET ONESHOT = ? WHERE ID = ?")
@@ -287,7 +287,7 @@ async fn router_series_thumbnail_by_id_reads_sidecar_thumbnail_file() {
     let sidecar_path = paths.config_dir.join("series-sidecar.png");
     std::fs::write(&sidecar_path, &sidecar_bytes).expect("series sidecar image should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series sidecar db should open");
     sqlx::query(
@@ -347,7 +347,7 @@ async fn router_series_thumbnail_by_id_returns_internal_server_error_when_sideca
 
     let missing_sidecar_path = paths.config_dir.join("series-missing-sidecar.png");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series missing-sidecar db should open");
     sqlx::query(
@@ -448,7 +448,7 @@ async fn router_series_thumbnail_delete_rejects_non_user_uploaded_thumbnail() {
     let paths = new_router_fixture("router-series-thumbnail-delete-generated-rejected").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series generated thumbnail delete db should open");
     sqlx::query(
@@ -487,7 +487,7 @@ async fn router_series_thumbnail_delete_rejects_non_user_uploaded_thumbnail() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series generated thumbnail verify db should open");
     let remaining = sqlx::query_scalar::<_, i64>(

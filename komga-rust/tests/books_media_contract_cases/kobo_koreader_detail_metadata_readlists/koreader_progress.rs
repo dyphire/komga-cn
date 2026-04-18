@@ -45,7 +45,7 @@ async fn router_koreader_progress_put_then_get_roundtrip() {
     let paths = new_router_fixture("router-koreader-progress-roundtrip").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for koreader roundtrip epub seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -117,7 +117,7 @@ async fn router_koreader_progress_put_persists_kotlin_style_epub_locator() {
     let paths = new_router_fixture("router-koreader-progress-persists-kotlin-epub-locator").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for koreader locator seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -155,7 +155,7 @@ async fn router_koreader_progress_put_persists_kotlin_style_epub_locator() {
         .expect("koreader locator put request should complete");
     assert_eq!(response.status(), StatusCode::OK);
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for koreader locator verification");
     let row = sqlx::query(
@@ -181,10 +181,7 @@ async fn router_koreader_progress_put_persists_kotlin_style_epub_locator() {
         locator.pointer("/href"),
         Some(&Value::String("/book-1.xhtml#kobo.2.1".to_string()))
     );
-    assert_eq!(
-        locator.pointer("/locations/progression"),
-        Some(&json!(0.0))
-    );
+    assert_eq!(locator.pointer("/locations/progression"), Some(&json!(0.0)));
     assert_eq!(
         locator.pointer("/locations/totalProgression"),
         Some(&json!(0.2))
@@ -199,7 +196,7 @@ async fn router_koreader_progress_put_treats_cbz_as_visual_and_marks_last_page_c
     seed_router_contract_data(&paths).await;
     seed_router_primary_series_cbz_book(&paths, "book-cbz-1", "book-cbz-1.cbz", "CBZ Book 1").await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for koreader cbz seed");
     sqlx::query("UPDATE BOOK SET FILE_HASH_KOREADER = ? WHERE ID = ?")
@@ -238,7 +235,7 @@ async fn router_koreader_progress_put_treats_cbz_as_visual_and_marks_last_page_c
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for koreader cbz verification");
     let progression_row = sqlx::query(
@@ -262,7 +259,7 @@ async fn router_koreader_progress_put_marks_epub_completed_from_matched_total_pr
     let paths = new_router_fixture("router-koreader-progress-epub-completed-threshold").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for koreader epub completion seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -302,7 +299,7 @@ async fn router_koreader_progress_put_marks_epub_completed_from_matched_total_pr
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for koreader epub completion verification");
     let progression_row = sqlx::query(
@@ -323,11 +320,10 @@ async fn router_koreader_progress_put_marks_epub_completed_from_matched_total_pr
 
 #[tokio::test]
 async fn router_koreader_progress_put_keeps_page_zero_when_epub_match_lacks_total_progression() {
-    let paths =
-        new_router_fixture("router-koreader-progress-epub-without-total-progression").await;
+    let paths = new_router_fixture("router-koreader-progress-epub-without-total-progression").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for koreader missing-total seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -366,7 +362,7 @@ async fn router_koreader_progress_put_keeps_page_zero_when_epub_match_lacks_tota
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for koreader missing-total verification");
     let row = sqlx::query(
@@ -389,7 +385,10 @@ async fn router_koreader_progress_put_keeps_page_zero_when_epub_match_lacks_tota
     assert_eq!(row.get::<i64, _>("PAGE"), 0);
     assert!(!row.get::<bool, _>("COMPLETED"));
     assert_eq!(locator.pointer("/locations/progression"), Some(&json!(0.0)));
-    assert_eq!(locator.pointer("/locations/totalProgression"), Some(&Value::Null));
+    assert_eq!(
+        locator.pointer("/locations/totalProgression"),
+        Some(&Value::Null)
+    );
 
     cleanup_router_fixture(paths);
 }
@@ -514,7 +513,7 @@ async fn router_koreader_progress_get_returns_kotlin_error_envelopes() {
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for koreader conflict seed");
     sqlx::query(
@@ -600,7 +599,7 @@ async fn router_koreader_progress_put_returns_kotlin_error_envelopes_for_lookup_
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for koreader put conflict seed");
     sqlx::query(
@@ -660,7 +659,7 @@ async fn router_koreader_progress_put_rejects_invalid_epub_progress_string() {
     let paths = new_router_fixture("router-koreader-progress-invalid-epub-progress").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for koreader invalid epub seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -710,11 +709,12 @@ async fn router_koreader_progress_put_rejects_invalid_epub_progress_string() {
 }
 
 #[tokio::test]
-async fn router_koreader_progress_put_returns_internal_error_for_out_of_range_epub_resource_index() {
+async fn router_koreader_progress_put_returns_internal_error_for_out_of_range_epub_resource_index()
+{
     let paths = new_router_fixture("router-koreader-progress-out-of-range-epub-progress").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for koreader out-of-range epub seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -811,7 +811,7 @@ async fn router_koreader_progress_put_rejects_invalid_non_epub_progress_string()
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for koreader invalid pdf seed");
     sqlx::query("UPDATE BOOK SET FILE_HASH_KOREADER = ? WHERE ID = ?")
@@ -865,7 +865,7 @@ async fn router_koreader_progress_put_rejects_out_of_range_non_epub_progress() {
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for koreader out-of-range pdf seed");
     sqlx::query("UPDATE BOOK SET FILE_HASH_KOREADER = ? WHERE ID = ?")

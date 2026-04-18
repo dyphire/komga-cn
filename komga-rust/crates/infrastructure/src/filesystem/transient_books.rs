@@ -18,7 +18,7 @@ use crate::metadata::{
 };
 use crate::rar_support::{detect_rar_media_type, list_rar_entries, read_rar_entry_bytes};
 use crate::resolve_stored_path;
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_read_pool;
 
 const EPUB_DIVINA_LETTER_COUNT_THRESHOLD: usize = 15;
 const KOTLIN_PDF_MIN_EDGE: f64 = 3200.0;
@@ -72,7 +72,7 @@ pub async fn infer_transient_series_and_number(
         return (None, number);
     }
 
-    let pool = match connect_pool(database_file, 1).await {
+    let pool = match connect_read_pool(database_file).await {
         Ok(pool) => pool,
         Err(_) => return (None, number),
     };
@@ -121,7 +121,7 @@ pub async fn infer_transient_series_and_number(
 }
 
 pub async fn validate_transient_scan_root(database_file: &Path, root: &Path) -> Result<(), String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("transient scan validation db open failed: {error}"))?;
 

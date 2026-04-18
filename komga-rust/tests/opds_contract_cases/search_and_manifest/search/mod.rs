@@ -139,7 +139,7 @@ async fn router_opds_v1_series_feeds_use_series_last_modified_for_entry_updated(
         let paths = new_router_fixture(fixture_name).await;
         seed_router_contract_data(&paths).await;
 
-        let pool = connect_pool(paths.main_db.as_path(), 1)
+        let pool = connect_test_pool(paths.main_db.as_path(), 1)
             .await
             .expect("opds v1 series entry-updated db should open");
         sqlx::query("UPDATE SERIES SET LAST_MODIFIED_DATE = ?, CREATED_DATE = ? WHERE ID = ?")
@@ -358,7 +358,7 @@ async fn router_opds_v1_latest_series_feed_paginates_after_restriction_filtering
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds latest-series pagination db should open");
     sqlx::query("UPDATE SERIES_METADATA SET AGE_RATING = ? WHERE SERIES_ID = ?")
@@ -420,7 +420,7 @@ async fn router_opds_v1_latest_series_feed_normalizes_entry_updated_to_utc_z() {
     let paths = new_router_fixture("router-opds-v1-latest-series-updated-format").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds latest-series updated db should open");
     sqlx::query("UPDATE SERIES SET LAST_MODIFIED_DATE = ?, CREATED_DATE = ? WHERE ID = ?")

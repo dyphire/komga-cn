@@ -1,6 +1,6 @@
 use std::path::Path as FsPath;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_read_pool;
 use sqlx::Row;
 
 #[derive(Clone)]
@@ -40,7 +40,7 @@ pub async fn persisted_readlists_exist(database_file: &FsPath) -> Result<bool, S
         return Ok(false);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open readlists exists db: {error}"))?;
     let row = sqlx::query(
@@ -57,7 +57,7 @@ LIMIT 1"#,
 pub async fn load_persisted_readlists(
     database_file: &FsPath,
 ) -> Result<Vec<PersistedReadlistRecord>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open persisted readlists db: {error}"))?;
 
@@ -91,7 +91,7 @@ pub async fn load_persisted_readlist_detail(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open persisted readlist detail db: {error}"))?;
 
@@ -119,7 +119,7 @@ pub async fn load_persisted_readlist_book_rows(
     database_file: &FsPath,
     readlist_id: &str,
 ) -> Result<Vec<PersistedReadlistBookRecord>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open persisted readlist books db: {error}"))?;
 
@@ -147,7 +147,7 @@ ORDER BY rb.NUMBER ASC"#,
 pub async fn load_comicrack_match_candidates(
     database_file: &FsPath,
 ) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open comicrack match candidates db: {error}"))?;
 
@@ -185,7 +185,7 @@ pub async fn load_persisted_book_authors(
     database_file: &FsPath,
     book_id: &str,
 ) -> Result<Vec<PersistedBookAuthorRecord>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open persisted book authors db: {error}"))?;
 
@@ -216,7 +216,7 @@ pub async fn persist_readlist_create(
     ordered: bool,
     book_ids: &[String],
 ) -> Result<(), String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open readlist create db: {error}"))?;
     let mut tx = pool
@@ -260,7 +260,7 @@ pub async fn persist_readlist_update(
         return Ok(false);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open readlist update db: {error}"))?;
     let mut tx = pool
@@ -310,7 +310,7 @@ pub async fn delete_persisted_readlist(
         return Ok(false);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open readlist delete db: {error}"))?;
     let mut tx = pool

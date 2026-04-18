@@ -2,7 +2,7 @@ use std::path::Path;
 
 use sqlx::Row;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_write_pool;
 
 #[derive(Clone, Debug)]
 pub struct CreatedClaimedUser {
@@ -11,7 +11,7 @@ pub struct CreatedClaimedUser {
 }
 
 pub async fn load_persisted_user_count(database_file: &Path) -> Result<i64, sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_write_pool(database_file).await?;
     let count = sqlx::query(r#"SELECT COUNT(*) AS COUNT FROM USER"#)
         .fetch_one(&pool)
         .await?
@@ -25,7 +25,7 @@ pub async fn persist_initial_admin_user(
     email: &str,
     hashed_password: &str,
 ) -> Result<CreatedClaimedUser, sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
 
     sqlx::query(

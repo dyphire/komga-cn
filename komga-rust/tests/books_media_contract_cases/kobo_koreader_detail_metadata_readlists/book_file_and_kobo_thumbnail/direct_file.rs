@@ -185,7 +185,7 @@ async fn router_book_file_direct_route_uses_persisted_media_type_for_comic_archi
     let paths = new_router_fixture("router-book-file-direct-route-comic-archive-type").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for direct comic archive file route fixture");
     sqlx::query("UPDATE BOOK SET NAME = ?, URL = ? WHERE ID = ?")
@@ -247,7 +247,7 @@ async fn router_book_file_direct_route_percent_encodes_unicode_attachment_name()
     seed_router_contract_data(&paths).await;
     let unicode_file_name = "アキラ.epub";
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for unicode direct file route fixture");
     sqlx::query("UPDATE BOOK SET NAME = ?, URL = ? WHERE ID = ?")

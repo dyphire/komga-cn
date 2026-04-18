@@ -26,7 +26,7 @@ async fn runtime_blocks_book_thumbnail_generation_when_main_database_is_external
         .process_available(&runtime)
         .expect("blocked main-database thumbnail generation should still drain cleanly");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for thumbnail verification");
     let generated_count = sqlx::query(
@@ -66,7 +66,7 @@ async fn runtime_generate_book_thumbnail_replaces_invalid_selected_thumbnail_wit
         .process_available(&runtime)
         .expect("generate-book-thumbnail task should replace invalid selected thumbnail cleanly");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for generated thumbnail verification");
     let thumbnails = sqlx::query(

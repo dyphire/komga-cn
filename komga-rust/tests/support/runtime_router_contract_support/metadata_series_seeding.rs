@@ -1,9 +1,9 @@
-use komga_infrastructure::sqlite::connect_pool;
+use komga_infrastructure::sqlite::connect_test_pool;
 
 use super::RuntimeDbPaths;
 
 pub async fn seed_router_contract_nullable_samples(paths: &RuntimeDbPaths) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract nullable db should open");
 
@@ -93,7 +93,7 @@ pub async fn seed_router_contract_nullable_samples(paths: &RuntimeDbPaths) {
 }
 
 pub async fn seed_router_read_progress(paths: &RuntimeDbPaths, completed: bool) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract read-progress db should open");
 
@@ -117,7 +117,7 @@ pub async fn seed_router_series_read_progress(
     read_count: i64,
     in_progress_count: i64,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract series read-progress db should open");
 
@@ -143,7 +143,7 @@ pub async fn seed_router_series_counts(
     book_count: i64,
     total_book_count: Option<i64>,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract series counts db should open");
 
@@ -177,7 +177,7 @@ pub async fn seed_router_series_title_sort(
     series_id: &str,
     title_sort: &str,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract series title-sort db should open");
 
@@ -201,7 +201,7 @@ pub async fn seed_router_series_alternate_title(
     label: &str,
     title: &str,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract series alternate-title db should open");
 
@@ -220,7 +220,7 @@ pub async fn seed_router_series_alternate_title(
 }
 
 pub async fn seed_router_series_aggregated_tag(paths: &RuntimeDbPaths, series_id: &str, tag: &str) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract series aggregated tag db should open");
 
@@ -243,7 +243,7 @@ pub async fn seed_router_custom_series(
     name: &str,
     library_id: &str,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract custom series db should open");
 
@@ -280,7 +280,7 @@ pub async fn seed_router_custom_series(
 }
 
 pub async fn seed_router_authors_scope_variants(paths: &RuntimeDbPaths) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract authors scope db should open");
 

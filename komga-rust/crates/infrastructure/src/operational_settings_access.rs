@@ -3,7 +3,6 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::sqlite::connect_pool;
 use crate::sqlite::read_models::client_settings::{
     load_client_settings_global as load_client_settings_global_model,
     load_client_settings_user as load_client_settings_user_model,
@@ -14,6 +13,7 @@ use crate::sqlite::write_models::client_settings::{
     upsert_client_settings_global as upsert_client_settings_global_model,
     upsert_client_settings_user as upsert_client_settings_user_model,
 };
+use crate::sqlite::{connect_read_pool, connect_write_pool};
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 use sqlx::Row;
@@ -46,7 +46,7 @@ pub async fn delete_syncpoints_by_user(
     database_file: &Path,
     user_id: &str,
 ) -> Result<(), sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
     let sync_point_ids = load_syncpoint_ids_for_user(&mut tx, user_id, None).await?;
     delete_syncpoint_children(&mut tx, &sync_point_ids).await?;
@@ -71,7 +71,7 @@ pub async fn delete_syncpoints_by_user_and_key_ids(
         return delete_syncpoints_by_user(database_file, user_id).await;
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
     let sync_point_ids = load_syncpoint_ids_for_user(&mut tx, user_id, Some(key_ids)).await?;
     delete_syncpoint_children(&mut tx, &sync_point_ids).await?;
@@ -247,7 +247,7 @@ pub async fn load_history_page(
     size: u64,
     sorts: &[String],
 ) -> Result<Value, sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
 
     let total_elements = sqlx::query(
         r#"SELECT COUNT(*) AS COUNT
@@ -494,7 +494,7 @@ fn parse_bool(value: Option<&Option<String>>, default: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sqlite::connect_pool;
+    use crate::sqlite::connect_test_pool;
     use sqlx::Row;
     use std::fs;
     use std::path::PathBuf;
@@ -504,7 +504,7 @@ mod tests {
         let root = unique_temp_dir(case);
         fs::create_dir_all(&root).expect("temp root should be created");
         let db_path = root.join("operational-settings.sqlite");
-        let pool = connect_pool(&db_path, 1)
+        let pool = connect_test_pool(&db_path, 1)
             .await
             .expect("test db should open");
         crate::sqlite::setup::bootstrap_pool(&pool)
@@ -526,7 +526,7 @@ mod tests {
         let root = unique_temp_dir(case);
         fs::create_dir_all(&root).expect("temp root should be created");
         let db_path = root.join("operational-settings-history.sqlite");
-        let pool = connect_pool(&db_path, 1)
+        let pool = connect_test_pool(&db_path, 1)
             .await
             .expect("test db should open");
         crate::sqlite::setup::bootstrap_pool(&pool)
@@ -540,7 +540,7 @@ mod tests {
         let root = unique_temp_dir(case);
         fs::create_dir_all(&root).expect("temp root should be created");
         let db_path = root.join("operational-settings-syncpoints.sqlite");
-        let pool = connect_pool(&db_path, 1)
+        let pool = connect_test_pool(&db_path, 1)
             .await
             .expect("test db should open");
         crate::sqlite::setup::bootstrap_pool(&pool)

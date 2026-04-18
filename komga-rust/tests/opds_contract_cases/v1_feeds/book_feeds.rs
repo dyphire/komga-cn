@@ -39,7 +39,7 @@ async fn router_opds_v1_ondeck_uses_kotlin_acquisition_entry_shape() {
     seed_router_read_progress(&paths, true).await;
     seed_router_pdf_book(&paths, "book-pdf", "series-1", "book-pdf.pdf", "Book PDF").await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 ondeck entry-shape db should open");
     sqlx::query("UPDATE BOOK_METADATA SET SUMMARY = ? WHERE BOOK_ID = ?")
@@ -149,7 +149,7 @@ async fn router_opds_v1_ondeck_orders_series_by_most_recent_read_date() {
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 ondeck recent-order db should open");
     sqlx::query(
@@ -219,7 +219,7 @@ async fn router_opds_v1_keep_reading_filters_non_ready_books() {
     seed_router_read_progress(&paths, false).await;
     seed_router_pdf_book(&paths, "book-pdf", "series-1", "book-pdf.pdf", "Book PDF").await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 keep-reading ready-only db should open");
     sqlx::query(
@@ -270,7 +270,7 @@ async fn router_opds_v1_keep_reading_uses_kotlin_acquisition_entry_shape() {
     seed_router_read_progress(&paths, false).await;
     seed_router_pdf_book(&paths, "book-pdf", "series-1", "book-pdf.pdf", "Book PDF").await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 keep-reading entry-shape db should open");
     sqlx::query(
@@ -338,7 +338,7 @@ async fn router_opds_v1_keep_reading_includes_page_streaming_link_with_read_prog
     seed_router_read_progress(&paths, false).await;
     seed_router_pdf_book(&paths, "book-pdf", "series-1", "book-pdf.pdf", "Book PDF").await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 keep-reading PSE db should open");
     sqlx::query(
@@ -399,7 +399,7 @@ async fn router_opds_v1_keep_reading_preserves_zero_page_count_in_pse_link() {
     seed_router_read_progress(&paths, false).await;
     seed_router_pdf_book(&paths, "book-pdf", "series-1", "book-pdf.pdf", "Book PDF").await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 keep-reading zero-page-count db should open");
     sqlx::query(
@@ -454,7 +454,7 @@ async fn router_opds_v1_keep_reading_orders_by_read_progress_date() {
     seed_router_read_progress(&paths, false).await;
     seed_router_pdf_book(&paths, "book-pdf", "series-1", "book-pdf.pdf", "Book PDF").await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 keep-reading order db should open");
     sqlx::query(
@@ -542,7 +542,7 @@ async fn router_opds_v1_books_latest_filters_non_ready_books() {
     seed_router_contract_data(&paths).await;
     seed_router_pdf_book(&paths, "book-pdf", "series-1", "book-pdf.pdf", "Book PDF").await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 books latest ready-only db should open");
     sqlx::query("UPDATE MEDIA SET STATUS = ? WHERE BOOK_ID = ?")
@@ -599,7 +599,7 @@ async fn router_opds_v1_books_latest_paginates_after_restriction_filtering() {
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 latest-books restriction-pagination db should open");
     sqlx::query("UPDATE SERIES_METADATA SET AGE_RATING = ? WHERE SERIES_ID = ?")
@@ -663,7 +663,7 @@ async fn router_opds_v1_books_latest_includes_page_streaming_and_read_progress_f
     seed_router_contract_data(&paths).await;
     seed_router_pdf_book(&paths, "book-pdf", "series-1", "book-pdf.pdf", "Book PDF").await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 books latest PSE db should open");
     sqlx::query(

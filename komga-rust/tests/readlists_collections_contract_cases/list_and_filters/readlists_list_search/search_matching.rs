@@ -6,7 +6,7 @@ async fn router_readlists_search_uses_relevance_order_like_kotlin() {
     let paths = new_router_fixture("router-readlists-search-relevance-order").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for readlists search relevance seed");
     sqlx::query("UPDATE READLIST SET NAME = ?, SUMMARY = ? WHERE ID = ?")
@@ -88,7 +88,7 @@ async fn router_readlists_search_does_not_match_summary_only_hits_like_kotlin() 
     let paths = new_router_fixture("router-readlists-search-name-only-matches").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for readlists name-only search seed");
     sqlx::query("UPDATE READLIST SET NAME = ?, SUMMARY = ? WHERE ID = ?")
@@ -155,7 +155,7 @@ async fn router_readlists_search_matches_accent_folded_names_like_kotlin() {
     let paths = new_router_fixture("router-readlists-search-accent-folding").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for readlists accent-folding seed");
     sqlx::query("UPDATE READLIST SET NAME = ?, SUMMARY = ? WHERE ID = ?")
@@ -207,7 +207,7 @@ async fn router_readlists_search_matches_non_contiguous_multi_token_names_like_k
     let paths = new_router_fixture("router-readlists-search-multi-token").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for readlists multi-token seed");
     sqlx::query("UPDATE READLIST SET NAME = ?, SUMMARY = ? WHERE ID = ?")
@@ -318,7 +318,7 @@ async fn router_readlists_search_does_not_drop_visible_hits_after_hidden_ranked_
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for readlists hidden-hit window seed");
     sqlx::query("UPDATE READLIST SET NAME = ?, SUMMARY = ? WHERE ID = ?")

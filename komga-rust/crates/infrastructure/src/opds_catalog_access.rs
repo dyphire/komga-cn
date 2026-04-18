@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_read_pool;
 use sqlx::Row;
 
 pub struct BrowseSeriesNavigationEntry {
@@ -125,7 +125,7 @@ pub async fn load_browse_series_navigation_entries(
         return Ok((vec![], 0));
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let authorized_library_ids = sorted_authorized_library_ids(allowed_library_ids);
     if allowed_library_ids.is_some() && authorized_library_ids.is_empty() {
         return Ok((vec![], 0));
@@ -221,7 +221,7 @@ pub async fn load_browse_publisher_entries(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT DISTINCT
     sm.PUBLISHER AS PUBLISHER,
@@ -265,7 +265,7 @@ pub async fn load_keep_reading_books(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT
     b.ID,
@@ -386,7 +386,7 @@ pub async fn load_on_deck_books(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT
     b.ID,
@@ -542,7 +542,7 @@ pub async fn load_latest_books_paged(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let authorized_library_ids = sorted_authorized_library_ids(allowed_library_ids);
     if allowed_library_ids.is_some() && authorized_library_ids.is_empty() {
         return Ok(vec![]);
@@ -694,7 +694,7 @@ pub async fn load_latest_series_paged(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let authorized_library_ids = sorted_authorized_library_ids(allowed_library_ids);
     if allowed_library_ids.is_some() && authorized_library_ids.is_empty() {
         return Ok(vec![]);
@@ -764,7 +764,7 @@ pub async fn load_library_series(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT
     s.ID,
@@ -816,7 +816,7 @@ pub async fn load_series_page(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let authorized_library_ids = sorted_authorized_library_ids(allowed_library_ids);
     if allowed_library_ids.is_some() && authorized_library_ids.is_empty() {
         return Ok(vec![]);
@@ -901,7 +901,7 @@ pub async fn load_all_readlists(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT
     ID,

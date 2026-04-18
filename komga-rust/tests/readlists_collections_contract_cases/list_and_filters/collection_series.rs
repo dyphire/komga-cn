@@ -92,7 +92,7 @@ async fn router_collection_series_uses_collection_order_for_ordered_collection_l
     seed_router_contract_data(&paths).await;
     seed_collection_series_variants(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for ordered collection series alignment");
     sqlx::query("UPDATE COLLECTION SET ORDERED = ?, SERIES_COUNT = ? WHERE ID = ?")
@@ -158,7 +158,7 @@ async fn router_collection_series_paginates_after_ordering_for_ordered_collectio
     seed_router_contract_data(&paths).await;
     seed_collection_series_variants(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for ordered collection pagination alignment");
     sqlx::query("UPDATE COLLECTION SET ORDERED = ?, SERIES_COUNT = ? WHERE ID = ?")
@@ -358,7 +358,7 @@ async fn router_series_collections_does_not_accept_sorted_position_series_alias(
     let paths = new_router_fixture("router-series-collections-no-id-bridge").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract db should open for series alias test");
 

@@ -26,7 +26,7 @@ async fn runtime_blocks_book_hash_when_main_database_is_external_owned() {
         .process_available(&runtime)
         .expect("blocked main-database hash-book should still drain cleanly");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for hash verification");
     let file_hash = sqlx::query("SELECT FILE_HASH FROM BOOK WHERE ID = ? LIMIT 1")
@@ -58,7 +58,7 @@ async fn runtime_skips_book_hash_when_library_hash_files_was_disabled_after_enqu
     )
     .expect("book file should be written for hash-files disabled fixture");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for hash-files disabled fixture setup");
     sqlx::query("UPDATE LIBRARY SET HASH_FILES = 0 WHERE ID = ?")
@@ -93,7 +93,7 @@ async fn runtime_skips_book_hash_when_library_hash_files_was_disabled_after_enqu
         "hash-book task should skip cleanly when library hash-files was disabled after enqueue",
     );
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for hash-files disabled verification");
     let file_hash = sqlx::query("SELECT FILE_HASH FROM BOOK WHERE ID = ? LIMIT 1")
@@ -125,7 +125,7 @@ async fn runtime_skips_book_hash_when_book_already_has_hash() {
     )
     .expect("book file should be written for existing hash fixture");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for existing hash fixture setup");
     sqlx::query("UPDATE BOOK SET FILE_HASH = ? WHERE ID = ?")
@@ -145,7 +145,7 @@ async fn runtime_skips_book_hash_when_book_already_has_hash() {
         .process_available(&runtime)
         .expect("hash-book task should skip cleanly when the book already has a hash");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for existing hash verification");
     let file_hash = sqlx::query("SELECT FILE_HASH FROM BOOK WHERE ID = ? LIMIT 1")
@@ -179,7 +179,7 @@ async fn runtime_blocks_book_page_hash_when_main_database_is_external_owned() {
     std::fs::write(paths.config_dir.join("books/hash-image.gif"), GIF_1X1)
         .expect("image file should be written for page-hash fixture");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for page-hash fixture setup");
     sqlx::query(
@@ -234,7 +234,7 @@ async fn runtime_blocks_book_page_hash_when_main_database_is_external_owned() {
         .process_available(&runtime)
         .expect("blocked main-database page-hash should still drain cleanly");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for page-hash verification");
     let file_hash =
@@ -268,7 +268,7 @@ async fn runtime_skips_book_koreader_hash_when_library_hash_koreader_was_disable
     )
     .expect("book file should be written for koreader-hash disabled fixture");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for koreader-hash disabled fixture setup");
     sqlx::query("UPDATE LIBRARY SET HASH_KOREADER = 0 WHERE ID = ?")
@@ -303,7 +303,7 @@ async fn runtime_skips_book_koreader_hash_when_library_hash_koreader_was_disable
         .process_available(&runtime)
         .expect("koreader-hash task should skip cleanly when library hash-koreader was disabled after enqueue");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for koreader-hash disabled verification");
     let file_hash = sqlx::query("SELECT FILE_HASH_KOREADER FROM BOOK WHERE ID = ? LIMIT 1")
@@ -345,7 +345,7 @@ async fn runtime_skips_book_koreader_hash_when_book_already_has_hash() {
         .process_available(&runtime)
         .expect("koreader-hash task should skip cleanly when the book already has a koreader hash");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for existing koreader hash verification");
     let file_hash = sqlx::query("SELECT FILE_HASH_KOREADER FROM BOOK WHERE ID = ? LIMIT 1")
@@ -379,7 +379,7 @@ async fn runtime_skips_book_page_hash_when_library_hash_pages_was_disabled_after
     std::fs::write(paths.config_dir.join("books/hash-image.gif"), GIF_1X1)
         .expect("image file should be written for page-hash disabled fixture");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for page-hash disabled fixture setup");
     sqlx::query("UPDATE LIBRARY SET HASH_PAGES = 0 WHERE ID = ?")
@@ -432,7 +432,7 @@ async fn runtime_skips_book_page_hash_when_library_hash_pages_was_disabled_after
         "page-hash task should skip cleanly when library hash-pages was disabled after enqueue",
     );
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for page-hash disabled verification");
     let file_hash =

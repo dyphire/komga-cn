@@ -3,7 +3,7 @@ use super::*;
 pub async fn load_persisted_series_summaries(
     database_file: &FsPath,
 ) -> Result<Vec<SeriesSummary>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series db: {error}"))?;
 
@@ -22,7 +22,7 @@ pub async fn load_persisted_series_summaries_by_ids(
         return Ok(Vec::new());
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series db for ids query: {error}"))?;
 
@@ -135,7 +135,7 @@ async fn fetch_persisted_series_summary_rows(
 }
 
 pub async fn load_persisted_series_count(database_file: &FsPath) -> Result<usize, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series db for count: {error}"))?;
     let row = sqlx::query("SELECT COUNT(*) AS COUNT FROM SERIES")
@@ -188,7 +188,7 @@ fn map_series_summary(row: sqlx::sqlite::SqliteRow) -> SeriesSummary {
 }
 
 pub async fn persisted_series_exist(database_file: &FsPath) -> Result<bool, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open persisted series db: {error}"))?;
     let row = sqlx::query("SELECT COUNT(*) AS COUNT FROM SERIES")

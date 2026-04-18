@@ -74,7 +74,7 @@ async fn router_opds_v2_manifest_dispatches_to_epub_profile_payload() {
         br#"<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Hello</p></body></html>"#,
     );
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds manifest epub profile db should open");
     for (file_name, media_type, sub_type, file_size) in [

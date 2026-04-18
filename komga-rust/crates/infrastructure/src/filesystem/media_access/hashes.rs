@@ -2,7 +2,7 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_write_pool;
 
 use super::db_queries::{
     load_persisted_book_media, load_persisted_book_pages, public_page_number_to_persisted,
@@ -40,7 +40,7 @@ pub async fn persist_book_page_hashes_from_media_content(
         return Ok(());
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_write_pool(database_file)
         .await
         .map_err(|error| format!("open media-page hash db: {error}"))?;
     for (number, hash) in hashes {

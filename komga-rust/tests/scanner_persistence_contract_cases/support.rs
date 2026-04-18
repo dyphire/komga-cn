@@ -179,7 +179,7 @@ pub(super) async fn seed_library_row(
     library_id: &str,
     root: &Path,
 ) -> anyhow::Result<()> {
-    let pool = connect_pool(main_db, 1).await?;
+    let pool = connect_test_pool(main_db, 1).await?;
     sqlx::query(
         "INSERT INTO LIBRARY (ID, NAME, ROOT) \
                  VALUES (?, ?, ?)",
@@ -198,7 +198,7 @@ pub(super) async fn update_series_file_last_modified(
     series_url: &str,
     file_last_modified: i64,
 ) {
-    let pool = connect_pool(main_db, 1)
+    let pool = connect_test_pool(main_db, 1)
         .await
         .expect("sqlite pool should open for series last-modified update");
     sqlx::query("UPDATE SERIES SET FILE_LAST_MODIFIED = datetime(?, 'unixepoch') WHERE URL = ?")
@@ -215,7 +215,7 @@ pub(super) async fn update_library_oneshots_directory(
     library_id: &str,
     oneshots_directory: Option<&str>,
 ) {
-    let pool = connect_pool(main_db, 1)
+    let pool = connect_test_pool(main_db, 1)
         .await
         .expect("sqlite pool should open for library oneshots-directory update");
     sqlx::query("UPDATE LIBRARY SET ONESHOTS_DIRECTORY = ? WHERE ID = ?")
@@ -228,7 +228,7 @@ pub(super) async fn update_library_oneshots_directory(
 }
 
 pub(super) async fn update_active_book_url(main_db: &Path, from_book_url: &str, to_book_url: &str) {
-    let pool = connect_pool(main_db, 1)
+    let pool = connect_test_pool(main_db, 1)
         .await
         .expect("sqlite pool should open for active book url update");
     sqlx::query(
@@ -243,7 +243,7 @@ pub(super) async fn update_active_book_url(main_db: &Path, from_book_url: &str, 
 }
 
 pub(super) async fn load_active_series_id_for_book_url(main_db: &Path, book_url: &str) -> String {
-    let pool = connect_pool(main_db, 1)
+    let pool = connect_test_pool(main_db, 1)
         .await
         .expect("sqlite pool should open for active series id lookup");
     let series_id =
@@ -258,7 +258,7 @@ pub(super) async fn load_active_series_id_for_book_url(main_db: &Path, book_url:
 }
 
 pub(super) async fn load_active_book_id_by_url(main_db: &Path, book_url: &str) -> String {
-    let pool = connect_pool(main_db, 1)
+    let pool = connect_test_pool(main_db, 1)
         .await
         .expect("sqlite pool should open for active book id lookup");
     let book_id = sqlx::query("SELECT ID FROM BOOK WHERE URL = ? AND DELETED_DATE IS NULL LIMIT 1")
@@ -272,7 +272,7 @@ pub(super) async fn load_active_book_id_by_url(main_db: &Path, book_url: &str) -
 }
 
 pub(super) async fn load_series_url_by_id(main_db: &Path, series_id: &str) -> String {
-    let pool = connect_pool(main_db, 1)
+    let pool = connect_test_pool(main_db, 1)
         .await
         .expect("sqlite pool should open for series url lookup");
     let series_url =
@@ -287,7 +287,7 @@ pub(super) async fn load_series_url_by_id(main_db: &Path, series_id: &str) -> St
 }
 
 pub(super) async fn load_active_series_count(main_db: &Path, library_id: &str) -> i64 {
-    let pool = connect_pool(main_db, 1)
+    let pool = connect_test_pool(main_db, 1)
         .await
         .expect("sqlite pool should open for active series count lookup");
     let series_count = sqlx::query(
@@ -310,7 +310,7 @@ pub(super) async fn assert_persisted_task_shape(
     group_id: Option<&str>,
     payload: Value,
 ) {
-    let pool = connect_pool(tasks_db, 1)
+    let pool = connect_test_pool(tasks_db, 1)
         .await
         .expect("tasks db should open for persisted task verification");
     let row =
@@ -356,7 +356,7 @@ pub(super) async fn load_persistence_snapshot(
     main_db: &Path,
     library_id: &str,
 ) -> PersistenceSnapshot {
-    let pool = connect_pool(main_db, 1)
+    let pool = connect_test_pool(main_db, 1)
         .await
         .expect("sqlite pool should open for scanner persistence inspection");
 
@@ -468,7 +468,7 @@ pub(super) async fn load_persistence_snapshot(
 }
 
 pub(super) async fn load_task_snapshot(tasks_db: &Path) -> TaskSnapshot {
-    let pool = connect_pool(tasks_db, 1)
+    let pool = connect_test_pool(tasks_db, 1)
         .await
         .expect("sqlite pool should open for scanner task inspection");
 
@@ -487,7 +487,7 @@ pub(super) async fn load_task_snapshot(tasks_db: &Path) -> TaskSnapshot {
 }
 
 pub(super) async fn load_media_ready_count(main_db: &Path) -> i64 {
-    let pool = connect_pool(main_db, 1)
+    let pool = connect_test_pool(main_db, 1)
         .await
         .expect("sqlite pool should open for media status inspection");
     let count = sqlx::query(
@@ -504,7 +504,7 @@ pub(super) async fn load_media_ready_count(main_db: &Path) -> i64 {
 }
 
 pub(super) async fn load_book_file_size(main_db: &Path, book_url: &str) -> i64 {
-    let pool = connect_pool(main_db, 1)
+    let pool = connect_test_pool(main_db, 1)
         .await
         .expect("sqlite pool should open for book file size inspection");
     let file_size = sqlx::query(
@@ -523,7 +523,7 @@ pub(super) async fn load_book_file_size(main_db: &Path, book_url: &str) -> i64 {
 }
 
 pub(super) async fn load_media_page_file_size(main_db: &Path, book_url: &str) -> i64 {
-    let pool = connect_pool(main_db, 1)
+    let pool = connect_test_pool(main_db, 1)
         .await
         .expect("sqlite pool should open for media page size inspection");
     let file_size = sqlx::query(

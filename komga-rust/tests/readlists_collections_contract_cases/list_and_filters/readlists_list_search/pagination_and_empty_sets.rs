@@ -5,7 +5,7 @@ async fn router_readlists_unpaged_returns_full_sorted_result_set_like_kotlin() {
     let paths = new_router_fixture("router-readlists-unpaged-full-result-set").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for readlists unpaged seed");
     sqlx::query("UPDATE READLIST SET NAME = ? WHERE ID = ?")
@@ -85,7 +85,7 @@ async fn router_readlists_returns_empty_page_when_no_readlists_exist_like_kotlin
     let paths = new_router_fixture("router-readlists-empty-page-when-no-readlists").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for empty readlists seed");
     sqlx::query("DELETE FROM READLIST_BOOK")
@@ -141,7 +141,7 @@ async fn router_readlists_keeps_genuinely_empty_readlists_like_kotlin() {
     let paths = new_router_fixture("router-readlists-keep-genuinely-empty").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for empty-readlist listing seed");
     sqlx::query("UPDATE READLIST SET NAME = ?, BOOK_COUNT = ? WHERE ID = ?")

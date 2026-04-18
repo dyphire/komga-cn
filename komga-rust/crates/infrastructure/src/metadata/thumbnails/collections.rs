@@ -3,7 +3,7 @@ use std::path::Path;
 use komga_application::media_assets::CollectionThumbnailRecord;
 use sqlx::Row;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_read_pool;
 
 use super::generated_thumbnail_id;
 
@@ -15,7 +15,7 @@ pub async fn persisted_collection_exists(
         return Ok(false);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open collection exists db: {error}"))?;
     let row = sqlx::query(
@@ -24,7 +24,7 @@ pub async fn persisted_collection_exists(
         FROM COLLECTION
         WHERE ID = ?
         LIMIT 1
-        "#
+        "#,
     )
     .bind(collection_id)
     .fetch_optional(&pool)
@@ -41,7 +41,7 @@ pub async fn load_persisted_collection_thumbnails(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open collection thumbnails db: {error}"))?;
     let rows = sqlx::query(
@@ -50,7 +50,7 @@ pub async fn load_persisted_collection_thumbnails(
         FROM THUMBNAIL_COLLECTION
         WHERE COLLECTION_ID = ?
         ORDER BY SELECTED DESC, LAST_MODIFIED_DATE DESC, ID ASC
-        "#
+        "#,
     )
     .bind(collection_id)
     .fetch_all(&pool)
@@ -82,7 +82,7 @@ pub async fn insert_collection_thumbnail(
     height: i64,
     selected: bool,
 ) -> Result<CollectionThumbnailRecord, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open collection thumbnail create db: {error}"))?;
     let mut tx = pool
@@ -96,7 +96,7 @@ pub async fn insert_collection_thumbnail(
         FROM COLLECTION
         WHERE ID = ?
         LIMIT 1
-        "#
+        "#,
     )
     .bind(collection_id)
     .fetch_optional(&mut *tx)
@@ -116,7 +116,7 @@ pub async fn insert_collection_thumbnail(
             UPDATE THUMBNAIL_COLLECTION
             SET SELECTED = 0
             WHERE COLLECTION_ID = ?
-            "#
+            "#,
         )
         .bind(collection_id)
         .execute(&mut *tx)
@@ -130,7 +130,7 @@ pub async fn insert_collection_thumbnail(
         INSERT INTO THUMBNAIL_COLLECTION
             (ID, SELECTED, THUMBNAIL, TYPE, COLLECTION_ID, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        "#
+        "#,
     )
     .bind(&id)
     .bind(selected)
@@ -170,7 +170,7 @@ pub async fn select_collection_thumbnail(
         return Ok(false);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open collection thumbnail select db: {error}"))?;
     let mut tx = pool
@@ -184,7 +184,7 @@ pub async fn select_collection_thumbnail(
         FROM THUMBNAIL_COLLECTION
         WHERE ID = ?
         LIMIT 1
-        "#
+        "#,
     )
     .bind(thumbnail_id)
     .fetch_optional(&mut *tx)
@@ -203,7 +203,7 @@ pub async fn select_collection_thumbnail(
         UPDATE THUMBNAIL_COLLECTION
         SET SELECTED = 0
         WHERE COLLECTION_ID = ?
-        "#
+        "#,
     )
     .bind(&target_collection_id)
     .execute(&mut *tx)
@@ -214,7 +214,7 @@ pub async fn select_collection_thumbnail(
         UPDATE THUMBNAIL_COLLECTION
         SET SELECTED = 1, LAST_MODIFIED_DATE = STRFTIME('%Y-%m-%d %H:%M:%f', 'now')
         WHERE ID = ? AND COLLECTION_ID = ?
-        "#
+        "#,
     )
     .bind(thumbnail_id)
     .bind(target_collection_id)
@@ -237,7 +237,7 @@ pub async fn delete_collection_thumbnail(
         return Ok(false);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open collection thumbnail delete db: {error}"))?;
     let mut tx = pool
@@ -251,7 +251,7 @@ pub async fn delete_collection_thumbnail(
         FROM COLLECTION
         WHERE ID = ?
         LIMIT 1
-        "#
+        "#,
     )
     .bind(collection_id)
     .fetch_optional(&mut *tx)
@@ -271,7 +271,7 @@ pub async fn delete_collection_thumbnail(
         FROM THUMBNAIL_COLLECTION
         WHERE ID = ?
         LIMIT 1
-        "#
+        "#,
     )
     .bind(thumbnail_id)
     .fetch_optional(&mut *tx)
@@ -290,7 +290,7 @@ pub async fn delete_collection_thumbnail(
         r#"
         DELETE FROM THUMBNAIL_COLLECTION
         WHERE ID = ?
-        "#
+        "#,
     )
     .bind(thumbnail_id)
     .execute(&mut *tx)
@@ -317,7 +317,7 @@ async fn normalize_collection_thumbnail_selection(
         FROM THUMBNAIL_COLLECTION
         WHERE COLLECTION_ID = ?
         ORDER BY ID ASC
-        "#
+        "#,
     )
     .bind(collection_id)
     .fetch_all(&mut **tx)

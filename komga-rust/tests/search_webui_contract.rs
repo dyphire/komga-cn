@@ -1,7 +1,7 @@
 use axum::body::Body;
 use axum::body::to_bytes;
 use axum::http::{Request, StatusCode, header};
-use komga_infrastructure::sqlite::connect_pool;
+use komga_infrastructure::sqlite::connect_test_pool;
 use komga_server::app::build_router_with_config;
 use serde_json::{Value, json};
 use tower::util::ServiceExt;
@@ -16,7 +16,7 @@ use support::runtime_router_contract_support::{
 use komga_interfaces::http::access_log as access_log_impl;
 
 async fn enrich_book_contract_fixture(paths: &RuntimeDbPaths) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("search webui db should open for book contract enrichment");
 

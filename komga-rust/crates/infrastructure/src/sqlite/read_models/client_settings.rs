@@ -3,13 +3,13 @@ use std::path::Path;
 use serde_json::{Value, json};
 use sqlx::Row;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_read_pool;
 
 pub async fn load_client_settings_global(
     database_file: &Path,
     allow_unauthorized_only: bool,
 ) -> Result<Value, sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let rows = if allow_unauthorized_only {
         sqlx::query(
             r#"SELECT KEY, VALUE, ALLOW_UNAUTHORIZED
@@ -49,7 +49,7 @@ pub async fn load_client_settings_user(
     database_file: &Path,
     user_id: &str,
 ) -> Result<Value, sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT KEY, VALUE
          FROM CLIENT_SETTINGS_USER

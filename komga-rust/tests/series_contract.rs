@@ -1,7 +1,7 @@
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use komga_contract_testkit::contract_matrix::assert_required_target_declared;
-use komga_infrastructure::sqlite::connect_pool;
+use komga_infrastructure::sqlite::connect_test_pool;
 use komga_server::app::build_router_with_config;
 use serde_json::{Value, json};
 use sqlx::Row;
@@ -25,7 +25,7 @@ fn series_contract_target_is_registered() {
 }
 
 async fn update_series_search_fixture_title(paths: &RuntimeDbPaths, series_id: &str, title: &str) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series search parity db should open for title update");
 

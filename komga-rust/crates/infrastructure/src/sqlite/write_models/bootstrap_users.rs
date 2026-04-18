@@ -2,7 +2,7 @@ use std::path::Path;
 
 use sqlx::Row;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_write_pool;
 
 #[derive(Clone, Debug)]
 pub struct PersistedBootstrapUser {
@@ -19,7 +19,7 @@ pub struct InitialBootstrapUserWriteModel {
 }
 
 pub async fn list_persisted_user_emails(database_file: &Path) -> Result<Vec<String>, sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_write_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT EMAIL
            FROM USER
@@ -38,7 +38,7 @@ pub async fn load_persisted_user_by_email(
     database_file: &Path,
     email: &str,
 ) -> Result<Option<PersistedBootstrapUser>, sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_write_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT ID, EMAIL
            FROM USER
@@ -59,7 +59,7 @@ pub async fn update_persisted_user_passwords(
     database_file: &Path,
     updates: &[(String, String)],
 ) -> Result<(), sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
 
     for (user_id, hashed_password) in updates {
@@ -87,7 +87,7 @@ pub async fn persist_initial_bootstrap_users(
     database_file: &Path,
     users: &[InitialBootstrapUserWriteModel],
 ) -> Result<(), sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
 
     for user in users {

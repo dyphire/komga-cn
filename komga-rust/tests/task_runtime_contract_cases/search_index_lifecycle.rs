@@ -61,7 +61,7 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
     let paths = new_router_fixture("runtime-incremental-index-sync-contract").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for incremental index sync fixture setup");
     sqlx::query(
@@ -146,7 +146,7 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
 
     write_stale_analyzer_version_marker(config.lucene_data_directory.as_path());
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for series metadata update fixture");
     sqlx::query(
@@ -403,7 +403,7 @@ async fn runtime_refresh_book_metadata_upserts_readlist_search_document_after_co
     )
     .expect("book metadata sidecar fixture for readlist search sync should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for readlist search sync fixture setup");
     sqlx::query("DELETE FROM SIDECAR WHERE PARENT_URL = ?")
@@ -461,7 +461,7 @@ async fn runtime_refresh_book_metadata_upserts_readlist_search_document_after_co
         .process_available(&runtime)
         .expect("readlist-only metadata refresh should sync readlist search document");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for readlist search sync verification");
     let readlist_id = sqlx::query("SELECT ID FROM READLIST WHERE NAME = ? LIMIT 1")
@@ -512,7 +512,7 @@ async fn runtime_rebuild_index_payload_can_scope_rebuild_to_selected_entities() 
         "fixture sanity: initial rebuild should index seeded collection documents",
     );
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for scoped rebuild fixture updates");
     sqlx::query("UPDATE BOOK_METADATA SET TITLE = ? WHERE BOOK_ID = ?")

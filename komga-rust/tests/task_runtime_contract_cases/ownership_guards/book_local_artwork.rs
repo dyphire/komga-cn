@@ -10,7 +10,7 @@ async fn runtime_skips_book_local_artwork_refresh_when_library_import_local_artw
     std::fs::write(sidecar_dir.join("book-1.png"), fixture_png_bytes())
         .expect("book artwork sidecar fixture should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for local artwork disabled fixture setup");
     sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 0 WHERE ID = ?")
@@ -46,7 +46,7 @@ async fn runtime_skips_book_local_artwork_refresh_when_library_import_local_artw
         "book local artwork refresh should skip cleanly when library.importLocalArtwork is disabled",
     );
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for local artwork disabled verification");
     let sidecar_thumbnail_count = sqlx::query(
@@ -77,7 +77,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_local_artwork_task() {
     std::fs::write(sidecar_dir.join("book-1.png"), fixture_png_bytes())
         .expect("book artwork sidecar fixture should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for Kotlin persisted local artwork fixture setup");
     sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 1 WHERE ID = ?")
@@ -102,7 +102,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_local_artwork_task() {
     .expect("book artwork sidecar row should be inserted for Kotlin persisted task test");
     pool.close().await;
 
-    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for Kotlin persisted local artwork task setup");
     sqlx::query(
@@ -133,7 +133,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_local_artwork_task() {
         "runtime should execute Kotlin persisted RefreshBookLocalArtwork tasks successfully",
     );
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for Kotlin persisted local artwork verification");
     let row = sqlx::query(
@@ -172,7 +172,7 @@ async fn runtime_imports_multiple_filesystem_book_local_artworks_and_selects_onl
     std::fs::write(sidecar_dir.join("book-12.png"), fixture_png_bytes())
         .expect("non-matching artwork should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for multi-artwork fixture setup");
     sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 1 WHERE ID = ?")
@@ -197,7 +197,7 @@ async fn runtime_imports_multiple_filesystem_book_local_artworks_and_selects_onl
         .process_available(&runtime)
         .expect("book local artwork refresh should import multiple filesystem candidates cleanly");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for multi-artwork verification");
     let rows = sqlx::query(
@@ -258,7 +258,7 @@ async fn runtime_preserves_existing_non_generated_selection_when_importing_book_
     std::fs::write(sidecar_dir.join("book-1-1.jpg"), fixture_png_bytes())
         .expect("secondary local artwork should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for non-generated selection fixture setup");
     sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 1 WHERE ID = ?")
@@ -285,7 +285,7 @@ async fn runtime_preserves_existing_non_generated_selection_when_importing_book_
         "book local artwork refresh should preserve existing non-generated selections cleanly",
     );
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for non-generated selection verification");
     let rows = sqlx::query(
@@ -341,7 +341,7 @@ async fn runtime_replaces_generated_selection_when_importing_book_local_artworks
     std::fs::write(sidecar_dir.join("book-1-1.jpg"), fixture_png_bytes())
         .expect("secondary local artwork should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for generated selection fixture setup");
     sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 1 WHERE ID = ?")
@@ -378,7 +378,7 @@ async fn runtime_replaces_generated_selection_when_importing_book_local_artworks
         .process_available(&runtime)
         .expect("book local artwork refresh should replace generated selection cleanly");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for generated selection verification");
     let rows = sqlx::query(

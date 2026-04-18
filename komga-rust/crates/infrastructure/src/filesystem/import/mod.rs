@@ -11,7 +11,7 @@ use komga_application::media_assets::{
 };
 use sqlx::Row;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::{connect_read_pool, connect_write_pool};
 use crate::{resolve_library_item_path, resolve_rooted_path, resolve_stored_path};
 
 #[derive(Clone, Debug)]
@@ -234,7 +234,7 @@ async fn load_import_series_target(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series target db: {error}"))?;
 
@@ -268,7 +268,7 @@ async fn load_import_upgrade_book_target(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open upgrade book target db: {error}"))?;
 
@@ -312,7 +312,7 @@ async fn load_library_roots(database_file: &Path) -> Result<Vec<PathBuf>, String
         return Ok(Vec::new());
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open library roots db: {error}"))?;
 
@@ -563,7 +563,7 @@ async fn migrate_upgraded_book_identity(
         .to_string();
     let destination_url = import_book_url_for_library_root(library_root, destination_file)?;
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_write_pool(database_file)
         .await
         .map_err(|error| format!("open import-upgrade migration db: {error}"))?;
     let mut tx = pool
@@ -748,7 +748,7 @@ async fn persist_book_imported_event(
     let source_name = source_file.to_string_lossy().to_string();
     let upgrade_value = if upgrade { "Yes" } else { "No" };
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_write_pool(database_file)
         .await
         .map_err(|error| format!("open historical-event db for import: {error}"))?;
     let mut tx = pool

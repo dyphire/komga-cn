@@ -255,7 +255,7 @@ async fn scheduler_claim_batch_respects_priority_order_group_locks_and_owner_per
     let paths = new_router_fixture("scheduler-batch-claim-ordering").await;
     seed_router_contract_data(&paths).await;
 
-    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for batch claim ordering setup");
     for (id, priority, group_id, class_name, simple_type) in [
@@ -332,7 +332,7 @@ async fn scheduler_claim_batch_respects_priority_order_group_locks_and_owner_per
         "claimed tasks should expose their persisted owner after batch selection",
     );
 
-    let verify_pool = connect_pool(paths.tasks_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should reopen for batch claim ordering verification");
     let rows = sqlx::query("SELECT ID, OWNER FROM TASK ORDER BY PRIORITY DESC, ID ASC")

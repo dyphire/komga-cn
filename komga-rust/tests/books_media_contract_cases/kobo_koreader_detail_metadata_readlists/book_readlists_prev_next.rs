@@ -54,7 +54,7 @@ async fn router_book_readlists_and_siblings_accept_basic_auth_like_kotlin_client
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("book sibling basic-auth db should open");
     sqlx::query("UPDATE BOOK_METADATA SET NUMBER_SORT = ? WHERE BOOK_ID = ?")
@@ -120,7 +120,7 @@ async fn router_discovery_book_readlists_applies_content_restrictions_to_book_id
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("book readlists restricted db should open");
     sqlx::query(
@@ -257,7 +257,7 @@ async fn router_book_previous_uses_metadata_number_sort_instead_of_book_number()
     let paths = new_router_fixture("router-book-previous-number-sort").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("book previous number-sort db should open");
     sqlx::query(
@@ -342,7 +342,7 @@ async fn router_book_previous_returns_deleted_books_when_they_sort_closer() {
     let paths = new_router_fixture("router-book-previous-excludes-deleted").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("book previous deleted db should open");
     sqlx::query("UPDATE BOOK_METADATA SET NUMBER_SORT = ? WHERE BOOK_ID = ?")
@@ -469,7 +469,7 @@ async fn router_book_previous_skips_equal_number_sort_ties() {
     let paths = new_router_fixture("router-book-previous-number-sort-tie").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("book previous tie db should open");
     sqlx::query("UPDATE BOOK_METADATA SET NUMBER_SORT = ? WHERE BOOK_ID = ?")
@@ -555,7 +555,7 @@ async fn router_book_next_uses_metadata_number_sort_instead_of_book_number() {
     let paths = new_router_fixture("router-book-next-number-sort").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("book next number-sort db should open");
     sqlx::query(
@@ -640,7 +640,7 @@ async fn router_book_next_returns_deleted_books_when_they_sort_closer() {
     let paths = new_router_fixture("router-book-next-excludes-deleted").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("book next deleted db should open");
     sqlx::query("UPDATE BOOK_METADATA SET NUMBER_SORT = ? WHERE BOOK_ID = ?")
@@ -767,7 +767,7 @@ async fn router_book_next_skips_equal_number_sort_ties() {
     let paths = new_router_fixture("router-book-next-number-sort-tie").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("book next tie db should open");
     sqlx::query("UPDATE BOOK_METADATA SET NUMBER_SORT = ? WHERE BOOK_ID = ?")
@@ -853,7 +853,7 @@ async fn router_book_next_reuses_book_detail_payload_fields() {
     let paths = new_router_fixture("router-book-next-detail-payload").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("book next detail payload db should open");
     sqlx::query(

@@ -53,7 +53,7 @@ async fn router_kobo_state_existing_progress_without_locator_omits_progress_fiel
     seed_router_contract_data(&paths).await;
     seed_admin_kobo_path_token(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract db should open for missing locator state test");
     sqlx::query(
@@ -121,7 +121,7 @@ async fn router_kobo_state_existing_progress_preserves_empty_string_locator_fiel
     seed_router_contract_data(&paths).await;
     seed_admin_kobo_path_token(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract db should open for empty-string locator state test");
     sqlx::query(

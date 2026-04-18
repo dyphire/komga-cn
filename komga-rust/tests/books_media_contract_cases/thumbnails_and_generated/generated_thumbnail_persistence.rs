@@ -6,7 +6,7 @@ async fn generate_book_thumbnail_persists_generated_thumbnail_for_epub_cover() {
     seed_router_contract_data(&paths).await;
     write_router_epub_with_cover(&paths, "books/book-1.epub");
 
-    let cleanup_pool = connect_pool(paths.main_db.as_path(), 1)
+    let cleanup_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for epub thumbnail cleanup");
     sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ?")
@@ -31,7 +31,7 @@ async fn generate_book_thumbnail_persists_generated_thumbnail_for_epub_cover() {
     generate_book_thumbnail(paths.main_db.as_path(), "book-1")
         .expect("generate_book_thumbnail should execute successfully for epub cover");
 
-    let main_pool = connect_pool(paths.main_db.as_path(), 1)
+    let main_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for epub generated thumbnail verification");
     let generated = sqlx::query(
@@ -114,7 +114,7 @@ async fn generate_book_thumbnail_persists_generated_thumbnail_for_pdf() {
     generate_book_thumbnail(paths.main_db.as_path(), "book-pdf-1")
         .expect("generate_book_thumbnail should execute successfully for pdf");
 
-    let main_pool = connect_pool(paths.main_db.as_path(), 1)
+    let main_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for pdf generated thumbnail verification");
     let generated = sqlx::query(

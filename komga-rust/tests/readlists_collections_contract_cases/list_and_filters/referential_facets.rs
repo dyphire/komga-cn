@@ -194,7 +194,7 @@ async fn router_genres_deduplicates_shared_values_across_series() {
     seed_router_contract_data(&paths).await;
     seed_facet_scope_variants(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("genres dedup db should open");
     sqlx::query("INSERT INTO SERIES_METADATA_GENRE (SERIES_ID, GENRE) VALUES (?, ?)")
@@ -233,7 +233,7 @@ async fn router_referential_facets_handle_empty_and_null_series_metadata_values(
         new_router_fixture("router-referential-facets-empty-and-null-series-metadata-values").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("referential facets metadata db should open");
     sqlx::query("UPDATE SERIES_METADATA SET LANGUAGE = ? WHERE SERIES_ID = ?")
@@ -348,7 +348,7 @@ async fn router_series_release_dates_uses_series_aggregated_release_date() {
     let paths = new_router_fixture("router-series-release-dates-uses-aggregation").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series release dates aggregation db should open");
     sqlx::query(

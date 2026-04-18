@@ -1,7 +1,7 @@
 use super::*;
 
 async fn soft_delete_series(paths: &RuntimeDbPaths, series_ids: &[&str]) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series deleted fixture db should open");
 
@@ -18,7 +18,7 @@ async fn soft_delete_series(paths: &RuntimeDbPaths, series_ids: &[&str]) {
 }
 
 async fn update_series_metadata_title(paths: &RuntimeDbPaths, series_id: &str, title: &str) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series metadata title fixture db should open");
 
@@ -39,7 +39,7 @@ async fn update_collection_series_number(
     series_id: &str,
     number: i64,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("collection number fixture db should open");
 
@@ -58,7 +58,7 @@ async fn update_collection_series_number(
 }
 
 async fn update_series_read_date(paths: &RuntimeDbPaths, series_id: &str, read_date: &str) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series read date fixture db should open");
 
@@ -134,7 +134,7 @@ struct LegacySeriesFixture<'a> {
 }
 
 async fn seed_legacy_series_fixture(paths: &RuntimeDbPaths, fixture: LegacySeriesFixture<'_>) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("legacy series fixture db should open");
 
@@ -252,7 +252,7 @@ async fn seed_series_read_progress_for(
     read_count: i64,
     in_progress_count: i64,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("legacy series read-progress db should open");
 
@@ -1404,7 +1404,7 @@ async fn router_discovery_series_list_sorts_runtime_owned_results_by_release_dat
     seed_router_contract_data(&paths).await;
     seed_router_custom_series(&paths, "series-2", "Series 2", "library-1").await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series runtime sort db should open");
     sqlx::query("UPDATE SERIES_METADATA SET TITLE_SORT = ? WHERE SERIES_ID = ?")

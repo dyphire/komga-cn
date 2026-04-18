@@ -1,13 +1,13 @@
 use std::path::Path;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_write_pool;
 
 pub async fn save_announcements_read(
     database_file: &Path,
     user_id: &str,
     announcement_ids: &[String],
 ) -> Result<(), sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
 
     for announcement_id in announcement_ids {

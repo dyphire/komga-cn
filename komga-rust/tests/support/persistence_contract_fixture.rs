@@ -5,7 +5,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use komga_infrastructure::context::SqlitePersistenceContext;
-use komga_infrastructure::sqlite::{connect_pool, evict_shared_pools_for_paths};
+use komga_infrastructure::sqlite::{
+    connect_shared_pool, connect_test_pool, evict_shared_pools_for_paths,
+};
 
 pub struct RuntimeDbPaths {
     pub config_dir: PathBuf,
@@ -100,7 +102,7 @@ async fn execute_sql_files(
     migration_dir: &Path,
     through_version: Option<i64>,
 ) -> anyhow::Result<()> {
-    let pool = connect_pool(db_path, 1).await?;
+    let pool = connect_test_pool(db_path, 1).await?;
     let context = SqlitePersistenceContext::new(pool.clone());
 
     for file in sorted_migration_files(migration_dir)? {
@@ -283,7 +285,7 @@ mod tests {
         seed_main_db_from_flyway(&main_db)
             .await
             .expect("fixture main db should be seeded before stale pool opens");
-        let stale_pool = connect_pool(&main_db, 1)
+        let stale_pool = connect_shared_pool(&main_db, 1)
             .await
             .expect("fixture main db should open");
         sqlx::query("INSERT INTO USER (ID, EMAIL, PASSWORD) VALUES (?, ?, ?)")
@@ -305,7 +307,7 @@ mod tests {
         let config_exists_after_cleanup = config_dir.exists();
 
         fs::create_dir_all(&config_dir).expect("fixture root should be recreated after cleanup");
-        let fresh_pool = connect_pool(&main_db, 1)
+        let fresh_pool = connect_shared_pool(&main_db, 1)
             .await
             .expect("fresh fixture main db should open after cleanup");
         let leaked_rows = sqlx::query_scalar::<_, String>("SELECT ID FROM USER")

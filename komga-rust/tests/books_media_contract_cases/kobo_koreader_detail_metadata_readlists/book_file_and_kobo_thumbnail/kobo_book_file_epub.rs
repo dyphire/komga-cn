@@ -115,7 +115,7 @@ async fn router_kobo_book_file_epub_returns_forbidden_for_restricted_user() {
     std::fs::write(books_dir.join("book-1.epub"), b"router-kobo-file-content")
         .expect("restricted kobo file fixture should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("restricted kobo file db should open");
     sqlx::query("UPDATE SERIES_METADATA SET AGE_RATING = ? WHERE SERIES_ID = ?")

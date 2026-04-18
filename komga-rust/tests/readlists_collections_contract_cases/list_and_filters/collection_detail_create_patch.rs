@@ -10,7 +10,7 @@ async fn router_collection_detail_returns_kotlin_collection_dto_fields() {
     seed_router_contract_data(&paths).await;
     seed_collection_series_variants(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for collection detail fixture alignment");
     sqlx::query("UPDATE COLLECTION SET SERIES_COUNT = ? WHERE ID = ?")
@@ -77,7 +77,7 @@ async fn router_collection_detail_marks_partially_visible_collection_as_filtered
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for filtered collection detail alignment");
     sqlx::query("UPDATE COLLECTION SET SERIES_COUNT = ? WHERE ID = ?")
@@ -420,7 +420,7 @@ async fn router_collection_patch_ignores_historical_duplicate_when_name_is_uncha
         new_router_fixture("router-collection-patch-unchanged-name-historical-duplicate").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for collection patch historical duplicate seed");
     sqlx::query(

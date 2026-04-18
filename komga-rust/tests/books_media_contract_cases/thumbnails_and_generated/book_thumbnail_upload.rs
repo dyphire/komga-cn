@@ -59,7 +59,7 @@ async fn router_book_thumbnail_upload_selects_thumbnail_when_none_was_selected()
     let paths = new_router_fixture("router-book-thumbnail-upload-auto-selects-first").await;
     seed_router_contract_data(&paths).await;
 
-    let cleanup_pool = connect_pool(paths.main_db.as_path(), 1)
+    let cleanup_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for book thumbnail cleanup");
     sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ?")
@@ -91,7 +91,7 @@ async fn router_book_thumbnail_upload_selects_thumbnail_when_none_was_selected()
 
     assert_eq!(upload.status(), StatusCode::OK);
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for selected thumbnail verification");
     let selected_count = sqlx::query(
@@ -114,7 +114,7 @@ async fn router_book_thumbnail_upload_accepts_oneshot_book() {
     let paths = new_router_fixture("router-book-thumbnail-upload-oneshot-book").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for oneshot book thumbnail setup");
     sqlx::query("UPDATE BOOK SET ONESHOT = ? WHERE ID = ?")

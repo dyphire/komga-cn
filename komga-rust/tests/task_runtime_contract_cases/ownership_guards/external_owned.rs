@@ -5,7 +5,7 @@ async fn runtime_blocks_authentication_activity_cleanup_when_main_database_is_ex
     let paths = new_router_fixture("runtime-blocked-main-database-auth-cleanup").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for auth-cleanup fixture setup");
     sqlx::query(
@@ -49,7 +49,7 @@ async fn runtime_blocks_authentication_activity_cleanup_when_main_database_is_ex
     .await
     .expect("auth cleanup should skip cleanly when main database is external-owned");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for auth-cleanup verification");
     let activity_rows = sqlx::query("SELECT COUNT(*) AS COUNT FROM AUTHENTICATION_ACTIVITY")
@@ -78,7 +78,7 @@ async fn runtime_blocks_book_media_analysis_when_main_database_is_external_owned
         br#"<html xmlns='http://www.w3.org/1999/xhtml'><body><p>Analyze Fixture</p></body></html>"#,
     );
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for analyze-book fixture setup");
     sqlx::query(
@@ -133,7 +133,7 @@ async fn runtime_blocks_book_media_analysis_when_main_database_is_external_owned
         .process_available(&runtime)
         .expect("blocked main-database analyze-book should still drain cleanly");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for analyze-book verification");
     let media_row = sqlx::query(
@@ -197,7 +197,7 @@ async fn runtime_blocks_sidecar_metadata_refresh_when_sidecar_output_is_external
     )
     .expect("book sidecar fixture should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for sidecar fixture setup");
     sqlx::query(
@@ -226,7 +226,7 @@ async fn runtime_blocks_sidecar_metadata_refresh_when_sidecar_output_is_external
         .process_available(&runtime)
         .expect("blocked sidecar metadata refresh should still drain cleanly");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for verification");
     let title = sqlx::query("SELECT TITLE FROM BOOK_METADATA WHERE BOOK_ID = ? LIMIT 1")
@@ -250,7 +250,7 @@ async fn runtime_blocks_series_metadata_aggregation_when_main_database_is_extern
     let paths = new_router_fixture("runtime-blocked-main-database-aggregation").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for aggregation fixture setup");
     sqlx::query("UPDATE SERIES SET NAME = ? WHERE ID = ?")
@@ -289,7 +289,7 @@ async fn runtime_blocks_series_metadata_aggregation_when_main_database_is_extern
         .process_available(&runtime)
         .expect("blocked main-database aggregation should still drain cleanly");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for aggregation verification");
     let row =
@@ -319,7 +319,7 @@ async fn runtime_blocks_empty_trash_cleanup_when_main_database_is_external_owned
     let paths = new_router_fixture("runtime-blocked-main-database-empty-trash").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for cleanup fixture setup");
     sqlx::query("DELETE FROM COLLECTION_SERIES WHERE COLLECTION_ID = ?")
@@ -363,7 +363,7 @@ async fn runtime_blocks_empty_trash_cleanup_when_main_database_is_external_owned
         .process_available(&runtime)
         .expect("blocked main-database cleanup should still drain cleanly");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for cleanup verification");
     let collection_rows = sqlx::query("SELECT COUNT(*) AS COUNT FROM COLLECTION WHERE ID = ?")

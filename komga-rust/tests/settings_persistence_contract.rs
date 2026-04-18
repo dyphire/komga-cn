@@ -1,7 +1,7 @@
 use komga_contract_testkit::contract_matrix::assert_required_target_declared;
+use komga_infrastructure::sqlite::connect_main_write_context;
+use komga_infrastructure::sqlite::connect_test_pool;
 use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore;
-use komga_infrastructure::sqlite::connect_persistence_context;
-use komga_infrastructure::sqlite::connect_pool;
 
 mod support {
     pub mod persistence_contract_fixture;
@@ -25,7 +25,7 @@ async fn server_settings_rows_persist_in_flyway_seeded_main_db() {
         .await
         .expect("tasks db flyway fixture should be created");
 
-    let pool = connect_pool(&paths.main_db, 1)
+    let pool = connect_test_pool(&paths.main_db, 1)
         .await
         .expect("main sqlite pool should open");
 
@@ -66,9 +66,9 @@ async fn server_settings_store_round_trips_through_context_backed_path() {
         .await
         .expect("tasks db flyway fixture should be created");
 
-    let context = connect_persistence_context(&paths.main_db, 1)
+    let context = connect_main_write_context(&paths.main_db)
         .await
-        .expect("main sqlite persistence context should open");
+        .expect("main sqlite write context should open");
     let store = ServerSettingsStore::from_context(context.clone());
 
     store

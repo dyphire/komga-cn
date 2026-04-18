@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::Write;
 
-use komga_infrastructure::sqlite::connect_pool;
+use komga_infrastructure::sqlite::connect_test_pool;
 use lopdf::{Document as PdfDocument, Object, Stream, dictionary};
 use zip::CompressionMethod;
 use zip::ZipWriter;
@@ -113,7 +113,7 @@ pub async fn seed_router_pdf_book(
     file_name: &str,
     title: &str,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract db should open for pdf book seed");
 
@@ -168,7 +168,7 @@ pub async fn seed_router_pdf_book(
 }
 
 pub async fn update_router_book_name(paths: &RuntimeDbPaths, book_id: &str, name: &str) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract db should open for book name update");
 
@@ -228,7 +228,7 @@ async fn seed_router_cbz_book_with_metadata(
     number: i64,
     release_date: &str,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract db should open for cbz book seed");
 
@@ -299,7 +299,7 @@ pub async fn seed_router_epub_divina_book(
     file_name: &str,
     title: &str,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract db should open for epub divina book seed");
 

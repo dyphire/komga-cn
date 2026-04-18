@@ -99,7 +99,7 @@ async fn router_book_thumbnail_delete_allows_missing_path_book_when_thumbnail_ex
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for missing path delete verification");
     let remaining = sqlx::query("SELECT COUNT(*) AS COUNT FROM THUMBNAIL_BOOK WHERE ID = ?")
@@ -120,7 +120,7 @@ async fn router_book_thumbnail_delete_rejects_generated_thumbnail() {
     seed_router_contract_data(&paths).await;
     write_router_epub_with_cover(&paths, "books/book-1.epub");
 
-    let cleanup_pool = connect_pool(paths.main_db.as_path(), 1)
+    let cleanup_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for generated thumbnail cleanup");
     sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ?")
@@ -133,7 +133,7 @@ async fn router_book_thumbnail_delete_rejects_generated_thumbnail() {
     generate_book_thumbnail(paths.main_db.as_path(), "book-1")
         .expect("generate_book_thumbnail should succeed before delete test");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for generated thumbnail lookup");
     let generated_thumbnail_id = sqlx::query(
@@ -172,7 +172,7 @@ async fn router_book_thumbnail_delete_reselects_remaining_thumbnail_when_selecte
     let paths = new_router_fixture("router-book-thumbnail-delete-reselects-remaining").await;
     seed_router_contract_data(&paths).await;
 
-    let cleanup_pool = connect_pool(paths.main_db.as_path(), 1)
+    let cleanup_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for book thumbnail delete cleanup");
     sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ?")
@@ -286,7 +286,7 @@ async fn router_book_thumbnail_returns_not_found_for_existing_single_image_witho
     let paths = new_router_fixture("router-book-thumbnail-single-image-no-poster").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for single-image thumbnail fixture");
     sqlx::query(

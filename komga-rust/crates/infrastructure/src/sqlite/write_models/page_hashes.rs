@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_write_pool;
 
 pub async fn upsert_page_hash(
     database_file: &Path,
@@ -9,7 +9,7 @@ pub async fn upsert_page_hash(
     action: &str,
 ) -> Result<(), sqlx::Error> {
     let normalized_size = size.filter(|value| *value >= 0);
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_write_pool(database_file).await?;
     sqlx::query(
         r#"
         INSERT INTO PAGE_HASH (HASH, SIZE, ACTION, DELETE_COUNT, CREATED_DATE, LAST_MODIFIED_DATE)

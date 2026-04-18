@@ -8,7 +8,7 @@ async fn insert_history_event(
     series_id: Option<&str>,
     timestamp: &str,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("history event db should open");
     sqlx::query(

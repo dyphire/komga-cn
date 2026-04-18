@@ -40,7 +40,7 @@ async fn scanner_runtime_blocks_scan_output_when_filesystem_scan_writer_is_exter
         "runtime must not persist scan-derived book updates when filesystem scan output is external-owned",
     );
 
-    let tasks_pool = connect_pool(fixture.paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(fixture.paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open after blocked scan-output drain");
     let remaining_tasks = sqlx::query("SELECT COUNT(*) AS COUNT FROM TASK")
@@ -108,7 +108,7 @@ async fn scanner_unknown_task_type_is_not_completed_or_silently_skipped() {
         "supported task behind unsupported head task must not run after unsupported-task failure",
     );
 
-    let tasks_pool = connect_pool(fixture.paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(fixture.paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open after unknown-task processing");
     let remaining_tasks = sqlx::query("SELECT COUNT(*) AS COUNT FROM TASK")
@@ -140,7 +140,7 @@ async fn scanner_startup_releases_previously_claimed_persisted_tasks() {
         .await
         .expect("scanner startup disown fixture should be created");
 
-    let tasks_pool = connect_pool(fixture.paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(fixture.paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for startup disown test");
     let task_id = scan_library_task_id("library-1", false);
@@ -166,7 +166,7 @@ async fn scanner_startup_releases_previously_claimed_persisted_tasks() {
         None,
     );
 
-    let verify_pool = connect_pool(fixture.paths.tasks_db.as_path(), 1)
+    let verify_pool = connect_test_pool(fixture.paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should reopen for startup disown verification");
     let owner = sqlx::query("SELECT OWNER FROM TASK WHERE ID = ?")
@@ -191,7 +191,7 @@ async fn scanner_startup_leaves_tasks_untouched_when_tasks_writer_is_external_ow
         .await
         .expect("scanner blocked tasks-disown fixture should be created");
 
-    let tasks_pool = connect_pool(fixture.paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(fixture.paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for blocked tasks-disown test");
     let task_id = scan_library_task_id("library-1", false);
@@ -237,7 +237,7 @@ async fn scanner_startup_leaves_tasks_untouched_when_tasks_writer_is_external_ow
         Some("REBUILD_INDEX"),
     );
 
-    let verify_pool = connect_pool(fixture.paths.tasks_db.as_path(), 1)
+    let verify_pool = connect_test_pool(fixture.paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should reopen for blocked tasks-disown verification");
     let task_rows = sqlx::query("SELECT COUNT(*) AS COUNT FROM TASK")
@@ -306,7 +306,7 @@ async fn scanner_persisted_scan_library_payload_overrides_legacy_id_target_and_d
         .expect("updated scan-library payload precedence fixture should exist")
         .len() as i64;
 
-    let tasks_pool = connect_pool(fixture.paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(fixture.paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for scan-library payload precedence seed");
     sqlx::query(

@@ -5,7 +5,7 @@ async fn router_book_progression_put_accepts_url_encoded_epub_href() {
     let paths = new_router_fixture("router-book-progression-put-epub-url-encoded-href").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for url-encoded href seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -54,7 +54,7 @@ async fn router_book_progression_routes_accept_basic_auth_like_kotlin_clients() 
     let paths = new_router_fixture("router-book-progression-basic-auth-compat").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for basic-auth progression seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -117,7 +117,7 @@ async fn router_book_progression_put_normalizes_epub_locator_from_matching_posit
     let paths = new_router_fixture("router-book-progression-put-epub-normalizes-locator").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for epub progression normalization seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -185,7 +185,7 @@ async fn router_book_progression_put_normalizes_epub_locator_from_matching_posit
         }))
     );
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for normalized progression verification");
     let progression_row = sqlx::query(
@@ -208,7 +208,7 @@ async fn router_book_progression_put_rejects_invalid_epub_progression_between_po
     let paths = new_router_fixture("router-book-progression-put-epub-invalid-progression").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for invalid epub progression seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -264,7 +264,7 @@ async fn router_book_progression_put_accepts_fixed_layout_epub_single_position()
         new_router_fixture("router-book-progression-put-epub-fixed-layout-single-position").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for fixed-layout progression seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -338,7 +338,7 @@ async fn router_book_progression_put_uses_total_progression_to_round_epub_page()
         new_router_fixture("router-book-progression-put-epub-rounds-total-progression").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for epub page-rounding seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -377,7 +377,7 @@ async fn router_book_progression_put_uses_total_progression_to_round_epub_page()
         .expect("epub page-rounding put request should complete");
     assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for page-rounding verification");
     let progression_row = sqlx::query(
@@ -401,7 +401,7 @@ async fn router_book_progression_put_ignores_epub_locator_position_when_persisti
         new_router_fixture("router-book-progression-put-epub-ignores-locator-position").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for epub conflicting-position seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -443,7 +443,7 @@ async fn router_book_progression_put_ignores_epub_locator_position_when_persisti
         .expect("epub conflicting-position put request should complete");
     assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for conflicting-position verification");
     let progression_row = sqlx::query(
@@ -466,7 +466,7 @@ async fn router_book_progression_put_marks_completed_when_total_progression_is_a
     let paths = new_router_fixture("router-book-progression-put-epub-completed-threshold").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for epub completion-threshold seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -505,7 +505,7 @@ async fn router_book_progression_put_marks_completed_when_total_progression_is_a
         .expect("epub completion-threshold put request should complete");
     assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for completion-threshold verification");
     let progression_row = sqlx::query(

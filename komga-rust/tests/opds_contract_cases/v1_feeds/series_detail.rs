@@ -5,7 +5,7 @@ async fn router_opds_v1_series_detail_filters_non_ready_books() {
     let paths = new_router_fixture("router-opds-v1-series-detail-ready-only").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 series detail ready-only db should open");
     sqlx::query("UPDATE MEDIA SET STATUS = ? WHERE BOOK_ID = ?")
@@ -74,7 +74,7 @@ async fn router_opds_v1_series_detail_formats_summary_content_like_kotlin() {
     let paths = new_router_fixture("router-opds-v1-series-detail-summary-content").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 series detail summary-content db should open");
     sqlx::query("UPDATE BOOK_METADATA SET SUMMARY = ? WHERE BOOK_ID = ?")
@@ -173,7 +173,7 @@ async fn router_opds_v1_series_detail_includes_read_progress_attributes_on_page_
     seed_router_contract_data(&paths).await;
     seed_router_pdf_book(&paths, "book-pdf", "series-1", "book-pdf.pdf", "Book PDF").await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 series detail read-progress db should open");
     sqlx::query(
@@ -297,7 +297,7 @@ async fn router_opds_v1_series_detail_formats_sqlite_naive_updated_like_kotlin()
     let paths = new_router_fixture("router-opds-v1-series-detail-naive-updated").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 series detail naive-updated db should open");
     sqlx::query("UPDATE SERIES SET LAST_MODIFIED_DATE = ? WHERE ID = ?")
@@ -400,7 +400,7 @@ async fn router_opds_v1_series_detail_keeps_deleted_series_accessible_like_kotli
     let paths = new_router_fixture("router-opds-v1-series-detail-deleted-series").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 series detail deleted-series db should open");
     sqlx::query("UPDATE SERIES SET DELETED_DATE = ? WHERE ID = ?")

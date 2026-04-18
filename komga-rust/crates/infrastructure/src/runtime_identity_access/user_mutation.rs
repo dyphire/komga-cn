@@ -8,13 +8,13 @@ use super::auth_access::persisted_users;
 use super::backend_contract::{
     CreateAuthUserInput, SharedLibrariesInput, UpdateAuthUserInput, UpdateAuthUserResult,
 };
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_write_pool;
 
 pub async fn create_auth_user(
     database_file: &Path,
     input: CreateAuthUserInput,
 ) -> Result<Option<AuthUser>, sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
 
     let email_exists = sqlx::query("SELECT 1 FROM USER WHERE LOWER(EMAIL) = LOWER(?) LIMIT 1")
@@ -109,7 +109,7 @@ pub async fn delete_auth_user(
     database_file: &Path,
     target_user_id: &str,
 ) -> Result<bool, sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
 
     let exists = sqlx::query("SELECT 1 FROM USER WHERE ID = ? LIMIT 1")
@@ -177,7 +177,7 @@ pub async fn update_auth_user(
     target_user_id: &str,
     patch: UpdateAuthUserInput,
 ) -> Result<UpdateAuthUserResult, sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
 
     let Some(user_row) = sqlx::query(

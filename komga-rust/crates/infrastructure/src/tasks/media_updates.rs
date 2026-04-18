@@ -8,7 +8,7 @@ use serde_json::json;
 use sqlx::{Row, Sqlite, SqlitePool};
 
 use super::media_queries::PersistedHashedPageToDelete;
-use crate::sqlite::connect_private_pool;
+use crate::sqlite::connect_private_write_pool;
 
 #[derive(Clone)]
 struct BookSseContext {
@@ -725,7 +725,7 @@ where
             .map_err(|error| format!("failed to build task runtime: {error}"))?;
 
         runtime.block_on(async move {
-            let pool = connect_private_pool(&database_file, 1)
+            let pool = connect_private_write_pool(&database_file)
                 .await
                 .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
             let result = operation(pool.clone()).await;

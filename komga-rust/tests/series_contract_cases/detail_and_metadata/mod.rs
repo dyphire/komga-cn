@@ -114,7 +114,7 @@ async fn router_discovery_series_detail_uses_persisted_series_name_for_top_level
     let paths = new_router_fixture("router-discovery-series-detail-uses-series-name").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series detail name parity db should open");
     sqlx::query("UPDATE SERIES SET NAME = ? WHERE ID = ?")

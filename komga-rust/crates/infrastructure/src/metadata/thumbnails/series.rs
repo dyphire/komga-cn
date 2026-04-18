@@ -4,7 +4,7 @@ use komga_application::media_assets::{EntityThumbnailBinary, SeriesThumbnailReco
 use reqwest::Url;
 use sqlx::Row;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_read_pool;
 
 use super::generated_thumbnail_id;
 
@@ -16,7 +16,7 @@ pub async fn load_persisted_series_thumbnails(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series thumbnails db: {error}"))?;
     let rows = sqlx::query(
@@ -25,7 +25,7 @@ pub async fn load_persisted_series_thumbnails(
         FROM THUMBNAIL_SERIES
         WHERE SERIES_ID = ?
         ORDER BY SELECTED DESC, LAST_MODIFIED_DATE DESC, ID ASC
-        "#
+        "#,
     )
     .bind(series_id)
     .fetch_all(&pool)
@@ -55,7 +55,7 @@ pub async fn load_selected_series_thumbnail(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open selected series thumbnail db: {error}"))?;
     let row = sqlx::query(
@@ -65,7 +65,7 @@ pub async fn load_selected_series_thumbnail(
         WHERE SERIES_ID = ?
         ORDER BY SELECTED DESC, LAST_MODIFIED_DATE DESC, ID ASC
         LIMIT 1
-        "#
+        "#,
     )
     .bind(series_id)
     .fetch_optional(&pool)
@@ -89,7 +89,7 @@ pub async fn load_series_thumbnail_by_id(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open single series thumbnail db: {error}"))?;
     let row = sqlx::query(
@@ -98,7 +98,7 @@ pub async fn load_series_thumbnail_by_id(
         FROM THUMBNAIL_SERIES
         WHERE ID = ?
         LIMIT 1
-        "#
+        "#,
     )
     .bind(thumbnail_id)
     .fetch_optional(&pool)
@@ -131,7 +131,7 @@ pub async fn insert_series_thumbnail(
     height: i64,
     selected: bool,
 ) -> Result<SeriesThumbnailRecord, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series thumbnail create db: {error}"))?;
     let mut tx = pool
@@ -145,7 +145,7 @@ pub async fn insert_series_thumbnail(
         FROM SERIES
         WHERE ID = ?
         LIMIT 1
-        "#
+        "#,
     )
     .bind(series_id)
     .fetch_optional(&mut *tx)
@@ -165,7 +165,7 @@ pub async fn insert_series_thumbnail(
             UPDATE THUMBNAIL_SERIES
             SET SELECTED = 0
             WHERE SERIES_ID = ?
-            "#
+            "#,
         )
         .bind(series_id)
         .execute(&mut *tx)
@@ -179,7 +179,7 @@ pub async fn insert_series_thumbnail(
         INSERT INTO THUMBNAIL_SERIES
             (ID, SELECTED, THUMBNAIL, TYPE, SERIES_ID, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        "#
+        "#,
     )
     .bind(&id)
     .bind(selected)
@@ -241,7 +241,7 @@ pub async fn select_series_thumbnail(
         return Ok(false);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series thumbnail select db: {error}"))?;
     let mut tx = pool
@@ -255,7 +255,7 @@ pub async fn select_series_thumbnail(
         FROM SERIES
         WHERE ID = ?
         LIMIT 1
-        "#
+        "#,
     )
     .bind(series_id)
     .fetch_optional(&mut *tx)
@@ -275,7 +275,7 @@ pub async fn select_series_thumbnail(
         FROM THUMBNAIL_SERIES
         WHERE ID = ?
         LIMIT 1
-        "#
+        "#,
     )
     .bind(thumbnail_id)
     .fetch_optional(&mut *tx)
@@ -294,7 +294,7 @@ pub async fn select_series_thumbnail(
         UPDATE THUMBNAIL_SERIES
         SET SELECTED = 0
         WHERE SERIES_ID = ?
-        "#
+        "#,
     )
     .bind(&target_series_id)
     .execute(&mut *tx)
@@ -305,7 +305,7 @@ pub async fn select_series_thumbnail(
         UPDATE THUMBNAIL_SERIES
         SET SELECTED = 1
         WHERE ID = ?
-        "#
+        "#,
     )
     .bind(thumbnail_id)
     .execute(&mut *tx)
@@ -327,7 +327,7 @@ pub async fn delete_series_thumbnail(
         return Ok(false);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series thumbnail delete db: {error}"))?;
     let mut tx = pool
@@ -341,7 +341,7 @@ pub async fn delete_series_thumbnail(
         FROM SERIES
         WHERE ID = ?
         LIMIT 1
-        "#
+        "#,
     )
     .bind(series_id)
     .fetch_optional(&mut *tx)
@@ -359,7 +359,7 @@ pub async fn delete_series_thumbnail(
         r#"
         DELETE FROM THUMBNAIL_SERIES
         WHERE ID = ? AND SERIES_ID = ?
-        "#
+        "#,
     )
     .bind(thumbnail_id)
     .bind(series_id)

@@ -3,7 +3,7 @@
 use super::*;
 
 async fn seed_kobo_state_epub_extension(paths: &RuntimeDbPaths, blob: Vec<u8>) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for kobo state epub extension seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -188,7 +188,7 @@ async fn router_kobo_state_update_uses_path_api_key_identity_for_valid_epub_upda
         Some(&Value::String("Success".to_string()))
     );
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract db should open for path token state update assertion");
     let row = sqlx::query(
@@ -282,7 +282,7 @@ async fn router_kobo_state_update_returns_failure_for_invalid_epub_progression()
         })
     );
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for invalid epub progression verification");
     let row = sqlx::query("SELECT 1 FROM READ_PROGRESS WHERE BOOK_ID = ? AND USER_ID = ? LIMIT 1")
@@ -346,7 +346,7 @@ async fn router_kobo_state_update_uses_matched_epub_total_progression_for_page_a
         Some(&Value::String("Success".to_string()))
     );
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for matched total progression verification");
     let row = sqlx::query(
@@ -425,7 +425,7 @@ async fn router_kobo_state_update_finished_uses_last_epub_position_semantics() {
         Some(&Value::String("Success".to_string()))
     );
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for finished state verification");
     let row = sqlx::query(
@@ -461,7 +461,7 @@ async fn router_kobo_state_update_returns_failure_for_older_progression() {
     seed_admin_kobo_path_token(&paths).await;
     seed_kobo_state_epub_extension(&paths, fixture_epub_positions_extension_blob()).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for older progression seed");
     sqlx::query(

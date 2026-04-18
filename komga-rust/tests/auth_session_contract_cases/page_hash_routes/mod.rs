@@ -26,7 +26,7 @@ async fn seed_unknown_page_hash_source(
     }
     std::fs::write(&source_path, bytes).expect("unknown page hash source should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("unknown page hash source db should open");
 
@@ -72,7 +72,7 @@ async fn seed_unknown_page_hash_pdf_match(paths: &RuntimeDbPaths, book_id: &str,
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("unknown page hash pdf db should open");
     sqlx::query(
@@ -91,7 +91,7 @@ async fn seed_unknown_page_hash_pdf_match(paths: &RuntimeDbPaths, book_id: &str,
 }
 
 async fn seed_known_page_hash_samples(paths: &RuntimeDbPaths) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("known page hash sample db should open");
 
@@ -218,7 +218,7 @@ async fn seed_known_page_hash_samples(paths: &RuntimeDbPaths) {
 }
 
 async fn load_page_hash_size(paths: &RuntimeDbPaths, hash: &str) -> Option<i64> {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("page hash query db should open");
 
@@ -236,7 +236,7 @@ async fn load_page_hash_record(
     paths: &RuntimeDbPaths,
     hash: &str,
 ) -> Option<(Option<i64>, String)> {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("page hash record query db should open");
 
@@ -256,7 +256,7 @@ async fn load_page_hash_record(
 }
 
 async fn seed_page_hash_row(paths: &RuntimeDbPaths, hash: &str, size: Option<i64>, action: &str) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("page hash seed db should open");
 
@@ -286,7 +286,7 @@ async fn seed_page_hash_image_source(
     let image_bytes = fixture_png_bytes();
     std::fs::write(&source_path, &image_bytes).expect("page hash source image should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("page hash image source db should open");
 
@@ -323,7 +323,7 @@ async fn seed_page_hash_image_source(
 }
 
 async fn seed_unknown_page_hash_samples(paths: &RuntimeDbPaths) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("unknown page hash sample db should open");
 
@@ -393,7 +393,7 @@ async fn seed_unknown_page_hash_samples(paths: &RuntimeDbPaths) {
 }
 
 async fn seed_unknown_page_hash_samples_with_mixed_sizes(paths: &RuntimeDbPaths) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("mixed-size unknown page hash sample db should open");
 
@@ -446,7 +446,7 @@ async fn seed_unknown_page_hash_samples_with_mixed_sizes(paths: &RuntimeDbPaths)
 }
 
 async fn seed_page_hash_match_samples(paths: &RuntimeDbPaths, hash: &str) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("page hash match sample db should open");
 
@@ -509,7 +509,7 @@ async fn seed_page_hash_match_samples(paths: &RuntimeDbPaths, hash: &str) {
 }
 
 async fn update_book_url(paths: &RuntimeDbPaths, book_id: &str, url: &str) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("book url update db should open");
 
@@ -524,7 +524,7 @@ async fn update_book_url(paths: &RuntimeDbPaths, book_id: &str, url: &str) {
 }
 
 async fn update_media_page_file_size_to_null(paths: &RuntimeDbPaths, book_id: &str, number: i64) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("media page update db should open");
 
@@ -543,7 +543,7 @@ async fn load_media_page_file_size(
     book_id: &str,
     number: i64,
 ) -> Option<i64> {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("media page query db should open");
 

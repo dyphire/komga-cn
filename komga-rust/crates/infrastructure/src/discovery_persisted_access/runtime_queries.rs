@@ -4,7 +4,7 @@ pub async fn load_persisted_ondeck_books(
     database_file: &FsPath,
     user_id: &str,
 ) -> Result<Vec<BookBrowseEntry>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open books ondeck db: {error}"))?;
 
@@ -50,7 +50,7 @@ pub async fn load_persisted_ondeck_books(
 pub async fn load_persisted_duplicate_books(
     database_file: &FsPath,
 ) -> Result<Vec<BookBrowseEntry>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open books duplicates db: {error}"))?;
 
@@ -97,7 +97,7 @@ pub async fn load_persisted_book_tags(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book tags db: {error}"))?;
 
@@ -208,7 +208,7 @@ pub async fn persisted_utc_date_minus_days(
     database_file: &FsPath,
     days: i64,
 ) -> Result<Option<String>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open persisted date db: {error}"))?;
 
@@ -231,7 +231,7 @@ pub async fn load_series_read_progress_counts(
     database_file: &FsPath,
     user_id: &str,
 ) -> Result<HashMap<String, (i64, i64)>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series read-progress db: {error}"))?;
 
@@ -262,7 +262,7 @@ pub async fn load_series_read_dates(
     database_file: &FsPath,
     user_id: &str,
 ) -> Result<HashMap<String, String>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series read-date db: {error}"))?;
 
@@ -291,7 +291,7 @@ pub async fn load_series_read_dates(
 pub async fn load_series_total_book_counts(
     database_file: &FsPath,
 ) -> Result<HashMap<String, i64>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series metadata db: {error}"))?;
 

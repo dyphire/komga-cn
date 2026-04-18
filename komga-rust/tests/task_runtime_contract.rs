@@ -7,7 +7,7 @@ use komga_config::writer_ownership::WriterOwnershipPolicy;
 use komga_contract_testkit::contract_matrix::assert_required_target_declared;
 use komga_infrastructure::search::analyzer_profiles::search_analyzer_version;
 use komga_infrastructure::search::index_lifecycle::{SearchEntityType, SearchIndexLifecycle};
-use komga_infrastructure::sqlite::connect_pool;
+use komga_infrastructure::sqlite::connect_test_pool;
 use komga_infrastructure::task_queue::queue_scheduler::TaskQueueScheduler;
 use komga_server::app::{
     build_router_with_config, build_router_without_runtime_workers_for_contract,

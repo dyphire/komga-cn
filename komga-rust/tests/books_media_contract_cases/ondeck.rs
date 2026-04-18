@@ -9,7 +9,7 @@ async fn insert_ondeck_read_progress(
     completed: bool,
     read_date: &str,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("ondeck test db should open for read progress seed");
 
@@ -36,7 +36,7 @@ async fn insert_ondeck_book(
     number: i64,
     title: &str,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("ondeck test db should open for book insert");
 
@@ -81,7 +81,7 @@ async fn insert_ondeck_book(
 }
 
 async fn update_ondeck_series_book_count(paths: &RuntimeDbPaths, series_id: &str, book_count: i64) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("ondeck test db should open for series count update");
 
@@ -110,7 +110,7 @@ async fn seed_ondeck_series_progress(
     in_progress_count: i64,
     most_recent_read_date: &str,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("ondeck test db should open for series progress seed");
 
@@ -170,7 +170,7 @@ async fn seed_ondeck_user(
     labels_allow: &[&str],
     labels_exclude: &[&str],
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("ondeck test user db should open");
 
@@ -233,7 +233,7 @@ async fn seed_ondeck_user(
 }
 
 async fn kotlin_equivalent_ondeck_ids(paths: &RuntimeDbPaths, user_id: &str) -> Vec<String> {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("ondeck kotlin-equivalent db should open");
 
@@ -806,7 +806,7 @@ async fn router_discovery_books_ondeck_excludes_series_with_in_progress_books() 
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("ondeck in-progress db should open");
     sqlx::query(

@@ -6,7 +6,7 @@ use serde_json::Value;
 use serde_json::json;
 use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_write_pool;
 
 fn serialize_locator(locator: Option<&Value>) -> Vec<u8> {
     locator
@@ -20,7 +20,7 @@ async fn open_pool_and_require_user(
     open_context: &str,
     query_context: &str,
 ) -> Result<SqlitePool, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_write_pool(database_file)
         .await
         .map_err(|error| format!("open {open_context} db: {error}"))?;
 
@@ -297,8 +297,9 @@ pub async fn persist_book_progression(
 
     emit_read_progress_changed(book_id, user_id_value);
     if let Some(series_id) = series_id {
-        let exists = persisted_series_read_progress_exists(&pool, &series_id, user_id_value, "progression")
-            .await?;
+        let exists =
+            persisted_series_read_progress_exists(&pool, &series_id, user_id_value, "progression")
+                .await?;
         emit_read_progress_series_event(&series_id, user_id_value, exists);
     }
 
@@ -314,7 +315,7 @@ pub async fn load_book_progression(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_write_pool(database_file)
         .await
         .map_err(|error| format!("open book progression db: {error}"))?;
 
@@ -324,7 +325,7 @@ pub async fn load_book_progression(
         FROM READ_PROGRESS
         WHERE BOOK_ID = ? AND USER_ID = ?
         LIMIT 1
-        "#
+        "#,
     )
     .bind(book_id)
     .bind(user_id_value)
@@ -380,7 +381,7 @@ pub async fn load_book_page_count(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_write_pool(database_file)
         .await
         .map_err(|error| format!("open book page-count db: {error}"))?;
 
@@ -398,7 +399,7 @@ pub async fn delete_persisted_read_progress(
     book_id: &str,
     user_id_value: &str,
 ) -> Result<(), String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_write_pool(database_file)
         .await
         .map_err(|error| format!("open read-progress delete db: {error}"))?;
     let series_id = load_book_series_id(&pool, book_id, "read-progress delete").await?;
@@ -436,7 +437,7 @@ pub async fn readlist_tachiyomi_counters(
         return Ok((0, 0, 0, 0, 0));
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_write_pool(database_file)
         .await
         .map_err(|error| format!("open readlist tachiyomi db: {error}"))?;
 
@@ -514,7 +515,7 @@ pub async fn persist_readlist_tachiyomi_progress(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_write_pool(database_file)
         .await
         .map_err(|error| format!("open readlist tachiyomi write db: {error}"))?;
     for book_id in ordered_book_ids.iter().take(last_book_read) {

@@ -5,7 +5,7 @@ async fn seed_epub_manifest_media(
     context: &str,
     set_divina_compatible: bool,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect(context);
     for (file_name, media_type, sub_type, file_size) in [
@@ -55,7 +55,7 @@ async fn router_book_manifest_epub_exposes_epub_specific_shape() {
     write_router_epub_with_cover(&paths, "books/book-1.epub");
     seed_epub_manifest_media(&paths, "main db should open for epub manifest seed", false).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for epub manifest metadata seed");
     sqlx::query("UPDATE BOOK_METADATA SET SUMMARY = ?, ISBN = ? WHERE BOOK_ID = ?")

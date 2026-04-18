@@ -1,7 +1,7 @@
 use komga_contract_testkit::contract_matrix::assert_required_target_declared;
 use komga_infrastructure::context::SqlitePersistenceContext;
 use komga_infrastructure::sqlite::{
-    connect_persistence_context, connect_pool, connect_tasks_pool, setup,
+    connect_main_write_context, connect_test_pool, connect_write_pool, setup,
 };
 use sqlx::Row;
 use std::path::Path;
@@ -25,14 +25,14 @@ async fn bootstrap_fresh_install() {
         persistence_contract_fixture::new_runtime_db_paths("runtime-schema-fresh-install-oracle")
             .expect("oracle db paths should be created");
 
-    let main_pool = connect_pool(&paths.main_db, 1)
+    let main_pool = connect_test_pool(&paths.main_db, 1)
         .await
         .expect("fresh main sqlite db should open");
     setup::bootstrap_pool(&main_pool)
         .await
         .expect("fresh install main db should be accepted");
 
-    let tasks_pool = connect_pool(&paths.tasks_db, 1)
+    let tasks_pool = connect_test_pool(&paths.tasks_db, 1)
         .await
         .expect("fresh tasks sqlite db should open");
     setup::bootstrap_tasks_pool(&tasks_pool)
@@ -103,14 +103,14 @@ async fn open_current_schema_db() {
         .await
         .expect("tasks db schema inventory should load before bootstrap");
 
-    let main_pool = connect_pool(&paths.main_db, 1)
+    let main_pool = connect_test_pool(&paths.main_db, 1)
         .await
         .expect("current main sqlite db should open");
     setup::bootstrap_pool(&main_pool)
         .await
         .expect("current main sqlite db should pass schema gate without rewrite");
 
-    let tasks_pool = connect_pool(&paths.tasks_db, 1)
+    let tasks_pool = connect_test_pool(&paths.tasks_db, 1)
         .await
         .expect("current tasks sqlite db should open");
     setup::bootstrap_tasks_pool(&tasks_pool)
@@ -149,7 +149,7 @@ async fn repair_historyless_tasks_schema_to_latest_inventory() {
     )
     .expect("oracle db paths should be created");
 
-    let tasks_pool = connect_pool(&paths.tasks_db, 1)
+    let tasks_pool = connect_test_pool(&paths.tasks_db, 1)
         .await
         .expect("historyless tasks sqlite db should open");
     sqlx::query(
@@ -209,7 +209,7 @@ async fn repair_historyless_main_schema_with_missing_index_to_latest_inventory()
         .await
         .expect("historyless main sqlite db should be created from Rust-owned migrations");
 
-    let main_pool = connect_pool(&paths.main_db, 1)
+    let main_pool = connect_test_pool(&paths.main_db, 1)
         .await
         .expect("historyless main sqlite db should open");
     sqlx::query("DROP INDEX IF EXISTS idx__series_metadata__title")
@@ -257,7 +257,7 @@ async fn repair_historyless_main_schema_with_missing_trigger_to_latest_inventory
         .await
         .expect("historyless main sqlite db should be created from Rust-owned migrations");
 
-    let main_pool = connect_pool(&paths.main_db, 1)
+    let main_pool = connect_test_pool(&paths.main_db, 1)
         .await
         .expect("historyless main sqlite db should open");
     sqlx::query("DROP TRIGGER IF EXISTS series_metadata__after_update")
@@ -295,7 +295,7 @@ async fn reject_outdated_schema() {
     let paths = persistence_contract_fixture::new_runtime_db_paths("runtime-schema-outdated")
         .expect("outdated db paths should be created");
 
-    let pool = connect_pool(&paths.main_db, 1)
+    let pool = connect_test_pool(&paths.main_db, 1)
         .await
         .expect("sqlite pool should open");
     let persistence = SqlitePersistenceContext::new(pool.clone());
@@ -348,7 +348,7 @@ async fn migrate_legacy_main_schema_to_latest_inventory() {
         .await
         .expect("legacy main db should carry flyway history");
 
-    let main_pool = connect_pool(&paths.main_db, 1)
+    let main_pool = connect_test_pool(&paths.main_db, 1)
         .await
         .expect("legacy main sqlite db should open");
     setup::bootstrap_pool(&main_pool)
@@ -398,7 +398,7 @@ async fn migrate_legacy_main_schema_without_flyway_history_to_latest_inventory()
     .await
     .expect("legacy main schema fixture without flyway history should be created");
 
-    let main_pool = connect_pool(&paths.main_db, 1)
+    let main_pool = connect_test_pool(&paths.main_db, 1)
         .await
         .expect("legacy main sqlite db should open");
     setup::bootstrap_pool(&main_pool)
@@ -459,7 +459,7 @@ async fn migrate_historyless_kotlin_main_schema_checkpoints_to_latest_inventory(
                 panic!("historyless Kotlin prefix fixture {version} should be created: {error}")
             });
 
-        let main_pool = connect_pool(&paths.main_db, 1)
+        let main_pool = connect_test_pool(&paths.main_db, 1)
             .await
             .expect("historyless prefix main sqlite db should open");
         setup::bootstrap_pool(&main_pool)
@@ -490,16 +490,19 @@ async fn migrate_historyless_kotlin_main_schema_checkpoints_to_latest_inventory(
 }
 
 #[tokio::test]
-async fn sqlite_connect_layer_bootstraps_main_and_tasks_databases() {
+async fn sqlite_connect_layer_bootstraps_main_database_and_tasks_setup_bootstraps_tasks_database() {
     let paths = persistence_contract_fixture::new_runtime_db_paths("runtime-schema-connect-layer")
         .expect("connect-layer db paths should be created");
 
-    let main_context = connect_persistence_context(&paths.main_db, 1)
+    let main_context = connect_main_write_context(&paths.main_db)
         .await
-        .expect("main context connect should bootstrap main sqlite schema");
-    let tasks_pool = connect_tasks_pool(&paths.tasks_db, 1)
+        .expect("main write context should bootstrap main sqlite schema");
+    let tasks_pool = connect_write_pool(&paths.tasks_db)
         .await
-        .expect("tasks connect should bootstrap tasks sqlite schema");
+        .expect("tasks sqlite db should open through the write pool");
+    setup::bootstrap_tasks_pool(&tasks_pool)
+        .await
+        .expect("tasks setup bootstrap should provision tasks sqlite schema");
 
     let main_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) \
@@ -526,7 +529,7 @@ async fn sqlite_connect_layer_bootstraps_main_and_tasks_databases() {
     .expect("tasks schema probe should succeed");
     assert_eq!(
         tasks_count, 1,
-        "tasks connect-layer bootstrap must provision Kotlin-compatible TASK table",
+        "tasks setup bootstrap must provision Kotlin-compatible TASK table",
     );
 
     let main_journal_mode: String = sqlx::query_scalar("PRAGMA journal_mode;")
@@ -546,7 +549,7 @@ async fn sqlite_connect_layer_bootstraps_main_and_tasks_databases() {
     assert_eq!(
         tasks_journal_mode.to_ascii_lowercase(),
         "wal",
-        "tasks connect-layer should align with Kotlin's WAL-backed SQLite design",
+        "tasks write pool should align with Kotlin's WAL-backed SQLite design",
     );
 
     main_context.pool().close().await;
@@ -557,7 +560,7 @@ async fn sqlite_connect_layer_bootstraps_main_and_tasks_databases() {
 async fn schema_inventory(
     path: &std::path::Path,
 ) -> anyhow::Result<Vec<(String, String, String, String)>> {
-    let pool = connect_pool(path, 1).await?;
+    let pool = connect_test_pool(path, 1).await?;
     let rows = sqlx::query(
         "SELECT type, name, tbl_name, COALESCE(sql, '') AS sql \
          FROM sqlite_master \
@@ -595,7 +598,7 @@ async fn comparable_schema_inventory(
 }
 
 async fn apply_sql_file(db_path: &Path, sql_file: &Path) -> anyhow::Result<()> {
-    let pool = connect_pool(db_path, 1).await?;
+    let pool = connect_test_pool(db_path, 1).await?;
     let context = SqlitePersistenceContext::new(pool.clone());
     let content = std::fs::read_to_string(sql_file)?;
 
@@ -608,7 +611,7 @@ async fn apply_sql_file(db_path: &Path, sql_file: &Path) -> anyhow::Result<()> {
 }
 
 async fn seed_flyway_history(db_path: &Path, versions: &[&str]) -> anyhow::Result<()> {
-    let pool = connect_pool(db_path, 1).await?;
+    let pool = connect_test_pool(db_path, 1).await?;
     let context = SqlitePersistenceContext::new(pool.clone());
 
     context

@@ -37,7 +37,7 @@ async fn runtime_blocks_book_delete_when_main_database_is_external_owned() {
         .process_available(&runtime)
         .expect("blocked main-database delete-book should still drain cleanly");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-book verification");
     let book_rows = sqlx::query("SELECT COUNT(*) AS COUNT FROM BOOK WHERE ID = ?")
@@ -74,7 +74,7 @@ async fn runtime_blocks_series_delete_when_main_database_is_external_owned() {
     std::fs::write(&series_sidecar_thumbnail, fixture_png_bytes())
         .expect("blocked delete-series series sidecar should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for blocked delete-series fixture setup");
     sqlx::query("UPDATE SERIES SET URL = ? WHERE ID = ?")
@@ -128,7 +128,7 @@ async fn runtime_blocks_series_delete_when_main_database_is_external_owned() {
         "runtime must not delete series files when the main database is external-owned",
     );
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for blocked delete-series verification");
     let book_rows = sqlx::query("SELECT COUNT(*) AS COUNT FROM BOOK WHERE ID = ?")
@@ -165,7 +165,7 @@ async fn runtime_delete_book_soft_deletes_rows_and_removes_book_sidecar_files() 
     std::fs::write(&sidecar_thumbnail, fixture_png_bytes())
         .expect("delete-book fixture sidecar thumbnail should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-book fixture setup");
     sqlx::query("UPDATE BOOK SET URL = ? WHERE ID = ?")
@@ -225,7 +225,7 @@ async fn runtime_delete_book_soft_deletes_rows_and_removes_book_sidecar_files() 
         "delete-book runtime should remove the now-empty parent directory"
     );
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-book verification");
     let book_row = sqlx::query("SELECT DELETED_DATE FROM BOOK WHERE ID = ? LIMIT 1")
@@ -300,7 +300,7 @@ async fn runtime_delete_book_oneshot_soft_deletes_series_and_removes_series_side
     std::fs::write(&series_sidecar_thumbnail, fixture_png_bytes())
         .expect("delete-book oneshot series sidecar should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-book oneshot fixture setup");
     sqlx::query("UPDATE SERIES SET URL = ? WHERE ID = ?")
@@ -381,7 +381,7 @@ async fn runtime_delete_book_oneshot_soft_deletes_series_and_removes_series_side
         "delete-book oneshot runtime should remove the now-empty series directory"
     );
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-book oneshot verification");
     let book_row = sqlx::query("SELECT DELETED_DATE FROM BOOK WHERE ID = ? LIMIT 1")
@@ -479,7 +479,7 @@ async fn runtime_delete_book_oneshot_deletes_every_book_in_the_series() {
     std::fs::write(&series_sidecar_thumbnail, fixture_png_bytes())
         .expect("delete-book oneshot full-series series sidecar should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-book oneshot full-series fixture setup");
     sqlx::query("UPDATE SERIES SET URL = ?, ONESHOT = 1 WHERE ID = ?")
@@ -569,7 +569,7 @@ async fn runtime_delete_book_oneshot_deletes_every_book_in_the_series() {
         "delete-book oneshot should delete every book file and sidecar in the series, then remove the empty series directory",
     );
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-book oneshot full-series verification");
     let first_book_deleted = sqlx::query("SELECT DELETED_DATE FROM BOOK WHERE ID = ? LIMIT 1")
@@ -613,7 +613,7 @@ async fn runtime_delete_book_soft_deletes_rows_when_book_file_is_already_missing
     std::fs::write(&sidecar_thumbnail, fixture_png_bytes())
         .expect("delete-book missing fixture sidecar thumbnail should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-book missing fixture setup");
     sqlx::query("UPDATE BOOK SET URL = ? WHERE ID = ?")
@@ -665,7 +665,7 @@ async fn runtime_delete_book_soft_deletes_rows_when_book_file_is_already_missing
         "delete-book missing-file should still remove the now-empty parent directory"
     );
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-book missing-file verification");
     let book_deleted = sqlx::query("SELECT DELETED_DATE FROM BOOK WHERE ID = ? LIMIT 1")
@@ -724,7 +724,7 @@ async fn runtime_delete_book_oneshot_skips_soft_delete_when_series_directory_is_
     std::fs::write(&series_sidecar_thumbnail, fixture_png_bytes())
         .expect("delete-book oneshot readonly series sidecar should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-book oneshot readonly fixture setup");
     sqlx::query("UPDATE SERIES SET URL = ? WHERE ID = ?")
@@ -777,7 +777,7 @@ async fn runtime_delete_book_oneshot_skips_soft_delete_when_series_directory_is_
         .process_available(&runtime)
         .expect("delete-book oneshot readonly runtime should still drain cleanly");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-book oneshot readonly verification");
     let book_deleted = sqlx::query("SELECT DELETED_DATE FROM BOOK WHERE ID = ? LIMIT 1")
@@ -841,7 +841,7 @@ async fn runtime_delete_series_soft_deletes_rows_and_removes_series_sidecar_file
     std::fs::write(&series_sidecar_thumbnail, fixture_png_bytes())
         .expect("delete-series fixture series sidecar should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-series fixture setup");
     sqlx::query("UPDATE SERIES SET URL = ? WHERE ID = ?")
@@ -922,7 +922,7 @@ async fn runtime_delete_series_soft_deletes_rows_and_removes_series_sidecar_file
         "delete-series runtime should remove the now-empty series directory"
     );
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-series verification");
     let book_row = sqlx::query("SELECT DELETED_DATE FROM BOOK WHERE ID = ? LIMIT 1")
@@ -992,7 +992,7 @@ async fn runtime_delete_series_skips_soft_delete_when_series_directory_is_missin
     let paths = new_router_fixture("runtime-delete-series-missing-directory-no-staging").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-series missing-directory fixture setup");
     sqlx::query("UPDATE SERIES SET URL = ? WHERE ID = ?")
@@ -1016,7 +1016,7 @@ async fn runtime_delete_series_skips_soft_delete_when_series_directory_is_missin
         .process_available(&runtime)
         .expect("delete-series missing-directory runtime should still drain cleanly");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-series missing-directory verification");
     let book_deleted = sqlx::query("SELECT DELETED_DATE FROM BOOK WHERE ID = ? LIMIT 1")

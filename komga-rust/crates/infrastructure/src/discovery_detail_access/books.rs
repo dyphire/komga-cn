@@ -1,6 +1,6 @@
 use std::path::Path as FsPath;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_read_pool;
 use sqlx::Row;
 
 #[derive(Clone)]
@@ -77,7 +77,7 @@ pub async fn load_book_id_by_sorted_position(
     database_file: &FsPath,
     index: usize,
 ) -> Result<Option<String>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book-id remap db: {error}"))?;
 
@@ -102,7 +102,7 @@ pub async fn load_persisted_book_resource(
     database_file: &FsPath,
     book_id: &str,
 ) -> Result<Option<PersistedBookResourceRecord>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book resource db: {error}"))?;
 
@@ -135,7 +135,7 @@ pub async fn load_persisted_book_detail(
     book_id: &str,
     user_id: Option<&str>,
 ) -> Result<Option<PersistedBookDetailRecord>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book detail db: {error}"))?;
 
@@ -267,7 +267,7 @@ pub async fn load_persisted_book_sibling_id(
     book_id: &str,
     direction: PersistedBookSiblingDirectionRecord,
 ) -> Result<Option<String>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book sibling db: {error}"))?;
 

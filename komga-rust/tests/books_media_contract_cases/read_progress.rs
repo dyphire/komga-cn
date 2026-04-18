@@ -29,7 +29,7 @@ async fn router_book_read_progress_accepts_basic_auth_without_session_bootstrap(
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for basic-auth read-progress verification");
     let row = sqlx::query(
@@ -322,7 +322,7 @@ async fn router_book_read_progress_refreshes_read_date_and_series_aggregate_on_p
     seed_router_contract_data(&paths).await;
 
     let old_read_date = "2000-01-01 00:00:00";
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for read-progress refresh seed");
     sqlx::query(
@@ -370,7 +370,7 @@ async fn router_book_read_progress_refreshes_read_date_and_series_aggregate_on_p
 
     assert_eq!(update.status(), StatusCode::NO_CONTENT);
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for read-progress refresh verification");
     let book_row = sqlx::query(
@@ -433,7 +433,7 @@ async fn router_book_read_progress_persists_epub_locator_for_page_updates() {
 
     let extension_blob = fixture_epub_positions_extension_blob();
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for epub locator seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -464,7 +464,7 @@ async fn router_book_read_progress_persists_epub_locator_for_page_updates() {
 
     assert_eq!(update.status(), StatusCode::NO_CONTENT);
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for epub locator verification");
     let locator_row =
@@ -575,7 +575,7 @@ async fn router_book_read_progress_delete_clears_persisted_progress_and_koreader
             .expect("koreader progress after delete request should complete");
         assert_eq!(koreader.status(), StatusCode::OK, "fixture={fixture_name}");
 
-        let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+        let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
             .await
             .expect("main db should open for read-progress delete verification");
         let remaining = sqlx::query(
@@ -599,7 +599,7 @@ async fn seed_read_progress_delete_fixture(
     extension_blob: Vec<u8>,
     oneshot: bool,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for read-progress delete setup");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")

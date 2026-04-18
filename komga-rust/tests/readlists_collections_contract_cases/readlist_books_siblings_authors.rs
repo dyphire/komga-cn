@@ -337,7 +337,7 @@ async fn router_readlist_books_filters_content_restricted_books_like_kotlin() {
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("readlist books content restriction db should open");
     sqlx::query(
@@ -470,7 +470,7 @@ async fn router_readlist_books_returns_not_found_for_library_hidden_readlist_lik
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("readlist books library-hidden db should open");
     sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT, ORDERED) VALUES (?, ?, ?, ?)")

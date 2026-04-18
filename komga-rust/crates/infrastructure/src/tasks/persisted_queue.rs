@@ -7,7 +7,7 @@ use komga_application::task_processing::{
 use serde_json::{Map, Value, json};
 use sqlx::{Row, SqlitePool};
 
-use crate::sqlite::connect_private_pool;
+use crate::sqlite::connect_private_write_pool;
 
 #[derive(Clone, Debug)]
 pub struct PersistedTaskStoreRecord {
@@ -247,7 +247,7 @@ impl SqliteTaskQueueStore {
                 .expect("persisted task runtime should build");
 
             runtime.block_on(async move {
-                let pool = connect_private_pool(&tasks_db_file, 1)
+                let pool = connect_private_write_pool(&tasks_db_file)
                     .await
                     .expect("tasks sqlite pool should open for task persistence");
                 let result = operation(pool.clone()).await;
@@ -1278,5 +1278,4 @@ mod tests {
             })
         );
     }
-
 }

@@ -31,7 +31,7 @@ async fn runtime_refresh_book_metadata_can_import_readlists_without_applying_boo
         std::fs::write(sidecar_dir.join("book-1.xml"), xml)
             .expect("book metadata sidecar fixture with read list should be written");
 
-        let pool = connect_pool(paths.main_db.as_path(), 1)
+        let pool = connect_test_pool(paths.main_db.as_path(), 1)
             .await
             .expect("main db should open for readlist-only metadata fixture setup");
         sqlx::query(
@@ -66,7 +66,7 @@ async fn runtime_refresh_book_metadata_can_import_readlists_without_applying_boo
         .expect("book metadata sidecar row should be inserted for readlist-only test");
         pool.close().await;
 
-        let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+        let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
             .await
             .expect("tasks db should open for readlist-only metadata task setup");
         sqlx::query(
@@ -98,7 +98,7 @@ async fn runtime_refresh_book_metadata_can_import_readlists_without_applying_boo
             .process_available(&runtime)
             .expect("runtime should process readlist-only RefreshBookMetadata tasks successfully");
 
-        let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+        let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
             .await
             .expect("main db should open for readlist-only metadata verification");
         let metadata = sqlx::query("SELECT TITLE FROM BOOK_METADATA WHERE BOOK_ID = ? LIMIT 1")
@@ -150,7 +150,7 @@ async fn runtime_refresh_book_metadata_applies_comicinfo_number_when_capability_
     )
     .expect("book metadata sidecar fixture with number should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for number metadata fixture setup");
     sqlx::query("DELETE FROM SIDECAR WHERE PARENT_URL = ?")
@@ -170,7 +170,7 @@ async fn runtime_refresh_book_metadata_applies_comicinfo_number_when_capability_
     .expect("book metadata sidecar row should be inserted for number capability test");
     pool.close().await;
 
-    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for number metadata task setup");
     sqlx::query(
@@ -202,7 +202,7 @@ async fn runtime_refresh_book_metadata_applies_comicinfo_number_when_capability_
         .process_available(&runtime)
         .expect("runtime should process number-only RefreshBookMetadata tasks successfully");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for number metadata verification");
     let metadata =
@@ -234,7 +234,7 @@ async fn runtime_refresh_book_metadata_applies_remaining_comicinfo_fields_with_l
     )
     .expect("book metadata sidecar fixture with remaining ComicInfo fields should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for remaining ComicInfo metadata fixture setup");
     sqlx::query("DELETE FROM SIDECAR WHERE PARENT_URL = ?")
@@ -277,7 +277,7 @@ async fn runtime_refresh_book_metadata_applies_remaining_comicinfo_fields_with_l
         .expect("seed metadata link should be inserted before remaining ComicInfo test");
     pool.close().await;
 
-    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for remaining ComicInfo metadata task setup");
     sqlx::query(
@@ -309,7 +309,7 @@ async fn runtime_refresh_book_metadata_applies_remaining_comicinfo_fields_with_l
         .process_available(&runtime)
         .expect("runtime should process remaining ComicInfo metadata fields successfully");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for remaining ComicInfo metadata verification");
     let metadata =
@@ -408,7 +408,7 @@ async fn runtime_refresh_book_metadata_does_not_run_comicinfo_for_isbn_or_tags_o
     )
     .expect("ComicInfo ISBN/tags-only sidecar fixture should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for ComicInfo gate fixture setup");
     sqlx::query("DELETE FROM SIDECAR WHERE PARENT_URL = ?")
@@ -446,7 +446,7 @@ async fn runtime_refresh_book_metadata_does_not_run_comicinfo_for_isbn_or_tags_o
         .expect("book metadata tags should be cleared before ComicInfo gate test");
     pool.close().await;
 
-    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for ComicInfo gate metadata task setup");
     sqlx::query(
@@ -478,7 +478,7 @@ async fn runtime_refresh_book_metadata_does_not_run_comicinfo_for_isbn_or_tags_o
         .process_available(&runtime)
         .expect("runtime should process ComicInfo gate metadata tasks successfully");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for ComicInfo gate metadata verification");
     let metadata = sqlx::query("SELECT ISBN FROM BOOK_METADATA WHERE BOOK_ID = ? LIMIT 1")

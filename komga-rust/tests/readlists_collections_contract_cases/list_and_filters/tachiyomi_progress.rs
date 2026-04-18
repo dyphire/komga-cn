@@ -86,7 +86,7 @@ async fn router_readlist_tachiyomi_progress_get_counts_in_progress_and_continuou
     seed_router_contract_data(&paths).await;
     seed_readlist_endpoint_variants(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for readlist tachiyomi counter seed");
     for (book_id, page, completed) in [
@@ -144,7 +144,7 @@ async fn router_readlist_tachiyomi_progress_get_counts_page_zero_incomplete_as_i
     seed_router_contract_data(&paths).await;
     seed_readlist_endpoint_variants(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for readlist tachiyomi page-zero seed");
     sqlx::query(
@@ -214,7 +214,7 @@ async fn router_readlist_tachiyomi_progress_marks_books_completed_at_real_page_c
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for tachiyomi verification");
     let rows = sqlx::query(
@@ -250,7 +250,7 @@ async fn router_readlist_tachiyomi_progress_skips_books_already_completed() {
     seed_router_contract_data(&paths).await;
     seed_readlist_endpoint_variants(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for tachiyomi skip-completed seed");
     sqlx::query(
@@ -284,7 +284,7 @@ async fn router_readlist_tachiyomi_progress_skips_books_already_completed() {
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should reopen for tachiyomi skip-completed verification");
     let rows = sqlx::query(

@@ -1,5 +1,5 @@
-use tokio::net::TcpListener;
 use std::time::Instant;
+use tokio::net::TcpListener;
 
 use crate::build_metadata::current_build_metadata;
 use crate::composition::start_server;
@@ -170,8 +170,8 @@ async fn run_server() {
         StartupTimingState::default(),
         Instant::now(),
     )
-        .await
-        .expect("server error");
+    .await
+    .expect("server error");
 }
 
 pub(crate) async fn validate_startup_schema_gate(config: &RuntimeConfig) -> std::io::Result<()> {
@@ -189,7 +189,7 @@ async fn validate_main_startup_schema_gate(database_file: &std::path::Path) -> s
         "Checking main sqlite schema gate",
     );
 
-    let main_pool = komga_infrastructure::sqlite::connect_pool(database_file, 1)
+    let main_pool = komga_infrastructure::sqlite::connect_read_pool(database_file)
         .await
         .map_err(|error| {
             schema_gate_failure(
@@ -230,7 +230,7 @@ async fn validate_tasks_startup_schema_gate(config: &RuntimeConfig) -> std::io::
         "Checking tasks sqlite schema gate",
     );
 
-    let tasks_pool = komga_infrastructure::sqlite::connect_pool(&config.tasks_db_file, 1)
+    let tasks_pool = komga_infrastructure::sqlite::connect_read_pool(&config.tasks_db_file)
         .await
         .map_err(|error| {
             schema_gate_failure(

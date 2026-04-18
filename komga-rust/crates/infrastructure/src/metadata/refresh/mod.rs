@@ -20,7 +20,7 @@ use crate::filesystem::media_access::page_content::{
     load_archive_page_row, resolve_book_page_bytes,
 };
 use crate::load_pdfium;
-use crate::sqlite::connect_private_pool;
+use crate::sqlite::connect_private_write_pool;
 use crate::{resolve_library_item_path, resolve_stored_path};
 
 mod artwork_refresh;
@@ -1174,7 +1174,7 @@ where
             .map_err(|error| format!("failed to build metadata runtime: {error}"))?;
 
         runtime.block_on(async move {
-            let pool = connect_private_pool(&database_file, 1)
+            let pool = connect_private_write_pool(&database_file)
                 .await
                 .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
             operation(pool).await

@@ -28,7 +28,7 @@ async fn runtime_refresh_series_metadata_applies_epub_from_book_provider_patch()
         </package>"##,
     );
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for EPUB series metadata fixture setup");
     sqlx::query(
@@ -73,7 +73,7 @@ async fn runtime_refresh_series_metadata_applies_epub_from_book_provider_patch()
         .process_available(&runtime)
         .expect("EPUB series metadata refresh task should process successfully");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for EPUB series metadata verification");
     let metadata = sqlx::query(
@@ -144,7 +144,7 @@ async fn runtime_refresh_series_metadata_ignores_non_iso_language_tags_from_book
         </package>"##,
     );
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for invalid EPUB language series metadata fixture setup");
     sqlx::query(
@@ -184,7 +184,7 @@ async fn runtime_refresh_series_metadata_ignores_non_iso_language_tags_from_book
         .process_available(&runtime)
         .expect("invalid language series metadata refresh task should process successfully");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for invalid language series metadata verification");
     let metadata = sqlx::query(
@@ -234,7 +234,7 @@ async fn runtime_refresh_series_metadata_ignores_generic_series_xml_sidecar_with
     )
     .expect("series sidecar fixture should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for generic series sidecar fixture setup");
     sqlx::query(
@@ -283,7 +283,7 @@ async fn runtime_refresh_series_metadata_ignores_generic_series_xml_sidecar_with
         .process_available(&runtime)
         .expect("generic series sidecar refresh task should process successfully");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for generic series sidecar verification");
     let metadata = sqlx::query(
@@ -338,7 +338,7 @@ async fn runtime_refresh_series_metadata_applies_comicinfo_from_book_provider_an
         )],
     );
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for ComicInfo series metadata fixture setup");
     sqlx::query(
@@ -401,7 +401,7 @@ async fn runtime_refresh_series_metadata_applies_comicinfo_from_book_provider_an
         .process_available(&runtime)
         .expect("ComicInfo series metadata refresh task should process successfully");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for ComicInfo series metadata verification");
     let metadata = sqlx::query(
@@ -523,7 +523,7 @@ async fn runtime_refresh_series_metadata_ignores_deleted_books_from_book_provide
         )],
     );
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for deleted series-provider fixture setup");
     sqlx::query(
@@ -591,7 +591,7 @@ async fn runtime_refresh_series_metadata_ignores_deleted_books_from_book_provide
         .process_available(&runtime)
         .expect("deleted-book series metadata refresh task should process successfully");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for deleted-book provider verification");
     let metadata = sqlx::query(
@@ -666,7 +666,7 @@ async fn runtime_refresh_series_metadata_applies_mylar_series_provider() {
     )
     .expect("mylar series sidecar fixture should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for Mylar series metadata fixture setup");
     sqlx::query(
@@ -707,7 +707,7 @@ async fn runtime_refresh_series_metadata_applies_mylar_series_provider() {
         .process_available(&runtime)
         .expect("Mylar series metadata refresh task should process successfully");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for Mylar series metadata verification");
     let metadata = sqlx::query(
@@ -768,7 +768,7 @@ async fn runtime_refresh_series_metadata_ignores_mylar_series_json_when_library_
     )
     .expect("disabled Mylar series sidecar fixture should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for disabled Mylar fixture setup");
     sqlx::query(
@@ -811,7 +811,7 @@ async fn runtime_refresh_series_metadata_ignores_mylar_series_json_when_library_
         .process_available(&runtime)
         .expect("disabled Mylar series metadata refresh task should process successfully");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for disabled Mylar verification");
     let metadata = sqlx::query(

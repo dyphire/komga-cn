@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use sqlx::{Row, SqlitePool};
 
-use crate::sqlite::connect_private_pool;
+use crate::sqlite::connect_private_write_pool;
 use crate::{resolve_library_item_path, resolve_optional_library_item_path};
 
 #[derive(Clone, Debug)]
@@ -389,7 +389,7 @@ where
             .map_err(|error| format!("failed to build task runtime: {error}"))?;
 
         runtime.block_on(async move {
-            let pool = connect_private_pool(&database_file, 1)
+            let pool = connect_private_write_pool(&database_file)
                 .await
                 .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
             operation(pool).await

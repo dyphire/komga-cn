@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_read_pool;
 use sqlx::Row;
 
 mod collections;
@@ -30,7 +30,7 @@ pub async fn load_libraries(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT ID, NAME, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
 FROM LIBRARY"#,
@@ -56,7 +56,7 @@ pub async fn load_library(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT ID, NAME, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
 FROM LIBRARY
@@ -82,7 +82,7 @@ pub async fn load_readlists_for_library(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT DISTINCT rl.ID, rl.NAME, rl.ORDERED,
        COALESCE(rl.LAST_MODIFIED_DATE, rl.CREATED_DATE, '') AS LAST_MODIFIED
@@ -115,7 +115,7 @@ pub async fn load_series(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE,
        COALESCE(NULLIF(sm.SUMMARY, ''), bma.SUMMARY, '') AS SERIES_SUMMARY,
@@ -156,7 +156,7 @@ pub async fn load_series_books_paged(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT b.ID, b.SERIES_ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE,
        COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE,
@@ -255,7 +255,7 @@ pub async fn load_series_tags(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT DISTINCT bt.TAG AS TAG
 FROM BOOK_METADATA_TAG bt
@@ -283,7 +283,7 @@ pub async fn load_readlist(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT ID, NAME, ORDERED, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
 FROM READLIST
@@ -310,7 +310,7 @@ pub async fn load_readlist_books(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT b.ID, b.SERIES_ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE,
        COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE,
@@ -392,7 +392,7 @@ pub async fn load_series_search_count(database_file: &Path) -> Result<usize, sql
         return Ok(0);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT COUNT(*) AS TOTAL
 FROM SERIES s
@@ -408,7 +408,7 @@ pub async fn load_book_search_count(database_file: &Path) -> Result<usize, sqlx:
         return Ok(0);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT COUNT(*) AS TOTAL
 FROM BOOK b
@@ -424,7 +424,7 @@ pub async fn load_collection_search_count(database_file: &Path) -> Result<usize,
         return Ok(0);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query("SELECT COUNT(*) AS TOTAL FROM COLLECTION")
         .fetch_one(&pool)
         .await?;
@@ -436,7 +436,7 @@ pub async fn load_readlist_search_count(database_file: &Path) -> Result<usize, s
         return Ok(0);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query("SELECT COUNT(*) AS TOTAL FROM READLIST")
         .fetch_one(&pool)
         .await?;
@@ -451,7 +451,7 @@ pub async fn load_series_search_records_by_ids(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let sql = format!(
         r#"SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE,
        COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
@@ -495,7 +495,7 @@ pub async fn load_book_search_records_by_ids(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let sql = format!(
         r#"SELECT b.ID, b.SERIES_ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE,
        COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE,
@@ -580,7 +580,7 @@ pub async fn load_collection_search_records_by_ids(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let sql = format!(
         r#"SELECT ID, NAME
 FROM COLLECTION
@@ -615,7 +615,7 @@ pub async fn load_readlist_search_records_by_ids(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let sql = format!(
         r#"SELECT ID, NAME
 FROM READLIST
@@ -653,7 +653,7 @@ pub async fn load_series_search_records_limited(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE,
        COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
@@ -694,7 +694,7 @@ pub async fn load_book_search_records_limited(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT b.ID, b.SERIES_ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE,
        COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE,
@@ -776,7 +776,7 @@ pub async fn load_collection_search_records_limited(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT ID, NAME
 FROM COLLECTION
@@ -811,7 +811,7 @@ pub async fn load_readlist_search_records_limited(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT ID, NAME
 FROM READLIST

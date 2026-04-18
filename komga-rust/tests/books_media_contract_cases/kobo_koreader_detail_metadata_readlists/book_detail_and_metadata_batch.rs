@@ -101,7 +101,7 @@ async fn router_discovery_book_detail_exposes_oneshot_flag_from_persisted_book_r
     let paths = new_router_fixture("router-discovery-book-detail-oneshot-flag").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("book detail oneshot db should open");
     sqlx::query("UPDATE BOOK SET ONESHOT = ? WHERE ID = ?")
@@ -146,7 +146,7 @@ async fn router_discovery_book_detail_preserves_empty_read_progress_device_field
     seed_router_contract_data(&paths).await;
     seed_router_read_progress(&paths, false).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("book detail device parity db should open");
     sqlx::query(
@@ -197,7 +197,7 @@ async fn router_discovery_book_detail_converts_admin_url_to_file_path() {
     let paths = new_router_fixture("router-discovery-book-detail-admin-url-path").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("book detail url parity db should open");
     sqlx::query("UPDATE BOOK SET URL = ? WHERE ID = ?")
@@ -296,7 +296,7 @@ async fn router_book_metadata_batch_update_persists_title_and_updates_book_snaps
         new_router_fixture("router-book-metadata-batch-update-persists-and-touches-book").await;
     seed_router_contract_data(&paths).await;
 
-    let pool_before = connect_pool(paths.main_db.as_path(), 1)
+    let pool_before = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open before metadata batch update");
     let last_modified_before = sqlx::query(
@@ -354,7 +354,7 @@ async fn router_book_metadata_batch_update_persists_title_and_updates_book_snaps
         Some(&Value::String("Updated Batch Title".to_string()))
     );
 
-    let pool_after = connect_pool(paths.main_db.as_path(), 1)
+    let pool_after = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open after metadata batch update");
     let last_modified_after = sqlx::query(

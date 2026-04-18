@@ -64,7 +64,7 @@ async fn router_kobo_book_metadata_uses_persisted_fields_instead_of_placeholders
     seed_router_contract_data(&paths).await;
     seed_admin_kobo_path_token(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract db should open for kobo metadata parity");
     sqlx::query("UPDATE BOOK_METADATA SET ISBN = ? WHERE BOOK_ID = ?")
@@ -142,7 +142,7 @@ async fn router_kobo_book_metadata_uses_epub3fl_for_fixed_layout_books() {
     seed_router_contract_data(&paths).await;
     seed_admin_kobo_path_token(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract db should open for fixed-layout metadata parity");
     sqlx::query("UPDATE MEDIA SET EPUB_IS_KEPUB = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -240,7 +240,7 @@ async fn router_kobo_book_metadata_returns_empty_array_when_book_exists_but_meta
     seed_admin_kobo_path_token(&paths).await;
     upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract db should open for missing metadata row");
     sqlx::query("DELETE FROM BOOK_METADATA WHERE BOOK_ID = ?")

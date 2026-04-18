@@ -184,7 +184,7 @@ fn parse_for_bigger_result_only(payload: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sqlite::{connect_pool, connect_private_pool, setup::bootstrap_pool};
+    use crate::sqlite::{connect_main_write_context, connect_test_pool};
     use crate::task_queue::test_support::RuntimeTestFixture;
     use image::{ImageBuffer, Rgba};
     use komga_application::task_processing::TaskQueueAdminPort;
@@ -239,13 +239,10 @@ mod tests {
     }
 
     async fn open_bootstrapped_main_pool(database_file: &std::path::Path) -> SqlitePool {
-        let pool = connect_private_pool(database_file, 1)
-            .await
-            .expect("index-jobs fixture db should open");
-        bootstrap_pool(&pool)
+        let context = connect_main_write_context(database_file)
             .await
             .expect("index-jobs fixture db should bootstrap main schema");
-        pool
+        context.pool().clone()
     }
 
     async fn insert_library(
@@ -358,7 +355,7 @@ mod tests {
         database_file: &std::path::Path,
         book_id: &str,
     ) -> Vec<(i64, Option<i64>, Option<i64>)> {
-        let pool = connect_pool(database_file, 1)
+        let pool = connect_test_pool(database_file, 1)
             .await
             .expect("page dimension verify db should open");
         let rows = sqlx::query(
@@ -538,7 +535,7 @@ mod tests {
         let result = try_execute(&mut scheduler, &runtime, &task, Some("book-1"));
         assert!(matches!(result, Some(Ok(()))));
 
-        let verify_pool = connect_pool(fixture.database_file.as_path(), 1)
+        let verify_pool = connect_test_pool(fixture.database_file.as_path(), 1)
             .await
             .expect("analyze-book follow-up verify db should open");
         let media_row =
@@ -732,7 +729,7 @@ mod tests {
         let result = try_execute(&mut scheduler, &runtime, &task, Some("book-1"));
         assert!(matches!(result, Some(Ok(()))));
 
-        let verify_pool = connect_pool(database_file.as_path(), 1)
+        let verify_pool = connect_test_pool(database_file.as_path(), 1)
             .await
             .expect("analyze-book read-progress adjust verify db should open");
         let page_count = sqlx::query("SELECT PAGE_COUNT FROM MEDIA WHERE BOOK_ID = ? LIMIT 1")
@@ -935,7 +932,7 @@ mod tests {
         let result = try_execute(&mut scheduler, &runtime, &task, Some("book-1"));
         assert!(matches!(result, Some(Ok(()))));
 
-        let verify_pool = connect_pool(database_file.as_path(), 1)
+        let verify_pool = connect_test_pool(database_file.as_path(), 1)
             .await
             .expect("analyze-book read-progress keep verify db should open");
         let progress_rows = sqlx::query(

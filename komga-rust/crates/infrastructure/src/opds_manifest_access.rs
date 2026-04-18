@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_read_pool;
 use sqlx::Row;
 
 pub struct ManifestBookRecord {
@@ -18,7 +18,7 @@ pub async fn load_manifest_book_record(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT COALESCE(bm.TITLE, b.NAME) AS TITLE, b.NAME AS NAME, m.MEDIA_TYPE AS MEDIA_TYPE,
                COALESCE(m.PAGE_COUNT, 1) AS PAGE_COUNT
@@ -29,7 +29,6 @@ pub async fn load_manifest_book_record(
         JOIN MEDIA m ON m.BOOK_ID = b.ID
         WHERE b.ID = ?
         LIMIT 1"#,
-
     )
     .bind(book_id)
     .fetch_optional(&pool)

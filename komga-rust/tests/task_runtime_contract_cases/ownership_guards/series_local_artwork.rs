@@ -22,7 +22,7 @@ async fn runtime_skips_series_local_artwork_refresh_when_library_import_local_ar
     std::fs::write(series_dir.join("cover.png"), fixture_png_bytes())
         .expect("series artwork fixture should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for series local artwork disabled fixture setup");
     sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 0 WHERE ID = ?")
@@ -44,7 +44,7 @@ async fn runtime_skips_series_local_artwork_refresh_when_library_import_local_ar
         "series local artwork refresh should skip cleanly when library.importLocalArtwork is disabled",
     );
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for series local artwork disabled verification");
     let sidecar_thumbnail_count = sqlx::query(
@@ -75,7 +75,7 @@ async fn runtime_skips_series_local_artwork_refresh_for_oneshot_series() {
     std::fs::write(series_dir.join("cover.png"), fixture_png_bytes())
         .expect("series artwork fixture should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for series oneshot artwork fixture setup");
     sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 1 WHERE ID = ?")
@@ -102,7 +102,7 @@ async fn runtime_skips_series_local_artwork_refresh_for_oneshot_series() {
         .process_available(&runtime)
         .expect("series local artwork refresh should skip oneshot series cleanly");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for oneshot series local artwork verification");
     let sidecar_thumbnail_count = sqlx::query(
@@ -141,7 +141,7 @@ async fn runtime_imports_multiple_filesystem_series_local_artworks_and_selects_o
     std::fs::write(series_dir.join("banner.png"), fixture_png_bytes())
         .expect("non-matching series local artwork should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for multi-series-artwork fixture setup");
     sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 1 WHERE ID = ?")
@@ -168,7 +168,7 @@ async fn runtime_imports_multiple_filesystem_series_local_artworks_and_selects_o
         "series local artwork refresh should import multiple filesystem candidates cleanly",
     );
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for multi-series-artwork verification");
     let rows = sqlx::query(
@@ -229,7 +229,7 @@ async fn runtime_preserves_existing_non_generated_selection_when_importing_serie
     std::fs::write(series_dir.join("poster.jpg"), fixture_png_bytes())
         .expect("secondary series local artwork should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for non-generated series selection fixture setup");
     sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 1 WHERE ID = ?")
@@ -263,7 +263,7 @@ async fn runtime_preserves_existing_non_generated_selection_when_importing_serie
         "series local artwork refresh should preserve existing non-generated selections cleanly",
     );
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for non-generated series selection verification");
     let rows = sqlx::query(
@@ -322,7 +322,7 @@ async fn runtime_replaces_generated_selection_when_importing_series_local_artwor
     std::fs::write(series_dir.join("poster.jpg"), fixture_png_bytes())
         .expect("secondary series local artwork should be written");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for generated series selection fixture setup");
     sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 1 WHERE ID = ?")
@@ -356,7 +356,7 @@ async fn runtime_replaces_generated_selection_when_importing_series_local_artwor
         .process_available(&runtime)
         .expect("series local artwork refresh should replace generated selection cleanly");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for generated series selection verification");
     let rows = sqlx::query(

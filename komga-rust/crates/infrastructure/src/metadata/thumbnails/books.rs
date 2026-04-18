@@ -3,7 +3,7 @@ use std::path::Path;
 use komga_application::media_assets::{EntityThumbnailBinary, EntityThumbnailRecord};
 use sqlx::Row;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_read_pool;
 
 use super::generated_thumbnail_id;
 
@@ -15,7 +15,7 @@ pub async fn load_persisted_book_thumbnails(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book thumbnails db: {error}"))?;
 
@@ -54,7 +54,7 @@ pub async fn load_selected_book_thumbnail(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open selected book thumbnail db: {error}"))?;
 
@@ -87,7 +87,7 @@ pub async fn load_book_thumbnail_by_id(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open single book thumbnail db: {error}"))?;
 
@@ -120,7 +120,7 @@ pub async fn insert_book_thumbnail(
     height: i64,
     selected: bool,
 ) -> Result<EntityThumbnailRecord, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book thumbnail create db: {error}"))?;
     let mut tx = pool
@@ -225,7 +225,7 @@ pub async fn select_book_thumbnail(
         return Ok(false);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book thumbnail select db: {error}"))?;
     let mut tx = pool
@@ -294,7 +294,7 @@ pub async fn delete_book_thumbnail(
 
     let _ = book_id;
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book thumbnail delete db: {error}"))?;
     let mut tx = pool

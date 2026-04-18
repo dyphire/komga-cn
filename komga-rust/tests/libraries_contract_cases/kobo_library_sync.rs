@@ -1,7 +1,7 @@
 use super::*;
 
 async fn load_first_kobo_sync_point_row(paths: &RuntimeDbPaths) -> (String, Option<String>) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("kobo sync point db should open");
 
@@ -18,7 +18,7 @@ async fn load_first_kobo_sync_point_row(paths: &RuntimeDbPaths) -> (String, Opti
 }
 
 async fn seed_second_book_in_primary_series(paths: &RuntimeDbPaths) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("second primary-series book db should open");
 
@@ -75,7 +75,7 @@ async fn update_series_read_progress_date(
     user_id: &str,
     most_recent_read_date: &str,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series read progress db should open");
 
@@ -159,7 +159,7 @@ async fn router_kobo_library_sync_returns_nested_dto_shape_and_sync_token() {
 async fn router_kobo_library_sync_respects_shared_library_scope() {
     let paths = new_router_fixture("router-kobo-library-sync-library-scope").await;
     seed_router_contract_data(&paths).await;
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("secondary kobo library db should open");
     sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
@@ -244,7 +244,7 @@ async fn router_kobo_library_sync_respects_shared_library_scope() {
     )
     .await;
     seed_kobo_sync_api_key(&paths, "any-token", "kobo-library-user").await;
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("user role seed db should open");
     sqlx::query("INSERT INTO USER_ROLE (USER_ID, ROLE) VALUES (?, ?)")
@@ -633,7 +633,7 @@ async fn router_kobo_library_sync_removed_book_matches_kotlin_placeholder_metada
         .map(str::to_string)
         .expect("initial sync response should include x-kobo-synctoken");
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("kobo removed metadata db should open");
     sqlx::query("UPDATE BOOK SET DELETED_DATE = ? WHERE ID = ?")
@@ -708,7 +708,7 @@ async fn router_kobo_library_sync_does_not_backfill_missing_api_key_id_on_existi
     seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-sync-user").await;
 
     let ongoing_sync_point_id = "existing-sync-point";
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("kobo sync point seed db should open");
     sqlx::query("INSERT INTO SYNC_POINT (ID, USER_ID, API_KEY_ID) VALUES (?, ?, ?)")
@@ -746,7 +746,7 @@ async fn router_kobo_library_sync_does_not_backfill_missing_api_key_id_on_existi
         .expect("existing-state kobo library sync request should complete");
 
     assert_eq!(response.status(), StatusCode::OK);
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("kobo sync point db should open");
     let row = sqlx::query("SELECT API_KEY_ID FROM SYNC_POINT WHERE ID = ? LIMIT 1")

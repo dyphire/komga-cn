@@ -47,7 +47,9 @@ fn cookie_max_age_seconds(cookie: &str) -> Option<u64> {
         .and_then(|value| value.parse::<u64>().ok())
 }
 
-fn one_second_session_runtime_config(paths: &RuntimeDbPaths) -> komga_config::env_config::RuntimeConfig {
+fn one_second_session_runtime_config(
+    paths: &RuntimeDbPaths,
+) -> komga_config::env_config::RuntimeConfig {
     let mut config = runtime_config_for_paths(paths);
     config.session_max_inactive_seconds = 1;
     config
@@ -174,7 +176,7 @@ pub(crate) async fn verify_remember_me_auto_login_records_remember_me_source() {
     let paths = new_router_fixture("router-remember-me-auto-login-records-source").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for remember-me activity cleanup");
     sqlx::query("DELETE FROM AUTHENTICATION_ACTIVITY WHERE EMAIL = ?")
@@ -205,7 +207,7 @@ pub(crate) async fn verify_remember_me_auto_login_records_remember_me_source() {
 
     assert_eq!(remember_only_response.status(), StatusCode::OK);
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for remember-me activity assertion");
     let source = sqlx::query_scalar::<_, Option<String>>(

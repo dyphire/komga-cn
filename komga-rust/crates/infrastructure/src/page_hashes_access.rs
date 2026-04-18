@@ -14,12 +14,10 @@ use crate::filesystem::media_access::db_queries::{
     load_persisted_book_media, load_persisted_book_page_row,
 };
 use crate::filesystem::media_access::page_content::{
-    load_archive_page_row, load_pdf_page_row, render_book_page_thumbnail,
-    resolve_book_page_bytes,
+    load_archive_page_row, load_pdf_page_row, render_book_page_thumbnail, resolve_book_page_bytes,
 };
 use crate::rar_support::read_rar_entry_bytes;
 use crate::resolve_library_item_path;
-use crate::sqlite::connect_pool;
 use crate::sqlite::read_models::page_hashes::{
     load_page_hash_delete_targets as load_page_hash_delete_targets_model,
     load_page_hash_matches_page as load_page_hash_matches_page_model,
@@ -29,6 +27,7 @@ use crate::sqlite::read_models::page_hashes::{
     load_unknown_page_hash_match_target, load_unknown_page_hash_source,
 };
 use crate::sqlite::write_models::page_hashes::upsert_page_hash as upsert_page_hash_model;
+use crate::sqlite::{connect_read_pool, connect_write_pool};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PageHashThumbnail {
@@ -289,7 +288,7 @@ fn as_sqlx_protocol_error(error: String) -> sqlx::Error {
 }
 
 async fn page_hash_exists(database_file: &Path, page_hash: &str) -> Result<bool, sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let exists = sqlx::query_scalar::<_, i64>("SELECT 1 FROM PAGE_HASH WHERE HASH = ? LIMIT 1")
         .bind(page_hash)
         .fetch_optional(&pool)
@@ -334,7 +333,7 @@ async fn insert_page_hash_thumbnail(
     page_hash: &str,
     thumbnail: &[u8],
 ) -> Result<(), sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_write_pool(database_file).await?;
     sqlx::query("INSERT INTO PAGE_HASH_THUMBNAIL (HASH, THUMBNAIL) VALUES (?, ?)")
         .bind(page_hash)
         .bind(thumbnail)
@@ -368,7 +367,7 @@ mod tests {
         let root = unique_temp_dir(case);
         fs::create_dir_all(&root).expect("temp root should be created");
         let db_path = root.join("page-hashes.sqlite");
-        let pool = crate::sqlite::connect_pool(&db_path, 1)
+        let pool = crate::sqlite::connect_test_pool(&db_path, 1)
             .await
             .expect("test db should open");
         setup::bootstrap_pool(&pool)
@@ -427,7 +426,6 @@ mod tests {
                 LIBRARY_ID
             ) VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?)
             "#,
-
         )
         .bind(book_id)
         .bind(0_i64)

@@ -209,7 +209,7 @@ async fn router_opds_v1_book_thumbnail_small_returns_selected_generated_thumbnai
     seed_router_contract_data(&paths).await;
     write_router_epub_with_cover(&paths, "books/book-1.epub");
 
-    let cleanup_pool = connect_pool(paths.main_db.as_path(), 1)
+    let cleanup_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for small generated thumbnail cleanup");
     sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ?")
@@ -222,7 +222,7 @@ async fn router_opds_v1_book_thumbnail_small_returns_selected_generated_thumbnai
     generate_book_thumbnail(paths.main_db.as_path(), "book-1")
         .expect("generate_book_thumbnail should succeed before small generated test");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for generated thumbnail lookup");
     let generated_thumbnail_id = sqlx::query(
@@ -369,7 +369,7 @@ async fn router_opds_v2_book_thumbnail_ignores_mutated_generated_thumbnail_bytes
             _ => unreachable!("unsupported source case"),
         }
 
-        let cleanup_pool = connect_pool(paths.main_db.as_path(), 1)
+        let cleanup_pool = connect_test_pool(paths.main_db.as_path(), 1)
             .await
             .expect("main db should open for generated thumbnail cleanup");
         sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ?")
@@ -403,7 +403,7 @@ async fn router_opds_v2_book_thumbnail_ignores_mutated_generated_thumbnail_bytes
             .expect("opds v2 generated thumbnail baseline body should be readable")
             .to_vec();
 
-        let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+        let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
             .await
             .expect("main db should open for generated thumbnail lookup");
         let generated_thumbnail_id = sqlx::query(

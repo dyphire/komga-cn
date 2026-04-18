@@ -6,7 +6,7 @@ async fn router_discovery_books_latest_ignores_sort_query_and_stays_last_modifie
     seed_router_contract_data(&paths).await;
     seed_router_primary_series_cbz_book(&paths, "book-2", "book-2.cbz", "Another Book").await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("books latest sort parity db should open");
     sqlx::query("UPDATE BOOK SET LAST_MODIFIED_DATE = ? WHERE ID = ?")

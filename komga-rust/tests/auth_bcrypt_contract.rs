@@ -5,14 +5,14 @@ use komga_application::identity_access::AuthOutcome;
 use komga_infrastructure::runtime_identity_access::{
     persisted_basic_user, persisted_update_password_by_user_id,
 };
-use komga_infrastructure::sqlite::{connect_pool, setup};
+use komga_infrastructure::sqlite::{connect_test_pool, setup};
 use std::path::PathBuf;
 use tempfile::TempDir;
 
 async fn create_test_db(case: &str) -> (TempDir, PathBuf, sqlx::Pool<sqlx::Sqlite>) {
     let temp_dir = TempDir::new().expect("temp dir should be created");
     let db_path = temp_dir.path().join(format!("{case}.sqlite"));
-    let pool = connect_pool(&db_path, 1)
+    let pool = connect_test_pool(&db_path, 1)
         .await
         .expect("test db should open");
     setup::bootstrap_pool(&pool)
@@ -62,7 +62,7 @@ fn kotlin_style_bcrypt_hash(password: &str) -> String {
 }
 
 async fn persisted_password(db_path: &PathBuf, user_id: &str) -> String {
-    let pool = connect_pool(db_path, 1)
+    let pool = connect_test_pool(db_path, 1)
         .await
         .expect("test db should reopen");
     sqlx::query_scalar::<_, String>("SELECT PASSWORD FROM USER WHERE ID = ?")

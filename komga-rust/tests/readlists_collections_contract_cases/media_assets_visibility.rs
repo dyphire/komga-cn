@@ -388,7 +388,7 @@ async fn router_readlist_tachiyomi_progress_put_returns_not_found_when_library_s
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for no-shared-libraries verification");
     let writes = sqlx::query("SELECT BOOK_ID FROM READ_PROGRESS WHERE USER_ID = ?")
@@ -439,7 +439,7 @@ async fn router_readlist_tachiyomi_progress_put_ignores_fully_hidden_content_lik
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for content-restricted verification");
     let writes = sqlx::query("SELECT BOOK_ID FROM READ_PROGRESS WHERE USER_ID = ?")
@@ -491,7 +491,7 @@ async fn router_readlist_tachiyomi_progress_put_marks_only_visible_books_for_res
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for partially restricted put verification");
     let rows = sqlx::query(

@@ -6,7 +6,7 @@ async fn seed_kobo_thumbnail_bytes(
     media_type: &str,
     bytes: &[u8],
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for kobo thumbnail seed");
     sqlx::query("UPDATE THUMBNAIL_BOOK SET MEDIA_TYPE = ?, THUMBNAIL = ? WHERE ID = ?")
@@ -36,7 +36,7 @@ async fn seed_kobo_thumbnail_sidecar_url(
         .expect("kobo thumbnail sidecar path should convert to file url")
         .to_string();
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for kobo thumbnail sidecar seed");
     sqlx::query("UPDATE THUMBNAIL_BOOK SET MEDIA_TYPE = ?, THUMBNAIL = NULL, URL = ? WHERE ID = ?")

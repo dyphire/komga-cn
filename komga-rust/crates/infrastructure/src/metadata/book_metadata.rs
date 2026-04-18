@@ -5,7 +5,7 @@ use komga_application::media_assets::{
 };
 use sqlx::Row;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::{connect_read_pool, connect_write_pool};
 
 #[derive(Clone, Debug)]
 pub struct SqliteBookMetadataPort {
@@ -46,7 +46,7 @@ async fn load_book_metadata(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book metadata db: {error}"))?;
 
@@ -138,7 +138,7 @@ async fn load_book_series_id(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book series db: {error}"))?;
     let row = sqlx::query("SELECT SERIES_ID FROM BOOK WHERE ID = ? LIMIT 1")
@@ -159,7 +159,7 @@ async fn persist_book_metadata(
         return Ok(false);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_write_pool(database_file)
         .await
         .map_err(|error| format!("open book metadata update db: {error}"))?;
     let mut tx = pool

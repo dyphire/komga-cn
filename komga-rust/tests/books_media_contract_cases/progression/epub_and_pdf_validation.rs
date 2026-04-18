@@ -91,7 +91,7 @@ async fn router_book_progression_put_rejects_epub_locator_with_non_existing_href
     let paths = new_router_fixture("router-book-progression-put-epub-bad-href").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for progression bad-href seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")

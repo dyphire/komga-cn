@@ -22,10 +22,11 @@ fn runtime_worker_spawns_log_started_and_shutdown_with_span_context() {
         let runtime = runtime.clone();
         async move {
             async move {
-                let background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
-                    runtime_task_context_from_config(&config),
-                    None,
-                );
+                let background =
+                    komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
+                        runtime_task_context_from_config(&config),
+                        None,
+                    );
                 komga_infrastructure::task_queue::worker_runtime::spawn_runtime_workers(
                     background.task_queue,
                     runtime,
@@ -90,10 +91,11 @@ fn runtime_workers_observe_shutdown_signal_before_runtime_teardown() {
         let runtime = runtime.clone();
         async move {
             async move {
-                let background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
-                    runtime_task_context_from_config(&config),
-                    None,
-                );
+                let background =
+                    komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
+                        runtime_task_context_from_config(&config),
+                        None,
+                    );
                 let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
                 komga_infrastructure::task_queue::worker_runtime::spawn_runtime_workers(
                     background.task_queue,
@@ -164,7 +166,7 @@ fn periodic_scan_iteration_logs_completion_only_when_due_and_stays_silent_when_i
         let paths = new_router_fixture("worker-periodic-scan-lifecycle").await;
         seed_router_contract_data(&paths).await;
 
-        let pool = connect_pool(paths.main_db.as_path(), 1)
+        let pool = connect_test_pool(paths.main_db.as_path(), 1)
             .await
             .expect("periodic scan worker db should open");
         sqlx::query("UPDATE LIBRARY SET SCAN_INTERVAL = ? WHERE ID = ?")
@@ -246,7 +248,7 @@ fn periodic_scan_iteration_logs_completion_only_when_due_and_stays_silent_when_i
         let task_queue = task_queue.clone();
         async move {
             let mut last_run = HashMap::new();
-            let pool = connect_pool(runtime.database_file.as_path(), 1)
+            let pool = connect_test_pool(runtime.database_file.as_path(), 1)
                 .await
                 .expect("periodic scan failure db should open");
             sqlx::query("UPDATE LIBRARY SET SCAN_INTERVAL = ? WHERE ID = ?")
@@ -290,7 +292,7 @@ fn periodic_scan_iteration_drains_each_due_library_separately_and_cleans_stale_s
         let paths = new_router_fixture("worker-periodic-scan-multi-library").await;
         seed_router_contract_data(&paths).await;
 
-        let pool = connect_pool(paths.main_db.as_path(), 1)
+        let pool = connect_test_pool(paths.main_db.as_path(), 1)
             .await
             .expect("periodic multi-library scan worker db should open");
         sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
@@ -481,9 +483,11 @@ fn authentication_cleanup_logs_skip_complete_and_failure_boundaries() {
     let complete_logs = capture_router_logs_async_result(&log_config, {
         let config = config.clone();
         async move {
-            komga_infrastructure::task_queue::worker_runtime::cleanup_authentication_activity_once(&config)
-                .await
-                .expect("auth cleanup should complete when main db is owned");
+            komga_infrastructure::task_queue::worker_runtime::cleanup_authentication_activity_once(
+                &config,
+            )
+            .await
+            .expect("auth cleanup should complete when main db is owned");
         }
     })
     .0;
@@ -512,9 +516,11 @@ fn authentication_cleanup_logs_skip_complete_and_failure_boundaries() {
         ..config.clone()
     };
     let skip_logs = capture_router_logs_async_result(&log_config, async move {
-        komga_infrastructure::task_queue::worker_runtime::cleanup_authentication_activity_once(&skip_runtime)
-            .await
-            .expect("auth cleanup skip path should return ok");
+        komga_infrastructure::task_queue::worker_runtime::cleanup_authentication_activity_once(
+            &skip_runtime,
+        )
+        .await
+        .expect("auth cleanup skip path should return ok");
     })
     .0;
     let skip_events = parse_json_log_lines(&skip_logs);

@@ -15,7 +15,7 @@ async fn router_post_page_hash_delete_all_enqueues_remove_hashed_pages_tasks_wit
     seed_router_contract_data(&paths).await;
     seed_known_page_hash_samples(&paths).await;
 
-    let setup_pool = connect_pool(paths.main_db.as_path(), 1)
+    let setup_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for page hash delete-all setup");
     sqlx::query(
@@ -49,7 +49,7 @@ async fn router_post_page_hash_delete_all_enqueues_remove_hashed_pages_tasks_wit
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for page hash delete-all verification");
     let remaining_media_rows =
@@ -71,7 +71,7 @@ async fn router_post_page_hash_delete_all_enqueues_remove_hashed_pages_tasks_wit
     assert_eq!(remaining_media_rows, 3);
     assert_eq!(delete_count, 1);
 
-    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for page hash delete-all verification");
     let rows = sqlx::query("SELECT ID, SIMPLE_TYPE, GROUP_ID, PAYLOAD FROM TASK ORDER BY ID ASC")
@@ -168,7 +168,7 @@ async fn router_post_page_hash_delete_all_accepts_missing_hash_without_enqueuing
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
-    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for missing-hash delete-all verification");
     let queued_count = sqlx::query("SELECT COUNT(*) AS COUNT FROM TASK")
@@ -215,7 +215,7 @@ async fn router_post_page_hash_delete_match_enqueues_remove_hashed_pages_task_wi
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for page hash delete-match verification");
     let remaining_media_rows =
@@ -237,7 +237,7 @@ async fn router_post_page_hash_delete_match_enqueues_remove_hashed_pages_task_wi
     assert_eq!(remaining_media_rows, 2);
     assert_eq!(delete_count, 1);
 
-    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for page hash delete-match verification");
     let rows = sqlx::query("SELECT ID, SIMPLE_TYPE, GROUP_ID, PAYLOAD FROM TASK ORDER BY ID ASC")
@@ -308,7 +308,7 @@ async fn router_post_page_hash_delete_match_accepts_missing_hash_and_still_enque
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
-    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for missing-hash delete-match verification");
     let rows = sqlx::query("SELECT ID, SIMPLE_TYPE, GROUP_ID, PAYLOAD FROM TASK ORDER BY ID ASC")

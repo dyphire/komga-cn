@@ -2,6 +2,9 @@ use std::io;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+const FILE_RELEASE_RETRY_DEADLINE: Duration = Duration::from_secs(2);
+const FILE_RELEASE_RETRY_INTERVAL: Duration = Duration::from_millis(10);
+
 pub mod browser;
 pub mod fonts;
 pub mod import;
@@ -9,7 +12,7 @@ pub mod media_access;
 pub mod transient_books;
 
 pub(crate) fn remove_file_after_release(path: &Path) -> io::Result<bool> {
-    let deadline = Instant::now() + Duration::from_millis(250);
+    let deadline = Instant::now() + FILE_RELEASE_RETRY_DEADLINE;
 
     loop {
         match std::fs::remove_file(path) {
@@ -18,10 +21,10 @@ pub(crate) fn remove_file_after_release(path: &Path) -> io::Result<bool> {
             Err(error)
                 if Instant::now() < deadline && is_transient_windows_share_violation(&error) =>
             {
-                // SQLite and UnRAR can release their Windows file handles a moment after the
-                // higher-level close/read call returns, so cleanup has to wait on the OS-visible
-                // release instead of assuming the file is immediately removable.
-                std::thread::sleep(Duration::from_millis(10));
+                // SQLite WAL teardown on Windows can outlive the higher-level close call by a
+                // noticeable margin on loaded CI runners, so cleanup has to wait for the OS-level
+                // handle release instead of assuming the file becomes removable immediately.
+                std::thread::sleep(FILE_RELEASE_RETRY_INTERVAL);
             }
             Err(error) => return Err(error),
         }

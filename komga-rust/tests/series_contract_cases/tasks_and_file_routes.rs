@@ -296,7 +296,7 @@ async fn router_series_tachiyomi_missing_series_gets_zero_dto_and_put_is_noop() 
 
     assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for missing-series noop verification");
     let count = sqlx::query_scalar::<_, i64>(
@@ -319,7 +319,7 @@ async fn router_series_tachiyomi_progress_counts_deleted_books_like_kotlin() {
     let paths = new_router_fixture("router-series-tachiyomi-progress-counts-deleted-books").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series tachiyomi deleted-book db should open");
     sqlx::query("UPDATE BOOK SET DELETED_DATE = ? WHERE ID = ?")
@@ -366,7 +366,7 @@ async fn router_series_tachiyomi_progress_counts_completed_false_page_zero_as_in
     let paths = new_router_fixture("router-series-tachiyomi-progress-page-zero-in-progress").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series tachiyomi page-zero db should open");
     sqlx::query(
@@ -418,7 +418,7 @@ async fn router_series_tachiyomi_progress_refreshes_read_dates_when_marking_comp
     seed_router_contract_data(&paths).await;
 
     let old_read_date = "2000-01-01 00:00:00";
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for series tachiyomi read-date seed");
     sqlx::query(
@@ -466,7 +466,7 @@ async fn router_series_tachiyomi_progress_refreshes_read_dates_when_marking_comp
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for read-date refresh verification");
     let book_row = sqlx::query(
@@ -506,7 +506,7 @@ async fn router_series_tachiyomi_progress_refreshes_series_aggregate_for_page_ze
         new_router_fixture("router-series-tachiyomi-progress-refresh-aggregate-page-zero").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for series aggregate seed");
     sqlx::query(
@@ -576,7 +576,7 @@ async fn router_series_tachiyomi_progress_refreshes_series_aggregate_for_page_ze
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for series aggregate verification");
     let series_row = sqlx::query(
@@ -600,7 +600,7 @@ async fn router_series_tachiyomi_progress_does_not_rewrite_already_completed_boo
     let paths = new_router_fixture("router-series-tachiyomi-progress-skip-completed").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for series tachiyomi completed seed");
     sqlx::query(
@@ -636,7 +636,7 @@ async fn router_series_tachiyomi_progress_does_not_rewrite_already_completed_boo
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for completed-skip verification");
     let row = sqlx::query(
@@ -715,7 +715,7 @@ async fn router_series_file_delete_enqueues_delete_series_without_group_id() {
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
-    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for series delete verification");
     let rows =
@@ -766,7 +766,7 @@ async fn router_series_analyze_enqueues_book_tasks_grouped_by_series_id() {
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
-    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for series analyze verification");
     let rows = sqlx::query("SELECT SIMPLE_TYPE, GROUP_ID FROM TASK ORDER BY ID ASC")
@@ -807,7 +807,7 @@ async fn router_series_metadata_refresh_enqueues_kotlin_style_task_groups() {
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
-    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for series metadata refresh verification");
     let rows = sqlx::query("SELECT ID, GROUP_ID, PAYLOAD FROM TASK ORDER BY ID ASC")
@@ -883,7 +883,7 @@ async fn router_series_metadata_refresh_does_not_canonicalize_series_id() {
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
-    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for series metadata refresh alias verification");
     let rows = sqlx::query("SELECT ID, SIMPLE_TYPE, GROUP_ID FROM TASK ORDER BY ID ASC")

@@ -3,7 +3,7 @@ use std::path::Path;
 use komga_application::media_assets::ReadlistThumbnailRecord;
 use sqlx::Row;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_read_pool;
 
 use super::generated_thumbnail_id;
 
@@ -15,7 +15,7 @@ pub async fn load_persisted_readlist_thumbnails(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open readlist thumbnails db: {error}"))?;
     let rows = sqlx::query(
@@ -24,7 +24,7 @@ pub async fn load_persisted_readlist_thumbnails(
         FROM THUMBNAIL_READLIST
         WHERE READLIST_ID = ?
         ORDER BY SELECTED DESC, LAST_MODIFIED_DATE DESC, ID ASC
-        "#
+        "#,
     )
     .bind(readlist_id)
     .fetch_all(&pool)
@@ -56,7 +56,7 @@ pub async fn insert_readlist_thumbnail(
     height: i64,
     selected: bool,
 ) -> Result<ReadlistThumbnailRecord, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open readlist thumbnail create db: {error}"))?;
     let mut tx = pool
@@ -70,7 +70,7 @@ pub async fn insert_readlist_thumbnail(
         FROM READLIST
         WHERE ID = ?
         LIMIT 1
-        "#
+        "#,
     )
     .bind(readlist_id)
     .fetch_optional(&mut *tx)
@@ -90,7 +90,7 @@ pub async fn insert_readlist_thumbnail(
             UPDATE THUMBNAIL_READLIST
             SET SELECTED = 0
             WHERE READLIST_ID = ?
-            "#
+            "#,
         )
         .bind(readlist_id)
         .execute(&mut *tx)
@@ -104,7 +104,7 @@ pub async fn insert_readlist_thumbnail(
         INSERT INTO THUMBNAIL_READLIST
             (ID, SELECTED, THUMBNAIL, TYPE, READLIST_ID, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        "#
+        "#,
     )
     .bind(&id)
     .bind(selected)
@@ -145,7 +145,7 @@ pub async fn select_readlist_thumbnail(
         return Ok(false);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open readlist thumbnail select db: {error}"))?;
     let mut tx = pool
@@ -159,7 +159,7 @@ pub async fn select_readlist_thumbnail(
         FROM READLIST
         WHERE ID = ?
         LIMIT 1
-        "#
+        "#,
     )
     .bind(readlist_id)
     .fetch_optional(&mut *tx)
@@ -179,7 +179,7 @@ pub async fn select_readlist_thumbnail(
         FROM THUMBNAIL_READLIST
         WHERE ID = ?
         LIMIT 1
-        "#
+        "#,
     )
     .bind(thumbnail_id)
     .fetch_optional(&mut *tx)
@@ -198,7 +198,7 @@ pub async fn select_readlist_thumbnail(
         UPDATE THUMBNAIL_READLIST
         SET SELECTED = 0
         WHERE READLIST_ID = ?
-        "#
+        "#,
     )
     .bind(&target_readlist_id)
     .execute(&mut *tx)
@@ -209,7 +209,7 @@ pub async fn select_readlist_thumbnail(
         UPDATE THUMBNAIL_READLIST
         SET SELECTED = 1, LAST_MODIFIED_DATE = STRFTIME('%Y-%m-%d %H:%M:%f', 'now')
         WHERE ID = ?
-        "#
+        "#,
     )
     .bind(thumbnail_id)
     .execute(&mut *tx)
@@ -231,7 +231,7 @@ pub async fn delete_readlist_thumbnail(
         return Ok(false);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open readlist thumbnail delete db: {error}"))?;
     let mut tx = pool
@@ -245,7 +245,7 @@ pub async fn delete_readlist_thumbnail(
         FROM READLIST
         WHERE ID = ?
         LIMIT 1
-        "#
+        "#,
     )
     .bind(readlist_id)
     .fetch_optional(&mut *tx)
@@ -265,7 +265,7 @@ pub async fn delete_readlist_thumbnail(
         FROM THUMBNAIL_READLIST
         WHERE ID = ?
         LIMIT 1
-        "#
+        "#,
     )
     .bind(thumbnail_id)
     .fetch_optional(&mut *tx)
@@ -284,7 +284,7 @@ pub async fn delete_readlist_thumbnail(
         r#"
         DELETE FROM THUMBNAIL_READLIST
         WHERE ID = ?
-        "#
+        "#,
     )
     .bind(thumbnail_id)
     .execute(&mut *tx)
@@ -310,7 +310,7 @@ async fn normalize_readlist_thumbnail_selection(
         FROM THUMBNAIL_READLIST
         WHERE READLIST_ID = ?
         ORDER BY ID ASC
-        "#
+        "#,
     )
     .bind(readlist_id)
     .fetch_all(&mut **tx)
@@ -363,7 +363,7 @@ pub async fn load_persisted_readlist_name(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open readlist file db: {error}"))?;
     let row = sqlx::query(
@@ -371,7 +371,7 @@ pub async fn load_persisted_readlist_name(
         SELECT NAME
         FROM READLIST
         WHERE ID = ?
-        "#
+        "#,
     )
     .bind(readlist_id)
     .fetch_optional(&pool)

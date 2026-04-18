@@ -30,7 +30,7 @@ pub(super) async fn load_persisted_scoped_strings(
         return Ok(Vec::new());
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open {label} db: {error}"))?;
 

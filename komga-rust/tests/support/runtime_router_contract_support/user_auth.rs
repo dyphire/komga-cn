@@ -2,7 +2,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
-use komga_infrastructure::sqlite::connect_pool;
+use komga_infrastructure::sqlite::connect_test_pool;
 use tower::util::ServiceExt;
 
 use super::RuntimeDbPaths;
@@ -37,7 +37,7 @@ pub async fn seed_router_age_exclude_user_with_roles(
     age_restriction: i64,
     roles: &[&str],
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract restricted-user db should open");
 
@@ -77,7 +77,7 @@ pub async fn seed_router_library_restricted_user(
     password: &str,
     library_ids: &[&str],
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract library-restricted-user db should open");
 

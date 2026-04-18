@@ -1,7 +1,7 @@
 use super::*;
 
 pub async fn load_persisted_library_ids(database_file: &FsPath) -> Result<Vec<String>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open persisted browse-library db: {error}"))?;
 
@@ -31,7 +31,7 @@ pub async fn load_persisted_library_ids(database_file: &FsPath) -> Result<Vec<St
 pub async fn load_collection_memberships(
     database_file: &FsPath,
 ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series collection db: {error}"))?;
 
@@ -57,7 +57,7 @@ pub async fn load_collection_ordering(
     database_file: &FsPath,
     collection_id: &str,
 ) -> Result<HashMap<String, i64>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open collection ordering db: {error}"))?;
 
@@ -85,7 +85,7 @@ pub async fn load_collection_ordering(
 pub async fn load_readlist_memberships(
     database_file: &FsPath,
 ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open readlist memberships db: {error}"))?;
 

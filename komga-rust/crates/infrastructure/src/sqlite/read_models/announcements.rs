@@ -2,13 +2,13 @@ use std::path::Path;
 
 use sqlx::Row;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_read_pool;
 
 pub async fn load_announcement_read_ids(
     database_file: &Path,
     user_id: &str,
 ) -> Result<Vec<String>, sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT ANNOUNCEMENT_ID
          FROM ANNOUNCEMENTS_READ

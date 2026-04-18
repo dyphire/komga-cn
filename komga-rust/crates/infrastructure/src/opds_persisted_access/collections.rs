@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_read_pool;
 use icu::collator::{
     Collator,
     options::{CollatorOptions, Strength},
@@ -23,7 +23,7 @@ pub async fn load_publishers(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT DISTINCT sm.PUBLISHER AS PUBLISHER, s.LIBRARY_ID AS LIBRARY_ID
 FROM SERIES_METADATA sm
@@ -80,7 +80,7 @@ pub async fn load_collections(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let rows = if let Some(library_id) = library_id {
         sqlx::query(
             r#"SELECT DISTINCT c.ID, c.NAME, c.ORDERED,
@@ -137,7 +137,7 @@ pub async fn load_collection(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT ID, NAME, ORDERED, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
 FROM COLLECTION
@@ -166,7 +166,7 @@ pub async fn load_collection_books(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE, b.NAME AS FILE_NAME,
        COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE,
@@ -214,7 +214,7 @@ pub async fn load_collection_series(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let query = if ordered {
         r#"SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE,
        COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,

@@ -1,4 +1,5 @@
 use super::*;
+use crate::sqlite::connect_test_pool;
 
 fn unique_temp_dir(case: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -15,7 +16,7 @@ async fn create_test_db(case: &str) -> (PathBuf, sqlx::Pool<sqlx::Sqlite>, PathB
     let root = unique_temp_dir(case);
     fs::create_dir_all(&root).expect("temp root should be created");
     let db_path = root.join("import.sqlite");
-    let pool = connect_pool(&db_path, 1)
+    let pool = connect_test_pool(&db_path, 1)
         .await
         .expect("test db should open");
     crate::sqlite::setup::bootstrap_pool(&pool)

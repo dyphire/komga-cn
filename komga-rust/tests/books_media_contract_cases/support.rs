@@ -86,12 +86,12 @@ pub(super) fn fixture_epub_positions_extension_blob_total_progression_0995() -> 
 
 pub(super) fn fixture_epub_positions_extension_blob_without_total_progression() -> Vec<u8> {
     vec![
-        31, 139, 8, 0, 130, 100, 226, 105, 2, 255, 37, 204, 61, 14, 128, 32, 20, 3, 224, 187,
-        212, 209, 255, 193, 133, 171, 24, 7, 52, 40, 68, 244, 189, 0, 131, 134, 112, 119, 81,
-        199, 246, 75, 27, 193, 228, 77, 48, 116, 122, 136, 49, 66, 59, 181, 66, 160, 157, 137,
-        246, 186, 111, 46, 29, 14, 91, 172, 78, 110, 168, 16, 110, 86, 217, 36, 179, 53, 139,
-        124, 55, 237, 231, 229, 117, 216, 204, 150, 254, 50, 31, 69, 176, 163, 205, 41, 239,
-        115, 134, 232, 154, 33, 165, 41, 61, 85, 24, 32, 25, 108, 0, 0, 0,
+        31, 139, 8, 0, 130, 100, 226, 105, 2, 255, 37, 204, 61, 14, 128, 32, 20, 3, 224, 187, 212,
+        209, 255, 193, 133, 171, 24, 7, 52, 40, 68, 244, 189, 0, 131, 134, 112, 119, 81, 199, 246,
+        75, 27, 193, 228, 77, 48, 116, 122, 136, 49, 66, 59, 181, 66, 160, 157, 137, 246, 186, 111,
+        46, 29, 14, 91, 172, 78, 110, 168, 16, 110, 86, 217, 36, 179, 53, 139, 124, 55, 237, 231,
+        229, 117, 216, 204, 150, 254, 50, 31, 69, 176, 163, 205, 41, 239, 115, 134, 232, 154, 33,
+        165, 41, 61, 85, 24, 32, 25, 108, 0, 0, 0,
     ]
 }
 
@@ -113,7 +113,7 @@ pub(super) async fn update_book_search_fixture_title(
     book_id: &str,
     title: &str,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("books search parity db should open for title update");
 
@@ -140,7 +140,7 @@ pub(super) async fn seed_router_persisted_pdf_page(
     height: i64,
     file_size: Option<i64>,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("persisted pdf page db should open");
 

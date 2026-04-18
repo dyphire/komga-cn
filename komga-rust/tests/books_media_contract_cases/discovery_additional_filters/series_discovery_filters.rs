@@ -6,7 +6,7 @@ async fn router_series_latest_excludes_deleted_series_by_default() {
     seed_router_contract_data(&paths).await;
     seed_router_custom_series(&paths, "series-deleted", "Deleted Series", "library-1").await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series latest default deleted db should open");
     sqlx::query("UPDATE SERIES SET DELETED_DATE = ? WHERE ID = ?")
@@ -52,7 +52,7 @@ async fn router_series_latest_supports_deleted_filter() {
     seed_router_contract_data(&paths).await;
     seed_router_custom_series(&paths, "series-deleted", "Deleted Series", "library-1").await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series latest deleted db should open");
     sqlx::query("UPDATE SERIES SET DELETED_DATE = ? WHERE ID = ?")
@@ -118,7 +118,7 @@ async fn router_series_latest_supports_oneshot_filter() {
     let paths = new_router_fixture("router-series-latest-oneshot-filter").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series latest oneshot db should open");
     sqlx::query(
@@ -204,7 +204,7 @@ async fn router_series_new_sorts_by_created_desc() {
     seed_router_contract_data(&paths).await;
     seed_router_custom_series(&paths, "series-new", "New Series", "library-1").await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series new created-desc db should open");
     sqlx::query("UPDATE SERIES SET LAST_MODIFIED_DATE = ?, CREATED_DATE = ? WHERE ID = ?")
@@ -256,7 +256,7 @@ async fn router_series_updated_excludes_newly_added_series() {
     seed_router_contract_data(&paths).await;
     seed_router_custom_series(&paths, "series-new", "New Series", "library-1").await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series updated db should open");
     sqlx::query("UPDATE SERIES SET LAST_MODIFIED_DATE = ?, CREATED_DATE = ? WHERE ID = ?")
@@ -307,7 +307,7 @@ async fn router_series_updated_unpaged_keeps_kotlin_page_shape() {
     seed_router_contract_data(&paths).await;
     seed_router_custom_series(&paths, "series-new", "New Series", "library-1").await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series updated unpaged db should open");
     sqlx::query("UPDATE SERIES SET LAST_MODIFIED_DATE = ?, CREATED_DATE = ? WHERE ID = ?")

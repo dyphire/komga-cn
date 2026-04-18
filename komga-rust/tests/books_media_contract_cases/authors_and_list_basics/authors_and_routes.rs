@@ -89,7 +89,7 @@ async fn router_author_endpoints_filter_to_authorized_libraries() {
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("authors authorized-libraries db should open");
     sqlx::query("INSERT INTO BOOK_METADATA_AUTHOR (BOOK_ID, NAME, ROLE) VALUES (?, ?, ?)")
@@ -210,7 +210,7 @@ async fn router_authors_names_matches_search_without_accents() {
     let paths = new_router_fixture("router-authors-names-strip-accents").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("authors names strip-accents db should open");
     sqlx::query("INSERT INTO BOOK_METADATA_AUTHOR (BOOK_ID, NAME, ROLE) VALUES (?, ?, ?)")

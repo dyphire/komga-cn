@@ -24,7 +24,8 @@ fn measurement_value(payload: &Value, statistic: &str) -> f64 {
 #[cfg(target_os = "linux")]
 fn expected_process_cpu_usage_fraction() -> Option<f64> {
     let schedstat = fs::read_to_string("/proc/self/schedstat").ok()?;
-    let cpu_runtime_seconds = schedstat.split_whitespace().next()?.parse::<f64>().ok()? / 1_000_000_000.0;
+    let cpu_runtime_seconds =
+        schedstat.split_whitespace().next()?.parse::<f64>().ok()? / 1_000_000_000.0;
     let process_uptime_seconds = expected_process_uptime_seconds()?;
     if process_uptime_seconds <= 0.0 {
         return None;
@@ -68,7 +69,10 @@ fn assert_health_datasource_component(
         .get("details")
         .and_then(Value::as_object)
         .unwrap_or_else(|| panic!("{component_name} should expose details: {payload:?}"));
-    assert_eq!(details.get("database").and_then(Value::as_str), Some("SQLite"));
+    assert_eq!(
+        details.get("database").and_then(Value::as_str),
+        Some("SQLite")
+    );
     assert_eq!(
         details.get("validationQuery").and_then(Value::as_str),
         Some("isValid()")
@@ -99,7 +103,10 @@ fn assert_admin_actuator_health_payload(
         .get("db")
         .and_then(Value::as_object)
         .expect("health should expose db component");
-    assert_eq!(db.get("status").and_then(Value::as_str), Some(expected_status));
+    assert_eq!(
+        db.get("status").and_then(Value::as_str),
+        Some(expected_status)
+    );
     assert!(
         db.get("details").is_none(),
         "db should be a composite contributor: {payload:?}"
@@ -147,11 +154,17 @@ fn assert_admin_actuator_health_payload(
         "diskSpace path should be non-empty: {payload:?}"
     );
     assert!(
-        disk_space_details.get("total").and_then(Value::as_u64).is_some(),
+        disk_space_details
+            .get("total")
+            .and_then(Value::as_u64)
+            .is_some(),
         "diskSpace total should be numeric: {payload:?}"
     );
     assert!(
-        disk_space_details.get("free").and_then(Value::as_u64).is_some(),
+        disk_space_details
+            .get("free")
+            .and_then(Value::as_u64)
+            .is_some(),
         "diskSpace free should be numeric: {payload:?}"
     );
 
@@ -270,7 +283,8 @@ async fn router_actuator_root_returns_forbidden_for_authenticated_non_admin() {
     )
     .await;
 
-    let response = app.clone()
+    let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -801,9 +815,15 @@ async fn router_actuator_metrics_returns_metric_names_for_admin() {
             .any(|value| value.as_str() == Some("komga.books")),
         "actuator metrics names should include komga.books: {payload:?}"
     );
-    for metric_name in ["komga.tasks.execution", "komga.books", "http.server.requests"] {
+    for metric_name in [
+        "komga.tasks.execution",
+        "komga.books",
+        "http.server.requests",
+    ] {
         assert!(
-            names.iter().any(|value| value.as_str() == Some(metric_name)),
+            names
+                .iter()
+                .any(|value| value.as_str() == Some(metric_name)),
             "actuator metrics names should include {metric_name}: {payload:?}"
         );
     }
@@ -911,7 +931,10 @@ async fn router_actuator_metric_detail_uses_runtime_startup_timings_for_admin() 
     let started_seconds = measurement_value(&started_payload, "TOTAL_TIME");
     let ready_seconds = measurement_value(&ready_payload, "TOTAL_TIME");
 
-    assert!(started_seconds > 0.0, "application.started.time should be positive: {started_payload:?}");
+    assert!(
+        started_seconds > 0.0,
+        "application.started.time should be positive: {started_payload:?}"
+    );
     assert!(
         ready_seconds >= started_seconds,
         "application.ready.time should be >= application.started.time: started={started_seconds}, ready={ready_seconds}"
@@ -944,7 +967,10 @@ async fn router_actuator_metric_detail_uses_runtime_process_cpu_usage_for_admin(
     let payload = response_json(response).await;
     let cpu_usage = measurement_value(&payload, "VALUE");
 
-    assert!((0.0..=1.0).contains(&cpu_usage), "process.cpu.usage should be a fraction: {payload:?}");
+    assert!(
+        (0.0..=1.0).contains(&cpu_usage),
+        "process.cpu.usage should be a fraction: {payload:?}"
+    );
 
     #[cfg(target_os = "linux")]
     {
@@ -964,13 +990,13 @@ async fn router_actuator_metric_detail_exposes_datasource_tags_for_admin() {
     let paths = new_router_fixture("router-actuator-metric-detail-datasource-tags").await;
     seed_router_contract_data(&paths).await;
 
-    let _main_pool_one = komga_infrastructure::sqlite::connect_pool(&paths.main_db, 1)
+    let _main_pool_one = komga_infrastructure::sqlite::connect_shared_pool(&paths.main_db, 1)
         .await
         .expect("main shared sqlx pool with max=1 should open");
-    let _main_pool_two = komga_infrastructure::sqlite::connect_pool(&paths.main_db, 2)
+    let _main_pool_two = komga_infrastructure::sqlite::connect_shared_pool(&paths.main_db, 2)
         .await
         .expect("main shared sqlx pool with max=2 should open");
-    let _tasks_pool_one = komga_infrastructure::sqlite::connect_pool(&paths.tasks_db, 1)
+    let _tasks_pool_one = komga_infrastructure::sqlite::connect_shared_pool(&paths.tasks_db, 1)
         .await
         .expect("tasks shared sqlx pool with max=1 should open");
 
@@ -1006,7 +1032,11 @@ async fn router_actuator_metric_detail_exposes_datasource_tags_for_admin() {
                 && tag
                     .get("values")
                     .and_then(Value::as_array)
-                    .is_some_and(|values| values.iter().any(|value| value.as_str() == Some("main-pool-max-2")))
+                    .is_some_and(|values| {
+                        values
+                            .iter()
+                            .any(|value| value.as_str() == Some("main-pool-max-2"))
+                    })
         }),
         "datasource metric should expose live sqlx pool entry names: {payload:?}"
     );
@@ -1160,7 +1190,10 @@ async fn router_actuator_metric_detail_reflects_real_http_requests_for_admin() {
         )
         .await
         .expect("anonymous actuator root request should complete");
-    assert_eq!(unauthorized_root_response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        unauthorized_root_response.status(),
+        StatusCode::UNAUTHORIZED
+    );
 
     let info_metric_response = app
         .clone()

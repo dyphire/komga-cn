@@ -61,7 +61,7 @@ pub(super) fn try_execute(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sqlite::connect_pool;
+    use crate::sqlite::connect_test_pool;
     use crate::task_queue::test_support::RuntimeTestFixture;
     use sqlx::{Row, SqlitePool};
 
@@ -172,7 +172,7 @@ mod tests {
             "find-books-to-convert should enqueue one downstream convert task",
         );
 
-        let tasks_pool = connect_pool(fixture.tasks_db_file.as_path(), 1)
+        let tasks_pool = connect_test_pool(fixture.tasks_db_file.as_path(), 1)
             .await
             .expect("tasks db should open for convert-book grouping verification");
         let row = sqlx::query(
@@ -269,7 +269,7 @@ mod tests {
             "find-books-to-convert should not enqueue convert-book tasks when convert-to-cbz is disabled",
         );
 
-        let tasks_pool = connect_pool(fixture.tasks_db_file.as_path(), 1)
+        let tasks_pool = connect_test_pool(fixture.tasks_db_file.as_path(), 1)
             .await
             .expect("tasks db should open for disabled convert-book verification");
         let count = sqlx::query("SELECT COUNT(*) AS COUNT FROM TASK")
@@ -359,7 +359,7 @@ mod tests {
         assert!(source_path.exists());
         assert!(!fixture.library_root.join("books/book-1.cbz").exists());
 
-        let verify_pool = connect_pool(fixture.database_file.as_path(), 1)
+        let verify_pool = connect_test_pool(fixture.database_file.as_path(), 1)
             .await
             .expect("convert-book last-modified verify db should open");
         let row = sqlx::query("SELECT URL FROM BOOK WHERE ID = ? LIMIT 1")
@@ -561,8 +561,8 @@ mod tests {
         .bind(preserved_page_hash)
         .bind(i64::try_from(preserved_page.unpacked_size).unwrap_or(i64::MAX))
         .execute(&pool)
-            .await
-            .expect("convert-book success source page hash should be inserted");
+        .await
+        .expect("convert-book success source page hash should be inserted");
         pool.close().await;
 
         let runtime = fixture.runtime_context(false, false);
@@ -587,7 +587,7 @@ mod tests {
             "convert-book success should create the converted cbz file"
         );
 
-        let verify_pool = connect_pool(fixture.database_file.as_path(), 1)
+        let verify_pool = connect_test_pool(fixture.database_file.as_path(), 1)
             .await
             .expect("convert-book success verify db should open");
         let book_row = sqlx::query("SELECT URL FROM BOOK WHERE ID = ? LIMIT 1")
@@ -772,7 +772,7 @@ mod tests {
         let result = try_execute(&mut scheduler, &runtime, &task, Some(book_id));
         assert!(matches!(result, Some(Ok(()))));
 
-        let verify_pool = connect_pool(fixture.database_file.as_path(), 1)
+        let verify_pool = connect_test_pool(fixture.database_file.as_path(), 1)
             .await
             .expect("repair-extension per-book verify db should open");
         let row = sqlx::query("SELECT URL FROM BOOK WHERE ID = ? LIMIT 1")

@@ -152,7 +152,7 @@ async fn router_opds_v1_libraries_preserves_kotlin_dao_iteration_order() {
 }
 
 async fn clear_router_collections_and_readlists(paths: &RuntimeDbPaths) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds collection/readlist cleanup db should open");
 
@@ -177,7 +177,7 @@ async fn seed_router_collection_series_entry(
     series_id: &str,
     number: i64,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds collection-series seed db should open");
 
@@ -200,7 +200,7 @@ async fn seed_router_readlist(
     name: &str,
     book_id: &str,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds readlist seed db should open");
 
@@ -229,7 +229,7 @@ async fn seed_router_readlist_book_entry(
     book_id: &str,
     number: i64,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds readlist-book seed db should open");
 
@@ -707,7 +707,7 @@ async fn seed_router_read_progress_entry(
     completed: bool,
     read_date: &str,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds read-progress seed db should open");
 
@@ -764,7 +764,7 @@ async fn upsert_router_series_read_progress(
     in_progress_count: i64,
     most_recent_read_date: &str,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds series read-progress seed db should open");
 
@@ -785,7 +785,7 @@ async fn upsert_router_series_read_progress(
 }
 
 async fn update_router_book_isbn(paths: &RuntimeDbPaths, book_id: &str, isbn: &str) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds book isbn update db should open");
 
@@ -805,7 +805,7 @@ async fn update_router_book_number_metadata(
     number: &str,
     number_sort: f64,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds book number metadata update db should open");
 
@@ -825,7 +825,7 @@ async fn update_router_book_created_date(
     book_id: &str,
     created_date: &str,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds book created_date update db should open");
 
@@ -846,7 +846,7 @@ async fn update_router_series_catalog_fields(
     one_shot: bool,
     last_modified_date: &str,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds series catalog update db should open");
 
@@ -873,7 +873,7 @@ async fn seed_catalog_book(
     number: i64,
     created_date: &str,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds catalog book seed db should open");
 

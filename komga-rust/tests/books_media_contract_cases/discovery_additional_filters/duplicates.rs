@@ -44,7 +44,7 @@ async fn router_books_duplicates_accepts_admin_x_api_key_like_kotlin_clients() {
     seed_router_contract_data(&paths).await;
     seed_router_contract_nullable_samples(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("books duplicates api-key db should open");
     for book_id in ["book-1", "book-2"] {
@@ -119,7 +119,7 @@ async fn router_books_duplicates_returns_full_book_dto_page() {
     seed_router_contract_data(&paths).await;
     seed_router_contract_nullable_samples(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("books duplicates dto db should open");
     for book_id in ["book-1", "book-2"] {
@@ -183,7 +183,7 @@ async fn router_books_duplicates_ignores_same_hash_with_different_sizes() {
     seed_router_contract_data(&paths).await;
     seed_router_contract_nullable_samples(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("books duplicates hash-size db should open");
     for book_id in ["book-1", "book-2"] {
@@ -229,7 +229,7 @@ async fn router_books_duplicates_honors_sort_query() {
     seed_router_contract_data(&paths).await;
     seed_router_contract_nullable_samples(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("books duplicates sort db should open");
     for book_id in ["book-1", "book-2"] {
@@ -284,7 +284,7 @@ async fn router_books_duplicates_sorts_series_by_title_sort() {
     seed_router_contract_data(&paths).await;
     seed_router_contract_nullable_samples(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("books duplicates series sort db should open");
     for book_id in ["book-1", "book-2"] {
@@ -348,7 +348,7 @@ async fn router_books_duplicates_defaults_to_file_hash_asc_sort() {
     seed_router_pdf_book(&paths, "book-3", "series-1", "book-3.pdf", "Book 3").await;
     seed_router_pdf_book(&paths, "book-4", "series-1", "book-4.pdf", "Book 4").await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("books duplicates default sort db should open");
     for book_id in ["book-1", "book-2"] {
@@ -409,7 +409,7 @@ async fn router_books_duplicates_unpaged_ignores_explicit_sort_query() {
     seed_router_contract_data(&paths).await;
     seed_router_contract_nullable_samples(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("books duplicates unpaged ignore-sort db should open");
     for book_id in ["book-1", "book-2"] {
@@ -480,7 +480,7 @@ async fn router_books_duplicates_includes_same_hash_books_outside_duplicate_size
     seed_router_contract_nullable_samples(&paths).await;
     seed_router_pdf_book(&paths, "book-3", "series-1", "book-3.pdf", "Book 3").await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("books duplicates expanded selection db should open");
     for book_id in ["book-1", "book-2"] {

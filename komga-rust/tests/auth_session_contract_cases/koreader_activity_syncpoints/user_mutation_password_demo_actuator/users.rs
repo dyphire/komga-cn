@@ -261,7 +261,7 @@ async fn router_users_update_keeps_session_when_labels_only_change_case_or_overl
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for user label normalization seed");
     sqlx::query("INSERT INTO USER_SHARING (LABEL, ALLOW, USER_ID) VALUES (?, ?, ?)")
@@ -324,7 +324,7 @@ async fn router_users_update_keeps_session_when_labels_only_change_case_or_overl
         .expect("label normalization existing session request should complete");
     assert_eq!(me_response.status(), StatusCode::OK);
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for label normalization verification");
     let rows = sqlx::query(
@@ -388,7 +388,7 @@ async fn router_users_create_normalizes_content_restriction_labels() {
         Some(&vec![Value::String("both".to_string())])
     );
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for created user normalization verification");
     let user_id = payload

@@ -134,7 +134,7 @@ async fn router_opds_v2_search_excludes_one_shot_series_for_blank_and_ranked_que
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v2 search one-shot db should open");
     sqlx::query("UPDATE SERIES SET ONESHOT = ? WHERE ID = ?")
@@ -190,7 +190,7 @@ async fn router_opds_v2_search_books_group_uses_shared_publication_shape() {
     let paths = new_router_fixture("router-opds-v2-search-book-publication-shape").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v2 search publication db should open");
     sqlx::query(

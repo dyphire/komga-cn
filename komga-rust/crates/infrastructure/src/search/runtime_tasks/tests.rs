@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::sqlite::{connect_private_pool, setup::bootstrap_pool};
+use crate::sqlite::{connect_main_write_context, connect_write_pool};
 use sqlx::SqlitePool;
 
 use super::super::index_lifecycle::{SearchEntityType, SearchIndexLifecycle};
@@ -11,13 +11,10 @@ use super::{
 };
 
 async fn open_bootstrapped_pool(database_file: &std::path::Path) -> SqlitePool {
-    let pool = connect_private_pool(database_file, 1)
-        .await
-        .expect("fixture sqlite database should open");
-    bootstrap_pool(&pool)
+    let context = connect_main_write_context(database_file)
         .await
         .expect("fixture sqlite database should bootstrap main schema");
-    pool
+    context.pool().clone()
 }
 
 #[tokio::test]
@@ -340,7 +337,7 @@ VALUES (?, ?, ?, ?, ?)"#,
     rebuild_index_from_database(database_file.as_path(), index_dir.as_path())
         .expect("index rebuild should complete");
 
-    let pool = connect_private_pool(database_file.as_path(), 1)
+    let pool = connect_write_pool(database_file.as_path())
         .await
         .expect("fixture sqlite database should reopen for collection update");
 
@@ -379,7 +376,7 @@ VALUES (?, ?, ?, ?, ?)"#,
         .expect("collection delete query should succeed");
     assert!(deleted_collection_hits.is_empty());
 
-    let pool = connect_private_pool(database_file.as_path(), 1)
+    let pool = connect_write_pool(database_file.as_path())
         .await
         .expect("fixture sqlite database should reopen");
 

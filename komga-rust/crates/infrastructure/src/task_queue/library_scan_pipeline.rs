@@ -367,7 +367,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::sqlite::{connect_pool, setup};
+    use crate::sqlite::{connect_test_pool, setup};
 
     fn temp_db_path(case_id: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
@@ -378,7 +378,7 @@ mod tests {
     }
 
     async fn seed_library_profiles(db_path: &Path, rows: &[(&str, bool, &str)]) {
-        let pool = connect_pool(db_path, 1)
+        let pool = connect_test_pool(db_path, 1)
             .await
             .expect("temporary sqlite db should open");
         setup::bootstrap_pool(&pool)

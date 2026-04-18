@@ -135,7 +135,7 @@ pub(in crate::task_queue) fn repair_extension(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sqlite::connect_pool;
+    use crate::sqlite::connect_test_pool;
     use crate::task_queue::test_support::RuntimeTestFixture;
     use sqlx::Row;
 
@@ -213,7 +213,7 @@ mod tests {
         repair_extension(&runtime, "book-1")
             .expect("first repair-extension call should skip EPUB-detected-as-ZIP cleanly");
 
-        let pool = connect_pool(fixture.database_file.as_path(), 1)
+        let pool = connect_test_pool(fixture.database_file.as_path(), 1)
             .await
             .expect("repair-extensions db should reopen for media mutation");
         sqlx::query("UPDATE MEDIA SET MEDIA_TYPE = ? WHERE BOOK_ID = ?")
@@ -227,7 +227,7 @@ mod tests {
         repair_extension(&runtime, "book-1")
             .expect("second repair-extension call should short-circuit previously skipped books");
 
-        let verify_pool = connect_pool(fixture.database_file.as_path(), 1)
+        let verify_pool = connect_test_pool(fixture.database_file.as_path(), 1)
             .await
             .expect("repair-extensions db should reopen for verification");
         let row = sqlx::query("SELECT URL FROM BOOK WHERE ID = ? LIMIT 1")
@@ -268,7 +268,7 @@ mod tests {
         repair_extension(&runtime, "book-1")
             .expect("first repair-extension call should ignore already-correct books cleanly");
 
-        let pool = connect_pool(fixture.database_file.as_path(), 1)
+        let pool = connect_test_pool(fixture.database_file.as_path(), 1)
             .await
             .expect("repair-extensions candidate db should reopen for mismatch mutation");
         std::fs::rename(
@@ -287,7 +287,7 @@ mod tests {
         repair_extension(&runtime, "book-1")
             .expect("second repair-extension call should repair newly mismatched books");
 
-        let verify_pool = connect_pool(fixture.database_file.as_path(), 1)
+        let verify_pool = connect_test_pool(fixture.database_file.as_path(), 1)
             .await
             .expect("repair-extensions candidate db should reopen for verification");
         let row = sqlx::query("SELECT URL FROM BOOK WHERE ID = ? LIMIT 1")
@@ -355,7 +355,7 @@ mod tests {
         repair_extension(&candidate_runtime, "book-1")
             .expect("separate runtime database should still repair its own mismatched book");
 
-        let verify_pool = connect_pool(candidate_fixture.database_file.as_path(), 1)
+        let verify_pool = connect_test_pool(candidate_fixture.database_file.as_path(), 1)
             .await
             .expect("isolated candidate db should reopen for verification");
         let row = sqlx::query("SELECT URL FROM BOOK WHERE ID = ? LIMIT 1")

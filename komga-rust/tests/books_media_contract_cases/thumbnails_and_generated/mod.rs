@@ -6,7 +6,7 @@ async fn seed_book_thumbnail_bytes(
     media_type: &str,
     bytes: &[u8],
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for book thumbnail seed");
     sqlx::query("UPDATE THUMBNAIL_BOOK SET MEDIA_TYPE = ?, THUMBNAIL = ? WHERE ID = ?")

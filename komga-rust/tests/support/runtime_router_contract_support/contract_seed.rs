@@ -1,5 +1,5 @@
 use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
-use komga_infrastructure::sqlite::connect_pool;
+use komga_infrastructure::sqlite::connect_test_pool;
 
 use super::RuntimeDbPaths;
 
@@ -16,7 +16,7 @@ async fn add_read_progress_column_if_missing(pool: &sqlx::SqlitePool, column: &s
 }
 
 pub async fn seed_router_contract_data(paths: &RuntimeDbPaths) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("router contract db should open");
 

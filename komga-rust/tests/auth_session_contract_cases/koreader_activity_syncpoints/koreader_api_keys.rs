@@ -149,13 +149,17 @@ async fn router_koreader_user_create_returns_forbidden_without_x_auth_user_or_se
     let body = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("koreader users create missing-header body should be readable");
-    assert!(body.is_empty(), "security gate should reject before disabled payload");
+    assert!(
+        body.is_empty(),
+        "security gate should reject before disabled payload"
+    );
 
     cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
-async fn router_koreader_user_create_rejects_valid_x_auth_user_api_key_without_koreader_sync_role() {
+async fn router_koreader_user_create_rejects_valid_x_auth_user_api_key_without_koreader_sync_role()
+{
     let paths = new_router_fixture("router-koreader-user-create-missing-sync-role").await;
     seed_router_contract_data(&paths).await;
     seed_router_age_exclude_user_with_roles(
@@ -215,7 +219,10 @@ async fn router_koreader_user_create_rejects_valid_x_auth_user_api_key_without_k
     let body = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("koreader users create valid-api-key body should be readable");
-    assert!(body.is_empty(), "role gate should reject before disabled payload");
+    assert!(
+        body.is_empty(),
+        "role gate should reject before disabled payload"
+    );
 
     cleanup_router_fixture(paths);
 }
@@ -487,7 +494,7 @@ async fn router_users_me_api_keys_create_and_list_expose_expected_fields() {
         "api key create payload should expose lastModifiedDate: {created:?}"
     );
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for api key timestamp override");
     sqlx::query("UPDATE USER_API_KEY SET LAST_MODIFIED_DATE = ? WHERE ID = ?")

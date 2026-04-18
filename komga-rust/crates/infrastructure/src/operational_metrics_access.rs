@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::sqlite::{SharedSqlitePoolSnapshot, connect_pool, shared_pool_snapshots_for_paths};
+use crate::sqlite::{SharedSqlitePoolSnapshot, connect_read_pool, shared_pool_snapshots_for_paths};
 use sqlx::Row;
 
 pub fn load_sqlite_pool_snapshots(paths: &[std::path::PathBuf]) -> Vec<SharedSqlitePoolSnapshot> {
@@ -10,7 +10,7 @@ pub fn load_sqlite_pool_snapshots(paths: &[std::path::PathBuf]) -> Vec<SharedSql
 pub async fn load_task_execution_values(
     tasks_db_file: &Path,
 ) -> Result<Vec<(String, f64)>, String> {
-    let pool = connect_pool(tasks_db_file, 1)
+    let pool = connect_read_pool(tasks_db_file)
         .await
         .map_err(|error| format!("open tasks db for metrics: {error}"))?;
     let rows = sqlx::query(
@@ -18,7 +18,6 @@ pub async fn load_task_execution_values(
         FROM TASK
         GROUP BY SIMPLE_TYPE
         ORDER BY SIMPLE_TYPE"#,
-
     )
     .fetch_all(&pool)
     .await
@@ -36,14 +35,13 @@ pub async fn load_task_execution_values(
 }
 
 pub async fn load_libraries_count(database_file: &Path) -> Result<f64, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open main db for libraries metrics: {error}"))?;
 
     let row = sqlx::query(
         r#"SELECT CAST(COUNT(*) AS REAL) AS VALUE
         FROM LIBRARY"#,
-
     )
     .fetch_optional(&pool)
     .await
@@ -55,7 +53,7 @@ pub async fn load_libraries_count(database_file: &Path) -> Result<f64, String> {
 pub async fn load_series_grouped_by_library(
     database_file: &Path,
 ) -> Result<Vec<(String, f64)>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open main db for series metrics: {error}"))?;
 
@@ -64,7 +62,6 @@ pub async fn load_series_grouped_by_library(
         FROM SERIES
         GROUP BY LIBRARY_ID
         ORDER BY LIBRARY_ID"#,
-
     )
     .fetch_all(&pool)
     .await
@@ -84,7 +81,7 @@ pub async fn load_series_grouped_by_library(
 pub async fn load_books_grouped_by_library(
     database_file: &Path,
 ) -> Result<Vec<(String, f64)>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open main db for books metrics: {error}"))?;
 
@@ -93,7 +90,6 @@ pub async fn load_books_grouped_by_library(
         FROM BOOK
         GROUP BY LIBRARY_ID
         ORDER BY LIBRARY_ID"#,
-
     )
     .fetch_all(&pool)
     .await
@@ -113,7 +109,7 @@ pub async fn load_books_grouped_by_library(
 pub async fn load_books_filesize_grouped_by_library(
     database_file: &Path,
 ) -> Result<Vec<(String, f64)>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open main db for books filesize metrics: {error}"))?;
 
@@ -122,7 +118,6 @@ pub async fn load_books_filesize_grouped_by_library(
         FROM BOOK
         GROUP BY LIBRARY_ID
         ORDER BY LIBRARY_ID"#,
-
     )
     .fetch_all(&pool)
     .await
@@ -142,7 +137,7 @@ pub async fn load_books_filesize_grouped_by_library(
 pub async fn load_sidecars_grouped_by_library(
     database_file: &Path,
 ) -> Result<Vec<(String, f64)>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open main db for sidecars metrics: {error}"))?;
 
@@ -151,7 +146,6 @@ pub async fn load_sidecars_grouped_by_library(
         FROM SIDECAR
         GROUP BY LIBRARY_ID
         ORDER BY LIBRARY_ID"#,
-
     )
     .fetch_all(&pool)
     .await
@@ -169,14 +163,13 @@ pub async fn load_sidecars_grouped_by_library(
 }
 
 pub async fn load_collections_count(database_file: &Path) -> Result<f64, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open main db for collections metrics: {error}"))?;
 
     let row = sqlx::query(
         r#"SELECT CAST(COUNT(*) AS REAL) AS VALUE
         FROM COLLECTION"#,
-
     )
     .fetch_optional(&pool)
     .await
@@ -186,14 +179,13 @@ pub async fn load_collections_count(database_file: &Path) -> Result<f64, String>
 }
 
 pub async fn load_readlists_count(database_file: &Path) -> Result<f64, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open main db for readlists metrics: {error}"))?;
 
     let row = sqlx::query(
         r#"SELECT CAST(COUNT(*) AS REAL) AS VALUE
         FROM READLIST"#,
-
     )
     .fetch_optional(&pool)
     .await
@@ -203,7 +195,7 @@ pub async fn load_readlists_count(database_file: &Path) -> Result<f64, String> {
 }
 
 pub async fn load_task_failure_count(database_file: &Path) -> Result<f64, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open main db for task failure metrics: {error}"))?;
 
@@ -212,7 +204,6 @@ pub async fn load_task_failure_count(database_file: &Path) -> Result<f64, String
         FROM HISTORICAL_EVENT
         WHERE TYPE LIKE '%TASK%'
         AND TYPE LIKE '%FAIL%'"#,
-
     )
     .fetch_optional(&pool)
     .await

@@ -5,7 +5,7 @@ use reqwest::Url;
 use serde_json::{Value, json};
 use sqlx::{QueryBuilder, Row, Sqlite};
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_read_pool;
 
 #[derive(Clone, Debug)]
 pub struct PageHashUnknownSource {
@@ -43,7 +43,7 @@ pub async fn load_page_hashes_page(
     actions: &[String],
     sorts: &[String],
 ) -> Result<Value, sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let order_by = known_page_hash_order_by(sorts);
 
     let mut count_query =
@@ -123,7 +123,7 @@ pub async fn load_page_hashes_unknown_page(
     size: u64,
     sorts: &[String],
 ) -> Result<Value, sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
 
     let total_elements = sqlx::query(
         r#"SELECT COUNT(*) AS COUNT
@@ -192,7 +192,7 @@ pub async fn load_page_hash_matches_page(
     size: u64,
     sorts: &[String],
 ) -> Result<Value, sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
 
     let total_elements = sqlx::query(
         r#"SELECT COUNT(*) AS COUNT
@@ -263,7 +263,7 @@ pub async fn load_page_hash_thumbnail(
     database_file: &Path,
     page_hash: &str,
 ) -> Result<Option<Vec<u8>>, sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let thumbnail = sqlx::query(
         r#"SELECT THUMBNAIL
          FROM PAGE_HASH_THUMBNAIL
@@ -280,7 +280,7 @@ pub async fn load_page_hash_delete_targets(
     database_file: &Path,
     page_hash: &str,
 ) -> Result<Vec<PageHashDeleteTarget>, sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT
              mp.BOOK_ID AS BOOK_ID,
@@ -322,7 +322,7 @@ pub async fn load_unknown_page_hash_match_target(
     database_file: &Path,
     page_hash: &str,
 ) -> Result<Option<PageHashUnknownMatchTarget>, sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT mp.BOOK_ID AS BOOK_ID, mp.NUMBER AS NUMBER
          FROM MEDIA_PAGE mp
@@ -344,7 +344,7 @@ pub async fn load_unknown_page_hash_source(
     database_file: &Path,
     page_hash: &str,
 ) -> Result<Option<PageHashUnknownSource>, sqlx::Error> {
-    let pool = connect_pool(database_file, 1).await?;
+    let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT
              l.ROOT AS LIBRARY_ROOT,

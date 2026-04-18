@@ -1,7 +1,7 @@
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use komga_contract_testkit::contract_matrix::assert_required_target_declared;
-use komga_infrastructure::sqlite::connect_pool;
+use komga_infrastructure::sqlite::connect_test_pool;
 use komga_server::app::build_router_with_config;
 use serde_json::Value;
 use tower::util::ServiceExt;
@@ -28,7 +28,7 @@ async fn response_text(response: axum::response::Response) -> String {
 }
 
 async fn update_router_series_publisher(paths: &RuntimeDbPaths, series_id: &str, publisher: &str) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds publisher update db should open");
 
@@ -48,7 +48,7 @@ async fn update_router_series_metadata_titles(
     title: &str,
     title_sort: &str,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds series metadata update db should open");
 
@@ -64,7 +64,7 @@ async fn update_router_series_metadata_titles(
 }
 
 async fn update_router_series_age_rating(paths: &RuntimeDbPaths, series_id: &str, age_rating: i64) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds series age rating update db should open");
 
@@ -79,7 +79,7 @@ async fn update_router_series_age_rating(paths: &RuntimeDbPaths, series_id: &str
 }
 
 async fn update_router_library_name(paths: &RuntimeDbPaths, library_id: &str, name: &str) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds library update db should open");
 
@@ -98,7 +98,7 @@ async fn update_router_library_last_modified(
     library_id: &str,
     last_modified: &str,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds library last-modified update db should open");
 
@@ -117,7 +117,7 @@ async fn update_router_collection_last_modified(
     collection_id: &str,
     last_modified: &str,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds collection last-modified update db should open");
 
@@ -136,7 +136,7 @@ async fn update_router_readlist_last_modified(
     readlist_id: &str,
     last_modified: &str,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds readlist last-modified update db should open");
 
@@ -151,7 +151,7 @@ async fn update_router_readlist_last_modified(
 }
 
 async fn update_router_readlist_ordered(paths: &RuntimeDbPaths, readlist_id: &str, ordered: bool) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds readlist ordered update db should open");
 
@@ -166,7 +166,7 @@ async fn update_router_readlist_ordered(paths: &RuntimeDbPaths, readlist_id: &st
 }
 
 async fn clear_router_series_sharing_labels(paths: &RuntimeDbPaths, series_id: &str) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds series sharing labels delete db should open");
 
@@ -180,7 +180,7 @@ async fn clear_router_series_sharing_labels(paths: &RuntimeDbPaths, series_id: &
 }
 
 async fn seed_router_library(paths: &RuntimeDbPaths, library_id: &str, name: &str) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds library seed db should open");
 

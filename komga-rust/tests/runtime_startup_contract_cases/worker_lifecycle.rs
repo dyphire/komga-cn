@@ -1,6 +1,6 @@
 use super::support::*;
 use super::*;
-use komga_infrastructure::sqlite::connect_pool;
+use komga_infrastructure::sqlite::connect_test_pool;
 
 #[test]
 fn runtime_startup_prepare_task_queue_enqueues_search_rebuild_without_processing_it_inline() {
@@ -15,7 +15,7 @@ fn runtime_startup_prepare_task_queue_enqueues_search_rebuild_without_processing
             .await
             .expect("startup worker bootstrap schema should initialize");
 
-        let pool = connect_pool(config.database_file.as_path(), 1)
+        let pool = connect_test_pool(config.database_file.as_path(), 1)
             .await
             .expect("startup worker bootstrap db should open");
         sqlx::query(
@@ -210,7 +210,7 @@ fn runtime_startup_prepare_task_queue_logs_no_startup_library_scan_skip_when_no_
             .await
             .expect("startup no-startup-profile schema should initialize");
 
-        let pool = connect_pool(config.database_file.as_path(), 1)
+        let pool = connect_test_pool(config.database_file.as_path(), 1)
             .await
             .expect("startup no-startup-profile db should open");
         sqlx::query(
@@ -284,7 +284,7 @@ fn runtime_startup_library_scan_processing_logs_run_complete_and_skip_boundaries
             .await
             .expect("startup scan processing schema should initialize");
 
-        let pool = connect_pool(config.database_file.as_path(), 1)
+        let pool = connect_test_pool(config.database_file.as_path(), 1)
             .await
             .expect("startup scan processing db should open");
         sqlx::query(
@@ -336,7 +336,7 @@ fn runtime_startup_library_scan_processing_logs_run_complete_and_skip_boundaries
             .await
             .expect("startup disabled-startup processing schema should initialize");
 
-        let pool = connect_pool(disabled_startup_config.database_file.as_path(), 1)
+        let pool = connect_test_pool(disabled_startup_config.database_file.as_path(), 1)
             .await
             .expect("startup disabled-startup processing db should open");
         sqlx::query(
@@ -402,7 +402,9 @@ fn runtime_startup_library_scan_processing_logs_run_complete_and_skip_boundaries
     skip_config.log_file = skip_root.join("logs").join("komga.log");
 
     let skip_logs = capture_contract_log_async(&skip_config, async move {
-        komga_infrastructure::task_queue::worker_runtime::process_startup_library_scans(skip_runtime);
+        komga_infrastructure::task_queue::worker_runtime::process_startup_library_scans(
+            skip_runtime,
+        );
     });
     let skip_events = parse_json_log_lines(&skip_logs);
     let skip = runtime_event_with_component(

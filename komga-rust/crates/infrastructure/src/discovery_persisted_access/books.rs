@@ -4,7 +4,7 @@ use crate::discovery_persisted_access::models::{ReadProgressSummary, WebLinkEntr
 pub async fn load_book_poster_summaries(
     database_file: &FsPath,
 ) -> Result<HashMap<String, Vec<BookPosterSummary>>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book poster db: {error}"))?;
 
@@ -33,7 +33,7 @@ pub async fn load_persisted_book_summaries(
     database_file: &FsPath,
     user_id: Option<&str>,
 ) -> Result<Vec<BookSummary>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open books db: {error}"))?;
 
@@ -53,7 +53,7 @@ pub async fn load_persisted_book_summaries_by_ids(
         return Ok(Vec::new());
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open books db for ids query: {error}"))?;
 
@@ -233,7 +233,7 @@ fn book_summary_select_sql(include_read_progress: bool) -> &'static str {
 }
 
 pub async fn load_persisted_book_count(database_file: &FsPath) -> Result<usize, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open books db for count: {error}"))?;
     let row = sqlx::query(r#"SELECT COUNT(*) AS COUNT FROM BOOK"#)

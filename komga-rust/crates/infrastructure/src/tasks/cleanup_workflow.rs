@@ -4,7 +4,7 @@ use sqlx::{Row, SqlitePool};
 use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
 use crate::sql::task_queue::{EMPTY_TRASH_BOOK_DEPENDENCY_SQL, EMPTY_TRASH_SERIES_DEPENDENCY_SQL};
-use crate::sqlite::connect_private_pool;
+use crate::sqlite::connect_private_write_pool;
 
 #[derive(Clone, Debug)]
 struct PersistedCleanupEmptySetsFlags {
@@ -419,7 +419,7 @@ where
             .map_err(|error| format!("failed to build task runtime: {error}"))?;
 
         runtime.block_on(async move {
-            let pool = connect_private_pool(&database_file, 1)
+            let pool = connect_private_write_pool(&database_file)
                 .await
                 .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
             operation(pool).await

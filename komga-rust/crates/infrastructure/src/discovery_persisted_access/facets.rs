@@ -32,7 +32,7 @@ pub async fn load_persisted_tags(
         return Ok(Vec::new());
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open tags db: {error}"))?;
 
@@ -177,7 +177,7 @@ pub async fn load_persisted_age_ratings(
         return Ok(Vec::new());
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open age-ratings db: {error}"))?;
 

@@ -7,7 +7,7 @@ use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
 
 use crate::resolve_library_item_path;
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_read_pool;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PersistedMediaFileRow {
@@ -45,7 +45,7 @@ pub async fn load_persisted_book_media(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book media db: {error}"))?;
 
@@ -84,7 +84,7 @@ pub async fn load_persisted_book_media_files(
         return Ok(Vec::new());
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book media files db: {error}"))?;
 
@@ -108,7 +108,7 @@ pub async fn load_persisted_media_file_records(
         return Ok(Vec::new());
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book media file records db: {error}"))?;
 
@@ -142,7 +142,7 @@ pub async fn book_media_is_ready_status(
     if !database_file.exists() {
         return Ok(false);
     }
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open media status db: {error}"))?;
     let row = sqlx::query("SELECT STATUS FROM MEDIA WHERE BOOK_ID = ? LIMIT 1")
@@ -164,7 +164,7 @@ pub async fn load_persisted_series_thumbnail_media(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series thumbnail db: {error}"))?;
     let row = sqlx::query(
@@ -200,7 +200,7 @@ pub async fn load_persisted_book_pages(
     if !database_file.exists() {
         return Ok(Vec::new());
     }
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book pages db: {error}"))?;
     let rows = sqlx::query(
@@ -223,7 +223,7 @@ pub async fn load_persisted_book_page_row(
     if !database_file.exists() {
         return Ok(None);
     }
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open single book page db: {error}"))?;
 
@@ -298,7 +298,7 @@ async fn load_series_id_by_sorted_position(
     database_file: &Path,
     index: usize,
 ) -> Result<Option<String>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series-id remap db: {error}"))?;
     let row = sqlx::query(
@@ -323,7 +323,7 @@ async fn load_book_id_by_sorted_position(
     if !database_file.exists() {
         return Ok(None);
     }
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book-id remap db: {error}"))?;
     let row = sqlx::query(
@@ -344,7 +344,7 @@ pub async fn persisted_book_exists(database_file: &Path, book_id: &str) -> Resul
     if !database_file.exists() {
         return Ok(false);
     }
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book-exists db: {error}"))?;
     Ok(
@@ -364,7 +364,7 @@ pub async fn persisted_series_exists(
     if !database_file.exists() {
         return Ok(false);
     }
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series exists db: {error}"))?;
     Ok(
@@ -384,7 +384,7 @@ pub async fn load_persisted_series_oneshot(
     if !database_file.exists() {
         return Ok(None);
     }
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series oneshot db: {error}"))?;
     let row =
@@ -403,7 +403,7 @@ pub async fn load_series_library_id(
     if !database_file.exists() {
         return Ok(None);
     }
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series library db: {error}"))?;
     let row = sqlx::query("SELECT LIBRARY_ID FROM SERIES WHERE ID = ? LIMIT 1")
@@ -421,7 +421,7 @@ pub async fn load_series_book_ids(
     if !database_file.exists() {
         return Ok(vec![]);
     }
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series books db: {error}"))?;
     let rows = sqlx::query(
@@ -448,7 +448,7 @@ pub async fn load_series_book_number_sorts(
     if !database_file.exists() {
         return Ok(vec![]);
     }
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series number sort db: {error}"))?;
     let rows = sqlx::query(
@@ -476,7 +476,7 @@ pub async fn load_book_restrictions(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book restrictions db: {error}"))?;
     let row = sqlx::query(
@@ -516,7 +516,7 @@ pub async fn load_persisted_manifest_book(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open manifest book db: {error}"))?;
     let row = sqlx::query(
@@ -552,7 +552,7 @@ pub async fn load_persisted_epub_extension_blob(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open epub extension db: {error}"))?;
     let row = sqlx::query(
@@ -583,7 +583,7 @@ pub async fn load_readlist_archive_entries(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open readlist archive db: {error}"))?;
     let rows = sqlx::query(
@@ -621,7 +621,7 @@ pub async fn load_series_archive_entries(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series archive db: {error}"))?;
     let series_row = sqlx::query(
@@ -672,7 +672,7 @@ pub async fn persisted_book_ids(database_file: &Path) -> Result<Vec<String>, Str
     if !database_file.exists() {
         return Ok(Vec::new());
     }
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book list db: {error}"))?;
     let rows = sqlx::query("SELECT ID FROM BOOK ORDER BY ID ASC")

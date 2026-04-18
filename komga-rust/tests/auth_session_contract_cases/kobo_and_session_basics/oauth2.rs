@@ -730,7 +730,7 @@ pub(crate) async fn verify_oauth2_callback_success_uses_session_cookie_without_a
         .expect("oauth2 callback success should include session cookie");
     assert!(set_cookie.contains("KOMGA-SESSION="));
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for oauth2 activity assertion");
     let (ip, user_agent, source): (Option<String>, Option<String>, Option<String>) = sqlx::query_as(
@@ -969,7 +969,7 @@ async fn router_oauth2_callback_respects_komga_oauth2_account_creation_config() 
         Some("/?server_redirect=Y")
     );
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for oauth2 account creation verification");
     let shared_all_libraries = sqlx::query_scalar::<_, i64>(
@@ -1181,7 +1181,7 @@ async fn router_oauth2_callback_records_failure_activity() {
         Some("/login?server_redirect=Y&error=access_denied")
     );
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for oauth2 failure activity verification");
     let (success, error, source, ip, user_agent, email): AuthenticationActivityRow = sqlx::query_as(

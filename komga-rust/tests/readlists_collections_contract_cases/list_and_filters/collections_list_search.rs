@@ -51,7 +51,7 @@ async fn router_collections_search_uses_index_relevance_order_like_kotlin() {
     seed_router_contract_data(&paths).await;
     seed_collection_listing_variants(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for collections search relevance seed");
     sqlx::query("UPDATE COLLECTION SET NAME = ? WHERE ID = ?")
@@ -178,7 +178,7 @@ async fn router_collections_default_name_order_and_filtered_flags_match_kotlin()
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for collections default-order filtered seed");
     sqlx::query("UPDATE COLLECTION SET NAME = ?, SERIES_COUNT = ? WHERE ID = ?")
@@ -261,7 +261,7 @@ async fn router_collections_default_name_order_uses_unicode_collation_like_kotli
     let paths = new_router_fixture("router-collections-default-unicode-order").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for collections unicode-order seed");
     sqlx::query("UPDATE COLLECTION SET NAME = ? WHERE ID = ?")
@@ -410,7 +410,7 @@ async fn router_collections_search_does_not_drop_visible_hits_after_hidden_ranke
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for collections hidden-ranked search seed");
     sqlx::query("UPDATE COLLECTION SET NAME = ? WHERE ID = ?")

@@ -107,13 +107,15 @@ async fn router_book_file_delete_enqueues_delete_book_even_when_book_is_missing(
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
-    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for missing book file delete verification");
-    let rows = sqlx::query("SELECT ID, SIMPLE_TYPE, GROUP_ID, PRIORITY, PAYLOAD FROM TASK ORDER BY ID ASC")
-        .fetch_all(&tasks_pool)
-        .await
-        .expect("missing book delete task rows should be queryable");
+    let rows = sqlx::query(
+        "SELECT ID, SIMPLE_TYPE, GROUP_ID, PRIORITY, PAYLOAD FROM TASK ORDER BY ID ASC",
+    )
+    .fetch_all(&tasks_pool)
+    .await
+    .expect("missing book delete task rows should be queryable");
     tasks_pool.close().await;
 
     assert_eq!(rows.len(), 1);

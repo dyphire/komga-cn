@@ -1,6 +1,6 @@
 use std::path::Path as FsPath;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_read_pool;
 use sqlx::Row;
 
 #[derive(Clone)]
@@ -22,7 +22,7 @@ pub async fn persisted_collections_exist(database_file: &FsPath) -> Result<bool,
         return Ok(false);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open collections exists db: {error}"))?;
     let row = sqlx::query(
@@ -39,7 +39,7 @@ LIMIT 1"#,
 pub async fn load_persisted_collections(
     database_file: &FsPath,
 ) -> Result<Vec<PersistedCollectionRecord>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open persisted collections db: {error}"))?;
 
@@ -72,7 +72,7 @@ pub async fn load_persisted_collection_detail(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open persisted collection detail db: {error}"))?;
 
@@ -99,7 +99,7 @@ pub async fn load_persisted_collection_series_ids(
     database_file: &FsPath,
     collection_id: &str,
 ) -> Result<Vec<String>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open persisted collection series ids db: {error}"))?;
 
@@ -124,7 +124,7 @@ pub async fn load_series_library_id(
     database_file: &FsPath,
     series_id: &str,
 ) -> Result<Option<String>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series visibility db: {error}"))?;
     let row = sqlx::query(
@@ -145,7 +145,7 @@ pub async fn load_series_restrictions(
     database_file: &FsPath,
     series_id: &str,
 ) -> Result<PersistedSeriesRestrictionRecord, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series restrictions db: {error}"))?;
 
@@ -188,7 +188,7 @@ pub async fn persist_collection_create(
     ordered: bool,
     series_ids: &[String],
 ) -> Result<(), String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open collection create db: {error}"))?;
     let mut tx = pool
@@ -231,7 +231,7 @@ pub async fn persist_collection_update(
         return Ok(false);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open collection update db: {error}"))?;
     let mut tx = pool
@@ -279,7 +279,7 @@ pub async fn delete_persisted_collection(
         return Ok(false);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open collection delete db: {error}"))?;
     let mut tx = pool

@@ -149,7 +149,7 @@ async fn scanner_scan_splits_configured_oneshots_directories_into_per_book_onesh
         .process_available(&runtime)
         .expect("scan should treat configured oneshots directories like Kotlin does");
 
-    let pool = connect_pool(fixture.paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)
         .await
         .expect("sqlite pool should open for oneshots-directory scan contract");
     let series_rows = sqlx::query(
@@ -324,7 +324,7 @@ async fn scanner_rescan_reapplies_provider_numbering_after_kotlin_like_resort() 
         .process_available(&runtime)
         .expect("initial scan should apply provider numbering successfully");
 
-    let initial_pool = connect_pool(fixture.paths.main_db.as_path(), 1)
+    let initial_pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)
         .await
         .expect("sqlite pool should open for provider numbering verification");
     let initial = sqlx::query(
@@ -347,7 +347,7 @@ async fn scanner_rescan_reapplies_provider_numbering_after_kotlin_like_resort() 
         .process_available(&runtime)
         .expect("rescan should preserve provider numbering after Kotlin-like resort");
 
-    let verify_pool = connect_pool(fixture.paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)
         .await
         .expect("sqlite pool should reopen for provider numbering rescan verification");
     let rescanned = sqlx::query(
@@ -421,7 +421,7 @@ async fn scanner_rescan_recreates_missing_metadata_seed_rows() {
         .process_available(&runtime)
         .expect("initial scan should create persisted metadata seeds");
 
-    let pool = connect_pool(fixture.paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)
         .await
         .expect("scanner metadata-repair db should open");
     sqlx::query("DELETE FROM SERIES_METADATA WHERE SERIES_ID IN (SELECT ID FROM SERIES WHERE LIBRARY_ID = ?)")
@@ -490,7 +490,7 @@ async fn scanner_rescan_soft_deletes_missing_series_while_leaving_sidecar_rows_v
         .process_available(&runtime)
         .expect("rescan should soft-delete missing persisted series successfully");
 
-    let pool = connect_pool(fixture.paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for missing-series soft-delete verification");
     let series_total = sqlx::query("SELECT COUNT(*) AS COUNT FROM SERIES WHERE LIBRARY_ID = ?")

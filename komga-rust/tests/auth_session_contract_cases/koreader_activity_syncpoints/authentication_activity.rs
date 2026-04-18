@@ -9,7 +9,7 @@ async fn router_users_by_id_authentication_activity_latest_treats_blank_apikey_i
     let paths = new_router_fixture("router-user-latest-auth-activity-blank-apikey-id").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for latest auth activity seed");
     sqlx::query(
@@ -59,7 +59,7 @@ async fn router_users_by_id_authentication_activity_latest_matches_email_only_ac
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for email-only latest auth activity seed");
     sqlx::query(
@@ -294,7 +294,7 @@ async fn router_users_me_authentication_activity_honors_page_and_date_time_sort(
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for current-user auth activity seed");
     sqlx::query("DELETE FROM AUTHENTICATION_ACTIVITY WHERE USER_ID = ?")
@@ -426,7 +426,7 @@ async fn router_users_me_authentication_activity_includes_email_only_rows() {
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for current-user email-fallback seed");
     sqlx::query("DELETE FROM AUTHENTICATION_ACTIVITY")
@@ -498,7 +498,7 @@ async fn router_users_me_basic_auth_records_forwarded_ip_and_user_agent() {
     let paths = new_router_fixture("router-users-me-basic-records-request-metadata").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for auth activity cleanup");
     sqlx::query("DELETE FROM AUTHENTICATION_ACTIVITY WHERE EMAIL = ?")
@@ -528,7 +528,7 @@ async fn router_users_me_basic_auth_records_forwarded_ip_and_user_agent() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for auth activity assertion");
     let (ip, user_agent, source): (Option<String>, Option<String>, Option<String>) =
@@ -579,7 +579,7 @@ async fn router_users_me_api_keys_list_api_key_auth_uses_connect_info_fallback()
         .expect("api key create payload should expose key")
         .to_string();
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for auth activity cleanup");
     sqlx::query("DELETE FROM AUTHENTICATION_ACTIVITY WHERE EMAIL = ?")
@@ -608,7 +608,7 @@ async fn router_users_me_api_keys_list_api_key_auth_uses_connect_info_fallback()
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for auth activity assertion");
     let (ip, user_agent, source, api_key_comment): (
@@ -666,7 +666,7 @@ pub(crate) async fn verify_api_key_login_records_apikey_source_after_auth_refact
         .expect("api key create payload should expose key")
         .to_string();
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for auth activity cleanup");
     sqlx::query("DELETE FROM AUTHENTICATION_ACTIVITY WHERE EMAIL = ?")
@@ -690,7 +690,7 @@ pub(crate) async fn verify_api_key_login_records_apikey_source_after_auth_refact
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for auth activity assertion");
     let source = sqlx::query_scalar::<_, Option<String>>(
@@ -728,7 +728,7 @@ async fn router_users_authentication_activity_honors_unpaged_date_time_sort() {
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for admin auth activity seed");
     sqlx::query("DELETE FROM AUTHENTICATION_ACTIVITY")
@@ -791,7 +791,7 @@ async fn router_users_me_invalid_basic_auth_does_not_record_failure_activity_yet
     let paths = new_router_fixture("router-users-me-invalid-basic-auth-failure-gap").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for failure-gap auth activity cleanup");
     sqlx::query("DELETE FROM AUTHENTICATION_ACTIVITY WHERE EMAIL = ?")
@@ -818,7 +818,7 @@ async fn router_users_me_invalid_basic_auth_does_not_record_failure_activity_yet
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for failure-gap auth activity assertion");
     let row_count = sqlx::query_scalar::<_, i64>(

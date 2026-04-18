@@ -86,7 +86,7 @@ async fn router_discovery_books_list_sorts_runtime_owned_results_by_read_progres
     seed_router_contract_data(&paths).await;
     seed_router_authors_scope_variants(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("books runtime read-progress sort db should open");
     for (book_id, read_date, last_modified) in [
@@ -166,7 +166,7 @@ async fn router_discovery_books_list_sorts_runtime_owned_results_by_number_serie
     seed_router_contract_data(&paths).await;
     seed_router_authors_scope_variants(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("books runtime sort db should open");
     for (book_id, title, created, last_modified) in [

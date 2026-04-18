@@ -53,7 +53,7 @@ async fn router_opds_v1_collection_detail_uses_collection_and_series_last_modifi
     let paths = new_router_fixture("router-opds-v1-collection-detail-updated").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 collection detail updated db should open");
     sqlx::query("UPDATE COLLECTION SET LAST_MODIFIED_DATE = ? WHERE ID = ?")
@@ -102,7 +102,7 @@ async fn router_opds_v1_collection_detail_orders_unordered_entries_by_title_sort
     update_router_series_metadata_titles(&paths, "series-1", "Zeta Display", "Zulu Sort").await;
     update_router_series_metadata_titles(&paths, "series-2", "Alpha Display", "Alpha Sort").await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 collection detail order db should open");
     sqlx::query("UPDATE COLLECTION SET ORDERED = ? WHERE ID = ?")
@@ -178,7 +178,7 @@ async fn router_opds_v1_collection_detail_returns_not_found_when_collection_is_o
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 collection detail library-scope db should open");
     sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
@@ -287,7 +287,7 @@ async fn router_opds_v1_readlist_detail_returns_not_found_when_readlist_is_outsi
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 readlist detail library-scope db should open");
     sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT, ORDERED) VALUES (?, ?, ?, ?)")
@@ -338,7 +338,7 @@ async fn router_opds_v1_readlist_detail_orders_unordered_entries_by_release_date
     seed_router_contract_data(&paths).await;
     seed_router_authors_scope_variants(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 readlist detail order db should open");
     sqlx::query("UPDATE READLIST SET ORDERED = ?, BOOK_COUNT = ? WHERE ID = ?")
@@ -413,7 +413,7 @@ async fn router_opds_v1_readlist_detail_uses_readlist_and_book_last_modified_tim
     let paths = new_router_fixture("router-opds-v1-readlist-detail-updated").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 readlist detail updated db should open");
     sqlx::query("UPDATE READLIST SET LAST_MODIFIED_DATE = ? WHERE ID = ?")
@@ -490,7 +490,7 @@ async fn router_opds_v1_readlist_detail_filters_non_ready_books_without_turning_
     seed_router_contract_data(&paths).await;
     seed_router_authors_scope_variants(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 readlist detail ready-only db should open");
     sqlx::query("UPDATE READLIST SET ORDERED = ?, BOOK_COUNT = ? WHERE ID = ?")

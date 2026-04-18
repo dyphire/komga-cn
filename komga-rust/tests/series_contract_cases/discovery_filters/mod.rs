@@ -257,7 +257,7 @@ async fn router_discovery_series_list_supports_anyof_and_allof_in_runtime_owned_
     let paths = new_router_fixture("router-discovery-series-list-strict-anyof-allof").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("series allOf sharing-label db should open");
     sqlx::query("INSERT INTO SERIES_METADATA_SHARING (SERIES_ID, LABEL) VALUES (?, ?)")

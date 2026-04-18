@@ -3,7 +3,7 @@ use std::path::Path;
 use komga_application::task_processing::LibraryScanProfile;
 use sqlx::Row;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_read_pool;
 
 #[derive(Clone, Debug)]
 pub struct PersistedLibraryScanProfile {
@@ -27,7 +27,7 @@ pub fn load_persisted_library_scan_profiles(
         let runtime = runtime.map_err(|error| format!("build scan profile runtime: {error}"))?;
 
         runtime.block_on(async move {
-            let pool = connect_pool(database_file.as_path(), 1)
+            let pool = connect_read_pool(database_file.as_path())
                 .await
                 .map_err(|error| format!("open scan profile db: {error}"))?;
 
@@ -84,7 +84,7 @@ pub fn load_persisted_library_ids(database_file: &Path) -> Result<Vec<String>, S
         let runtime = runtime.map_err(|error| format!("build library id runtime: {error}"))?;
 
         runtime.block_on(async move {
-            let pool = connect_pool(database_file.as_path(), 1)
+            let pool = connect_read_pool(database_file.as_path())
                 .await
                 .map_err(|error| format!("open library id db: {error}"))?;
 
@@ -122,7 +122,7 @@ mod tests {
     #[tokio::test]
     async fn scan_profile_loader_returns_error_for_invalid_schema() {
         let db_path = temp_db_path("scan-profile-invalid-schema");
-        let pool = connect_pool(db_path.as_path(), 1)
+        let pool = connect_read_pool(db_path.as_path())
             .await
             .expect("temporary sqlite db should open");
         pool.close().await;
@@ -137,7 +137,7 @@ mod tests {
     #[tokio::test]
     async fn library_scan_profile_loader_maps_to_application_profiles() {
         let db_path = temp_db_path("scan-profile-application-mapping");
-        let pool = connect_pool(db_path.as_path(), 1)
+        let pool = connect_read_pool(db_path.as_path())
             .await
             .expect("temporary sqlite db should open");
         setup::bootstrap_pool(&pool)
@@ -177,7 +177,7 @@ mod tests {
     #[tokio::test]
     async fn library_id_loader_returns_error_for_invalid_schema() {
         let db_path = temp_db_path("library-id-invalid-schema");
-        let pool = connect_pool(db_path.as_path(), 1)
+        let pool = connect_read_pool(db_path.as_path())
             .await
             .expect("temporary sqlite db should open");
         pool.close().await;

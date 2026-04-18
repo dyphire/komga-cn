@@ -194,7 +194,7 @@ async fn runtime_refresh_book_metadata_applies_epub_provider_patch_when_title_ca
         </package>"##,
     );
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for EPUB metadata fixture setup");
     sqlx::query("DELETE FROM SIDECAR WHERE PARENT_URL = ?")
@@ -225,7 +225,7 @@ async fn runtime_refresh_book_metadata_applies_epub_provider_patch_when_title_ca
         .expect("existing metadata authors should be cleared before EPUB metadata refresh test");
     pool.close().await;
 
-    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for EPUB metadata task setup");
     sqlx::query(
@@ -257,7 +257,7 @@ async fn runtime_refresh_book_metadata_applies_epub_provider_patch_when_title_ca
         .process_available(&runtime)
         .expect("runtime should process EPUB RefreshBookMetadata tasks successfully");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for EPUB metadata verification");
     let metadata = sqlx::query(
@@ -320,7 +320,7 @@ async fn runtime_refresh_book_metadata_applies_barcode_isbn_for_non_epub_books()
         &render_ean13_png_bytes("9780306406157"),
     );
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for barcode metadata fixture setup");
     sqlx::query(
@@ -338,7 +338,7 @@ async fn runtime_refresh_book_metadata_applies_barcode_isbn_for_non_epub_books()
         .expect("book metadata isbn should be reset before barcode refresh test");
     pool.close().await;
 
-    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for barcode metadata task setup");
     sqlx::query(
@@ -370,7 +370,7 @@ async fn runtime_refresh_book_metadata_applies_barcode_isbn_for_non_epub_books()
         .process_available(&runtime)
         .expect("runtime should process barcode RefreshBookMetadata tasks successfully");
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for barcode metadata verification");
     let metadata = sqlx::query("SELECT ISBN FROM BOOK_METADATA WHERE BOOK_ID = ? LIMIT 1")

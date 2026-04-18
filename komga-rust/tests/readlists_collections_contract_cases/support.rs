@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) async fn seed_collection_listing_variants(paths: &RuntimeDbPaths) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("collection listing variants db should open");
 
@@ -68,7 +68,7 @@ pub(super) async fn seed_collection_listing_variants(paths: &RuntimeDbPaths) {
 }
 
 pub(super) async fn seed_collection_series_variants(paths: &RuntimeDbPaths) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("collection series variants db should open");
 
@@ -143,7 +143,7 @@ pub(super) async fn seed_collection_series_variants(paths: &RuntimeDbPaths) {
 }
 
 pub(super) async fn seed_readlist_endpoint_variants(paths: &RuntimeDbPaths) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("readlist endpoint variants db should open");
 
@@ -341,7 +341,7 @@ pub(super) async fn seed_readlist_endpoint_variants(paths: &RuntimeDbPaths) {
 }
 
 pub(super) async fn mark_readlist_unordered(paths: &RuntimeDbPaths, readlist_id: &str) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("unordered readlist db should open");
 
@@ -372,7 +372,7 @@ pub(super) async fn mark_readlist_unordered(paths: &RuntimeDbPaths, readlist_id:
 }
 
 pub(super) async fn seed_readlist_author_edge_case(paths: &RuntimeDbPaths) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("readlist author edge case db should open");
 
@@ -396,7 +396,7 @@ pub(super) async fn seed_readlist_author_edge_case(paths: &RuntimeDbPaths) {
 }
 
 pub(super) async fn seed_facet_scope_variants(paths: &RuntimeDbPaths) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("facet scope variants db should open");
 

@@ -3,7 +3,7 @@ use std::path::Path;
 use serde_json::{Value, json};
 use sqlx::Row;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_write_pool;
 
 fn empty_series_tachiyomi_progress_payload() -> Value {
     json!({
@@ -24,7 +24,7 @@ pub async fn refresh_series_read_progress_row(
     if !database_file.exists() {
         return Ok(());
     }
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_write_pool(database_file)
         .await
         .map_err(|error| format!("open series read progress db: {error}"))?;
     let row = sqlx::query(
@@ -65,7 +65,7 @@ pub async fn delete_series_read_progress_row(
     if !database_file.exists() {
         return Ok(());
     }
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_write_pool(database_file)
         .await
         .map_err(|error| format!("open series read progress delete db: {error}"))?;
     sqlx::query("DELETE FROM READ_PROGRESS_SERIES WHERE SERIES_ID = ? AND USER_ID = ?")
@@ -85,7 +85,7 @@ pub async fn load_series_tachiyomi_progress(
     if !database_file.exists() {
         return Ok(None);
     }
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_write_pool(database_file)
         .await
         .map_err(|error| format!("open series tachiyomi db: {error}"))?;
     let rows = sqlx::query(

@@ -1,6 +1,6 @@
 use std::path::Path as FsPath;
 
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_read_pool;
 use sqlx::Row;
 
 #[derive(Clone)]
@@ -123,7 +123,7 @@ pub async fn load_persisted_series_resource(
     database_file: &FsPath,
     series_id: &str,
 ) -> Result<Option<PersistedSeriesResourceRecord>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series detail db: {error}"))?;
 
@@ -154,7 +154,7 @@ pub async fn load_series_id_by_sorted_position(
     database_file: &FsPath,
     index: usize,
 ) -> Result<Option<String>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series-id remap db: {error}"))?;
 
@@ -179,7 +179,7 @@ pub async fn load_persisted_series_detail(
     database_file: &FsPath,
     series_id: &str,
 ) -> Result<Option<PersistedSeriesDetailRecord>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series detail db: {error}"))?;
 
@@ -258,7 +258,7 @@ pub async fn load_persisted_series_collections(
     database_file: &FsPath,
     series_id: &str,
 ) -> Result<Vec<PersistedCollectionRecord>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series collection db: {error}"))?;
 
@@ -308,7 +308,7 @@ pub async fn load_existing_series_metadata(
     database_file: &FsPath,
     series_id: &str,
 ) -> Result<Option<ExistingSeriesMetadataRecord>, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series metadata db: {error}"))?;
 
@@ -438,7 +438,7 @@ pub async fn persist_series_metadata_update(
     series_id: &str,
     update: SeriesMetadataUpdateRecord,
 ) -> Result<bool, String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series metadata update db: {error}"))?;
 
@@ -620,7 +620,7 @@ pub async fn refresh_series_after_metadata_update(
     database_file: &FsPath,
     series_id: &str,
 ) -> Result<(), String> {
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series metadata refresh db: {error}"))?;
 

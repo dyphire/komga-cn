@@ -11,6 +11,7 @@ use crate::filesystem::remove_file_after_release;
 use crate::sqlite::setup;
 
 pub const DEFAULT_MAX_CONNECTIONS: u32 = 4;
+pub const WRITE_MAX_CONNECTIONS: u32 = 1;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SharedSqlitePoolSnapshot {
@@ -186,14 +187,38 @@ pub fn file_backed_connect_options(path: impl AsRef<Path>) -> SqliteConnectOptio
         .journal_mode(SqliteJournalMode::Wal)
 }
 
-pub async fn connect_pool(
+/// Read-heavy SQLite entry points use a small shared pool sized
+/// `max(4, NumCPU)` pattern, while explicit write paths stay serialized behind
+/// `WRITE_MAX_CONNECTIONS` to avoid WAL writer contention.
+pub fn default_read_max_connections() -> u32 {
+    let minimum = usize::try_from(DEFAULT_MAX_CONNECTIONS).unwrap_or(usize::MAX);
+    let available = std::thread::available_parallelism()
+        .map(|value| value.get())
+        .unwrap_or(minimum);
+
+    u32::try_from(available.max(minimum)).unwrap_or(u32::MAX)
+}
+
+pub async fn connect_read_pool(path: impl AsRef<Path>) -> Result<SqlitePool, sqlx::Error> {
+    connect_shared_pool(path, default_read_max_connections()).await
+}
+
+pub async fn connect_write_pool(path: impl AsRef<Path>) -> Result<SqlitePool, sqlx::Error> {
+    connect_shared_pool(path, WRITE_MAX_CONNECTIONS).await
+}
+
+/// Test code should use private pools by default so fixtures stay isolated and do
+/// not participate in the process-wide shared sqlx pool topology.
+pub async fn connect_test_pool(
     path: impl AsRef<Path>,
     max_connections: u32,
 ) -> Result<SqlitePool, sqlx::Error> {
-    connect_bootstrapped_pool(path, max_connections, BootstrapTarget::None).await
+    connect_private_task_pool(path, max_connections).await
 }
 
-pub(crate) async fn connect_private_pool(
+/// Task workers should use private pools so background jobs do not attach to the
+/// process-wide shared pool topology used by HTTP and other runtime access paths.
+pub async fn connect_private_task_pool(
     path: impl AsRef<Path>,
     max_connections: u32,
 ) -> Result<SqlitePool, sqlx::Error> {
@@ -203,11 +228,15 @@ pub(crate) async fn connect_private_pool(
         .await
 }
 
-pub async fn connect_tasks_pool(
+pub async fn connect_private_write_pool(path: impl AsRef<Path>) -> Result<SqlitePool, sqlx::Error> {
+    connect_private_task_pool(path, WRITE_MAX_CONNECTIONS).await
+}
+
+pub async fn connect_shared_pool(
     path: impl AsRef<Path>,
     max_connections: u32,
 ) -> Result<SqlitePool, sqlx::Error> {
-    connect_bootstrapped_pool(path, max_connections, BootstrapTarget::Tasks).await
+    connect_bootstrapped_pool(path, max_connections, BootstrapTarget::None).await
 }
 
 async fn connect_bootstrapped_pool(
@@ -244,22 +273,14 @@ async fn bootstrap_pool_for_target(
     match bootstrap_target {
         BootstrapTarget::None => Ok(()),
         BootstrapTarget::Main => setup::bootstrap_pool(pool).await,
-        BootstrapTarget::Tasks => setup::bootstrap_tasks_pool(pool).await,
     }
 }
 
-pub async fn connect_persistence_context(
+pub async fn connect_main_write_context(
     path: impl AsRef<Path>,
-    max_connections: u32,
 ) -> Result<SqlitePersistenceContext, sqlx::Error> {
-    if max_connections != 1 {
-        return Err(sqlx::Error::Protocol(
-            "persistence write path requires single-writer sqlite pool (max_connections=1)"
-                .to_string(),
-        ));
-    }
-
-    let pool = connect_bootstrapped_pool(path, max_connections, BootstrapTarget::Main).await?;
+    let pool =
+        connect_bootstrapped_pool(path, WRITE_MAX_CONNECTIONS, BootstrapTarget::Main).await?;
     Ok(SqlitePersistenceContext::new(pool))
 }
 
@@ -267,7 +288,6 @@ pub async fn connect_persistence_context(
 enum BootstrapTarget {
     None,
     Main,
-    Tasks,
 }
 
 pub struct SqliteTempPool {
@@ -280,7 +300,10 @@ impl SqliteTempPool {
         let db_path = deterministic_temp_db_path(case_id);
         // Temp pools are short-lived test fixtures; bypassing the shared cache keeps Windows
         // cleanup deterministic because there is only one pool lifecycle to shut down.
-        let pool = connect_private_pool(&db_path, DEFAULT_MAX_CONNECTIONS).await?;
+        let pool = SqlitePoolOptions::new()
+            .max_connections(DEFAULT_MAX_CONNECTIONS)
+            .connect_with(file_backed_connect_options(&db_path))
+            .await?;
 
         Ok(Self { pool, db_path })
     }
@@ -379,15 +402,19 @@ mod tests {
             .await
             .expect("temp pool should open");
 
-        let _pool_one = connect_pool(temp_pool.db_path(), 1)
+        let _pool_one = connect_shared_pool(temp_pool.db_path(), 1)
             .await
             .expect("shared pool with max=1 should open");
-        let _pool_two = connect_pool(temp_pool.db_path(), 2)
+        let _pool_two = connect_shared_pool(temp_pool.db_path(), 2)
             .await
             .expect("shared pool with max=2 should open");
 
         let snapshots = shared_pool_snapshots_for_paths(&[temp_pool.db_path().to_path_buf()]);
-        assert_eq!(snapshots.len(), 2, "each shared sqlx pool topology should be reported separately");
+        assert_eq!(
+            snapshots.len(),
+            2,
+            "each shared sqlx pool topology should be reported separately"
+        );
 
         let snapshot_one = snapshots
             .iter()

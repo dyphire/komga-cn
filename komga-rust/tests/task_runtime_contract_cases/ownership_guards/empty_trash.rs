@@ -21,7 +21,7 @@ async fn runtime_empty_trash_uses_kotlin_like_natural_name_sort_for_remaining_se
     let paths = new_router_fixture("runtime-empty-trash-natural-name-sort").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for empty-trash natural-sort fixture setup");
 
@@ -91,7 +91,7 @@ async fn runtime_empty_trash_uses_kotlin_like_natural_name_sort_for_remaining_se
 
     run_empty_trash(&paths).await;
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for empty-trash natural-sort verification");
     let remaining = sqlx::query(
@@ -133,7 +133,7 @@ async fn runtime_empty_trash_deletes_series_level_dependents_before_removing_emp
     let paths = new_router_fixture("runtime-empty-trash-deletes-series-dependents").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for empty-trash series dependency fixture setup");
     sqlx::query("INSERT INTO BOOK_METADATA_AGGREGATION_TAG (SERIES_ID, TAG) VALUES (?, ?)")
@@ -167,7 +167,7 @@ async fn runtime_empty_trash_deletes_series_level_dependents_before_removing_emp
 
     run_empty_trash(&paths).await;
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for empty-trash series dependency verification");
     let series_rows = sqlx::query("SELECT COUNT(*) AS COUNT FROM SERIES WHERE ID = ?")
@@ -191,7 +191,7 @@ async fn runtime_empty_trash_keeps_active_series_even_when_its_last_trashed_book
     let paths = new_router_fixture("runtime-empty-trash-keeps-active-empty-series").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for active-series empty-trash fixture setup");
     sqlx::query("UPDATE SERIES SET BOOK_COUNT = ?, DELETED_DATE = NULL WHERE ID = ?")
@@ -209,7 +209,7 @@ async fn runtime_empty_trash_keeps_active_series_even_when_its_last_trashed_book
 
     run_empty_trash(&paths).await;
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for active-series empty-trash verification");
     let series = sqlx::query(
@@ -261,7 +261,7 @@ async fn runtime_empty_trash_cleans_up_empty_sets_with_thumbnails_in_kotlin_orde
     let paths = new_router_fixture("runtime-empty-trash-cleans-empty-sets-with-thumbnails").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for empty-set thumbnail cleanup fixture setup");
     sqlx::query("DELETE FROM COLLECTION_SERIES WHERE COLLECTION_ID = ?")
@@ -312,7 +312,7 @@ async fn runtime_empty_trash_cleans_up_empty_sets_with_thumbnails_in_kotlin_orde
 
     run_empty_trash(&paths).await;
 
-    let verify_pool = connect_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for empty-set thumbnail cleanup verification");
     let collection_rows = sqlx::query("SELECT COUNT(*) AS COUNT FROM COLLECTION WHERE ID = ?")

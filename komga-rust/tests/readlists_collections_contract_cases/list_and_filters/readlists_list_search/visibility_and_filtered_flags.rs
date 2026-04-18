@@ -14,7 +14,7 @@ async fn router_readlists_default_name_order_and_filtered_flags_match_kotlin() {
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for readlists default-order seed");
     sqlx::query("UPDATE READLIST SET NAME = ?, BOOK_COUNT = ? WHERE ID = ?")
@@ -115,7 +115,7 @@ async fn router_readlists_apply_content_restrictions_and_filtered_flags_like_kot
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for readlists content-restriction seed");
     sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT) VALUES (?, ?, ?)")
@@ -191,7 +191,7 @@ async fn router_readlists_library_filter_and_content_restriction_exclude_nonmatc
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for readlists library-filter restriction seed");
     sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT) VALUES (?, ?, ?)")

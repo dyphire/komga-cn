@@ -31,7 +31,7 @@ async fn load_import_task_rows(
     sql: &str,
     context: &str,
 ) -> Vec<sqlx::sqlite::SqliteRow> {
-    let tasks_pool = connect_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect(context);
     let rows = sqlx::query(sql)
@@ -169,7 +169,9 @@ async fn router_books_import_enqueues_individual_tasks_in_tasks_db() {
                 .to_string();
             (row, payload, source_file)
         })
-        .filter(|(_, payload, _)| payload.get("copyMode").and_then(Value::as_str) == Some("HARDLINK"))
+        .filter(|(_, payload, _)| {
+            payload.get("copyMode").and_then(Value::as_str) == Some("HARDLINK")
+        })
         .collect::<Vec<_>>();
     assert_eq!(parsed_rows.len(), 2);
     parsed_rows.sort_by(|(_, _, left_source), (_, _, right_source)| left_source.cmp(right_source));
@@ -300,13 +302,22 @@ async fn router_books_import_reuses_kotlin_style_unique_id_for_duplicate_series_
 
     let payload = serde_json::from_str::<Value>(&rows[0].get::<String, _>("PAYLOAD"))
         .expect("deterministic import payload should be valid JSON");
-    assert_eq!(payload.get("uniqueId").and_then(Value::as_str), Some(expected_id.as_str()));
-    assert_eq!(payload.get("copyMode").and_then(Value::as_str), Some("HARDLINK"));
+    assert_eq!(
+        payload.get("uniqueId").and_then(Value::as_str),
+        Some(expected_id.as_str())
+    );
+    assert_eq!(
+        payload.get("copyMode").and_then(Value::as_str),
+        Some("HARDLINK")
+    );
     assert_eq!(
         payload.get("destinationName").and_then(Value::as_str),
         Some("dedup-destination")
     );
-    assert_eq!(payload.get("upgradeBookId").and_then(Value::as_str), Some("book-1"));
+    assert_eq!(
+        payload.get("upgradeBookId").and_then(Value::as_str),
+        Some("book-1")
+    );
 
     cleanup_router_fixture(paths);
 }

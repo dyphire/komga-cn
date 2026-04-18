@@ -19,7 +19,7 @@ pub(super) fn rebuild_index_from_database_for_entities(
     let database_file = database_file.to_path_buf();
     let index_dir = index_dir.to_path_buf();
     let entity_types = entity_types.map(|entities| entities.to_vec());
-    db::run_database_query_with_max_connections(database_file, 2, move |pool| {
+    db::run_task_database_query_with_max_connections(database_file, 2, move |pool| {
         let index_dir = index_dir.clone();
         let entity_types = entity_types.clone();
         Box::pin(async move {

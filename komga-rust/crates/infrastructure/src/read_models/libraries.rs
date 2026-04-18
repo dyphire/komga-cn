@@ -3,7 +3,7 @@ use std::path::Path;
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 
 use super::queries;
-use crate::sqlite::connect_pool;
+use crate::sqlite::connect_read_pool;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PersistedLibraryReadModel {
@@ -47,7 +47,7 @@ pub async fn list_persisted_libraries(
         return Ok(vec![]);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(map_sqlx_error)?;
     queries::libraries::list_persisted_libraries_sqlx(pool, context).await
@@ -62,7 +62,7 @@ pub async fn get_persisted_library(
         return Ok(None);
     }
 
-    let pool = connect_pool(database_file, 1)
+    let pool = connect_read_pool(database_file)
         .await
         .map_err(map_sqlx_error)?;
     queries::libraries::get_persisted_library_sqlx(pool, context, library_id).await

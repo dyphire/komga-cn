@@ -68,7 +68,7 @@ async fn scanner_scan_output_is_persisted_into_kotlin_compatible_library_series_
         "scanner contract requires series/book sidecars to persist in SIDECAR with Kotlin-compatible shape",
     );
 
-    let pool = connect_pool(fixture.paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for sidecar shape verification");
     let persisted_sidecars =
@@ -327,7 +327,7 @@ async fn scanner_runtime_assigns_kotlin_like_natural_book_numbers_for_unmanaged_
     process_scan_library_task(fixture.config.clone(), "library-1", 900, false)
         .expect("natural-numbering contract should persist scanned rows");
 
-    let pool = connect_pool(fixture.paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for natural-numbering verification");
     let rows = sqlx::query(

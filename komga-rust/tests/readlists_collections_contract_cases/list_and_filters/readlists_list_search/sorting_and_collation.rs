@@ -5,7 +5,7 @@ async fn router_readlists_explicit_created_date_sort_matches_kotlin() {
     let paths = new_router_fixture("router-readlists-created-date-sort").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for readlists created-date sort seed");
     sqlx::query(
@@ -91,7 +91,7 @@ async fn router_readlists_explicit_last_modified_date_sort_matches_kotlin() {
     let paths = new_router_fixture("router-readlists-last-modified-date-sort").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for readlists last-modified sort seed");
     sqlx::query(
@@ -177,7 +177,7 @@ async fn router_readlists_default_name_order_uses_unicode_collation_like_kotlin(
     let paths = new_router_fixture("router-readlists-default-unicode-order").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for readlists unicode-order seed");
     sqlx::query("UPDATE READLIST SET NAME = ? WHERE ID = ?")
@@ -250,7 +250,7 @@ async fn router_readlists_explicit_name_sort_uses_unicode_collation_like_kotlin(
     let paths = new_router_fixture("router-readlists-explicit-name-unicode-order").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for readlists explicit unicode-order seed");
     sqlx::query("UPDATE READLIST SET NAME = ? WHERE ID = ?")

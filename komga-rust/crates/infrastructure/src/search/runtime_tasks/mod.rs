@@ -100,7 +100,7 @@ pub fn analyze_book_input(
 ) -> Result<Option<BookAnalysisInput>, String> {
     let database_file = database_file.to_path_buf();
     let book_id = book_id.to_string();
-    db::run_database_query(database_file, move |pool| {
+    db::run_task_database_query(database_file, move |pool| {
         let book_id = book_id.clone();
         Box::pin(async move {
             let row = sqlx::query(
@@ -151,7 +151,7 @@ pub fn persist_book_analysis(
     let index_dir = index_dir.to_path_buf();
     let book_id = book_id.to_string();
     let analysis = analysis.clone();
-    let document = db::run_database_query(database_file, move |pool| {
+    let document = db::run_task_database_query(database_file, move |pool| {
         let book_id = book_id.clone();
         let analysis = analysis.clone();
         Box::pin(async move {
@@ -261,25 +261,26 @@ pub fn sync_entity_upsert_from_database(
     let database_file_for_sync = database_file.clone();
     let index_dir = index_dir.to_path_buf();
     let entity_id = entity_id.to_string();
-    let document = db::run_database_query_with_max_connections(database_file, 2, move |pool| {
-        let entity_id = entity_id.clone();
-        Box::pin(async move {
-            Ok(match entity_type {
-                SearchEntityType::Book => {
-                    loaders::load_book_search_document(pool.clone(), &entity_id).await?
-                }
-                SearchEntityType::Series => {
-                    loaders::load_series_search_document(pool.clone(), &entity_id).await?
-                }
-                SearchEntityType::Collection => {
-                    loaders::load_collection_search_document(pool.clone(), &entity_id).await?
-                }
-                SearchEntityType::ReadList => {
-                    loaders::load_readlist_search_document(pool.clone(), &entity_id).await?
-                }
+    let document =
+        db::run_task_database_query_with_max_connections(database_file, 2, move |pool| {
+            let entity_id = entity_id.clone();
+            Box::pin(async move {
+                Ok(match entity_type {
+                    SearchEntityType::Book => {
+                        loaders::load_book_search_document(pool.clone(), &entity_id).await?
+                    }
+                    SearchEntityType::Series => {
+                        loaders::load_series_search_document(pool.clone(), &entity_id).await?
+                    }
+                    SearchEntityType::Collection => {
+                        loaders::load_collection_search_document(pool.clone(), &entity_id).await?
+                    }
+                    SearchEntityType::ReadList => {
+                        loaders::load_readlist_search_document(pool.clone(), &entity_id).await?
+                    }
+                })
             })
-        })
-    })?;
+        })?;
 
     let Some(document) = document else {
         return Ok(false);
@@ -306,7 +307,7 @@ pub fn sync_series_and_oneshot_books_after_metadata_update(
     let index_dir = index_dir.to_path_buf();
     let series_id = series_id.to_string();
     let (series_document, oneshot_documents) =
-        db::run_database_query_with_max_connections(database_file, 2, move |pool| {
+        db::run_task_database_query_with_max_connections(database_file, 2, move |pool| {
             let series_id = series_id.clone();
             Box::pin(async move {
                 let series_document =

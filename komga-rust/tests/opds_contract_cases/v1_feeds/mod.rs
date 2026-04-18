@@ -67,7 +67,7 @@ async fn router_opds_v1_readlists_filters_out_of_scope_entries_sorts_by_name_and
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 readlists db should open");
     sqlx::query(
@@ -164,7 +164,7 @@ async fn router_opds_v1_collections_filters_out_of_scope_entries_sorts_by_name_a
     )
     .await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 collections db should open");
     sqlx::query(
@@ -277,7 +277,7 @@ async fn router_opds_v1_collections_keeps_empty_collection_for_all_library_user(
     let paths = new_router_fixture("router-opds-v1-collections-empty-visible").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 collections empty-visible db should open");
     sqlx::query(
@@ -324,7 +324,7 @@ async fn router_opds_v1_collections_formats_sqlite_naive_updated_like_kotlin() {
     let paths = new_router_fixture("router-opds-v1-collections-naive-updated").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 collections naive-updated db should open");
     sqlx::query(
@@ -386,7 +386,7 @@ async fn router_opds_v1_collections_preserves_unicode_collation_order() {
     let paths = new_router_fixture("router-opds-v1-collections-unicode-order").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 collections unicode-order db should open");
     sqlx::query("UPDATE COLLECTION SET NAME = ? WHERE ID = ?")
@@ -484,7 +484,7 @@ async fn router_opds_v1_collections_preserves_kotlin_tertiary_case_order() {
         ("collection-b", names[0].clone()),
     ];
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("opds v1 collections tertiary-case-order db should open");
     sqlx::query("UPDATE COLLECTION SET NAME = ? WHERE ID = ?")

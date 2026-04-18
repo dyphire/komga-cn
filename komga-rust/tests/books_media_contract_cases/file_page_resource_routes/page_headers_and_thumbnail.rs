@@ -23,7 +23,7 @@ async fn seed_router_persisted_two_page_cbz_book(
     let first_page = solid_png_bytes([255, 0, 0]);
     let second_page = solid_png_bytes([0, 255, 0]);
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("persisted cbz book seed db should open");
 
@@ -117,7 +117,7 @@ async fn rewrite_router_book_to_legacy_file_urls(
     book_id: &str,
     file_name: &str,
 ) {
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("legacy file url rewrite db should open");
 

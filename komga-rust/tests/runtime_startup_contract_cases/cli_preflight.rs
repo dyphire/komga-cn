@@ -47,7 +47,7 @@ fn prepare_action_fixture_with_users(config_dir: &Path, users: &[(&str, &str)]) 
         let database_file = config_dir.join("database.sqlite");
         let tasks_db_file = config_dir.join("tasks.sqlite");
 
-        let main_pool = komga_infrastructure::sqlite::connect_pool(&database_file, 1)
+        let main_pool = komga_infrastructure::sqlite::connect_test_pool(&database_file, 1)
             .await
             .expect("CLI action main pool should open");
         komga_infrastructure::sqlite::setup::bootstrap_pool(&main_pool)
@@ -55,7 +55,7 @@ fn prepare_action_fixture_with_users(config_dir: &Path, users: &[(&str, &str)]) 
             .expect("CLI action main schema should bootstrap");
         main_pool.close().await;
 
-        let tasks_pool = komga_infrastructure::sqlite::connect_pool(&tasks_db_file, 1)
+        let tasks_pool = komga_infrastructure::sqlite::connect_test_pool(&tasks_db_file, 1)
             .await
             .expect("CLI action tasks pool should open");
         komga_infrastructure::sqlite::setup::bootstrap_tasks_pool(&tasks_pool)
@@ -88,7 +88,7 @@ fn prepare_action_fixture_with_users(config_dir: &Path, users: &[(&str, &str)]) 
 fn load_password_hash(config_dir: &Path, email: &str) -> String {
     run_async(async {
         let database_file = config_dir.join("database.sqlite");
-        let pool = komga_infrastructure::sqlite::connect_pool(&database_file, 1)
+        let pool = komga_infrastructure::sqlite::connect_test_pool(&database_file, 1)
             .await
             .expect("password verification pool should open");
         let password = sqlx::query("SELECT PASSWORD FROM USER WHERE EMAIL = ? LIMIT 1")

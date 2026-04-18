@@ -5,7 +5,7 @@ async fn runtime_aggregate_series_metadata_refreshes_series_books_metadata_surfa
     let paths = new_router_fixture("runtime-aggregate-series-books-metadata-surfaces").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for series booksMetadata aggregation fixture");
     sqlx::query("UPDATE BOOK_METADATA SET SUMMARY = ?, RELEASE_DATE = ? WHERE BOOK_ID = ?")
@@ -154,7 +154,7 @@ async fn runtime_aggregate_series_metadata_preserves_series_metadata_title_and_s
     let paths = new_router_fixture("runtime-aggregate-series-preserves-metadata-title").await;
     seed_router_contract_data(&paths).await;
 
-    let pool = connect_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for metadata title aggregation fixture");
     sqlx::query("UPDATE SERIES SET NAME = ? WHERE ID = ?")
