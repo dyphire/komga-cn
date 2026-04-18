@@ -9,7 +9,7 @@ pub(crate) struct BuildMetadata {
 
 pub(crate) fn current_build_metadata() -> BuildMetadata {
     BuildMetadata {
-        version: env!("CARGO_PKG_VERSION").to_string(),
+        version: env!("VERSION").to_string(),
         build_time: env!("BUILD_TIME").to_string(),
         git_branch: option_env!("GIT_BRANCH")
             .filter(|value| !value.is_empty())

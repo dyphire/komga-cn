@@ -1,0 +1,12 @@
+[package]
+name = "komga-build-support"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+flate2.workspace = true
+reqwest.workspace = true
+rusqlite = { workspace = true, features = ["bundled"] }
+serde_json.workspace = true
+tar.workspace = true
+time.workspace = true

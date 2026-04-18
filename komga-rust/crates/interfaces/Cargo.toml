@@ -48,3 +48,6 @@ windows-sys.workspace = true
 
 [dev-dependencies]
 sqlx.workspace = true
+
+[build-dependencies]
+komga-build-support = { path = "../build-support" }

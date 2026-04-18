@@ -1,3 +1,6 @@
+[build.env]
+passthrough = ["VERSION_NEXT"]
+
 [target.x86_64-unknown-linux-gnu]
 image = ":edge"
 # Reference: https://github.com/cross-rs/cross/issues/1725

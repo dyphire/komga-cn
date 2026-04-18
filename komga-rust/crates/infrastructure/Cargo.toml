@@ -33,8 +33,4 @@ unicode-normalization.workspace = true
 zip.workspace = true
 
 [build-dependencies]
-flate2.workspace = true
-reqwest.workspace = true
-rusqlite = { workspace = true, features = ["bundled"] }
-serde_json.workspace = true
-tar.workspace = true
+komga-build-support = { path = "../build-support" }

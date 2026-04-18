@@ -120,6 +120,7 @@ jobs:
             docker_runtime: true
     env:
       VERSION: ${{ needs.version.outputs.version_next }}
+      VERSION_NEXT: ${{ needs.version.outputs.version_next }}
       CROSS_CONFIG: komga-rust/Cross.toml
     steps:
       - name: Remove unnecessary files

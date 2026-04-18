@@ -2430,6 +2430,18 @@ name = "komga-benchmark-wpd3"
 version = "0.1.0"
 
 [[package]]
+name = "komga-build-support"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "reqwest 0.13.2",
+ "rusqlite",
+ "serde_json",
+ "tar",
+ "time",
+]
+
+[[package]]
 name = "komga-config"
 version = "0.1.0"
 dependencies = [
@@ -2465,6 +2477,7 @@ dependencies = [
  "icu",
  "image",
  "komga-application",
+ "komga-build-support",
  "komga-domain",
  "komga-kepubify",
  "language-tags",
@@ -2479,7 +2492,6 @@ dependencies = [
  "sha2 0.11.0",
  "sqlx",
  "tantivy",
- "tar",
  "tokio",
  "tracing",
  "unicode-normalization",
@@ -2501,6 +2513,7 @@ dependencies = [
  "icu",
  "image",
  "komga-application",
+ "komga-build-support",
  "komga-domain",
  "komga-kepubify",
  "language-tags",
@@ -2586,6 +2599,7 @@ dependencies = [
  "futures-util",
  "image",
  "komga-application",
+ "komga-build-support",
  "komga-config",
  "komga-domain",
  "komga-infrastructure",

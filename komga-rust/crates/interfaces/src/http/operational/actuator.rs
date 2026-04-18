@@ -378,7 +378,7 @@ fn os_info_json() -> Value {
 }
 
 fn product_version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
+    env!("VERSION").to_string()
 }
 
 fn normalized_os_name(os: &str) -> String {

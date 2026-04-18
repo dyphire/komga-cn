@@ -36,7 +36,7 @@ komga-interfaces = { path = "../interfaces" }
 komga-kepubify = { path = "../kepubify" }
 
 [build-dependencies]
-time.workspace = true
+komga-build-support = { path = "../build-support" }
 
 [dev-dependencies]
 komga-interfaces = { path = "../interfaces", features = ["allow-missing-webui-dist"] }
