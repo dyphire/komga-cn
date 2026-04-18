@@ -984,6 +984,7 @@ async fn router_actuator_health_aggregates_down_when_database_file_is_missing() 
 
     let app = build_router_with_config(&runtime_config_for_paths(&paths));
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    close_router_fixture_shared_pools(&paths).await;
     std::fs::remove_file(&paths.main_db).expect("main db should be removable for health down test");
 
     let response = app

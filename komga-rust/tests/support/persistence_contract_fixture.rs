@@ -55,10 +55,14 @@ pub fn cleanup(paths: RuntimeDbPaths) {
     cleanup_files(&paths);
 }
 
-pub async fn cleanup_async(paths: RuntimeDbPaths) {
+pub async fn close_shared_pools(paths: &RuntimeDbPaths) {
     for pool in evict_shared_pools_for_paths(&[paths.main_db.clone(), paths.tasks_db.clone()]) {
         pool.close().await;
     }
+}
+
+pub async fn cleanup_async(paths: RuntimeDbPaths) {
+    close_shared_pools(&paths).await;
     cleanup_files(&paths);
 }
 

@@ -10,6 +10,10 @@ pub fn cleanup_router_fixture(paths: RuntimeDbPaths) {
     persistence_contract_fixture::cleanup(paths)
 }
 
+pub async fn close_router_fixture_shared_pools(paths: &RuntimeDbPaths) {
+    persistence_contract_fixture::close_shared_pools(paths).await;
+}
+
 pub async fn new_router_fixture(case_id: &str) -> RuntimeDbPaths {
     let paths = persistence_contract_fixture::new_runtime_db_paths(case_id)
         .expect("router contract fixture paths should be created");
