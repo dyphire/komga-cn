@@ -1,23 +1,16 @@
+use axum::Router;
 use axum::middleware;
 use axum::routing::{delete, get, patch, post, put};
-use axum::Router;
 use tower_http::trace::TraceLayer;
 
 use crate::http::access_log;
 use crate::http::cache;
-use crate::http::discovery_auth::state::DiscoveryAuthState;
 use crate::http::{discovery, identity_access, library_catalog, media_assets, opds, operational};
 
 use crate::http::identity_access::device_auth;
-use crate::http::state::{AuthDatabaseState, OperationalState, ReadProgressState, RuntimeProfile};
+use crate::http::state::HttpAppState;
 
-pub fn build_router(
-    profile: RuntimeProfile,
-    read_progress: ReadProgressState,
-    discovery_auth: DiscoveryAuthState,
-    auth_db: AuthDatabaseState,
-    operational: OperationalState,
-) -> Router {
+pub fn build_router(app: HttpAppState) -> Router {
     let router = Router::new()
         .route(
             "/api/v1/settings",
@@ -700,19 +693,13 @@ pub fn build_router(
     ));
 
     #[allow(clippy::let_and_return)]
-    router
-        .layer(axum::extract::Extension(read_progress))
-        .layer(axum::extract::Extension(auth_db))
-        .layer(axum::extract::Extension(discovery_auth))
-        .layer(axum::extract::Extension(operational))
-        .layer(axum::extract::Extension(profile))
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(access_log::make_request_span)
-                .on_request(access_log::on_request)
-                .on_response(access_log::on_response)
-                .on_failure(access_log::on_failure),
-        )
+    router.layer(axum::extract::Extension(app)).layer(
+        TraceLayer::new_for_http()
+            .make_span_with(access_log::make_request_span)
+            .on_request(access_log::on_request)
+            .on_response(access_log::on_response)
+            .on_failure(access_log::on_failure),
+    )
 }
 
 fn should_expose_actuator_default_contract() -> bool {

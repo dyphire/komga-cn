@@ -1,8 +1,8 @@
 use super::*;
 use komga_application::runtime_sse::register_runtime_sse_event;
 
-use crate::discovery_detail_access::readlists as readlists_access;
 use crate::http::helpers::normalized_date_time;
+use crate::http::state::HttpAppState;
 use quick_xml::Reader as XmlReader;
 use quick_xml::events::Event as XmlEvent;
 
@@ -61,16 +61,19 @@ pub struct ComicRackRequestMatchGroup {
 pub type PersistedVisibleReadlistBook = BookDetailReadModel;
 
 pub(super) async fn load_persisted_readlists(
-    database_file: &FsPath,
+    app: &HttpAppState,
     library_ids: Option<&[String]>,
 ) -> Result<Vec<ReadListReadModel>, String> {
-    let rows = readlists_access::load_persisted_readlists(database_file).await?;
+    let rows = app
+        .services
+        .discovery_detail
+        .load_persisted_readlists(app.auth_db.database_file.clone())
+        .await?;
 
     let mut readlists = Vec::with_capacity(rows.len());
     for row in rows {
         let id = row.id;
-        let (book_ids, filtered) =
-            load_persisted_readlist_book_ids(database_file, &id, library_ids).await?;
+        let (book_ids, filtered) = load_persisted_readlist_book_ids(app, &id, library_ids).await?;
         if library_ids.is_some() && book_ids.is_empty() {
             continue;
         }
@@ -91,31 +94,40 @@ pub(super) async fn load_persisted_readlists(
 }
 
 pub async fn load_comicrack_match_candidates(
-    database_file: &FsPath,
+    app: &HttpAppState,
 ) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String> {
-    readlists_access::load_comicrack_match_candidates(database_file).await
+    app.services
+        .discovery_detail
+        .load_comicrack_match_candidates(app.auth_db.database_file.clone())
+        .await
 }
 
 pub async fn load_persisted_book_authors(
-    database_file: &FsPath,
+    app: &HttpAppState,
     book_id: &str,
 ) -> Result<Vec<PersistedBookAuthorRecord>, String> {
-    readlists_access::load_persisted_book_authors(database_file, book_id).await
+    app.services
+        .discovery_detail
+        .load_persisted_book_authors(app.auth_db.database_file.clone(), book_id.to_string())
+        .await
 }
 
 pub(super) async fn load_persisted_readlist_detail(
-    database_file: &FsPath,
+    app: &HttpAppState,
     readlist_id: &str,
     library_ids: Option<&[String]>,
 ) -> Result<Option<ReadListReadModel>, String> {
-    let Some(row) =
-        readlists_access::load_persisted_readlist_detail(database_file, readlist_id).await?
+    let Some(row) = app
+        .services
+        .discovery_detail
+        .load_persisted_readlist_detail(app.auth_db.database_file.clone(), readlist_id.to_string())
+        .await?
     else {
         return Ok(None);
     };
 
     let (book_ids, filtered) =
-        load_persisted_readlist_book_ids(database_file, readlist_id, library_ids).await?;
+        load_persisted_readlist_book_ids(app, readlist_id, library_ids).await?;
 
     let readlist = ReadListReadModel {
         id: row.id,
@@ -132,12 +144,18 @@ pub(super) async fn load_persisted_readlist_detail(
 }
 
 async fn load_persisted_readlist_book_ids(
-    database_file: &FsPath,
+    app: &HttpAppState,
     readlist_id: &str,
     library_ids: Option<&[String]>,
 ) -> Result<(Vec<String>, bool), String> {
-    let rows =
-        readlists_access::load_persisted_readlist_book_rows(database_file, readlist_id).await?;
+    let rows = app
+        .services
+        .discovery_detail
+        .load_persisted_readlist_book_rows(
+            app.auth_db.database_file.clone(),
+            readlist_id.to_string(),
+        )
+        .await?;
 
     let total_count = rows.len();
     let book_ids = rows
@@ -191,19 +209,21 @@ pub fn merge_readlist_write_input(
 }
 
 pub async fn persist_readlist_create(
-    database_file: &FsPath,
+    app: &HttpAppState,
     input: &PersistedReadlistWriteInput,
 ) -> Result<String, String> {
     let readlist_id = generated_readlist_id();
-    readlists_access::persist_readlist_create(
-        database_file,
-        &readlist_id,
-        &input.name,
-        &input.summary,
-        input.ordered,
-        &input.book_ids,
-    )
-    .await?;
+    app.services
+        .discovery_detail
+        .persist_readlist_create(
+            app.auth_db.database_file.clone(),
+            readlist_id.clone(),
+            input.name.clone(),
+            input.summary.clone(),
+            input.ordered,
+            input.book_ids.clone(),
+        )
+        .await?;
 
     register_runtime_sse_event(
         "ReadListAdded",
@@ -219,19 +239,22 @@ pub async fn persist_readlist_create(
 }
 
 pub async fn persist_readlist_update(
-    database_file: &FsPath,
+    app: &HttpAppState,
     readlist_id: &str,
     input: &PersistedReadlistWriteInput,
 ) -> Result<bool, String> {
-    let updated = readlists_access::persist_readlist_update(
-        database_file,
-        readlist_id,
-        &input.name,
-        &input.summary,
-        input.ordered,
-        &input.book_ids,
-    )
-    .await?;
+    let updated = app
+        .services
+        .discovery_detail
+        .persist_readlist_update(
+            app.auth_db.database_file.clone(),
+            readlist_id.to_string(),
+            input.name.clone(),
+            input.summary.clone(),
+            input.ordered,
+            input.book_ids.clone(),
+        )
+        .await?;
     if updated {
         register_runtime_sse_event(
             "ReadListChanged",
@@ -247,11 +270,15 @@ pub async fn persist_readlist_update(
 }
 
 pub async fn delete_persisted_readlist(
-    database_file: &FsPath,
+    app: &HttpAppState,
     readlist_id: &str,
 ) -> Result<bool, String> {
-    let existing = load_persisted_readlist_detail(database_file, readlist_id, None).await?;
-    let deleted = readlists_access::delete_persisted_readlist(database_file, readlist_id).await?;
+    let existing = load_persisted_readlist_detail(app, readlist_id, None).await?;
+    let deleted = app
+        .services
+        .discovery_detail
+        .delete_persisted_readlist(app.auth_db.database_file.clone(), readlist_id.to_string())
+        .await?;
     if deleted && let Some(readlist) = existing {
         register_runtime_sse_event(
             "ReadListDeleted",
@@ -267,18 +294,30 @@ pub async fn delete_persisted_readlist(
 }
 
 pub async fn upsert_readlist_search_document(
-    database_file: &FsPath,
-    index_dir: &FsPath,
+    app: &HttpAppState,
     readlist_id: &str,
 ) -> Result<bool, String> {
-    readlists_access::upsert_readlist_search_document(database_file, index_dir, readlist_id).await
+    app.services
+        .discovery_detail
+        .upsert_readlist_search_document(
+            app.auth_db.database_file.clone(),
+            app.operational.runtime.lucene_data_directory.clone(),
+            readlist_id.to_string(),
+        )
+        .await
 }
 
 pub async fn delete_readlist_search_document(
-    index_dir: &FsPath,
+    app: &HttpAppState,
     readlist_id: &str,
 ) -> Result<(), String> {
-    readlists_access::delete_readlist_search_document(index_dir, readlist_id).await
+    app.services
+        .discovery_detail
+        .delete_readlist_search_document(
+            app.operational.runtime.lucene_data_directory.clone(),
+            readlist_id.to_string(),
+        )
+        .await
 }
 
 fn generated_readlist_id() -> String {
@@ -407,10 +446,10 @@ pub fn comicrack_payload(name: &str, error_code: &str, requests: Vec<Value>) -> 
 }
 
 pub async fn match_comicrack_readlist(
-    database_file: &FsPath,
+    app: &HttpAppState,
     request: &ComicRackReadListRequest,
 ) -> Result<Value, String> {
-    let readlists = load_persisted_readlists(database_file, None).await?;
+    let readlists = load_persisted_readlists(app, None).await?;
     let duplicate_error_code = if readlists
         .iter()
         .any(|readlist| readlist.name.eq_ignore_ascii_case(&request.name))
@@ -420,7 +459,7 @@ pub async fn match_comicrack_readlist(
         ""
     };
 
-    let candidates = load_comicrack_match_candidates(database_file).await?;
+    let candidates = load_comicrack_match_candidates(app).await?;
     let requests = request
         .books
         .iter()
@@ -532,12 +571,13 @@ fn decoded_query_values(query: &str, key: &str) -> Vec<String> {
 }
 
 pub(super) async fn load_visible_persisted_readlist_books(
-    database_file: &FsPath,
-    auth_state: &DiscoveryAuthState,
+    app: &HttpAppState,
     headers: &HeaderMap,
     readlist_id: &str,
     query: &PersistedReadlistBooksQuery,
 ) -> Result<Option<Vec<PersistedVisibleReadlistBook>>, String> {
+    let database_file = app.auth_db.database_file.as_path();
+    let auth_state = &app.discovery_auth;
     let Some(context) = auth_state
         .resolve_query_context_with_persistence(headers, None, database_file)
         .await
@@ -545,12 +585,9 @@ pub(super) async fn load_visible_persisted_readlist_books(
         return Ok(None);
     };
 
-    let Some(readlist) = load_persisted_readlist_detail(
-        database_file,
-        readlist_id,
-        context.authorized_library_ids.as_deref(),
-    )
-    .await?
+    let Some(readlist) =
+        load_persisted_readlist_detail(app, readlist_id, context.authorized_library_ids.as_deref())
+            .await?
     else {
         return Ok(None);
     };
@@ -558,8 +595,14 @@ pub(super) async fn load_visible_persisted_readlist_books(
         return Ok(None);
     }
 
-    let rows =
-        readlists_access::load_persisted_readlist_book_rows(database_file, readlist_id).await?;
+    let rows = app
+        .services
+        .discovery_detail
+        .load_persisted_readlist_book_rows(
+            app.auth_db.database_file.clone(),
+            readlist_id.to_string(),
+        )
+        .await?;
     let mut visible = Vec::new();
 
     for row in rows {
@@ -578,8 +621,7 @@ pub(super) async fn load_visible_persisted_readlist_books(
             continue;
         }
 
-        let Some(resource) = load_persisted_book_resource(database_file, &row.book_id).await?
-        else {
+        let Some(resource) = load_persisted_book_resource(app, &row.book_id).await? else {
             continue;
         };
         let detail_context = DetailResourceContext {
@@ -596,17 +638,14 @@ pub(super) async fn load_visible_persisted_readlist_books(
             Ok(context) => context,
             Err(_) => continue,
         };
-        let Some(detail) = load_persisted_book_detail(
-            database_file,
-            &row.book_id,
-            detail_query_context.user_id.as_deref(),
-        )
-        .await?
+        let Some(detail) =
+            load_persisted_book_detail(app, &row.book_id, detail_query_context.user_id.as_deref())
+                .await?
         else {
             continue;
         };
 
-        let book_authors = load_persisted_book_authors(database_file, &row.book_id).await?;
+        let book_authors = load_persisted_book_authors(app, &row.book_id).await?;
 
         if !matches_persisted_readlist_book_filters(&detail, &book_authors, query) {
             continue;

@@ -1,4 +1,5 @@
 mod discovery_detail_access;
+pub mod discovery_persisted_access;
 pub mod http;
 pub mod media_assets_runtime_access;
 pub mod opds_catalog_access;

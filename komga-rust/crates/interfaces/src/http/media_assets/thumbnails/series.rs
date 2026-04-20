@@ -5,10 +5,11 @@ use super::shared::{
 use super::*;
 
 pub async fn series_thumbnail(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
+    let auth_db = &app.auth_db;
     if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
@@ -18,25 +19,22 @@ pub async fn series_thumbnail(
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    let resolved_series_id =
-        resolve_series_id_for_persisted(auth_db.database_file.as_path(), &series_id).await;
+    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
 
-    if !persisted_series_exists(auth_db.database_file.as_path(), &resolved_series_id)
+    if !persisted_series_exists_from_services(&app, &resolved_series_id)
         .await
         .unwrap_or(false)
     {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    match user_can_access_series_media(auth_db.database_file.as_path(), &resolved_series_id, &user)
-        .await
-    {
+    match user_can_access_series_media(&app, &resolved_series_id, &user).await {
         Ok(true) => {}
         Ok(false) => return StatusCode::FORBIDDEN.into_response(),
         Err(error) => return internal_error_response(error),
     }
 
-    match load_series_thumbnail(auth_db.database_file.as_path(), &resolved_series_id).await {
+    match load_series_thumbnail(&app, &resolved_series_id).await {
         Ok(Some(thumbnail)) => {
             return response_from_thumbnail_bytes(
                 &headers,
@@ -52,38 +50,36 @@ pub async fn series_thumbnail(
 }
 
 pub async fn series_thumbnails(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+    let Some(user) =
+        resolved_request_auth_user(&headers, app.auth_db.database_file.as_path()).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    let resolved_series_id =
-        resolve_series_id_for_persisted(auth_db.database_file.as_path(), &series_id).await;
-    if !persisted_series_exists(auth_db.database_file.as_path(), &resolved_series_id)
+    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
+    if !persisted_series_exists_from_services(&app, &resolved_series_id)
         .await
         .unwrap_or(false)
     {
         return StatusCode::NOT_FOUND.into_response();
     }
-    match user_can_access_series_media(auth_db.database_file.as_path(), &resolved_series_id, &user)
-        .await
-    {
+    match user_can_access_series_media(&app, &resolved_series_id, &user).await {
         Ok(true) => {}
         Ok(false) => return StatusCode::FORBIDDEN.into_response(),
         Err(error) => return internal_error_response(error),
     }
 
-    match load_persisted_series_thumbnails(auth_db.database_file.as_path(), &resolved_series_id)
-        .await
-    {
+    match load_persisted_series_thumbnails_from_services(&app, &resolved_series_id).await {
         Ok(rows) => Json(
             rows.into_iter()
                 .map(|row| {
@@ -106,46 +102,42 @@ pub async fn series_thumbnails(
 }
 
 pub async fn series_thumbnail_by_id(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path((series_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+    let Some(user) =
+        resolved_request_auth_user(&headers, app.auth_db.database_file.as_path()).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    let resolved_series_id =
-        resolve_series_id_for_persisted(auth_db.database_file.as_path(), &series_id).await;
+    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
     let unrestricted_all_libraries = user_shared_all_libraries(&user)
         && principal_from_user_payload(&user_payload_json(&user))
             .is_none_or(|principal| !principal.restrictions.is_restricted());
     if !unrestricted_all_libraries {
-        if !persisted_series_exists(auth_db.database_file.as_path(), &resolved_series_id)
+        if !persisted_series_exists_from_services(&app, &resolved_series_id)
             .await
             .unwrap_or(false)
         {
             return StatusCode::NOT_FOUND.into_response();
         }
 
-        match user_can_access_series_media(
-            auth_db.database_file.as_path(),
-            &resolved_series_id,
-            &user,
-        )
-        .await
-        {
+        match user_can_access_series_media(&app, &resolved_series_id, &user).await {
             Ok(true) => {}
             Ok(false) => return StatusCode::FORBIDDEN.into_response(),
             Err(error) => return internal_error_response(error),
         }
     }
 
-    match load_series_thumbnail_by_id(auth_db.database_file.as_path(), &thumbnail_id).await {
+    match load_series_thumbnail_by_id_from_services(&app, &thumbnail_id).await {
         Ok(Some(thumbnail)) => asset_ok_response(
             thumbnail.media_type.as_str(),
             thumbnail.thumbnail,
@@ -158,25 +150,25 @@ pub async fn series_thumbnail_by_id(
 }
 
 pub async fn series_thumbnail_upload(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(series_id): Path<String>,
     multipart: Multipart,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_admin(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    let resolved_series_id =
-        resolve_series_id_for_persisted(auth_db.database_file.as_path(), &series_id).await;
-    if !persisted_series_exists(auth_db.database_file.as_path(), &resolved_series_id)
+    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
+    if !persisted_series_exists_from_services(&app, &resolved_series_id)
         .await
         .unwrap_or(false)
     {
         return StatusCode::NOT_FOUND.into_response();
     }
-    match load_persisted_series_oneshot(auth_db.database_file.as_path(), &resolved_series_id).await
-    {
+    match load_persisted_series_oneshot_from_services(&app, &resolved_series_id).await {
         Ok(Some(true)) => return StatusCode::BAD_REQUEST.into_response(),
         Ok(Some(false)) => {}
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
@@ -192,8 +184,8 @@ pub async fn series_thumbnail_upload(
         return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
     };
 
-    match insert_series_thumbnail(
-        auth_db.database_file.as_path(),
+    match insert_series_thumbnail_from_services(
+        &app,
         &resolved_series_id,
         &thumbnail_bytes,
         media_type.as_str(),
@@ -219,23 +211,18 @@ pub async fn series_thumbnail_upload(
 }
 
 pub async fn series_thumbnail_select(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path((series_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_admin(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    let resolved_series_id =
-        resolve_series_id_for_persisted(auth_db.database_file.as_path(), &series_id).await;
-    match select_series_thumbnail(
-        auth_db.database_file.as_path(),
-        &resolved_series_id,
-        &thumbnail_id,
-    )
-    .await
-    {
+    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
+    match select_series_thumbnail_from_services(&app, &resolved_series_id, &thumbnail_id).await {
         Ok(true) => StatusCode::ACCEPTED.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
@@ -243,25 +230,22 @@ pub async fn series_thumbnail_select(
 }
 
 pub async fn series_thumbnail_delete(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path((series_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_admin(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    let resolved_series_id =
-        resolve_series_id_for_persisted(auth_db.database_file.as_path(), &series_id).await;
-    let thumbnail = match load_persisted_series_thumbnails(
-        auth_db.database_file.as_path(),
-        &resolved_series_id,
-    )
-    .await
-    {
-        Ok(rows) => rows.into_iter().find(|row| row.id == thumbnail_id),
-        Err(error) => return internal_error_response(error),
-    };
+    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
+    let thumbnail =
+        match load_persisted_series_thumbnails_from_services(&app, &resolved_series_id).await {
+            Ok(rows) => rows.into_iter().find(|row| row.id == thumbnail_id),
+            Err(error) => return internal_error_response(error),
+        };
     let Some(thumbnail) = thumbnail else {
         return StatusCode::NOT_FOUND.into_response();
     };
@@ -269,13 +253,7 @@ pub async fn series_thumbnail_delete(
         return StatusCode::BAD_REQUEST.into_response();
     }
 
-    match delete_series_thumbnail(
-        auth_db.database_file.as_path(),
-        &resolved_series_id,
-        &thumbnail_id,
-    )
-    .await
-    {
+    match delete_series_thumbnail_from_services(&app, &resolved_series_id, &thumbnail_id).await {
         Ok(true) => StatusCode::ACCEPTED.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),

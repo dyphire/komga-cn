@@ -11,7 +11,7 @@ pub(super) use crate::http::identity_access::auth::{
 use komga_application::identity_access::random_uuid_like;
 
 pub(super) fn register_discovery_principal(
-    auth_state: &DiscoveryAuthState,
+    auth_state: &crate::http::discovery_auth::state::DiscoveryAuthState,
     payload: &serde_json::Value,
     token: &str,
 ) {
@@ -265,8 +265,9 @@ pub(super) fn api_key_comment_from_request(body: &Value) -> Option<String> {
 pub(super) async fn authenticated_user(
     headers: &HeaderMap,
     connection_info: RequestConnectionInfo,
-    auth_db: &AuthDatabaseState,
+    app: &HttpAppState,
 ) -> Option<AuthUser> {
+    let auth_db = &app.auth_db;
     let request_metadata = authentication_activity_headers_metadata_with_remote_addr(
         headers,
         connection_info.remote_addr(),

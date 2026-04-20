@@ -184,14 +184,14 @@ fn empty_series_page_response(page: usize, size: usize, unpaged: bool, sorted: b
 }
 
 async fn series_feed(
+    app: &HttpAppState,
     headers: HeaderMap,
     uri: Uri,
-    auth_state: DiscoveryAuthState,
-    database_file: &FsPath,
     sort_mode: PersistedSeriesSortMode,
     exclude_newly_added: bool,
     kotlin_unpaged_page_shape: bool,
 ) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
@@ -202,7 +202,8 @@ async fn series_feed(
 
     let query = uri.query().unwrap_or_default();
     let library_ids = requested_query_values(query, "library_id");
-    let context = match auth_state
+    let context = match app
+        .discovery_auth
         .resolve_query_context_with_persistence(&headers, library_ids.as_deref(), database_file)
         .await
     {
@@ -228,6 +229,7 @@ async fn series_feed(
     };
 
     match load_persisted_series_page(
+        &app.services.discovery_persisted,
         database_file,
         &context,
         PersistedSeriesBrowseQuery::from_filters(
@@ -266,17 +268,11 @@ fn should_use_strict_runtime_shape(payload: Option<&Value>) -> bool {
         .is_some()
 }
 
-pub async fn series_latest(
-    headers: HeaderMap,
-    uri: Uri,
-    auth_state: DiscoveryAuthState,
-    database_file: &FsPath,
-) -> Response {
+pub async fn series_latest(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
     series_feed(
+        app,
         headers,
         uri,
-        auth_state,
-        database_file,
         PersistedSeriesSortMode::LastModifiedDesc,
         false,
         false,
@@ -284,12 +280,8 @@ pub async fn series_latest(
     .await
 }
 
-pub async fn series_deprecated_get(
-    headers: HeaderMap,
-    uri: Uri,
-    auth_state: DiscoveryAuthState,
-    database_file: &FsPath,
-) -> Response {
+pub async fn series_deprecated_get(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
@@ -300,9 +292,12 @@ pub async fn series_deprecated_get(
 
     let query = uri.query().unwrap_or_default();
     let requested_library_ids = requested_query_values(query, "library_id");
-    let library_ids =
-        remap_requested_library_ids_for_persisted(database_file, requested_library_ids.as_ref())
-            .await;
+    let library_ids = remap_requested_library_ids_for_persisted(
+        &app.services.discovery_persisted,
+        database_file,
+        requested_library_ids.as_ref(),
+    )
+    .await;
     let collection_ids = decoded_query_values(query, "collection_id");
     let metadata_status = decoded_query_values(query, "status");
     let read_status = decoded_query_values(query, "read_status");
@@ -331,7 +326,8 @@ pub async fn series_deprecated_get(
     });
     let authors = decoded_query_values(query, "author");
     let search_regex = decoded_delimited_pair(query, "search_regex");
-    let context = match auth_state
+    let context = match app
+        .discovery_auth
         .resolve_query_context_with_persistence(&headers, library_ids.as_deref(), database_file)
         .await
     {
@@ -410,6 +406,7 @@ pub async fn series_deprecated_get(
     let requested_unpaged = unpaged || requires_age_post_filter;
 
     match load_persisted_series_page(
+        &app.services.discovery_persisted,
         database_file,
         &context,
         PersistedSeriesBrowseQuery::from_filters(
@@ -478,9 +475,9 @@ pub async fn series_deprecated_get(
 pub async fn series_alphabetical_groups(
     headers: HeaderMap,
     body: Value,
-    auth_state: DiscoveryAuthState,
-    database_file: &FsPath,
+    app: &HttpAppState,
 ) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if !body.is_object() {
         return StatusCode::BAD_REQUEST.into_response();
     }
@@ -509,6 +506,7 @@ pub async fn series_alphabetical_groups(
 
     let mut filters = filters;
     filters.criteria.library_ids = remap_requested_library_ids_for_persisted(
+        &app.services.discovery_persisted,
         database_file,
         filters.criteria.library_ids.as_ref(),
     )
@@ -516,7 +514,8 @@ pub async fn series_alphabetical_groups(
 
     let full_text_search = extract_full_text_search(&body);
 
-    let context = match auth_state
+    let context = match app
+        .discovery_auth
         .resolve_query_context_with_persistence(&headers, None, database_file)
         .await
     {
@@ -524,8 +523,14 @@ pub async fn series_alphabetical_groups(
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    match load_persisted_alphabetical_groups(database_file, &context, filters, full_text_search)
-        .await
+    match load_persisted_alphabetical_groups(
+        &app.services.discovery_persisted,
+        database_file,
+        &context,
+        filters,
+        full_text_search,
+    )
+    .await
     {
         Ok(groups) => Json(Value::Array(groups)).into_response(),
         Err(error) => internal_error_response(error),
@@ -533,13 +538,14 @@ pub async fn series_alphabetical_groups(
 }
 
 pub async fn series_list(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
@@ -554,14 +560,15 @@ pub async fn series_list(
     let full_text_search = extract_full_text_search(&payload);
     let strict_runtime_shape = should_use_strict_runtime_shape(Some(&payload));
 
-    if auth_db.database_file.exists()
+    if app.auth_db.database_file.exists()
         && let Some(runtime_response) = runtime_owned_series_list_response(
+            &app.services.discovery_persisted,
             &headers,
             &uri,
             Some(&payload),
             full_text_search.clone(),
-            &auth_state,
-            auth_db.database_file.as_path(),
+            &app.discovery_auth,
+            app.auth_db.database_file.as_path(),
             strict_runtime_shape,
         )
         .await
@@ -569,7 +576,7 @@ pub async fn series_list(
         return runtime_response;
     }
 
-    if !auth_db.database_file.exists() {
+    if !app.auth_db.database_file.exists() {
         return StatusCode::NOT_FOUND.into_response();
     }
 
@@ -578,17 +585,11 @@ pub async fn series_list(
     ))
 }
 
-pub async fn series_new(
-    headers: HeaderMap,
-    uri: Uri,
-    auth_state: DiscoveryAuthState,
-    database_file: &FsPath,
-) -> Response {
+pub async fn series_new(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
     series_feed(
+        app,
         headers,
         uri,
-        auth_state,
-        database_file,
         PersistedSeriesSortMode::CreatedDesc,
         false,
         false,
@@ -596,17 +597,11 @@ pub async fn series_new(
     .await
 }
 
-pub async fn series_updated(
-    headers: HeaderMap,
-    uri: Uri,
-    auth_state: DiscoveryAuthState,
-    database_file: &FsPath,
-) -> Response {
+pub async fn series_updated(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
     series_feed(
+        app,
         headers,
         uri,
-        auth_state,
-        database_file,
         PersistedSeriesSortMode::LastModifiedDesc,
         true,
         true,

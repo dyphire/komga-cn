@@ -588,20 +588,20 @@ pub async fn cleanup_authentication_activity_once(
     crate::auth::runtime_identity_access::persisted_cleanup_authentication_activity(
         runtime.database_file.as_path(),
     )
-        .await
-        .ok_or_else(|| {
-            let error_message = format!(
-                "failed to clean up authentication activity using {}",
-                runtime.database_file.display()
-            );
-            log_worker_event(
-                AUTHENTICATION_ACTIVITY_CLEANUP_WORKER,
-                "failed",
-                runtime,
-                RuntimeLifecycleFields::default().with_error(&error_message),
-            );
-            error_message
-        })?;
+    .await
+    .ok_or_else(|| {
+        let error_message = format!(
+            "failed to clean up authentication activity using {}",
+            runtime.database_file.display()
+        );
+        log_worker_event(
+            AUTHENTICATION_ACTIVITY_CLEANUP_WORKER,
+            "failed",
+            runtime,
+            RuntimeLifecycleFields::default().with_error(&error_message),
+        );
+        error_message
+    })?;
 
     log_worker_event(
         AUTHENTICATION_ACTIVITY_CLEANUP_WORKER,

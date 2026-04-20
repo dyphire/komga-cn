@@ -1,24 +1,25 @@
-#![allow(clippy::type_complexity)]
-
 #[cfg(test)]
 use std::collections::HashMap;
-
-use std::future::Future;
-use std::path::{Path, PathBuf};
-use std::pin::Pin;
+use std::path::PathBuf;
+#[cfg(test)]
+use std::sync::Arc;
 #[cfg(test)]
 use std::sync::Mutex;
-use std::sync::{Arc, OnceLock};
 
+#[cfg(test)]
 use axum::http::HeaderMap;
+#[cfg(test)]
 use komga_application::identity_access::{
     AuthOutcome, AuthUser, KoboStoreSyncMergeResult, KoboSyncPage, PersistedApiKey,
     PersistedApiKeyMetadata, PersistedAuthenticationActivity,
 };
+#[cfg(test)]
 use serde_json::Value;
+#[cfg(test)]
 use sqlx::SqlitePool;
 
-pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
+#[cfg(test)]
+use crate::http::state::IdentityService;
 
 #[derive(Clone)]
 pub struct PersistedBookMediaFile {
@@ -122,199 +123,6 @@ pub struct AuthenticationActivityWriteInput {
     pub user_agent: Option<String>,
 }
 
-#[derive(Clone)]
-pub struct RuntimeIdentityAccessBackend {
-    pub auth_token_user: Arc<dyn Fn(HeaderMap) -> Option<AuthUser> + Send + Sync>,
-    pub session_token_for_user_with_runtime_key:
-        Arc<dyn Fn(AuthUser, String) -> String + Send + Sync>,
-    pub remember_me_token_for_user_with_runtime_key:
-        Arc<dyn Fn(AuthUser, String) -> Option<String> + Send + Sync>,
-    pub sync_session_runtime_settings: Arc<dyn Fn(String, u64) + Send + Sync>,
-    pub sync_remember_me_runtime_database_file: Arc<dyn Fn(String, PathBuf) + Send + Sync>,
-    pub sync_remember_me_runtime_settings: Arc<dyn Fn(String, String, u64) + Send + Sync>,
-    pub remember_me_max_age_seconds: Arc<dyn Fn(String) -> u64 + Send + Sync>,
-    pub invalidate_user_sessions: Arc<dyn Fn(String) + Send + Sync>,
-    pub invalidate_user_sessions_with_runtime_key: Arc<dyn Fn(String, String) + Send + Sync>,
-    pub invalidate_session_token: Arc<dyn Fn(String) + Send + Sync>,
-    pub invalidate_remember_me_token: Arc<dyn Fn(String) + Send + Sync>,
-    pub store_oauth2_authorization_state: Arc<dyn Fn(String, String, String, String) + Send + Sync>,
-    pub take_oauth2_authorization_state:
-        Arc<dyn Fn(String, String, String) -> Option<String> + Send + Sync>,
-    pub persisted_basic_user:
-        Arc<dyn Fn(HeaderMap, PathBuf) -> BoxFuture<Option<AuthOutcome>> + Send + Sync>,
-    pub persisted_api_key_user:
-        Arc<dyn Fn(HeaderMap, PathBuf) -> BoxFuture<Option<AuthOutcome>> + Send + Sync>,
-    pub persisted_api_key_user_by_token:
-        Arc<dyn Fn(String, PathBuf) -> BoxFuture<Option<AuthOutcome>> + Send + Sync>,
-    pub persisted_api_key_metadata:
-        Arc<dyn Fn(HeaderMap, PathBuf) -> BoxFuture<Option<PersistedApiKeyMetadata>> + Send + Sync>,
-    pub persisted_users: Arc<dyn Fn(PathBuf) -> BoxFuture<Option<Vec<AuthUser>>> + Send + Sync>,
-    pub persisted_update_password_by_user_id:
-        Arc<dyn Fn(PathBuf, String, String) -> BoxFuture<Option<bool>> + Send + Sync>,
-    pub persisted_create_api_key:
-        Arc<dyn Fn(PathBuf, String, String) -> BoxFuture<Option<PersistedApiKey>> + Send + Sync>,
-    pub persisted_api_key_comment_exists:
-        Arc<dyn Fn(PathBuf, String, String) -> BoxFuture<Option<bool>> + Send + Sync>,
-    pub persisted_list_api_keys:
-        Arc<dyn Fn(PathBuf, String) -> BoxFuture<Option<Vec<PersistedApiKey>>> + Send + Sync>,
-    pub persisted_delete_api_key_by_id:
-        Arc<dyn Fn(PathBuf, String, String) -> BoxFuture<Option<bool>> + Send + Sync>,
-    pub persisted_list_authentication_activity: Arc<
-        dyn Fn(PathBuf, Option<String>) -> BoxFuture<Option<Vec<PersistedAuthenticationActivity>>>
-            + Send
-            + Sync,
-    >,
-    pub persisted_cleanup_authentication_activity:
-        Arc<dyn Fn(PathBuf) -> BoxFuture<Option<u64>> + Send + Sync>,
-    pub persisted_latest_authentication_activity_by_user_and_api_key: Arc<
-        dyn Fn(PathBuf, String, String) -> BoxFuture<Option<PersistedAuthenticationActivity>>
-            + Send
-            + Sync,
-    >,
-    pub persisted_record_failed_authentication_activity: Arc<
-        dyn Fn(
-                PathBuf,
-                Option<String>,
-                AuthenticationActivityWriteInput,
-                String,
-            ) -> BoxFuture<Option<()>>
-            + Send
-            + Sync,
-    >,
-    pub persisted_record_successful_authentication_activity: Arc<
-        dyn Fn(PathBuf, AuthUser, AuthenticationActivityWriteInput) -> BoxFuture<Option<()>>
-            + Send
-            + Sync,
-    >,
-    pub ensure_oauth_user: Arc<
-        dyn Fn(PathBuf, String, bool) -> BoxFuture<Result<Option<AuthUser>, sqlx::Error>>
-            + Send
-            + Sync,
-    >,
-    pub configured_api_key: Arc<dyn Fn() -> Option<String> + Send + Sync>,
-    pub load_book_created_timestamp: Arc<
-        dyn Fn(PathBuf, String) -> BoxFuture<Result<Option<String>, sqlx::Error>> + Send + Sync,
-    >,
-    pub load_book_last_epub_position_locator:
-        Arc<dyn Fn(PathBuf, String) -> BoxFuture<Result<Option<Value>, sqlx::Error>> + Send + Sync>,
-    pub load_book_media_file: Arc<
-        dyn Fn(PathBuf, String) -> BoxFuture<Result<Option<PersistedBookMediaFile>, sqlx::Error>>
-            + Send
-            + Sync,
-    >,
-    pub load_kobo_metadata_record: Arc<
-        dyn Fn(PathBuf, String) -> BoxFuture<Result<Option<KoboMetadataRecord>, sqlx::Error>>
-            + Send
-            + Sync,
-    >,
-    pub load_kobo_sync_page: Arc<
-        dyn Fn(
-                PathBuf,
-                AuthUser,
-                String,
-                Option<String>,
-                Option<String>,
-                Option<String>,
-                usize,
-            ) -> BoxFuture<Result<KoboSyncPage, sqlx::Error>>
-            + Send
-            + Sync,
-    >,
-    pub load_koreader_book_target: Arc<
-        dyn Fn(
-                PathBuf,
-                String,
-            )
-                -> BoxFuture<Result<Option<KoreaderBookTarget>, KoreaderBookLookupError>>
-            + Send
-            + Sync,
-    >,
-    pub load_read_progress: Arc<
-        dyn Fn(
-                PathBuf,
-                String,
-                String,
-            ) -> BoxFuture<Result<Option<PersistedReadProgressRecord>, sqlx::Error>>
-            + Send
-            + Sync,
-    >,
-    pub load_thumbnail_by_id: Arc<
-        dyn Fn(PathBuf, String) -> BoxFuture<Result<Option<(String, Vec<u8>)>, sqlx::Error>>
-            + Send
-            + Sync,
-    >,
-    pub persist_read_progress_with_locator: Arc<
-        dyn Fn(
-                PathBuf,
-                String,
-                String,
-                i64,
-                bool,
-                String,
-                String,
-                String,
-                Option<Value>,
-            ) -> BoxFuture<Result<(), String>>
-            + Send
-            + Sync,
-    >,
-    pub persisted_book_exists:
-        Arc<dyn Fn(PathBuf, String) -> BoxFuture<Result<bool, sqlx::Error>> + Send + Sync>,
-    pub proxy_kobo_store_library_sync: Arc<
-        dyn Fn(
-                Vec<(String, String)>,
-                Option<String>,
-                String,
-            ) -> BoxFuture<Result<KoboStoreSyncMergeResult, ()>>
-            + Send
-            + Sync,
-    >,
-    pub remove_sync_point:
-        Arc<dyn Fn(PathBuf, String) -> BoxFuture<Result<(), sqlx::Error>> + Send + Sync>,
-    pub create_auth_user: Arc<
-        dyn Fn(PathBuf, CreateAuthUserInput) -> BoxFuture<Result<Option<AuthUser>, sqlx::Error>>
-            + Send
-            + Sync,
-    >,
-    pub delete_auth_user:
-        Arc<dyn Fn(PathBuf, String) -> BoxFuture<Result<bool, sqlx::Error>> + Send + Sync>,
-    pub update_auth_user: Arc<
-        dyn Fn(
-                PathBuf,
-                String,
-                UpdateAuthUserInput,
-            ) -> BoxFuture<Result<UpdateAuthUserResult, sqlx::Error>>
-            + Send
-            + Sync,
-    >,
-    pub open_auth_pool:
-        Arc<dyn Fn(PathBuf) -> BoxFuture<Result<SqlitePool, sqlx::Error>> + Send + Sync>,
-}
-
-static BACKEND: OnceLock<RuntimeIdentityAccessBackend> = OnceLock::new();
-#[cfg(test)]
-static TEST_BACKEND: OnceLock<RuntimeIdentityAccessBackend> = OnceLock::new();
-
-pub fn install_runtime_identity_access(backend: RuntimeIdentityAccessBackend) {
-    let _ = BACKEND.set(backend);
-}
-
-fn backend() -> &'static RuntimeIdentityAccessBackend {
-    if let Some(backend) = BACKEND.get() {
-        return backend;
-    }
-
-    #[cfg(test)]
-    {
-        TEST_BACKEND.get_or_init(default_test_backend)
-    }
-
-    #[cfg(not(test))]
-    {
-        panic!("runtime identity access backend should be installed before use");
-    }
-}
-
 #[cfg(test)]
 #[derive(Default)]
 struct RuntimeIdentityAccessTestState {
@@ -327,552 +135,425 @@ struct RuntimeIdentityAccessTestState {
 
 #[cfg(test)]
 fn test_state() -> &'static Mutex<RuntimeIdentityAccessTestState> {
-    static TEST_STATE: OnceLock<Mutex<RuntimeIdentityAccessTestState>> = OnceLock::new();
+    static TEST_STATE: std::sync::OnceLock<Mutex<RuntimeIdentityAccessTestState>> =
+        std::sync::OnceLock::new();
     TEST_STATE.get_or_init(|| Mutex::new(RuntimeIdentityAccessTestState::default()))
 }
 
 #[cfg(test)]
-fn default_test_backend() -> RuntimeIdentityAccessBackend {
-    RuntimeIdentityAccessBackend {
-        auth_token_user: Arc::new(|headers| {
-            headers
-                .get("X-Auth-Token")
-                .and_then(|value| value.to_str().ok())
-                .and_then(|token| {
-                    test_state()
-                        .lock()
-                        .expect("runtime identity access test state lock should not be poisoned")
-                        .session_users
-                        .get(token)
-                        .cloned()
-                })
-        }),
-        session_token_for_user_with_runtime_key: Arc::new(|user, runtime_key| {
-            let token = format!("test-session-{runtime_key}-{}", user.id);
-            test_state()
-                .lock()
-                .expect("runtime identity access test state lock should not be poisoned")
-                .session_users
-                .insert(token.clone(), user);
-            token
-        }),
-        remember_me_token_for_user_with_runtime_key: Arc::new(|user, runtime_key| {
-            let token = format!("test-remember-me-{runtime_key}-{}", user.id);
-            test_state()
-                .lock()
-                .expect("runtime identity access test state lock should not be poisoned")
-                .remember_me_users
-                .insert(token.clone(), user);
-            Some(token)
-        }),
-        sync_session_runtime_settings: Arc::new(|_, _| {}),
-        sync_remember_me_runtime_database_file: Arc::new(|_, _| {}),
-        sync_remember_me_runtime_settings: Arc::new(|_, _, _| {}),
-        remember_me_max_age_seconds: Arc::new(|_| 365 * 24 * 60 * 60),
-        invalidate_user_sessions: Arc::new(|_| {}),
-        invalidate_user_sessions_with_runtime_key: Arc::new(|_, _| {}),
-        invalidate_session_token: Arc::new(|_| {}),
-        invalidate_remember_me_token: Arc::new(|_| {}),
-        store_oauth2_authorization_state: Arc::new(
-            |runtime_key, session_token, registration_id, state| {
+#[derive(Clone, Default)]
+struct TestIdentityService;
+
+#[cfg(test)]
+pub(crate) fn default_test_identity_service() -> Arc<dyn IdentityService> {
+    Arc::new(TestIdentityService)
+}
+
+#[cfg(test)]
+#[async_trait::async_trait]
+impl IdentityService for TestIdentityService {
+    fn auth_token_user(&self, headers: HeaderMap) -> Option<AuthUser> {
+        headers
+            .get("X-Auth-Token")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|token| {
                 test_state()
                     .lock()
                     .expect("runtime identity access test state lock should not be poisoned")
-                    .oauth2_authorization_states
-                    .insert((runtime_key, session_token, registration_id), state);
-            },
-        ),
-        take_oauth2_authorization_state: Arc::new(|runtime_key, session_token, registration_id| {
-            test_state()
-                .lock()
-                .expect("runtime identity access test state lock should not be poisoned")
-                .oauth2_authorization_states
-                .remove(&(runtime_key, session_token, registration_id))
-        }),
-        persisted_basic_user: Arc::new(|_, _| Box::pin(async { Some(AuthOutcome::Missing) })),
-        persisted_api_key_user: Arc::new(|_, _| Box::pin(async { Some(AuthOutcome::Missing) })),
-        persisted_api_key_user_by_token: Arc::new(|_, _| Box::pin(async { None })),
-        persisted_api_key_metadata: Arc::new(|_, _| Box::pin(async { None })),
-        persisted_users: Arc::new(|_| Box::pin(async { Some(vec![]) })),
-        persisted_update_password_by_user_id: Arc::new(|_, _, _| Box::pin(async { Some(false) })),
-        persisted_create_api_key: Arc::new(|_, _, _| Box::pin(async { None })),
-        persisted_api_key_comment_exists: Arc::new(|_, _, _| Box::pin(async { Some(false) })),
-        persisted_list_api_keys: Arc::new(|_, _| Box::pin(async { Some(vec![]) })),
-        persisted_delete_api_key_by_id: Arc::new(|_, _, _| Box::pin(async { Some(false) })),
-        persisted_list_authentication_activity: Arc::new(|_, _| Box::pin(async { Some(vec![]) })),
-        persisted_cleanup_authentication_activity: Arc::new(|_| Box::pin(async { Some(0) })),
-        persisted_latest_authentication_activity_by_user_and_api_key: Arc::new(|_, _, _| {
-            Box::pin(async { None })
-        }),
-        persisted_record_failed_authentication_activity: Arc::new(|_, _, _, _| {
-            Box::pin(async { Some(()) })
-        }),
-        persisted_record_successful_authentication_activity: Arc::new(|_, _, _| {
-            Box::pin(async { Some(()) })
-        }),
-        ensure_oauth_user: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),
-        configured_api_key: Arc::new(|| None),
-        load_book_created_timestamp: Arc::new(|_, _| Box::pin(async { Ok(None) })),
-        load_book_last_epub_position_locator: Arc::new(|_, _| Box::pin(async { Ok(None) })),
-        load_book_media_file: Arc::new(|_, _| Box::pin(async { Ok(None) })),
-        load_kobo_metadata_record: Arc::new(|_, _| Box::pin(async { Ok(None) })),
-        load_kobo_sync_page: Arc::new(|_, _, _, _, _, _, _| {
-            Box::pin(async {
-                Ok(KoboSyncPage {
-                    to_sync_point_id: String::new(),
-                    from_sync_point_id: None,
-                    books_added: Vec::new(),
-                    books_changed: Vec::new(),
-                    books_removed: Vec::new(),
-                    books_read_progress_changed: Vec::new(),
-                    readlists_added: Vec::new(),
-                    readlists_changed: Vec::new(),
-                    readlists_removed: Vec::new(),
-                    should_continue: false,
-                })
-            })
-        }),
-        load_koreader_book_target: Arc::new(|database_file, book_hash| {
-            Box::pin(async move {
-                test_state()
-                    .lock()
-                    .expect("runtime identity access test state lock should not be poisoned")
-                    .koreader_book_targets
-                    .get(&(database_file, book_hash))
+                    .session_users
+                    .get(token)
                     .cloned()
-                    .unwrap_or(Ok(None))
             })
-        }),
-        load_read_progress: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),
-        load_thumbnail_by_id: Arc::new(|_, _| Box::pin(async { Ok(None) })),
-        persist_read_progress_with_locator: Arc::new(|_, _, _, _, _, _, _, _, _| {
-            Box::pin(async { Ok(()) })
-        }),
-        persisted_book_exists: Arc::new(|_, _| Box::pin(async { Ok(false) })),
-        proxy_kobo_store_library_sync: Arc::new(|_, _, _| {
-            Box::pin(async {
-                Ok(KoboStoreSyncMergeResult {
-                    events: vec![],
-                    raw_sync_token: None,
-                    should_continue: false,
-                })
-            })
-        }),
-        remove_sync_point: Arc::new(|_, _| Box::pin(async { Ok(()) })),
-        create_auth_user: Arc::new(|_, _| Box::pin(async { Ok(None) })),
-        delete_auth_user: Arc::new(|_, _| Box::pin(async { Ok(false) })),
-        update_auth_user: Arc::new(|_, _, _| {
-            Box::pin(async {
-                Ok(UpdateAuthUserResult {
-                    updated: false,
-                    expire_sessions: false,
-                })
-            })
-        }),
-        open_auth_pool: Arc::new(|_| Box::pin(async { Err(sqlx::Error::PoolClosed) })),
     }
-}
 
-pub fn auth_token_user(headers: &HeaderMap) -> Option<AuthUser> {
-    (backend().auth_token_user)(headers.clone())
-}
+    fn session_token_for_user_with_runtime_key(
+        &self,
+        user: AuthUser,
+        runtime_key: String,
+    ) -> String {
+        let token = format!("test-session-{runtime_key}-{}", user.id);
+        test_state()
+            .lock()
+            .expect("runtime identity access test state lock should not be poisoned")
+            .session_users
+            .insert(token.clone(), user);
+        token
+    }
 
-pub fn session_token_for_user_with_runtime_key(user: &AuthUser, runtime_key: &str) -> String {
-    (backend().session_token_for_user_with_runtime_key)(user.clone(), runtime_key.to_string())
-}
+    fn remember_me_token_for_user_with_runtime_key(
+        &self,
+        user: AuthUser,
+        runtime_key: String,
+    ) -> Option<String> {
+        let token = format!("test-remember-me-{runtime_key}-{}", user.id);
+        test_state()
+            .lock()
+            .expect("runtime identity access test state lock should not be poisoned")
+            .remember_me_users
+            .insert(token.clone(), user);
+        Some(token)
+    }
 
-pub fn remember_me_token_for_user_with_runtime_key(
-    user: &AuthUser,
-    runtime_key: &str,
-) -> Option<String> {
-    (backend().remember_me_token_for_user_with_runtime_key)(user.clone(), runtime_key.to_string())
-}
+    fn sync_session_runtime_settings(&self, _runtime_key: String, _max_inactive_seconds: u64) {}
 
-pub fn sync_session_runtime_settings(runtime_key: &str, max_inactive_seconds: u64) {
-    (backend().sync_session_runtime_settings)(runtime_key.to_string(), max_inactive_seconds)
-}
+    fn sync_remember_me_runtime_database_file(
+        &self,
+        _runtime_key: String,
+        _database_file: PathBuf,
+    ) {
+    }
 
-pub fn sync_remember_me_runtime_database_file(runtime_key: &str, database_file: &Path) {
-    (backend().sync_remember_me_runtime_database_file)(
-        runtime_key.to_string(),
-        database_file.to_path_buf(),
-    )
-}
+    fn sync_remember_me_runtime_settings(
+        &self,
+        _runtime_key: String,
+        _key: String,
+        _duration_days: u64,
+    ) {
+    }
 
-pub fn sync_remember_me_runtime_settings(runtime_key: &str, key: &str, duration_days: u64) {
-    (backend().sync_remember_me_runtime_settings)(
-        runtime_key.to_string(),
-        key.to_string(),
-        duration_days,
-    )
-}
+    fn remember_me_max_age_seconds(&self, _runtime_key: String) -> u64 {
+        365 * 24 * 60 * 60
+    }
 
-pub fn remember_me_max_age_seconds(runtime_key: &str) -> u64 {
-    (backend().remember_me_max_age_seconds)(runtime_key.to_string())
-}
+    fn invalidate_user_sessions(&self, _user_id: String) {}
 
-pub fn invalidate_user_sessions(user_id: &str) {
-    (backend().invalidate_user_sessions)(user_id.to_string())
-}
+    fn invalidate_user_sessions_with_runtime_key(&self, _user_id: String, _runtime_key: String) {}
 
-pub fn invalidate_user_sessions_with_runtime_key(user_id: &str, runtime_key: &str) {
-    (backend().invalidate_user_sessions_with_runtime_key)(
-        user_id.to_string(),
-        runtime_key.to_string(),
-    )
-}
+    fn invalidate_session_token(&self, _token: String) {}
 
-pub fn invalidate_session_token(token: &str) {
-    (backend().invalidate_session_token)(token.to_string())
-}
+    fn invalidate_remember_me_token(&self, _token: String) {}
 
-pub fn invalidate_remember_me_token(token: &str) {
-    (backend().invalidate_remember_me_token)(token.to_string())
-}
+    fn store_oauth2_authorization_state(
+        &self,
+        runtime_key: String,
+        session_token: String,
+        registration_id: String,
+        state: String,
+    ) {
+        test_state()
+            .lock()
+            .expect("runtime identity access test state lock should not be poisoned")
+            .oauth2_authorization_states
+            .insert((runtime_key, session_token, registration_id), state);
+    }
 
-pub fn store_oauth2_authorization_state(
-    runtime_key: &str,
-    session_token: &str,
-    registration_id: &str,
-    state: &str,
-) {
-    (backend().store_oauth2_authorization_state)(
-        runtime_key.to_string(),
-        session_token.to_string(),
-        registration_id.to_string(),
-        state.to_string(),
-    )
-}
+    fn take_oauth2_authorization_state(
+        &self,
+        runtime_key: String,
+        session_token: String,
+        registration_id: String,
+    ) -> Option<String> {
+        test_state()
+            .lock()
+            .expect("runtime identity access test state lock should not be poisoned")
+            .oauth2_authorization_states
+            .remove(&(runtime_key, session_token, registration_id))
+    }
 
-pub fn take_oauth2_authorization_state(
-    runtime_key: &str,
-    session_token: &str,
-    registration_id: &str,
-) -> Option<String> {
-    (backend().take_oauth2_authorization_state)(
-        runtime_key.to_string(),
-        session_token.to_string(),
-        registration_id.to_string(),
-    )
-}
+    async fn persisted_basic_user(
+        &self,
+        _headers: HeaderMap,
+        _database_file: PathBuf,
+    ) -> Option<AuthOutcome> {
+        Some(AuthOutcome::Missing)
+    }
 
-pub async fn persisted_basic_user(
-    headers: &HeaderMap,
-    database_file: &Path,
-) -> Option<AuthOutcome> {
-    (backend().persisted_basic_user)(headers.clone(), database_file.to_path_buf()).await
-}
+    async fn persisted_api_key_user(
+        &self,
+        _headers: HeaderMap,
+        _database_file: PathBuf,
+    ) -> Option<AuthOutcome> {
+        Some(AuthOutcome::Missing)
+    }
 
-pub async fn persisted_api_key_user(
-    headers: &HeaderMap,
-    database_file: &Path,
-) -> Option<AuthOutcome> {
-    (backend().persisted_api_key_user)(headers.clone(), database_file.to_path_buf()).await
-}
+    async fn persisted_api_key_user_by_token(
+        &self,
+        _api_key: String,
+        _database_file: PathBuf,
+    ) -> Option<AuthOutcome> {
+        None
+    }
 
-pub async fn persisted_api_key_user_by_token(
-    api_key: &str,
-    database_file: &Path,
-) -> Option<AuthOutcome> {
-    (backend().persisted_api_key_user_by_token)(api_key.to_string(), database_file.to_path_buf())
-        .await
-}
+    async fn persisted_api_key_metadata(
+        &self,
+        _headers: HeaderMap,
+        _database_file: PathBuf,
+    ) -> Option<PersistedApiKeyMetadata> {
+        None
+    }
 
-pub async fn persisted_api_key_metadata(
-    headers: &HeaderMap,
-    database_file: &Path,
-) -> Option<PersistedApiKeyMetadata> {
-    (backend().persisted_api_key_metadata)(headers.clone(), database_file.to_path_buf()).await
-}
+    async fn persisted_users(&self, _database_file: PathBuf) -> Option<Vec<AuthUser>> {
+        Some(vec![])
+    }
 
-pub async fn persisted_users(database_file: &Path) -> Option<Vec<AuthUser>> {
-    (backend().persisted_users)(database_file.to_path_buf()).await
-}
+    async fn persisted_update_password_by_user_id(
+        &self,
+        _database_file: PathBuf,
+        _user_id: String,
+        _password: String,
+    ) -> Option<bool> {
+        Some(false)
+    }
 
-pub async fn persisted_update_password_by_user_id(
-    database_file: &Path,
-    user_id: &str,
-    password: &str,
-) -> Option<bool> {
-    (backend().persisted_update_password_by_user_id)(
-        database_file.to_path_buf(),
-        user_id.to_string(),
-        password.to_string(),
-    )
-    .await
-}
+    async fn persisted_create_api_key(
+        &self,
+        _database_file: PathBuf,
+        _user_id: String,
+        _comment: String,
+    ) -> Option<PersistedApiKey> {
+        None
+    }
 
-pub async fn persisted_create_api_key(
-    database_file: &Path,
-    user_id: &str,
-    comment: &str,
-) -> Option<PersistedApiKey> {
-    (backend().persisted_create_api_key)(
-        database_file.to_path_buf(),
-        user_id.to_string(),
-        comment.to_string(),
-    )
-    .await
-}
+    async fn persisted_api_key_comment_exists(
+        &self,
+        _database_file: PathBuf,
+        _user_id: String,
+        _comment: String,
+    ) -> Option<bool> {
+        Some(false)
+    }
 
-pub async fn persisted_api_key_comment_exists(
-    database_file: &Path,
-    user_id: &str,
-    comment: &str,
-) -> Option<bool> {
-    (backend().persisted_api_key_comment_exists)(
-        database_file.to_path_buf(),
-        user_id.to_string(),
-        comment.to_string(),
-    )
-    .await
-}
+    async fn persisted_list_api_keys(
+        &self,
+        _database_file: PathBuf,
+        _user_id: String,
+    ) -> Option<Vec<PersistedApiKey>> {
+        Some(vec![])
+    }
 
-pub async fn persisted_list_api_keys(
-    database_file: &Path,
-    user_id: &str,
-) -> Option<Vec<PersistedApiKey>> {
-    (backend().persisted_list_api_keys)(database_file.to_path_buf(), user_id.to_string()).await
-}
+    async fn persisted_delete_api_key_by_id(
+        &self,
+        _database_file: PathBuf,
+        _user_id: String,
+        _api_key_id: String,
+    ) -> Option<bool> {
+        Some(false)
+    }
 
-pub async fn persisted_delete_api_key_by_id(
-    database_file: &Path,
-    user_id: &str,
-    api_key_id: &str,
-) -> Option<bool> {
-    (backend().persisted_delete_api_key_by_id)(
-        database_file.to_path_buf(),
-        user_id.to_string(),
-        api_key_id.to_string(),
-    )
-    .await
-}
+    async fn persisted_list_authentication_activity(
+        &self,
+        _database_file: PathBuf,
+        _user_id: Option<String>,
+    ) -> Option<Vec<PersistedAuthenticationActivity>> {
+        Some(vec![])
+    }
 
-pub async fn persisted_list_authentication_activity(
-    database_file: &Path,
-    user_id: Option<&str>,
-) -> Option<Vec<PersistedAuthenticationActivity>> {
-    (backend().persisted_list_authentication_activity)(
-        database_file.to_path_buf(),
-        user_id.map(ToString::to_string),
-    )
-    .await
-}
+    async fn persisted_cleanup_authentication_activity(
+        &self,
+        _database_file: PathBuf,
+    ) -> Option<u64> {
+        Some(0)
+    }
 
-pub async fn persisted_cleanup_authentication_activity(database_file: &Path) -> Option<u64> {
-    (backend().persisted_cleanup_authentication_activity)(database_file.to_path_buf()).await
-}
+    async fn persisted_latest_authentication_activity_by_user_and_api_key(
+        &self,
+        _database_file: PathBuf,
+        _user_id: String,
+        _api_key_id: String,
+    ) -> Option<PersistedAuthenticationActivity> {
+        None
+    }
 
-pub async fn persisted_latest_authentication_activity_by_user_and_api_key(
-    database_file: &Path,
-    user_id: &str,
-    api_key_id: &str,
-) -> Option<PersistedAuthenticationActivity> {
-    (backend().persisted_latest_authentication_activity_by_user_and_api_key)(
-        database_file.to_path_buf(),
-        user_id.to_string(),
-        api_key_id.to_string(),
-    )
-    .await
-}
+    async fn persisted_record_failed_authentication_activity(
+        &self,
+        _database_file: PathBuf,
+        _email: Option<String>,
+        _input: AuthenticationActivityWriteInput,
+        _error: String,
+    ) -> Option<()> {
+        Some(())
+    }
 
-pub async fn persisted_record_failed_authentication_activity(
-    database_file: &Path,
-    email: Option<&str>,
-    input: AuthenticationActivityWriteInput,
-    error: &str,
-) -> Option<()> {
-    (backend().persisted_record_failed_authentication_activity)(
-        database_file.to_path_buf(),
-        email.map(ToString::to_string),
-        input,
-        error.to_string(),
-    )
-    .await
-}
+    async fn persisted_record_successful_authentication_activity(
+        &self,
+        _database_file: PathBuf,
+        _user: AuthUser,
+        _input: AuthenticationActivityWriteInput,
+    ) -> Option<()> {
+        Some(())
+    }
 
-pub async fn persisted_record_successful_authentication_activity(
-    database_file: &Path,
-    user: &AuthUser,
-    input: AuthenticationActivityWriteInput,
-) -> Option<()> {
-    (backend().persisted_record_successful_authentication_activity)(
-        database_file.to_path_buf(),
-        user.clone(),
-        input,
-    )
-    .await
-}
+    async fn ensure_oauth_user(
+        &self,
+        _database_file: PathBuf,
+        _email: String,
+        _allow_create: bool,
+    ) -> Result<Option<AuthUser>, sqlx::Error> {
+        Ok(None)
+    }
 
-pub async fn ensure_oauth_user(
-    database_file: &Path,
-    email: &str,
-    allow_create: bool,
-) -> Result<Option<AuthUser>, sqlx::Error> {
-    (backend().ensure_oauth_user)(database_file.to_path_buf(), email.to_string(), allow_create)
-        .await
-}
+    fn configured_api_key(&self) -> Option<String> {
+        None
+    }
 
-pub fn configured_api_key() -> Option<String> {
-    (backend().configured_api_key)()
-}
+    async fn load_book_created_timestamp(
+        &self,
+        _database_file: PathBuf,
+        _book_id: String,
+    ) -> Result<Option<String>, sqlx::Error> {
+        Ok(None)
+    }
 
-pub async fn load_book_created_timestamp(
-    database_file: &Path,
-    book_id: &str,
-) -> Result<Option<String>, sqlx::Error> {
-    (backend().load_book_created_timestamp)(database_file.to_path_buf(), book_id.to_string()).await
-}
+    async fn load_book_last_epub_position_locator(
+        &self,
+        _database_file: PathBuf,
+        _book_id: String,
+    ) -> Result<Option<Value>, sqlx::Error> {
+        Ok(None)
+    }
 
-pub async fn load_book_last_epub_position_locator(
-    database_file: &Path,
-    book_id: &str,
-) -> Result<Option<Value>, sqlx::Error> {
-    (backend().load_book_last_epub_position_locator)(
-        database_file.to_path_buf(),
-        book_id.to_string(),
-    )
-    .await
-}
+    async fn load_book_media_file(
+        &self,
+        _database_file: PathBuf,
+        _book_id: String,
+    ) -> Result<Option<PersistedBookMediaFile>, sqlx::Error> {
+        Ok(None)
+    }
 
-pub async fn load_kobo_metadata_record(
-    database_file: &Path,
-    book_id: &str,
-) -> Result<Option<KoboMetadataRecord>, sqlx::Error> {
-    (backend().load_kobo_metadata_record)(database_file.to_path_buf(), book_id.to_string()).await
-}
+    async fn load_kobo_metadata_record(
+        &self,
+        _database_file: PathBuf,
+        _book_id: String,
+    ) -> Result<Option<KoboMetadataRecord>, sqlx::Error> {
+        Ok(None)
+    }
 
-pub async fn load_kobo_sync_page(
-    database_file: &Path,
-    user: &AuthUser,
-    user_id: &str,
-    current_api_key_id: Option<&str>,
-    ongoing_sync_point_id: Option<&str>,
-    last_successful_sync_point_id: Option<&str>,
-    limit: usize,
-) -> Result<KoboSyncPage, sqlx::Error> {
-    (backend().load_kobo_sync_page)(
-        database_file.to_path_buf(),
-        user.clone(),
-        user_id.to_string(),
-        current_api_key_id.map(str::to_string),
-        ongoing_sync_point_id.map(str::to_string),
-        last_successful_sync_point_id.map(str::to_string),
-        limit,
-    )
-    .await
-}
+    async fn load_kobo_sync_page(
+        &self,
+        _database_file: PathBuf,
+        _user: AuthUser,
+        _user_id: String,
+        _current_api_key_id: Option<String>,
+        _ongoing_sync_point_id: Option<String>,
+        _last_successful_sync_point_id: Option<String>,
+        _limit: usize,
+    ) -> Result<KoboSyncPage, sqlx::Error> {
+        Ok(KoboSyncPage {
+            to_sync_point_id: String::new(),
+            from_sync_point_id: None,
+            books_added: Vec::new(),
+            books_changed: Vec::new(),
+            books_removed: Vec::new(),
+            books_read_progress_changed: Vec::new(),
+            readlists_added: Vec::new(),
+            readlists_changed: Vec::new(),
+            readlists_removed: Vec::new(),
+            should_continue: false,
+        })
+    }
 
-pub async fn load_koreader_book_target(
-    database_file: &Path,
-    book_hash: &str,
-) -> Result<Option<KoreaderBookTarget>, KoreaderBookLookupError> {
-    (backend().load_koreader_book_target)(database_file.to_path_buf(), book_hash.to_string()).await
-}
+    async fn load_koreader_book_target(
+        &self,
+        database_file: PathBuf,
+        book_hash: String,
+    ) -> Result<Option<KoreaderBookTarget>, KoreaderBookLookupError> {
+        test_state()
+            .lock()
+            .expect("runtime identity access test state lock should not be poisoned")
+            .koreader_book_targets
+            .get(&(database_file, book_hash))
+            .cloned()
+            .unwrap_or(Ok(None))
+    }
 
-pub async fn load_read_progress(
-    database_file: &Path,
-    book_id: &str,
-    user_id: &str,
-) -> Result<Option<PersistedReadProgressRecord>, sqlx::Error> {
-    (backend().load_read_progress)(
-        database_file.to_path_buf(),
-        book_id.to_string(),
-        user_id.to_string(),
-    )
-    .await
-}
+    async fn load_read_progress(
+        &self,
+        _database_file: PathBuf,
+        _book_id: String,
+        _user_id: String,
+    ) -> Result<Option<PersistedReadProgressRecord>, sqlx::Error> {
+        Ok(None)
+    }
 
-pub async fn load_thumbnail_by_id(
-    database_file: &Path,
-    thumbnail_id: &str,
-) -> Result<Option<(String, Vec<u8>)>, sqlx::Error> {
-    (backend().load_thumbnail_by_id)(database_file.to_path_buf(), thumbnail_id.to_string()).await
-}
+    async fn load_thumbnail_by_id(
+        &self,
+        _database_file: PathBuf,
+        _thumbnail_id: String,
+    ) -> Result<Option<(String, Vec<u8>)>, sqlx::Error> {
+        Ok(None)
+    }
 
-#[allow(clippy::too_many_arguments)]
-pub async fn persist_read_progress_with_locator(
-    database_file: &Path,
-    book_id: &str,
-    user_id: &str,
-    page: i64,
-    completed: bool,
-    device_id: &str,
-    device_name: &str,
-    timestamp: &str,
-    locator: Option<Value>,
-) -> Result<(), String> {
-    (backend().persist_read_progress_with_locator)(
-        database_file.to_path_buf(),
-        book_id.to_string(),
-        user_id.to_string(),
-        page,
-        completed,
-        device_id.to_string(),
-        device_name.to_string(),
-        timestamp.to_string(),
-        locator,
-    )
-    .await
-}
+    async fn persist_read_progress_with_locator(
+        &self,
+        _database_file: PathBuf,
+        _book_id: String,
+        _user_id: String,
+        _page: i64,
+        _completed: bool,
+        _device_id: String,
+        _device_name: String,
+        _timestamp: String,
+        _locator: Option<Value>,
+    ) -> Result<(), String> {
+        Ok(())
+    }
 
-pub async fn persisted_book_exists(
-    database_file: &Path,
-    book_id: &str,
-) -> Result<bool, sqlx::Error> {
-    (backend().persisted_book_exists)(database_file.to_path_buf(), book_id.to_string()).await
-}
+    async fn persisted_book_exists(
+        &self,
+        _database_file: PathBuf,
+        _book_id: String,
+    ) -> Result<bool, sqlx::Error> {
+        Ok(false)
+    }
 
-pub async fn proxy_kobo_store_library_sync(
-    forwarded_headers: &[(String, String)],
-    query: Option<&str>,
-    raw_sync_token: &str,
-) -> Result<KoboStoreSyncMergeResult, ()> {
-    (backend().proxy_kobo_store_library_sync)(
-        forwarded_headers.to_vec(),
-        query.map(ToString::to_string),
-        raw_sync_token.to_string(),
-    )
-    .await
-}
+    async fn proxy_kobo_store_library_sync(
+        &self,
+        _forwarded_headers: Vec<(String, String)>,
+        _query: Option<String>,
+        _raw_sync_token: String,
+    ) -> Result<KoboStoreSyncMergeResult, ()> {
+        Ok(KoboStoreSyncMergeResult {
+            events: vec![],
+            raw_sync_token: None,
+            should_continue: false,
+        })
+    }
 
-pub async fn remove_sync_point(
-    database_file: &Path,
-    sync_point_id: &str,
-) -> Result<(), sqlx::Error> {
-    (backend().remove_sync_point)(database_file.to_path_buf(), sync_point_id.to_string()).await
-}
+    async fn remove_sync_point(
+        &self,
+        _database_file: PathBuf,
+        _sync_point_id: String,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
 
-pub async fn create_auth_user(
-    database_file: &Path,
-    input: CreateAuthUserInput,
-) -> Result<Option<AuthUser>, sqlx::Error> {
-    (backend().create_auth_user)(database_file.to_path_buf(), input).await
-}
+    async fn create_auth_user(
+        &self,
+        _database_file: PathBuf,
+        _input: CreateAuthUserInput,
+    ) -> Result<Option<AuthUser>, sqlx::Error> {
+        Ok(None)
+    }
 
-pub async fn delete_auth_user(
-    database_file: &Path,
-    target_user_id: &str,
-) -> Result<bool, sqlx::Error> {
-    (backend().delete_auth_user)(database_file.to_path_buf(), target_user_id.to_string()).await
-}
+    async fn delete_auth_user(
+        &self,
+        _database_file: PathBuf,
+        _target_user_id: String,
+    ) -> Result<bool, sqlx::Error> {
+        Ok(false)
+    }
 
-pub async fn update_auth_user(
-    database_file: &Path,
-    target_user_id: &str,
-    patch: UpdateAuthUserInput,
-) -> Result<UpdateAuthUserResult, sqlx::Error> {
-    (backend().update_auth_user)(
-        database_file.to_path_buf(),
-        target_user_id.to_string(),
-        patch,
-    )
-    .await
+    async fn update_auth_user(
+        &self,
+        _database_file: PathBuf,
+        _target_user_id: String,
+        _patch: UpdateAuthUserInput,
+    ) -> Result<UpdateAuthUserResult, sqlx::Error> {
+        Ok(UpdateAuthUserResult {
+            updated: false,
+            expire_sessions: false,
+        })
+    }
+
+    async fn open_auth_pool(&self, _database_file: PathBuf) -> Result<SqlitePool, sqlx::Error> {
+        Err(sqlx::Error::PoolClosed)
+    }
 }
 
 #[cfg(test)]
 pub(crate) mod test_support {
     use super::*;
+    use std::path::Path;
 
     pub(crate) fn seed_koreader_book_target(
         database_file: &Path,

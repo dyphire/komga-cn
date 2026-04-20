@@ -41,7 +41,6 @@ pub(super) async fn list_series_collections_sqlx(
             JOIN collection_series cs_target ON cs_target.collection_id = c.id
             JOIN series s ON s.id = cs_target.series_id
         "#,
-
     );
     let mut candidate_state = SqlxWhereState::default();
     apply_series_collection_visibility_sqlx(
@@ -67,12 +66,11 @@ pub(super) async fn list_series_collections_sqlx(
     let mut collections = vec![];
     for candidate in candidates {
         let mut visible_builder = QueryBuilder::<Sqlite>::new(
-        r#"
+            r#"
             SELECT cs.series_id AS series_id
             FROM collection_series cs
             JOIN series s ON s.id = cs.series_id
         "#,
-
         );
         let mut visible_state = SqlxWhereState::default();
         apply_series_collection_visibility_sqlx(
@@ -104,12 +102,11 @@ pub(super) async fn list_series_collections_sqlx(
         }
 
         let _total_count = sqlx::query_scalar::<_, i64>(
-        r#"
+            r#"
             SELECT COUNT(*)
             FROM collection_series
             WHERE collection_id = ?
         "#,
-
         )
         .bind(candidate.id.clone())
         .fetch_one(&pool)

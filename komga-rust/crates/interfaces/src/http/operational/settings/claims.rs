@@ -7,12 +7,14 @@ use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::http::identity_access::auth::{AuthUser, user_payload_json};
-use crate::operational_settings_access::claims as claims_access;
+use crate::http::state::HttpAppState;
+use crate::operational_settings_access::ClaimInitialAdminUserResult;
 
-use super::super::super::OperationalState;
-
-pub(crate) async fn get_claim_status(Extension(state): Extension<OperationalState>) -> Response {
-    let is_claimed = claims_access::load_claim_status(state.runtime.database_file.as_path())
+pub(crate) async fn get_claim_status(Extension(app): Extension<HttpAppState>) -> Response {
+    let is_claimed = app
+        .services
+        .operational_settings
+        .load_claim_status(app.operational.runtime.database_file.clone())
         .await
         .unwrap_or(false);
 
@@ -20,7 +22,7 @@ pub(crate) async fn get_claim_status(Extension(state): Extension<OperationalStat
 }
 
 pub(crate) async fn post_claim(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     let email = email_header_value(&headers, "x-komga-email");
@@ -29,7 +31,10 @@ pub(crate) async fn post_claim(
         return StatusCode::BAD_REQUEST.into_response();
     };
 
-    if claims_access::load_claim_status(state.runtime.database_file.as_path())
+    if app
+        .services
+        .operational_settings
+        .load_claim_status(app.operational.runtime.database_file.clone())
         .await
         .unwrap_or(false)
     {
@@ -42,16 +47,19 @@ pub(crate) async fn post_claim(
     };
 
     let created_user_id = generate_claimed_user_id();
-    let created_user = match claims_access::claim_initial_admin_user(
-        state.runtime.database_file.as_path(),
-        &created_user_id,
-        email.as_str(),
-        hashed_password.as_str(),
-    )
-    .await
+    let created_user = match app
+        .services
+        .operational_settings
+        .claim_initial_admin_user(
+            app.operational.runtime.database_file.clone(),
+            created_user_id,
+            email,
+            hashed_password,
+        )
+        .await
     {
-        Ok(claims_access::ClaimInitialAdminUserResult::Created(created_user)) => created_user,
-        Ok(claims_access::ClaimInitialAdminUserResult::AlreadyClaimed) => {
+        Ok(ClaimInitialAdminUserResult::Created(created_user)) => *created_user,
+        Ok(ClaimInitialAdminUserResult::AlreadyClaimed) => {
             return claim_already_claimed_response();
         }
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),

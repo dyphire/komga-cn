@@ -1,4 +1,4 @@
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use time::OffsetDateTime;
 use tsid::create_tsid_256;
 
@@ -96,9 +96,10 @@ mod tests {
 
         assert_eq!(id.len(), 13);
         assert!(matches!(id.chars().next(), Some('0'..='9' | 'A'..='F')));
-        assert!(id
-            .chars()
-            .all(|ch| "0123456789ABCDEFGHJKMNPQRSTVWXYZ".contains(ch)));
+        assert!(
+            id.chars()
+                .all(|ch| "0123456789ABCDEFGHJKMNPQRSTVWXYZ".contains(ch))
+        );
     }
 
     #[test]

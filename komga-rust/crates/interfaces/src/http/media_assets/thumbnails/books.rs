@@ -6,30 +6,27 @@ use super::shared::{
 use super::*;
 
 pub async fn book_thumbnail(
-    Extension(_profile): Extension<RuntimeProfile>,
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    if let Ok(Some(media)) =
-        load_persisted_book_media(auth_db.database_file.as_path(), &book_id).await
-    {
+    if let Ok(Some(media)) = load_persisted_book_media_from_services(&app, &book_id).await {
         let Some(user) =
-            resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+            resolved_request_auth_user(&headers, app.auth_db.database_file.as_path()).await
         else {
             return StatusCode::UNAUTHORIZED.into_response();
         };
-        if !user_can_access_book_media(auth_db.database_file.as_path(), &book_id, &user, &media)
-            .await
-        {
+        if !user_can_access_book_media(&app, &book_id, &user, &media).await {
             return StatusCode::FORBIDDEN.into_response();
         }
 
-        match load_selected_book_thumbnail(auth_db.database_file.as_path(), &book_id).await {
+        match load_selected_book_thumbnail_from_services(&app, &book_id).await {
             Ok(Some(thumbnail)) => {
                 let etag = asset_etag(thumbnail.thumbnail.as_slice());
                 if if_none_match_matches(&headers, etag.as_str()) {
@@ -54,26 +51,21 @@ pub async fn book_thumbnail(
 }
 
 async fn book_thumbnail_opds_response(
-    auth_db: &AuthDatabaseState,
+    app: &HttpAppState,
     headers: &HeaderMap,
     book_id: &str,
 ) -> Response {
-    if let Ok(Some(media)) =
-        load_persisted_book_media(auth_db.database_file.as_path(), book_id).await
-    {
-        let Some(user) = resolved_request_auth_user(headers, auth_db.database_file.as_path()).await
+    if let Ok(Some(media)) = load_persisted_book_media_from_services(app, book_id).await {
+        let Some(user) =
+            resolved_request_auth_user(headers, app.auth_db.database_file.as_path()).await
         else {
             return StatusCode::UNAUTHORIZED.into_response();
         };
-        if !user_can_access_book_media(auth_db.database_file.as_path(), book_id, &user, &media)
-            .await
-        {
+        if !user_can_access_book_media(app, book_id, &user, &media).await {
             return StatusCode::FORBIDDEN.into_response();
         }
 
-        if let Some(bytes) =
-            load_book_thumbnail_source_bytes(auth_db.database_file.as_path(), book_id, &media).await
-        {
+        if let Some(bytes) = load_book_thumbnail_source_bytes(app, book_id, &media).await {
             return response_from_thumbnail_jpeg_bytes(headers, bytes);
         }
 
@@ -84,25 +76,22 @@ async fn book_thumbnail_opds_response(
 }
 
 async fn book_thumbnail_opds_small_response(
-    auth_db: &AuthDatabaseState,
+    app: &HttpAppState,
     headers: &HeaderMap,
     book_id: &str,
     max_edge: u32,
 ) -> Response {
-    if let Ok(Some(media)) =
-        load_persisted_book_media(auth_db.database_file.as_path(), book_id).await
-    {
-        let Some(user) = resolved_request_auth_user(headers, auth_db.database_file.as_path()).await
+    if let Ok(Some(media)) = load_persisted_book_media_from_services(app, book_id).await {
+        let Some(user) =
+            resolved_request_auth_user(headers, app.auth_db.database_file.as_path()).await
         else {
             return StatusCode::UNAUTHORIZED.into_response();
         };
-        if !user_can_access_book_media(auth_db.database_file.as_path(), book_id, &user, &media)
-            .await
-        {
+        if !user_can_access_book_media(app, book_id, &user, &media).await {
             return StatusCode::FORBIDDEN.into_response();
         }
 
-        match load_selected_book_thumbnail(auth_db.database_file.as_path(), book_id).await {
+        match load_selected_book_thumbnail_from_services(app, book_id).await {
             Ok(Some(thumbnail)) => {
                 if thumbnail.thumbnail_type == "GENERATED" {
                     return response_from_thumbnail_bytes(
@@ -128,38 +117,37 @@ async fn book_thumbnail_opds_small_response(
 }
 
 pub async fn book_thumbnail_opds(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    book_thumbnail_opds_response(&auth_db, &headers, &book_id).await
+    book_thumbnail_opds_response(&app, &headers, &book_id).await
 }
 
 pub async fn book_thumbnail_opds_small(
-    Extension(operational): Extension<OperationalState>,
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    let settings = match crate::operational_settings_access::server_settings::load_server_settings(
-        operational.settings_store.as_ref(),
-    )
-    .await
-    {
+    let settings = match app.services.server_settings.load_settings().await {
         Ok(settings) => settings,
         Err(error) => return internal_error_response(error),
     };
 
     book_thumbnail_opds_small_response(
-        &auth_db,
+        &app,
         &headers,
         &book_id,
         thumbnail_max_edge_from_setting(settings.thumbnail_size),
@@ -168,30 +156,28 @@ pub async fn book_thumbnail_opds_small(
 }
 
 pub async fn book_thumbnail_by_id(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path((book_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    if let Ok(Some(media)) =
-        load_persisted_book_media(auth_db.database_file.as_path(), &book_id).await
-    {
+    if let Ok(Some(media)) = load_persisted_book_media_from_services(&app, &book_id).await {
         let Some(user) =
-            resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+            resolved_request_auth_user(&headers, app.auth_db.database_file.as_path()).await
         else {
             return StatusCode::UNAUTHORIZED.into_response();
         };
-        if !user_can_access_book_media(auth_db.database_file.as_path(), &book_id, &user, &media)
-            .await
-        {
+        if !user_can_access_book_media(&app, &book_id, &user, &media).await {
             return StatusCode::FORBIDDEN.into_response();
         }
     }
 
-    match load_book_thumbnail_by_id(auth_db.database_file.as_path(), &thumbnail_id).await {
+    match load_book_thumbnail_by_id_from_services(&app, &thumbnail_id).await {
         Ok(Some(thumbnail)) => response_from_thumbnail_jpeg_bytes(&headers, thumbnail.thumbnail),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
@@ -199,33 +185,31 @@ pub async fn book_thumbnail_by_id(
 }
 
 pub async fn book_thumbnails(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    if let Ok(Some(media)) =
-        load_persisted_book_media(auth_db.database_file.as_path(), &book_id).await
-    {
+    if let Ok(Some(media)) = load_persisted_book_media_from_services(&app, &book_id).await {
         let Some(user) =
-            resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+            resolved_request_auth_user(&headers, app.auth_db.database_file.as_path()).await
         else {
             return StatusCode::UNAUTHORIZED.into_response();
         };
-        if !user_can_access_book_media(auth_db.database_file.as_path(), &book_id, &user, &media)
-            .await
-        {
+        if !user_can_access_book_media(&app, &book_id, &user, &media).await {
             return StatusCode::FORBIDDEN.into_response();
         }
     }
 
-    match load_persisted_book_thumbnails(auth_db.database_file.as_path(), &book_id).await {
+    match load_persisted_book_thumbnails_from_services(&app, &book_id).await {
         Ok(rows) => {
             if rows.is_empty() {
-                if persisted_book_exists(auth_db.database_file.as_path(), &book_id)
+                if persisted_book_exists_from_services(&app, &book_id)
                     .await
                     .unwrap_or(false)
                 {
@@ -260,16 +244,18 @@ pub async fn book_thumbnails(
 }
 
 pub async fn book_thumbnail_upload(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
     multipart: Multipart,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_admin(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    if !persisted_book_exists(auth_db.database_file.as_path(), &book_id)
+    if !persisted_book_exists_from_services(&app, &book_id)
         .await
         .unwrap_or(false)
     {
@@ -285,8 +271,8 @@ pub async fn book_thumbnail_upload(
         return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
     };
 
-    match insert_book_thumbnail(
-        auth_db.database_file.as_path(),
+    match insert_book_thumbnail_from_services(
+        &app,
         &book_id,
         &thumbnail_bytes,
         media_type.as_str(),
@@ -312,15 +298,17 @@ pub async fn book_thumbnail_upload(
 }
 
 pub async fn book_thumbnail_select(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path((_book_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_admin(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    match select_book_thumbnail(auth_db.database_file.as_path(), &thumbnail_id).await {
+    match select_book_thumbnail_from_services(&app, &thumbnail_id).await {
         Ok(true) => {
             let mut response = StatusCode::ACCEPTED.into_response();
             mark_runtime_owned(&mut response);
@@ -332,15 +320,17 @@ pub async fn book_thumbnail_select(
 }
 
 pub async fn book_thumbnail_delete(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path((book_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_admin(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    match delete_book_thumbnail(auth_db.database_file.as_path(), &book_id, &thumbnail_id).await {
+    match delete_book_thumbnail_from_services(&app, &book_id, &thumbnail_id).await {
         Ok(true) => {
             let mut response = StatusCode::ACCEPTED.into_response();
             mark_runtime_owned(&mut response);

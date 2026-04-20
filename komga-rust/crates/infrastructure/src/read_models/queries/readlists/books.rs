@@ -28,7 +28,6 @@ pub(super) async fn list_readlist_books_sqlx(
             FROM readlists
             WHERE id = ?
         "#,
-
     )
     .bind(&query.readlist_id)
     .fetch_optional(&pool)
@@ -50,7 +49,6 @@ pub(super) async fn list_readlist_books_sqlx(
             JOIN books b ON b.id = rlb.book_id
             JOIN series s ON s.id = b.series_id
         "#,
-
     );
     let mut count_state = SqlxWhereState::default();
     apply_books_filters_sqlx(

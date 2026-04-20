@@ -107,20 +107,17 @@ impl PlannedTaskKind {
             Self::FindBooksWithMissingPageHash => TaskDescriptor {
                 runtime_simple_type: "FIND_BOOKS_WITH_MISSING_PAGE_HASH",
                 persisted_simple_type: "FindBooksWithMissingPageHash",
-                persisted_class_name:
-                    "org.gotson.komga.application.tasks.Task$FindBooksWithMissingPageHash",
+                persisted_class_name: "org.gotson.komga.application.tasks.Task$FindBooksWithMissingPageHash",
             },
             Self::FindDuplicatePagesToDelete => TaskDescriptor {
                 runtime_simple_type: "FIND_DUPLICATE_PAGES_TO_DELETE",
                 persisted_simple_type: "FindDuplicatePagesToDelete",
-                persisted_class_name:
-                    "org.gotson.komga.application.tasks.Task$FindDuplicatePagesToDelete",
+                persisted_class_name: "org.gotson.komga.application.tasks.Task$FindDuplicatePagesToDelete",
             },
             Self::FindBookThumbnailsToRegenerate => TaskDescriptor {
                 runtime_simple_type: "FIND_BOOK_THUMBNAILS_TO_REGENERATE",
                 persisted_simple_type: "FindBookThumbnailsToRegenerate",
-                persisted_class_name:
-                    "org.gotson.komga.application.tasks.Task$FindBookThumbnailsToRegenerate",
+                persisted_class_name: "org.gotson.komga.application.tasks.Task$FindBookThumbnailsToRegenerate",
             },
             Self::RefreshBookMetadata => TaskDescriptor {
                 runtime_simple_type: "REFRESH_BOOK_METADATA",
@@ -130,26 +127,22 @@ impl PlannedTaskKind {
             Self::RefreshBookLocalArtwork => TaskDescriptor {
                 runtime_simple_type: "REFRESH_BOOK_LOCAL_ARTWORK",
                 persisted_simple_type: "RefreshBookLocalArtwork",
-                persisted_class_name:
-                    "org.gotson.komga.application.tasks.Task$RefreshBookLocalArtwork",
+                persisted_class_name: "org.gotson.komga.application.tasks.Task$RefreshBookLocalArtwork",
             },
             Self::RefreshSeriesLocalArtwork => TaskDescriptor {
                 runtime_simple_type: "REFRESH_SERIES_LOCAL_ARTWORK",
                 persisted_simple_type: "RefreshSeriesLocalArtwork",
-                persisted_class_name:
-                    "org.gotson.komga.application.tasks.Task$RefreshSeriesLocalArtwork",
+                persisted_class_name: "org.gotson.komga.application.tasks.Task$RefreshSeriesLocalArtwork",
             },
             Self::RefreshSeriesMetadata => TaskDescriptor {
                 runtime_simple_type: "REFRESH_SERIES_METADATA",
                 persisted_simple_type: "RefreshSeriesMetadata",
-                persisted_class_name:
-                    "org.gotson.komga.application.tasks.Task$RefreshSeriesMetadata",
+                persisted_class_name: "org.gotson.komga.application.tasks.Task$RefreshSeriesMetadata",
             },
             Self::AggregateSeriesMetadata => TaskDescriptor {
                 runtime_simple_type: "AGGREGATE_SERIES_METADATA",
                 persisted_simple_type: "AggregateSeriesMetadata",
-                persisted_class_name:
-                    "org.gotson.komga.application.tasks.Task$AggregateSeriesMetadata",
+                persisted_class_name: "org.gotson.komga.application.tasks.Task$AggregateSeriesMetadata",
             },
             Self::RepairExtension => TaskDescriptor {
                 runtime_simple_type: "REPAIR_EXTENSION",
@@ -159,8 +152,7 @@ impl PlannedTaskKind {
             Self::GenerateBookThumbnail => TaskDescriptor {
                 runtime_simple_type: "GENERATE_BOOK_THUMBNAIL",
                 persisted_simple_type: "GenerateBookThumbnail",
-                persisted_class_name:
-                    "org.gotson.komga.application.tasks.Task$GenerateBookThumbnail",
+                persisted_class_name: "org.gotson.komga.application.tasks.Task$GenerateBookThumbnail",
             },
             Self::HashBook => TaskDescriptor {
                 runtime_simple_type: "HASH_BOOK",

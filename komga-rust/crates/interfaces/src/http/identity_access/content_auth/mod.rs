@@ -8,10 +8,9 @@ use serde_json::Value;
 use serde_json::json;
 use std::collections::BTreeSet;
 
-use super::super::AuthDatabaseState;
 use crate::http::access_log::RequestConnectionInfo;
 use crate::http::discovery_auth::principal::principal_from_user_payload;
-use crate::http::discovery_auth::state::DiscoveryAuthState;
+
 use crate::http::identity_access::auth::{
     AuthOutcome, AuthUser, PersistedAuthenticationActivity, bootstrap_api_key_user, bootstrap_user,
     bootstrap_user_with_remember_me_cookies, bootstrap_user_with_remember_me_token,
@@ -27,10 +26,9 @@ use crate::http::identity_access::auth::{
     unauthorized_json_response, user_id, user_is_admin, user_payload_json,
 };
 use crate::http::operational::register_session_expired_event;
-use crate::http::state::OperationalState;
+use crate::http::state::HttpAppState;
 use crate::runtime_identity_access::{
     AuthUserAgeRestrictionInput, CreateAuthUserInput, SharedLibrariesInput, UpdateAuthUserInput,
-    create_auth_user, delete_auth_user, update_auth_user,
 };
 
 mod activity_routes;
@@ -43,11 +41,9 @@ use activity_routes::{
 };
 use helpers::*;
 
-pub(super) async fn users_me(
-    auth_state: DiscoveryAuthState,
-    auth_db: AuthDatabaseState,
-    request: Request,
-) -> Response {
+pub(super) async fn users_me(app: &HttpAppState, request: Request) -> Response {
+    let auth_db = &app.auth_db;
+    let auth_state = &app.discovery_auth;
     let uri = request.uri().clone();
     let headers = request.headers().clone();
     let request_metadata = authentication_activity_request_metadata(&request);
@@ -79,7 +75,7 @@ pub(super) async fn users_me(
                 auth_db.session_runtime_key.as_str(),
             );
             register_discovery_principal(
-                &auth_state,
+                auth_state,
                 &crate::http::identity_access::auth::user_payload_json(&user),
                 &token,
             );
@@ -105,7 +101,7 @@ pub(super) async fn users_me(
             session_token_for_user_with_runtime_key(&user, auth_db.session_runtime_key.as_str())
         });
         let payload = crate::http::identity_access::auth::user_payload_json(&user);
-        register_discovery_principal(&auth_state, &payload, &token);
+        register_discovery_principal(auth_state, &payload, &token);
         if session_token_from_headers(&headers).is_some() {
             return Json(payload).into_response();
         }
@@ -140,7 +136,7 @@ pub(super) async fn users_me(
                     auth_db.session_runtime_key.as_str(),
                 );
                 register_discovery_principal(
-                    &auth_state,
+                    auth_state,
                     &crate::http::identity_access::auth::user_payload_json(&user),
                     &token,
                 );
@@ -156,7 +152,7 @@ pub(super) async fn users_me(
                     auth_db.session_runtime_key.as_str(),
                 );
                 register_discovery_principal(
-                    &auth_state,
+                    auth_state,
                     &crate::http::identity_access::auth::user_payload_json(&user),
                     &token,
                 );
@@ -180,7 +176,7 @@ pub(super) async fn users_me(
                 auth_db.session_runtime_key.as_str(),
             );
             register_discovery_principal(
-                &auth_state,
+                auth_state,
                 &crate::http::identity_access::auth::user_payload_json(&user),
                 &token,
             );
@@ -219,12 +215,12 @@ pub(super) async fn login_set_cookie(headers: HeaderMap) -> Response {
         .into_response()
 }
 
-pub(super) async fn users_list(headers: HeaderMap, auth_db: AuthDatabaseState) -> Response {
+pub(super) async fn users_list(headers: HeaderMap, app: &HttpAppState) -> Response {
     if let Some(response) = require_admin(&headers) {
         return response;
     }
 
-    let users = persisted_users(auth_db.database_file.as_path())
+    let users = persisted_users(app.auth_db.database_file.as_path())
         .await
         .unwrap_or_default();
 
@@ -232,12 +228,13 @@ pub(super) async fn users_list(headers: HeaderMap, auth_db: AuthDatabaseState) -
 }
 
 pub(super) async fn users_create(
+    app: HttpAppState,
     headers: HeaderMap,
     connection_info: RequestConnectionInfo,
     body: Value,
-    auth_db: AuthDatabaseState,
 ) -> Response {
-    let Some(current_user) = authenticated_user(&headers, connection_info, &auth_db).await else {
+    let auth_db = &app.auth_db;
+    let Some(current_user) = authenticated_user(&headers, connection_info, &app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if !user_is_admin(&current_user) {
@@ -293,26 +290,29 @@ pub(super) async fn users_create(
         Err(response) => return response,
     };
 
-    match create_auth_user(
-        auth_db.database_file.as_path(),
-        CreateAuthUserInput {
-            user_id: new_user_id,
-            email: email.to_string(),
-            password_hash: hashed_password,
-            roles,
-            shared_libraries: SharedLibrariesInput {
-                all: shared_libraries.all,
-                library_ids: shared_libraries.library_ids,
+    match app
+        .services
+        .runtime_identity
+        .create_auth_user(
+            auth_db.database_file.clone(),
+            CreateAuthUserInput {
+                user_id: new_user_id,
+                email: email.to_string(),
+                password_hash: hashed_password,
+                roles,
+                shared_libraries: SharedLibrariesInput {
+                    all: shared_libraries.all,
+                    library_ids: shared_libraries.library_ids,
+                },
+                labels_allow,
+                labels_exclude,
+                age_restriction: age_restriction.map(|value| AuthUserAgeRestrictionInput {
+                    age: value.age,
+                    allow_only: value.allow_only,
+                }),
             },
-            labels_allow,
-            labels_exclude,
-            age_restriction: age_restriction.map(|value| AuthUserAgeRestrictionInput {
-                age: value.age,
-                allow_only: value.allow_only,
-            }),
-        },
-    )
-    .await
+        )
+        .await
     {
         Ok(Some(user)) => (StatusCode::CREATED, Json(user_payload_json(&user))).into_response(),
         Ok(None) => spring_error(
@@ -325,13 +325,13 @@ pub(super) async fn users_create(
 }
 
 pub(super) async fn users_delete(
+    app: HttpAppState,
     headers: HeaderMap,
     connection_info: RequestConnectionInfo,
     Path(target_user_id): Path<String>,
-    auth_db: AuthDatabaseState,
-    state: OperationalState,
 ) -> Response {
-    let Some(current_user) = authenticated_user(&headers, connection_info, &auth_db).await else {
+    let auth_db = &app.auth_db;
+    let Some(current_user) = authenticated_user(&headers, connection_info, &app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if !user_is_admin(&current_user) && user_id(&current_user) != target_user_id {
@@ -341,13 +341,18 @@ pub(super) async fn users_delete(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    match delete_auth_user(auth_db.database_file.as_path(), &target_user_id).await {
+    match app
+        .services
+        .runtime_identity
+        .delete_auth_user(auth_db.database_file.clone(), target_user_id.clone())
+        .await
+    {
         Ok(true) => {
             invalidate_user_sessions_for_runtime_key(
                 &target_user_id,
                 auth_db.session_runtime_key.as_str(),
             );
-            register_session_expired_event(&state, &target_user_id);
+            register_session_expired_event(&target_user_id);
             StatusCode::NO_CONTENT.into_response()
         }
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
@@ -356,14 +361,14 @@ pub(super) async fn users_delete(
 }
 
 pub(super) async fn users_update(
+    app: HttpAppState,
     headers: HeaderMap,
     connection_info: RequestConnectionInfo,
     Path(target_user_id): Path<String>,
     body: Value,
-    auth_db: AuthDatabaseState,
-    state: OperationalState,
 ) -> Response {
-    let Some(current_user) = authenticated_user(&headers, connection_info, &auth_db).await else {
+    let auth_db = &app.auth_db;
+    let Some(current_user) = authenticated_user(&headers, connection_info, &app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if !user_is_admin(&current_user) && user_id(&current_user) != target_user_id {
@@ -422,28 +427,31 @@ pub(super) async fn users_update(
         None
     };
 
-    match update_auth_user(
-        auth_db.database_file.as_path(),
-        &target_user_id,
-        UpdateAuthUserInput {
-            roles: roles_patch,
-            shared_libraries: shared_libraries_patch_raw.map(|shared_libraries| {
-                SharedLibrariesInput {
-                    all: shared_libraries.all,
-                    library_ids: shared_libraries.library_ids,
-                }
-            }),
-            labels_allow: labels_allow_patch,
-            labels_exclude: labels_exclude_patch,
-            age_restriction: age_restriction_patch.map(|patch| {
-                patch.map(|value| AuthUserAgeRestrictionInput {
-                    age: value.age,
-                    allow_only: value.allow_only,
-                })
-            }),
-        },
-    )
-    .await
+    match app
+        .services
+        .runtime_identity
+        .update_auth_user(
+            auth_db.database_file.clone(),
+            target_user_id.clone(),
+            UpdateAuthUserInput {
+                roles: roles_patch,
+                shared_libraries: shared_libraries_patch_raw.map(|shared_libraries| {
+                    SharedLibrariesInput {
+                        all: shared_libraries.all,
+                        library_ids: shared_libraries.library_ids,
+                    }
+                }),
+                labels_allow: labels_allow_patch,
+                labels_exclude: labels_exclude_patch,
+                age_restriction: age_restriction_patch.map(|patch| {
+                    patch.map(|value| AuthUserAgeRestrictionInput {
+                        age: value.age,
+                        allow_only: value.allow_only,
+                    })
+                }),
+            },
+        )
+        .await
     {
         Ok(result) if !result.updated => StatusCode::NOT_FOUND.into_response(),
         Ok(result) => {
@@ -452,7 +460,7 @@ pub(super) async fn users_update(
                     &target_user_id,
                     auth_db.session_runtime_key.as_str(),
                 );
-                register_session_expired_event(&state, &target_user_id);
+                register_session_expired_event(&target_user_id);
             }
             StatusCode::NO_CONTENT.into_response()
         }
@@ -480,9 +488,10 @@ pub(super) async fn users_me_password(
     headers: HeaderMap,
     connection_info: RequestConnectionInfo,
     body: Value,
-    auth_db: AuthDatabaseState,
+    app: &HttpAppState,
 ) -> Response {
-    let Some(current_user) = authenticated_user(&headers, connection_info, &auth_db).await else {
+    let auth_db = &app.auth_db;
+    let Some(current_user) = authenticated_user(&headers, connection_info, app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
@@ -511,10 +520,10 @@ pub(super) async fn users_by_id_password(
     connection_info: RequestConnectionInfo,
     Path(target_user_id): Path<String>,
     body: Value,
-    auth_db: AuthDatabaseState,
-    state: OperationalState,
+    app: &HttpAppState,
 ) -> Response {
-    let Some(current_user) = authenticated_user(&headers, connection_info, &auth_db).await else {
+    let auth_db = &app.auth_db;
+    let Some(current_user) = authenticated_user(&headers, connection_info, app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if !user_is_admin(&current_user) && user_id(&current_user) != target_user_id {
@@ -541,7 +550,7 @@ pub(super) async fn users_by_id_password(
                     &target_user_id,
                     auth_db.session_runtime_key.as_str(),
                 );
-                register_session_expired_event(&state, &target_user_id);
+                register_session_expired_event(&target_user_id);
             }
             StatusCode::NO_CONTENT.into_response()
         }
@@ -551,122 +560,118 @@ pub(super) async fn users_by_id_password(
 }
 
 pub(crate) async fn users_me_route(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(app): Extension<HttpAppState>,
     request: Request,
 ) -> Response {
-    users_me(auth_state, auth_db, request).await
+    users_me(&app, request).await
 }
 
 pub(crate) async fn users_list_route(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
-    users_list(headers, auth_db).await
+    users_list(headers, &app).await
 }
 
 pub(crate) async fn users_create_route(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    users_create(headers, connection_info, body, auth_db).await
+    users_create(app, headers, connection_info, body).await
 }
 
 pub(crate) async fn users_update_route(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     path: Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    users_update(headers, connection_info, path, body, auth_db, state).await
+    users_update(app, headers, connection_info, path, body).await
 }
 
 pub(crate) async fn users_delete_route(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     path: Path<String>,
 ) -> Response {
-    users_delete(headers, connection_info, path, auth_db, state).await
+    users_delete(app, headers, connection_info, path).await
 }
 
 pub(crate) async fn users_me_password_route(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    users_me_password(headers, connection_info, body, auth_db).await
+    users_me_password(headers, connection_info, body, &app).await
 }
 
 pub(crate) async fn users_by_id_password_route(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     path: Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    users_by_id_password(headers, connection_info, path, body, auth_db, state).await
+    users_by_id_password(headers, connection_info, path, body, &app).await
 }
 
 pub(crate) async fn users_me_api_keys_create_route(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    users_me_api_keys_create(headers, connection_info, body, auth_db).await
+    users_me_api_keys_create(headers, connection_info, body, &app).await
 }
 
 pub(crate) async fn users_me_api_keys_list_route(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
 ) -> Response {
-    users_me_api_keys_list(headers, connection_info, auth_db).await
+    users_me_api_keys_list(headers, connection_info, &app).await
 }
 
 pub(crate) async fn users_me_api_keys_delete_route(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     path: Path<String>,
 ) -> Response {
-    users_me_api_keys_delete(headers, connection_info, path, auth_db).await
+    users_me_api_keys_delete(headers, connection_info, path, &app).await
 }
 
 pub(crate) async fn users_me_authentication_activity_route(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    users_me_authentication_activity(headers, connection_info, uri, auth_db).await
+    users_me_authentication_activity(headers, connection_info, uri, &app).await
 }
 
 pub(crate) async fn users_authentication_activity_route(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    users_authentication_activity(headers, connection_info, uri, auth_db).await
+    users_authentication_activity(headers, connection_info, uri, &app).await
 }
 
 pub(crate) async fn users_by_id_authentication_activity_latest_route(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     path: Path<String>,
     uri: Uri,
 ) -> Response {
-    users_by_id_authentication_activity_latest(headers, connection_info, path, uri, auth_db).await
+    users_by_id_authentication_activity_latest(headers, connection_info, path, uri, &app).await
 }
 
 pub(crate) async fn login_set_cookie_route(headers: HeaderMap) -> Response {

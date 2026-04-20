@@ -1,6 +1,5 @@
 use crate::http::request_urls::request_context_path;
 use axum::body::Bytes;
-use axum::extract::Extension;
 use axum::extract::Path as AxumPath;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -9,7 +8,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{LazyLock, RwLock};
 
-use super::{super::OperationalState, webui_assets::WebUiAssets};
+use super::webui_assets::WebUiAssets;
 
 const RESOURCE_BASE_URL_TEMPLATE_MARKER: &str =
     concat!("/*[(${", "\"'\" + baseUrl + \"'\"", "})]*/ '/'",);
@@ -61,10 +60,7 @@ impl IndexHtmlCache {
     }
 }
 
-pub(crate) async fn webui_entrypoint(
-    headers: HeaderMap,
-    Extension(_state): Extension<OperationalState>,
-) -> Response {
+pub(crate) async fn webui_entrypoint(headers: HeaderMap) -> Response {
     let resource_base_url = request_scoped_resource_base_url(&headers);
     serve_webui_asset("", resource_base_url.as_str())
 }
@@ -72,7 +68,6 @@ pub(crate) async fn webui_entrypoint(
 pub(crate) async fn webui_asset(
     AxumPath(webui_path): AxumPath<String>,
     headers: HeaderMap,
-    Extension(_state): Extension<OperationalState>,
 ) -> Response {
     if is_runtime_owned_prefix(webui_path.as_str()) {
         return StatusCode::NOT_FOUND.into_response();
@@ -323,6 +318,8 @@ fn content_type_for(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(webui_dist_present)]
+    use super::super::webui_assets::WebUiAssets;
     use super::{
         INDEX_HTML_CACHE_MAX_ENTRIES, IndexHtmlCache, content_type_for, is_runtime_owned_prefix,
         request_scoped_resource_base_url, resolve_embedded_asset_path, serve_webui_asset,
@@ -336,8 +333,6 @@ mod tests {
     use axum::http::header;
     use axum::http::{HeaderMap, StatusCode};
     use std::path::Path;
-    #[cfg(webui_dist_present)]
-    use super::super::webui_assets::WebUiAssets;
 
     #[cfg(webui_dist_present)]
     #[tokio::test]

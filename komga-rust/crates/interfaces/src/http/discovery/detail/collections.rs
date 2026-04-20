@@ -1,10 +1,10 @@
 use super::collections_support::PersistedCollectionWriteInput;
 use super::*;
-use crate::http::discovery::persisted::backend::persisted_backend_search_collection_ids;
 use crate::http::discovery::persisted::common_helpers::decode_query_component;
 use crate::http::discovery::series::series_list;
 use crate::http::discovery::series_routes::author_query_to_author_match;
 use crate::http::helpers::validation_error_response;
+use crate::http::state::HttpAppState;
 use axum::body::{Body, to_bytes};
 use icu::collator::{
     Collator,
@@ -21,42 +21,36 @@ struct CollectionPatchInput {
 }
 
 pub async fn collection_series(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(collection_id): Path<String>,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    let visible_context = match auth_state
-        .resolve_query_context_with_persistence(&headers, None, auth_db.database_file.as_path())
+    let visible_context = match app
+        .discovery_auth
+        .resolve_query_context_with_persistence(&headers, None, app.auth_db.database_file.as_path())
         .await
     {
         Some(context) => context,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
     let query_string = uri.query().unwrap_or_default();
-    let collection =
-        match load_persisted_collection_detail(auth_db.database_file.as_path(), &collection_id)
-            .await
-        {
-            Ok(Some(collection)) => collection,
-            Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-            Err(error) => return internal_error_response(error),
-        };
-    let visible_series_ids = match visible_collection_series_ids(
-        auth_db.database_file.as_path(),
-        &visible_context,
-        &collection,
-    )
-    .await
-    {
-        Ok(ids) => ids,
+    let collection = match load_persisted_collection_detail(&app, &collection_id).await {
+        Ok(Some(collection)) => collection,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
     };
+    let visible_series_ids =
+        match visible_collection_series_ids(&app, &visible_context, &collection).await {
+            Ok(ids) => ids,
+            Err(error) => return internal_error_response(error),
+        };
     if visible_series_ids.is_empty() {
         return StatusCode::NOT_FOUND.into_response();
     }
@@ -143,8 +137,7 @@ pub async fn collection_series(
 
     let adjusted_uri = collection_series_runtime_uri(&uri, collection.ordered);
     let response = series_list(
-        Extension(auth_db),
-        Extension(auth_state),
+        Extension(app),
         headers,
         adjusted_uri,
         Bytes::from(body.to_string()),
@@ -159,13 +152,13 @@ pub async fn collection_series(
 }
 
 async fn visible_collection_series_ids(
-    database_file: &FsPath,
+    app: &HttpAppState,
     context: &DiscoveryQueryContext,
     collection: &CollectionReadModel,
 ) -> Result<Vec<String>, String> {
     let mut visible_series_ids = Vec::with_capacity(collection.series_ids.len());
     for series_id in &collection.series_ids {
-        if series_visible_to_context(database_file, context, series_id, None).await? {
+        if series_visible_to_context(app, context, series_id, None).await? {
             visible_series_ids.push(series_id.clone());
         }
     }
@@ -338,12 +331,13 @@ fn query_bool_option(query: &str, key: &str) -> Option<bool> {
 }
 
 pub async fn collections(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
@@ -365,23 +359,23 @@ pub async fn collections(
         .collect::<Vec<_>>();
     let unpaged = query_bool(query_string, "unpaged");
 
-    let visible_context = match auth_state
-        .resolve_query_context_with_persistence(&headers, None, auth_db.database_file.as_path())
+    let visible_context = match app
+        .discovery_auth
+        .resolve_query_context_with_persistence(&headers, None, app.auth_db.database_file.as_path())
         .await
     {
         Some(context) => context,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    let mut content = if auth_db.database_file.exists() {
-        let persisted_rows_exist =
-            match persisted_collections_exist(auth_db.database_file.as_path()).await {
-                Ok(exists) => exists,
-                Err(error) => return internal_error_response(error),
-            };
+    let mut content = if app.auth_db.database_file.exists() {
+        let persisted_rows_exist = match persisted_collections_exist(&app).await {
+            Ok(exists) => exists,
+            Err(error) => return internal_error_response(error),
+        };
 
         if persisted_rows_exist {
-            match load_persisted_collections(auth_db.database_file.as_path()).await {
+            match load_persisted_collections(&app).await {
                 Ok(collections) => collections,
                 Err(error) => return internal_error_response(error),
             }
@@ -395,11 +389,12 @@ pub async fn collections(
     let request_scope_context = if requested_library_ids.is_empty() {
         None
     } else {
-        match auth_state
+        match app
+            .discovery_auth
             .resolve_query_context_with_persistence(
                 &headers,
                 Some(&requested_library_ids),
-                auth_db.database_file.as_path(),
+                app.auth_db.database_file.as_path(),
             )
             .await
         {
@@ -412,18 +407,17 @@ pub async fn collections(
         let mut visible_series_ids = Vec::with_capacity(collection.series_ids.len());
         let mut matches_requested_scope = request_scope_context.is_none();
         for series_id in &collection.series_ids {
-            let series_library_id =
-                match load_series_library_id(auth_db.database_file.as_path(), series_id).await {
-                    Ok(Some(value)) => value,
-                    Ok(None) => continue,
-                    Err(error) => return internal_error_response(error),
-                };
+            let series_library_id = match load_series_library_id(&app, series_id).await {
+                Ok(Some(value)) => value,
+                Ok(None) => continue,
+                Err(error) => return internal_error_response(error),
+            };
 
             if let Some(request_context) = request_scope_context.as_ref()
                 && !matches_requested_scope
             {
                 match series_visible_to_context(
-                    auth_db.database_file.as_path(),
+                    &app,
                     request_context,
                     series_id,
                     Some(series_library_id.as_str()),
@@ -437,7 +431,7 @@ pub async fn collections(
             }
 
             match series_visible_to_context(
-                auth_db.database_file.as_path(),
+                &app,
                 &visible_context,
                 series_id,
                 Some(series_library_id.as_str()),
@@ -463,12 +457,15 @@ pub async fn collections(
     content.retain(|collection| !collection.series_ids.is_empty());
 
     if let Some(search) = search.as_ref() {
-        let ranked_ids: Vec<String> = match persisted_backend_search_collection_ids(
-            auth_db.database_file.as_path(),
-            search,
-            search_limit,
-        )
-        .await
+        let ranked_ids: Vec<String> = match app
+            .services
+            .discovery_persisted
+            .search_collection_ids(
+                app.auth_db.database_file.clone(),
+                search.to_string(),
+                search_limit,
+            )
+            .await
         {
             Ok(ids) => ids,
             Err(error) => return internal_error_response(error),
@@ -517,12 +514,13 @@ pub async fn collections(
 }
 
 pub async fn collection_create(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(operational): Extension<crate::http::state::OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_admin(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
@@ -532,7 +530,7 @@ pub async fn collection_create(
         Err(response) => return response,
     };
 
-    match load_persisted_collections(auth_db.database_file.as_path()).await {
+    match load_persisted_collections(&app).await {
         Ok(collections)
             if collections
                 .iter()
@@ -544,23 +542,16 @@ pub async fn collection_create(
         Err(error) => return internal_error_response(error),
     }
 
-    let created_id = match persist_collection_create(auth_db.database_file.as_path(), &input).await
-    {
+    let created_id = match persist_collection_create(&app, &input).await {
         Ok(id) => id,
         Err(error) => return internal_error_response(error),
     };
 
-    if let Err(error) = upsert_collection_search_document(
-        auth_db.database_file.as_path(),
-        operational.runtime.lucene_data_directory.as_path(),
-        &created_id,
-    )
-    .await
-    {
+    if let Err(error) = upsert_collection_search_document(&app, &created_id).await {
         return internal_error_response(error);
     }
 
-    match load_persisted_collection_detail(auth_db.database_file.as_path(), &created_id).await {
+    match load_persisted_collection_detail(&app, &created_id).await {
         Ok(Some(collection)) => Json(collection_payload(&collection)).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
@@ -817,38 +808,31 @@ fn collections_unicode_collator() -> icu::collator::CollatorBorrowed<'static> {
 }
 
 pub async fn collection_detail(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(collection_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    let context = match auth_state
-        .resolve_query_context_with_persistence(&headers, None, auth_db.database_file.as_path())
+    let context = match app
+        .discovery_auth
+        .resolve_query_context_with_persistence(&headers, None, app.auth_db.database_file.as_path())
         .await
     {
         Some(context) => context,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    if auth_db.database_file.exists() {
-        match load_persisted_collection_detail(auth_db.database_file.as_path(), &collection_id)
-            .await
-        {
+    if app.auth_db.database_file.exists() {
+        match load_persisted_collection_detail(&app, &collection_id).await {
             Ok(Some(mut collection)) => {
                 let mut visible_series_ids = Vec::with_capacity(collection.series_ids.len());
                 for series_id in &collection.series_ids {
-                    match series_visible_to_context(
-                        auth_db.database_file.as_path(),
-                        &context,
-                        series_id,
-                        None,
-                    )
-                    .await
-                    {
+                    match series_visible_to_context(&app, &context, series_id, None).await {
                         Ok(true) => visible_series_ids.push(series_id.clone()),
                         Ok(false) => {}
                         Err(error) => return internal_error_response(error),
@@ -875,13 +859,14 @@ pub async fn collection_detail(
 }
 
 pub async fn collection_update(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(operational): Extension<crate::http::state::OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(collection_id): Path<String>,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_admin(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
@@ -896,14 +881,11 @@ pub async fn collection_update(
         Ok(input) => input,
         Err(response) => return response,
     };
-    let existing =
-        match load_persisted_collection_detail(auth_db.database_file.as_path(), &collection_id)
-            .await
-        {
-            Ok(Some(collection)) => collection,
-            Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-            Err(error) => return internal_error_response(error),
-        };
+    let existing = match load_persisted_collection_detail(&app, &collection_id).await {
+        Ok(Some(collection)) => collection,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => return internal_error_response(error),
+    };
     let should_validate_duplicate_name = patch
         .name
         .as_ref()
@@ -911,7 +893,7 @@ pub async fn collection_update(
     let input = merge_collection_patch_input(&existing, patch);
 
     if should_validate_duplicate_name {
-        match load_persisted_collections(auth_db.database_file.as_path()).await {
+        match load_persisted_collections(&app).await {
             Ok(collections)
                 if collections.iter().any(|collection| {
                     collection.id != collection_id
@@ -928,15 +910,9 @@ pub async fn collection_update(
         }
     }
 
-    match persist_collection_update(auth_db.database_file.as_path(), &collection_id, &input).await {
+    match persist_collection_update(&app, &collection_id, &input).await {
         Ok(true) => {
-            if let Err(error) = upsert_collection_search_document(
-                auth_db.database_file.as_path(),
-                operational.runtime.lucene_data_directory.as_path(),
-                &collection_id,
-            )
-            .await
-            {
+            if let Err(error) = upsert_collection_search_document(&app, &collection_id).await {
                 return internal_error_response(error);
             }
             StatusCode::NO_CONTENT.into_response()
@@ -947,23 +923,19 @@ pub async fn collection_update(
 }
 
 pub async fn collection_delete(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(operational): Extension<crate::http::state::OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(collection_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_admin(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    match delete_persisted_collection(auth_db.database_file.as_path(), &collection_id).await {
+    match delete_persisted_collection(&app, &collection_id).await {
         Ok(true) => {
-            if let Err(error) = delete_collection_search_document(
-                operational.runtime.lucene_data_directory.as_path(),
-                &collection_id,
-            )
-            .await
-            {
+            if let Err(error) = delete_collection_search_document(&app, &collection_id).await {
                 return internal_error_response(error);
             }
             StatusCode::NO_CONTENT.into_response()

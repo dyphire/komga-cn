@@ -19,8 +19,144 @@ fn encode_kobo_thumbnail_as_jpeg(bytes: &[u8]) -> Option<Vec<u8>> {
     Some(output.into_inner())
 }
 
+async fn load_thumbnail_by_id(
+    app: &HttpAppState,
+    thumbnail_id: &str,
+) -> Result<Option<(String, Vec<u8>)>, sqlx::Error> {
+    app.services
+        .runtime_identity
+        .load_thumbnail_by_id(
+            app.operational.runtime.database_file.clone(),
+            thumbnail_id.to_string(),
+        )
+        .await
+}
+
+async fn load_kobo_metadata_record(
+    app: &HttpAppState,
+    book_id: &str,
+) -> Result<Option<crate::runtime_identity_access::KoboMetadataRecord>, sqlx::Error> {
+    app.services
+        .runtime_identity
+        .load_kobo_metadata_record(
+            app.operational.runtime.database_file.clone(),
+            book_id.to_string(),
+        )
+        .await
+}
+
+async fn load_read_progress(
+    app: &HttpAppState,
+    book_id: &str,
+    user_id: &str,
+) -> Result<Option<PersistedReadProgressRecord>, sqlx::Error> {
+    app.services
+        .runtime_identity
+        .load_read_progress(
+            app.operational.runtime.database_file.clone(),
+            book_id.to_string(),
+            user_id.to_string(),
+        )
+        .await
+}
+
+async fn persisted_book_exists(app: &HttpAppState, book_id: &str) -> Result<bool, sqlx::Error> {
+    app.services
+        .runtime_identity
+        .persisted_book_exists(
+            app.operational.runtime.database_file.clone(),
+            book_id.to_string(),
+        )
+        .await
+}
+
+async fn load_book_created_timestamp(
+    app: &HttpAppState,
+    book_id: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    app.services
+        .runtime_identity
+        .load_book_created_timestamp(
+            app.operational.runtime.database_file.clone(),
+            book_id.to_string(),
+        )
+        .await
+}
+
+async fn load_book_last_epub_position_locator(
+    app: &HttpAppState,
+    book_id: &str,
+) -> Result<Option<Value>, sqlx::Error> {
+    app.services
+        .runtime_identity
+        .load_book_last_epub_position_locator(
+            app.operational.runtime.database_file.clone(),
+            book_id.to_string(),
+        )
+        .await
+}
+
+async fn load_kobo_sync_page(
+    app: &HttpAppState,
+    current_user: &AuthUser,
+    user_id: &str,
+    current_api_key_id: Option<&str>,
+    ongoing_sync_point_id: Option<&str>,
+    last_successful_sync_point_id: Option<&str>,
+    limit: usize,
+) -> Result<komga_application::identity_access::KoboSyncPage, sqlx::Error> {
+    app.services
+        .runtime_identity
+        .load_kobo_sync_page(
+            app.operational.runtime.database_file.clone(),
+            current_user.clone(),
+            user_id.to_string(),
+            current_api_key_id.map(str::to_string),
+            ongoing_sync_point_id.map(str::to_string),
+            last_successful_sync_point_id.map(str::to_string),
+            limit,
+        )
+        .await
+}
+
+async fn proxy_kobo_store_library_sync(
+    app: &HttpAppState,
+    headers: &HeaderMap,
+    query: Option<&str>,
+    raw_store_sync_token: &str,
+) -> Result<komga_application::identity_access::KoboStoreSyncMergeResult, ()> {
+    app.services
+        .runtime_identity
+        .proxy_kobo_store_library_sync(
+            headers
+                .iter()
+                .filter_map(|(name, value)| {
+                    value
+                        .to_str()
+                        .ok()
+                        .map(|value| (name.as_str().to_string(), value.to_string()))
+                })
+                .collect::<Vec<_>>(),
+            query.map(str::to_string),
+            raw_store_sync_token.to_string(),
+        )
+        .await
+}
+
+async fn remove_sync_point(app: &HttpAppState, sync_point_id: &str) -> Result<(), sqlx::Error> {
+    app.services
+        .runtime_identity
+        .remove_sync_point(
+            app.operational.runtime.database_file.clone(),
+            sync_point_id.to_string(),
+        )
+        .await
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn kobo_book_thumbnail_response(
-    state: &OperationalState,
+    app: &HttpAppState,
+    server_settings: &dyn crate::http::state::ServerSettingsService,
     auth_token: &str,
     headers: &HeaderMap,
     remote_addr: Option<SocketAddr>,
@@ -32,14 +168,14 @@ async fn kobo_book_thumbnail_response(
         auth_token,
         headers,
         remote_addr,
-        state.runtime.database_file.as_path(),
+        app.operational.runtime.database_file.as_path(),
     )
     .await
     {
         return status.into_response();
     }
 
-    match load_thumbnail_by_id(state.runtime.database_file.as_path(), thumbnail_id).await {
+    match load_thumbnail_by_id(app, thumbnail_id).await {
         Ok(Some((media_type, bytes))) => {
             let jpeg_bytes = if media_type.eq_ignore_ascii_case("image/jpeg") {
                 bytes
@@ -58,7 +194,7 @@ async fn kobo_book_thumbnail_response(
                 .into_response()
         }
         Ok(None) => {
-            if load_kobo_proxy_enabled(state).await {
+            if load_kobo_proxy_enabled(server_settings).await {
                 let location = format!(
                     "https://cdn.kobo.com/book-images/{thumbnail_id}/{width}/{height}/false/image.jpg"
                 );
@@ -160,7 +296,7 @@ fn progress_snapshot(record: &PersistedReadProgressRecord) -> KoboSyncReadProgre
 }
 
 async fn build_kobo_sync_events_page(
-    database_file: &FsPath,
+    app: &HttpAppState,
     page: &komga_application::identity_access::KoboSyncPage,
     user_id: &str,
     base_url: &str,
@@ -169,10 +305,10 @@ async fn build_kobo_sync_events_page(
     let mut events = Vec::new();
 
     for book in &page.books_added {
-        let metadata = load_kobo_metadata_record(database_file, &book.book_id)
+        let metadata = load_kobo_metadata_record(app, &book.book_id)
             .await?
             .ok_or(sqlx::Error::RowNotFound)?;
-        let progress = load_read_progress(database_file, &book.book_id, user_id)
+        let progress = load_read_progress(app, &book.book_id, user_id)
             .await?
             .as_ref()
             .map(progress_snapshot);
@@ -191,10 +327,10 @@ async fn build_kobo_sync_events_page(
     }
 
     for book in &page.books_changed {
-        let metadata = load_kobo_metadata_record(database_file, &book.book_id)
+        let metadata = load_kobo_metadata_record(app, &book.book_id)
             .await?
             .ok_or(sqlx::Error::RowNotFound)?;
-        let progress = load_read_progress(database_file, &book.book_id, user_id)
+        let progress = load_read_progress(app, &book.book_id, user_id)
             .await?
             .as_ref()
             .map(progress_snapshot);
@@ -227,8 +363,8 @@ async fn build_kobo_sync_events_page(
     }
 
     for book in &page.books_read_progress_changed {
-        if let Some(progress) = load_read_progress(database_file, &book.book_id, user_id).await? {
-            let metadata = load_kobo_metadata_record(database_file, &book.book_id)
+        if let Some(progress) = load_read_progress(app, &book.book_id, user_id).await? {
+            let metadata = load_kobo_metadata_record(app, &book.book_id)
                 .await?
                 .ok_or(sqlx::Error::RowNotFound)?;
             let snapshot = sync_book_snapshot_from_metadata(
@@ -256,7 +392,7 @@ async fn build_kobo_sync_events_page(
 }
 
 pub async fn kobo_library_sync(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     Path(auth_token): Path<String>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
@@ -266,7 +402,7 @@ pub async fn kobo_library_sync(
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
-        state.runtime.database_file.as_path(),
+        app.operational.runtime.database_file.as_path(),
     )
     .await
     {
@@ -278,7 +414,7 @@ pub async fn kobo_library_sync(
         &current_user,
         auth_token.as_str(),
         &headers,
-        state.runtime.database_file.as_path(),
+        app.operational.runtime.database_file.as_path(),
     )
     .await
     .map(|(id, _)| id);
@@ -289,7 +425,7 @@ pub async fn kobo_library_sync(
 
     let base_url = request_base_url(&headers);
     let sync_page = match load_kobo_sync_page(
-        state.runtime.database_file.as_path(),
+        &app,
         &current_user,
         &user_id_value,
         current_api_key_id.as_deref(),
@@ -307,7 +443,7 @@ pub async fn kobo_library_sync(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     let response_events = match build_kobo_sync_events_page(
-        state.runtime.database_file.as_path(),
+        &app,
         &sync_page,
         &user_id_value,
         base_url.as_str(),
@@ -322,7 +458,8 @@ pub async fn kobo_library_sync(
     let from_sync_point_id = sync_page.from_sync_point_id.clone();
     let to_sync_point_id = sync_page.to_sync_point_id.clone();
 
-    let kobo_store_sync_enabled = load_kobo_proxy_enabled(&state).await;
+    let kobo_store_sync_enabled =
+        load_kobo_proxy_enabled(app.services.server_settings.as_ref()).await;
     let mut merged_events = response_events;
     let mut merged_should_continue = sync_page.should_continue;
     let mut merged_raw_kobo_sync_token = sync_token_payload
@@ -341,20 +478,8 @@ pub async fn kobo_library_sync(
         && let Some(raw_store_sync_token) = merged_raw_kobo_sync_token
             .as_deref()
             .filter(|value| is_kobo_store_sync_token_candidate(value))
-        && let Ok(store_response) = proxy_kobo_store_library_sync(
-            &headers
-                .iter()
-                .filter_map(|(name, value)| {
-                    value
-                        .to_str()
-                        .ok()
-                        .map(|value| (name.as_str().to_string(), value.to_string()))
-                })
-                .collect::<Vec<_>>(),
-            uri.query(),
-            raw_store_sync_token,
-        )
-        .await
+        && let Ok(store_response) =
+            proxy_kobo_store_library_sync(&app, &headers, uri.query(), raw_store_sync_token).await
     {
         merged_events.extend(store_response.events);
         merged_should_continue = store_response.should_continue;
@@ -368,9 +493,7 @@ pub async fn kobo_library_sync(
     if !merged_should_continue
         && let Some(from_sync_point_id) = from_sync_point_id.as_deref()
         && from_sync_point_id != to_sync_point_id
-        && remove_sync_point(state.runtime.database_file.as_path(), from_sync_point_id)
-            .await
-            .is_err()
+        && remove_sync_point(&app, from_sync_point_id).await.is_err()
     {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
@@ -410,7 +533,7 @@ pub async fn kobo_library_sync(
 }
 
 pub async fn kobo_library_book_metadata(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     Path((auth_token, book_id)): Path<(String, String)>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
@@ -420,24 +543,21 @@ pub async fn kobo_library_book_metadata(
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
-        state.runtime.database_file.as_path(),
+        app.operational.runtime.database_file.as_path(),
     )
     .await
     {
         return status.into_response();
     }
 
-    let database_file = state.runtime.database_file.as_path();
-    let metadata = match load_kobo_metadata_record(database_file, &book_id).await {
+    let metadata = match load_kobo_metadata_record(&app, &book_id).await {
         Ok(Some(metadata)) => metadata,
         Ok(None) => {
-            let book_exists = persisted_book_exists(database_file, &book_id)
-                .await
-                .unwrap_or(false);
+            let book_exists = persisted_book_exists(&app, &book_id).await.unwrap_or(false);
             if !book_exists {
                 let proxy_path = format!("/v1/library/{book_id}/metadata");
                 if let Some(response) = proxied_missing_kobo_book_response(
-                    &state,
+                    &app,
                     &axum::http::Method::GET,
                     proxy_path.as_str(),
                     uri.query(),
@@ -456,7 +576,7 @@ pub async fn kobo_library_book_metadata(
 
     let base_url = format!(
         "{}{}",
-        request_base_url_with_port(&headers, Some(state.runtime.bind_address.port())),
+        request_base_url_with_port(&headers, Some(app.operational.runtime.bind_address.port())),
         request_context_path(&headers)
     );
     let (format, convert_kepub) = if metadata.is_pre_paginated {
@@ -551,7 +671,7 @@ pub async fn kobo_library_book_metadata(
 }
 
 pub async fn kobo_library_book_state(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     Path((auth_token, book_id)): Path<(String, String)>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
@@ -561,7 +681,7 @@ pub async fn kobo_library_book_state(
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
-        state.runtime.database_file.as_path(),
+        app.operational.runtime.database_file.as_path(),
     )
     .await
     {
@@ -569,14 +689,10 @@ pub async fn kobo_library_book_state(
         Err(status) => return status.into_response(),
     };
 
-    let database_file = state.runtime.database_file.as_path();
-    if !persisted_book_exists(database_file, &book_id)
-        .await
-        .unwrap_or(false)
-    {
+    if !persisted_book_exists(&app, &book_id).await.unwrap_or(false) {
         let proxy_path = format!("/v1/library/{book_id}/state");
         if let Some(response) = proxied_missing_kobo_book_response(
-            &state,
+            &app,
             &axum::http::Method::GET,
             proxy_path.as_str(),
             uri.query(),
@@ -592,12 +708,12 @@ pub async fn kobo_library_book_state(
     }
 
     let user_id_value = user_id(&current_user).to_string();
-    let created_timestamp = load_book_created_timestamp(database_file, &book_id)
+    let created_timestamp = load_book_created_timestamp(&app, &book_id)
         .await
         .unwrap_or(None)
         .unwrap_or_else(now_sync_marker);
 
-    let progress = match load_read_progress(database_file, &book_id, &user_id_value).await {
+    let progress = match load_read_progress(&app, &book_id, &user_id_value).await {
         Ok(progress) => progress,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
@@ -615,7 +731,7 @@ pub async fn kobo_library_book_state(
 }
 
 pub async fn kobo_library_book_state_update(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     Path((auth_token, book_id)): Path<(String, String)>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
@@ -626,7 +742,7 @@ pub async fn kobo_library_book_state_update(
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
-        state.runtime.database_file.as_path(),
+        app.operational.runtime.database_file.as_path(),
     )
     .await
     {
@@ -634,7 +750,6 @@ pub async fn kobo_library_book_state_update(
         Err(status) => return status.into_response(),
     };
 
-    let database_file = state.runtime.database_file.as_path();
     let payload = match serde_json::from_slice::<KoboReadingStateUpdatePayload>(&body) {
         Ok(payload) => payload,
         Err(_) => {
@@ -646,13 +761,10 @@ pub async fn kobo_library_book_state_update(
         }
     };
 
-    if !persisted_book_exists(database_file, &book_id)
-        .await
-        .unwrap_or(false)
-    {
+    if !persisted_book_exists(&app, &book_id).await.unwrap_or(false) {
         let proxy_path = format!("/v1/library/{book_id}/state");
         if let Some(response) = proxied_missing_kobo_book_response(
-            &state,
+            &app,
             &axum::http::Method::PUT,
             proxy_path.as_str(),
             uri.query(),
@@ -698,7 +810,7 @@ pub async fn kobo_library_book_state_update(
     let user_id_value = user_id(&current_user).to_string();
 
     let locator = if completed {
-        match load_book_last_epub_position_locator(database_file, &book_id).await {
+        match load_book_last_epub_position_locator(&app, &book_id).await {
             Ok(Some(locator)) => locator,
             _ => {
                 return kobo_state_update_failure(book_id.as_str());
@@ -715,14 +827,14 @@ pub async fn kobo_library_book_state_update(
             },
         });
 
-        match normalize_book_epub_locator(database_file, &book_id, &request_locator).await {
+        match normalize_book_epub_locator(&app, &book_id, &request_locator).await {
             Ok(locator) => locator,
             Err(_) => return kobo_state_update_failure(book_id.as_str()),
         }
     };
 
     let stale_progression = match progression_is_older_than_existing(
-        database_file,
+        &app,
         &book_id,
         &user_id_value,
         progress_last_modified.as_str(),
@@ -740,7 +852,7 @@ pub async fn kobo_library_book_state_update(
         &current_user,
         auth_token.as_str(),
         &headers,
-        database_file,
+        app.operational.runtime.database_file.as_path(),
     )
     .await
     .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
@@ -755,18 +867,21 @@ pub async fn kobo_library_book_state_update(
             content_source_progress
         });
 
-    let persist_result = persist_book_progression(
-        database_file,
-        &book_id,
-        &user_id_value,
-        locator_progression,
-        false,
-        Some(progress_last_modified),
-        Some(device_id),
-        Some(device_name),
-        Some(locator),
-    )
-    .await;
+    let persist_result = app
+        .services
+        .media_assets
+        .persist_book_progression(
+            app.operational.runtime.database_file.clone(),
+            book_id.clone(),
+            user_id_value.clone(),
+            locator_progression,
+            false,
+            Some(progress_last_modified),
+            Some(device_id),
+            Some(device_name),
+            Some(locator),
+        )
+        .await;
 
     let update_result = if persist_result.is_ok() {
         "Success"
@@ -804,7 +919,7 @@ fn kobo_state_update_failure(book_id: &str) -> Response {
 }
 
 pub async fn kobo_book_file_epub(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     Path((auth_token, book_id)): Path<(String, String)>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
@@ -814,7 +929,7 @@ pub async fn kobo_book_file_epub(
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
-        state.runtime.database_file.as_path(),
+        app.operational.runtime.database_file.as_path(),
     )
     .await
     {
@@ -826,21 +941,21 @@ pub async fn kobo_book_file_epub(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    let media =
-        match load_persisted_book_media(state.runtime.database_file.as_path(), &book_id).await {
-            Ok(Some(media)) => media,
-            Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-        };
-
-    if !user_can_access_book_media(
-        state.runtime.database_file.as_path(),
-        &book_id,
-        &current_user,
-        &media,
-    )
-    .await
+    let media = match app
+        .services
+        .media_assets
+        .load_persisted_book_media(
+            app.operational.runtime.database_file.clone(),
+            book_id.clone(),
+        )
+        .await
     {
+        Ok(Some(media)) => media,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
+    if !user_can_access_book_media(&app, &book_id, &current_user, &media).await {
         return StatusCode::FORBIDDEN.into_response();
     }
 
@@ -861,7 +976,11 @@ pub async fn kobo_book_file_epub(
                 .into_response();
         }
     } else {
-        match read_media_file_bytes(&media.file_path) {
+        match app
+            .services
+            .media_assets
+            .read_media_file_bytes(media.file_path.clone())
+        {
             Some(body) => body,
             None => {
                 return (
@@ -895,7 +1014,7 @@ pub async fn kobo_book_file_epub(
 }
 
 pub async fn kobo_book_thumbnail(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     Path((auth_token, thumbnail_id, width, height, _)): Path<(
         String,
         String,
@@ -907,7 +1026,8 @@ pub async fn kobo_book_thumbnail(
     headers: HeaderMap,
 ) -> Response {
     kobo_book_thumbnail_response(
-        &state,
+        &app,
+        app.services.server_settings.as_ref(),
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
@@ -919,7 +1039,7 @@ pub async fn kobo_book_thumbnail(
 }
 
 pub async fn kobo_book_thumbnail_with_quality(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     Path((auth_token, thumbnail_id, width, height, _, _)): Path<(
         String,
         String,
@@ -932,7 +1052,8 @@ pub async fn kobo_book_thumbnail_with_quality(
     headers: HeaderMap,
 ) -> Response {
     kobo_book_thumbnail_response(
-        &state,
+        &app,
+        app.services.server_settings.as_ref(),
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
@@ -944,7 +1065,7 @@ pub async fn kobo_book_thumbnail_with_quality(
 }
 
 pub async fn kobo_catch_all(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     Path((auth_token, path)): Path<(String, String)>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
@@ -956,14 +1077,14 @@ pub async fn kobo_catch_all(
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
-        state.runtime.database_file.as_path(),
+        app.operational.runtime.database_file.as_path(),
     )
     .await
     {
         return status.into_response();
     }
 
-    if !load_kobo_proxy_enabled(&state).await {
+    if !load_kobo_proxy_enabled(app.services.server_settings.as_ref()).await {
         return Json(json!({})).into_response();
     }
 

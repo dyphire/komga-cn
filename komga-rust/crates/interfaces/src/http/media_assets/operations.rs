@@ -1,5 +1,5 @@
 use super::*;
-use crate::discovery_detail_access::books as detail_books_access;
+use crate::http::state::HttpAppState;
 use komga_application::media_assets::{
     BookMetadataAuthor as ApplicationBookMetadataAuthor,
     BookMetadataLink as ApplicationBookMetadataLink,
@@ -14,8 +14,7 @@ pub struct BooksThumbnailsRegenerateQuery {
 }
 
 pub async fn book_analyze(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
@@ -23,12 +22,11 @@ pub async fn book_analyze(
         return response;
     }
 
-    let Some(book) = (match detail_books_access::load_persisted_book_detail(
-        auth_db.database_file.as_path(),
-        &book_id,
-        None,
-    )
-    .await
+    let Some(book) = (match app
+        .services
+        .discovery_detail
+        .load_persisted_book_detail(app.auth_db.database_file.clone(), book_id.clone(), None)
+        .await
     {
         Ok(book) => book,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -37,17 +35,17 @@ pub async fn book_analyze(
     };
 
     enqueue_task_records(
-        &state,
+        &app,
         vec![
             TaskQueueRecord::new(format!("ANALYZE_BOOK_{book_id}"), 6, Some(book.series_id))
                 .with_simple_type("ANALYZE_BOOK"),
         ],
     )
+    .await
 }
 
 pub async fn book_metadata_refresh(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
@@ -55,12 +53,11 @@ pub async fn book_metadata_refresh(
         return response;
     }
 
-    let Some(book) = (match detail_books_access::load_persisted_book_detail(
-        auth_db.database_file.as_path(),
-        &book_id,
-        None,
-    )
-    .await
+    let Some(book) = (match app
+        .services
+        .discovery_detail
+        .load_persisted_book_detail(app.auth_db.database_file.clone(), book_id.clone(), None)
+        .await
     {
         Ok(book) => book,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -69,7 +66,7 @@ pub async fn book_metadata_refresh(
     };
 
     enqueue_task_records(
-        &state,
+        &app,
         vec![
             TaskQueueRecord::new(
                 format!("REFRESH_BOOK_METADATA_{book_id}"),
@@ -81,11 +78,11 @@ pub async fn book_metadata_refresh(
                 .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK"),
         ],
     )
+    .await
 }
 
 pub async fn book_metadata_update(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
     Json(body): Json<Value>,
@@ -112,16 +109,22 @@ pub async fn book_metadata_update(
         }
     };
 
-    let service = book_metadata_service(auth_db.database_file.as_path());
+    let service = app
+        .services
+        .media_assets
+        .book_metadata_service(app.auth_db.database_file.clone());
 
     match service.update_book_metadata(&book_id, &patch).await {
         Ok(Some(series_id)) => {
-            if let Err(error) = refresh_book_search_documents_after_metadata_update(
-                auth_db.database_file.as_path(),
-                state.runtime.lucene_data_directory.as_path(),
-                &book_id,
-            )
-            .await
+            if let Err(error) = app
+                .services
+                .media_assets
+                .refresh_book_search_documents_after_metadata_update(
+                    app.auth_db.database_file.clone(),
+                    app.operational.runtime.lucene_data_directory.clone(),
+                    book_id.clone(),
+                )
+                .await
             {
                 return internal_error_response(error);
             }
@@ -133,17 +136,20 @@ pub async fn book_metadata_update(
                     Some(series_id),
                 )
                 .with_simple_type("AGGREGATE_SERIES_METADATA");
-                if let Err(error) = process_task_side_effects(&state, vec![task]) {
+                if let Err(error) = process_task_side_effects(&app, vec![task]).await {
                     return internal_error_response(error);
                 }
             }
 
-            if let Ok(Some(book)) = detail_books_access::load_persisted_book_detail(
-                auth_db.database_file.as_path(),
-                &book_id,
-                None,
-            )
-            .await
+            if let Ok(Some(book)) = app
+                .services
+                .discovery_detail
+                .load_persisted_book_detail(
+                    app.auth_db.database_file.clone(),
+                    book_id.clone(),
+                    None,
+                )
+                .await
             {
                 register_runtime_sse_event(
                     "BookChanged",
@@ -167,8 +173,7 @@ pub async fn book_metadata_update(
 }
 
 pub async fn book_metadata_batch_update(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
@@ -220,7 +225,10 @@ pub async fn book_metadata_batch_update(
         updates.push((book_id.clone(), patch));
     }
 
-    let service = book_metadata_service(auth_db.database_file.as_path());
+    let service = app
+        .services
+        .media_assets
+        .book_metadata_service(app.auth_db.database_file.clone());
     let updated_book_ids = updates
         .iter()
         .map(|(book_id, _)| book_id.clone())
@@ -242,18 +250,21 @@ pub async fn book_metadata_batch_update(
                 .with_simple_type("AGGREGATE_SERIES_METADATA")
             })
             .collect::<Vec<_>>();
-        if let Err(error) = process_task_side_effects(&state, tasks) {
+        if let Err(error) = process_task_side_effects(&app, tasks).await {
             return internal_error_response(error);
         }
     }
 
     for updated_book_id in updated_book_ids {
-        if let Ok(Some(book)) = detail_books_access::load_persisted_book_detail(
-            auth_db.database_file.as_path(),
-            &updated_book_id,
-            None,
-        )
-        .await
+        if let Ok(Some(book)) = app
+            .services
+            .discovery_detail
+            .load_persisted_book_detail(
+                app.auth_db.database_file.clone(),
+                updated_book_id.clone(),
+                None,
+            )
+            .await
         {
             register_runtime_sse_event(
                 "BookChanged",
@@ -493,8 +504,7 @@ fn optional_links(
 }
 
 pub async fn books_thumbnails_regenerate(
-    Extension(_auth_db): Extension<AuthDatabaseState>,
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BooksThumbnailsRegenerateQuery>,
 ) -> Response {
@@ -503,7 +513,7 @@ pub async fn books_thumbnails_regenerate(
     }
 
     enqueue_task_records(
-        &state,
+        &app,
         vec![
             TaskQueueRecord::new("FIND_BOOK_THUMBNAILS_TO_REGENERATE", 0, None).with_payload(
                 json!({
@@ -513,11 +523,11 @@ pub async fn books_thumbnails_regenerate(
             ),
         ],
     )
+    .await
 }
 
 pub async fn series_file_delete(
-    Extension(_auth_db): Extension<AuthDatabaseState>,
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
@@ -526,16 +536,16 @@ pub async fn series_file_delete(
     }
 
     enqueue_delete_media_task(
-        &state,
+        &app,
         format!("DELETE_SERIES_{series_id}"),
         "DELETE_SERIES",
         8,
     )
+    .await
 }
 
 pub async fn series_analyze(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
@@ -543,14 +553,20 @@ pub async fn series_analyze(
         return response;
     }
 
-    let resolved_series_id =
-        resolve_series_id_for_persisted(auth_db.database_file.as_path(), &series_id).await;
+    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
 
-    let book_ids =
-        match load_series_book_ids(auth_db.database_file.as_path(), &resolved_series_id).await {
-            Ok(book_ids) => book_ids,
-            Err(error) => return internal_error_response(error),
-        };
+    let book_ids = match app
+        .services
+        .media_assets
+        .load_series_book_ids(
+            app.auth_db.database_file.clone(),
+            resolved_series_id.clone(),
+        )
+        .await
+    {
+        Ok(book_ids) => book_ids,
+        Err(error) => return internal_error_response(error),
+    };
     let task_records = book_ids
         .into_iter()
         .map(|book_id| {
@@ -563,12 +579,11 @@ pub async fn series_analyze(
         })
         .collect::<Vec<_>>();
 
-    enqueue_task_records(&state, task_records)
+    enqueue_task_records(&app, task_records).await
 }
 
 pub async fn series_metadata_refresh(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
@@ -576,7 +591,12 @@ pub async fn series_metadata_refresh(
         return response;
     }
 
-    let book_ids = match load_series_book_ids(auth_db.database_file.as_path(), &series_id).await {
+    let book_ids = match app
+        .services
+        .media_assets
+        .load_series_book_ids(app.auth_db.database_file.clone(), series_id.clone())
+        .await
+    {
         Ok(book_ids) => book_ids,
         Err(error) => return internal_error_response(error),
     };
@@ -601,11 +621,11 @@ pub async fn series_metadata_refresh(
             .with_simple_type("REFRESH_SERIES_LOCAL_ARTWORK"),
     );
 
-    enqueue_task_records(&state, task_records)
+    enqueue_task_records(&app, task_records).await
 }
 
 pub async fn book_file_delete(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
@@ -613,17 +633,18 @@ pub async fn book_file_delete(
         return response;
     }
 
-    enqueue_delete_media_task(&state, format!("DELETE_BOOK_{book_id}"), "DELETE_BOOK", 8)
+    enqueue_delete_media_task(&app, format!("DELETE_BOOK_{book_id}"), "DELETE_BOOK", 8).await
 }
 
-fn enqueue_delete_media_task(
-    state: &OperationalState,
+async fn enqueue_delete_media_task(
+    app: &HttpAppState,
     task_id: String,
     simple_type: &'static str,
     priority: i32,
 ) -> Response {
     enqueue_task_records(
-        state,
+        app,
         vec![TaskQueueRecord::new(task_id, priority, None).with_simple_type(simple_type)],
     )
+    .await
 }

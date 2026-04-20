@@ -2,8 +2,8 @@ use super::readlists_support::{
     PersistedReadlistBooksQuery, PersistedReadlistWriteInput, merge_readlist_write_input,
 };
 use super::*;
-use crate::http::discovery::persisted::backend::persisted_backend_search_readlist_scored_ids;
 use crate::http::helpers::validation_error_response;
+use crate::http::state::HttpAppState;
 use axum_extra::extract::{Multipart, multipart::MultipartRejection};
 use icu::collator::{
     Collator,
@@ -16,12 +16,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const READLIST_SEARCH_CANDIDATE_LIMIT: usize = 1000;
 
 pub async fn readlists(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
@@ -59,28 +60,30 @@ pub async fn readlists(
         .collect::<Vec<_>>();
     let requested_sort = sort.first().cloned();
 
-    let requested_context = match auth_state
+    let requested_context = match app
+        .discovery_auth
         .resolve_query_context_with_persistence(
             &headers,
             library_ids.as_deref(),
-            auth_db.database_file.as_path(),
+            app.auth_db.database_file.as_path(),
         )
         .await
     {
         Some(context) => context,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
-    let visibility_context = match auth_state
-        .resolve_query_context_with_persistence(&headers, None, auth_db.database_file.as_path())
+    let visibility_context = match app
+        .discovery_auth
+        .resolve_query_context_with_persistence(&headers, None, app.auth_db.database_file.as_path())
         .await
     {
         Some(context) => context,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    if auth_db.database_file.exists() {
+    if app.auth_db.database_file.exists() {
         let mut content = match load_persisted_readlists(
-            auth_db.database_file.as_path(),
+            &app,
             requested_context.authorized_library_ids.as_deref(),
         )
         .await
@@ -105,12 +108,15 @@ pub async fn readlists(
                         // visibility afterward. Keeping the same fixed candidate window avoids
                         // hidden higher-ranked readlists crowding visible matches out of Rust's
                         // pre-filtered result set.
-                        let ranked_hits = match persisted_backend_search_readlist_scored_ids(
-                            auth_db.database_file.as_path(),
-                            search_group,
-                            READLIST_SEARCH_CANDIDATE_LIMIT,
-                        )
-                        .await
+                        let ranked_hits = match app
+                            .services
+                            .discovery_persisted
+                            .search_readlist_scored_ids(
+                                app.auth_db.database_file.clone(),
+                                search_group.to_string(),
+                                READLIST_SEARCH_CANDIDATE_LIMIT,
+                            )
+                            .await
                         {
                             Ok(hits) => hits,
                             Err(error) => return internal_error_response(error),
@@ -163,7 +169,7 @@ pub async fn readlists(
         let mut visible_content = Vec::with_capacity(content.len());
         for readlist in content {
             let Some(mut visible_readlist) = (match load_persisted_readlist_detail(
-                auth_db.database_file.as_path(),
+                &app,
                 &readlist.id,
                 visibility_context.authorized_library_ids.as_deref(),
             )
@@ -177,8 +183,7 @@ pub async fn readlists(
 
             if let Some(requested_library_query) = requested_library_query.as_ref() {
                 let Some(requested_library_books) = (match load_visible_persisted_readlist_books(
-                    auth_db.database_file.as_path(),
-                    &auth_state,
+                    &app,
                     &headers,
                     &readlist.id,
                     requested_library_query,
@@ -197,8 +202,7 @@ pub async fn readlists(
             }
 
             let Some(visible_books) = (match load_visible_persisted_readlist_books(
-                auth_db.database_file.as_path(),
-                &auth_state,
+                &app,
                 &headers,
                 &readlist.id,
                 &list_query,
@@ -318,12 +322,13 @@ fn readlists_unicode_collator() -> icu::collator::CollatorBorrowed<'static> {
 }
 
 pub async fn readlist_create(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(operational): Extension<crate::http::state::OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_admin(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
@@ -333,7 +338,7 @@ pub async fn readlist_create(
         Err(response) => return response,
     };
 
-    match load_persisted_readlists(auth_db.database_file.as_path(), None).await {
+    match load_persisted_readlists(&app, None).await {
         Ok(readlists)
             if readlists
                 .iter()
@@ -345,22 +350,16 @@ pub async fn readlist_create(
         Err(error) => return internal_error_response(error),
     }
 
-    let created_id = match persist_readlist_create(auth_db.database_file.as_path(), &input).await {
+    let created_id = match persist_readlist_create(&app, &input).await {
         Ok(id) => id,
         Err(error) => return internal_error_response(error),
     };
 
-    if let Err(error) = upsert_readlist_search_document(
-        auth_db.database_file.as_path(),
-        operational.runtime.lucene_data_directory.as_path(),
-        &created_id,
-    )
-    .await
-    {
+    if let Err(error) = upsert_readlist_search_document(&app, &created_id).await {
         return internal_error_response(error);
     }
 
-    match load_persisted_readlist_detail(auth_db.database_file.as_path(), &created_id, None).await {
+    match load_persisted_readlist_detail(&app, &created_id, None).await {
         Ok(Some(readlist)) => Json(readlist_payload(&readlist)).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
@@ -480,11 +479,13 @@ fn readlist_create_bad_request(message: &str) -> Response {
 }
 
 pub async fn readlist_match_comicrack(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     multipart: Result<Multipart, MultipartRejection>,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_admin(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
@@ -498,7 +499,7 @@ pub async fn readlist_match_comicrack(
         Err(error_code) => return comicrack_bad_request_response(error_code),
     };
 
-    match match_comicrack_readlist(auth_db.database_file.as_path(), &request).await {
+    match match_comicrack_readlist(&app, &request).await {
         Ok(payload) => Json(payload).into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -522,38 +523,29 @@ fn comicrack_bad_request_response(error_code: &str) -> Response {
 }
 
 pub async fn readlist_update(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(operational): Extension<crate::http::state::OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_admin(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
     let payload = serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}));
-    let Some(existing) =
-        (match load_persisted_readlist_detail(auth_db.database_file.as_path(), &readlist_id, None)
-            .await
-        {
-            Ok(readlist) => readlist,
-            Err(error) => return internal_error_response(error),
-        })
-    else {
+    let Some(existing) = (match load_persisted_readlist_detail(&app, &readlist_id, None).await {
+        Ok(readlist) => readlist,
+        Err(error) => return internal_error_response(error),
+    }) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     let input = merge_readlist_write_input(&existing, &payload);
 
-    match persist_readlist_update(auth_db.database_file.as_path(), &readlist_id, &input).await {
+    match persist_readlist_update(&app, &readlist_id, &input).await {
         Ok(true) => {
-            if let Err(error) = upsert_readlist_search_document(
-                auth_db.database_file.as_path(),
-                operational.runtime.lucene_data_directory.as_path(),
-                &readlist_id,
-            )
-            .await
-            {
+            if let Err(error) = upsert_readlist_search_document(&app, &readlist_id).await {
                 return internal_error_response(error);
             }
             StatusCode::NO_CONTENT.into_response()
@@ -564,23 +556,19 @@ pub async fn readlist_update(
 }
 
 pub async fn readlist_delete(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(operational): Extension<crate::http::state::OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_admin(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    match delete_persisted_readlist(auth_db.database_file.as_path(), &readlist_id).await {
+    match delete_persisted_readlist(&app, &readlist_id).await {
         Ok(true) => {
-            if let Err(error) = delete_readlist_search_document(
-                operational.runtime.lucene_data_directory.as_path(),
-                &readlist_id,
-            )
-            .await
-            {
+            if let Err(error) = delete_readlist_search_document(&app, &readlist_id).await {
                 return internal_error_response(error);
             }
             StatusCode::NO_CONTENT.into_response()
@@ -591,44 +579,40 @@ pub async fn readlist_delete(
 }
 
 pub async fn readlist_books(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
     let query = parse_persisted_readlist_books_query(uri.query().unwrap_or_default());
-    let Some(mut visible_books) = (match load_visible_persisted_readlist_books(
-        auth_db.database_file.as_path(),
-        &auth_state,
-        &headers,
-        &readlist_id,
-        &query,
-    )
-    .await
-    {
-        Ok(books) => books,
-        Err(error) => return internal_error_response(error),
-    }) else {
+    let Some(mut visible_books) =
+        (match load_visible_persisted_readlist_books(&app, &headers, &readlist_id, &query).await {
+            Ok(books) => books,
+            Err(error) => return internal_error_response(error),
+        })
+    else {
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    let Some(context) = auth_state
+    let Some(context) = app
+        .discovery_auth
         .resolve_query_context_with_persistence(
             &headers,
             query.library_ids.as_deref(),
-            auth_db.database_file.as_path(),
+            app.auth_db.database_file.as_path(),
         )
         .await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let Some(readlist) = (match load_persisted_readlist_detail(
-        auth_db.database_file.as_path(),
+        &app,
         &readlist_id,
         context.authorized_library_ids.as_deref(),
     )
@@ -651,17 +635,19 @@ pub async fn readlist_books(
 }
 
 pub async fn readlist_detail(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    let context = match auth_state
-        .resolve_query_context_with_persistence(&headers, None, auth_db.database_file.as_path())
+    let context = match app
+        .discovery_auth
+        .resolve_query_context_with_persistence(&headers, None, app.auth_db.database_file.as_path())
         .await
     {
         Some(context) => context,
@@ -679,9 +665,9 @@ pub async fn readlist_detail(
         authors: Vec::new(),
     };
 
-    if auth_db.database_file.exists() {
+    if app.auth_db.database_file.exists() {
         match load_persisted_readlist_detail(
-            auth_db.database_file.as_path(),
+            &app,
             &readlist_id,
             context.authorized_library_ids.as_deref(),
         )
@@ -689,8 +675,7 @@ pub async fn readlist_detail(
         {
             Ok(Some(mut readlist)) => {
                 let Some(visible_books) = (match load_visible_persisted_readlist_books(
-                    auth_db.database_file.as_path(),
-                    &auth_state,
+                    &app,
                     &headers,
                     &readlist_id,
                     &detail_query,
@@ -724,55 +709,42 @@ pub async fn readlist_detail(
 }
 
 pub async fn readlist_book_sibling_previous(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path((readlist_id, book_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    sibling_response(
-        auth_db.database_file.as_path(),
-        &auth_state,
-        &headers,
-        &readlist_id,
-        &book_id,
-        false,
-    )
-    .await
+    sibling_response(&app, &headers, &readlist_id, &book_id, false).await
 }
 
 pub async fn readlist_book_sibling_next(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path((readlist_id, book_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    sibling_response(
-        auth_db.database_file.as_path(),
-        &auth_state,
-        &headers,
-        &readlist_id,
-        &book_id,
-        true,
-    )
-    .await
+    sibling_response(&app, &headers, &readlist_id, &book_id, true).await
 }
 
 async fn sibling_response(
-    database_file: &FsPath,
-    auth_state: &DiscoveryAuthState,
+    app: &HttpAppState,
     headers: &HeaderMap,
     readlist_id: &str,
     book_id: &str,
     next: bool,
 ) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
+    let auth_state = &app.discovery_auth;
     let query = PersistedReadlistBooksQuery {
         page: 0,
         size: 20,
@@ -785,18 +757,12 @@ async fn sibling_response(
         authors: Vec::new(),
     };
 
-    let Some(mut visible_books) = (match load_visible_persisted_readlist_books(
-        database_file,
-        auth_state,
-        headers,
-        readlist_id,
-        &query,
-    )
-    .await
-    {
-        Ok(books) => books,
-        Err(error) => return internal_error_response(error),
-    }) else {
+    let Some(mut visible_books) =
+        (match load_visible_persisted_readlist_books(app, headers, readlist_id, &query).await {
+            Ok(books) => books,
+            Err(error) => return internal_error_response(error),
+        })
+    else {
         return StatusCode::NOT_FOUND.into_response();
     };
 
@@ -807,7 +773,7 @@ async fn sibling_response(
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let Some(readlist) = (match load_persisted_readlist_detail(
-        database_file,
+        app,
         readlist_id,
         context.authorized_library_ids.as_deref(),
     )

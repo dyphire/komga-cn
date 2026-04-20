@@ -1,13 +1,23 @@
 use super::*;
 
 async fn load_tachiyomi_readlist_book_ids(
-    database_file: &FsPath,
+    app: &HttpAppState,
     readlist_id: &str,
     user: &AuthUser,
 ) -> Result<Option<Vec<String>>, String> {
-    let readlist_books = load_readlist_books(database_file, readlist_id).await?;
+    let readlist_books = app
+        .services
+        .opds_persisted
+        .load_readlist_books(app.auth_db.database_file.clone(), readlist_id.to_string())
+        .await?;
     if readlist_books.is_empty() {
-        let readlist_exists = load_persisted_readlist_name(database_file, readlist_id)
+        let readlist_exists = app
+            .services
+            .media_assets
+            .load_persisted_readlist_name(
+                app.auth_db.database_file.clone(),
+                readlist_id.to_string(),
+            )
             .await?
             .is_some();
         return Ok(
@@ -28,38 +38,40 @@ async fn load_tachiyomi_readlist_book_ids(
 }
 
 pub async fn readlist_tachiyomi_read_progress_get(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+    let Some(user) =
+        resolved_request_auth_user(&headers, app.auth_db.database_file.as_path()).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    let Some(ordered_book_ids) = (match load_tachiyomi_readlist_book_ids(
-        auth_db.database_file.as_path(),
-        &readlist_id,
-        &user,
-    )
-    .await
-    {
-        Ok(ordered_book_ids) => ordered_book_ids,
-        Err(error) => return internal_error_response(error),
-    }) else {
+    let Some(ordered_book_ids) =
+        (match load_tachiyomi_readlist_book_ids(&app, &readlist_id, &user).await {
+            Ok(ordered_book_ids) => ordered_book_ids,
+            Err(error) => return internal_error_response(error),
+        })
+    else {
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    let counters = match readlist_tachiyomi_counters(
-        auth_db.database_file.as_path(),
-        ordered_book_ids,
-        user_id(&user),
-    )
-    .await
+    let counters = match app
+        .services
+        .media_assets
+        .readlist_tachiyomi_counters(
+            app.auth_db.database_file.clone(),
+            ordered_book_ids,
+            user_id(&user).to_string(),
+        )
+        .await
     {
         Ok(counters) => counters,
         Err(error) => return internal_error_response(error),
@@ -83,16 +95,19 @@ pub async fn readlist_tachiyomi_read_progress_get(
 }
 
 pub async fn readlist_tachiyomi_read_progress_put(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+    let Some(user) =
+        resolved_request_auth_user(&headers, app.auth_db.database_file.as_path()).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -109,16 +124,12 @@ pub async fn readlist_tachiyomi_read_progress_put(
             .into_response();
     };
 
-    let Some(ordered_book_ids) = (match load_tachiyomi_readlist_book_ids(
-        auth_db.database_file.as_path(),
-        &readlist_id,
-        &user,
-    )
-    .await
-    {
-        Ok(ordered_book_ids) => ordered_book_ids,
-        Err(error) => return internal_error_response(error),
-    }) else {
+    let Some(ordered_book_ids) =
+        (match load_tachiyomi_readlist_book_ids(&app, &readlist_id, &user).await {
+            Ok(ordered_book_ids) => ordered_book_ids,
+            Err(error) => return internal_error_response(error),
+        })
+    else {
         return StatusCode::NOT_FOUND.into_response();
     };
 
@@ -126,13 +137,10 @@ pub async fn readlist_tachiyomi_read_progress_put(
         return StatusCode::NO_CONTENT.into_response();
     }
 
-    let visible_books =
-        match visible_readlist_books_for_user(auth_db.database_file.as_path(), &readlist_id, &user)
-            .await
-        {
-            Ok(books) => books,
-            Err(error) => return internal_error_response(error),
-        };
+    let visible_books = match visible_readlist_books_for_user(&app, &readlist_id, &user).await {
+        Ok(books) => books,
+        Err(error) => return internal_error_response(error),
+    };
     if visible_books.is_empty() {
         return StatusCode::NO_CONTENT.into_response();
     }
@@ -142,13 +150,16 @@ pub async fn readlist_tachiyomi_read_progress_put(
         .map(|book| book.id)
         .collect::<Vec<_>>();
 
-    match persist_readlist_tachiyomi_progress(
-        auth_db.database_file.as_path(),
-        visible_book_ids,
-        user_id(&user),
-        last_book_read as usize,
-    )
-    .await
+    match app
+        .services
+        .media_assets
+        .persist_readlist_tachiyomi_progress(
+            app.auth_db.database_file.clone(),
+            visible_book_ids,
+            user_id(&user).to_string(),
+            last_book_read as usize,
+        )
+        .await
     {
         Ok(Some(())) => StatusCode::NO_CONTENT.into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),

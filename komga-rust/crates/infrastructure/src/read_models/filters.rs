@@ -78,7 +78,9 @@ pub(super) fn apply_restrictions_sqlx<'args>(
         (restrictions.age_restriction, restrictions.age)
     {
         push_sqlx_clause_prefix(builder, state);
-        builder.push(format!(r#"({series_alias}.age_rating IS NULL OR {series_alias}.age_rating < "#));
+        builder.push(format!(
+            r#"({series_alias}.age_rating IS NULL OR {series_alias}.age_rating < "#
+        ));
         builder.push_bind(max_age as i64);
         builder.push(r#")"#);
         state.params.push(SqlValue::Integer(max_age as i64));

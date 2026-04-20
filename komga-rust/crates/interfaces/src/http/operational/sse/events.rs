@@ -14,8 +14,9 @@ use std::time::Duration;
 use tokio::time::{Instant, MissedTickBehavior, interval_at};
 
 use crate::http::identity_access::auth::{resolved_auth_user, user_id, user_is_admin};
+use crate::http::state::HttpAppState;
 
-use super::super::super::{OperationalState, PERSISTED_OWNERSHIP_MARKER, SEARCH_OWNERSHIP_HEADER};
+use super::super::super::{PERSISTED_OWNERSHIP_MARKER, SEARCH_OWNERSHIP_HEADER};
 
 fn sse_event(name: &str, payload: serde_json::Value) -> Event {
     Event::default()
@@ -24,9 +25,10 @@ fn sse_event(name: &str, payload: serde_json::Value) -> Event {
 }
 
 pub(crate) async fn sse_events(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
+    let state = &app.operational;
     if !state
         .sse
         .lock()
@@ -65,7 +67,7 @@ pub(crate) async fn sse_events(
             last_runtime_event_id,
             pending_events: VecDeque::new(),
             runtime_event_updates,
-            state,
+            app,
         },
         |mut stream_state| async move {
             loop {
@@ -78,7 +80,7 @@ pub(crate) async fn sse_events(
                         return Some((Ok::<Event, Infallible>(Event::default().comment("heartbeat")), stream_state));
                     }
                     _ = stream_state.task_interval.tick(), if stream_state.admin => {
-                        return Some((Ok::<Event, Infallible>(task_queue_status_event(&stream_state.state)), stream_state));
+                        return Some((Ok::<Event, Infallible>(task_queue_status_event(&stream_state.app).await), stream_state));
                     }
                     changed = stream_state.runtime_event_updates.changed() => {
                         if changed.is_err() {
@@ -104,8 +106,7 @@ pub(crate) async fn sse_events(
     response
 }
 
-pub(crate) fn register_session_expired_event(state: &OperationalState, user_id: &str) {
-    let _ = state;
+pub(crate) fn register_session_expired_event(user_id: &str) {
     register_runtime_sse_event(
         "SessionExpired",
         json!({ "userId": user_id }),
@@ -122,7 +123,7 @@ struct SseStreamState {
     last_runtime_event_id: u64,
     pending_events: VecDeque<Event>,
     runtime_event_updates: tokio::sync::watch::Receiver<u64>,
-    state: OperationalState,
+    app: HttpAppState,
 }
 
 async fn poll_runtime_events(stream_state: &mut SseStreamState) {
@@ -139,8 +140,9 @@ async fn poll_runtime_events(stream_state: &mut SseStreamState) {
     );
 }
 
-fn task_queue_status_event(state: &OperationalState) -> Event {
-    let count_by_type = kotlin_visible_task_type_counts((state.count_task_queue_by_type)());
+async fn task_queue_status_event(app: &HttpAppState) -> Event {
+    let count_by_type =
+        kotlin_visible_task_type_counts(app.services.task_queue.count_task_queue_by_type().await);
     let total_count: usize = count_by_type.values().sum();
     sse_event(
         "TaskQueueStatus",

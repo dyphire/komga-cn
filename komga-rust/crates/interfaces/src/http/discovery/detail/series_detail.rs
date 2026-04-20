@@ -1,15 +1,16 @@
 #![allow(clippy::result_large_err)]
 
 use super::*;
+use crate::http::state::HttpAppState;
 use language_tags::LanguageTag;
 use reqwest::Url;
 
 pub async fn series_detail(
     headers: HeaderMap,
     Path(series_id): Path<String>,
-    auth_state: DiscoveryAuthState,
-    database_file: &FsPath,
+    app: &HttpAppState,
 ) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
@@ -18,14 +19,12 @@ pub async fn series_detail(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let resolved_series_id = resolve_series_id_for_persisted(database_file, &series_id).await;
+    let resolved_series_id = resolve_series_id_for_persisted(app, &series_id).await;
 
-    let Some(resource) =
-        (match load_persisted_series_resource(database_file, &resolved_series_id).await {
-            Ok(resource) => resource,
-            Err(error) => return internal_error_response(error),
-        })
-    else {
+    let Some(resource) = (match load_persisted_series_resource(app, &resolved_series_id).await {
+        Ok(resource) => resource,
+        Err(error) => return internal_error_response(error),
+    }) else {
         return StatusCode::NOT_FOUND.into_response();
     };
 
@@ -37,7 +36,8 @@ pub async fn series_detail(
         }),
     };
 
-    let detail_query_context = match auth_state
+    let detail_query_context = match app
+        .discovery_auth
         .resolve_detail_query_context_with_persistence(&headers, &detail_context, database_file)
         .await
     {
@@ -46,7 +46,7 @@ pub async fn series_detail(
     };
     let is_admin = detail_query_context.is_admin;
     let Some(series) = (match load_persisted_series_detail(
-        database_file,
+        app,
         &resolved_series_id,
         detail_query_context.user_id.as_deref(),
     )
@@ -64,9 +64,9 @@ pub async fn series_detail(
 pub async fn series_collections(
     headers: HeaderMap,
     Path(series_id): Path<String>,
-    auth_state: DiscoveryAuthState,
-    database_file: &FsPath,
+    app: &HttpAppState,
 ) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
@@ -75,13 +75,14 @@ pub async fn series_collections(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Some(context) = auth_state
+    let Some(context) = app
+        .discovery_auth
         .resolve_query_context_with_persistence(&headers, None, database_file)
         .await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let Some(resource) = (match load_persisted_series_resource(database_file, &series_id).await {
+    let Some(resource) = (match load_persisted_series_resource(app, &series_id).await {
         Ok(resource) => resource,
         Err(error) => return internal_error_response(error),
     }) else {
@@ -96,22 +97,18 @@ pub async fn series_collections(
         }),
     };
 
-    match auth_state
+    match app
+        .discovery_auth
         .resolve_detail_query_context_with_persistence(&headers, &detail_context, database_file)
         .await
     {
-        Ok(_) => match load_persisted_series_collections(database_file, &series_id).await {
+        Ok(_) => match load_persisted_series_collections(app, &series_id).await {
             Ok(mut collections) => {
                 for collection in &mut collections {
                     let mut visible_series_ids = Vec::with_capacity(collection.series_ids.len());
                     for related_series_id in &collection.series_ids {
-                        match series_visible_to_context(
-                            database_file,
-                            &context,
-                            related_series_id,
-                            None,
-                        )
-                        .await
+                        match series_visible_to_context(app, &context, related_series_id, None)
+                            .await
                         {
                             Ok(true) => visible_series_ids.push(related_series_id.clone()),
                             Ok(false) => {}
@@ -136,11 +133,11 @@ pub async fn series_collections(
 
 pub async fn series_metadata_update(
     headers: HeaderMap,
-    database_file: &FsPath,
-    index_dir: &FsPath,
+    app: &HttpAppState,
     Path(series_id): Path<String>,
     body: Value,
 ) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_request_admin(&headers, database_file).await {
         return response;
     }
@@ -164,7 +161,7 @@ pub async fn series_metadata_update(
         return response;
     }
 
-    let existing = match load_existing_series_metadata(database_file, &series_id).await {
+    let existing = match load_existing_series_metadata(app, &series_id).await {
         Ok(Some(existing)) => existing,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
@@ -315,14 +312,10 @@ pub async fn series_metadata_update(
         alternate_titles_lock,
     };
 
-    match persist_series_metadata_update(database_file, &series_id, update).await {
+    match persist_series_metadata_update(app, &series_id, update).await {
         Ok(true) => {
-            if let Err(error) = sync_series_search_documents_after_metadata_update(
-                database_file,
-                index_dir,
-                &series_id,
-            )
-            .await
+            if let Err(error) =
+                sync_series_search_documents_after_metadata_update(app, &series_id).await
             {
                 return internal_error_response(error);
             }

@@ -1,3 +1,5 @@
+use crate::discovery_persisted_access::PersistedDiscoveryService;
+
 use super::*;
 
 fn push_unique(values: &mut Vec<String>, value: &str) {
@@ -6,11 +8,17 @@ fn push_unique(values: &mut Vec<String>, value: &str) {
     }
 }
 
-pub async fn load_persisted_library_ids(database_file: &FsPath) -> Result<Vec<String>, String> {
-    persisted_backend_load_persisted_library_ids(database_file).await
+pub async fn load_persisted_library_ids(
+    backend: &dyn PersistedDiscoveryService,
+    database_file: &FsPath,
+) -> Result<Vec<String>, String> {
+    backend
+        .load_persisted_library_ids(database_file.to_path_buf())
+        .await
 }
 
 pub async fn remap_requested_library_ids_for_persisted(
+    backend: &dyn PersistedDiscoveryService,
     database_file: &FsPath,
     requested: Option<&Vec<String>>,
 ) -> Option<Vec<String>> {
@@ -20,7 +28,7 @@ pub async fn remap_requested_library_ids_for_persisted(
         return None;
     }
 
-    let persisted_ids = match load_persisted_library_ids(database_file).await {
+    let persisted_ids = match load_persisted_library_ids(backend, database_file).await {
         Ok(ids) => ids,
         Err(_) => return None,
     };
@@ -58,20 +66,29 @@ pub async fn remap_requested_library_ids_for_persisted(
 }
 
 pub async fn load_collection_memberships(
+    backend: &dyn PersistedDiscoveryService,
     database_file: &FsPath,
 ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
-    persisted_backend_load_collection_memberships(database_file).await
+    backend
+        .load_collection_memberships(database_file.to_path_buf())
+        .await
 }
 
 pub async fn load_collection_ordering(
+    backend: &dyn PersistedDiscoveryService,
     database_file: &FsPath,
     collection_id: &str,
 ) -> Result<HashMap<String, i64>, String> {
-    persisted_backend_load_collection_ordering(database_file, collection_id).await
+    backend
+        .load_collection_ordering(database_file.to_path_buf(), collection_id.to_string())
+        .await
 }
 
 pub async fn load_readlist_memberships(
+    backend: &dyn PersistedDiscoveryService,
     database_file: &FsPath,
 ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
-    persisted_backend_load_readlist_memberships(database_file).await
+    backend
+        .load_readlist_memberships(database_file.to_path_buf())
+        .await
 }

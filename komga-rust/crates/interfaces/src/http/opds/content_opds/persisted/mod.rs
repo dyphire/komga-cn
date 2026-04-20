@@ -11,10 +11,11 @@ use crate::http::discovery_auth::principal::AgeRestrictionKind;
 use crate::http::identity_access::auth::{
     resolved_auth_user, user_payload_json, user_shared_all_libraries, user_shared_library_ids,
 };
+use crate::http::state::{OpdsCatalogService, OpdsPersistedService};
 use crate::opds_persisted_access;
 
 use super::types::{
-    OpdsRestrictions, PersistedBookFeedItem, PersistedBookSearchResult, PersistedCollection,
+    OpdsRestrictions, PersistedBookSearchResult, PersistedCollection,
     PersistedCollectionSearchResult, PersistedLibrary, PersistedReadlist, PersistedReadlistBook,
     PersistedReadlistSearchResult, PersistedSeries, PersistedSeriesBook,
     PersistedSeriesSearchResult,
@@ -168,78 +169,91 @@ pub(super) fn content_allowed_by_restrictions(
     !age_denied && !label_denied
 }
 
-pub(super) async fn load_libraries(database_file: &Path) -> Result<Vec<PersistedLibrary>, String> {
-    let records = opds_persisted_access::load_libraries(database_file).await?;
+pub(super) async fn load_libraries(
+    backend: &dyn OpdsPersistedService,
+    database_file: &Path,
+) -> Result<Vec<PersistedLibrary>, String> {
+    let records = backend.load_libraries(database_file.to_path_buf()).await?;
     Ok(records.into_iter().map(map_library_record).collect())
 }
 
 pub(super) async fn load_library(
+    backend: &dyn OpdsPersistedService,
     database_file: &Path,
     library_id: &str,
 ) -> Result<Option<PersistedLibrary>, String> {
-    let record = opds_persisted_access::load_library(database_file, library_id).await?;
+    let record = backend
+        .load_library(database_file.to_path_buf(), library_id.to_string())
+        .await?;
     Ok(record.map(map_library_record))
 }
 
 pub(super) async fn load_readlists_for_library(
+    backend: &dyn OpdsPersistedService,
     database_file: &Path,
     library_id: &str,
 ) -> Result<Vec<PersistedReadlist>, String> {
-    let records =
-        opds_persisted_access::load_readlists_for_library(database_file, library_id).await?;
+    let records = backend
+        .load_readlists_for_library(database_file.to_path_buf(), library_id.to_string())
+        .await?;
     Ok(records.into_iter().map(map_readlist_record).collect())
 }
 
 pub(super) async fn load_series(
+    backend: &dyn OpdsPersistedService,
     database_file: &Path,
     series_id: &str,
 ) -> Result<Option<PersistedSeries>, String> {
-    let record = opds_persisted_access::load_series(database_file, series_id).await?;
+    let record = backend
+        .load_series(database_file.to_path_buf(), series_id.to_string())
+        .await?;
     Ok(record.map(map_series_record))
 }
 
 pub(super) async fn load_series_books_paged(
+    backend: &dyn OpdsPersistedService,
     database_file: &Path,
     series_id: &str,
     user_id: &str,
     offset: i64,
     limit: i64,
 ) -> Result<Vec<PersistedSeriesBook>, String> {
-    let records = opds_persisted_access::load_series_books_paged(
-        database_file,
-        series_id,
-        user_id,
-        offset,
-        limit,
-    )
-    .await?;
+    let records = backend
+        .load_series_books_paged(
+            database_file.to_path_buf(),
+            series_id.to_string(),
+            user_id.to_string(),
+            offset,
+            limit,
+        )
+        .await?;
     Ok(records.into_iter().map(map_series_book_record).collect())
 }
 
-pub(super) async fn load_series_tags(
-    database_file: &Path,
-    series_id: &str,
-) -> Result<Vec<String>, String> {
-    opds_persisted_access::load_series_tags(database_file, series_id).await
-}
-
 pub(super) async fn load_readlist(
+    backend: &dyn OpdsPersistedService,
     database_file: &Path,
     readlist_id: &str,
 ) -> Result<Option<PersistedReadlist>, String> {
-    let record = opds_persisted_access::load_readlist(database_file, readlist_id).await?;
+    let record = backend
+        .load_readlist(database_file.to_path_buf(), readlist_id.to_string())
+        .await?;
     Ok(record.map(map_readlist_record))
 }
 
 pub(super) async fn load_readlist_books(
+    backend: &dyn OpdsPersistedService,
     database_file: &Path,
     readlist_id: &str,
 ) -> Result<Vec<PersistedReadlistBook>, String> {
-    let records = opds_persisted_access::load_readlist_books(database_file, readlist_id).await?;
+    let records = backend
+        .load_readlist_books(database_file.to_path_buf(), readlist_id.to_string())
+        .await?;
     Ok(records.into_iter().map(map_readlist_book_record).collect())
 }
 
 pub(super) async fn load_unified_search_results(
+    backend: &dyn OpdsPersistedService,
     database_file: &Path,
     query: &str,
 ) -> Result<
@@ -251,8 +265,9 @@ pub(super) async fn load_unified_search_results(
     ),
     String,
 > {
-    let (series_rows, book_rows, collection_rows, readlist_rows) =
-        opds_persisted_access::load_unified_search_results(database_file, query).await?;
+    let (series_rows, book_rows, collection_rows, readlist_rows) = backend
+        .load_unified_search_results(database_file.to_path_buf(), query.to_string())
+        .await?;
 
     Ok((
         series_rows
@@ -316,12 +331,15 @@ pub(super) async fn load_unified_search_results(
 }
 
 pub(super) async fn load_opds_v1_series_search_results(
+    persisted_backend: &dyn OpdsPersistedService,
     database_file: &Path,
+    catalog_backend: &dyn OpdsCatalogService,
     allowed_library_ids: &Option<HashSet<String>>,
     search: &str,
     publishers: &[String],
 ) -> Result<Vec<PersistedSeriesSearchResult>, String> {
-    let (series, _, _, _) = load_unified_search_results(database_file, search).await?;
+    let (series, _, _, _) =
+        load_unified_search_results(persisted_backend, database_file, search).await?;
 
     if publishers.is_empty() {
         return Ok(series
@@ -331,6 +349,7 @@ pub(super) async fn load_opds_v1_series_search_results(
     }
 
     let visible_publisher_rows = load_series_page(
+        catalog_backend,
         database_file,
         allowed_library_ids,
         None,
@@ -363,28 +382,38 @@ pub(super) async fn load_opds_v1_series_search_results(
 }
 
 pub(super) async fn load_publishers(
+    backend: &dyn OpdsPersistedService,
     database_file: &Path,
     allowed_library_ids: &Option<HashSet<String>>,
 ) -> Result<Vec<String>, String> {
-    opds_persisted_access::load_publishers(database_file, allowed_library_ids).await
+    backend
+        .load_publishers(database_file.to_path_buf(), allowed_library_ids.clone())
+        .await
 }
 
 pub(super) async fn has_visible_collections_for_scope(
+    backend: &dyn OpdsPersistedService,
     database_file: &Path,
     allowed_library_ids: &Option<HashSet<String>>,
     restrictions: Option<&OpdsRestrictions>,
     library_id: Option<&str>,
 ) -> bool {
-    let collections = match load_collections(database_file, library_id).await {
+    let collections = match load_collections(backend, database_file, library_id).await {
         Ok(collections) => collections,
         Err(_) => return false,
     };
     for collection in collections {
-        let series =
-            match load_collection_series(database_file, &collection.id, collection.ordered).await {
-                Ok(series) => series,
-                Err(_) => continue,
-            };
+        let series = match load_collection_series(
+            backend,
+            database_file,
+            &collection.id,
+            collection.ordered,
+        )
+        .await
+        {
+            Ok(series) => series,
+            Err(_) => continue,
+        };
         if series.iter().any(|series| {
             library_visible(allowed_library_ids, &series.library_id)
                 && content_allowed_by_restrictions(
@@ -400,20 +429,23 @@ pub(super) async fn has_visible_collections_for_scope(
 }
 
 pub(super) async fn has_visible_readlists_for_scope(
+    catalog_backend: &dyn OpdsCatalogService,
+    persisted_backend: &dyn OpdsPersistedService,
     database_file: &Path,
     allowed_library_ids: &Option<HashSet<String>>,
     restrictions: Option<&OpdsRestrictions>,
     library_id: Option<&str>,
 ) -> bool {
     if let Some(id) = library_id {
-        for readlist in load_readlists_for_library(database_file, id)
+        for readlist in load_readlists_for_library(persisted_backend, database_file, id)
             .await
             .unwrap_or_default()
         {
-            let books = match load_readlist_books(database_file, &readlist.id).await {
-                Ok(books) => books,
-                Err(_) => continue,
-            };
+            let books =
+                match load_readlist_books(persisted_backend, database_file, &readlist.id).await {
+                    Ok(books) => books,
+                    Err(_) => continue,
+                };
             if books.iter().any(|book| {
                 library_visible(allowed_library_ids, &book.library_id)
                     && content_allowed_by_restrictions(
@@ -428,8 +460,12 @@ pub(super) async fn has_visible_readlists_for_scope(
         return false;
     }
 
-    for readlist in load_all_readlists(database_file).await.unwrap_or_default() {
-        let books = match load_readlist_books(database_file, &readlist.id).await {
+    for readlist in load_all_readlists(catalog_backend, database_file)
+        .await
+        .unwrap_or_default()
+    {
+        let books = match load_readlist_books(persisted_backend, database_file, &readlist.id).await
+        {
             Ok(books) => books,
             Err(_) => continue,
         };
@@ -447,7 +483,9 @@ pub(super) async fn has_visible_readlists_for_scope(
     false
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn load_browse_series_navigation(
+    backend: &dyn OpdsCatalogService,
     headers: &HeaderMap,
     database_file: &Path,
     allowed_library_ids: &Option<HashSet<String>>,
@@ -457,6 +495,7 @@ pub(super) async fn load_browse_series_navigation(
     size: usize,
 ) -> Result<(Vec<Value>, usize), String> {
     catalog_queries::load_browse_series_navigation(
+        backend,
         headers,
         database_file,
         allowed_library_ids,
@@ -469,12 +508,14 @@ pub(super) async fn load_browse_series_navigation(
 }
 
 pub(super) async fn load_browse_publisher_navigation(
+    backend: &dyn OpdsCatalogService,
     headers: &HeaderMap,
     database_file: &Path,
     allowed_library_ids: &Option<HashSet<String>>,
     library_id: Option<&str>,
 ) -> Result<Vec<Value>, String> {
     catalog_queries::load_browse_publisher_navigation(
+        backend,
         headers,
         database_file,
         allowed_library_ids,
@@ -483,72 +524,14 @@ pub(super) async fn load_browse_publisher_navigation(
     .await
 }
 
-pub(super) async fn load_keep_reading_books(
-    database_file: &Path,
-    user_id: &str,
-    library_id: Option<&str>,
-) -> Result<Vec<PersistedBookFeedItem>, String> {
-    catalog_queries::load_keep_reading_books(database_file, user_id, library_id).await
-}
-
-pub(super) async fn load_on_deck_books(
-    database_file: &Path,
-    user_id: &str,
-    library_id: Option<&str>,
-) -> Result<Vec<PersistedBookFeedItem>, String> {
-    catalog_queries::load_on_deck_books(database_file, user_id, library_id).await
-}
-
-pub(super) async fn load_latest_books_paged(
-    database_file: &Path,
-    allowed_library_ids: &Option<HashSet<String>>,
-    user_id: Option<&str>,
-    library_id: Option<&str>,
-    offset: i64,
-    limit: i64,
-) -> Result<Vec<PersistedBookFeedItem>, String> {
-    catalog_queries::load_latest_books_paged(
-        database_file,
-        allowed_library_ids,
-        user_id,
-        library_id,
-        offset,
-        limit,
-    )
-    .await
-}
-
-pub(super) async fn load_latest_series_paged(
-    database_file: &Path,
-    allowed_library_ids: &Option<HashSet<String>>,
-    library_id: Option<&str>,
-    offset: i64,
-    limit: i64,
-) -> Result<Vec<PersistedSeries>, String> {
-    catalog_queries::load_latest_series_paged(
-        database_file,
-        allowed_library_ids,
-        library_id,
-        offset,
-        limit,
-    )
-    .await
-}
-
-pub(super) async fn load_library_series(
-    database_file: &Path,
-    library_id: &str,
-    offset: i64,
-    limit: i64,
-) -> Result<Vec<PersistedSeries>, String> {
-    catalog_queries::load_library_series(database_file, library_id, offset, limit).await
-}
-
 pub(super) async fn load_collections(
+    backend: &dyn OpdsPersistedService,
     database_file: &Path,
     library_id: Option<&str>,
 ) -> Result<Vec<PersistedCollection>, String> {
-    let rows = opds_persisted_access::load_collections(database_file, library_id).await?;
+    let rows = backend
+        .load_collections(database_file.to_path_buf(), library_id.map(str::to_string))
+        .await?;
     Ok(rows
         .into_iter()
         .map(|row| PersistedCollection {
@@ -561,10 +544,13 @@ pub(super) async fn load_collections(
 }
 
 pub(super) async fn load_collection(
+    backend: &dyn OpdsPersistedService,
     database_file: &Path,
     collection_id: &str,
 ) -> Result<Option<PersistedCollection>, String> {
-    let row = opds_persisted_access::load_collection(database_file, collection_id).await?;
+    let row = backend
+        .load_collection(database_file.to_path_buf(), collection_id.to_string())
+        .await?;
     Ok(row.map(|row| PersistedCollection {
         id: row.id,
         name: row.name,
@@ -573,20 +559,18 @@ pub(super) async fn load_collection(
     }))
 }
 
-pub(super) async fn load_collection_books(
-    database_file: &Path,
-    collection_id: &str,
-) -> Result<Vec<PersistedBookFeedItem>, String> {
-    let rows = opds_persisted_access::load_collection_books(database_file, collection_id).await?;
-    Ok(rows.into_iter().map(map_book_feed_record).collect())
-}
-
 pub(super) async fn load_collection_series(
+    backend: &dyn OpdsPersistedService,
     database_file: &Path,
     collection_id: &str,
     ordered: bool,
 ) -> Result<Vec<PersistedSeries>, String> {
-    let rows = opds_persisted_access::load_collection_series(database_file, collection_id, ordered)
+    let rows = backend
+        .load_collection_series(
+            database_file.to_path_buf(),
+            collection_id.to_string(),
+            ordered,
+        )
         .await?;
     Ok(rows.into_iter().map(map_series_record).collect())
 }
@@ -691,31 +675,8 @@ fn map_readlist_book_record(
     }
 }
 
-fn map_book_feed_record(
-    row: opds_persisted_access::PersistedBookFeedRecord,
-) -> PersistedBookFeedItem {
-    PersistedBookFeedItem {
-        id: row.id,
-        title: row.title,
-        series_title: String::new(),
-        number: String::new(),
-        summary: String::new(),
-        authors: vec![],
-        file_name: row.file_name,
-        file_size: 0,
-        media_type: row.media_type,
-        page_count: 0,
-        epub_divina_compatible: false,
-        last_read: None,
-        last_read_date: None,
-        library_id: row.library_id,
-        age_rating: row.age_rating,
-        sharing_labels: row.sharing_labels,
-        last_modified: row.last_modified,
-    }
-}
-
 pub(super) async fn load_series_page(
+    backend: &dyn OpdsCatalogService,
     database_file: &Path,
     allowed_library_ids: &Option<HashSet<String>>,
     search: Option<&str>,
@@ -724,6 +685,7 @@ pub(super) async fn load_series_page(
     limit: i64,
 ) -> Result<Vec<PersistedSeries>, String> {
     catalog_queries::load_series_page(
+        backend,
         database_file,
         allowed_library_ids,
         search,
@@ -735,19 +697,21 @@ pub(super) async fn load_series_page(
 }
 
 pub(super) async fn load_all_readlists(
+    backend: &dyn OpdsCatalogService,
     database_file: &Path,
 ) -> Result<Vec<PersistedReadlist>, String> {
-    catalog_queries::load_all_readlists(database_file).await
+    catalog_queries::load_all_readlists(backend, database_file).await
 }
 
 pub(super) async fn validate_library_scope(
+    backend: &dyn OpdsPersistedService,
     database_file: &Path,
     allowed_library_ids: &Option<HashSet<String>>,
     library_id: Option<&str>,
 ) -> Option<Response> {
     let library_id = library_id?;
 
-    let library = match load_library(database_file, library_id).await {
+    let library = match load_library(backend, database_file, library_id).await {
         Ok(library) => library,
         Err(error) => {
             return Some(

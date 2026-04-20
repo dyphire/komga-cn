@@ -1,13 +1,14 @@
 use super::*;
+use std::sync::Arc;
 
 pub(super) async fn build_book_feed_acquisition_entries(
-    database_file: &Path,
+    app: &HttpAppState,
     headers: &HeaderMap,
     books: Vec<PersistedBookFeedItem>,
 ) -> Vec<OpdsV1AcquisitionEntry> {
     let mut entries = Vec::with_capacity(books.len());
     for book in books {
-        let extra_links = book_feed_page_streaming_links(database_file, headers, &book).await;
+        let extra_links = book_feed_page_streaming_links(app, headers, &book).await;
         let extension = std::path::Path::new(book.file_name.as_str())
             .extension()
             .and_then(|value| value.to_str())
@@ -65,12 +66,12 @@ pub(super) fn localized_opds_updated(value: &str) -> Option<String> {
 }
 
 pub(super) async fn series_book_page_streaming_links(
-    database_file: &Path,
+    app: &HttpAppState,
     headers: &HeaderMap,
     book: &PersistedSeriesBook,
 ) -> Vec<String> {
     opds_book_page_streaming_links(
-        database_file,
+        app,
         headers,
         &book.id,
         &book.media_type,
@@ -83,12 +84,12 @@ pub(super) async fn series_book_page_streaming_links(
 }
 
 async fn book_feed_page_streaming_links(
-    database_file: &Path,
+    app: &HttpAppState,
     headers: &HeaderMap,
     book: &PersistedBookFeedItem,
 ) -> Vec<String> {
     opds_book_page_streaming_links(
-        database_file,
+        app,
         headers,
         &book.id,
         &book.media_type,
@@ -102,7 +103,7 @@ async fn book_feed_page_streaming_links(
 
 #[allow(clippy::too_many_arguments)]
 async fn opds_book_page_streaming_links(
-    database_file: &Path,
+    app: &HttpAppState,
     headers: &HeaderMap,
     book_id: &str,
     media_type: &str,
@@ -112,7 +113,8 @@ async fn opds_book_page_streaming_links(
     last_read_date: Option<&str>,
 ) -> Vec<String> {
     let media_types = opds_book_page_stream_media_types(
-        database_file,
+        &app.services.media_assets,
+        app.auth_db.database_file.as_path(),
         book_id,
         media_type,
         page_count,
@@ -171,6 +173,7 @@ async fn opds_book_page_streaming_links(
 }
 
 async fn opds_book_page_stream_media_types(
+    media_assets: &Arc<dyn crate::http::state::MediaAssetsService>,
     database_file: &Path,
     book_id: &str,
     media_type: &str,
@@ -192,14 +195,19 @@ async fn opds_book_page_stream_media_types(
         )
         || (media_type == "application/epub+zip" && epub_divina_compatible)
     {
-        return load_divina_page_media_types_for_opds(database_file, book_id).await;
+        return load_divina_page_media_types_for_opds(media_assets, database_file, book_id).await;
     }
 
     vec![]
 }
 
-async fn load_divina_page_media_types_for_opds(database_file: &Path, book_id: &str) -> Vec<String> {
-    let persisted = load_persisted_book_pages(database_file, book_id)
+async fn load_divina_page_media_types_for_opds(
+    media_assets: &Arc<dyn crate::http::state::MediaAssetsService>,
+    database_file: &Path,
+    book_id: &str,
+) -> Vec<String> {
+    let persisted = media_assets
+        .load_persisted_book_pages(database_file.to_path_buf(), book_id.to_string())
         .await
         .unwrap_or_default()
         .into_iter()
@@ -215,7 +223,10 @@ async fn load_divina_page_media_types_for_opds(database_file: &Path, book_id: &s
         return dedup_media_types(persisted);
     }
 
-    let Ok(Some(media)) = load_persisted_book_media(database_file, book_id).await else {
+    let Ok(Some(media)) = media_assets
+        .load_persisted_book_media(database_file.to_path_buf(), book_id.to_string())
+        .await
+    else {
         return vec![];
     };
 
@@ -225,7 +236,8 @@ async fn load_divina_page_media_types_for_opds(database_file: &Path, book_id: &s
     }
 
     dedup_media_types(
-        load_archive_page_rows(&media)
+        media_assets
+            .load_archive_page_rows(media)
             .unwrap_or_default()
             .into_iter()
             .map(|page| {

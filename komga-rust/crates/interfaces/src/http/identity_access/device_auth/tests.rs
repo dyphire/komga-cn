@@ -1,5 +1,4 @@
 use super::*;
-use axum::extract::{Extension, Path};
 use axum::http::{HeaderMap, StatusCode};
 use base64::engine::general_purpose::STANDARD;
 use komga_application::identity_access::{
@@ -11,7 +10,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::runtime_identity_access::{KoreaderBookTarget, test_support::seed_koreader_book_target};
+use crate::runtime_identity_access::{
+    KoreaderBookLookupError, KoreaderBookTarget, test_support::seed_koreader_book_target,
+};
 
 fn unique_temp_path(prefix: &str) -> PathBuf {
     let millis = SystemTime::now()
@@ -494,11 +495,12 @@ async fn kobo_ping_rejects_requests_without_valid_auth() {
         demo_mode: false,
         session_runtime_key: "test-session".to_string(),
         remember_me_runtime_key: "test-remember-me".to_string(),
+        runtime_identity: crate::runtime_identity_access::default_test_identity_service(),
     };
-    let response = kobo_ping(
-        Extension(auth_db),
-        Path("invalid-token".to_string()),
-        Extension(RequestConnectionInfo::default()),
+    let response = kobo_ping_for_tests(
+        auth_db.database_file.as_path(),
+        "invalid-token",
+        RequestConnectionInfo::default(),
         HeaderMap::new(),
     )
     .await;
@@ -518,7 +520,7 @@ async fn load_koreader_book_target_returns_unique_book_and_page_count() {
         })),
     );
 
-    let target = load_koreader_book_target(database_file.as_path(), "hash-unique")
+    let target = load_koreader_book_target_for_tests(database_file.as_path(), "hash-unique")
         .await
         .expect("unique hash should not fail")
         .expect("unique hash should resolve a book");
@@ -538,7 +540,7 @@ async fn load_koreader_book_target_reports_conflict_for_duplicate_hash() {
         Err(KoreaderBookLookupError::Conflict),
     );
 
-    let result = load_koreader_book_target(database_file.as_path(), "hash-dup").await;
+    let result = load_koreader_book_target_for_tests(database_file.as_path(), "hash-dup").await;
     assert!(matches!(result, Err(KoreaderBookLookupError::Conflict)));
 
     let _ = fs::remove_file(database_file);

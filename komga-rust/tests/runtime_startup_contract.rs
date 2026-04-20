@@ -26,7 +26,8 @@ fn runtime_task_context(
                 | komga_config::writer_ownership::WriterDecision::Isolated
         ),
         owns_filesystem_scan_output: matches!(
-            config.writer_decision(komga_config::writer_ownership::WriterKind::FilesystemScanOutput),
+            config
+                .writer_decision(komga_config::writer_ownership::WriterKind::FilesystemScanOutput),
             komga_config::writer_ownership::WriterDecision::Allowed
                 | komga_config::writer_ownership::WriterDecision::Isolated
         ),

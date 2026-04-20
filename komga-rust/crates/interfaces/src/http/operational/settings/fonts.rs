@@ -1,47 +1,45 @@
 use axum::Json;
 use axum::extract::Extension;
 use axum::extract::Path as AxumPath;
-use axum::http::HeaderMap;
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use rust_embed::Embed;
 use serde_json::Value;
 use std::collections::BTreeSet;
-use std::path::Path;
 
-use crate::operational_settings_access::fonts::{
-    list_font_families, load_font_family_css, load_font_file,
-};
 use crate::http::identity_access::auth::require_request_auth;
-use crate::http::state::AuthDatabaseState;
-
-use super::super::super::OperationalState;
+use crate::http::state::HttpAppState;
 
 #[derive(Embed)]
 #[folder = "../../../komga/src/main/resources/embeddedFonts"]
 struct EmbeddedFonts;
 
 pub(crate) async fn get_fonts_families(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    let families = merged_font_families(state.runtime.fonts_data_directory.as_path());
+    let families = merged_font_families(&app);
     Json(Value::Array(
         families.into_iter().map(Value::String).collect(),
     ))
     .into_response()
 }
 
-fn merged_font_families(fonts_directory: &Path) -> Vec<String> {
+fn merged_font_families(app: &HttpAppState) -> Vec<String> {
     let mut families = embedded_font_families()
         .into_iter()
         .collect::<BTreeSet<_>>();
-    families.extend(list_font_families(fonts_directory));
+    families.extend(
+        app.services
+            .operational_settings
+            .list_font_families(app.operational.runtime.fonts_data_directory.clone()),
+    );
     families.into_iter().collect()
 }
 
@@ -103,8 +101,12 @@ fn load_embedded_font_family_css(font_family: &str) -> Option<String> {
     )
 }
 
-fn filesystem_font_family_exists(fonts_directory: &Path, font_family: &str) -> bool {
-    fonts_directory.join(font_family).is_dir()
+fn filesystem_font_family_exists(app: &HttpAppState, font_family: &str) -> bool {
+    app.operational
+        .runtime
+        .fonts_data_directory
+        .join(font_family)
+        .is_dir()
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -114,7 +116,7 @@ struct FontCharacteristics {
 }
 
 pub(crate) async fn get_font_file(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     AxumPath((font_family, font_file)): AxumPath<(String, String)>,
 ) -> Response {
     if font_family.contains('/')
@@ -129,12 +131,21 @@ pub(crate) async fn get_font_file(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    let fonts_directory = state.runtime.fonts_data_directory.as_path();
-    let bytes = if filesystem_font_family_exists(fonts_directory, &font_family) {
-        load_font_file(fonts_directory, &font_family, &font_file)
+    let fonts_directory = app.operational.runtime.fonts_data_directory.clone();
+    let bytes = if filesystem_font_family_exists(&app, &font_family) {
+        app.services.operational_settings.load_font_file(
+            fonts_directory.clone(),
+            font_family.clone(),
+            font_file.clone(),
+        )
     } else {
-        load_embedded_font_file(&font_family, &font_file)
-            .or_else(|| load_font_file(fonts_directory, &font_family, &font_file))
+        load_embedded_font_file(&font_family, &font_file).or_else(|| {
+            app.services.operational_settings.load_font_file(
+                fonts_directory.clone(),
+                font_family.clone(),
+                font_file.clone(),
+            )
+        })
     };
 
     let Some(bytes) = bytes else {
@@ -154,19 +165,24 @@ pub(crate) async fn get_font_file(
 }
 
 pub(crate) async fn get_font_family_css(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     AxumPath(font_family): AxumPath<String>,
 ) -> Response {
     if font_family.contains('/') || font_family.contains('\\') {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let fonts_directory = state.runtime.fonts_data_directory.as_path();
-    let css = if filesystem_font_family_exists(fonts_directory, &font_family) {
-        load_font_family_css(fonts_directory, &font_family)
+    let fonts_directory = app.operational.runtime.fonts_data_directory.clone();
+    let css = if filesystem_font_family_exists(&app, &font_family) {
+        app.services
+            .operational_settings
+            .load_font_family_css(fonts_directory.clone(), font_family.clone())
     } else {
-        load_embedded_font_family_css(&font_family)
-            .or_else(|| load_font_family_css(fonts_directory, &font_family))
+        load_embedded_font_family_css(&font_family).or_else(|| {
+            app.services
+                .operational_settings
+                .load_font_family_css(fonts_directory.clone(), font_family.clone())
+        })
     };
 
     let Some(css) = css else {

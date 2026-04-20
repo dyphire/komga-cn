@@ -8,9 +8,8 @@ use serde_json::json;
 use crate::http::identity_access::auth::{
     require_admin, require_auth, resolved_auth_user, user_id,
 };
-use crate::operational_settings_access::operations as operations_access;
+use crate::http::state::HttpAppState;
 
-use super::super::super::OperationalState;
 use super::{query_value, query_values};
 
 #[derive(Debug, Eq, PartialEq)]
@@ -20,7 +19,7 @@ enum SyncpointDeleteScope {
 }
 
 pub(crate) async fn get_history(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -38,13 +37,16 @@ pub(crate) async fn get_history(
         .unwrap_or(20);
     let sorts = query_values(query, "sort");
 
-    let page_data = match operations_access::load_history_page(
-        state.runtime.database_file.as_path(),
-        page,
-        size,
-        &sorts,
-    )
-    .await
+    let page_data = match app
+        .services
+        .operational_settings
+        .load_history_page(
+            app.operational.runtime.database_file.clone(),
+            page,
+            size,
+            sorts,
+        )
+        .await
     {
         Ok(page_data) => page_data,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -54,7 +56,7 @@ pub(crate) async fn get_history(
 }
 
 pub(crate) async fn delete_syncpoints_me(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -68,19 +70,23 @@ pub(crate) async fn delete_syncpoints_me(
 
     let result = match syncpoint_delete_scope(uri.query().unwrap_or_default()) {
         SyncpointDeleteScope::All => {
-            operations_access::delete_syncpoints_by_user(
-                state.runtime.database_file.as_path(),
-                user_id(&current_user),
-            )
-            .await
+            app.services
+                .operational_settings
+                .delete_syncpoints_by_user(
+                    app.operational.runtime.database_file.clone(),
+                    user_id(&current_user).to_string(),
+                )
+                .await
         }
         SyncpointDeleteScope::ApiKeys(key_ids) => {
-            operations_access::delete_syncpoints_by_user_and_key_ids(
-                state.runtime.database_file.as_path(),
-                user_id(&current_user),
-                &key_ids,
-            )
-            .await
+            app.services
+                .operational_settings
+                .delete_syncpoints_by_user_and_key_ids(
+                    app.operational.runtime.database_file.clone(),
+                    user_id(&current_user).to_string(),
+                    key_ids,
+                )
+                .await
         }
     };
 
@@ -110,10 +116,9 @@ fn syncpoint_delete_scope(query: &str) -> SyncpointDeleteScope {
     }
 }
 
-pub(crate) async fn get_oauth2_providers(
-    Extension(state): Extension<OperationalState>,
-) -> Response {
-    let providers = state
+pub(crate) async fn get_oauth2_providers(Extension(app): Extension<HttpAppState>) -> Response {
+    let providers = app
+        .operational
         .oauth2_clients
         .iter()
         .map(|provider| {
@@ -128,14 +133,14 @@ pub(crate) async fn get_oauth2_providers(
 }
 
 pub(crate) async fn delete_tasks(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
         return response;
     }
 
-    let deleted = (state.clear_unowned_tasks)();
+    let deleted = app.services.task_queue.clear_unowned_tasks().await;
 
     Json(json!(deleted)).into_response()
 }

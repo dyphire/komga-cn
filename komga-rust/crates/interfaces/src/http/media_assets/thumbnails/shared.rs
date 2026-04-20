@@ -125,38 +125,38 @@ pub(super) fn thumbnail_max_edge_from_setting(value: &str) -> u32 {
 }
 
 pub(super) async fn load_book_thumbnail_source_bytes(
-    database_file: &FsPath,
+    app: &HttpAppState,
     book_id: &str,
     media: &PersistedBookMedia,
 ) -> Option<Vec<u8>> {
-    if let Ok(Some(thumbnail)) = load_selected_book_thumbnail(database_file, book_id).await
+    if let Ok(Some(thumbnail)) = load_selected_book_thumbnail_from_services(app, book_id).await
         && thumbnail.thumbnail_type != "GENERATED"
     {
         return Some(thumbnail.thumbnail);
     }
 
     if book_media_is_epub(media) {
-        return load_epub_cover_bytes(media).map(|(bytes, _)| bytes);
+        return load_epub_cover_bytes_from_services(app, media).map(|(bytes, _)| bytes);
     }
 
     if book_media_is_pdf(media) {
-        let page_row = load_persisted_book_page_row(database_file, book_id, 1)
+        let page_row = load_persisted_book_page_row_from_services(app, book_id, 1)
             .await
             .ok()
             .flatten()
-            .or_else(|| load_pdf_page_row(media, 1))?;
-        return render_book_page_thumbnail(media, &page_row, 1, 300);
+            .or_else(|| load_pdf_page_row_from_services(app, media, 1))?;
+        return render_book_page_thumbnail_from_services(app, media, &page_row, 1, 300);
     }
 
     if book_media_is_single_image(media) {
-        return read_media_file_bytes(&media.file_path);
+        return read_media_file_bytes_from_services(app, &media.file_path);
     }
 
-    let page_row = load_persisted_book_page_row(database_file, book_id, 1)
+    let page_row = load_persisted_book_page_row_from_services(app, book_id, 1)
         .await
         .ok()
         .flatten()
-        .or_else(|| load_archive_page_row(media, 1))?;
+        .or_else(|| load_archive_page_row_from_services(app, media, 1))?;
     let media_type = if page_row.media_type.is_empty() {
         content_type_from_filename(&page_row.file_name, &media.media_type)
     } else {
@@ -166,18 +166,18 @@ pub(super) async fn load_book_thumbnail_source_bytes(
         return None;
     }
 
-    resolve_book_page_bytes(media, &page_row, 1)
+    resolve_book_page_bytes_from_services(app, media, &page_row, 1)
 }
 
 pub(super) async fn load_series_thumbnail(
-    database_file: &FsPath,
+    app: &HttpAppState,
     series_id: &str,
 ) -> Result<Option<EntityThumbnailBinary>, String> {
-    if let Some(thumbnail) = load_selected_series_thumbnail(database_file, series_id).await? {
+    if let Some(thumbnail) = load_selected_series_thumbnail_from_services(app, series_id).await? {
         return Ok(Some(thumbnail));
     }
 
-    let Some(book_id) = load_series_book_ids(database_file, series_id)
+    let Some(book_id) = load_series_book_ids_from_media_services(app, series_id)
         .await?
         .into_iter()
         .next()
@@ -185,25 +185,30 @@ pub(super) async fn load_series_thumbnail(
         return Ok(None);
     };
 
-    load_selected_book_thumbnail(database_file, &book_id).await
+    load_selected_book_thumbnail_from_services(app, &book_id).await
 }
 
 pub(super) async fn load_series_thumbnail_source_bytes(
-    database_file: &FsPath,
+    app: &HttpAppState,
     series_id: &str,
 ) -> Option<Vec<u8>> {
-    match load_series_thumbnail(database_file, series_id).await {
+    match load_series_thumbnail(app, series_id).await {
         Ok(Some(thumbnail)) => Some(thumbnail.thumbnail),
         Ok(None) | Err(_) => None,
     }
 }
 
 pub(super) async fn load_readlist_mosaic_bytes(
-    database_file: &FsPath,
+    app: &HttpAppState,
     readlist_id: &str,
 ) -> Result<Option<Vec<u8>>, String> {
     let book_ids = repeated_thumbnail_source_ids(
-        load_persisted_readlist_book_rows(database_file, readlist_id)
+        app.services
+            .discovery_detail
+            .load_persisted_readlist_book_rows(
+                app.auth_db.database_file.clone(),
+                readlist_id.to_string(),
+            )
             .await?
             .into_iter()
             .map(|row| row.book_id)
@@ -215,9 +220,8 @@ pub(super) async fn load_readlist_mosaic_bytes(
 
     let mut images = Vec::new();
     for book_id in book_ids {
-        if let Ok(Some(media)) = load_persisted_book_media(database_file, &book_id).await
-            && let Some(bytes) =
-                load_book_thumbnail_source_bytes(database_file, &book_id, &media).await
+        if let Ok(Some(media)) = load_persisted_book_media_from_services(app, &book_id).await
+            && let Some(bytes) = load_book_thumbnail_source_bytes(app, &book_id, &media).await
         {
             images.push(bytes);
         }
@@ -227,11 +231,17 @@ pub(super) async fn load_readlist_mosaic_bytes(
 }
 
 pub(super) async fn load_collection_mosaic_bytes(
-    database_file: &FsPath,
+    app: &HttpAppState,
     collection_id: &str,
 ) -> Result<Option<Vec<u8>>, String> {
     let series_ids = repeated_thumbnail_source_ids(
-        load_persisted_collection_series_ids(database_file, collection_id).await?,
+        app.services
+            .discovery_detail
+            .load_persisted_collection_series_ids(
+                app.auth_db.database_file.clone(),
+                collection_id.to_string(),
+            )
+            .await?,
     );
     if series_ids.is_empty() {
         return Ok(None);
@@ -239,7 +249,7 @@ pub(super) async fn load_collection_mosaic_bytes(
 
     let mut images = Vec::new();
     for series_id in series_ids {
-        if let Some(bytes) = load_series_thumbnail_source_bytes(database_file, &series_id).await {
+        if let Some(bytes) = load_series_thumbnail_source_bytes(app, &series_id).await {
             images.push(bytes);
         }
     }

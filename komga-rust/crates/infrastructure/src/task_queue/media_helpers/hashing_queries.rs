@@ -43,8 +43,8 @@ pub(in crate::task_queue) fn hash_book_pages(
 
         async_runtime.block_on(async move {
             persist_book_page_hashes_from_media_content(database_file.as_path(), &book_id)
-            .await
-            .map_err(TaskExecutionError::runtime)
+                .await
+                .map_err(TaskExecutionError::runtime)
         })
     })
     .join()

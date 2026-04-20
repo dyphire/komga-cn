@@ -1,7 +1,6 @@
 use super::*;
-
+use crate::http::state::HttpAppState;
 use komga_application::runtime_sse::register_runtime_sse_event;
-use crate::discovery_detail_access::collections as collections_access;
 use time::PrimitiveDateTime;
 use time::macros::format_description;
 
@@ -11,14 +10,21 @@ pub struct PersistedCollectionWriteInput {
     pub series_ids: Vec<String>,
 }
 
-pub async fn persisted_collections_exist(database_file: &FsPath) -> Result<bool, String> {
-    collections_access::persisted_collections_exist(database_file).await
+pub async fn persisted_collections_exist(app: &HttpAppState) -> Result<bool, String> {
+    app.services
+        .discovery_detail
+        .persisted_collections_exist(app.auth_db.database_file.clone())
+        .await
 }
 
 pub(super) async fn load_persisted_collections(
-    database_file: &FsPath,
+    app: &HttpAppState,
 ) -> Result<Vec<CollectionReadModel>, String> {
-    let rows = collections_access::load_persisted_collections(database_file).await?;
+    let rows = app
+        .services
+        .discovery_detail
+        .load_persisted_collections(app.auth_db.database_file.clone())
+        .await?;
 
     let mut collections = Vec::with_capacity(rows.len());
     for row in rows {
@@ -27,11 +33,11 @@ pub(super) async fn load_persisted_collections(
             id: id.clone(),
             name: row.name,
             ordered: row.ordered,
-            series_ids: collections_access::load_persisted_collection_series_ids(
-                database_file,
-                &id,
-            )
-            .await?,
+            series_ids: app
+                .services
+                .discovery_detail
+                .load_persisted_collection_series_ids(app.auth_db.database_file.clone(), id.clone())
+                .await?,
             created_date: row.created_date,
             last_modified_date: row.last_modified_date,
             filtered: false,
@@ -42,11 +48,17 @@ pub(super) async fn load_persisted_collections(
 }
 
 pub(super) async fn load_persisted_collection_detail(
-    database_file: &FsPath,
+    app: &HttpAppState,
     collection_id: &str,
 ) -> Result<Option<CollectionReadModel>, String> {
-    let Some(row) =
-        collections_access::load_persisted_collection_detail(database_file, collection_id).await?
+    let Some(row) = app
+        .services
+        .discovery_detail
+        .load_persisted_collection_detail(
+            app.auth_db.database_file.clone(),
+            collection_id.to_string(),
+        )
+        .await?
     else {
         return Ok(None);
     };
@@ -55,11 +67,14 @@ pub(super) async fn load_persisted_collection_detail(
         id: row.id,
         name: row.name,
         ordered: row.ordered,
-        series_ids: collections_access::load_persisted_collection_series_ids(
-            database_file,
-            collection_id,
-        )
-        .await?,
+        series_ids: app
+            .services
+            .discovery_detail
+            .load_persisted_collection_series_ids(
+                app.auth_db.database_file.clone(),
+                collection_id.to_string(),
+            )
+            .await?,
         created_date: row.created_date,
         last_modified_date: row.last_modified_date,
         filtered: false,
@@ -69,14 +84,17 @@ pub(super) async fn load_persisted_collection_detail(
 }
 
 pub async fn load_series_library_id(
-    database_file: &FsPath,
+    app: &HttpAppState,
     series_id: &str,
 ) -> Result<Option<String>, String> {
-    collections_access::load_series_library_id(database_file, series_id).await
+    app.services
+        .discovery_detail
+        .load_series_library_id(app.auth_db.database_file.clone(), series_id.to_string())
+        .await
 }
 
 pub async fn series_visible_to_context(
-    database_file: &FsPath,
+    app: &HttpAppState,
     context: &DiscoveryQueryContext,
     series_id: &str,
     known_library_id: Option<&str>,
@@ -84,9 +102,7 @@ pub async fn series_visible_to_context(
     let library_id = match known_library_id {
         Some(value) => value.to_string(),
         None => {
-            let Some(row) =
-                collections_access::load_series_library_id(database_file, series_id).await?
-            else {
+            let Some(row) = load_series_library_id(app, series_id).await? else {
                 return Ok(false);
             };
             row
@@ -105,8 +121,11 @@ pub async fn series_visible_to_context(
         return Ok(true);
     };
 
-    let restriction_record =
-        collections_access::load_series_restrictions(database_file, series_id).await?;
+    let restriction_record = app
+        .services
+        .discovery_detail
+        .load_series_restrictions(app.auth_db.database_file.clone(), series_id.to_string())
+        .await?;
 
     Ok(restrictions_allow_content(
         restrictions,
@@ -174,18 +193,20 @@ fn restrictions_allow_content(
 }
 
 pub async fn persist_collection_create(
-    database_file: &FsPath,
+    app: &HttpAppState,
     input: &PersistedCollectionWriteInput,
 ) -> Result<String, String> {
     let collection_id = generated_collection_id();
-    collections_access::persist_collection_create(
-        database_file,
-        &collection_id,
-        &input.name,
-        input.ordered,
-        &input.series_ids,
-    )
-    .await?;
+    app.services
+        .discovery_detail
+        .persist_collection_create(
+            app.auth_db.database_file.clone(),
+            collection_id.clone(),
+            input.name.clone(),
+            input.ordered,
+            input.series_ids.clone(),
+        )
+        .await?;
 
     register_runtime_sse_event(
         "CollectionAdded",
@@ -201,18 +222,21 @@ pub async fn persist_collection_create(
 }
 
 pub async fn persist_collection_update(
-    database_file: &FsPath,
+    app: &HttpAppState,
     collection_id: &str,
     input: &PersistedCollectionWriteInput,
 ) -> Result<bool, String> {
-    let updated = collections_access::persist_collection_update(
-        database_file,
-        collection_id,
-        &input.name,
-        input.ordered,
-        &input.series_ids,
-    )
-    .await?;
+    let updated = app
+        .services
+        .discovery_detail
+        .persist_collection_update(
+            app.auth_db.database_file.clone(),
+            collection_id.to_string(),
+            input.name.clone(),
+            input.ordered,
+            input.series_ids.clone(),
+        )
+        .await?;
     if updated {
         register_runtime_sse_event(
             "CollectionChanged",
@@ -228,11 +252,15 @@ pub async fn persist_collection_update(
 }
 
 pub async fn delete_persisted_collection(
-    database_file: &FsPath,
+    app: &HttpAppState,
     collection_id: &str,
 ) -> Result<bool, String> {
-    let existing = load_persisted_collection_detail(database_file, collection_id).await?;
-    let deleted = collections_access::delete_persisted_collection(database_file, collection_id).await?;
+    let existing = load_persisted_collection_detail(app, collection_id).await?;
+    let deleted = app
+        .services
+        .discovery_detail
+        .delete_persisted_collection(app.auth_db.database_file.clone(), collection_id.to_string())
+        .await?;
     if deleted && let Some(collection) = existing {
         register_runtime_sse_event(
             "CollectionDeleted",
@@ -248,19 +276,30 @@ pub async fn delete_persisted_collection(
 }
 
 pub async fn upsert_collection_search_document(
-    database_file: &FsPath,
-    index_dir: &FsPath,
+    app: &HttpAppState,
     collection_id: &str,
 ) -> Result<bool, String> {
-    collections_access::upsert_collection_search_document(database_file, index_dir, collection_id)
+    app.services
+        .discovery_detail
+        .upsert_collection_search_document(
+            app.auth_db.database_file.clone(),
+            app.operational.runtime.lucene_data_directory.clone(),
+            collection_id.to_string(),
+        )
         .await
 }
 
 pub async fn delete_collection_search_document(
-    index_dir: &FsPath,
+    app: &HttpAppState,
     collection_id: &str,
 ) -> Result<(), String> {
-    collections_access::delete_collection_search_document(index_dir, collection_id).await
+    app.services
+        .discovery_detail
+        .delete_collection_search_document(
+            app.operational.runtime.lucene_data_directory.clone(),
+            collection_id.to_string(),
+        )
+        .await
 }
 
 fn generated_collection_id() -> String {

@@ -9,10 +9,11 @@ pub async fn ensure_noclaim_initial_users(config: &RuntimeConfig) {
         return;
     }
 
-    let existing_users = komga_infrastructure::sqlite::write_models::claims::load_persisted_user_count(
-        config.database_file.as_path(),
-    )
-    .await;
+    let existing_users =
+        komga_infrastructure::sqlite::write_models::claims::load_persisted_user_count(
+            config.database_file.as_path(),
+        )
+        .await;
 
     let existing_users = match existing_users {
         Ok(count) => count,

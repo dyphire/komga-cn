@@ -45,7 +45,6 @@ pub(super) const READ_FIXTURE_SCHEMA_STATEMENTS: &[&str] = &[
         url TEXT NOT NULL DEFAULT ''
     )
     "#,
-
     r#"
     CREATE TABLE IF NOT EXISTS collections (
         id TEXT PRIMARY KEY,
@@ -55,7 +54,6 @@ pub(super) const READ_FIXTURE_SCHEMA_STATEMENTS: &[&str] = &[
         last_modified_date TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z'
     )
     "#,
-
     r#"
     CREATE TABLE IF NOT EXISTS collection_series (
         collection_id TEXT NOT NULL,
@@ -63,7 +61,6 @@ pub(super) const READ_FIXTURE_SCHEMA_STATEMENTS: &[&str] = &[
         position INTEGER NOT NULL DEFAULT 0
     )
     "#,
-
     "CREATE TABLE IF NOT EXISTS series_labels (series_id TEXT NOT NULL, label TEXT NOT NULL)",
     "CREATE TABLE IF NOT EXISTS series_genres (series_id TEXT NOT NULL, genre TEXT NOT NULL)",
     "CREATE TABLE IF NOT EXISTS series_tags (series_id TEXT NOT NULL, tag TEXT NOT NULL)",
@@ -90,7 +87,6 @@ pub(super) const READ_FIXTURE_SCHEMA_STATEMENTS: &[&str] = &[
         oneshot INTEGER NOT NULL DEFAULT 0
     )
     "#,
-
     "CREATE TABLE IF NOT EXISTS book_tags (book_id TEXT NOT NULL, tag TEXT NOT NULL)",
     "CREATE TABLE IF NOT EXISTS book_authors (book_id TEXT NOT NULL, author TEXT NOT NULL)",
     r#"
@@ -106,7 +102,6 @@ pub(super) const READ_FIXTURE_SCHEMA_STATEMENTS: &[&str] = &[
         device_name TEXT NOT NULL DEFAULT ''
     )
     "#,
-
     r#"
     CREATE TABLE IF NOT EXISTS readlists (
         id TEXT PRIMARY KEY,
@@ -117,7 +112,6 @@ pub(super) const READ_FIXTURE_SCHEMA_STATEMENTS: &[&str] = &[
         last_modified_date TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z'
     )
     "#,
-
     "CREATE TABLE IF NOT EXISTS readlist_books (readlist_id TEXT NOT NULL, book_id TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0)",
 ];
 

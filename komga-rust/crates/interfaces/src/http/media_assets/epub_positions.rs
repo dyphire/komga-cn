@@ -1,11 +1,14 @@
 use super::*;
 
 pub(super) async fn load_persisted_epub_positions(
-    database_file: &FsPath,
+    app: &HttpAppState,
     book_id: &str,
 ) -> Result<Option<Vec<Value>>, String> {
-    let Some((extension_class, blob)) =
-        load_persisted_epub_extension_blob(database_file, book_id).await?
+    let Some((extension_class, blob)) = app
+        .services
+        .media_assets
+        .load_persisted_epub_extension_blob(app.auth_db.database_file.clone(), book_id.to_string())
+        .await?
     else {
         return Ok(None);
     };
@@ -17,7 +20,7 @@ pub(super) async fn load_persisted_epub_positions(
         return Ok(None);
     }
 
-    let positions = decode_epub_positions_blob(&blob)?;
+    let positions = decode_epub_positions_blob(app, &blob)?;
     if positions.is_empty() {
         Ok(None)
     } else {
@@ -25,6 +28,11 @@ pub(super) async fn load_persisted_epub_positions(
     }
 }
 
-pub(super) fn decode_epub_positions_blob(blob: &[u8]) -> Result<Vec<Value>, String> {
-    decode_epub_positions(blob)
+pub(super) fn decode_epub_positions_blob(
+    app: &HttpAppState,
+    blob: &[u8],
+) -> Result<Vec<Value>, String> {
+    app.services
+        .media_assets
+        .decode_epub_positions(blob.to_vec())
 }

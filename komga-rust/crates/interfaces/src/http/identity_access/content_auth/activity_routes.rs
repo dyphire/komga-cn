@@ -6,9 +6,10 @@ pub(crate) async fn users_me_api_keys_create(
     headers: HeaderMap,
     connection_info: RequestConnectionInfo,
     body: Value,
-    auth_db: AuthDatabaseState,
+    app: &HttpAppState,
 ) -> Response {
-    let Some(current_user) = authenticated_user(&headers, connection_info, &auth_db).await else {
+    let auth_db = &app.auth_db;
+    let Some(current_user) = authenticated_user(&headers, connection_info, app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let Some(comment) = api_key_comment_from_request(&body) else {
@@ -58,9 +59,10 @@ pub(crate) async fn users_me_api_keys_create(
 pub(crate) async fn users_me_api_keys_list(
     headers: HeaderMap,
     connection_info: RequestConnectionInfo,
-    auth_db: AuthDatabaseState,
+    app: &HttpAppState,
 ) -> Response {
-    let Some(current_user) = authenticated_user(&headers, connection_info, &auth_db).await else {
+    let auth_db = &app.auth_db;
+    let Some(current_user) = authenticated_user(&headers, connection_info, app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if auth_db.demo_mode && !user_is_admin(&current_user) {
@@ -93,9 +95,10 @@ pub(crate) async fn users_me_api_keys_delete(
     headers: HeaderMap,
     connection_info: RequestConnectionInfo,
     Path(api_key_id): Path<String>,
-    auth_db: AuthDatabaseState,
+    app: &HttpAppState,
 ) -> Response {
-    let Some(current_user) = authenticated_user(&headers, connection_info, &auth_db).await else {
+    let auth_db = &app.auth_db;
+    let Some(current_user) = authenticated_user(&headers, connection_info, app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
@@ -116,9 +119,10 @@ pub(crate) async fn users_me_authentication_activity(
     headers: HeaderMap,
     connection_info: RequestConnectionInfo,
     uri: Uri,
-    auth_db: AuthDatabaseState,
+    app: &HttpAppState,
 ) -> Response {
-    let Some(current_user) = authenticated_user(&headers, connection_info, &auth_db).await else {
+    let auth_db = &app.auth_db;
+    let Some(current_user) = authenticated_user(&headers, connection_info, app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if auth_db.demo_mode && !user_is_admin(&current_user) {
@@ -141,9 +145,10 @@ pub(crate) async fn users_authentication_activity(
     headers: HeaderMap,
     connection_info: RequestConnectionInfo,
     uri: Uri,
-    auth_db: AuthDatabaseState,
+    app: &HttpAppState,
 ) -> Response {
-    let Some(current_user) = authenticated_user(&headers, connection_info, &auth_db).await else {
+    let auth_db = &app.auth_db;
+    let Some(current_user) = authenticated_user(&headers, connection_info, app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if !user_is_admin(&current_user) {
@@ -163,9 +168,10 @@ pub(crate) async fn users_by_id_authentication_activity_latest(
     connection_info: RequestConnectionInfo,
     Path(target_user_id): Path<String>,
     uri: Uri,
-    auth_db: AuthDatabaseState,
+    app: &HttpAppState,
 ) -> Response {
-    let Some(current_user) = authenticated_user(&headers, connection_info, &auth_db).await else {
+    let auth_db = &app.auth_db;
+    let Some(current_user) = authenticated_user(&headers, connection_info, app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if !user_is_admin(&current_user) && user_id(&current_user) != target_user_id {

@@ -2,8 +2,8 @@ use super::archive_utils::{build_stored_zip_archive, metadata_updated_unix_secon
 use super::media_analysis::{is_supported_page_image_file_name, media_type_from_entry_name};
 use super::*;
 use crate::tasks::media_queries::{
-    load_book_archive_source as load_persisted_book_archive_source,
-    load_book_hashed_pages as load_persisted_book_hashed_pages, PersistedHashedPageToDelete,
+    PersistedHashedPageToDelete, load_book_archive_source as load_persisted_book_archive_source,
+    load_book_hashed_pages as load_persisted_book_hashed_pages,
 };
 use crate::tasks::media_updates::{
     persist_duplicate_page_deleted_events, persist_removed_hashed_pages,

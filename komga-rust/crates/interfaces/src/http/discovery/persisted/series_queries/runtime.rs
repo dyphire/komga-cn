@@ -1,6 +1,9 @@
 #![allow(clippy::too_many_arguments)]
 
 use super::common_helpers::runtime_list_request;
+use crate::discovery_persisted_access::PersistedDiscoveryService;
+use crate::http::discovery_auth::state::DiscoveryAuthState;
+
 use super::*;
 use crate::http::discovery::filters::{
     OperatorValidationMode, parse_runtime_series_filters_with_mode,
@@ -8,6 +11,7 @@ use crate::http::discovery::filters::{
 };
 
 pub async fn runtime_owned_persisted_series_page(
+    backend: &dyn PersistedDiscoveryService,
     database_file: &FsPath,
     context: &DiscoveryQueryContext,
     filters: &RuntimeSeriesFilters,
@@ -22,7 +26,7 @@ pub async fn runtime_owned_persisted_series_page(
     }
 
     let sort_modes = parse_persisted_series_sort_modes(sorts, full_text_search.as_deref());
-    let has_persisted_rows = match persisted_series_exist(database_file).await {
+    let has_persisted_rows = match persisted_series_exist(backend, database_file).await {
         Ok(has_rows) => has_rows,
         Err(error) => return Some(Err(error)),
     };
@@ -32,6 +36,7 @@ pub async fn runtime_owned_persisted_series_page(
 
     Some(
         load_persisted_series_page(
+            backend,
             database_file,
             context,
             PersistedSeriesBrowseQuery::from_runtime_filters(
@@ -95,11 +100,17 @@ pub fn parse_persisted_series_sort_modes(
     modes
 }
 
-async fn persisted_series_exist(database_file: &FsPath) -> Result<bool, String> {
-    persisted_backend_persisted_series_exist(database_file).await
+async fn persisted_series_exist(
+    backend: &dyn PersistedDiscoveryService,
+    database_file: &FsPath,
+) -> Result<bool, String> {
+    backend
+        .persisted_series_exist(database_file.to_path_buf())
+        .await
 }
 
 pub async fn runtime_owned_series_list_response(
+    backend: &dyn PersistedDiscoveryService,
     headers: &HeaderMap,
     uri: &Uri,
     payload: Option<&Value>,
@@ -134,6 +145,7 @@ pub async fn runtime_owned_series_list_response(
 
     if !strict_runtime_shape {
         filters.criteria.library_ids = remap_requested_library_ids_for_persisted(
+            backend,
             database_file,
             filters.criteria.library_ids.as_ref(),
         )
@@ -157,6 +169,7 @@ pub async fn runtime_owned_series_list_response(
     };
 
     if let Some(persisted_page) = runtime_owned_persisted_series_page(
+        backend,
         database_file,
         &context,
         &filters,

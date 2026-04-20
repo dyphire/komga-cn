@@ -9,19 +9,14 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::http::identity_access::auth::require_admin;
-use crate::operational_settings_access::transient_books as transient_books_access;
-
-use super::super::super::{OperationalState, TransientBookPageRecord, TransientBookRecord};
+use crate::http::state::{HttpAppState, TransientBookPageRecord, TransientBookRecord};
+use crate::operational_settings_access::TransientBookPage as InfrastructureTransientBookPage;
 
 mod discovery;
 mod payload;
 
 use discovery::{infer_transient_series_and_number, list_transient_book_entries};
 use payload::{transient_book_id, transient_book_payload};
-use transient_books_access::{
-    InfrastructureTransientBookPage, analyze_transient_book, load_transient_book_file_metadata,
-    transient_book_page_content, validate_transient_scan_root,
-};
 
 const TRANSIENT_BOOKS_PATH: &str = "/api/v1/transient-books";
 
@@ -47,7 +42,7 @@ fn transient_books_json_error_response(status: StatusCode, error: &str) -> Respo
 }
 
 pub(crate) async fn post_transient_books(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -62,7 +57,14 @@ pub(crate) async fn post_transient_books(
         return StatusCode::BAD_REQUEST.into_response();
     };
 
-    match validate_transient_scan_root(state.runtime.database_file.as_path(), requested_path).await
+    match app
+        .services
+        .operational_settings
+        .validate_transient_scan_root(
+            app.operational.runtime.database_file.clone(),
+            requested_path.to_string(),
+        )
+        .await
     {
         Ok(()) => {}
         Err(error_code) if matches!(error_code.as_str(), "ERR_1016" | "ERR_1017") => {
@@ -71,9 +73,10 @@ pub(crate) async fn post_transient_books(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 
-    let scanned_books = list_transient_book_entries(PathBuf::from(requested_path).as_path());
+    let scanned_books = list_transient_book_entries(&app, PathBuf::from(requested_path));
 
-    let mut store = state
+    let mut store = app
+        .operational
         .transient_books
         .lock()
         .expect("transient books state lock should not be poisoned");
@@ -87,7 +90,11 @@ pub(crate) async fn post_transient_books(
             continue;
         };
 
-        let Some(file_metadata) = load_transient_book_file_metadata(path) else {
+        let Some(file_metadata) = app
+            .services
+            .operational_settings
+            .load_transient_book_file_metadata(path.to_string())
+        else {
             continue;
         };
         let id = transient_book_id();
@@ -122,7 +129,7 @@ pub(crate) async fn post_transient_books(
 }
 
 pub(crate) async fn post_transient_book_analyze(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     AxumPath(transient_book_id): AxumPath<String>,
 ) -> Response {
@@ -131,7 +138,8 @@ pub(crate) async fn post_transient_book_analyze(
     }
 
     let record = {
-        let mut store = state
+        let mut store = app
+            .operational
             .transient_books
             .lock()
             .expect("transient books state lock should not be poisoned");
@@ -141,14 +149,15 @@ pub(crate) async fn post_transient_book_analyze(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    let analysis = analyze_transient_book(record.path.as_str());
-    let inferred_series_and_number = infer_transient_series_and_number(
-        state.runtime.database_file.as_path(),
-        record.path.as_str(),
-    )
-    .await;
+    let analysis = app
+        .services
+        .operational_settings
+        .analyze_transient_book(record.path.clone());
+    let inferred_series_and_number =
+        infer_transient_series_and_number(&app, record.path.as_str()).await;
 
-    let mut store = state
+    let mut store = app
+        .operational
         .transient_books
         .lock()
         .expect("transient books state lock should not be poisoned");
@@ -184,7 +193,7 @@ pub(crate) async fn post_transient_book_analyze(
 }
 
 pub(crate) async fn get_transient_book_page(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     AxumPath((transient_book_id, page_number)): AxumPath<(String, i32)>,
 ) -> Response {
@@ -199,7 +208,8 @@ pub(crate) async fn get_transient_book_page(
     }
     let page_number = page_number as u32;
     let record = {
-        let mut store = state
+        let mut store = app
+            .operational
             .transient_books
             .lock()
             .expect("transient books state lock should not be poisoned");
@@ -239,12 +249,16 @@ pub(crate) async fn get_transient_book_page(
             size_bytes: page.size_bytes,
         })
         .collect::<Vec<_>>();
-    let Some((content_type, bytes)) = transient_book_page_content(
-        record.path.as_str(),
-        record.media_type.as_str(),
-        pages.as_slice(),
-        page_number,
-    ) else {
+    let Some((content_type, bytes)) = app
+        .services
+        .operational_settings
+        .transient_book_page_content(
+            record.path.clone(),
+            record.media_type.clone(),
+            pages,
+            page_number,
+        )
+    else {
         return transient_books_json_error_response(
             StatusCode::BAD_REQUEST,
             "Page number does not exist",

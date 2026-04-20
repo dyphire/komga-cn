@@ -10,25 +10,28 @@ use crate::http::operational::helpers::{
     effective_server_context_path, effective_server_port, invalid_settings_payload,
     is_valid_context_path, multi_source_number, multi_source_string,
 };
-use crate::http::state::OperationalSettings;
-use crate::operational_settings_access::server_settings as server_settings_access;
-
-use super::super::super::OperationalState;
+use crate::http::state::{HttpAppState, OperationalSettings, RuntimeState};
+use crate::operational_settings_access::PersistedServerSettings;
 
 pub(crate) async fn get_server_settings(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
         return response;
     }
 
-    let settings = match load_operational_settings(&state).await {
+    let settings = match load_operational_settings(&app).await {
         Ok(settings) => settings,
         Err(response) => return response,
     };
 
-    if let Err(error) = (state.apply_task_pool_size)(settings.task_pool_size as usize) {
+    if let Err(error) = app
+        .services
+        .task_queue
+        .apply_task_pool_size(settings.task_pool_size as usize)
+        .await
+    {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "message": format!("failed to process queued tasks: {error}") })),
@@ -36,11 +39,11 @@ pub(crate) async fn get_server_settings(
             .into_response();
     }
 
-    Json(settings_json(&state.runtime, &settings)).into_response()
+    Json(settings_json(&app.operational.runtime, &settings)).into_response()
 }
 
 pub(crate) async fn update_server_settings(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -56,7 +59,7 @@ pub(crate) async fn update_server_settings(
         return invalid_settings_payload("invalid settings payload");
     }
 
-    let mut settings = match load_operational_settings(&state).await {
+    let mut settings = match load_operational_settings(&app).await {
         Ok(settings) => settings,
         Err(response) => return response,
     };
@@ -109,7 +112,7 @@ pub(crate) async fn update_server_settings(
             return invalid_settings_payload("renewRememberMeKey must be a boolean");
         };
         if value {
-            settings.remember_me_key = server_settings_access::generate_remember_me_key();
+            settings.remember_me_key = generate_remember_me_key();
             persistence_changes.push((
                 "REMEMBER_ME_KEY".to_string(),
                 Some(settings.remember_me_key.clone()),
@@ -231,11 +234,11 @@ pub(crate) async fn update_server_settings(
         ));
     }
 
-    if let Err(error) = server_settings_access::apply_server_settings_changes(
-        state.settings_store.as_ref(),
-        &persistence_changes,
-    )
-    .await
+    if let Err(error) = app
+        .services
+        .server_settings
+        .apply_changes(&persistence_changes)
+        .await
     {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -245,13 +248,17 @@ pub(crate) async fn update_server_settings(
     }
 
     sync_remember_me_runtime_settings(
-        state.remember_me_runtime_key.as_str(),
+        app.operational.remember_me_runtime_key.as_str(),
         settings.remember_me_key.as_str(),
         settings.remember_me_duration_days,
     );
 
     if let Some(value) = task_pool_size_change
-        && let Err(error) = (state.apply_task_pool_size)(value as usize)
+        && let Err(error) = app
+            .services
+            .task_queue
+            .apply_task_pool_size(value as usize)
+            .await
     {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -263,9 +270,18 @@ pub(crate) async fn update_server_settings(
     axum::http::StatusCode::NO_CONTENT.into_response()
 }
 
-fn operational_settings_from_persisted(
-    settings: server_settings_access::PersistedServerSettings,
-) -> OperationalSettings {
+fn generate_remember_me_key() -> String {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time should be after epoch")
+        .as_nanos();
+    let sequence = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let raw = format!("{nanos:032x}{sequence:016x}");
+    raw.chars().take(32).collect()
+}
+
+fn operational_settings_from_persisted(settings: PersistedServerSettings) -> OperationalSettings {
     let mut operational = OperationalSettings::from_runtime();
     operational.delete_empty_collections = settings.delete_empty_collections;
     operational.delete_empty_read_lists = settings.delete_empty_read_lists;
@@ -280,14 +296,14 @@ fn operational_settings_from_persisted(
     operational
 }
 
-async fn load_operational_settings(
-    state: &OperationalState,
-) -> Result<OperationalSettings, Response> {
-    server_settings_access::load_server_settings(state.settings_store.as_ref())
+async fn load_operational_settings(app: &HttpAppState) -> Result<OperationalSettings, Response> {
+    app.services
+        .server_settings
+        .load_settings()
         .await
         .map(|settings| {
             sync_remember_me_runtime_settings(
-                state.remember_me_runtime_key.as_str(),
+                app.operational.remember_me_runtime_key.as_str(),
                 settings.remember_me_key.as_str(),
                 settings.remember_me_duration_days,
             );
@@ -302,7 +318,7 @@ async fn load_operational_settings(
         })
 }
 
-fn settings_json(runtime: &crate::http::RuntimeState, settings: &OperationalSettings) -> Value {
+fn settings_json(runtime: &RuntimeState, settings: &OperationalSettings) -> Value {
     json!({
         "deleteEmptyCollections": settings.delete_empty_collections,
         "deleteEmptyReadLists": settings.delete_empty_read_lists,

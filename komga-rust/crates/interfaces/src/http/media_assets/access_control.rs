@@ -1,8 +1,13 @@
 use super::*;
-use crate::discovery_detail_access::collections::{
-    load_persisted_collection_series_ids, load_series_library_id, load_series_restrictions,
-};
-use crate::opds_persisted_access::{PersistedReadlistBookRecord, load_readlist_books};
+use crate::http::discovery::detail::load_series_library_id;
+
+#[derive(Clone)]
+pub(super) struct PersistedReadlistBookAccessRecord {
+    pub id: String,
+    pub library_id: String,
+    pub age_rating: Option<u16>,
+    pub sharing_labels: Vec<String>,
+}
 
 pub(super) fn user_can_access_library(user: &AuthUser, library_id: &str) -> bool {
     user_shared_all_libraries(user)
@@ -12,7 +17,7 @@ pub(super) fn user_can_access_library(user: &AuthUser, library_id: &str) -> bool
 }
 
 pub(crate) async fn user_can_access_book_media(
-    database_file: &FsPath,
+    app: &HttpAppState,
     book_id: &str,
     user: &AuthUser,
     media: &PersistedBookMedia,
@@ -21,7 +26,7 @@ pub(crate) async fn user_can_access_book_media(
         return false;
     }
 
-    let Ok(Some((age_rating, labels))) = load_book_restrictions(database_file, book_id).await
+    let Ok(Some((age_rating, labels))) = load_book_restrictions_from_services(app, book_id).await
     else {
         return true;
     };
@@ -42,45 +47,57 @@ fn principal_allows_content(user: &AuthUser, age_rating: Option<u16>, labels: &[
 }
 
 pub(super) async fn user_can_access_series_media(
-    database_file: &FsPath,
+    app: &HttpAppState,
     series_id: &str,
     user: &AuthUser,
 ) -> Result<bool, String> {
-    let Some(library_id) = load_series_library_id(database_file, series_id).await? else {
+    let Some(library_id) = load_series_library_id(app, series_id).await? else {
         return Ok(false);
     };
     if !user_can_access_library(user, &library_id) {
         return Ok(false);
     }
 
-    let restrictions = load_series_restrictions(database_file, series_id).await?;
+    let restriction_record = app
+        .services
+        .discovery_detail
+        .load_series_restrictions(app.auth_db.database_file.clone(), series_id.to_string())
+        .await?;
     Ok(principal_allows_content(
         user,
-        restrictions.age_rating,
-        &restrictions.labels,
+        restriction_record.age_rating,
+        &restriction_record.labels,
     ))
 }
 
 pub(super) async fn user_can_access_readlist_media(
-    database_file: &FsPath,
+    app: &HttpAppState,
     readlist_id: &str,
     user: &AuthUser,
 ) -> Result<bool, String> {
-    Ok(
-        !visible_readlist_books_for_user(database_file, readlist_id, user)
-            .await?
-            .is_empty(),
-    )
+    Ok(!visible_readlist_books_for_user(app, readlist_id, user)
+        .await?
+        .is_empty())
 }
 
 pub(super) async fn visible_readlist_books_for_user(
-    database_file: &FsPath,
+    app: &HttpAppState,
     readlist_id: &str,
     user: &AuthUser,
-) -> Result<Vec<PersistedReadlistBookRecord>, String> {
-    let books = load_readlist_books(database_file, readlist_id).await?;
+) -> Result<Vec<PersistedReadlistBookAccessRecord>, String> {
+    let books = app
+        .services
+        .opds_persisted
+        .load_readlist_books(app.auth_db.database_file.clone(), readlist_id.to_string())
+        .await?;
     Ok(books
         .into_iter()
+        .map(|book| PersistedReadlistBookAccessRecord {
+            id: book.id,
+            library_id: book.library_id,
+            age_rating: book.age_rating,
+            sharing_labels: book.sharing_labels,
+        })
         .filter(|book| {
             user_can_access_library(user, &book.library_id)
                 && principal_allows_content(user, book.age_rating, &book.sharing_labels)
@@ -89,26 +106,33 @@ pub(super) async fn visible_readlist_books_for_user(
 }
 
 pub(super) async fn user_can_access_collection_media(
-    database_file: &FsPath,
+    app: &HttpAppState,
     collection_id: &str,
     user: &AuthUser,
 ) -> Result<bool, String> {
     Ok(
-        !visible_collection_series_ids_for_user(database_file, collection_id, user)
+        !visible_collection_series_ids_for_user(app, collection_id, user)
             .await?
             .is_empty(),
     )
 }
 
 pub(super) async fn visible_collection_series_ids_for_user(
-    database_file: &FsPath,
+    app: &HttpAppState,
     collection_id: &str,
     user: &AuthUser,
 ) -> Result<Vec<String>, String> {
-    let series_ids = load_persisted_collection_series_ids(database_file, collection_id).await?;
+    let series_ids = app
+        .services
+        .discovery_detail
+        .load_persisted_collection_series_ids(
+            app.auth_db.database_file.clone(),
+            collection_id.to_string(),
+        )
+        .await?;
     let mut visible_series_ids = Vec::new();
     for series_id in series_ids {
-        if user_can_access_series_media(database_file, &series_id, user).await? {
+        if user_can_access_series_media(app, &series_id, user).await? {
             visible_series_ids.push(series_id);
         }
     }

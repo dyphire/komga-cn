@@ -5,36 +5,35 @@ use super::shared::{
 use super::*;
 
 pub async fn collection_thumbnail(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(collection_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+    let Some(user) =
+        resolved_request_auth_user(&headers, app.auth_db.database_file.as_path()).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    match user_can_access_collection_media(auth_db.database_file.as_path(), &collection_id, &user)
-        .await
-    {
+    match user_can_access_collection_media(&app, &collection_id, &user).await {
         Ok(true) => {}
         Ok(false) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
     }
 
-    if !persisted_collection_exists(auth_db.database_file.as_path(), &collection_id)
+    if !persisted_collection_exists_from_services(&app, &collection_id)
         .await
         .unwrap_or(false)
     {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    match load_persisted_collection_thumbnails(auth_db.database_file.as_path(), &collection_id)
-        .await
-    {
+    match load_persisted_collection_thumbnails_from_services(&app, &collection_id).await {
         Ok(rows) => {
             if let Some(thumbnail) = rows.first() {
                 let mut response =
@@ -43,9 +42,7 @@ pub async fn collection_thumbnail(
                 return response;
             }
 
-            match load_collection_mosaic_bytes(auth_db.database_file.as_path(), &collection_id)
-                .await
-            {
+            match load_collection_mosaic_bytes(&app, &collection_id).await {
                 Ok(Some(bytes)) => {
                     let mut response = response_from_thumbnail_bytes(&headers, bytes, "image/jpeg");
                     set_one_hour_private_cache_control(&mut response);
@@ -60,36 +57,35 @@ pub async fn collection_thumbnail(
 }
 
 pub async fn collection_thumbnails(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(collection_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+    let Some(user) =
+        resolved_request_auth_user(&headers, app.auth_db.database_file.as_path()).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    match user_can_access_collection_media(auth_db.database_file.as_path(), &collection_id, &user)
-        .await
-    {
+    match user_can_access_collection_media(&app, &collection_id, &user).await {
         Ok(true) => {}
         Ok(false) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
     }
 
-    if !persisted_collection_exists(auth_db.database_file.as_path(), &collection_id)
+    if !persisted_collection_exists_from_services(&app, &collection_id)
         .await
         .unwrap_or(false)
     {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    match load_persisted_collection_thumbnails(auth_db.database_file.as_path(), &collection_id)
-        .await
-    {
+    match load_persisted_collection_thumbnails_from_services(&app, &collection_id).await {
         Ok(rows) => Json(
             rows.into_iter()
                 .map(|row| {
@@ -112,36 +108,35 @@ pub async fn collection_thumbnails(
 }
 
 pub async fn collection_thumbnail_by_id(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path((collection_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+    let Some(user) =
+        resolved_request_auth_user(&headers, app.auth_db.database_file.as_path()).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    match user_can_access_collection_media(auth_db.database_file.as_path(), &collection_id, &user)
-        .await
-    {
+    match user_can_access_collection_media(&app, &collection_id, &user).await {
         Ok(true) => {}
         Ok(false) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
     }
 
-    if !persisted_collection_exists(auth_db.database_file.as_path(), &collection_id)
+    if !persisted_collection_exists_from_services(&app, &collection_id)
         .await
         .unwrap_or(false)
     {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    match load_persisted_collection_thumbnails(auth_db.database_file.as_path(), &collection_id)
-        .await
-    {
+    match load_persisted_collection_thumbnails_from_services(&app, &collection_id).await {
         Ok(rows) => {
             if let Some(thumbnail) = rows.into_iter().find(|row| row.id == thumbnail_id) {
                 asset_ok_response(
@@ -159,16 +154,18 @@ pub async fn collection_thumbnail_by_id(
 }
 
 pub async fn collection_thumbnail_upload(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(collection_id): Path<String>,
     multipart: Multipart,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_admin(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    if !persisted_collection_exists(auth_db.database_file.as_path(), &collection_id)
+    if !persisted_collection_exists_from_services(&app, &collection_id)
         .await
         .unwrap_or(false)
     {
@@ -184,8 +181,8 @@ pub async fn collection_thumbnail_upload(
         return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
     };
 
-    match insert_collection_thumbnail(
-        auth_db.database_file.as_path(),
+    match insert_collection_thumbnail_from_services(
+        &app,
         &collection_id,
         &thumbnail_bytes,
         media_type.as_str(),
@@ -211,43 +208,41 @@ pub async fn collection_thumbnail_upload(
 }
 
 pub async fn collection_thumbnail_select(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path((collection_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_admin(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    if !persisted_collection_exists(auth_db.database_file.as_path(), &collection_id)
+    if !persisted_collection_exists_from_services(&app, &collection_id)
         .await
         .unwrap_or(false)
     {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    match select_collection_thumbnail(auth_db.database_file.as_path(), &thumbnail_id).await {
+    match select_collection_thumbnail_from_services(&app, &thumbnail_id).await {
         Ok(_) => StatusCode::ACCEPTED.into_response(),
         Err(error) => internal_error_response(error),
     }
 }
 
 pub async fn collection_thumbnail_delete(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path((collection_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_admin(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    match delete_collection_thumbnail(
-        auth_db.database_file.as_path(),
-        &collection_id,
-        &thumbnail_id,
-    )
-    .await
-    {
+    match delete_collection_thumbnail_from_services(&app, &collection_id, &thumbnail_id).await {
         Ok(true) => StatusCode::ACCEPTED.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),

@@ -7,18 +7,24 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use axum::body::to_bytes;
-use axum::http::{HeaderValue, header};
+use async_trait::async_trait;
+use axum::body::{Bytes, to_bytes};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use komga_application::identity_access::AuthUser;
-use komga_domain::discovery::DiscoveryQueryContext;
 
+use crate::http::OperationalState;
 use crate::http::identity_access::auth::session_token_for_user_with_runtime_key;
 use crate::http::state::{
-    BookImportSseEvent, HttpServerRequestsState, LibraryCatalogOperations, OAuth2ClientConfig,
-    OperationalBuildMetadata, RemoteCacheEntry, RuntimeState, SseOperationalState,
-    StartupTimingState, TransientBooksStore,
+    BookImportSseEvent, HttpAppState, HttpServerRequestsState, HttpServices, LibraryCatalogService,
+    OAuth2ClientConfig, OperationalBuildMetadata, RemoteCacheEntry, RuntimeState,
+    ServerSettingsService, SseOperationalState, StartupTimingState, TaskQueueService,
+    TransientBooksStore,
+    tests::{
+        NoopDiscoveryDetailService, NoopMediaAssetsService, NoopOpdsCatalogService,
+        NoopOpdsPersistedService, NoopOperationalRuntimeService, NoopOperationalSettingsService,
+        NoopPersistedDiscoveryService,
+    },
 };
-use crate::operational_runtime_access::ServerSettingsStore;
 
 #[tokio::test]
 async fn update_server_settings_does_not_apply_runtime_task_pool_before_persistence_succeeds() {
@@ -33,28 +39,27 @@ async fn update_server_settings_does_not_apply_runtime_task_pool_before_persiste
         ("TASK_POOL_SIZE".to_string(), Some("1".to_string())),
     ])));
     let persist_attempts = Arc::new(AtomicUsize::new(0));
-    let settings_store = Arc::new(fake_settings_store(
-        persisted_settings.clone(),
-        persist_attempts.clone(),
-    ));
+    let settings_store = fake_settings_store(persisted_settings.clone(), persist_attempts.clone());
 
     let apply_count = Arc::new(AtomicUsize::new(0));
-    let state = test_operational_state(
-        database_file.clone(),
-        fixture_root.clone(),
+    let state = test_operational_state(database_file.clone(), fixture_root.clone());
+    let app = test_app_state(
+        state.clone(),
+        Arc::new(FakeTaskQueueService {
+            apply: {
+                let apply_count = apply_count.clone();
+                move |_value| {
+                    apply_count.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                }
+            },
+        }),
         settings_store.clone(),
-        {
-            let apply_count = apply_count.clone();
-            move |_value| {
-                apply_count.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            }
-        },
     );
     let headers = admin_headers(&fixture_root);
 
     let response = update_server_settings(
-        Extension(state.clone()),
+        Extension(app),
         headers,
         Bytes::from(serde_json::json!({ "taskPoolSize": 4_u64 }).to_string()),
     )
@@ -88,20 +93,17 @@ async fn get_server_settings_returns_empty_string_placeholders_for_missing_strin
     std::fs::create_dir_all(&fixture_root).expect("fixture root should be created");
     let database_file = fixture_root.join("main.db");
     let persisted_settings = Arc::new(Mutex::new(HashMap::new()));
-    let settings_store = Arc::new(fake_settings_store(
-        persisted_settings,
-        Arc::new(AtomicUsize::new(0)),
-    ));
+    let settings_store = fake_settings_store(persisted_settings, Arc::new(AtomicUsize::new(0)));
 
-    let state = test_operational_state(
-        database_file,
-        fixture_root.clone(),
+    let state = test_operational_state(database_file, fixture_root.clone());
+    let app = test_app_state(
+        state,
+        Arc::new(FakeTaskQueueService { apply: |_| Ok(()) }),
         settings_store,
-        |_value| Ok(()),
     );
     let headers = admin_headers(&fixture_root);
 
-    let response = get_server_settings(Extension(state), headers).await;
+    let response = get_server_settings(Extension(app), headers).await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_body = to_bytes(response.into_body(), usize::MAX)
@@ -126,24 +128,22 @@ async fn get_server_settings_returns_runtime_server_port_configuration_source() 
     let fixture_root = unique_fixture_root("server-settings-runtime-port-source");
     std::fs::create_dir_all(&fixture_root).expect("fixture root should be created");
     let database_file = fixture_root.join("main.db");
-    let persisted_settings = Arc::new(Mutex::new(HashMap::from([
-        ("SERVER_PORT".to_string(), Some("9090".to_string())),
-    ])));
-    let settings_store = Arc::new(fake_settings_store(
-        persisted_settings,
-        Arc::new(AtomicUsize::new(0)),
-    ));
+    let persisted_settings = Arc::new(Mutex::new(HashMap::from([(
+        "SERVER_PORT".to_string(),
+        Some("9090".to_string()),
+    )])));
+    let settings_store = fake_settings_store(persisted_settings, Arc::new(AtomicUsize::new(0)));
 
-    let mut state = test_operational_state(
-        database_file,
-        fixture_root.clone(),
-        settings_store,
-        |_value| Ok(()),
-    );
+    let mut state = test_operational_state(database_file, fixture_root.clone());
     state.runtime.bind_address = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8081));
+    let app = test_app_state(
+        state,
+        Arc::new(FakeTaskQueueService { apply: |_| Ok(()) }),
+        settings_store,
+    );
     let headers = admin_headers(&fixture_root);
 
-    let response = get_server_settings(Extension(state), headers).await;
+    let response = get_server_settings(Extension(app), headers).await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_body = to_bytes(response.into_body(), usize::MAX)
@@ -164,15 +164,246 @@ async fn get_server_settings_returns_runtime_server_port_configuration_source() 
     std::fs::remove_dir_all(&fixture_root).expect("fixture root should be removed");
 }
 
-fn test_operational_state<F>(
-    database_file: PathBuf,
-    fixture_root: PathBuf,
-    settings_store: Arc<ServerSettingsStore>,
+struct FakeSettingsStore {
+    persisted: Arc<Mutex<HashMap<String, Option<String>>>>,
+    persist_attempts: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl ServerSettingsService for FakeSettingsStore {
+    async fn load_map(&self) -> Result<BTreeMap<String, Option<String>>, String> {
+        Ok(self
+            .persisted
+            .lock()
+            .expect("fake settings store should lock")
+            .clone()
+            .into_iter()
+            .collect())
+    }
+
+    async fn load_settings(
+        &self,
+    ) -> Result<crate::operational_settings_access::PersistedServerSettings, String> {
+        let persisted = self.load_map().await?;
+        Ok(
+            crate::operational_settings_access::PersistedServerSettings {
+                delete_empty_collections: persisted
+                    .get("DELETE_EMPTY_COLLECTIONS")
+                    .and_then(|v| v.as_deref())
+                    .is_some_and(|v| v == "true"),
+                delete_empty_read_lists: persisted
+                    .get("DELETE_EMPTY_READLISTS")
+                    .and_then(|v| v.as_deref())
+                    .is_some_and(|v| v == "true"),
+                remember_me_key: persisted
+                    .get("REMEMBER_ME_KEY")
+                    .and_then(|v| v.clone())
+                    .unwrap_or_default(),
+                remember_me_duration_days: persisted
+                    .get("REMEMBER_ME_DURATION")
+                    .and_then(|v| v.as_deref())
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .unwrap_or(365),
+                thumbnail_size: "DEFAULT",
+                task_pool_size: persisted
+                    .get("TASK_POOL_SIZE")
+                    .and_then(|v| v.as_deref())
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .unwrap_or(1),
+                server_port: persisted
+                    .get("SERVER_PORT")
+                    .and_then(|v| v.as_deref())
+                    .and_then(|v| v.parse::<u16>().ok()),
+                server_context_path: persisted.get("SERVER_CONTEXT_PATH").and_then(|v| v.clone()),
+                kobo_proxy: false,
+                kobo_port: None,
+            },
+        )
+    }
+
+    async fn apply_changes(&self, changes: &[(String, Option<String>)]) -> Result<(), String> {
+        self.persist_attempts.fetch_add(1, Ordering::SeqCst);
+        if changes
+            .iter()
+            .any(|(key, value)| key == "TASK_POOL_SIZE" && value.as_deref() == Some("4"))
+        {
+            return Err("reject task pool size update".to_string());
+        }
+
+        let mut persisted = self
+            .persisted
+            .lock()
+            .expect("fake settings store should lock");
+        for (key, value) in changes {
+            if let Some(value) = value {
+                persisted.insert(key.clone(), Some(value.clone()));
+            } else {
+                persisted.remove(key);
+            }
+        }
+        Ok(())
+    }
+}
+
+struct FakeTaskQueueService<F> {
     apply: F,
-) -> OperationalState
+}
+
+#[async_trait]
+impl<F> TaskQueueService for FakeTaskQueueService<F>
 where
-    F: Fn(usize) -> Result<(), String> + Send + Sync + 'static,
+    F: Fn(usize) -> Result<(), String> + Send + Sync,
 {
+    async fn enqueue_task_records(
+        &self,
+        _task_records: Vec<komga_application::task_processing::TaskQueueRecord>,
+        _urgent: bool,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    async fn clear_unowned_tasks(&self) -> usize {
+        0
+    }
+
+    async fn count_task_queue_by_type(&self) -> BTreeMap<String, usize> {
+        BTreeMap::new()
+    }
+
+    async fn apply_task_pool_size(&self, value: usize) -> Result<(), String> {
+        (self.apply)(value)
+    }
+}
+
+struct NoopLibraryCatalogService;
+
+#[async_trait]
+impl LibraryCatalogService for NoopLibraryCatalogService {
+    async fn list_libraries(
+        &self,
+        _context: komga_domain::discovery::DiscoveryQueryContext,
+    ) -> Result<
+        Vec<komga_application::library_catalog::LibraryRecord>,
+        komga_domain::discovery::DiscoveryError,
+    > {
+        panic!("library catalog should not be used in server settings tests")
+    }
+
+    async fn get_library(
+        &self,
+        _context: komga_domain::discovery::DiscoveryQueryContext,
+        _library_id: String,
+    ) -> Result<
+        Option<komga_application::library_catalog::LibraryRecord>,
+        komga_domain::discovery::DiscoveryError,
+    > {
+        panic!("library catalog should not be used in server settings tests")
+    }
+
+    async fn create_library(
+        &self,
+        _changes: komga_application::library_catalog::LibraryChangeSet,
+    ) -> Result<
+        komga_application::library_catalog::CreateLibraryResult,
+        komga_application::library_catalog::LibraryCatalogMutationError,
+    > {
+        panic!("library catalog should not be used in server settings tests")
+    }
+
+    async fn update_library(
+        &self,
+        _library_id: String,
+        _changes: komga_application::library_catalog::LibraryChangeSet,
+    ) -> Result<
+        komga_application::library_catalog::LibraryTaskResult,
+        komga_application::library_catalog::LibraryCatalogMutationError,
+    > {
+        panic!("library catalog should not be used in server settings tests")
+    }
+
+    async fn delete_library(
+        &self,
+        _library_id: String,
+    ) -> Result<bool, komga_application::library_catalog::LibraryCatalogMutationError> {
+        panic!("library catalog should not be used in server settings tests")
+    }
+
+    async fn scan_library(
+        &self,
+        _library_id: String,
+        _deep_scan: bool,
+    ) -> Result<
+        komga_application::library_catalog::LibraryTaskResult,
+        komga_application::library_catalog::LibraryCatalogMutationError,
+    > {
+        panic!("library catalog should not be used in server settings tests")
+    }
+
+    async fn analyze_library(
+        &self,
+        _library_id: String,
+    ) -> Result<
+        komga_application::library_catalog::LibraryTaskResult,
+        komga_application::library_catalog::LibraryCatalogMutationError,
+    > {
+        panic!("library catalog should not be used in server settings tests")
+    }
+
+    async fn refresh_metadata(
+        &self,
+        _library_id: String,
+    ) -> Result<
+        komga_application::library_catalog::LibraryTaskResult,
+        komga_application::library_catalog::LibraryCatalogMutationError,
+    > {
+        panic!("library catalog should not be used in server settings tests")
+    }
+
+    async fn empty_trash(
+        &self,
+        _library_id: String,
+    ) -> Result<
+        komga_application::library_catalog::LibraryTaskResult,
+        komga_application::library_catalog::LibraryCatalogMutationError,
+    > {
+        panic!("library catalog should not be used in server settings tests")
+    }
+}
+
+fn test_app_state(
+    operational: OperationalState,
+    task_queue: Arc<dyn TaskQueueService>,
+    server_settings: Arc<dyn ServerSettingsService>,
+) -> HttpAppState {
+    HttpAppState {
+        profile: crate::http::state::RuntimeProfile::LiveLocaldb,
+        read_progress: crate::http::state::ReadProgressState::default(),
+        discovery_auth: crate::http::discovery_auth::state::DiscoveryAuthState::default(),
+        auth_db: crate::http::state::AuthDatabaseState {
+            database_file: operational.runtime.database_file.clone(),
+            demo_mode: false,
+            session_runtime_key: operational.remember_me_runtime_key.clone(),
+            remember_me_runtime_key: operational.remember_me_runtime_key.clone(),
+            runtime_identity: crate::runtime_identity_access::default_test_identity_service(),
+        },
+        services: HttpServices {
+            library_catalog: Arc::new(NoopLibraryCatalogService),
+            task_queue,
+            server_settings,
+            runtime_identity: crate::runtime_identity_access::default_test_identity_service(),
+            operational_runtime: Arc::new(NoopOperationalRuntimeService),
+            operational_settings: Arc::new(NoopOperationalSettingsService),
+            media_assets: Arc::new(NoopMediaAssetsService),
+            opds_catalog: Arc::new(NoopOpdsCatalogService),
+            opds_persisted: Arc::new(NoopOpdsPersistedService),
+            discovery_persisted: Arc::new(NoopPersistedDiscoveryService),
+            discovery_detail: Arc::new(NoopDiscoveryDetailService),
+        },
+        operational,
+    }
+}
+
+fn test_operational_state(database_file: PathBuf, fixture_root: PathBuf) -> OperationalState {
     OperationalState {
         runtime: RuntimeState {
             database_file,
@@ -194,15 +425,9 @@ where
             git_commit_id: Some("deadbeef".to_string()),
             git_commit_time: Some("2026-04-09T00:00:00Z".to_string()),
         },
-        settings_store,
         oauth2_clients: Arc::new(Vec::<OAuth2ClientConfig>::new()),
         oauth2_account_creation: false,
         oidc_email_verification: true,
-        enqueue_task_records: Arc::new(|_, _| Ok(())),
-        clear_unowned_tasks: Arc::new(|| 0),
-        count_task_queue_by_type: Arc::new(BTreeMap::new),
-        apply_task_pool_size: Arc::new(apply),
-        library_catalog: test_library_catalog_operations(),
         sse: Arc::new(Mutex::new(SseOperationalState {
             accepting_connections: true,
             book_import_events: Vec::<BookImportSseEvent>::new(),
@@ -211,8 +436,6 @@ where
         })),
         announcements_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
         releases_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
-        load_transient_books_records: Arc::new(|| Ok(std::collections::HashMap::new())),
-        persist_transient_books_records: Arc::new(|_| Ok(())),
         transient_books: Arc::new(Mutex::new(TransientBooksStore::with_records(
             std::collections::HashMap::new(),
         ))),
@@ -223,91 +446,11 @@ where
 fn fake_settings_store(
     persisted: Arc<Mutex<HashMap<String, Option<String>>>>,
     persist_attempts: Arc<AtomicUsize>,
-) -> ServerSettingsStore {
-    ServerSettingsStore::new(
-        Arc::new({
-            let persisted = persisted.clone();
-            move || {
-                let persisted = persisted.clone();
-                Box::pin(async move {
-                    Ok(persisted
-                        .lock()
-                        .expect("fake settings store should lock")
-                        .clone())
-                })
-            }
-        }),
-        Arc::new({
-            let persisted = persisted.clone();
-            let persist_attempts = persist_attempts.clone();
-            move |changes| {
-                let persisted = persisted.clone();
-                let persist_attempts = persist_attempts.clone();
-                Box::pin(async move {
-                    persist_attempts.fetch_add(1, Ordering::SeqCst);
-                    if changes.iter().any(|(key, value)| {
-                        key == "TASK_POOL_SIZE" && value.as_deref() == Some("4")
-                    }) {
-                        return Err("reject task pool size update".to_string());
-                    }
-
-                    let mut persisted = persisted.lock().expect("fake settings store should lock");
-                    for (key, value) in changes {
-                        if let Some(value) = value {
-                            persisted.insert(key, Some(value));
-                        } else {
-                            persisted.remove(&key);
-                        }
-                    }
-                    Ok(())
-                })
-            }
-        }),
-    )
-}
-
-fn test_library_catalog_operations() -> LibraryCatalogOperations {
-    LibraryCatalogOperations {
-        list_libraries: Arc::new(|_context: DiscoveryQueryContext| {
-            Box::pin(async {
-                panic!("list_libraries should not be called in server settings tests")
-            })
-        }),
-        get_library: Arc::new(|_context: DiscoveryQueryContext, _library_id: String| {
-            Box::pin(async { panic!("get_library should not be called in server settings tests") })
-        }),
-        create_library: Arc::new(|_changes| {
-            Box::pin(async {
-                panic!("create_library should not be called in server settings tests")
-            })
-        }),
-        update_library: Arc::new(|_library_id, _changes| {
-            Box::pin(async {
-                panic!("update_library should not be called in server settings tests")
-            })
-        }),
-        delete_library: Arc::new(|_library_id| {
-            Box::pin(async {
-                panic!("delete_library should not be called in server settings tests")
-            })
-        }),
-        scan_library: Arc::new(|_library_id, _deep_scan| {
-            Box::pin(async { panic!("scan_library should not be called in server settings tests") })
-        }),
-        analyze_library: Arc::new(|_library_id| {
-            Box::pin(async {
-                panic!("analyze_library should not be called in server settings tests")
-            })
-        }),
-        refresh_metadata: Arc::new(|_library_id| {
-            Box::pin(async {
-                panic!("refresh_metadata should not be called in server settings tests")
-            })
-        }),
-        empty_trash: Arc::new(|_library_id| {
-            Box::pin(async { panic!("empty_trash should not be called in server settings tests") })
-        }),
-    }
+) -> Arc<dyn ServerSettingsService> {
+    Arc::new(FakeSettingsStore {
+        persisted,
+        persist_attempts,
+    })
 }
 
 fn admin_headers(fixture_root: &Path) -> HeaderMap {

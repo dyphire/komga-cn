@@ -1,22 +1,17 @@
 use super::*;
 
 pub async fn book_manifest(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    match build_persisted_book_manifest(
-        auth_db.database_file.as_path(),
-        &headers,
-        &book_id,
-        ManifestVariant::Default,
-    )
-    .await
-    {
+    match build_persisted_book_manifest(&app, &headers, &book_id, ManifestVariant::Default).await {
         Ok(ManifestBuildOutcome::Found(content_type, payload)) => (
             StatusCode::OK,
             [(header::CONTENT_TYPE, content_type)],
@@ -33,22 +28,17 @@ pub async fn book_manifest(
 }
 
 pub async fn book_manifest_epub(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    match build_persisted_book_manifest(
-        auth_db.database_file.as_path(),
-        &headers,
-        &book_id,
-        ManifestVariant::Epub,
-    )
-    .await
-    {
+    match build_persisted_book_manifest(&app, &headers, &book_id, ManifestVariant::Epub).await {
         Ok(ManifestBuildOutcome::Found(content_type, payload)) => (
             StatusCode::OK,
             [(header::CONTENT_TYPE, content_type)],
@@ -65,22 +55,17 @@ pub async fn book_manifest_epub(
 }
 
 pub async fn book_manifest_pdf(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    match build_persisted_book_manifest(
-        auth_db.database_file.as_path(),
-        &headers,
-        &book_id,
-        ManifestVariant::Pdf,
-    )
-    .await
-    {
+    match build_persisted_book_manifest(&app, &headers, &book_id, ManifestVariant::Pdf).await {
         Ok(ManifestBuildOutcome::Found(content_type, payload)) => (
             StatusCode::OK,
             [(header::CONTENT_TYPE, content_type)],
@@ -97,22 +82,17 @@ pub async fn book_manifest_pdf(
 }
 
 pub async fn book_manifest_divina(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    match build_persisted_book_manifest(
-        auth_db.database_file.as_path(),
-        &headers,
-        &book_id,
-        ManifestVariant::Divina,
-    )
-    .await
-    {
+    match build_persisted_book_manifest(&app, &headers, &book_id, ManifestVariant::Divina).await {
         Ok(ManifestBuildOutcome::Found(content_type, payload)) => (
             StatusCode::OK,
             [(header::CONTENT_TYPE, content_type)],

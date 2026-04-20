@@ -11,12 +11,10 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use crate::http::identity_access::auth::{require_admin, resolved_auth_user, user_id};
-use crate::operational_settings_access::announcements as announcements_access;
-
-use super::super::super::OperationalState;
+use crate::http::state::HttpAppState;
 
 pub(crate) async fn get_announcements(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
@@ -27,17 +25,20 @@ pub(crate) async fn get_announcements(
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    let feed = match load_cached_announcements_feed(&state).await {
+    let feed = match load_cached_announcements_feed(&app).await {
         Ok(Some(feed)) => feed,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    let read_ids = match announcements_access::load_announcement_read_ids(
-        state.runtime.database_file.as_path(),
-        user_id(&current_user),
-    )
-    .await
+    let read_ids = match app
+        .services
+        .operational_settings
+        .load_announcement_read_ids(
+            app.operational.runtime.database_file.clone(),
+            user_id(&current_user).to_string(),
+        )
+        .await
     {
         Ok(ids) => ids,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -47,7 +48,7 @@ pub(crate) async fn get_announcements(
 }
 
 pub(crate) async fn put_announcements(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -63,13 +64,16 @@ pub(crate) async fn put_announcements(
         return StatusCode::BAD_REQUEST.into_response();
     };
 
-    if announcements_access::save_announcements_read(
-        state.runtime.database_file.as_path(),
-        user_id(&current_user),
-        &ids,
-    )
-    .await
-    .is_err()
+    if app
+        .services
+        .operational_settings
+        .save_announcements_read(
+            app.operational.runtime.database_file.clone(),
+            user_id(&current_user).to_string(),
+            ids,
+        )
+        .await
+        .is_err()
     {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
@@ -97,14 +101,14 @@ fn parse_announcement_ids(body: &[u8]) -> Result<Vec<String>, ()> {
 }
 
 pub(crate) async fn get_releases(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
         return response;
     }
 
-    let releases = match load_cached_releases(&state).await {
+    let releases = match load_cached_releases(&app).await {
         Ok(Some(releases)) => releases,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -113,11 +117,12 @@ pub(crate) async fn get_releases(
     Json(releases).into_response()
 }
 
-async fn load_cached_announcements_feed(state: &OperationalState) -> Result<Option<Value>, String> {
+async fn load_cached_announcements_feed(app: &HttpAppState) -> Result<Option<Value>, String> {
     const CACHE_TTL_SECONDS: u64 = 60 * 60;
     let now = now_epoch_seconds();
     {
-        let mut cache = state
+        let mut cache = app
+            .operational
             .announcements_cache
             .lock()
             .expect("announcements cache lock should not be poisoned");
@@ -149,11 +154,12 @@ async fn load_cached_announcements_feed(state: &OperationalState) -> Result<Opti
     let payload = serde_json::to_value(dto).map_err(|error| error.to_string())?;
 
     {
-        let mut cache = state
+        let mut cache = app
+            .operational
             .announcements_cache
             .lock()
             .expect("announcements cache lock should not be poisoned");
-        *cache = Some(super::super::super::RemoteCacheEntry {
+        *cache = Some(crate::http::state::RemoteCacheEntry {
             fetched_at_epoch_seconds: now,
             payload: payload.clone(),
         });
@@ -163,7 +169,7 @@ async fn load_cached_announcements_feed(state: &OperationalState) -> Result<Opti
 }
 
 fn load_remote_cache_entry_on_access(
-    cache: &mut Option<super::super::super::RemoteCacheEntry>,
+    cache: &mut Option<crate::http::state::RemoteCacheEntry>,
     now_epoch_seconds: u64,
     ttl_seconds: u64,
 ) -> Option<Value> {
@@ -241,11 +247,12 @@ mod optional_rfc3339 {
     }
 }
 
-async fn load_cached_releases(state: &OperationalState) -> Result<Option<Value>, reqwest::Error> {
+async fn load_cached_releases(app: &HttpAppState) -> Result<Option<Value>, reqwest::Error> {
     const CACHE_TTL_SECONDS: u64 = 60 * 60;
     let now = now_epoch_seconds();
     {
-        let mut cache = state
+        let mut cache = app
+            .operational
             .releases_cache
             .lock()
             .expect("releases cache lock should not be poisoned");
@@ -269,11 +276,12 @@ async fn load_cached_releases(state: &OperationalState) -> Result<Option<Value>,
 
     let payload = map_github_releases(upstream);
     {
-        let mut cache = state
+        let mut cache = app
+            .operational
             .releases_cache
             .lock()
             .expect("releases cache lock should not be poisoned");
-        *cache = Some(super::super::super::RemoteCacheEntry {
+        *cache = Some(crate::http::state::RemoteCacheEntry {
             fetched_at_epoch_seconds: now,
             payload: payload.clone(),
         });
@@ -371,7 +379,7 @@ fn now_epoch_seconds() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{load_remote_cache_entry_on_access, parse_announcement_ids};
-    use crate::http::RemoteCacheEntry;
+    use crate::http::state::RemoteCacheEntry;
     use serde_json::json;
 
     #[test]

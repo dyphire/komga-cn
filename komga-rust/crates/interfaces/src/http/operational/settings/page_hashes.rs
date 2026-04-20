@@ -9,10 +9,9 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::http::identity_access::auth::require_admin;
-use crate::operational_settings_access::page_hashes as page_hashes_access;
 
-use super::super::super::OperationalState;
 use super::{query_value, query_values};
+use crate::http::state::HttpAppState;
 
 const REMOVE_HASHED_PAGES_PRIORITY: i32 = 4;
 
@@ -28,7 +27,7 @@ struct DeletePageHashMatchRequest {
 }
 
 pub(crate) async fn get_page_hashes(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -50,14 +49,17 @@ pub(crate) async fn get_page_hashes(
     };
     let sorts = query_values(query, "sort");
 
-    let page_data = match page_hashes_access::load_page_hashes_page(
-        state.runtime.database_file.as_path(),
-        page,
-        size,
-        actions,
-        sorts,
-    )
-    .await
+    let page_data = match app
+        .services
+        .operational_settings
+        .load_page_hashes_page(
+            app.operational.runtime.database_file.clone(),
+            page,
+            size,
+            actions,
+            sorts,
+        )
+        .await
     {
         Ok(page_data) => page_data,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -119,7 +121,7 @@ fn build_remove_hashed_pages_task(
 }
 
 pub(crate) async fn get_page_hashes_unknown(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -137,13 +139,16 @@ pub(crate) async fn get_page_hashes_unknown(
         .unwrap_or(20);
     let sorts = query_values(query, "sort");
 
-    let page_data = match page_hashes_access::load_page_hashes_unknown_page(
-        state.runtime.database_file.as_path(),
-        page,
-        size,
-        sorts,
-    )
-    .await
+    let page_data = match app
+        .services
+        .operational_settings
+        .load_page_hashes_unknown_page(
+            app.operational.runtime.database_file.clone(),
+            page,
+            size,
+            sorts,
+        )
+        .await
     {
         Ok(page_data) => page_data,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -153,7 +158,7 @@ pub(crate) async fn get_page_hashes_unknown(
 }
 
 pub(crate) async fn get_page_hash_matches(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     AxumPath(page_hash): AxumPath<String>,
     uri: Uri,
@@ -172,14 +177,17 @@ pub(crate) async fn get_page_hash_matches(
         .unwrap_or(20);
     let sorts = query_values(query, "sort");
 
-    let page_data = match page_hashes_access::load_page_hash_matches_page(
-        state.runtime.database_file.as_path(),
-        &page_hash,
-        page,
-        size,
-        sorts,
-    )
-    .await
+    let page_data = match app
+        .services
+        .operational_settings
+        .load_page_hash_matches_page(
+            app.operational.runtime.database_file.clone(),
+            page_hash.clone(),
+            page,
+            size,
+            sorts,
+        )
+        .await
     {
         Ok(page_data) => page_data,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -189,7 +197,7 @@ pub(crate) async fn get_page_hash_matches(
 }
 
 pub(crate) async fn get_page_hash_thumbnail(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     AxumPath(page_hash): AxumPath<String>,
 ) -> Response {
@@ -197,11 +205,11 @@ pub(crate) async fn get_page_hash_thumbnail(
         return response;
     }
 
-    let thumbnail = match page_hashes_access::load_page_hash_thumbnail(
-        state.runtime.database_file.as_path(),
-        &page_hash,
-    )
-    .await
+    let thumbnail = match app
+        .services
+        .operational_settings
+        .load_page_hash_thumbnail(app.operational.runtime.database_file.clone(), page_hash)
+        .await
     {
         Ok(Some(thumbnail)) => thumbnail,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
@@ -212,7 +220,7 @@ pub(crate) async fn get_page_hash_thumbnail(
 }
 
 pub(crate) async fn get_page_hash_unknown_thumbnail(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     AxumPath(page_hash): AxumPath<String>,
     uri: Uri,
@@ -230,12 +238,15 @@ pub(crate) async fn get_page_hash_unknown_thumbnail(
         },
     };
 
-    let thumbnail = match page_hashes_access::load_unknown_page_hash_thumbnail(
-        state.runtime.database_file.as_path(),
-        &page_hash,
-        resize_to,
-    )
-    .await
+    let thumbnail = match app
+        .services
+        .operational_settings
+        .load_unknown_page_hash_thumbnail(
+            app.operational.runtime.database_file.clone(),
+            page_hash,
+            resize_to,
+        )
+        .await
     {
         Ok(Some(thumbnail)) => thumbnail,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
@@ -250,7 +261,7 @@ pub(crate) async fn get_page_hash_unknown_thumbnail(
 }
 
 pub(crate) async fn put_page_hash(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -283,13 +294,16 @@ pub(crate) async fn put_page_hash(
         return StatusCode::BAD_REQUEST.into_response();
     };
 
-    match page_hashes_access::upsert_page_hash(
-        state.runtime.database_file.as_path(),
-        hash,
-        size,
-        action,
-    )
-    .await
+    match app
+        .services
+        .operational_settings
+        .upsert_page_hash(
+            app.operational.runtime.database_file.clone(),
+            hash.to_string(),
+            size,
+            action.to_string(),
+        )
+        .await
     {
         Ok(()) => StatusCode::ACCEPTED.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -297,7 +311,7 @@ pub(crate) async fn put_page_hash(
 }
 
 pub(crate) async fn post_page_hash_delete_all(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     AxumPath(page_hash): AxumPath<String>,
 ) -> Response {
@@ -305,11 +319,14 @@ pub(crate) async fn post_page_hash_delete_all(
         return response;
     }
 
-    let delete_targets = match page_hashes_access::load_page_hash_delete_targets(
-        state.runtime.database_file.as_path(),
-        &page_hash,
-    )
-    .await
+    let delete_targets = match app
+        .services
+        .operational_settings
+        .load_page_hash_delete_targets(
+            app.operational.runtime.database_file.clone(),
+            page_hash.clone(),
+        )
+        .await
     {
         Ok(targets) => targets,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -337,14 +354,19 @@ pub(crate) async fn post_page_hash_delete_all(
         task_records.push(task_record);
     }
 
-    match (state.enqueue_task_records)(task_records, true) {
+    match app
+        .services
+        .task_queue
+        .enqueue_task_records(task_records, true)
+        .await
+    {
         Ok(()) => StatusCode::ACCEPTED.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
 
 pub(crate) async fn post_page_hash_delete_match(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     AxumPath(page_hash): AxumPath<String>,
     body: Bytes,
@@ -380,7 +402,12 @@ pub(crate) async fn post_page_hash_delete_match(
         Err(status) => return status.into_response(),
     };
 
-    match (state.enqueue_task_records)(vec![task_record], true) {
+    match app
+        .services
+        .task_queue
+        .enqueue_task_records(vec![task_record], true)
+        .await
+    {
         Ok(()) => StatusCode::ACCEPTED.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }

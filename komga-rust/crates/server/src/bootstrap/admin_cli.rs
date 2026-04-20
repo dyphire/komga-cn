@@ -259,10 +259,11 @@ pub async fn run_admin_cli_commands(
 }
 
 async fn print_user_list(database_file: &Path) -> Result<(), AdminCliActionError> {
-    let rows = komga_infrastructure::sqlite::write_models::bootstrap_users::list_persisted_user_emails(
-        database_file,
-    )
-    .await;
+    let rows =
+        komga_infrastructure::sqlite::write_models::bootstrap_users::list_persisted_user_emails(
+            database_file,
+        )
+        .await;
 
     match rows {
         Ok(rows) if rows.is_empty() => {

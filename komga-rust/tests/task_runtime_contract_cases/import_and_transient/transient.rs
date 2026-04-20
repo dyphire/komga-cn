@@ -763,7 +763,10 @@ async fn router_transient_book_analyze_uses_epub_series_metadata_but_not_epub_nu
         .get("pages")
         .and_then(Value::as_array)
         .expect("transient epub analyze payload should include pages");
-    assert!(pages.is_empty(), "non-divina EPUB should not expose page resources");
+    assert!(
+        pages.is_empty(),
+        "non-divina EPUB should not expose page resources"
+    );
 
     let page_response = app
         .oneshot(
@@ -842,7 +845,10 @@ async fn router_transient_book_analyze_uses_comicinfo_number_for_epub_like_kotli
     assert_eq!(analyze_response.status(), StatusCode::OK);
 
     let payload = response_json(analyze_response).await;
-    assert_eq!(payload.get("seriesId"), Some(&Value::String("series-1".to_string())));
+    assert_eq!(
+        payload.get("seriesId"),
+        Some(&Value::String("series-1".to_string()))
+    );
     assert_eq!(payload.get("number"), Some(&Value::from(8.0)));
 
     cleanup_router_fixture(paths);
@@ -850,7 +856,8 @@ async fn router_transient_book_analyze_uses_comicinfo_number_for_epub_like_kotli
 }
 
 #[tokio::test]
-async fn router_transient_book_page_returns_bad_request_for_out_of_bounds_non_divina_epub_like_kotlin() {
+async fn router_transient_book_page_returns_bad_request_for_out_of_bounds_non_divina_epub_like_kotlin()
+ {
     let paths = new_router_fixture("router-transient-books-page-epub-non-divina-oob").await;
     seed_router_contract_data(&paths).await;
 
@@ -922,14 +929,18 @@ async fn router_transient_book_page_returns_bad_request_for_out_of_bounds_non_di
 }
 
 #[tokio::test]
-async fn router_transient_book_page_returns_internal_error_for_supported_non_divina_page_number_like_kotlin() {
-    let paths = new_router_fixture("router-transient-books-page-epub-non-divina-supported-number").await;
+async fn router_transient_book_page_returns_internal_error_for_supported_non_divina_page_number_like_kotlin()
+ {
+    let paths =
+        new_router_fixture("router-transient-books-page-epub-non-divina-supported-number").await;
     seed_router_contract_data(&paths).await;
 
     let transient_dir = unique_transient_dir("page-epub-non-divina-supported-number");
     std::fs::create_dir_all(&transient_dir).expect("transient epub directory should be created");
     let candidate_file = transient_dir.join("candidate.epub");
-    let long_text = (0..600).map(|index| format!("token-{index:04} ")).collect::<String>();
+    let long_text = (0..600)
+        .map(|index| format!("token-{index:04} "))
+        .collect::<String>();
     let chapter_html = format!(
         "<html xmlns='http://www.w3.org/1999/xhtml'><body><p>{long_text}</p></body></html>"
     );
@@ -1047,7 +1058,10 @@ async fn router_transient_book_analyze_uses_comicinfo_provider_metadata_like_kot
     assert_eq!(analyze_response.status(), StatusCode::OK);
 
     let payload = response_json(analyze_response).await;
-    assert_eq!(payload.get("seriesId"), Some(&Value::String("series-1".to_string())));
+    assert_eq!(
+        payload.get("seriesId"),
+        Some(&Value::String("series-1".to_string()))
+    );
     assert_eq!(payload.get("number"), Some(&Value::from(8.0)));
 
     cleanup_router_fixture(paths);
@@ -1198,7 +1212,10 @@ async fn router_transient_book_analyze_returns_dynamic_pdf_page_payload_like_kot
         .and_then(Value::as_array)
         .expect("pdf transient analyze payload should include pages");
     assert_eq!(pages.len(), 1);
-    assert_eq!(pages[0].get("fileName"), Some(&Value::String("1".to_string())));
+    assert_eq!(
+        pages[0].get("fileName"),
+        Some(&Value::String("1".to_string()))
+    );
     assert_eq!(
         pages[0].get("mediaType"),
         Some(&Value::String("image/jpeg".to_string()))

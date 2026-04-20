@@ -1,8 +1,7 @@
 use super::*;
+use crate::http::state::HttpAppState;
 use komga_application::runtime_sse::register_runtime_sse_event;
 use serde_json::json;
-
-use crate::discovery_detail_access::series as series_access;
 
 #[derive(Clone)]
 pub struct PersistedSeriesResource {
@@ -43,10 +42,13 @@ pub struct ExistingSeriesMetadata {
 }
 
 pub async fn load_persisted_series_resource(
-    database_file: &FsPath,
+    app: &HttpAppState,
     series_id: &str,
 ) -> Result<Option<PersistedSeriesResource>, String> {
-    let resource = series_access::load_persisted_series_resource(database_file, series_id)
+    let resource = app
+        .services
+        .discovery_detail
+        .load_persisted_series_resource(app.auth_db.database_file.clone(), series_id.to_string())
         .await?
         .map(|row| PersistedSeriesResource {
             library_id: row.library_id,
@@ -58,7 +60,7 @@ pub async fn load_persisted_series_resource(
 }
 
 pub async fn resolve_series_id_for_persisted(
-    database_file: &FsPath,
+    app: &HttpAppState,
     requested_series_id: &str,
 ) -> String {
     let Some(index) = requested_series_id
@@ -73,44 +75,65 @@ pub async fn resolve_series_id_for_persisted(
     }
 
     if matches!(
-        load_persisted_series_resource(database_file, requested_series_id).await,
+        load_persisted_series_resource(app, requested_series_id).await,
         Ok(Some(_))
     ) {
         return requested_series_id.to_string();
     }
 
-    match series_access::load_series_id_by_sorted_position(database_file, index).await {
+    match app
+        .services
+        .discovery_detail
+        .load_series_id_by_sorted_position(app.auth_db.database_file.clone(), index)
+        .await
+    {
         Ok(Some(series_id)) => series_id,
         _ => requested_series_id.to_string(),
     }
 }
 
 pub(super) async fn load_persisted_series_detail(
-    database_file: &FsPath,
+    app: &HttpAppState,
     series_id: &str,
     user_id: Option<&str>,
 ) -> Result<Option<SeriesDetailReadModel>, String> {
-    let Some(row) = series_access::load_persisted_series_detail(database_file, series_id).await?
+    let Some(row) = app
+        .services
+        .discovery_detail
+        .load_persisted_series_detail(app.auth_db.database_file.clone(), series_id.to_string())
+        .await?
     else {
         return Ok(None);
     };
-    let metadata = load_existing_series_metadata(database_file, series_id)
+    let metadata = load_existing_series_metadata(app, series_id)
         .await?
         .unwrap_or_else(|| fallback_existing_series_metadata(&row));
 
-    let persisted_summary = series_access::load_persisted_series_summaries(database_file)
+    let persisted_summary = app
+        .services
+        .discovery_detail
+        .load_persisted_series_summaries(app.auth_db.database_file.clone())
         .await?
         .into_iter()
         .find(|entry| entry.id == series_id);
 
-    let total_book_count = series_access::load_series_total_book_counts(database_file)
+    let total_book_count = app
+        .services
+        .discovery_detail
+        .load_series_total_book_counts(app.auth_db.database_file.clone())
         .await?
         .get(series_id)
         .copied()
         .map(|value| value.clamp(0, i64::from(i32::MAX)) as u32);
 
     let (books_read_count, books_in_progress_count) = if let Some(user_id) = user_id {
-        let counts = series_access::load_series_read_progress_counts(database_file, user_id)
+        let counts = app
+            .services
+            .discovery_detail
+            .load_series_read_progress_counts(
+                app.auth_db.database_file.clone(),
+                user_id.to_string(),
+            )
             .await?
             .get(series_id)
             .copied();
@@ -211,9 +234,7 @@ pub(super) async fn load_persisted_series_detail(
     Ok(model)
 }
 
-fn fallback_existing_series_metadata(
-    row: &series_access::PersistedSeriesDetailRecord,
-) -> ExistingSeriesMetadata {
+fn fallback_existing_series_metadata(row: &PersistedSeriesDetailRecord) -> ExistingSeriesMetadata {
     ExistingSeriesMetadata {
         status: row.status.clone(),
         status_lock: false,
@@ -262,10 +283,14 @@ fn parse_aggregated_series_authors(raw: &[String]) -> Vec<BookMetadataAuthorRead
 }
 
 pub(super) async fn load_persisted_series_collections(
-    database_file: &FsPath,
+    app: &HttpAppState,
     series_id: &str,
 ) -> Result<Vec<CollectionReadModel>, String> {
-    let rows = series_access::load_persisted_series_collections(database_file, series_id).await?;
+    let rows = app
+        .services
+        .discovery_detail
+        .load_persisted_series_collections(app.auth_db.database_file.clone(), series_id.to_string())
+        .await?;
     Ok(rows
         .into_iter()
         .map(|row| CollectionReadModel {
@@ -281,10 +306,13 @@ pub(super) async fn load_persisted_series_collections(
 }
 
 pub async fn load_existing_series_metadata(
-    database_file: &FsPath,
+    app: &HttpAppState,
     series_id: &str,
 ) -> Result<Option<ExistingSeriesMetadata>, String> {
-    let metadata = series_access::load_existing_series_metadata(database_file, series_id)
+    let metadata = app
+        .services
+        .discovery_detail
+        .load_existing_series_metadata(app.auth_db.database_file.clone(), series_id.to_string())
         .await?
         .map(|row| ExistingSeriesMetadata {
             status: row.status,
@@ -321,14 +349,20 @@ pub async fn load_existing_series_metadata(
 }
 
 pub async fn persist_series_metadata_update(
-    database_file: &FsPath,
+    app: &HttpAppState,
     series_id: &str,
     update: SeriesMetadataUpdateRecord,
 ) -> Result<bool, String> {
-    let updated = series_access::persist_series_metadata_update(database_file, series_id, update).await?;
-    if updated
-        && let Some(series) = load_persisted_series_resource(database_file, series_id).await?
-    {
+    let updated = app
+        .services
+        .discovery_detail
+        .persist_series_metadata_update(
+            app.auth_db.database_file.clone(),
+            series_id.to_string(),
+            update,
+        )
+        .await?;
+    if updated && let Some(series) = load_persisted_series_resource(app, series_id).await? {
         register_runtime_sse_event(
             "SeriesChanged",
             json!({
@@ -343,16 +377,17 @@ pub async fn persist_series_metadata_update(
 }
 
 pub async fn sync_series_search_documents_after_metadata_update(
-    database_file: &FsPath,
-    index_dir: &FsPath,
+    app: &HttpAppState,
     series_id: &str,
 ) -> Result<(), String> {
-    series_access::refresh_series_search_documents_after_metadata_update(
-        database_file,
-        index_dir,
-        series_id,
-    )
-    .await
+    app.services
+        .discovery_detail
+        .refresh_series_search_documents_after_metadata_update(
+            app.auth_db.database_file.clone(),
+            app.operational.runtime.lucene_data_directory.clone(),
+            series_id.to_string(),
+        )
+        .await
 }
 
 #[cfg(test)]

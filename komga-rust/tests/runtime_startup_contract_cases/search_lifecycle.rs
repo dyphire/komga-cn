@@ -25,8 +25,10 @@ fn startup_search_lifecycle_missing_index_enqueues_rebuild_contract() {
 fn startup_search_lifecycle_existing_runtime_index_skips_startup_task_contract() {
     let lucene_dir = unique_temp_dir("komga-runtime-startup-search-existing-index");
     fs::create_dir_all(&lucene_dir).expect("lucene directory should be created");
-    komga_infrastructure::search::index_lifecycle::SearchIndexLifecycle::bootstrap(lucene_dir.as_path())
-        .expect("runtime index bootstrap should create an existing index");
+    komga_infrastructure::search::index_lifecycle::SearchIndexLifecycle::bootstrap(
+        lucene_dir.as_path(),
+    )
+    .expect("runtime index bootstrap should create an existing index");
 
     let mut config = komga_config::env_config::RuntimeConfig::for_runtime_profile(
         komga_config::profile::RuntimeProfile::SnapshotAligned,

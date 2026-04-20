@@ -1,5 +1,3 @@
-use std::path::Path as FsPath;
-
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{Extension, Path};
@@ -15,19 +13,17 @@ use crate::discovery_detail_access::{
     books as detail_access_books, collections as detail_access_collections,
     readlists as detail_access_readlists, series as detail_access_series,
 };
-
 use crate::http::discovery_auth::context::{
     DetailContentContext, DetailResourceContext, DiscoveryQueryContext, QueryRestrictions,
 };
 use crate::http::discovery_auth::principal::AgeRestrictionKind;
-use crate::http::discovery_auth::state::DiscoveryAuthState;
 use crate::http::helpers::{
     api_file_path, detail_access_denial_response, mark_runtime_owned, normalized_date_time,
     normalized_file_last_modified, normalized_optional_read_progress_date, query_bool, query_value,
     query_values, restricted_book_url,
 };
 use crate::http::identity_access::auth::{require_request_admin, require_request_auth};
-use crate::http::state::AuthDatabaseState;
+use crate::http::state::HttpAppState;
 
 mod books_detail;
 mod books_persistence;
@@ -39,35 +35,17 @@ mod readlists_support;
 mod series_detail;
 mod series_persistence;
 
-pub struct DiscoveryDetailAccessBackends {
-    pub books: detail_access_books::DiscoveryDetailBooksAccessBackend,
-    pub collections: detail_access_collections::DiscoveryDetailCollectionsAccessBackend,
-    pub readlists: detail_access_readlists::DiscoveryDetailReadlistsAccessBackend,
-    pub series: detail_access_series::DiscoveryDetailSeriesAccessBackend,
-}
-
-pub fn install_discovery_detail_access_backends(backends: DiscoveryDetailAccessBackends) {
-    detail_access_books::install_backend(backends.books);
-    detail_access_collections::install_backend(backends.collections);
-    detail_access_readlists::install_backend(backends.readlists);
-    detail_access_series::install_backend(backends.series);
-}
-
-pub use detail_access_books::DiscoveryDetailBooksAccessBackend;
 pub use detail_access_books::{
     PersistedBookDetailRecord, PersistedBookResourceRecord, PersistedBookSiblingDirectionRecord,
     PersistedReadProgressRecord,
 };
-pub use detail_access_collections::DiscoveryDetailCollectionsAccessBackend;
 pub use detail_access_collections::{
     PersistedCollectionRecord as PersistedCollectionAccessRecord, PersistedSeriesRestrictionRecord,
 };
-pub use detail_access_readlists::DiscoveryDetailReadlistsAccessBackend;
 pub use detail_access_readlists::{
     PersistedBookAuthorRecord, PersistedComicrackMatchCandidateRecord, PersistedReadlistBookRecord,
     PersistedReadlistRecord,
 };
-pub use detail_access_series::DiscoveryDetailSeriesAccessBackend;
 pub use detail_access_series::{
     ExistingSeriesMetadataRecord, PersistedCollectionRecord as PersistedSeriesCollectionRecord,
     PersistedSeriesDetailRecord, PersistedSeriesResourceRecord, SeriesAlternateTitleRecord,
@@ -75,23 +53,23 @@ pub use detail_access_series::{
 };
 
 pub use books_detail::{book_detail, book_readlists, book_sibling_next, book_sibling_previous};
+use books_persistence::load_persisted_book_sibling_detail;
 pub use books_persistence::{
     PersistedBookSiblingDirection, load_persisted_book_resource, load_persisted_book_series_id,
     resolve_book_id_for_persisted,
 };
-use books_persistence::load_persisted_book_sibling_detail;
 pub use collections::{
     collection_create, collection_delete, collection_detail, collection_series, collection_update,
     collections,
+};
+use collections_support::{
+    collection_payload, collections_page_payload, collections_unpaged_payload,
+    load_persisted_collection_detail, load_persisted_collections,
 };
 pub use collections_support::{
     delete_collection_search_document, delete_persisted_collection, load_series_library_id,
     persist_collection_create, persist_collection_update, persisted_collections_exist,
     series_visible_to_context, upsert_collection_search_document,
-};
-use collections_support::{
-    collection_payload, collections_page_payload, collections_unpaged_payload,
-    load_persisted_collection_detail, load_persisted_collections,
 };
 pub use detail_utils::{
     format_size_bytes, internal_error_response, media_profile_for_media_type, parse_csv_values,
@@ -108,9 +86,9 @@ pub use readlists_support::{
     persist_readlist_update, upsert_readlist_search_document,
 };
 use readlists_support::{
-    load_persisted_readlist_detail, load_persisted_readlists, load_visible_persisted_readlist_books,
-    paginate_persisted_readlist_books, readlist_payload, readlists_page_payload,
-    sort_visible_persisted_readlist_books,
+    load_persisted_readlist_detail, load_persisted_readlists,
+    load_visible_persisted_readlist_books, paginate_persisted_readlist_books, readlist_payload,
+    readlists_page_payload, sort_visible_persisted_readlist_books,
 };
 pub use series_detail::{series_collections, series_detail, series_metadata_update};
 pub use series_persistence::{
@@ -266,14 +244,14 @@ pub(super) struct SeriesDetailReadModel {
 }
 
 pub(crate) async fn load_persisted_webpub_metadata_additions(
-    database_file: &FsPath,
+    app: &HttpAppState,
     book_id: &str,
 ) -> Result<Option<(Map<String, Value>, bool)>, String> {
-    let Some(book) = load_persisted_book_detail(database_file, book_id, None).await? else {
+    let Some(book) = load_persisted_book_detail(app, book_id, None).await? else {
         return Ok(None);
     };
 
-    let series = load_persisted_series_detail(database_file, &book.series_id, None).await?;
+    let series = load_persisted_series_detail(app, &book.series_id, None).await?;
 
     let mut metadata = Map::new();
     if !book.metadata_summary.is_empty() {
@@ -353,11 +331,11 @@ pub(crate) async fn load_persisted_webpub_metadata_additions(
 }
 
 pub(super) async fn load_persisted_book_detail(
-    database_file: &FsPath,
+    app: &HttpAppState,
     book_id: &str,
     user_id: Option<&str>,
 ) -> Result<Option<BookDetailReadModel>, String> {
-    books_persistence::load_persisted_book_detail(database_file, book_id, user_id).await
+    books_persistence::load_persisted_book_detail(app, book_id, user_id).await
 }
 
 fn normalize_webpub_modified(value: &str) -> String {

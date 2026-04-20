@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use axum::Json;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -10,6 +8,7 @@ use crate::http::identity_access::auth::require_auth;
 use crate::http::media_assets::manifest_persistence::build_persisted_book_manifest;
 use crate::http::media_assets::types::{ManifestBuildOutcome, ManifestVariant};
 use crate::http::request_urls::app_absolute_url;
+use crate::http::state::HttpAppState;
 
 const OPDS_MANIFEST_CONTENT_TYPE: &str = "application/opds-publication+json";
 const OPDS_AUTH_CONTENT_TYPE: &str = "application/opds-authentication+json";
@@ -18,24 +17,24 @@ const PROGRESSION_CONTENT_TYPE: &str = "application/vnd.readium.progression+json
 
 pub(crate) async fn opds_manifest(
     headers: HeaderMap,
-    database_file: &Path,
+    app: &HttpAppState,
     book_id: &str,
 ) -> Response {
-    opds_manifest_variant(headers, database_file, book_id, None).await
+    opds_manifest_variant(headers, app, book_id, None).await
 }
 
 pub(crate) async fn opds_manifest_with_profile(
     headers: HeaderMap,
-    database_file: &Path,
+    app: &HttpAppState,
     book_id: &str,
     profile: &str,
 ) -> Response {
-    opds_manifest_variant(headers, database_file, book_id, Some(profile)).await
+    opds_manifest_variant(headers, app, book_id, Some(profile)).await
 }
 
 async fn opds_manifest_variant(
     headers: HeaderMap,
-    database_file: &Path,
+    app: &HttpAppState,
     book_id: &str,
     profile: Option<&str>,
 ) -> Response {
@@ -47,9 +46,9 @@ async fn opds_manifest_variant(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    match build_persisted_book_manifest(database_file, &headers, book_id, variant).await {
+    match build_persisted_book_manifest(app, &headers, book_id, variant).await {
         Ok(ManifestBuildOutcome::Found(_, mut payload)) => {
-            let series_id = load_persisted_book_series_id(database_file, book_id)
+            let series_id = load_persisted_book_series_id(app, book_id)
                 .await
                 .ok()
                 .flatten();

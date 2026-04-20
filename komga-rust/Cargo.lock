@@ -2503,6 +2503,7 @@ dependencies = [
 name = "komga-interfaces"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum",
  "axum-extra",
  "base64",
@@ -2515,6 +2516,7 @@ dependencies = [
  "komga-application",
  "komga-build-support",
  "komga-domain",
+ "komga-infrastructure",
  "komga-kepubify",
  "language-tags",
  "libc",
@@ -2591,6 +2593,7 @@ dependencies = [
 name = "komga-server"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum",
  "axum-extra",
  "base64",

@@ -1,6 +1,4 @@
 use super::*;
-use crate::discovery_detail_access::collections::load_persisted_collection_series_ids;
-use crate::discovery_detail_access::readlists::load_persisted_readlist_book_rows;
 use axum_extra::extract::Multipart;
 
 mod books;

@@ -314,13 +314,13 @@ fn sorted_sql_files(source_dir: &Path) -> Vec<PathBuf> {
 fn schema_inventory(connection: &Connection) -> Vec<serde_json::Value> {
     let mut statement = connection
         .prepare(
-        r#"
+            r#"
         SELECT type, name, tbl_name, COALESCE(sql, '') AS sql
         FROM sqlite_master
         WHERE type IN ('table', 'index', 'trigger', 'view')
           AND name NOT LIKE 'sqlite_%'
         ORDER BY type, name
-        "#
+        "#,
         )
         .expect("schema inventory query should prepare");
 

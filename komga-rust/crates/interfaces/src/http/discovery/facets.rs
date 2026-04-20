@@ -1,14 +1,15 @@
-use super::*;
 use super::persisted::common_helpers::decode_query_component;
 use super::persisted::delegates::{
     authors_v2_page_payload, internal_error_response, load_persisted_age_ratings,
     load_persisted_author_names, load_persisted_author_roles, load_persisted_authors_by_scope,
     load_persisted_genres, load_persisted_languages, load_persisted_publishers,
-    load_persisted_series_release_dates, load_persisted_series_tags,
-    load_persisted_sharing_labels, load_persisted_tags,
+    load_persisted_series_release_dates, load_persisted_series_tags, load_persisted_sharing_labels,
+    load_persisted_tags,
 };
 use super::persisted::models::PersistedAuthorsScope;
+use super::*;
 use crate::http::discovery_auth::context::DiscoveryQueryContext;
+use crate::http::discovery_auth::state::DiscoveryAuthState;
 
 fn decoded_library_ids(query: &str) -> Vec<String> {
     query_values(query, "library_id")
@@ -80,12 +81,8 @@ async fn resolve_collection_facet_scope(
     })
 }
 
-pub async fn authors_names(
-    headers: HeaderMap,
-    uri: Uri,
-    auth_state: DiscoveryAuthState,
-    database_file: &FsPath,
-) -> Response {
+pub async fn authors_names(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
@@ -97,15 +94,20 @@ pub async fn authors_names(
     let search = query_value(uri.query().unwrap_or_default(), "search")
         .map(decode_query_component)
         .unwrap_or_default();
-    let context =
-        match resolve_query_context_or_unauthorized(&auth_state, &headers, None, database_file)
-            .await
-        {
-            Ok(context) => context,
-            Err(response) => return response,
-        };
+    let context = match resolve_query_context_or_unauthorized(
+        &app.discovery_auth,
+        &headers,
+        None,
+        database_file,
+    )
+    .await
+    {
+        Ok(context) => context,
+        Err(response) => return response,
+    };
 
     match load_persisted_author_names(
+        &app.services.discovery_persisted,
         database_file,
         &search,
         context.authorized_library_ids.as_deref(),
@@ -117,11 +119,8 @@ pub async fn authors_names(
     }
 }
 
-pub async fn authors_roles(
-    headers: HeaderMap,
-    auth_state: DiscoveryAuthState,
-    database_file: &FsPath,
-) -> Response {
+pub async fn authors_roles(headers: HeaderMap, app: &HttpAppState) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
@@ -130,16 +129,24 @@ pub async fn authors_roles(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let context =
-        match resolve_query_context_or_unauthorized(&auth_state, &headers, None, database_file)
-            .await
-        {
-            Ok(context) => context,
-            Err(response) => return response,
-        };
+    let context = match resolve_query_context_or_unauthorized(
+        &app.discovery_auth,
+        &headers,
+        None,
+        database_file,
+    )
+    .await
+    {
+        Ok(context) => context,
+        Err(response) => return response,
+    };
 
-    match load_persisted_author_roles(database_file, context.authorized_library_ids.as_deref())
-        .await
+    match load_persisted_author_roles(
+        &app.services.discovery_persisted,
+        database_file,
+        context.authorized_library_ids.as_deref(),
+    )
+    .await
     {
         Ok(values) => Json(json!(values)).into_response(),
         Err(error) => internal_error_response(error),
@@ -149,9 +156,9 @@ pub async fn authors_roles(
 pub(super) async fn authors_deprecated_get(
     headers: HeaderMap,
     uri: Uri,
-    auth_state: DiscoveryAuthState,
-    database_file: &FsPath,
+    app: &HttpAppState,
 ) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
@@ -172,7 +179,7 @@ pub(super) async fn authors_deprecated_get(
         .filter(|value| !value.is_empty())
         .map(decode_query_component);
     let context = match resolve_query_context_or_unauthorized(
-        &auth_state,
+        &app.discovery_auth,
         &headers,
         library_id.as_ref().map(std::slice::from_ref),
         database_file,
@@ -194,6 +201,7 @@ pub(super) async fn authors_deprecated_get(
     };
 
     let mut authors = match load_persisted_authors_by_scope(
+        &app.services.discovery_persisted,
         database_file,
         &scope,
         context.authorized_library_ids.as_deref(),
@@ -212,12 +220,8 @@ pub(super) async fn authors_deprecated_get(
     Json(json!(authors)).into_response()
 }
 
-pub async fn authors_v2(
-    headers: HeaderMap,
-    uri: Uri,
-    auth_state: DiscoveryAuthState,
-    database_file: &FsPath,
-) -> Response {
+pub async fn authors_v2(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
@@ -257,7 +261,7 @@ pub async fn authors_v2(
         .max(1);
     let unpaged = query_bool(query, "unpaged");
     let context = match resolve_query_context_or_unauthorized(
-        &auth_state,
+        &app.discovery_auth,
         &headers,
         (!library_ids.is_empty()).then_some(library_ids.as_slice()),
         database_file,
@@ -281,6 +285,7 @@ pub async fn authors_v2(
     };
 
     let mut authors = match load_persisted_authors_by_scope(
+        &app.services.discovery_persisted,
         database_file,
         &scope,
         context.authorized_library_ids.as_deref(),
@@ -304,12 +309,8 @@ pub async fn authors_v2(
     Json(authors_v2_page_payload(authors, page, size, unpaged)).into_response()
 }
 
-pub async fn genres(
-    headers: HeaderMap,
-    uri: Uri,
-    auth_state: DiscoveryAuthState,
-    database_file: &FsPath,
-) -> Response {
+pub async fn genres(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
@@ -320,12 +321,15 @@ pub async fn genres(
 
     let query = uri.query().unwrap_or_default();
     let scope =
-        match resolve_collection_facet_scope(&auth_state, &headers, query, database_file).await {
+        match resolve_collection_facet_scope(&app.discovery_auth, &headers, query, database_file)
+            .await
+        {
             Ok(scope) => scope,
             Err(response) => return response,
         };
 
     match load_persisted_genres(
+        &app.services.discovery_persisted,
         database_file,
         scope.authorized_library_ids(),
         scope.collection_id(),
@@ -337,12 +341,8 @@ pub async fn genres(
     }
 }
 
-pub async fn tags(
-    headers: HeaderMap,
-    uri: Uri,
-    auth_state: DiscoveryAuthState,
-    database_file: &FsPath,
-) -> Response {
+pub async fn tags(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
@@ -353,12 +353,15 @@ pub async fn tags(
 
     let query = uri.query().unwrap_or_default();
     let scope =
-        match resolve_collection_facet_scope(&auth_state, &headers, query, database_file).await {
+        match resolve_collection_facet_scope(&app.discovery_auth, &headers, query, database_file)
+            .await
+        {
             Ok(scope) => scope,
             Err(response) => return response,
         };
 
     match load_persisted_tags(
+        &app.services.discovery_persisted,
         database_file,
         scope.authorized_library_ids(),
         scope.collection_id(),
@@ -370,12 +373,8 @@ pub async fn tags(
     }
 }
 
-pub async fn series_tags(
-    headers: HeaderMap,
-    uri: Uri,
-    auth_state: DiscoveryAuthState,
-    database_file: &FsPath,
-) -> Response {
+pub async fn series_tags(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
@@ -386,12 +385,15 @@ pub async fn series_tags(
 
     let query = uri.query().unwrap_or_default();
     let scope =
-        match resolve_collection_facet_scope(&auth_state, &headers, query, database_file).await {
+        match resolve_collection_facet_scope(&app.discovery_auth, &headers, query, database_file)
+            .await
+        {
             Ok(scope) => scope,
             Err(response) => return response,
         };
 
     match load_persisted_series_tags(
+        &app.services.discovery_persisted,
         database_file,
         scope.authorized_library_ids(),
         scope.collection_id(),
@@ -403,12 +405,8 @@ pub async fn series_tags(
     }
 }
 
-pub async fn languages(
-    headers: HeaderMap,
-    uri: Uri,
-    auth_state: DiscoveryAuthState,
-    database_file: &FsPath,
-) -> Response {
+pub async fn languages(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
@@ -419,12 +417,15 @@ pub async fn languages(
 
     let query = uri.query().unwrap_or_default();
     let scope =
-        match resolve_collection_facet_scope(&auth_state, &headers, query, database_file).await {
+        match resolve_collection_facet_scope(&app.discovery_auth, &headers, query, database_file)
+            .await
+        {
             Ok(scope) => scope,
             Err(response) => return response,
         };
 
     match load_persisted_languages(
+        &app.services.discovery_persisted,
         database_file,
         scope.authorized_library_ids(),
         scope.collection_id(),
@@ -436,12 +437,8 @@ pub async fn languages(
     }
 }
 
-pub async fn publishers(
-    headers: HeaderMap,
-    uri: Uri,
-    auth_state: DiscoveryAuthState,
-    database_file: &FsPath,
-) -> Response {
+pub async fn publishers(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
@@ -452,12 +449,15 @@ pub async fn publishers(
 
     let query = uri.query().unwrap_or_default();
     let scope =
-        match resolve_collection_facet_scope(&auth_state, &headers, query, database_file).await {
+        match resolve_collection_facet_scope(&app.discovery_auth, &headers, query, database_file)
+            .await
+        {
             Ok(scope) => scope,
             Err(response) => return response,
         };
 
     match load_persisted_publishers(
+        &app.services.discovery_persisted,
         database_file,
         scope.authorized_library_ids(),
         scope.collection_id(),
@@ -469,12 +469,8 @@ pub async fn publishers(
     }
 }
 
-pub async fn age_ratings(
-    headers: HeaderMap,
-    uri: Uri,
-    auth_state: DiscoveryAuthState,
-    database_file: &FsPath,
-) -> Response {
+pub async fn age_ratings(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
@@ -485,12 +481,15 @@ pub async fn age_ratings(
 
     let query = uri.query().unwrap_or_default();
     let scope =
-        match resolve_collection_facet_scope(&auth_state, &headers, query, database_file).await {
+        match resolve_collection_facet_scope(&app.discovery_auth, &headers, query, database_file)
+            .await
+        {
             Ok(scope) => scope,
             Err(response) => return response,
         };
 
     match load_persisted_age_ratings(
+        &app.services.discovery_persisted,
         database_file,
         scope.authorized_library_ids(),
         scope.collection_id(),
@@ -502,12 +501,8 @@ pub async fn age_ratings(
     }
 }
 
-pub async fn sharing_labels(
-    headers: HeaderMap,
-    uri: Uri,
-    auth_state: DiscoveryAuthState,
-    database_file: &FsPath,
-) -> Response {
+pub async fn sharing_labels(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
@@ -518,12 +513,15 @@ pub async fn sharing_labels(
 
     let query = uri.query().unwrap_or_default();
     let scope =
-        match resolve_collection_facet_scope(&auth_state, &headers, query, database_file).await {
+        match resolve_collection_facet_scope(&app.discovery_auth, &headers, query, database_file)
+            .await
+        {
             Ok(scope) => scope,
             Err(response) => return response,
         };
 
     match load_persisted_sharing_labels(
+        &app.services.discovery_persisted,
         database_file,
         scope.authorized_library_ids(),
         scope.collection_id(),
@@ -535,12 +533,8 @@ pub async fn sharing_labels(
     }
 }
 
-pub async fn series_release_dates(
-    headers: HeaderMap,
-    uri: Uri,
-    auth_state: DiscoveryAuthState,
-    database_file: &FsPath,
-) -> Response {
+pub async fn series_release_dates(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
@@ -551,12 +545,15 @@ pub async fn series_release_dates(
 
     let query = uri.query().unwrap_or_default();
     let scope =
-        match resolve_collection_facet_scope(&auth_state, &headers, query, database_file).await {
+        match resolve_collection_facet_scope(&app.discovery_auth, &headers, query, database_file)
+            .await
+        {
             Ok(scope) => scope,
             Err(response) => return response,
         };
 
     match load_persisted_series_release_dates(
+        &app.services.discovery_persisted,
         database_file,
         scope.authorized_library_ids(),
         scope.collection_id(),

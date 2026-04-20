@@ -50,6 +50,7 @@ quick-xml = "0.39.2"
 time = { version = "0.3.44", features = ["formatting", "parsing", "local-offset"] }
 tsid = "0.3.4"
 futures-util = "0.3.31"
+async-trait = "0.1.89"
 image = "0.25.8"
 mime_guess = "2.0.5"
 rust-embed = { version = "8.11.0", features = ["debug-embed"] }

@@ -2,51 +2,48 @@ use super::*;
 use komga_application::media_assets::BookPageRecord;
 
 pub async fn book_page(
-    Extension(_profile): Extension<RuntimeProfile>,
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BookPageQuery>,
     Path((book_id, page_number)): Path<(String, u32)>,
 ) -> Response {
-    book_page_response(&auth_db, &headers, &book_id, page_number, query).await
+    book_page_response(&app, &headers, &book_id, page_number, query).await
 }
 
 pub async fn book_page_opds_v1(
-    Extension(_profile): Extension<RuntimeProfile>,
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Query(mut query): Query<BookPageQuery>,
     Path((book_id, page_number)): Path<(String, u32)>,
 ) -> Response {
     query.zero_based = true;
     query.content_negotiation = false;
-    book_page_response(&auth_db, &headers, &book_id, page_number, query).await
+    book_page_response(&app, &headers, &book_id, page_number, query).await
 }
 
 pub async fn book_page_opds_v2(
-    Extension(_profile): Extension<RuntimeProfile>,
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Query(mut query): Query<BookPageQuery>,
     Path((book_id, page_number)): Path<(String, u32)>,
 ) -> Response {
     query.content_negotiation = false;
-    book_page_response(&auth_db, &headers, &book_id, page_number, query).await
+    book_page_response(&app, &headers, &book_id, page_number, query).await
 }
 
 async fn book_page_response(
-    auth_db: &AuthDatabaseState,
+    app: &HttpAppState,
     headers: &HeaderMap,
     book_id: &str,
     page_number: u32,
     query: BookPageQuery,
 ) -> Response {
-    if let Some(response) = require_request_auth(headers, auth_db.database_file.as_path()).await {
+    if let Some(response) = require_request_auth(headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    let resolved_book_id =
-        resolve_book_id_for_persisted(auth_db.database_file.as_path(), book_id).await;
+    let resolved_book_id = resolve_book_id_for_persisted(app, book_id).await;
 
     let requested_page_number = if query.zero_based {
         page_number.saturating_add(1)
@@ -69,9 +66,7 @@ async fn book_page_response(
         return StatusCode::BAD_REQUEST.into_response();
     }
 
-    if let Ok(Some(media)) =
-        load_persisted_book_media(auth_db.database_file.as_path(), &resolved_book_id).await
-    {
+    if let Ok(Some(media)) = load_persisted_book_media_from_services(app, &resolved_book_id).await {
         let last_modified = file_last_modified_header_value(media.file_path.as_path());
         if let Some(last_modified) = last_modified.as_deref()
             && if_modified_since_matches(headers, last_modified)
@@ -81,7 +76,7 @@ async fn book_page_response(
 
         let book_display_name = media.file_name.clone();
 
-        if !book_media_is_ready_status(auth_db.database_file.as_path(), &resolved_book_id)
+        if !book_media_is_ready_status_from_services(app, &resolved_book_id)
             .await
             .unwrap_or(false)
         {
@@ -92,21 +87,15 @@ async fn book_page_response(
                 .into_response();
         }
 
-        let Some(user) = resolved_request_auth_user(headers, auth_db.database_file.as_path()).await
+        let Some(user) =
+            resolved_request_auth_user(headers, app.auth_db.database_file.as_path()).await
         else {
             return StatusCode::UNAUTHORIZED.into_response();
         };
         if !user_is_admin(&user) && !user_has_role(&user, "PAGE_STREAMING") {
             return StatusCode::FORBIDDEN.into_response();
         }
-        if !user_can_access_book_media(
-            auth_db.database_file.as_path(),
-            &resolved_book_id,
-            &user,
-            &media,
-        )
-        .await
-        {
+        if !user_can_access_book_media(app, &resolved_book_id, &user, &media).await {
             return StatusCode::FORBIDDEN.into_response();
         }
 
@@ -115,13 +104,16 @@ async fn book_page_response(
         }
 
         if book_media_is_pdf(&media) && content_negotiation && accept_header_prefers_pdf(headers) {
-            let page_count = detect_pdf_page_count(&media).unwrap_or(media.page_count);
+            let page_count =
+                detect_pdf_page_count_from_services(app, &media).unwrap_or(media.page_count);
             if requested_page_number as u64 > page_count {
                 return page_number_does_not_exist_response();
             }
-            if let Some(bytes) =
-                read_pdf_page_as_single_page_pdf(&media, requested_page_number as u64)
-            {
+            if let Some(bytes) = read_pdf_page_as_single_page_pdf_from_services(
+                app,
+                &media,
+                requested_page_number as u64,
+            ) {
                 let last_modified = file_last_modified_header_value(media.file_path.as_path());
                 if let Some(last_modified) = last_modified.as_deref()
                     && if_modified_since_matches(headers, last_modified)
@@ -142,7 +134,7 @@ async fn book_page_response(
         }
 
         let page_row = match load_page_row(
-            auth_db.database_file.as_path(),
+            app,
             &resolved_book_id,
             &media,
             requested_page_number as u64,
@@ -155,9 +147,12 @@ async fn book_page_response(
             Err(error) => return internal_error_response(error),
         };
 
-        if let Some(bytes) =
-            resolve_book_page_bytes(&media, &page_row, requested_page_number as u64)
-        {
+        if let Some(bytes) = resolve_book_page_bytes_from_services(
+            app,
+            &media,
+            &page_row,
+            requested_page_number as u64,
+        ) {
             let mut effective_bytes = bytes;
             let content_type = page_row_media_type(&page_row, &media);
 
@@ -202,12 +197,13 @@ async fn book_page_response(
 }
 
 pub async fn book_page_raw(
-    Extension(_profile): Extension<RuntimeProfile>,
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path((book_id, page_number_signed)): Path<(String, i32)>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
     if page_number_signed <= 0 {
@@ -219,13 +215,12 @@ pub async fn book_page_raw(
     }
     let page_number = page_number_signed as u32;
 
-    let resolved_book_id =
-        resolve_book_id_for_persisted(auth_db.database_file.as_path(), &book_id).await;
+    let resolved_book_id = resolve_book_id_for_persisted(&app, &book_id).await;
 
-    if let Ok(Some(media)) =
-        load_persisted_book_media(auth_db.database_file.as_path(), &resolved_book_id).await
+    if let Ok(Some(media)) = load_persisted_book_media_from_services(&app, &resolved_book_id).await
     {
-        let auth_user = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await;
+        let auth_user =
+            resolved_request_auth_user(&headers, app.auth_db.database_file.as_path()).await;
         if let Some(user) = auth_user.as_ref()
             && !user_has_role(user, "PAGE_STREAMING")
         {
@@ -242,13 +237,7 @@ pub async fn book_page_raw(
         let book_display_name = media.file_name.clone();
 
         if let Some(user) = auth_user.as_ref()
-            && !user_can_access_book_media(
-                auth_db.database_file.as_path(),
-                &resolved_book_id,
-                user,
-                &media,
-            )
-            .await
+            && !user_can_access_book_media(&app, &resolved_book_id, user, &media).await
         {
             return StatusCode::FORBIDDEN.into_response();
         }
@@ -260,7 +249,7 @@ pub async fn book_page_raw(
             );
         }
 
-        if !book_media_is_ready_status(auth_db.database_file.as_path(), &resolved_book_id)
+        if !book_media_is_ready_status_from_services(&app, &resolved_book_id)
             .await
             .unwrap_or(false)
         {
@@ -271,12 +260,15 @@ pub async fn book_page_raw(
             return json_error_response(StatusCode::NOT_FOUND, "File not found, it may have moved");
         }
 
-        let page_count = detect_pdf_page_count(&media).unwrap_or(media.page_count);
+        let page_count =
+            detect_pdf_page_count_from_services(&app, &media).unwrap_or(media.page_count);
         if page_number == 0 || page_number as u64 > page_count {
             return page_number_does_not_exist_response();
         }
 
-        if let Some(bytes) = read_pdf_page_as_single_page_pdf(&media, page_number as u64) {
+        if let Some(bytes) =
+            read_pdf_page_as_single_page_pdf_from_services(&app, &media, page_number as u64)
+        {
             return asset_ok_with_inline_disposition(
                 &book_display_name,
                 page_number,
@@ -323,8 +315,12 @@ fn page_number_does_not_exist_response() -> Response {
     json_error_response(StatusCode::BAD_REQUEST, "Page number does not exist")
 }
 
-fn single_image_page_row(media: &PersistedBookMedia, page_number: u64) -> PersistedBookPageRow {
-    let (width, height) = read_media_image_dimensions(media.file_path.as_path())
+fn single_image_page_row(
+    app: &HttpAppState,
+    media: &PersistedBookMedia,
+    page_number: u64,
+) -> PersistedBookPageRow {
+    let (width, height) = read_media_image_dimensions(app, media.file_path.as_path())
         .map(|(width, height)| (Some(width), Some(height)))
         .unwrap_or((None, None));
     PersistedBookPageRow {
@@ -333,12 +329,12 @@ fn single_image_page_row(media: &PersistedBookMedia, page_number: u64) -> Persis
         media_type: content_type_from_filename(&media.file_name, &media.media_type),
         width,
         height,
-        file_size: read_media_file_size(&media.file_path).unwrap_or(0),
+        file_size: read_media_file_size_from_services(app, &media.file_path).unwrap_or(0),
     }
 }
 
-fn single_image_page_record(media: &PersistedBookMedia) -> BookPageRecord {
-    let page = single_image_page_row(media, 1);
+fn single_image_page_record(app: &HttpAppState, media: &PersistedBookMedia) -> BookPageRecord {
+    let page = single_image_page_row(app, media, 1);
     BookPageRecord {
         number: page.number,
         file_name: page.file_name,
@@ -350,23 +346,23 @@ fn single_image_page_record(media: &PersistedBookMedia) -> BookPageRecord {
 }
 
 async fn load_page_row(
-    database_file: &FsPath,
+    app: &HttpAppState,
     book_id: &str,
     media: &PersistedBookMedia,
     page_number: u64,
     allow_pdf_fallback: bool,
 ) -> Result<Option<PersistedBookPageRow>, String> {
-    match load_persisted_book_page_row(database_file, book_id, page_number).await {
+    match load_persisted_book_page_row_from_services(app, book_id, page_number).await {
         Ok(Some(row)) => Ok(Some(row)),
         Ok(None) if book_media_is_single_image(media) && page_number == 1 => {
-            Ok(Some(single_image_page_row(media, page_number)))
+            Ok(Some(single_image_page_row(app, media, page_number)))
         }
         Ok(None) => {
-            if let Some(row) = load_archive_page_row(media, page_number) {
+            if let Some(row) = load_archive_page_row_from_services(app, media, page_number) {
                 return Ok(Some(row));
             }
             if allow_pdf_fallback {
-                return Ok(load_pdf_page_row(media, page_number));
+                return Ok(load_pdf_page_row_from_services(app, media, page_number));
             }
             Ok(None)
         }
@@ -519,18 +515,18 @@ fn convert_page_image_bytes(
     Some(output.into_inner())
 }
 
-fn read_media_image_dimensions(path: &FsPath) -> Option<(i64, i64)> {
-    let bytes = read_media_file_bytes(path)?;
+fn read_media_image_dimensions(app: &HttpAppState, path: &FsPath) -> Option<(i64, i64)> {
+    let bytes = read_media_file_bytes_from_services(app, path)?;
     let image = image::load_from_memory(&bytes).ok()?;
     Some((i64::from(image.width()), i64::from(image.height())))
 }
 
 pub async fn book_page_thumbnail(
-    Extension(_profile): Extension<RuntimeProfile>,
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path((book_id, page_number)): Path<(String, u32)>,
 ) -> Response {
+    let auth_db = &app.auth_db;
     if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
@@ -538,25 +534,16 @@ pub async fn book_page_thumbnail(
         return page_number_does_not_exist_response();
     }
 
-    let resolved_book_id =
-        resolve_book_id_for_persisted(auth_db.database_file.as_path(), &book_id).await;
+    let resolved_book_id = resolve_book_id_for_persisted(&app, &book_id).await;
 
-    if let Ok(Some(media)) =
-        load_persisted_book_media(auth_db.database_file.as_path(), &resolved_book_id).await
+    if let Ok(Some(media)) = load_persisted_book_media_from_services(&app, &resolved_book_id).await
     {
         let Some(user) =
             resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
         else {
             return StatusCode::UNAUTHORIZED.into_response();
         };
-        if !user_can_access_book_media(
-            auth_db.database_file.as_path(),
-            &resolved_book_id,
-            &user,
-            &media,
-        )
-        .await
-        {
+        if !user_can_access_book_media(&app, &resolved_book_id, &user, &media).await {
             return StatusCode::FORBIDDEN.into_response();
         }
 
@@ -564,22 +551,20 @@ pub async fn book_page_thumbnail(
             return StatusCode::NOT_FOUND.into_response();
         }
 
-        let page_row = match load_page_row(
-            auth_db.database_file.as_path(),
-            &resolved_book_id,
-            &media,
-            page_number as u64,
-            true,
-        )
-        .await
-        {
-            Ok(Some(row)) => row,
-            Ok(None) => return page_number_does_not_exist_response(),
-            Err(error) => return internal_error_response(error),
-        };
+        let page_row =
+            match load_page_row(&app, &resolved_book_id, &media, page_number as u64, true).await {
+                Ok(Some(row)) => row,
+                Ok(None) => return page_number_does_not_exist_response(),
+                Err(error) => return internal_error_response(error),
+            };
 
-        if let Some(bytes) = render_book_page_thumbnail(&media, &page_row, page_number as u64, 300)
-        {
+        if let Some(bytes) = render_book_page_thumbnail_from_services(
+            &app,
+            &media,
+            &page_row,
+            page_number as u64,
+            300,
+        ) {
             let content_type = "image/jpeg".to_string();
 
             let etag = asset_etag(bytes.as_slice());
@@ -606,40 +591,34 @@ pub async fn book_page_thumbnail(
 }
 
 pub async fn book_pages(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    let resolved_book_id =
-        resolve_book_id_for_persisted(auth_db.database_file.as_path(), &book_id).await;
+    let resolved_book_id = resolve_book_id_for_persisted(&app, &book_id).await;
 
-    let media =
-        match load_persisted_book_media(auth_db.database_file.as_path(), &resolved_book_id).await {
-            Ok(Some(media)) => media,
-            Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-            Err(error) => return internal_error_response(error),
-        };
+    let media = match load_persisted_book_media_from_services(&app, &resolved_book_id).await {
+        Ok(Some(media)) => media,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => return internal_error_response(error),
+    };
 
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+    let Some(user) =
+        resolved_request_auth_user(&headers, app.auth_db.database_file.as_path()).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    if !user_can_access_book_media(
-        auth_db.database_file.as_path(),
-        &resolved_book_id,
-        &user,
-        &media,
-    )
-    .await
-    {
+    if !user_can_access_book_media(&app, &resolved_book_id, &user, &media).await {
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    if !book_media_is_ready_status(auth_db.database_file.as_path(), &resolved_book_id)
+    if !book_media_is_ready_status_from_services(&app, &resolved_book_id)
         .await
         .unwrap_or(false)
     {
@@ -650,11 +629,10 @@ pub async fn book_pages(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let page_rows =
-        match load_persisted_book_pages(auth_db.database_file.as_path(), &resolved_book_id).await {
-            Ok(rows) => rows,
-            Err(error) => return internal_error_response(error),
-        };
+    let page_rows = match load_persisted_book_pages_from_services(&app, &resolved_book_id).await {
+        Ok(rows) => rows,
+        Err(error) => return internal_error_response(error),
+    };
 
     if !page_rows.is_empty() {
         let page_rows = if book_media_is_pdf(&media) {
@@ -665,13 +643,13 @@ pub async fn book_pages(
         return page_rows_response(page_rows);
     }
 
-    if let Some(archive_rows) = load_archive_page_rows(&media)
+    if let Some(archive_rows) = load_archive_page_rows_from_services(&app, &media)
         && !archive_rows.is_empty()
     {
         return page_rows_response(archive_rows);
     }
 
-    let generated_pdf_rows = load_generated_pdf_page_rows(&media);
+    let generated_pdf_rows = load_generated_pdf_page_rows_from_services(&app, &media);
     if !generated_pdf_rows.is_empty() {
         return page_rows_response(generated_pdf_rows);
     }
@@ -680,7 +658,7 @@ pub async fn book_pages(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    page_rows_response(vec![single_image_page_record(&media)])
+    page_rows_response(vec![single_image_page_record(&app, &media)])
 }
 
 fn page_rows_response(page_rows: Vec<BookPageRecord>) -> Response {
@@ -748,37 +726,30 @@ fn scale_pdf_dimensions(width: Option<i64>, height: Option<i64>) -> (Option<i64>
 }
 
 pub async fn book_positions(
-    Extension(_state): Extension<OperationalState>,
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    let resolved_book_id =
-        resolve_book_id_for_persisted(auth_db.database_file.as_path(), &book_id).await;
+    let resolved_book_id = resolve_book_id_for_persisted(&app, &book_id).await;
 
-    let media =
-        match load_persisted_book_media(auth_db.database_file.as_path(), &resolved_book_id).await {
-            Ok(Some(media)) => media,
-            Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-            Err(error) => return internal_error_response(error),
-        };
+    let media = match load_persisted_book_media_from_services(&app, &resolved_book_id).await {
+        Ok(Some(media)) => media,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => return internal_error_response(error),
+    };
 
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+    let Some(user) =
+        resolved_request_auth_user(&headers, app.auth_db.database_file.as_path()).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    if !user_can_access_book_media(
-        auth_db.database_file.as_path(),
-        &resolved_book_id,
-        &user,
-        &media,
-    )
-    .await
-    {
+    if !user_can_access_book_media(&app, &resolved_book_id, &user, &media).await {
         return StatusCode::FORBIDDEN.into_response();
     }
 
@@ -788,7 +759,7 @@ pub async fn book_positions(
 
     let last_modified = file_last_modified_header_value(media.file_path.as_path());
 
-    match load_persisted_epub_positions(auth_db.database_file.as_path(), &resolved_book_id).await {
+    match load_persisted_epub_positions(&app, &resolved_book_id).await {
         Ok(Some(positions)) if !positions.is_empty() => {
             if let Some(last_modified) = last_modified.as_deref()
                 && if_modified_since_matches(&headers, last_modified)

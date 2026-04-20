@@ -11,8 +11,8 @@ pub use super::operations::{
     series_metadata_refresh,
 };
 pub use super::pages::{
-    book_page, book_page_opds_v1, book_page_opds_v2, book_page_raw, book_page_thumbnail,
-    book_pages, book_positions, BookPageQuery,
+    BookPageQuery, book_page, book_page_opds_v1, book_page_opds_v2, book_page_raw,
+    book_page_thumbnail, book_pages, book_positions,
 };
 pub use super::read_progress::{
     book_progression, book_progression_get, book_read_progress, book_read_progress_delete,

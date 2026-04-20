@@ -13,9 +13,7 @@ use komga_application::identity_access::{
     build_komga_sync_token_payload, decode_or_passthrough_sync_token, generated_kobo_token_triplet,
     is_kobo_store_sync_token_candidate, now_sync_marker, parse_komga_sync_token_payload, user_id,
 };
-use oauth2::{
-    AuthUrl, ClientId, ClientSecret, CsrfToken, RedirectUrl, Scope, basic::BasicClient,
-};
+use oauth2::{AuthUrl, ClientId, ClientSecret, CsrfToken, RedirectUrl, Scope, basic::BasicClient};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -31,17 +29,10 @@ use crate::http::identity_access::auth::{
 use crate::http::request_urls::{
     request_base_url, request_base_url_with_port, request_context_path,
 };
-use crate::http::state::{AuthDatabaseState, OperationalState};
-use crate::media_assets_runtime_access::facade::{
-    load_persisted_book_media, persist_book_progression, read_media_file_bytes,
-};
-use crate::runtime_identity_access::{
-    KoreaderBookLookupError, PersistedReadProgressRecord, ensure_oauth_user,
-    load_book_created_timestamp, load_book_last_epub_position_locator, load_kobo_metadata_record,
-    load_kobo_sync_page, load_koreader_book_target, load_read_progress, load_thumbnail_by_id,
-    persisted_book_exists, proxy_kobo_store_library_sync,
-    remove_sync_point, store_oauth2_authorization_state, take_oauth2_authorization_state,
-};
+use crate::http::state::HttpAppState;
+#[cfg(test)]
+use crate::runtime_identity_access::KoreaderBookTarget;
+use crate::runtime_identity_access::{KoreaderBookLookupError, PersistedReadProgressRecord};
 
 mod auth_resolvers;
 mod helpers;
@@ -63,6 +54,36 @@ pub use oauth::{oauth2_authorization, oauth2_login_code};
 
 use auth_resolvers::*;
 use helpers::*;
+
+#[cfg(test)]
+pub(crate) async fn load_koreader_book_target_for_tests(
+    database_file: &FsPath,
+    book_hash: &str,
+) -> Result<Option<KoreaderBookTarget>, KoreaderBookLookupError> {
+    crate::runtime_identity_access::default_test_identity_service()
+        .load_koreader_book_target(database_file.to_path_buf(), book_hash.to_string())
+        .await
+}
+
+#[cfg(test)]
+pub(crate) async fn kobo_ping_for_tests(
+    database_file: &FsPath,
+    auth_token: &str,
+    connection_info: RequestConnectionInfo,
+    headers: HeaderMap,
+) -> Response {
+    match auth_resolvers::required_kobo_user(
+        auth_token,
+        &headers,
+        connection_info.remote_addr(),
+        database_file,
+    )
+    .await
+    {
+        Ok(_) => "pong".into_response(),
+        Err(status) => status.into_response(),
+    }
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "PascalCase")]
@@ -164,9 +185,10 @@ fn kobo_sync_token_from_request(headers: &HeaderMap, _uri: &axum::http::Uri) -> 
     None
 }
 
-async fn load_kobo_proxy_enabled(state: &OperationalState) -> bool {
-    state
-        .settings_store
+async fn load_kobo_proxy_enabled(
+    server_settings: &dyn crate::http::state::ServerSettingsService,
+) -> bool {
+    server_settings
         .load_map()
         .await
         .ok()

@@ -10,8 +10,7 @@ use tracing::error;
 use crate::media_assets_runtime_access::RuntimeMediaImportService;
 
 pub async fn books_import(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
@@ -26,20 +25,21 @@ pub async fn books_import(
         }
     };
 
-    let service = media_import_service(auth_db.database_file.as_path());
-    enqueue_books_best_effort(service.as_ref(), payload, |task_record| {
-        process_task_side_effects(&state, vec![task_record])
-    });
+    let service = app
+        .services
+        .media_assets
+        .media_import_service(app.auth_db.database_file.clone());
+    enqueue_books_best_effort(service.as_ref(), payload, &app).await;
 
     let mut response = StatusCode::ACCEPTED.into_response();
     mark_runtime_owned(&mut response);
     response
 }
 
-fn enqueue_books_best_effort(
+async fn enqueue_books_best_effort(
     service: &dyn RuntimeMediaImportService,
     payload: BooksImportPayload,
-    mut enqueue_task: impl FnMut(TaskQueueRecord) -> Result<(), String>,
+    app: &HttpAppState,
 ) {
     for book in payload.books {
         let source_file = book.source_file.display().to_string();
@@ -57,10 +57,14 @@ fn enqueue_books_best_effort(
                 task_records
                     .pop()
                     .ok_or_else(|| "import task generation returned no task".to_string())
-            })
-        {
+            }) {
             Ok(task_record) => {
-                if let Err(err) = enqueue_task(interface_task_record(task_record)) {
+                if let Err(err) = app
+                    .services
+                    .task_queue
+                    .enqueue_task_records(vec![interface_task_record(task_record)], true)
+                    .await
+                {
                     error!(
                         %series_id,
                         source_file = %source_file,
@@ -82,7 +86,11 @@ fn enqueue_books_best_effort(
 }
 
 fn kotlin_import_book_task_id(book: &BooksImportEntry) -> String {
-    format!("IMPORT_BOOK_{}_{}", book.series_id, book.source_file.display())
+    format!(
+        "IMPORT_BOOK_{}_{}",
+        book.series_id,
+        book.source_file.display()
+    )
 }
 
 fn application_import_payload(payload: BooksImportPayload) -> ApplicationBooksImportPayload {
@@ -117,8 +125,22 @@ fn interface_task_record(task: ApplicationTaskQueueRecord) -> TaskQueueRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::RefCell;
+    use std::collections::{BTreeMap, HashMap};
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    use crate::http::discovery_auth::state::DiscoveryAuthState;
+    use crate::http::state::{
+        AuthDatabaseState, HttpAppState, HttpServerRequestsState, HttpServices,
+        LibraryCatalogService, OAuth2ClientConfig, OperationalBuildMetadata, OperationalState,
+        RemoteCacheEntry, RuntimeProfile, RuntimeState, ServerSettingsService, SseOperationalState,
+        StartupTimingState, TaskQueueService, TransientBooksStore,
+        tests::{
+            NoopDiscoveryDetailService, NoopMediaAssetsService, NoopOpdsCatalogService,
+            NoopOpdsPersistedService, NoopOperationalRuntimeService,
+            NoopOperationalSettingsService, NoopPersistedDiscoveryService,
+        },
+    };
 
     struct StubImportService;
 
@@ -144,13 +166,236 @@ mod tests {
             &'a self,
             _task_payload: &'a str,
             _import_priority: i32,
-        ) -> futures_util::future::BoxFuture<'a, Result<Vec<ApplicationTaskQueueRecord>, String>> {
+        ) -> futures_util::future::BoxFuture<'a, Result<Vec<ApplicationTaskQueueRecord>, String>>
+        {
             Box::pin(async { panic!("process_queued_book_payload should not be called in tests") })
         }
     }
 
-    #[test]
-    fn enqueue_books_best_effort_keeps_later_books_when_earlier_enqueue_fails() {
+    struct NoopLibraryCatalogService;
+
+    #[async_trait::async_trait]
+    impl LibraryCatalogService for NoopLibraryCatalogService {
+        async fn list_libraries(
+            &self,
+            _context: komga_domain::discovery::DiscoveryQueryContext,
+        ) -> Result<
+            Vec<komga_application::library_catalog::LibraryRecord>,
+            komga_domain::discovery::DiscoveryError,
+        > {
+            panic!("library catalog should not be used in media import tests")
+        }
+
+        async fn get_library(
+            &self,
+            _context: komga_domain::discovery::DiscoveryQueryContext,
+            _library_id: String,
+        ) -> Result<
+            Option<komga_application::library_catalog::LibraryRecord>,
+            komga_domain::discovery::DiscoveryError,
+        > {
+            panic!("library catalog should not be used in media import tests")
+        }
+
+        async fn create_library(
+            &self,
+            _changes: komga_application::library_catalog::LibraryChangeSet,
+        ) -> Result<
+            komga_application::library_catalog::CreateLibraryResult,
+            komga_application::library_catalog::LibraryCatalogMutationError,
+        > {
+            panic!("library catalog should not be used in media import tests")
+        }
+
+        async fn update_library(
+            &self,
+            _library_id: String,
+            _changes: komga_application::library_catalog::LibraryChangeSet,
+        ) -> Result<
+            komga_application::library_catalog::LibraryTaskResult,
+            komga_application::library_catalog::LibraryCatalogMutationError,
+        > {
+            panic!("library catalog should not be used in media import tests")
+        }
+
+        async fn delete_library(
+            &self,
+            _library_id: String,
+        ) -> Result<bool, komga_application::library_catalog::LibraryCatalogMutationError> {
+            panic!("library catalog should not be used in media import tests")
+        }
+
+        async fn scan_library(
+            &self,
+            _library_id: String,
+            _deep_scan: bool,
+        ) -> Result<
+            komga_application::library_catalog::LibraryTaskResult,
+            komga_application::library_catalog::LibraryCatalogMutationError,
+        > {
+            panic!("library catalog should not be used in media import tests")
+        }
+
+        async fn analyze_library(
+            &self,
+            _library_id: String,
+        ) -> Result<
+            komga_application::library_catalog::LibraryTaskResult,
+            komga_application::library_catalog::LibraryCatalogMutationError,
+        > {
+            panic!("library catalog should not be used in media import tests")
+        }
+
+        async fn refresh_metadata(
+            &self,
+            _library_id: String,
+        ) -> Result<
+            komga_application::library_catalog::LibraryTaskResult,
+            komga_application::library_catalog::LibraryCatalogMutationError,
+        > {
+            panic!("library catalog should not be used in media import tests")
+        }
+
+        async fn empty_trash(
+            &self,
+            _library_id: String,
+        ) -> Result<
+            komga_application::library_catalog::LibraryTaskResult,
+            komga_application::library_catalog::LibraryCatalogMutationError,
+        > {
+            panic!("library catalog should not be used in media import tests")
+        }
+    }
+
+    struct TestTaskQueueService {
+        persisted_ids: Arc<tokio::sync::Mutex<Vec<String>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl TaskQueueService for TestTaskQueueService {
+        async fn enqueue_task_records(
+            &self,
+            task_records: Vec<TaskQueueRecord>,
+            _urgent: bool,
+        ) -> Result<(), String> {
+            let task_record = task_records.into_iter().next().expect("task should exist");
+            if task_record.id == "IMPORT_BOOK_series-1_/tmp/book-a.cbz" {
+                Err("first enqueue failed".to_string())
+            } else {
+                self.persisted_ids.lock().await.push(task_record.id);
+                Ok(())
+            }
+        }
+
+        async fn clear_unowned_tasks(&self) -> usize {
+            0
+        }
+
+        async fn count_task_queue_by_type(&self) -> BTreeMap<String, usize> {
+            BTreeMap::new()
+        }
+
+        async fn apply_task_pool_size(&self, _value: usize) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    struct TestServerSettingsService;
+
+    #[async_trait::async_trait]
+    impl ServerSettingsService for TestServerSettingsService {
+        async fn load_map(&self) -> Result<BTreeMap<String, Option<String>>, String> {
+            Ok(BTreeMap::new())
+        }
+
+        async fn load_settings(
+            &self,
+        ) -> Result<crate::operational_settings_access::PersistedServerSettings, String> {
+            Ok(
+                crate::operational_settings_access::PersistedServerSettings {
+                    delete_empty_collections: false,
+                    delete_empty_read_lists: false,
+                    remember_me_key: String::new(),
+                    remember_me_duration_days: 365,
+                    thumbnail_size: "DEFAULT",
+                    task_pool_size: 1,
+                    server_port: None,
+                    server_context_path: None,
+                    kobo_proxy: false,
+                    kobo_port: None,
+                },
+            )
+        }
+
+        async fn apply_changes(&self, _changes: &[(String, Option<String>)]) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    fn test_app_state(task_queue: Arc<dyn TaskQueueService>) -> HttpAppState {
+        let operational = OperationalState {
+            runtime: RuntimeState {
+                database_file: PathBuf::from("/tmp/main.db"),
+                tasks_db_file: PathBuf::from("/tmp/tasks.db"),
+                lucene_data_directory: PathBuf::from("/tmp/lucene"),
+                fonts_data_directory: PathBuf::from("/tmp/fonts"),
+                log_file: PathBuf::from("/tmp/komga.log"),
+                config_dir: None,
+                bind_address: "127.0.0.1:0".parse().expect("bind address"),
+                server_context_path: None,
+            },
+            startup_timing: StartupTimingState::default(),
+            http_server_requests: HttpServerRequestsState::default(),
+            remember_me_runtime_key: "test".to_string(),
+            build_metadata: OperationalBuildMetadata {
+                version: "0.1.0".to_string(),
+                build_time: "2026-04-09T00:00:00Z".to_string(),
+                git_branch: None,
+                git_commit_id: None,
+                git_commit_time: None,
+            },
+            oauth2_clients: Arc::new(Vec::<OAuth2ClientConfig>::new()),
+            oauth2_account_creation: false,
+            oidc_email_verification: false,
+            sse: Arc::new(Mutex::new(SseOperationalState::default())),
+            announcements_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
+            releases_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
+            transient_books: Arc::new(Mutex::new(
+                TransientBooksStore::with_records(HashMap::new()),
+            )),
+            shutdown_trigger: None,
+        };
+
+        HttpAppState {
+            profile: RuntimeProfile::LiveLocaldb,
+            read_progress: crate::http::state::ReadProgressState::default(),
+            discovery_auth: DiscoveryAuthState::default(),
+            auth_db: AuthDatabaseState {
+                database_file: operational.runtime.database_file.clone(),
+                demo_mode: false,
+                session_runtime_key: operational.remember_me_runtime_key.clone(),
+                remember_me_runtime_key: operational.remember_me_runtime_key.clone(),
+                runtime_identity: crate::runtime_identity_access::default_test_identity_service(),
+            },
+            services: HttpServices {
+                library_catalog: Arc::new(NoopLibraryCatalogService),
+                task_queue,
+                server_settings: Arc::new(TestServerSettingsService),
+                runtime_identity: crate::runtime_identity_access::default_test_identity_service(),
+                operational_runtime: Arc::new(NoopOperationalRuntimeService),
+                operational_settings: Arc::new(NoopOperationalSettingsService),
+                media_assets: Arc::new(NoopMediaAssetsService),
+                opds_catalog: Arc::new(NoopOpdsCatalogService),
+                opds_persisted: Arc::new(NoopOpdsPersistedService),
+                discovery_persisted: Arc::new(NoopPersistedDiscoveryService),
+                discovery_detail: Arc::new(NoopDiscoveryDetailService),
+            },
+            operational,
+        }
+    }
+
+    #[tokio::test]
+    async fn enqueue_books_best_effort_keeps_later_books_when_earlier_enqueue_fails() {
         let service = StubImportService;
         let payload = BooksImportPayload {
             copy_mode: ImportCopyMode::Copy,
@@ -169,23 +414,15 @@ mod tests {
                 },
             ],
         };
-        let persisted_ids = RefCell::new(Vec::new());
+        let persisted_ids = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+        let app = test_app_state(Arc::new(TestTaskQueueService {
+            persisted_ids: persisted_ids.clone(),
+        }));
 
-        enqueue_books_best_effort(
-            &service,
-            payload,
-            |task_record| {
-                if task_record.id == "IMPORT_BOOK_series-1_/tmp/book-a.cbz" {
-                    Err("first enqueue failed".to_string())
-                } else {
-                    persisted_ids.borrow_mut().push(task_record.id);
-                    Ok(())
-                }
-            },
-        );
+        enqueue_books_best_effort(&service, payload, &app).await;
 
         assert_eq!(
-            persisted_ids.into_inner(),
+            persisted_ids.lock().await.clone(),
             vec!["IMPORT_BOOK_series-2_/tmp/book-b.cbz".to_string()]
         );
     }

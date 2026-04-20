@@ -177,13 +177,7 @@ async fn serve_router_with_shutdown_timeout(
 }
 
 fn build_http_router(runtime: HttpRuntimeState) -> Router {
-    komga_interfaces::http::router::build_router(
-        runtime.profile,
-        runtime.read_progress,
-        runtime.discovery_auth,
-        runtime.auth_db,
-        runtime.operational,
-    )
+    komga_interfaces::http::router::build_router(runtime.app)
 }
 
 fn finalize_router_startup(

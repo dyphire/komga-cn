@@ -1,7 +1,11 @@
 use super::index_dirs::{register_discovery_index_dir, resolve_discovery_index_dir};
 use super::*;
 
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::path::PathBuf;
+
 use komga_infrastructure::search::index_lifecycle::SearchQueryLifecycle;
+use komga_interfaces::discovery_persisted_access::PersistedDiscoveryService;
 
 fn search_ids_or_empty(
     index_dir: &std::path::Path,
@@ -31,21 +35,6 @@ fn search_scored_ids_or_empty(
     index
         .search_scored_ids(query, entity_type, limit)
         .unwrap_or_default()
-}
-
-macro_rules! forward_string_facet_loader {
-    ($loader:path) => {
-        Arc::new(|database_file, library_ids, collection_id| {
-            Box::pin(async move {
-                $loader(
-                    database_file.as_path(),
-                    library_ids.as_deref(),
-                    collection_id.as_deref(),
-                )
-                .await
-            })
-        })
-    };
 }
 
 fn persisted_book_summary(
@@ -175,359 +164,490 @@ fn persisted_series_summary(
     }
 }
 
-pub(super) fn compose_persisted_discovery_access_backend(
+#[derive(Clone)]
+pub(super) struct RuntimePersistedDiscoveryService {
+    lucene_data_directory: PathBuf,
+}
+
+#[async_trait::async_trait]
+impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
+    async fn load_persisted_author_names(
+        &self,
+        database_file: PathBuf,
+        search: String,
+        authorized_library_ids: Option<Vec<String>>,
+    ) -> Result<Vec<String>, String> {
+        infrastructure_discovery_authors::load_persisted_author_names(
+            database_file.as_path(),
+            &search,
+            authorized_library_ids.as_deref(),
+        )
+        .await
+    }
+
+    async fn load_persisted_author_roles(
+        &self,
+        database_file: PathBuf,
+        authorized_library_ids: Option<Vec<String>>,
+    ) -> Result<Vec<String>, String> {
+        infrastructure_discovery_authors::load_persisted_author_roles(
+            database_file.as_path(),
+            authorized_library_ids.as_deref(),
+        )
+        .await
+    }
+
+    async fn load_persisted_authors_by_scope(
+        &self,
+        database_file: PathBuf,
+        scope: PersistedAuthorsScope,
+        authorized_library_ids: Option<Vec<String>>,
+    ) -> Result<Vec<PersistedAuthorEntry>, String> {
+        let mapped_scope = match scope {
+            PersistedAuthorsScope::All => infrastructure_discovery_models::AuthorsScope::All,
+            PersistedAuthorsScope::Libraries(ids) => {
+                infrastructure_discovery_models::AuthorsScope::Libraries(ids)
+            }
+            PersistedAuthorsScope::Collection(id) => {
+                infrastructure_discovery_models::AuthorsScope::Collection(id)
+            }
+            PersistedAuthorsScope::Series(id) => {
+                infrastructure_discovery_models::AuthorsScope::Series(id)
+            }
+            PersistedAuthorsScope::ReadList(id) => {
+                infrastructure_discovery_models::AuthorsScope::ReadList(id)
+            }
+        };
+        let rows = infrastructure_discovery_authors::load_persisted_authors_by_scope(
+            database_file.as_path(),
+            &mapped_scope,
+            authorized_library_ids.as_deref(),
+        )
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| PersistedAuthorEntry {
+                name: row.name,
+                role: row.role,
+            })
+            .collect())
+    }
+
+    async fn load_book_poster_summaries(
+        &self,
+        database_file: PathBuf,
+    ) -> Result<HashMap<String, Vec<PersistedBookPosterSummary>>, String> {
+        let rows =
+            infrastructure_discovery_books::load_book_poster_summaries(database_file.as_path())
+                .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(book_id, values)| {
+                (
+                    book_id,
+                    values
+                        .into_iter()
+                        .map(|value| PersistedBookPosterSummary {
+                            thumbnail_type: value.thumbnail_type,
+                            selected: value.selected,
+                        })
+                        .collect(),
+                )
+            })
+            .collect())
+    }
+
+    async fn load_persisted_book_summaries(
+        &self,
+        database_file: PathBuf,
+        user_id: Option<String>,
+    ) -> Result<Vec<PersistedBookSummary>, String> {
+        infrastructure_discovery_books::load_persisted_book_summaries(
+            database_file.as_path(),
+            user_id.as_deref(),
+        )
+        .await
+        .map(|rows| rows.into_iter().map(persisted_book_summary).collect())
+    }
+
+    async fn load_persisted_book_summaries_by_ids(
+        &self,
+        database_file: PathBuf,
+        user_id: Option<String>,
+        ids: Vec<String>,
+    ) -> Result<Vec<PersistedBookSummary>, String> {
+        infrastructure_discovery_books::load_persisted_book_summaries_by_ids(
+            database_file.as_path(),
+            user_id.as_deref(),
+            ids.as_slice(),
+        )
+        .await
+        .map(|rows| rows.into_iter().map(persisted_book_summary).collect())
+    }
+
+    async fn load_persisted_book_count(&self, database_file: PathBuf) -> Result<usize, String> {
+        infrastructure_discovery_books::load_persisted_book_count(database_file.as_path()).await
+    }
+
+    async fn load_persisted_genres(
+        &self,
+        database_file: PathBuf,
+        library_ids: Option<Vec<String>>,
+        collection_id: Option<String>,
+    ) -> Result<Vec<String>, String> {
+        infrastructure_discovery_facets::load_persisted_genres(
+            database_file.as_path(),
+            library_ids.as_deref(),
+            collection_id.as_deref(),
+        )
+        .await
+    }
+
+    async fn load_persisted_tags(
+        &self,
+        database_file: PathBuf,
+        library_ids: Option<Vec<String>>,
+        collection_id: Option<String>,
+    ) -> Result<Vec<String>, String> {
+        infrastructure_discovery_facets::load_persisted_tags(
+            database_file.as_path(),
+            library_ids.as_deref(),
+            collection_id.as_deref(),
+        )
+        .await
+    }
+
+    async fn load_persisted_languages(
+        &self,
+        database_file: PathBuf,
+        library_ids: Option<Vec<String>>,
+        collection_id: Option<String>,
+    ) -> Result<Vec<String>, String> {
+        infrastructure_discovery_facets::load_persisted_languages(
+            database_file.as_path(),
+            library_ids.as_deref(),
+            collection_id.as_deref(),
+        )
+        .await
+    }
+
+    async fn load_persisted_publishers(
+        &self,
+        database_file: PathBuf,
+        library_ids: Option<Vec<String>>,
+        collection_id: Option<String>,
+    ) -> Result<Vec<String>, String> {
+        infrastructure_discovery_facets::load_persisted_publishers(
+            database_file.as_path(),
+            library_ids.as_deref(),
+            collection_id.as_deref(),
+        )
+        .await
+    }
+
+    async fn load_persisted_age_ratings(
+        &self,
+        database_file: PathBuf,
+        library_ids: Option<Vec<String>>,
+        collection_id: Option<String>,
+    ) -> Result<Vec<String>, String> {
+        infrastructure_discovery_facets::load_persisted_age_ratings(
+            database_file.as_path(),
+            library_ids.as_deref(),
+            collection_id.as_deref(),
+        )
+        .await
+    }
+
+    async fn load_persisted_sharing_labels(
+        &self,
+        database_file: PathBuf,
+        library_ids: Option<Vec<String>>,
+        collection_id: Option<String>,
+    ) -> Result<Vec<String>, String> {
+        infrastructure_discovery_facets::load_persisted_sharing_labels(
+            database_file.as_path(),
+            library_ids.as_deref(),
+            collection_id.as_deref(),
+        )
+        .await
+    }
+
+    async fn load_persisted_series_release_dates(
+        &self,
+        database_file: PathBuf,
+        library_ids: Option<Vec<String>>,
+        collection_id: Option<String>,
+    ) -> Result<Vec<String>, String> {
+        infrastructure_discovery_facets::load_persisted_series_release_dates(
+            database_file.as_path(),
+            library_ids.as_deref(),
+            collection_id.as_deref(),
+        )
+        .await
+    }
+
+    async fn load_persisted_series_tags(
+        &self,
+        database_file: PathBuf,
+        library_ids: Option<Vec<String>>,
+        collection_id: Option<String>,
+    ) -> Result<Vec<String>, String> {
+        infrastructure_discovery_facets::load_persisted_series_tags(
+            database_file.as_path(),
+            library_ids.as_deref(),
+            collection_id.as_deref(),
+        )
+        .await
+    }
+
+    async fn load_persisted_library_ids(
+        &self,
+        database_file: PathBuf,
+    ) -> Result<Vec<String>, String> {
+        infrastructure_discovery_library_mappings::load_persisted_library_ids(
+            database_file.as_path(),
+        )
+        .await
+    }
+
+    async fn load_collection_memberships(
+        &self,
+        database_file: PathBuf,
+    ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
+        infrastructure_discovery_library_mappings::load_collection_memberships(
+            database_file.as_path(),
+        )
+        .await
+    }
+
+    async fn load_collection_ordering(
+        &self,
+        database_file: PathBuf,
+        collection_id: String,
+    ) -> Result<HashMap<String, i64>, String> {
+        infrastructure_discovery_library_mappings::load_collection_ordering(
+            database_file.as_path(),
+            &collection_id,
+        )
+        .await
+    }
+
+    async fn load_readlist_memberships(
+        &self,
+        database_file: PathBuf,
+    ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
+        infrastructure_discovery_library_mappings::load_readlist_memberships(
+            database_file.as_path(),
+        )
+        .await
+    }
+
+    async fn load_persisted_ondeck_books(
+        &self,
+        database_file: PathBuf,
+        user_id: String,
+    ) -> Result<Vec<PersistedBookBrowseEntry>, String> {
+        infrastructure_discovery_runtime_queries::load_persisted_ondeck_books(
+            database_file.as_path(),
+            &user_id,
+        )
+        .await
+        .map(|rows| rows.into_iter().map(persisted_book_browse_entry).collect())
+    }
+
+    async fn load_persisted_duplicate_books(
+        &self,
+        database_file: PathBuf,
+    ) -> Result<Vec<PersistedBookBrowseEntry>, String> {
+        infrastructure_discovery_runtime_queries::load_persisted_duplicate_books(
+            database_file.as_path(),
+        )
+        .await
+        .map(|rows| rows.into_iter().map(persisted_book_browse_entry).collect())
+    }
+
+    async fn load_persisted_book_tags(
+        &self,
+        database_file: PathBuf,
+        scope: Option<PersistedBookTagsScope>,
+        authorized_library_ids: Option<Vec<String>>,
+    ) -> Result<Vec<String>, String> {
+        let scope = scope.map(|scope| match scope {
+            PersistedBookTagsScope::All => infrastructure_discovery_models::BookTagsScope::All,
+            PersistedBookTagsScope::Series(id) => {
+                infrastructure_discovery_models::BookTagsScope::Series(id)
+            }
+            PersistedBookTagsScope::Libraries(ids) => {
+                infrastructure_discovery_models::BookTagsScope::Libraries(ids)
+            }
+            PersistedBookTagsScope::ReadList(id) => {
+                infrastructure_discovery_models::BookTagsScope::ReadList(id)
+            }
+        });
+        infrastructure_discovery_runtime_queries::load_persisted_book_tags(
+            database_file.as_path(),
+            scope.as_ref(),
+            authorized_library_ids.as_deref(),
+        )
+        .await
+    }
+
+    async fn persisted_utc_date_minus_days(
+        &self,
+        database_file: PathBuf,
+        days: i64,
+    ) -> Result<Option<String>, String> {
+        infrastructure_discovery_runtime_queries::persisted_utc_date_minus_days(
+            database_file.as_path(),
+            days,
+        )
+        .await
+    }
+
+    async fn load_series_read_progress_counts(
+        &self,
+        database_file: PathBuf,
+        user_id: String,
+    ) -> Result<HashMap<String, (i64, i64)>, String> {
+        infrastructure_discovery_runtime_queries::load_series_read_progress_counts(
+            database_file.as_path(),
+            &user_id,
+        )
+        .await
+    }
+
+    async fn load_series_read_dates(
+        &self,
+        database_file: PathBuf,
+        user_id: String,
+    ) -> Result<HashMap<String, String>, String> {
+        infrastructure_discovery_runtime_queries::load_series_read_dates(
+            database_file.as_path(),
+            &user_id,
+        )
+        .await
+    }
+
+    async fn load_series_total_book_counts(
+        &self,
+        database_file: PathBuf,
+    ) -> Result<HashMap<String, i64>, String> {
+        infrastructure_discovery_runtime_queries::load_series_total_book_counts(
+            database_file.as_path(),
+        )
+        .await
+    }
+
+    async fn load_persisted_series_summaries(
+        &self,
+        database_file: PathBuf,
+    ) -> Result<Vec<PersistedSeriesSummary>, String> {
+        infrastructure_discovery_series::load_persisted_series_summaries(database_file.as_path())
+            .await
+            .map(|rows| rows.into_iter().map(persisted_series_summary).collect())
+    }
+
+    async fn load_persisted_series_summaries_by_ids(
+        &self,
+        database_file: PathBuf,
+        ids: Vec<String>,
+    ) -> Result<Vec<PersistedSeriesSummary>, String> {
+        infrastructure_discovery_series::load_persisted_series_summaries_by_ids(
+            database_file.as_path(),
+            ids.as_slice(),
+        )
+        .await
+        .map(|rows| rows.into_iter().map(persisted_series_summary).collect())
+    }
+
+    async fn load_persisted_series_count(&self, database_file: PathBuf) -> Result<usize, String> {
+        infrastructure_discovery_series::load_persisted_series_count(database_file.as_path()).await
+    }
+
+    async fn persisted_series_exist(&self, database_file: PathBuf) -> Result<bool, String> {
+        infrastructure_discovery_series::persisted_series_exist(database_file.as_path()).await
+    }
+
+    async fn search_book_ids(
+        &self,
+        database_file: PathBuf,
+        query: String,
+        limit: usize,
+    ) -> Result<Vec<String>, String> {
+        Ok(search_ids_or_empty(
+            resolve_discovery_index_dir(
+                database_file.as_path(),
+                self.lucene_data_directory.as_path(),
+            )
+            .as_path(),
+            &query,
+            SearchEntityType::Book,
+            limit,
+        ))
+    }
+
+    async fn search_collection_ids(
+        &self,
+        database_file: PathBuf,
+        query: String,
+        limit: usize,
+    ) -> Result<Vec<String>, String> {
+        Ok(search_ids_or_empty(
+            resolve_discovery_index_dir(
+                database_file.as_path(),
+                self.lucene_data_directory.as_path(),
+            )
+            .as_path(),
+            &query,
+            SearchEntityType::Collection,
+            limit,
+        ))
+    }
+
+    async fn search_readlist_scored_ids(
+        &self,
+        database_file: PathBuf,
+        query: String,
+        limit: usize,
+    ) -> Result<Vec<(f32, String)>, String> {
+        Ok(search_scored_ids_or_empty(
+            resolve_discovery_index_dir(
+                database_file.as_path(),
+                self.lucene_data_directory.as_path(),
+            )
+            .as_path(),
+            &query,
+            SearchEntityType::ReadList,
+            limit,
+        ))
+    }
+
+    async fn search_series_scored_ids(
+        &self,
+        database_file: PathBuf,
+        query: String,
+        limit: usize,
+    ) -> Result<Vec<(f32, String)>, String> {
+        Ok(search_scored_ids_or_empty(
+            resolve_discovery_index_dir(
+                database_file.as_path(),
+                self.lucene_data_directory.as_path(),
+            )
+            .as_path(),
+            &query,
+            SearchEntityType::Series,
+            limit,
+        ))
+    }
+}
+
+pub(super) fn compose_persisted_discovery_service(
     database_file: &std::path::Path,
     lucene_data_directory: &std::path::Path,
-) -> PersistedDiscoveryAccessBackend {
+) -> Arc<dyn PersistedDiscoveryService> {
     register_discovery_index_dir(database_file, lucene_data_directory);
-
-    let lucene_data_directory = lucene_data_directory.to_path_buf();
-    PersistedDiscoveryAccessBackend {
-        load_persisted_author_names: Arc::new(|database_file, search, authorized_library_ids| {
-            Box::pin(async move {
-                infrastructure_discovery_authors::load_persisted_author_names(
-                    database_file.as_path(),
-                    &search,
-                    authorized_library_ids.as_deref(),
-                )
-                .await
-            })
-        }),
-        load_persisted_author_roles: Arc::new(|database_file, authorized_library_ids| {
-            Box::pin(async move {
-                infrastructure_discovery_authors::load_persisted_author_roles(
-                    database_file.as_path(),
-                    authorized_library_ids.as_deref(),
-                )
-                .await
-            })
-        }),
-        load_persisted_authors_by_scope: Arc::new(
-            |database_file, scope, authorized_library_ids| {
-                Box::pin(async move {
-                    let mapped_scope = match scope {
-                        PersistedAuthorsScope::All => {
-                            infrastructure_discovery_models::AuthorsScope::All
-                        }
-                        PersistedAuthorsScope::Libraries(ids) => {
-                            infrastructure_discovery_models::AuthorsScope::Libraries(ids)
-                        }
-                        PersistedAuthorsScope::Collection(id) => {
-                            infrastructure_discovery_models::AuthorsScope::Collection(id)
-                        }
-                        PersistedAuthorsScope::Series(id) => {
-                            infrastructure_discovery_models::AuthorsScope::Series(id)
-                        }
-                        PersistedAuthorsScope::ReadList(id) => {
-                            infrastructure_discovery_models::AuthorsScope::ReadList(id)
-                        }
-                    };
-                    let rows = infrastructure_discovery_authors::load_persisted_authors_by_scope(
-                        database_file.as_path(),
-                        &mapped_scope,
-                        authorized_library_ids.as_deref(),
-                    )
-                    .await?;
-                    Ok(rows
-                        .into_iter()
-                        .map(|row| PersistedAuthorEntry {
-                            name: row.name,
-                            role: row.role,
-                        })
-                        .collect())
-                })
-            },
-        ),
-        load_book_poster_summaries: Arc::new(|database_file| {
-            Box::pin(async move {
-                let rows = infrastructure_discovery_books::load_book_poster_summaries(
-                    database_file.as_path(),
-                )
-                .await?;
-                Ok(rows
-                    .into_iter()
-                    .map(|(book_id, values)| {
-                        (
-                            book_id,
-                            values
-                                .into_iter()
-                                .map(|value| PersistedBookPosterSummary {
-                                    thumbnail_type: value.thumbnail_type,
-                                    selected: value.selected,
-                                })
-                                .collect(),
-                        )
-                    })
-                    .collect())
-            })
-        }),
-        load_persisted_book_summaries: Arc::new(|database_file, user_id| {
-            Box::pin(async move {
-                let rows = infrastructure_discovery_books::load_persisted_book_summaries(
-                    database_file.as_path(),
-                    user_id.as_deref(),
-                )
-                .await?;
-                Ok(rows.into_iter().map(persisted_book_summary).collect())
-            })
-        }),
-        load_persisted_book_summaries_by_ids: Arc::new(|database_file, user_id, ids| {
-            Box::pin(async move {
-                let rows = infrastructure_discovery_books::load_persisted_book_summaries_by_ids(
-                    database_file.as_path(),
-                    user_id.as_deref(),
-                    &ids,
-                )
-                .await?;
-                Ok(rows.into_iter().map(persisted_book_summary).collect())
-            })
-        }),
-        load_persisted_book_count: Arc::new(|database_file| {
-            Box::pin(async move {
-                infrastructure_discovery_books::load_persisted_book_count(database_file.as_path())
-                    .await
-            })
-        }),
-        load_persisted_genres: forward_string_facet_loader!(
-            infrastructure_discovery_facets::load_persisted_genres
-        ),
-        load_persisted_tags: forward_string_facet_loader!(
-            infrastructure_discovery_facets::load_persisted_tags
-        ),
-        load_persisted_languages: forward_string_facet_loader!(
-            infrastructure_discovery_facets::load_persisted_languages
-        ),
-        load_persisted_publishers: forward_string_facet_loader!(
-            infrastructure_discovery_facets::load_persisted_publishers
-        ),
-        load_persisted_age_ratings: forward_string_facet_loader!(
-            infrastructure_discovery_facets::load_persisted_age_ratings
-        ),
-        load_persisted_sharing_labels: forward_string_facet_loader!(
-            infrastructure_discovery_facets::load_persisted_sharing_labels
-        ),
-        load_persisted_series_release_dates: forward_string_facet_loader!(
-            infrastructure_discovery_facets::load_persisted_series_release_dates
-        ),
-        load_persisted_series_tags: forward_string_facet_loader!(
-            infrastructure_discovery_facets::load_persisted_series_tags
-        ),
-        load_persisted_library_ids: Arc::new(|database_file| {
-            Box::pin(async move {
-                infrastructure_discovery_library_mappings::load_persisted_library_ids(
-                    database_file.as_path(),
-                )
-                .await
-            })
-        }),
-        load_collection_memberships: Arc::new(|database_file| {
-            Box::pin(async move {
-                infrastructure_discovery_library_mappings::load_collection_memberships(
-                    database_file.as_path(),
-                )
-                .await
-            })
-        }),
-        load_collection_ordering: Arc::new(|database_file, collection_id| {
-            Box::pin(async move {
-                infrastructure_discovery_library_mappings::load_collection_ordering(
-                    database_file.as_path(),
-                    &collection_id,
-                )
-                .await
-            })
-        }),
-        load_readlist_memberships: Arc::new(|database_file| {
-            Box::pin(async move {
-                infrastructure_discovery_library_mappings::load_readlist_memberships(
-                    database_file.as_path(),
-                )
-                .await
-            })
-        }),
-        load_persisted_ondeck_books: Arc::new(|database_file, user_id| {
-            Box::pin(async move {
-                let rows = infrastructure_discovery_runtime_queries::load_persisted_ondeck_books(
-                    database_file.as_path(),
-                    &user_id,
-                )
-                .await?;
-                Ok(rows.into_iter().map(persisted_book_browse_entry).collect())
-            })
-        }),
-        load_persisted_duplicate_books: Arc::new(|database_file| {
-            Box::pin(async move {
-                let rows =
-                    infrastructure_discovery_runtime_queries::load_persisted_duplicate_books(
-                        database_file.as_path(),
-                    )
-                    .await?;
-                Ok(rows.into_iter().map(persisted_book_browse_entry).collect())
-            })
-        }),
-        load_persisted_book_tags: Arc::new(|database_file, scope, authorized_library_ids| {
-            Box::pin(async move {
-                let mapped_scope = scope.map(|scope| match scope {
-                    PersistedBookTagsScope::All => {
-                        infrastructure_discovery_models::BookTagsScope::All
-                    }
-                    PersistedBookTagsScope::Series(series_id) => {
-                        infrastructure_discovery_models::BookTagsScope::Series(series_id)
-                    }
-                    PersistedBookTagsScope::Libraries(library_ids) => {
-                        infrastructure_discovery_models::BookTagsScope::Libraries(library_ids)
-                    }
-                    PersistedBookTagsScope::ReadList(readlist_id) => {
-                        infrastructure_discovery_models::BookTagsScope::ReadList(readlist_id)
-                    }
-                });
-                infrastructure_discovery_runtime_queries::load_persisted_book_tags(
-                    database_file.as_path(),
-                    mapped_scope.as_ref(),
-                    authorized_library_ids.as_deref(),
-                )
-                .await
-            })
-        }),
-        persisted_utc_date_minus_days: Arc::new(|database_file, days| {
-            Box::pin(async move {
-                infrastructure_discovery_runtime_queries::persisted_utc_date_minus_days(
-                    database_file.as_path(),
-                    days,
-                )
-                .await
-            })
-        }),
-        load_series_read_progress_counts: Arc::new(|database_file, user_id| {
-            Box::pin(async move {
-                infrastructure_discovery_runtime_queries::load_series_read_progress_counts(
-                    database_file.as_path(),
-                    &user_id,
-                )
-                .await
-            })
-        }),
-        load_series_read_dates: Arc::new(|database_file, user_id| {
-            Box::pin(async move {
-                infrastructure_discovery_runtime_queries::load_series_read_dates(
-                    database_file.as_path(),
-                    &user_id,
-                )
-                .await
-            })
-        }),
-        load_series_total_book_counts: Arc::new(|database_file| {
-            Box::pin(async move {
-                infrastructure_discovery_runtime_queries::load_series_total_book_counts(
-                    database_file.as_path(),
-                )
-                .await
-            })
-        }),
-        load_persisted_series_summaries: Arc::new(|database_file| {
-            Box::pin(async move {
-                let rows = infrastructure_discovery_series::load_persisted_series_summaries(
-                    database_file.as_path(),
-                )
-                .await?;
-                Ok(rows.into_iter().map(persisted_series_summary).collect())
-            })
-        }),
-        load_persisted_series_summaries_by_ids: Arc::new(|database_file, ids| {
-            Box::pin(async move {
-                let rows = infrastructure_discovery_series::load_persisted_series_summaries_by_ids(
-                    database_file.as_path(),
-                    &ids,
-                )
-                .await?;
-                Ok(rows.into_iter().map(persisted_series_summary).collect())
-            })
-        }),
-        load_persisted_series_count: Arc::new(|database_file| {
-            Box::pin(async move {
-                infrastructure_discovery_series::load_persisted_series_count(
-                    database_file.as_path(),
-                )
-                .await
-            })
-        }),
-        persisted_series_exist: Arc::new(|database_file| {
-            Box::pin(async move {
-                infrastructure_discovery_series::persisted_series_exist(database_file.as_path())
-                    .await
-            })
-        }),
-        search_book_ids: Arc::new({
-            let default_index_dir = lucene_data_directory.clone();
-            move |database_file, query, limit| {
-                let default_index_dir = default_index_dir.clone();
-                Box::pin(async move {
-                    let index_dir = resolve_discovery_index_dir(
-                        database_file.as_path(),
-                        default_index_dir.as_path(),
-                    );
-                    Ok(search_ids_or_empty(
-                        index_dir.as_path(),
-                        &query,
-                        SearchEntityType::Book,
-                        limit,
-                    ))
-                })
-            }
-        }),
-        search_collection_ids: Arc::new({
-            let default_index_dir = lucene_data_directory.clone();
-            move |database_file, query, limit| {
-                let default_index_dir = default_index_dir.clone();
-                Box::pin(async move {
-                    let index_dir = resolve_discovery_index_dir(
-                        database_file.as_path(),
-                        default_index_dir.as_path(),
-                    );
-                    Ok(search_ids_or_empty(
-                        index_dir.as_path(),
-                        &query,
-                        SearchEntityType::Collection,
-                        limit,
-                    ))
-                })
-            }
-        }),
-        search_readlist_scored_ids: Arc::new({
-            let default_index_dir = lucene_data_directory.clone();
-            move |database_file, query, limit| {
-                let default_index_dir = default_index_dir.clone();
-                Box::pin(async move {
-                    let index_dir = resolve_discovery_index_dir(
-                        database_file.as_path(),
-                        default_index_dir.as_path(),
-                    );
-                    Ok(search_scored_ids_or_empty(
-                        index_dir.as_path(),
-                        &query,
-                        SearchEntityType::ReadList,
-                        limit,
-                    ))
-                })
-            }
-        }),
-        search_series_scored_ids: Arc::new({
-            let default_index_dir = lucene_data_directory.clone();
-            move |database_file, query, limit| {
-                let default_index_dir = default_index_dir.clone();
-                Box::pin(async move {
-                    let index_dir = resolve_discovery_index_dir(
-                        database_file.as_path(),
-                        default_index_dir.as_path(),
-                    );
-                    Ok(search_scored_ids_or_empty(
-                        index_dir.as_path(),
-                        &query,
-                        SearchEntityType::Series,
-                        limit,
-                    ))
-                })
-            }
-        }),
-    }
+    Arc::new(RuntimePersistedDiscoveryService {
+        lucene_data_directory: lucene_data_directory.to_path_buf(),
+    })
 }

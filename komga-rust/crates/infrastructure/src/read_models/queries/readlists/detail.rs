@@ -29,7 +29,6 @@ pub(super) async fn list_book_readlists_sqlx(
             WHERE rlb.book_id = ?
             ORDER BY rl.name COLLATE NOCASE ASC
         "#,
-
     )
     .bind(&query.book_id)
     .fetch_all(&pool)
@@ -46,12 +45,11 @@ pub(super) async fn list_book_readlists_sqlx(
         }
 
         let _total_count = sqlx::query_scalar::<_, i64>(
-        r#"
+            r#"
             SELECT COUNT(*)
             FROM readlist_books
             WHERE readlist_id = ?
         "#,
-
         )
         .bind(candidate.id.clone())
         .fetch_one(&pool)
@@ -83,7 +81,6 @@ pub(super) async fn get_readlist_detail_sqlx(
             FROM readlists
             WHERE id = ?
         "#,
-
     )
     .bind(&query.readlist_id)
     .fetch_optional(&pool)
@@ -103,7 +100,6 @@ pub(super) async fn get_readlist_detail_sqlx(
             FROM readlist_books
             WHERE readlist_id = ?
         "#,
-
     )
     .bind(candidate.id.clone())
     .fetch_one(&pool)

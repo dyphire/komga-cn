@@ -86,7 +86,6 @@ pub(in crate::read_models) async fn list_series_sqlx(
             SELECT COUNT(DISTINCT s.id)
             FROM series s
         "#,
-
     );
     let mut count_state = SqlxWhereState::default();
     apply_series_list_filters_sqlx(
@@ -118,7 +117,6 @@ pub(in crate::read_models) async fn list_series_sqlx(
             FROM series s
             LEFT JOIN series_labels sl ON sl.series_id = s.id
         "#,
-
     );
     let mut select_state = SqlxWhereState::default();
     apply_series_list_filters_sqlx(
@@ -240,7 +238,6 @@ pub(in crate::read_models) async fn get_series_detail_sqlx(
             LEFT JOIN series_genres sg ON sg.series_id = s.id
             LEFT JOIN series_tags st ON st.series_id = s.id
         "#,
-
     );
     let mut state = SqlxWhereState::default();
 
@@ -283,7 +280,6 @@ pub(in crate::read_models) async fn resolve_series_resource_sqlx(
             FROM series s
             WHERE s.id = ?
         "#,
-
     )
     .bind(series_id)
     .fetch_optional(&pool)

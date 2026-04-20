@@ -366,8 +366,8 @@ fn persisted_epub_manifest_payload(
 }
 
 async fn build_manifest_reading_order(
+    app: &HttpAppState,
     headers: &HeaderMap,
-    database_file: &FsPath,
     book_id: &str,
     media: &PersistedBookMedia,
     media_type: &str,
@@ -385,7 +385,7 @@ async fn build_manifest_reading_order(
             .collect::<Vec<_>>(),
         (ManifestVariant::Divina, ManifestProfile::Pdf)
         | (ManifestVariant::Divina, ManifestProfile::Divina) => {
-            let persisted_rows = load_persisted_book_pages(database_file, book_id).await?;
+            let persisted_rows = load_persisted_book_pages_from_services(app, book_id).await?;
             let effective_rows = if !persisted_rows.is_empty() {
                 reading_order_entries(
                     headers,
@@ -393,10 +393,10 @@ async fn build_manifest_reading_order(
                     persisted_rows,
                     (profile == ManifestProfile::Pdf).then_some("image/jpeg"),
                 )
-            } else if let Some(archive_rows) = load_archive_page_rows(media) {
+            } else if let Some(archive_rows) = load_archive_page_rows_from_services(app, media) {
                 reading_order_entries(headers, book_id, archive_rows, None)
             } else {
-                reading_order_entries(headers, book_id, load_generated_pdf_page_rows(media), None)
+                reading_order_entries(headers, book_id, load_generated_pdf_page_rows_from_services(app, media), None)
             };
 
             if effective_rows.is_empty() {
@@ -475,17 +475,18 @@ fn default_reading_order_entry(headers: &HeaderMap, book_id: &str, media_type: &
 }
 
 pub(crate) async fn build_persisted_book_manifest(
-    database_file: &FsPath,
+    app: &HttpAppState,
     headers: &HeaderMap,
     book_id: &str,
     variant: ManifestVariant,
 ) -> Result<ManifestBuildOutcome, String> {
+    let database_file = app.auth_db.database_file.as_path();
     let Some(user) = resolved_request_auth_user(headers, database_file).await else {
         return Ok(ManifestBuildOutcome::NotFound);
     };
 
     let Some((library_id, title, media_type)) =
-        load_persisted_manifest_book(database_file, book_id).await?
+        load_persisted_manifest_book_from_services(app, book_id).await?
     else {
         return Ok(ManifestBuildOutcome::NotFound);
     };
@@ -494,15 +495,15 @@ pub(crate) async fn build_persisted_book_manifest(
         return Ok(ManifestBuildOutcome::Forbidden);
     }
 
-    let Some(media) = load_persisted_book_media(database_file, book_id).await? else {
+    let Some(media) = load_persisted_book_media_from_services(app, book_id).await? else {
         return Ok(ManifestBuildOutcome::NotFound);
     };
-    if !user_can_access_book_media(database_file, book_id, &user, &media).await {
+    if !user_can_access_book_media(app, book_id, &user, &media).await {
         return Ok(ManifestBuildOutcome::Forbidden);
     }
 
     let profile = manifest_profile_from_media_type(&media_type);
-    let webpub_additions = load_persisted_webpub_metadata_additions(database_file, book_id).await?;
+    let webpub_additions = load_persisted_webpub_metadata_additions(app, book_id).await?;
     let epub_divina_compatible = webpub_additions
         .as_ref()
         .is_some_and(|(_, epub_divina_compatible)| *epub_divina_compatible);
@@ -525,8 +526,15 @@ pub(crate) async fn build_persisted_book_manifest(
         (effective_variant, profile),
         (ManifestVariant::Epub, ManifestProfile::Epub)
     ) {
-        let media_files = load_persisted_media_file_records(database_file, book_id).await?;
-        let extension_blob = load_persisted_epub_extension_blob(database_file, book_id).await?;
+        let media_files = load_persisted_media_file_records_from_services(app, book_id).await?;
+        let extension_blob = app
+            .services
+            .media_assets
+            .load_persisted_epub_extension_blob(
+                app.auth_db.database_file.clone(),
+                book_id.to_string(),
+            )
+            .await?;
         let payload = persisted_epub_manifest_payload(
             headers,
             book_id,
@@ -544,8 +552,8 @@ pub(crate) async fn build_persisted_book_manifest(
     }
 
     let reading_order = build_manifest_reading_order(
+        app,
         headers,
-        database_file,
         book_id,
         &media,
         &media_type,

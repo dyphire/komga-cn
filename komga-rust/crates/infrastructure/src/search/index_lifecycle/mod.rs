@@ -6,15 +6,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use super::analyzer_profiles::{
-    build_query_time_analyzer, index_tokenizer_profile_name, normalize_multilingual_width,
-    register_search_analyzer_profiles, search_analyzer_version, search_text_field_options,
-    SearchFieldClass,
+    SearchFieldClass, build_query_time_analyzer, index_tokenizer_profile_name,
+    normalize_multilingual_width, register_search_analyzer_profiles, search_analyzer_version,
+    search_text_field_options,
 };
 use tantivy::collector::TopDocs;
 use tantivy::doc;
 use tantivy::query::{BooleanQuery, Occur, QueryParser, TermQuery};
 use tantivy::schema::{
-    Field, FieldType, IndexRecordOption, Schema, TantivyDocument, Value, STORED, STRING,
+    Field, FieldType, IndexRecordOption, STORED, STRING, Schema, TantivyDocument, Value,
 };
 use tantivy::tokenizer::TokenizerManager;
 use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, Term};

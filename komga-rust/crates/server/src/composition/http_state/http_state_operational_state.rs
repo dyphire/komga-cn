@@ -1,34 +1,216 @@
 use super::*;
 
+use std::collections::BTreeMap;
+
 use crate::build_metadata::current_build_metadata;
 use crate::runtime::background_workers::{
     SharedTaskQueue, TaskQueueWakeSignal, WorkerRuntimeGuard,
 };
+use async_trait::async_trait;
+use komga_application::library_catalog::{
+    CreateLibraryResult, CreateLibraryService, DeleteLibraryService, LibraryCatalogMutationError,
+    LibraryCatalogQueryService, LibraryChangeSet, LibraryRecord, LibraryTaskResult,
+    LibraryTaskService, UpdateLibraryService,
+};
+use komga_application::task_processing::TaskQueueRecord;
+use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
+use komga_infrastructure::library_catalog::SqliteLibraryCatalogAdapter;
+use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore as InfrastructureServerSettingsStore;
 
-macro_rules! query_service_op {
-    ($adapter:expr, |$service:ident, $($arg:ident),*| $body:expr) => {{
-        let adapter = $adapter.clone();
-        Arc::new(move |$($arg),*| {
-            let adapter = adapter.clone();
-            Box::pin(async move {
-                let $service = LibraryCatalogQueryService::new(adapter);
-                $body
-            })
-        })
-    }};
+#[derive(Clone)]
+pub(super) struct SqliteLibraryCatalogService {
+    adapter: SqliteLibraryCatalogAdapter,
 }
 
-macro_rules! task_service_op {
-    ($adapter:expr, |$service:ident, $($arg:ident),*| $body:expr) => {{
-        let adapter = $adapter.clone();
-        Arc::new(move |$($arg),*| {
-            let adapter = adapter.clone();
-            Box::pin(async move {
-                let $service = LibraryTaskService::new(adapter);
-                $body
+impl SqliteLibraryCatalogService {
+    pub(super) fn new(database_file: &Path) -> Self {
+        Self {
+            adapter: SqliteLibraryCatalogAdapter::new(database_file.to_path_buf()),
+        }
+    }
+}
+
+#[async_trait]
+impl LibraryCatalogService for SqliteLibraryCatalogService {
+    async fn list_libraries(
+        &self,
+        context: DiscoveryQueryContext,
+    ) -> Result<Vec<LibraryRecord>, DiscoveryError> {
+        let service = LibraryCatalogQueryService::new(self.adapter.clone());
+        service.list_libraries(&context).await
+    }
+
+    async fn get_library(
+        &self,
+        context: DiscoveryQueryContext,
+        library_id: String,
+    ) -> Result<Option<LibraryRecord>, DiscoveryError> {
+        let service = LibraryCatalogQueryService::new(self.adapter.clone());
+        service.get_library(&context, &library_id).await
+    }
+
+    async fn create_library(
+        &self,
+        changes: LibraryChangeSet,
+    ) -> Result<CreateLibraryResult, LibraryCatalogMutationError> {
+        let service = CreateLibraryService::new(self.adapter.clone());
+        service.create_library(changes).await
+    }
+
+    async fn update_library(
+        &self,
+        library_id: String,
+        changes: LibraryChangeSet,
+    ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {
+        let service = UpdateLibraryService::new(self.adapter.clone());
+        service.update_library(&library_id, changes).await
+    }
+
+    async fn delete_library(
+        &self,
+        library_id: String,
+    ) -> Result<bool, LibraryCatalogMutationError> {
+        let service = DeleteLibraryService::new(self.adapter.clone());
+        service.delete_library(&library_id).await
+    }
+
+    async fn scan_library(
+        &self,
+        library_id: String,
+        deep_scan: bool,
+    ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {
+        let service = LibraryTaskService::new(self.adapter.clone());
+        service.scan_library(&library_id, deep_scan).await
+    }
+
+    async fn analyze_library(
+        &self,
+        library_id: String,
+    ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {
+        let service = LibraryTaskService::new(self.adapter.clone());
+        service.analyze_library(&library_id).await
+    }
+
+    async fn refresh_metadata(
+        &self,
+        library_id: String,
+    ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {
+        let service = LibraryTaskService::new(self.adapter.clone());
+        service.refresh_metadata(&library_id).await
+    }
+
+    async fn empty_trash(
+        &self,
+        library_id: String,
+    ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {
+        let service = LibraryTaskService::new(self.adapter.clone());
+        service.empty_trash(&library_id).await
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct RuntimeTaskQueueService {
+    task_queue: SharedTaskQueue,
+    task_wakeup: TaskQueueWakeSignal,
+    worker_runtime_guard: Option<WorkerRuntimeGuard>,
+}
+
+impl RuntimeTaskQueueService {
+    pub(super) fn new(
+        task_queue: SharedTaskQueue,
+        task_wakeup: TaskQueueWakeSignal,
+        worker_runtime_guard: Option<WorkerRuntimeGuard>,
+    ) -> Self {
+        Self {
+            task_queue,
+            task_wakeup,
+            worker_runtime_guard,
+        }
+    }
+}
+
+#[async_trait]
+impl TaskQueueService for RuntimeTaskQueueService {
+    async fn enqueue_task_records(
+        &self,
+        task_records: Vec<TaskQueueRecord>,
+        urgent: bool,
+    ) -> Result<(), String> {
+        let _worker_runtime_guard = self.worker_runtime_guard.clone();
+        with_task_queue(&self.task_queue, |queue| {
+            for task_record in task_records {
+                queue.enqueue(task_record);
+            }
+        })?;
+        if urgent {
+            self.task_wakeup.notify_one();
+        }
+        Ok(())
+    }
+
+    async fn clear_unowned_tasks(&self) -> usize {
+        with_task_queue(&self.task_queue, |queue| queue.clear_unowned())
+            .expect("task queue state lock should not be poisoned")
+    }
+
+    async fn count_task_queue_by_type(&self) -> BTreeMap<String, usize> {
+        with_task_queue(&self.task_queue, |queue| queue.count_by_simple_type())
+            .expect("task queue state lock should not be poisoned")
+    }
+
+    async fn apply_task_pool_size(&self, value: usize) -> Result<(), String> {
+        with_task_queue(&self.task_queue, |queue| queue.set_task_pool_size(value))?;
+        self.task_wakeup.notify_one();
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct RuntimeServerSettingsService {
+    store: InfrastructureServerSettingsStore,
+}
+
+impl RuntimeServerSettingsService {
+    pub(super) fn new(database_file: &Path) -> Self {
+        Self {
+            store: InfrastructureServerSettingsStore::new(database_file.to_path_buf()),
+        }
+    }
+}
+
+#[async_trait]
+impl ServerSettingsService for RuntimeServerSettingsService {
+    async fn load_map(&self) -> Result<BTreeMap<String, Option<String>>, String> {
+        self.store
+            .load_map()
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    async fn load_settings(&self) -> Result<InterfacesPersistedServerSettings, String> {
+        infrastructure_operational_settings::load_server_settings(&self.store)
+            .await
+            .map(|settings| InterfacesPersistedServerSettings {
+                delete_empty_collections: settings.delete_empty_collections,
+                delete_empty_read_lists: settings.delete_empty_read_lists,
+                remember_me_key: settings.remember_me_key,
+                remember_me_duration_days: settings.remember_me_duration_days,
+                thumbnail_size: settings.thumbnail_size,
+                task_pool_size: settings.task_pool_size,
+                server_port: settings.server_port,
+                server_context_path: settings.server_context_path,
+                kobo_proxy: settings.kobo_proxy,
+                kobo_port: settings.kobo_port,
             })
-        })
-    }};
+            .map_err(|error| error.to_string())
+    }
+
+    async fn apply_changes(&self, changes: &[(String, Option<String>)]) -> Result<(), String> {
+        self.store
+            .apply_changes(changes)
+            .await
+            .map_err(|error| error.to_string())
+    }
 }
 
 fn with_task_queue<T>(
@@ -47,17 +229,8 @@ pub(super) fn compose_operational_state(
     config: &RuntimeConfig,
     startup_timing: StartupTimingState,
     remember_me_runtime_key: String,
-    task_queue: SharedTaskQueue,
-    task_wakeup: TaskQueueWakeSignal,
-    worker_runtime_guard: Option<WorkerRuntimeGuard>,
     shutdown_trigger: Option<watch::Sender<bool>>,
 ) -> OperationalState {
-    let enqueue_worker_runtime_guard = worker_runtime_guard.clone();
-    let enqueue_task_queue = task_queue.clone();
-    let clear_task_queue = task_queue.clone();
-    let count_task_queue = task_queue.clone();
-    let apply_task_queue = task_queue.clone();
-    let apply_task_wakeup = task_wakeup.clone();
     let build_metadata = current_build_metadata();
     OperationalState {
         runtime: RuntimeState {
@@ -80,40 +253,9 @@ pub(super) fn compose_operational_state(
             git_commit_id: build_metadata.git_commit_id,
             git_commit_time: build_metadata.git_commit_time,
         },
-        settings_store: Arc::new(
-            http_state_operational_access::compose_server_settings_store(
-                config.database_file.as_path(),
-            ),
-        ),
         oauth2_clients: Arc::new(oauth2_clients(config)),
         oauth2_account_creation: config.oauth2_account_creation,
         oidc_email_verification: config.oidc_email_verification,
-        enqueue_task_records: Arc::new(move |task_records, urgent| {
-            let _worker_runtime_guard = enqueue_worker_runtime_guard.clone();
-            with_task_queue(&enqueue_task_queue, |queue| {
-                for task_record in task_records {
-                    queue.enqueue(task_record);
-                }
-            })?;
-            if urgent {
-                task_wakeup.notify_one();
-            }
-            Ok(())
-        }),
-        clear_unowned_tasks: Arc::new(move || {
-            with_task_queue(&clear_task_queue, |queue| queue.clear_unowned())
-                .expect("task queue state lock should not be poisoned")
-        }),
-        count_task_queue_by_type: Arc::new(move || {
-            with_task_queue(&count_task_queue, |queue| queue.count_by_simple_type())
-                .expect("task queue state lock should not be poisoned")
-        }),
-        apply_task_pool_size: Arc::new(move |value| {
-            with_task_queue(&apply_task_queue, |queue| queue.set_task_pool_size(value))?;
-            apply_task_wakeup.notify_one();
-            Ok(())
-        }),
-        library_catalog: compose_library_catalog_operations(&config.database_file),
         sse: Arc::new(Mutex::new(SseOperationalState {
             accepting_connections: true,
             book_import_events: Vec::<BookImportSseEvent>::new(),
@@ -122,65 +264,8 @@ pub(super) fn compose_operational_state(
         })),
         announcements_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
         releases_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
-        load_transient_books_records: Arc::new(|| Ok(std::collections::HashMap::new())),
-        persist_transient_books_records: Arc::new(|_| Ok(())),
         transient_books: Arc::new(Mutex::new(TransientBooksStore::default())),
         shutdown_trigger,
-    }
-}
-
-fn compose_library_catalog_operations(database_file: &Path) -> LibraryCatalogOperations {
-    let adapter = SqliteLibraryCatalogAdapter::new(database_file.to_path_buf());
-
-    LibraryCatalogOperations {
-        list_libraries: query_service_op!(adapter, |service, context| {
-            service.list_libraries(&context).await
-        }),
-        get_library: query_service_op!(adapter, |service, context, library_id| {
-            service.get_library(&context, &library_id).await
-        }),
-        create_library: Arc::new({
-            let adapter = adapter.clone();
-            move |changes| {
-                let adapter = adapter.clone();
-                Box::pin(async move {
-                    let service = CreateLibraryService::new(adapter);
-                    service.create_library(changes).await
-                })
-            }
-        }),
-        update_library: Arc::new({
-            let adapter = adapter.clone();
-            move |library_id, changes| {
-                let adapter = adapter.clone();
-                Box::pin(async move {
-                    let service = UpdateLibraryService::new(adapter);
-                    service.update_library(&library_id, changes).await
-                })
-            }
-        }),
-        delete_library: Arc::new({
-            let adapter = adapter.clone();
-            move |library_id| {
-                let adapter = adapter.clone();
-                Box::pin(async move {
-                    let service = DeleteLibraryService::new(adapter);
-                    service.delete_library(&library_id).await
-                })
-            }
-        }),
-        scan_library: task_service_op!(adapter, |service, library_id, deep_scan| {
-            service.scan_library(&library_id, deep_scan).await
-        }),
-        analyze_library: task_service_op!(adapter, |service, library_id| {
-            service.analyze_library(&library_id).await
-        }),
-        refresh_metadata: task_service_op!(adapter, |service, library_id| {
-            service.refresh_metadata(&library_id).await
-        }),
-        empty_trash: task_service_op!(adapter, |service, library_id| {
-            service.empty_trash(&library_id).await
-        }),
     }
 }
 
@@ -235,17 +320,12 @@ mod tests {
                 "rust-main",
             )));
             let task_wakeup = Arc::new(tokio::sync::Notify::new());
-            let state = compose_operational_state(
-                &config,
-                StartupTimingState::default(),
-                "test-runtime".to_string(),
-                task_queue.clone(),
-                task_wakeup.clone(),
-                None,
-                None,
-            );
+            let service =
+                RuntimeTaskQueueService::new(task_queue.clone(), task_wakeup.clone(), None);
 
-            (state.enqueue_task_records)(vec![scan_library_task()], urgent)
+            service
+                .enqueue_task_records(vec![scan_library_task()], urgent)
+                .await
                 .expect("task enqueue should succeed");
 
             let notified =

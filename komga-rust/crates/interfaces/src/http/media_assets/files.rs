@@ -1,40 +1,43 @@
 use super::*;
-use crate::opds_persisted_access::load_readlist_books;
 
 pub async fn readlist_file(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
 ) -> Response {
     if let Some(response) =
-        require_request_file_download(&headers, auth_db.database_file.as_path()).await
+        require_request_file_download(&headers, app.auth_db.database_file.as_path()).await
     {
         return response;
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+    let Some(user) =
+        resolved_request_auth_user(&headers, app.auth_db.database_file.as_path()).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    match user_can_access_readlist_media(auth_db.database_file.as_path(), &readlist_id, &user).await
-    {
+    match user_can_access_readlist_media(&app, &readlist_id, &user).await {
         Ok(true) => {}
         Ok(false) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
     }
 
-    let readlist_books =
-        match load_readlist_books(auth_db.database_file.as_path(), &readlist_id).await {
-            Ok(books) => books,
-            Err(error) => return internal_error_response(error),
-        };
+    let readlist_books = match app
+        .services
+        .opds_persisted
+        .load_readlist_books(app.auth_db.database_file.clone(), readlist_id.clone())
+        .await
+    {
+        Ok(books) => books,
+        Err(error) => return internal_error_response(error),
+    };
     let visible_books = readlist_books
         .into_iter()
         .filter(|book| user_can_access_library(&user, &book.library_id))
         .collect::<Vec<_>>();
 
-    match load_persisted_readlist_name(auth_db.database_file.as_path(), &readlist_id).await {
+    match load_persisted_readlist_name_from_services(&app, &readlist_id).await {
         Ok(Some(name)) => {
             let file_name = format!("{name}.zip");
             let content_disposition = attachment_disposition(&file_name);
@@ -42,16 +45,15 @@ pub async fn readlist_file(
             let mut archive_entries = Vec::new();
             for (index, book) in visible_books.into_iter().enumerate() {
                 let Some(media) =
-                    (match load_persisted_book_media(auth_db.database_file.as_path(), &book.id)
-                        .await
-                    {
+                    (match load_persisted_book_media_from_services(&app, &book.id).await {
                         Ok(media) => media,
                         Err(error) => return internal_error_response(error),
                     })
                 else {
                     continue;
                 };
-                let Some(bytes) = read_media_file_bytes(&media.file_path) else {
+                let Some(bytes) = read_media_file_bytes_from_services(&app, &media.file_path)
+                else {
                     continue;
                 };
                 archive_entries.push((readlist_archive_entry_name(index, &media.file_name), bytes));
@@ -80,26 +82,25 @@ pub async fn readlist_file(
 }
 
 pub async fn series_file(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
     if let Some(response) =
-        require_request_file_download(&headers, auth_db.database_file.as_path()).await
+        require_request_file_download(&headers, app.auth_db.database_file.as_path()).await
     {
         return response;
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+    let Some(user) =
+        resolved_request_auth_user(&headers, app.auth_db.database_file.as_path()).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    match load_series_archive_entries(auth_db.database_file.as_path(), &series_id).await {
+    match load_series_archive_entries_from_services(&app, &series_id).await {
         Ok(Some((series_title, _library_id, entries))) => {
-            match user_can_access_series_media(auth_db.database_file.as_path(), &series_id, &user)
-                .await
-            {
+            match user_can_access_series_media(&app, &series_id, &user).await {
                 Ok(true) => {}
                 Ok(false) => return StatusCode::FORBIDDEN.into_response(),
                 Err(error) => return internal_error_response(error),
@@ -108,7 +109,8 @@ pub async fn series_file(
             let archive_entries = entries
                 .into_iter()
                 .filter_map(|(file_name, file_path)| {
-                    read_media_file_bytes(&file_path).map(|bytes| (file_name, bytes))
+                    read_media_file_bytes_from_services(&app, &file_path)
+                        .map(|bytes| (file_name, bytes))
                 })
                 .collect::<Vec<_>>();
 
@@ -135,7 +137,7 @@ pub async fn series_file(
 }
 
 pub async fn book_resource(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path((book_id, resource_path)): Path<(String, String)>,
 ) -> Response {
@@ -144,20 +146,18 @@ pub async fn book_resource(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let is_font = is_font_resource(resource_name);
+    let is_font = is_font_resource_from_services(&app, resource_name);
     if !is_font
         && let Some(response) =
-            require_request_auth(&headers, auth_db.database_file.as_path()).await
+            require_request_auth(&headers, app.auth_db.database_file.as_path()).await
     {
         return response;
     }
 
-    let Some(media) =
-        (match load_persisted_book_media(auth_db.database_file.as_path(), &book_id).await {
-            Ok(media) => media,
-            Err(error) => return internal_error_response(error),
-        })
-    else {
+    let Some(media) = (match load_persisted_book_media_from_services(&app, &book_id).await {
+        Ok(media) => media,
+        Err(error) => return internal_error_response(error),
+    }) else {
         return StatusCode::NOT_FOUND.into_response();
     };
 
@@ -173,18 +173,18 @@ pub async fn book_resource(
 
     if !is_font {
         let Some(user) =
-            resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+            resolved_request_auth_user(&headers, app.auth_db.database_file.as_path()).await
         else {
             return StatusCode::UNAUTHORIZED.into_response();
         };
-        if !user_can_access_book_media(auth_db.database_file.as_path(), &book_id, &user, &media)
-            .await
-        {
+        if !user_can_access_book_media(&app, &book_id, &user, &media).await {
             return StatusCode::FORBIDDEN.into_response();
         }
     }
 
-    let Some(bytes) = read_epub_resource_bytes(media.file_path.as_path(), resource_name) else {
+    let Some(bytes) =
+        read_epub_resource_bytes_from_services(&app, media.file_path.as_path(), resource_name)
+    else {
         return StatusCode::NOT_FOUND.into_response();
     };
 
@@ -226,48 +226,39 @@ pub async fn book_resource(
 }
 
 pub async fn book_file(
-    Extension(_profile): Extension<RuntimeProfile>,
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    book_file_response(&auth_db, &headers, &book_id).await
+    book_file_response(&app, &headers, &book_id).await
 }
 
 pub async fn book_file_with_suffix(
-    Extension(_profile): Extension<RuntimeProfile>,
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path((book_id, _file_name)): Path<(String, String)>,
 ) -> Response {
-    book_file_response(&auth_db, &headers, &book_id).await
+    book_file_response(&app, &headers, &book_id).await
 }
 
-async fn book_file_response(
-    auth_db: &AuthDatabaseState,
-    headers: &HeaderMap,
-    book_id: &str,
-) -> Response {
+async fn book_file_response(app: &HttpAppState, headers: &HeaderMap, book_id: &str) -> Response {
     if let Some(response) =
-        require_request_file_download(headers, auth_db.database_file.as_path()).await
+        require_request_file_download(headers, app.auth_db.database_file.as_path()).await
     {
         return response;
     }
 
-    if let Ok(Some(media)) =
-        load_persisted_book_media(auth_db.database_file.as_path(), book_id).await
-    {
-        let Some(user) = resolved_request_auth_user(headers, auth_db.database_file.as_path()).await
+    if let Ok(Some(media)) = load_persisted_book_media_from_services(app, book_id).await {
+        let Some(user) =
+            resolved_request_auth_user(headers, app.auth_db.database_file.as_path()).await
         else {
             return StatusCode::UNAUTHORIZED.into_response();
         };
-        if !user_can_access_book_media(auth_db.database_file.as_path(), book_id, &user, &media)
-            .await
-        {
+        if !user_can_access_book_media(app, book_id, &user, &media).await {
             return StatusCode::FORBIDDEN.into_response();
         }
 
-        let Some(body) = read_media_file_bytes(&media.file_path) else {
+        let Some(body) = read_media_file_bytes_from_services(app, &media.file_path) else {
             return (
                 StatusCode::NOT_FOUND,
                 Json(json!({ "error": "File not found, it may have moved" })),

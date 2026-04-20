@@ -21,9 +21,7 @@ use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
 use crate::http::identity_access::auth::{
     require_admin, resolved_request_auth_user, user_is_admin,
 };
-use crate::operational_runtime_access::metrics as operational_metrics_access;
-
-use super::super::OperationalState;
+use crate::http::state::HttpAppState;
 
 const ACTUATOR_V3_JSON: &str = "application/vnd.spring-boot.actuator.v3+json";
 const PRODUCT_GROUP: &str = "huihuimoe";
@@ -90,16 +88,16 @@ fn actuator_root_links() -> Value {
 
 pub(crate) async fn actuator_health(
     headers: HeaderMap,
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
 ) -> Response {
-    let db = db_health_component(&state);
-    let disk_space_probe_path = disk_space_probe_path(&state);
+    let db = db_health_component(&app);
+    let disk_space_probe_path = disk_space_probe_path(&app);
     let disk_space = disk_space_component(&disk_space_probe_path);
     let ping = ping_component();
     let status = aggregate_health_status([db.is_up, disk_space.is_up, ping.is_up]);
 
     let request_auth_user =
-        resolved_request_auth_user(&headers, state.runtime.database_file.as_path()).await;
+        resolved_request_auth_user(&headers, app.operational.runtime.database_file.as_path()).await;
     if request_auth_user
         .as_ref()
         .is_none_or(|user| !user_is_admin(user))
@@ -130,10 +128,10 @@ fn component_status(is_up: bool) -> &'static str {
     if is_up { "UP" } else { "DOWN" }
 }
 
-fn db_health_component(state: &OperationalState) -> HealthComponentPayload {
-    let sqlite_rw_ready = state.runtime.database_file.exists();
+fn db_health_component(app: &HttpAppState) -> HealthComponentPayload {
+    let sqlite_rw_ready = app.operational.runtime.database_file.exists();
     let sqlite_ro_ready = sqlite_rw_ready;
-    let tasks_rw_ready = state.runtime.tasks_db_file.exists();
+    let tasks_rw_ready = app.operational.runtime.tasks_db_file.exists();
     let tasks_ro_ready = tasks_rw_ready;
     let is_up = aggregate_health_is_up([
         sqlite_rw_ready,
@@ -208,11 +206,17 @@ fn disk_space_component(path: &Path) -> HealthComponentPayload {
     }
 }
 
-fn disk_space_probe_path(state: &OperationalState) -> std::path::PathBuf {
+fn disk_space_probe_path(app: &HttpAppState) -> std::path::PathBuf {
     std::env::current_dir()
         .ok()
-        .or_else(|| state.runtime.config_dir.clone())
-        .or_else(|| state.runtime.database_file.parent().map(Path::to_path_buf))
+        .or_else(|| app.operational.runtime.config_dir.clone())
+        .or_else(|| {
+            app.operational
+                .runtime
+                .database_file
+                .parent()
+                .map(Path::to_path_buf)
+        })
         .unwrap_or_else(|| Path::new(".").to_path_buf())
 }
 
@@ -279,7 +283,7 @@ fn disk_space_details(path: &Path) -> Option<DiskSpaceDetails> {
 }
 
 pub(crate) async fn actuator_info(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
@@ -287,11 +291,12 @@ pub(crate) async fn actuator_info(
     }
 
     let build_time =
-        Some(state.build_metadata.build_time.as_str()).filter(|value| !value.is_empty());
-    let commit_time = state.build_metadata.git_commit_time.as_deref();
-    let commit_id = state.build_metadata.git_commit_id.as_deref();
-    let branch = state.build_metadata.git_branch.as_deref();
-    let version = Some(state.build_metadata.version.as_str()).filter(|value| !value.is_empty());
+        Some(app.operational.build_metadata.build_time.as_str()).filter(|value| !value.is_empty());
+    let commit_time = app.operational.build_metadata.git_commit_time.as_deref();
+    let commit_id = app.operational.build_metadata.git_commit_id.as_deref();
+    let branch = app.operational.build_metadata.git_branch.as_deref();
+    let version =
+        Some(app.operational.build_metadata.version.as_str()).filter(|value| !value.is_empty());
 
     let mut payload = serde_json::Map::new();
     payload.insert("build".to_string(), build_info_json(version, build_time));
@@ -459,21 +464,21 @@ fn parse_windows_version_from_cmd_output(output: &str) -> Option<String> {
 }
 
 pub(crate) async fn actuator_logfile(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
         return response;
     }
 
-    let logfile = match fs::read_to_string(state.runtime.log_file.as_path()) {
+    let logfile = match fs::read_to_string(app.operational.runtime.log_file.as_path()) {
         Ok(logfile) => logfile,
         Err(_) => {
             return (
                 StatusCode::NOT_FOUND,
                 Json(json!({
                     "error": "log file not found",
-                    "path": state.runtime.log_file.to_string_lossy().to_string(),
+                    "path": app.operational.runtime.log_file.to_string_lossy().to_string(),
                 })),
             )
                 .into_response();
@@ -489,20 +494,20 @@ pub(crate) async fn actuator_logfile(
 }
 
 pub(crate) async fn actuator_shutdown(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
         return response;
     }
 
-    state
+    app.operational
         .sse
         .lock()
         .expect("sse state lock should not be poisoned")
         .accepting_connections = false;
 
-    if let Some(trigger) = state.shutdown_trigger.as_ref() {
+    if let Some(trigger) = app.operational.shutdown_trigger.as_ref() {
         let _ = trigger.send(true);
     }
 
@@ -520,7 +525,7 @@ pub(crate) async fn actuator_metrics_index(headers: HeaderMap) -> Response {
 }
 
 pub(crate) async fn actuator_metric_detail(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
     AxumPath(metric_name): AxumPath<String>,
@@ -529,7 +534,7 @@ pub(crate) async fn actuator_metric_detail(
         return response;
     }
 
-    match metric_detail_json(&state, &metric_name, &uri).await {
+    match metric_detail_json(&app, &metric_name, &uri).await {
         Ok(Some(metric)) => actuator_json(metric),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => (
@@ -541,11 +546,12 @@ pub(crate) async fn actuator_metric_detail(
 }
 
 async fn metric_detail_json(
-    state: &OperationalState,
+    app: &HttpAppState,
     metric_name: &str,
     uri: &Uri,
 ) -> Result<Option<Value>, String> {
     let tag_filters = metric_query_tags(uri);
+    let state = &app.operational;
     let database_file = state.runtime.database_file.as_path();
     let tasks_db_file = state.runtime.tasks_db_file.as_path();
 
@@ -575,7 +581,7 @@ async fn metric_detail_json(
             "Usable disk space",
             Some("bytes"),
             "VALUE",
-            disk_space_details(&disk_space_probe_path(state))
+            disk_space_details(&disk_space_probe_path(app))
                 .map(|details| details.free as f64)
                 .unwrap_or(0.0),
         ))),
@@ -584,14 +590,14 @@ async fn metric_detail_json(
             "Total disk space",
             Some("bytes"),
             "VALUE",
-            disk_space_details(&disk_space_probe_path(state))
+            disk_space_details(&disk_space_probe_path(app))
                 .map(|details| details.total as f64)
                 .unwrap_or(0.0),
         ))),
-        "http.server.requests" => Ok(Some(http_server_requests_metric(state, &tag_filters))),
+        "http.server.requests" => Ok(Some(http_server_requests_metric(app, &tag_filters))),
         "jdbc.connections.active" => Ok(Some(
             jdbc_connections_metric(
-                state,
+                app,
                 metric_name,
                 "Active connections",
                 &tag_filters,
@@ -601,7 +607,7 @@ async fn metric_detail_json(
         )),
         "jdbc.connections.idle" => Ok(Some(
             jdbc_connections_metric(
-                state,
+                app,
                 metric_name,
                 "Idle connections",
                 &tag_filters,
@@ -611,7 +617,7 @@ async fn metric_detail_json(
         )),
         "jdbc.connections.max" => Ok(Some(
             jdbc_connections_metric(
-                state,
+                app,
                 metric_name,
                 "Max connections",
                 &tag_filters,
@@ -621,7 +627,7 @@ async fn metric_detail_json(
         )),
         "jdbc.connections.min" => Ok(Some(
             jdbc_connections_metric(
-                state,
+                app,
                 metric_name,
                 "Min connections",
                 &tag_filters,
@@ -686,18 +692,25 @@ async fn metric_detail_json(
             one_minute_load_average().unwrap_or(0.0),
         ))),
         "komga.tasks.execution" => Ok(Some(
-            metric_tasks_execution(tasks_db_file, tag_filters.get("type").map(String::as_str))
-                .await?,
+            metric_tasks_execution(
+                app,
+                tasks_db_file,
+                tag_filters.get("type").map(String::as_str),
+            )
+            .await?,
         )),
         "komga.tasks.failure" => Ok(Some(
-            metric_tasks_failure(database_file, tasks_db_file).await?,
+            metric_tasks_failure(app, database_file, tasks_db_file).await?,
         )),
         "komga.libraries" => Ok(Some(
             simple_metric(
                 metric_name,
                 "Libraries count",
                 Some("count"),
-                operational_metrics_access::load_libraries_count(database_file).await?,
+                app.services
+                    .operational_runtime
+                    .load_libraries_count(database_file.to_path_buf())
+                    .await?,
             )
             .await,
         )),
@@ -706,7 +719,10 @@ async fn metric_detail_json(
                 metric_name,
                 "Series count grouped by library",
                 Some("count"),
-                operational_metrics_access::load_series_grouped_by_library(database_file).await?,
+                app.services
+                    .operational_runtime
+                    .load_series_grouped_by_library(database_file.to_path_buf())
+                    .await?,
                 tag_filters.get("library").map(String::as_str),
             )
             .await?,
@@ -716,7 +732,10 @@ async fn metric_detail_json(
                 metric_name,
                 "Books count grouped by library",
                 Some("count"),
-                operational_metrics_access::load_books_grouped_by_library(database_file).await?,
+                app.services
+                    .operational_runtime
+                    .load_books_grouped_by_library(database_file.to_path_buf())
+                    .await?,
                 tag_filters.get("library").map(String::as_str),
             )
             .await?,
@@ -726,7 +745,9 @@ async fn metric_detail_json(
                 metric_name,
                 "Books file size grouped by library",
                 Some("bytes"),
-                operational_metrics_access::load_books_filesize_grouped_by_library(database_file)
+                app.services
+                    .operational_runtime
+                    .load_books_filesize_grouped_by_library(database_file.to_path_buf())
                     .await?,
                 tag_filters.get("library").map(String::as_str),
             )
@@ -737,7 +758,10 @@ async fn metric_detail_json(
                 metric_name,
                 "Sidecars count grouped by library",
                 Some("count"),
-                operational_metrics_access::load_sidecars_grouped_by_library(database_file).await?,
+                app.services
+                    .operational_runtime
+                    .load_sidecars_grouped_by_library(database_file.to_path_buf())
+                    .await?,
                 tag_filters.get("library").map(String::as_str),
             )
             .await?,
@@ -747,7 +771,10 @@ async fn metric_detail_json(
                 metric_name,
                 "Collections count",
                 Some("count"),
-                operational_metrics_access::load_collections_count(database_file).await?,
+                app.services
+                    .operational_runtime
+                    .load_collections_count(database_file.to_path_buf())
+                    .await?,
             )
             .await,
         )),
@@ -756,7 +783,10 @@ async fn metric_detail_json(
                 metric_name,
                 "Read lists count",
                 Some("count"),
-                operational_metrics_access::load_readlists_count(database_file).await?,
+                app.services
+                    .operational_runtime
+                    .load_readlists_count(database_file.to_path_buf())
+                    .await?,
             )
             .await,
         )),
@@ -775,10 +805,15 @@ fn metric_query_tags(uri: &Uri) -> HashMap<String, String> {
 }
 
 async fn metric_tasks_execution(
+    app: &HttpAppState,
     tasks_db_file: &Path,
     task_type: Option<&str>,
 ) -> Result<Value, String> {
-    let values = operational_metrics_access::load_task_execution_values(tasks_db_file).await?;
+    let values = app
+        .services
+        .operational_runtime
+        .load_task_execution_values(tasks_db_file.to_path_buf())
+        .await?;
 
     let count = if let Some(task_type) = task_type {
         values
@@ -816,10 +851,20 @@ async fn metric_tasks_execution(
     }))
 }
 
-async fn metric_tasks_failure(database_file: &Path, tasks_db_file: &Path) -> Result<Value, String> {
-    let failures = operational_metrics_access::load_task_failure_count(database_file).await?;
+async fn metric_tasks_failure(
+    app: &HttpAppState,
+    database_file: &Path,
+    tasks_db_file: &Path,
+) -> Result<Value, String> {
+    let failures = app
+        .services
+        .operational_runtime
+        .load_task_failure_count(database_file.to_path_buf())
+        .await?;
     let task_types = unique_strings(
-        operational_metrics_access::load_task_execution_values(tasks_db_file)
+        app.services
+            .operational_runtime
+            .load_task_execution_values(tasks_db_file.to_path_buf())
             .await?
             .into_iter()
             .map(|(kind, _)| kind)
@@ -1129,11 +1174,9 @@ fn metric_from_samples(
     Value::Object(metric)
 }
 
-fn http_server_requests_metric(
-    state: &OperationalState,
-    tag_filters: &HashMap<String, String>,
-) -> Value {
-    let samples = state
+fn http_server_requests_metric(app: &HttpAppState, tag_filters: &HashMap<String, String>) -> Value {
+    let samples = app
+        .operational
         .http_server_requests
         .snapshot()
         .into_iter()
@@ -1172,34 +1215,37 @@ enum JdbcConnectionsField {
 }
 
 async fn jdbc_connections_metric(
-    state: &OperationalState,
+    app: &HttpAppState,
     name: &str,
     description: &str,
     tag_filters: &HashMap<String, String>,
     field: JdbcConnectionsField,
 ) -> Result<Value, String> {
-    let samples = operational_metrics_access::load_sqlite_pool_snapshots(&[
-        state.runtime.database_file.clone(),
-        state.runtime.tasks_db_file.clone(),
-    ])
-    .await?
-    .into_iter()
-    .map(|pool| {
-        let value = match field {
-            JdbcConnectionsField::Active => pool.in_use_connections,
-            JdbcConnectionsField::Idle => pool.idle_connections,
-            JdbcConnectionsField::Max => pool.max_connections,
-            JdbcConnectionsField::Min => pool.min_connections,
-        } as f64;
-        MetricSample::with_owned_tags(
-            vec![(
-                "name",
-                datasource_pool_name(state, &pool.path, pool.max_connections),
-            )],
-            [("VALUE", value)],
-        )
-    })
-    .collect();
+    let samples = app
+        .services
+        .operational_runtime
+        .load_sqlite_pool_snapshots(vec![
+            app.operational.runtime.database_file.clone(),
+            app.operational.runtime.tasks_db_file.clone(),
+        ])
+        .await?
+        .into_iter()
+        .map(|pool| {
+            let value = match field {
+                JdbcConnectionsField::Active => pool.in_use_connections,
+                JdbcConnectionsField::Idle => pool.idle_connections,
+                JdbcConnectionsField::Max => pool.max_connections,
+                JdbcConnectionsField::Min => pool.min_connections,
+            } as f64;
+            MetricSample::with_owned_tags(
+                vec![(
+                    "name",
+                    datasource_pool_name(app, &pool.path, pool.max_connections),
+                )],
+                [("VALUE", value)],
+            )
+        })
+        .collect();
 
     Ok(metric_from_samples(
         name,
@@ -1210,13 +1256,9 @@ async fn jdbc_connections_metric(
     ))
 }
 
-fn datasource_pool_name(
-    state: &OperationalState,
-    pool_path: &Path,
-    max_connections: u32,
-) -> String {
-    let normalized_main_path = normalized_runtime_path(&state.runtime.database_file);
-    let normalized_tasks_path = normalized_runtime_path(&state.runtime.tasks_db_file);
+fn datasource_pool_name(app: &HttpAppState, pool_path: &Path, max_connections: u32) -> String {
+    let normalized_main_path = normalized_runtime_path(&app.operational.runtime.database_file);
+    let normalized_tasks_path = normalized_runtime_path(&app.operational.runtime.tasks_db_file);
     let normalized_pool_path = normalized_runtime_path(pool_path);
 
     if normalized_pool_path == normalized_main_path {

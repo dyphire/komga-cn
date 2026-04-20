@@ -178,7 +178,7 @@ fn normalized_epub_locator(locator: &Value, matched_position: &Value) -> Value {
 }
 
 pub(crate) async fn normalize_book_epub_locator(
-    database_file: &FsPath,
+    app: &HttpAppState,
     book_id: &str,
     locator: &Value,
 ) -> Result<Value, Response> {
@@ -196,11 +196,11 @@ pub(crate) async fn normalize_book_epub_locator(
         return Err(progression_bad_request("location.progression is required"));
     };
 
-    let persisted_media_files = match load_persisted_book_media_files(database_file, book_id).await
-    {
-        Ok(files) => files,
-        Err(error) => return Err(internal_error_response(error)),
-    };
+    let persisted_media_files =
+        match load_persisted_book_media_files_from_services(app, book_id).await {
+            Ok(files) => files,
+            Err(error) => return Err(internal_error_response(error)),
+        };
     let persisted_resource_exists = (!persisted_media_files.is_empty()).then(|| {
         persisted_media_files
             .iter()
@@ -212,7 +212,12 @@ pub(crate) async fn normalize_book_epub_locator(
         )));
     }
 
-    let extension = match load_persisted_epub_extension_blob(database_file, book_id).await {
+    let extension = match app
+        .services
+        .media_assets
+        .load_persisted_epub_extension_blob(app.auth_db.database_file.clone(), book_id.to_string())
+        .await
+    {
         Ok(extension) => extension,
         Err(error) => return Err(internal_error_response(error)),
     };
@@ -247,7 +252,7 @@ pub(crate) async fn normalize_book_epub_locator(
 }
 
 pub(crate) async fn progression_is_older_than_existing(
-    database_file: &FsPath,
+    app: &HttpAppState,
     book_id: &str,
     user_id: &str,
     modified: &str,
@@ -255,7 +260,8 @@ pub(crate) async fn progression_is_older_than_existing(
     let Ok(new_modified) = OffsetDateTime::parse(modified, &Rfc3339) else {
         return Ok(false);
     };
-    let Some(existing_progression) = load_book_progression(database_file, book_id, user_id).await?
+    let Some(existing_progression) =
+        load_book_progression_from_services(app, book_id, user_id).await?
     else {
         return Ok(false);
     };
@@ -271,12 +277,20 @@ pub(crate) async fn progression_is_older_than_existing(
 }
 
 pub(super) async fn load_epub_locator_for_page(
-    database_file: &FsPath,
+    app: &HttpAppState,
     book_id: &str,
     page: u64,
 ) -> Result<Option<Value>, String> {
-    match load_persisted_epub_extension_blob(database_file, book_id).await {
-        Ok(Some((_class, blob))) => Ok(decode_epub_positions(&blob)
+    match app
+        .services
+        .media_assets
+        .load_persisted_epub_extension_blob(app.auth_db.database_file.clone(), book_id.to_string())
+        .await
+    {
+        Ok(Some((_class, blob))) => Ok(app
+            .services
+            .media_assets
+            .decode_epub_positions(blob)
             .ok()
             .and_then(|positions| positions.get(page.saturating_sub(1) as usize).cloned())),
         Ok(None) => Ok(None),

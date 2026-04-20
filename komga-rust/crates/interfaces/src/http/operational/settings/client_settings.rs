@@ -10,20 +10,21 @@ use serde_json::Value;
 use crate::http::identity_access::auth::{
     require_admin, require_auth, resolved_auth_user, user_id,
 };
-use crate::operational_settings_access::client_settings as client_settings_access;
-
-use super::super::super::OperationalState;
+use crate::http::state::HttpAppState;
 
 pub(crate) async fn get_client_settings_global(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     let include_unauthorized_only = resolved_auth_user(&headers).is_none();
-    let settings = match client_settings_access::load_client_settings_global(
-        state.runtime.database_file.as_path(),
-        include_unauthorized_only,
-    )
-    .await
+    let settings = match app
+        .services
+        .operational_settings
+        .load_client_settings_global(
+            app.operational.runtime.database_file.clone(),
+            include_unauthorized_only,
+        )
+        .await
     {
         Ok(settings) => settings,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -32,7 +33,7 @@ pub(crate) async fn get_client_settings_global(
 }
 
 pub(crate) async fn get_client_settings_user(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     if let Some(response) = require_auth(&headers) {
@@ -42,11 +43,14 @@ pub(crate) async fn get_client_settings_user(
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    let settings = match client_settings_access::load_client_settings_user(
-        state.runtime.database_file.as_path(),
-        user_id(&current_user),
-    )
-    .await
+    let settings = match app
+        .services
+        .operational_settings
+        .load_client_settings_user(
+            app.operational.runtime.database_file.clone(),
+            user_id(&current_user).to_string(),
+        )
+        .await
     {
         Ok(settings) => settings,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -55,7 +59,7 @@ pub(crate) async fn get_client_settings_user(
 }
 
 pub(crate) async fn patch_client_settings_global(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -68,11 +72,11 @@ pub(crate) async fn patch_client_settings_global(
         Err(response) => return response,
     };
 
-    match client_settings_access::persist_upsert_client_settings_global(
-        state.runtime.database_file.as_path(),
-        &settings,
-    )
-    .await
+    match app
+        .services
+        .operational_settings
+        .upsert_client_settings_global(app.operational.runtime.database_file.clone(), settings)
+        .await
     {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -80,7 +84,7 @@ pub(crate) async fn patch_client_settings_global(
 }
 
 pub(crate) async fn patch_client_settings_user(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -96,12 +100,15 @@ pub(crate) async fn patch_client_settings_user(
         Err(response) => return response,
     };
 
-    match client_settings_access::persist_upsert_client_settings_user(
-        state.runtime.database_file.as_path(),
-        user_id(&current_user),
-        &settings,
-    )
-    .await
+    match app
+        .services
+        .operational_settings
+        .upsert_client_settings_user(
+            app.operational.runtime.database_file.clone(),
+            user_id(&current_user).to_string(),
+            settings,
+        )
+        .await
     {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -109,7 +116,7 @@ pub(crate) async fn patch_client_settings_user(
 }
 
 pub(crate) async fn delete_client_settings_global(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -122,11 +129,11 @@ pub(crate) async fn delete_client_settings_global(
         Err(response) => return response,
     };
 
-    match client_settings_access::persist_delete_client_settings_global(
-        state.runtime.database_file.as_path(),
-        &keys,
-    )
-    .await
+    match app
+        .services
+        .operational_settings
+        .delete_client_settings_global(app.operational.runtime.database_file.clone(), keys)
+        .await
     {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -134,7 +141,7 @@ pub(crate) async fn delete_client_settings_global(
 }
 
 pub(crate) async fn delete_client_settings_user(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -150,12 +157,15 @@ pub(crate) async fn delete_client_settings_user(
         Err(response) => return response,
     };
 
-    match client_settings_access::persist_delete_client_settings_user(
-        state.runtime.database_file.as_path(),
-        user_id(&current_user),
-        &keys,
-    )
-    .await
+    match app
+        .services
+        .operational_settings
+        .delete_client_settings_user(
+            app.operational.runtime.database_file.clone(),
+            user_id(&current_user).to_string(),
+            keys,
+        )
+        .await
     {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),

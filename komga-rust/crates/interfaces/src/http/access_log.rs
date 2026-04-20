@@ -13,7 +13,7 @@ use axum::middleware::Next;
 use axum::response::Response;
 use tracing::Span;
 
-use crate::http::state::{HttpServerRequestMetricKey, HttpServerRequestsState, OperationalState};
+use crate::http::state::{HttpAppState, HttpServerRequestMetricKey, HttpServerRequestsState};
 
 const ANONYMOUS_USER_ID: &str = "anonymous";
 static ACCESS_LOG_REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -61,14 +61,7 @@ pub fn on_response<B>(response: &Response<B>, latency: Duration, span: &Span) {
     };
 
     if state.mode == AccessLogMode::Standard {
-        emit_access_event(
-            &state.context,
-            response.status(),
-            latency,
-            None,
-            None,
-            span,
-        );
+        emit_access_event(&state.context, response.status(), latency, None, None, span);
     }
 }
 
@@ -89,8 +82,8 @@ pub async fn prepare_access_log_middleware(request: Request, next: Next) -> Resp
     let mut request = request;
     let http_server_requests = request
         .extensions()
-        .get::<OperationalState>()
-        .map(|state| state.http_server_requests.clone());
+        .get::<HttpAppState>()
+        .map(|app| app.operational.http_server_requests.clone());
     let remote_addr = request
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
@@ -449,7 +442,10 @@ fn record_http_request_metric(
     );
 }
 
-fn request_metrics_outcome(status: StatusCode, outcome_override: Option<&'static str>) -> &'static str {
+fn request_metrics_outcome(
+    status: StatusCode,
+    outcome_override: Option<&'static str>,
+) -> &'static str {
     match outcome_override.unwrap_or_else(|| outcome_for_status(status)) {
         "success" => "SUCCESS",
         "redirect" => "REDIRECTION",

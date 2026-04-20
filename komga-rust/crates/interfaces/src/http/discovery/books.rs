@@ -1,4 +1,3 @@
-use super::*;
 use super::filters::{exact_oneshot_bootstrap_series_id, normalize_release_date_date_time};
 use super::persisted::common_helpers::{decode_query_component, filter_rows};
 use super::persisted::delegates::{
@@ -8,9 +7,9 @@ use super::persisted::delegates::{
     runtime_owned_books_latest_response, runtime_owned_books_list_response,
 };
 use super::persisted::models::{
-    BooksFilterCriteria, PersistedBookTagsScope, PersistedBooksBrowseQuery,
-    PersistedBooksSortMode,
+    BooksFilterCriteria, PersistedBookTagsScope, PersistedBooksBrowseQuery, PersistedBooksSortMode,
 };
+use super::*;
 use crate::http::discovery_auth::context::{
     DetailContentContext, DetailResourceContext, QueryRestrictions,
 };
@@ -637,17 +636,18 @@ fn should_use_strict_runtime_shape(payload: &Value, has_oneshot_bootstrap: bool)
 }
 
 pub async fn books_list(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    if !auth_db.database_file.exists() {
+    if !app.auth_db.database_file.exists() {
         return StatusCode::NOT_FOUND.into_response();
     }
 
@@ -666,12 +666,13 @@ pub async fn books_list(
         should_use_strict_runtime_shape(&payload, is_exact_oneshot_bootstrap);
 
     if let Some(runtime_response) = runtime_owned_books_list_response(
+        &app.services.discovery_persisted,
         &headers,
         &uri,
         Some(&payload),
         full_text_search.clone(),
-        &auth_state,
-        auth_db.database_file.as_path(),
+        &app.discovery_auth,
+        app.auth_db.database_file.as_path(),
         strict_runtime_shape,
     )
     .await
@@ -687,9 +688,9 @@ pub async fn books_list(
 pub(super) async fn books_deprecated_get(
     headers: HeaderMap,
     uri: Uri,
-    auth_state: DiscoveryAuthState,
-    database_file: &FsPath,
+    app: &HttpAppState,
 ) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
@@ -700,9 +701,12 @@ pub(super) async fn books_deprecated_get(
 
     let query = uri.query().unwrap_or_default();
     let requested_library_ids = requested_query_values(query, "library_id");
-    let library_ids =
-        remap_requested_library_ids_for_persisted(database_file, requested_library_ids.as_ref())
-            .await;
+    let library_ids = remap_requested_library_ids_for_persisted(
+        &app.services.discovery_persisted,
+        database_file,
+        requested_library_ids.as_ref(),
+    )
+    .await;
     let tags = requested_query_values(query, "tag");
     let read_statuses = requested_query_values(query, "read_status");
     let media_statuses = requested_query_values(query, "media_status").map(|values| {
@@ -751,11 +755,12 @@ pub(super) async fn books_deprecated_get(
     .map(|condition| json!({ "condition": condition }));
 
     if let Some(runtime_response) = runtime_owned_books_list_response(
+        &app.services.discovery_persisted,
         &headers,
         &uri,
         payload.as_ref(),
         search.clone(),
-        &auth_state,
+        &app.discovery_auth,
         database_file,
         true,
     )
@@ -770,12 +775,12 @@ pub(super) async fn books_deprecated_get(
 }
 
 pub async fn series_books_deprecated(
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
     AxumPath(series_id): AxumPath<String>,
-    auth_state: DiscoveryAuthState,
-    database_file: &FsPath,
 ) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
@@ -784,11 +789,9 @@ pub async fn series_books_deprecated(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let resolved_series_id = super::detail::resolve_series_id_for_persisted(database_file, &series_id).await;
+    let resolved_series_id = super::detail::resolve_series_id_for_persisted(&app, &series_id).await;
     let Some(resource) =
-        (match super::detail::load_persisted_series_resource(database_file, &resolved_series_id)
-            .await
-        {
+        (match super::detail::load_persisted_series_resource(&app, &resolved_series_id).await {
             Ok(resource) => resource,
             Err(error) => return internal_error_response(error),
         })
@@ -804,7 +807,8 @@ pub async fn series_books_deprecated(
         }),
     };
 
-    if let Err(denial) = auth_state
+    if let Err(denial) = app
+        .discovery_auth
         .resolve_detail_query_context_with_persistence(&headers, &detail_context, database_file)
         .await
     {
@@ -821,11 +825,12 @@ pub async fn series_books_deprecated(
     };
 
     if let Some(response) = runtime_owned_books_list_response(
+        &app.services.discovery_persisted,
         &headers,
         &uri,
         Some(&payload),
         None,
-        &auth_state,
+        &app.discovery_auth,
         database_file,
         true,
     )
@@ -840,31 +845,34 @@ pub async fn series_books_deprecated(
 }
 
 pub async fn books_latest(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
     let query = uri.query().unwrap_or_default();
 
-    if auth_db.database_file.exists() {
+    if app.auth_db.database_file.exists() {
         let requested_library_ids = requested_query_values(query, "library_id");
         let library_ids = remap_requested_library_ids_for_persisted(
-            auth_db.database_file.as_path(),
+            &app.services.discovery_persisted,
+            app.auth_db.database_file.as_path(),
             requested_library_ids.as_ref(),
         )
         .await
         .or(requested_library_ids);
 
-        let context = match auth_state
+        let context = match app
+            .discovery_auth
             .resolve_query_context_with_persistence(
                 &headers,
                 library_ids.as_deref(),
-                auth_db.database_file.as_path(),
+                app.auth_db.database_file.as_path(),
             )
             .await
         {
@@ -882,7 +890,8 @@ pub async fn books_latest(
         let unpaged = query_bool(query, "unpaged");
 
         match load_persisted_books_page(
-            auth_db.database_file.as_path(),
+            &app.services.discovery_persisted,
+            app.auth_db.database_file.as_path(),
             &context,
             PersistedBooksBrowseQuery::from_filters(
                 BooksFilterCriteria {
@@ -911,19 +920,20 @@ pub async fn books_latest(
         }
     }
 
-    if auth_db.database_file.exists()
+    if app.auth_db.database_file.exists()
         && let Some(runtime_response) = runtime_owned_books_latest_response(
+            &app.services.discovery_persisted,
             &headers,
             &uri,
-            &auth_state,
-            auth_db.database_file.as_path(),
+            &app.discovery_auth,
+            app.auth_db.database_file.as_path(),
         )
         .await
     {
         return runtime_response;
     }
 
-    if !auth_db.database_file.exists() {
+    if !app.auth_db.database_file.exists() {
         return StatusCode::NOT_FOUND.into_response();
     }
 
@@ -933,32 +943,35 @@ pub async fn books_latest(
 }
 
 pub async fn books_ondeck(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    if !auth_db.database_file.exists() {
+    if !app.auth_db.database_file.exists() {
         return StatusCode::NOT_FOUND.into_response();
     }
 
     let query = uri.query().unwrap_or_default();
     let requested_library_ids = requested_query_values(query, "library_id");
     let library_ids = remap_requested_library_ids_for_persisted(
-        auth_db.database_file.as_path(),
+        &app.services.discovery_persisted,
+        app.auth_db.database_file.as_path(),
         requested_library_ids.as_ref(),
     )
     .await
     .or(requested_library_ids);
-    let context = match auth_state
+    let context = match app
+        .discovery_auth
         .resolve_query_context_with_persistence(
             &headers,
             library_ids.as_deref(),
-            auth_db.database_file.as_path(),
+            app.auth_db.database_file.as_path(),
         )
         .await
     {
@@ -969,7 +982,13 @@ pub async fn books_ondeck(
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    match load_persisted_ondeck_books(auth_db.database_file.as_path(), user_id).await {
+    match load_persisted_ondeck_books(
+        &app.services.discovery_persisted,
+        app.auth_db.database_file.as_path(),
+        user_id,
+    )
+    .await
+    {
         Ok(entries) => {
             let filtered_entries =
                 if let Some(allowed_ids) = context.authorized_library_ids.as_ref() {
@@ -981,21 +1000,17 @@ pub async fn books_ondeck(
                 };
             let mut content = Vec::with_capacity(filtered_entries.len());
             for entry in filtered_entries {
-                let resource = match super::detail::load_persisted_book_resource(
-                    auth_db.database_file.as_path(),
-                    &entry.id,
-                )
-                .await
-                {
-                    Ok(Some(resource)) => resource,
-                    Ok(None) => {
-                        return internal_error_response(format!(
-                            "missing persisted on-deck book resource for '{}'",
-                            entry.id
-                        ));
-                    }
-                    Err(error) => return internal_error_response(error),
-                };
+                let resource =
+                    match super::detail::load_persisted_book_resource(&app, &entry.id).await {
+                        Ok(Some(resource)) => resource,
+                        Ok(None) => {
+                            return internal_error_response(format!(
+                                "missing persisted on-deck book resource for '{}'",
+                                entry.id
+                            ));
+                        }
+                        Err(error) => return internal_error_response(error),
+                    };
 
                 if !ondeck_content_allowed_by_restrictions(
                     context.restrictions.as_ref(),
@@ -1005,22 +1020,19 @@ pub async fn books_ondeck(
                     continue;
                 }
 
-                let detail = match super::detail::load_persisted_book_detail(
-                    auth_db.database_file.as_path(),
-                    &entry.id,
-                    Some(user_id),
-                )
-                .await
-                {
-                    Ok(Some(detail)) => detail,
-                    Ok(None) => {
-                        return internal_error_response(format!(
-                            "missing persisted on-deck book detail for '{}'",
-                            entry.id
-                        ));
-                    }
-                    Err(error) => return internal_error_response(error),
-                };
+                let detail =
+                    match super::detail::load_persisted_book_detail(&app, &entry.id, Some(user_id))
+                        .await
+                    {
+                        Ok(Some(detail)) => detail,
+                        Ok(None) => {
+                            return internal_error_response(format!(
+                                "missing persisted on-deck book detail for '{}'",
+                                entry.id
+                            ));
+                        }
+                        Err(error) => return internal_error_response(error),
+                    };
                 content.push(super::detail::book_detail_payload(
                     &detail,
                     context.is_admin,
@@ -1036,19 +1048,22 @@ pub async fn books_ondeck(
 }
 
 pub async fn books_duplicates(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_admin(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    if !auth_db.database_file.exists() {
+    if !app.auth_db.database_file.exists() {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
+    let Some(user) =
+        resolved_request_auth_user(&headers, app.auth_db.database_file.as_path()).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -1064,12 +1079,17 @@ pub async fn books_duplicates(
     let unpaged = query_bool(query, "unpaged");
     let sort_modes = duplicate_books_sort_modes(query, unpaged);
 
-    match load_persisted_duplicate_books(auth_db.database_file.as_path()).await {
+    match load_persisted_duplicate_books(
+        &app.services.discovery_persisted,
+        app.auth_db.database_file.as_path(),
+    )
+    .await
+    {
         Ok(entries) => {
             let mut content = Vec::with_capacity(entries.len());
             for entry in entries {
                 let detail = match super::detail::load_persisted_book_detail(
-                    auth_db.database_file.as_path(),
+                    &app,
                     &entry.id,
                     Some(&user_id),
                 )
@@ -1113,16 +1133,17 @@ pub async fn books_duplicates(
 }
 
 pub async fn book_tags(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    if !auth_db.database_file.exists() {
+    if !app.auth_db.database_file.exists() {
         return StatusCode::NOT_FOUND.into_response();
     }
 
@@ -1139,7 +1160,8 @@ pub async fn book_tags(
     let readlist_scope = query_value(query, "readlist_id")
         .filter(|value| !value.is_empty())
         .map(decode_query_component);
-    let context = match auth_state
+    let context = match app
+        .discovery_auth
         .resolve_query_context_with_persistence(
             &headers,
             if series_scope.is_some() || readlist_scope.is_some() || library_ids.is_empty() {
@@ -1147,7 +1169,7 @@ pub async fn book_tags(
             } else {
                 Some(library_ids.as_slice())
             },
-            auth_db.database_file.as_path(),
+            app.auth_db.database_file.as_path(),
         )
         .await
     {
@@ -1167,7 +1189,8 @@ pub async fn book_tags(
         .or(Some(PersistedBookTagsScope::All));
 
     match load_persisted_book_tags(
-        auth_db.database_file.as_path(),
+        &app.services.discovery_persisted,
+        app.auth_db.database_file.as_path(),
         scope.as_ref(),
         context.authorized_library_ids.as_deref(),
     )

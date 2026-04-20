@@ -4,10 +4,10 @@ use std::path::Path;
 use komga_application::identity_access::AuthUser;
 use sqlx::Row;
 
-use super::auth_access::persisted_users;
 use super::backend_contract::{
     CreateAuthUserInput, SharedLibrariesInput, UpdateAuthUserInput, UpdateAuthUserResult,
 };
+use crate::auth::runtime_identity_access::persisted_users;
 use crate::sqlite::connect_write_pool;
 
 pub async fn create_auth_user(

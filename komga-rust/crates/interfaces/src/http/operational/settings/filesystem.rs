@@ -1,5 +1,6 @@
 use axum::Json;
 use axum::body::Bytes;
+use axum::extract::Extension;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
@@ -7,7 +8,7 @@ use serde_json::{Map, Value, json};
 use std::path::{Path, PathBuf};
 
 use crate::http::identity_access::auth::require_admin;
-use crate::operational_settings_access::filesystem as filesystem_access;
+use crate::http::state::HttpAppState;
 
 #[derive(Default, Deserialize)]
 #[serde(default)]
@@ -17,7 +18,11 @@ struct DirectoryRequestDto {
     show_files: bool,
 }
 
-pub(crate) async fn post_filesystem(headers: HeaderMap, body: Bytes) -> Response {
+pub(crate) async fn post_filesystem(
+    Extension(app): Extension<HttpAppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
     if let Some(response) = require_admin(&headers) {
         return response;
     }
@@ -49,9 +54,14 @@ pub(crate) async fn post_filesystem(headers: HeaderMap, body: Bytes) -> Response
         return StatusCode::BAD_REQUEST.into_response();
     }
 
-    let directories = filesystem_access::list_directory_entries(&directory, true);
+    let directories = app
+        .services
+        .operational_settings
+        .list_directory_entries(directory.clone(), true);
     let files = if request.show_files {
-        filesystem_access::list_directory_entries(&directory, false)
+        app.services
+            .operational_settings
+            .list_directory_entries(directory.clone(), false)
     } else {
         Vec::new()
     };

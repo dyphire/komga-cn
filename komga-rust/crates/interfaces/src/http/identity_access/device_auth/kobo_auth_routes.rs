@@ -3,7 +3,7 @@ use super::*;
 use axum::body::to_bytes;
 
 pub async fn kobo_ping(
-    Extension(auth_db): Extension<super::AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     Path(auth_token): Path<String>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
@@ -12,7 +12,7 @@ pub async fn kobo_ping(
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
-        auth_db.database_file.as_path(),
+        app.auth_db.database_file.as_path(),
     )
     .await
     {
@@ -23,11 +23,12 @@ pub async fn kobo_ping(
     "pong".into_response()
 }
 pub async fn kobo_initialization(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     Path(auth_token): Path<String>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
 ) -> Response {
+    let state = &app.operational;
     if let Err(status) = required_kobo_user(
         auth_token.as_str(),
         &headers,
@@ -39,11 +40,11 @@ pub async fn kobo_initialization(
         return status.into_response();
     }
 
-    let mut resources = match initialization_resources(&state, &headers).await {
+    let mut resources = match initialization_resources(&app, &headers).await {
         Ok(resources) => resources,
         Err(status) => return status.into_response(),
     };
-    let base_url = request_base_url_with_port(&headers, initialization_port(&state).await);
+    let base_url = request_base_url_with_port(&headers, initialization_port(&app).await);
     let context_base_url = format!("{base_url}{}", request_context_path(&headers));
     apply_initialization_overrides(
         &mut resources,
@@ -60,10 +61,10 @@ pub async fn kobo_initialization(
 }
 
 async fn initialization_resources(
-    state: &OperationalState,
+    app: &HttpAppState,
     headers: &HeaderMap,
 ) -> Result<Value, StatusCode> {
-    if load_kobo_proxy_enabled(state).await {
+    if load_kobo_proxy_enabled(app.services.server_settings.as_ref()).await {
         match proxied_initialization_resources(headers).await {
             Ok(Some(resources)) => return Ok(resources),
             Err(status) if status == StatusCode::UNAUTHORIZED => return Err(status),
@@ -117,14 +118,14 @@ async fn proxied_initialization_resources(
     Ok(payload.get("Resources").cloned())
 }
 
-async fn initialization_port(state: &OperationalState) -> Option<u16> {
-    let persisted = state.settings_store.load_map().await.ok();
+async fn initialization_port(app: &HttpAppState) -> Option<u16> {
+    let persisted = app.services.server_settings.load_map().await.ok();
     let configured_kobo_port = persisted
         .as_ref()
         .and_then(|settings| settings.get("KOBO_PORT"))
         .and_then(|value| value.as_ref())
         .and_then(|value| value.trim().parse::<u16>().ok());
-    configured_kobo_port.or(Some(state.runtime.bind_address.port()))
+    configured_kobo_port.or(Some(app.operational.runtime.bind_address.port()))
 }
 
 fn apply_initialization_overrides(resources: &mut Value, auth_token: &str, context_base_url: &str) {
@@ -151,13 +152,14 @@ fn apply_initialization_overrides(resources: &mut Value, auth_token: &str, conte
 }
 
 pub async fn kobo_auth_device(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     Path(auth_token): Path<String>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     uri: axum::http::Uri,
     body: Bytes,
 ) -> Response {
+    let state = &app.operational;
     if let Err(status) = required_kobo_user(
         auth_token.as_str(),
         &headers,
@@ -174,7 +176,7 @@ pub async fn kobo_auth_device(
         Err(status) => return status.into_response(),
     };
 
-    if load_kobo_proxy_enabled(&state).await
+    if load_kobo_proxy_enabled(app.services.server_settings.as_ref()).await
         && let Ok(response) = proxy_kobo_catch_all_request(
             &axum::http::Method::POST,
             "/v1/auth/device",

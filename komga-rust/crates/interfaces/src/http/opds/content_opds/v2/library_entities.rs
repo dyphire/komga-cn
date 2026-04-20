@@ -1,28 +1,331 @@
-use super::super::types::{PersistedBookSearchResult, PersistedReadlistBook, PersistedSeriesBook};
+use super::super::types::{
+    PersistedBookFeedItem, PersistedBookSearchResult, PersistedCollection,
+    PersistedCollectionSearchResult, PersistedReadlist, PersistedReadlistBook,
+    PersistedReadlistSearchResult, PersistedSeries, PersistedSeriesBook,
+    PersistedSeriesSearchResult,
+};
 use super::*;
 use serde_json::Value;
+
+async fn load_collection_from_services(
+    app: &HttpAppState,
+    collection_id: &str,
+) -> Result<Option<PersistedCollection>, String> {
+    Ok(app
+        .services
+        .opds_persisted
+        .load_collection(app.auth_db.database_file.clone(), collection_id.to_string())
+        .await?
+        .map(|row| PersistedCollection {
+            id: row.id,
+            name: row.name,
+            last_modified: row.last_modified,
+            ordered: row.ordered,
+        }))
+}
+
+async fn load_collection_series_from_services(
+    app: &HttpAppState,
+    collection_id: &str,
+    ordered: bool,
+) -> Result<Vec<PersistedSeries>, String> {
+    Ok(app
+        .services
+        .opds_persisted
+        .load_collection_series(
+            app.auth_db.database_file.clone(),
+            collection_id.to_string(),
+            ordered,
+        )
+        .await?
+        .into_iter()
+        .map(|row| PersistedSeries {
+            id: row.id,
+            library_id: row.library_id,
+            title: row.title,
+            summary: row.summary,
+            age_rating: row.age_rating,
+            sharing_labels: row.sharing_labels,
+            last_modified: row.last_modified,
+        })
+        .collect())
+}
+
+async fn load_series_from_services(
+    app: &HttpAppState,
+    series_id: &str,
+) -> Result<Option<PersistedSeries>, String> {
+    Ok(app
+        .services
+        .opds_persisted
+        .load_series(app.auth_db.database_file.clone(), series_id.to_string())
+        .await?
+        .map(|row| PersistedSeries {
+            id: row.id,
+            library_id: row.library_id,
+            title: row.title,
+            summary: row.summary,
+            age_rating: row.age_rating,
+            sharing_labels: row.sharing_labels,
+            last_modified: row.last_modified,
+        }))
+}
+
+async fn load_series_books_paged_from_services(
+    app: &HttpAppState,
+    series_id: &str,
+    user_id: &str,
+    offset: i64,
+    limit: i64,
+) -> Result<Vec<PersistedSeriesBook>, String> {
+    Ok(app
+        .services
+        .opds_persisted
+        .load_series_books_paged(
+            app.auth_db.database_file.clone(),
+            series_id.to_string(),
+            user_id.to_string(),
+            offset,
+            limit,
+        )
+        .await?
+        .into_iter()
+        .map(|row| PersistedSeriesBook {
+            id: row.id,
+            series_id: row.series_id,
+            title: row.title,
+            series_title: row.series_title,
+            number: row.number,
+            number_sort: row.number_sort,
+            summary: row.summary,
+            isbn: row.isbn,
+            authors: row
+                .authors
+                .into_iter()
+                .map(|author| crate::opds_catalog_access::OpdsBookAuthorEntry {
+                    name: author.name,
+                    role: author.role,
+                })
+                .collect(),
+            tags: row.tags,
+            file_name: row.file_name,
+            file_size: row.file_size,
+            media_type: row.media_type,
+            page_count: row.page_count,
+            epub_divina_compatible: row.epub_divina_compatible,
+            last_read: row.last_read,
+            last_read_date: row.last_read_date,
+            library_id: row.library_id,
+            age_rating: row.age_rating,
+            sharing_labels: row.sharing_labels,
+            last_modified: row.last_modified,
+            release_date: row.release_date,
+        })
+        .collect())
+}
+
+async fn load_series_tags_from_services(
+    app: &HttpAppState,
+    series_id: &str,
+) -> Result<Vec<String>, String> {
+    app.services
+        .opds_persisted
+        .load_series_tags(app.auth_db.database_file.clone(), series_id.to_string())
+        .await
+}
+
+async fn load_readlist_from_services(
+    app: &HttpAppState,
+    readlist_id: &str,
+) -> Result<Option<PersistedReadlist>, String> {
+    Ok(app
+        .services
+        .opds_persisted
+        .load_readlist(app.auth_db.database_file.clone(), readlist_id.to_string())
+        .await?
+        .map(|row| PersistedReadlist {
+            id: row.id,
+            name: row.name,
+            last_modified: row.last_modified,
+            ordered: row.ordered,
+        }))
+}
+
+async fn load_readlist_books_from_services(
+    app: &HttpAppState,
+    readlist_id: &str,
+) -> Result<Vec<PersistedReadlistBook>, String> {
+    Ok(app
+        .services
+        .opds_persisted
+        .load_readlist_books(app.auth_db.database_file.clone(), readlist_id.to_string())
+        .await?
+        .into_iter()
+        .map(|row| PersistedReadlistBook {
+            id: row.id,
+            series_id: row.series_id,
+            title: row.title,
+            series_title: row.series_title,
+            number: row.number,
+            number_sort: row.number_sort,
+            summary: row.summary,
+            isbn: row.isbn,
+            authors: row
+                .authors
+                .into_iter()
+                .map(|author| crate::opds_catalog_access::OpdsBookAuthorEntry {
+                    name: author.name,
+                    role: author.role,
+                })
+                .collect(),
+            tags: row.tags,
+            file_name: row.file_name,
+            file_size: row.file_size,
+            media_type: row.media_type,
+            media_status: row.media_status,
+            page_count: row.page_count,
+            epub_divina_compatible: row.epub_divina_compatible,
+            library_id: row.library_id,
+            age_rating: row.age_rating,
+            sharing_labels: row.sharing_labels,
+            last_modified: row.last_modified,
+            release_date: row.release_date,
+        })
+        .collect())
+}
+
+async fn load_collection_books_from_services(
+    app: &HttpAppState,
+    collection_id: &str,
+) -> Result<Vec<PersistedBookFeedItem>, String> {
+    Ok(app
+        .services
+        .opds_persisted
+        .load_collection_books(app.auth_db.database_file.clone(), collection_id.to_string())
+        .await?
+        .into_iter()
+        .map(|row| PersistedBookFeedItem {
+            id: row.id,
+            title: row.title,
+            series_title: String::new(),
+            number: String::new(),
+            summary: String::new(),
+            authors: vec![],
+            file_name: row.file_name,
+            file_size: 0,
+            media_type: row.media_type,
+            page_count: 0,
+            epub_divina_compatible: false,
+            last_read: None,
+            last_read_date: None,
+            library_id: row.library_id,
+            age_rating: row.age_rating,
+            sharing_labels: row.sharing_labels,
+            last_modified: row.last_modified,
+        })
+        .collect())
+}
+
+async fn load_unified_search_results_from_services(
+    app: &HttpAppState,
+    query: &str,
+) -> Result<
+    (
+        Vec<PersistedSeriesSearchResult>,
+        Vec<PersistedBookSearchResult>,
+        Vec<PersistedCollectionSearchResult>,
+        Vec<PersistedReadlistSearchResult>,
+    ),
+    String,
+> {
+    let (series_rows, book_rows, collection_rows, readlist_rows) = app
+        .services
+        .opds_persisted
+        .load_unified_search_results(app.auth_db.database_file.clone(), query.to_string())
+        .await?;
+
+    Ok((
+        series_rows
+            .into_iter()
+            .map(|row| PersistedSeriesSearchResult {
+                id: row.id,
+                title: row.title,
+                library_id: row.library_id,
+                age_rating: row.age_rating,
+                sharing_labels: row.sharing_labels,
+                last_modified: row.last_modified,
+            })
+            .collect(),
+        book_rows
+            .into_iter()
+            .map(|row| PersistedBookSearchResult {
+                id: row.id,
+                series_id: row.series_id,
+                title: row.title,
+                series_title: row.series_title,
+                number: row.number,
+                number_sort: row.number_sort,
+                summary: row.summary,
+                isbn: row.isbn,
+                authors: row
+                    .authors
+                    .into_iter()
+                    .map(|author| crate::opds_catalog_access::OpdsBookAuthorEntry {
+                        name: author.name,
+                        role: author.role,
+                    })
+                    .collect(),
+                tags: row.tags,
+                file_name: row.file_name,
+                file_size: row.file_size,
+                media_type: row.media_type,
+                page_count: row.page_count,
+                epub_divina_compatible: row.epub_divina_compatible,
+                library_id: row.library_id,
+                age_rating: row.age_rating,
+                sharing_labels: row.sharing_labels,
+                last_modified: row.last_modified,
+                release_date: row.release_date,
+            })
+            .collect(),
+        collection_rows
+            .into_iter()
+            .map(|row| PersistedCollectionSearchResult {
+                id: row.id,
+                name: row.name,
+            })
+            .collect(),
+        readlist_rows
+            .into_iter()
+            .map(|row| PersistedReadlistSearchResult {
+                id: row.id,
+                name: row.name,
+            })
+            .collect(),
+    ))
+}
 
 pub(crate) async fn opds_v2_libraries_collections(
     headers: HeaderMap,
     uri: Uri,
-    database_file: &Path,
+    app: &HttpAppState,
 ) -> Response {
-    opds_v2_collections_feed(headers, uri, database_file, None).await
+    opds_v2_collections_feed(headers, uri, app, None).await
 }
 
 pub(crate) async fn opds_v2_library_collections(
     headers: HeaderMap,
     uri: Uri,
-    database_file: &Path,
+    app: &HttpAppState,
     library_id: &str,
 ) -> Response {
-    opds_v2_collections_feed(headers, uri, database_file, Some(library_id)).await
+    opds_v2_collections_feed(headers, uri, app, Some(library_id)).await
 }
 
 pub(crate) async fn opds_v2_collection(
     headers: HeaderMap,
     uri: Uri,
-    database_file: &Path,
+    app: &HttpAppState,
     collection_id: &str,
 ) -> Response {
     if require_auth(&headers).is_some() {
@@ -33,7 +336,7 @@ pub(crate) async fn opds_v2_collection(
         return opds_catalog_unauthorized_response(&headers);
     };
 
-    let Some(collection) = (match load_collection(database_file, collection_id).await {
+    let Some(collection) = (match load_collection_from_services(app, collection_id).await {
         Ok(collection) => collection,
         Err(error) => {
             return (
@@ -48,7 +351,7 @@ pub(crate) async fn opds_v2_collection(
 
     let restrictions = opds_restrictions(&headers);
     let series =
-        match load_collection_series(database_file, collection_id, collection.ordered).await {
+        match load_collection_series_from_services(app, collection_id, collection.ordered).await {
             Ok(series) => series,
             Err(error) => {
                 return (
@@ -180,24 +483,24 @@ pub(crate) async fn opds_v2_collection(
 pub(crate) async fn opds_v2_libraries_readlists(
     headers: HeaderMap,
     uri: Uri,
-    database_file: &Path,
+    app: &HttpAppState,
 ) -> Response {
-    opds_v2_readlists_feed(headers, uri, database_file, None).await
+    opds_v2_readlists_feed(headers, uri, app, None).await
 }
 
 pub(crate) async fn opds_v2_library_readlists(
     headers: HeaderMap,
     uri: Uri,
-    database_file: &Path,
+    app: &HttpAppState,
     library_id: &str,
 ) -> Response {
-    opds_v2_readlists_feed(headers, uri, database_file, Some(library_id)).await
+    opds_v2_readlists_feed(headers, uri, app, Some(library_id)).await
 }
 
 pub(crate) async fn opds_v2_series(
     headers: HeaderMap,
     uri: Uri,
-    database_file: &Path,
+    app: &HttpAppState,
     series_id: &str,
 ) -> Response {
     if let Some(response) = require_auth(&headers) {
@@ -208,7 +511,7 @@ pub(crate) async fn opds_v2_series(
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    let Some(series) = (match load_series(database_file, series_id).await {
+    let Some(series) = (match load_series_from_services(app, series_id).await {
         Ok(series) => series,
         Err(error) => {
             return (
@@ -247,7 +550,7 @@ pub(crate) async fn opds_v2_series(
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
 
     let books =
-        match load_series_books_paged(database_file, &series.id, &current_user_id, 0, i64::MAX)
+        match load_series_books_paged_from_services(app, &series.id, &current_user_id, 0, i64::MAX)
             .await
         {
             Ok(books) => books,
@@ -272,7 +575,7 @@ pub(crate) async fn opds_v2_series(
         })
         .collect::<Vec<_>>();
 
-    let series_tags = match load_series_tags(database_file, &series.id).await {
+    let series_tags = match load_series_tags_from_services(app, &series.id).await {
         Ok(tags) => tags,
         Err(error) => {
             return (
@@ -441,7 +744,7 @@ fn series_page_link_path(self_path: &str, page: usize) -> String {
 pub(crate) async fn opds_v2_readlist(
     headers: HeaderMap,
     uri: Uri,
-    database_file: &Path,
+    app: &HttpAppState,
     readlist_id: &str,
 ) -> Response {
     if require_auth(&headers).is_some() {
@@ -452,7 +755,7 @@ pub(crate) async fn opds_v2_readlist(
         return opds_catalog_unauthorized_response(&headers);
     };
 
-    let Some(readlist) = (match load_readlist(database_file, readlist_id).await {
+    let Some(readlist) = (match load_readlist_from_services(app, readlist_id).await {
         Ok(readlist) => readlist,
         Err(error) => {
             return (
@@ -466,7 +769,7 @@ pub(crate) async fn opds_v2_readlist(
     };
     let restrictions = opds_restrictions(&headers);
 
-    let books = match load_readlist_books(database_file, &readlist.id).await {
+    let books = match load_readlist_books_from_services(app, &readlist.id).await {
         Ok(books) => books,
         Err(error) => {
             return (
@@ -581,7 +884,7 @@ fn search_book_feed_entry(
 
 pub(crate) async fn opds_v2_search(
     headers: HeaderMap,
-    database_file: &Path,
+    app: &HttpAppState,
     query: Option<&str>,
 ) -> Response {
     if let Some(response) = require_auth(&headers) {
@@ -596,7 +899,7 @@ pub(crate) async fn opds_v2_search(
     let search_query = query.unwrap_or_default().trim();
 
     let (series, books, collections, readlists) =
-        match load_unified_search_results(database_file, search_query).await {
+        match load_unified_search_results_from_services(app, search_query).await {
             Ok(results) => results,
             Err(error) => {
                 return (
@@ -643,7 +946,7 @@ pub(crate) async fn opds_v2_search(
 
     let mut collections_navigation = Vec::new();
     for item in collections {
-        let books = match load_collection_books(database_file, &item.id).await {
+        let books = match load_collection_books_from_services(app, &item.id).await {
             Ok(books) => books,
             Err(_) => continue,
         };
@@ -666,7 +969,7 @@ pub(crate) async fn opds_v2_search(
 
     let mut readlist_navigation = Vec::new();
     for item in readlists {
-        let books = match load_readlist_books(database_file, &item.id).await {
+        let books = match load_readlist_books_from_services(app, &item.id).await {
             Ok(books) => books,
             Err(_) => continue,
         };

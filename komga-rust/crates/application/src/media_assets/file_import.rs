@@ -104,11 +104,9 @@ where
                 })
                 .map_err(|error| format!("serialize books import payload: {error}"))?;
 
-                Ok(
-                    TaskQueueRecord::new(next_task_id(), 100, Some(group_id))
-                        .with_simple_type("IMPORT_BOOK")
-                        .with_payload(task_payload),
-                )
+                Ok(TaskQueueRecord::new(next_task_id(), 100, Some(group_id))
+                    .with_simple_type("IMPORT_BOOK")
+                    .with_payload(task_payload))
             })
             .collect()
     }

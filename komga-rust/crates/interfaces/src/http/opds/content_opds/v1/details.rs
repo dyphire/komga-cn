@@ -1,12 +1,27 @@
 use super::streaming::{localized_opds_updated, series_book_page_streaming_links};
 use super::*;
+use crate::http::opds::content_opds::types::PersistedSeries;
+use crate::opds_catalog_access::OpdsSeriesEntry;
+
+fn persisted_series(entry: OpdsSeriesEntry) -> PersistedSeries {
+    PersistedSeries {
+        id: entry.id,
+        library_id: entry.library_id,
+        title: entry.title,
+        summary: String::new(),
+        age_rating: entry.age_rating,
+        sharing_labels: entry.sharing_labels,
+        last_modified: entry.last_modified,
+    }
+}
 
 pub(crate) async fn opds_v1_series_detail(
     headers: HeaderMap,
     uri: Uri,
-    database_file: &Path,
+    app: &HttpAppState,
     series_id: &str,
 ) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_auth(&headers) {
         return response;
     }
@@ -20,7 +35,10 @@ pub(crate) async fn opds_v1_series_detail(
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    let Some(series) = load_series(database_file, series_id).await.unwrap_or(None) else {
+    let Some(series) = load_series(&app.services.opds_persisted, database_file, series_id)
+        .await
+        .unwrap_or(None)
+    else {
         return StatusCode::NOT_FOUND.into_response();
     };
     if !library_visible(&allowed_library_ids, &series.library_id) {
@@ -37,6 +55,7 @@ pub(crate) async fn opds_v1_series_detail(
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
     let feed_updated = localized_opds_updated(&series.last_modified);
     let books = load_series_books_paged(
+        &app.services.opds_persisted,
         database_file,
         &series.id,
         &current_user_id,
@@ -49,7 +68,7 @@ pub(crate) async fn opds_v1_series_detail(
     let mut entries = Vec::new();
     for book in books {
         let updated = localized_opds_updated(&book.last_modified);
-        let extra_links = series_book_page_streaming_links(database_file, &headers, &book).await;
+        let extra_links = series_book_page_streaming_links(app, &headers, &book).await;
         let extension = std::path::Path::new(book.file_name.as_str())
             .extension()
             .and_then(|value| value.to_str())
@@ -93,9 +112,10 @@ pub(crate) async fn opds_v1_series_detail(
 pub(crate) async fn opds_v1_library_detail(
     headers: HeaderMap,
     uri: Uri,
-    database_file: &Path,
+    app: &HttpAppState,
     library_id: &str,
 ) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_auth(&headers) {
         return response;
     }
@@ -103,7 +123,7 @@ pub(crate) async fn opds_v1_library_detail(
     let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let Some(library) = load_library(database_file, library_id)
+    let Some(library) = load_library(&app.services.opds_persisted, database_file, library_id)
         .await
         .unwrap_or(None)
     else {
@@ -128,7 +148,15 @@ pub(crate) async fn opds_v1_library_detail(
     let mut visible_seen = 0usize;
     let mut entries = Vec::with_capacity(size + 1);
     let has_next = loop {
-        let batch = load_library_series(database_file, library_id, raw_offset, batch_limit)
+        let batch = app
+            .services
+            .opds_catalog
+            .load_library_series(
+                app.auth_db.database_file.clone(),
+                library_id.to_string(),
+                raw_offset,
+                batch_limit,
+            )
             .await
             .unwrap_or_default();
         if batch.is_empty() {
@@ -162,7 +190,11 @@ pub(crate) async fn opds_v1_library_detail(
             break false;
         }
     };
-    let entries = entries.into_iter().take(size).collect::<Vec<_>>();
+    let entries = entries
+        .into_iter()
+        .take(size)
+        .map(persisted_series)
+        .collect::<Vec<_>>();
 
     opds_v1_library_series_feed_response(
         &headers,
@@ -179,9 +211,10 @@ pub(crate) async fn opds_v1_library_detail(
 pub(crate) async fn opds_v1_collection_detail(
     headers: HeaderMap,
     uri: Uri,
-    database_file: &Path,
+    app: &HttpAppState,
     collection_id: &str,
 ) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_auth(&headers) {
         return response;
     }
@@ -189,20 +222,26 @@ pub(crate) async fn opds_v1_collection_detail(
     let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let Some(collection) = load_collection(database_file, collection_id)
-        .await
-        .unwrap_or(None)
+    let Some(collection) =
+        load_collection(&app.services.opds_persisted, database_file, collection_id)
+            .await
+            .unwrap_or(None)
     else {
         return StatusCode::NOT_FOUND.into_response();
     };
     let restrictions = opds_restrictions(&headers);
 
-    let visible_series = load_collection_series(database_file, collection_id, collection.ordered)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|series| library_visible(&allowed_library_ids, &series.library_id))
-        .collect::<Vec<_>>();
+    let visible_series = load_collection_series(
+        &app.services.opds_persisted,
+        database_file,
+        collection_id,
+        collection.ordered,
+    )
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .filter(|series| library_visible(&allowed_library_ids, &series.library_id))
+    .collect::<Vec<_>>();
     if visible_series.is_empty() {
         return StatusCode::NOT_FOUND.into_response();
     }
@@ -248,9 +287,10 @@ pub(crate) async fn opds_v1_collection_detail(
 pub(crate) async fn opds_v1_readlist_detail(
     headers: HeaderMap,
     uri: Uri,
-    database_file: &Path,
+    app: &HttpAppState,
     readlist_id: &str,
 ) -> Response {
+    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_auth(&headers) {
         return response;
     }
@@ -258,7 +298,7 @@ pub(crate) async fn opds_v1_readlist_detail(
     let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let Some(readlist) = load_readlist(database_file, readlist_id)
+    let Some(readlist) = load_readlist(&app.services.opds_persisted, database_file, readlist_id)
         .await
         .unwrap_or(None)
     else {
@@ -266,12 +306,13 @@ pub(crate) async fn opds_v1_readlist_detail(
     };
     let restrictions = opds_restrictions(&headers);
 
-    let visible_books = load_readlist_books(database_file, readlist_id)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|book| library_visible(&allowed_library_ids, &book.library_id))
-        .collect::<Vec<_>>();
+    let visible_books =
+        load_readlist_books(&app.services.opds_persisted, database_file, readlist_id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|book| library_visible(&allowed_library_ids, &book.library_id))
+            .collect::<Vec<_>>();
     if visible_books.is_empty() {
         return StatusCode::NOT_FOUND.into_response();
     }

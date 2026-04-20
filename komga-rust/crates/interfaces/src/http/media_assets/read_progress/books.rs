@@ -16,18 +16,23 @@ fn request_progress_token(headers: &HeaderMap, user: &AuthUser) -> String {
 }
 
 async fn load_accessible_book_media(
-    database_file: &FsPath,
+    app: &HttpAppState,
     book_id: &str,
     user: &AuthUser,
 ) -> Result<PersistedBookMedia, Response> {
-    let Some(media) = (match load_persisted_book_media(database_file, book_id).await {
+    let Some(media) = (match app
+        .services
+        .media_assets
+        .load_persisted_book_media(app.auth_db.database_file.clone(), book_id.to_string())
+        .await
+    {
         Ok(media) => media,
         Err(error) => return Err(internal_error_response(error)),
     }) else {
         return Err(StatusCode::NOT_FOUND.into_response());
     };
 
-    if !user_can_access_book_media(database_file, book_id, user, &media).await {
+    if !user_can_access_book_media(app, book_id, user, &media).await {
         return Err(StatusCode::FORBIDDEN.into_response());
     }
 
@@ -36,8 +41,7 @@ async fn load_accessible_book_media(
 
 #[allow(clippy::too_many_arguments)]
 async fn persist_and_record_read_progress(
-    database_file: &FsPath,
-    state: &ReadProgressState,
+    app: &HttpAppState,
     token: &str,
     book_id: &str,
     persisted_user_id: Option<&str>,
@@ -46,30 +50,29 @@ async fn persist_and_record_read_progress(
     locator: Option<Value>,
 ) -> Response {
     if let Some(user_id) = persisted_user_id
-        && persist_read_progress(database_file, book_id, user_id, page, completed, locator)
+        && persist_read_progress_from_services(app, book_id, user_id, page, completed, locator)
             .await
             .is_err()
     {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    set_read_progress(state, token.to_string(), book_id.to_string());
+    set_read_progress(app, token.to_string(), book_id.to_string());
     StatusCode::NO_CONTENT.into_response()
 }
 
 pub async fn book_read_progress(
-    Extension(_profile): Extension<RuntimeProfile>,
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(state): Extension<ReadProgressState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
     body: Bytes,
 ) -> Response {
+    let auth_db = &app.auth_db;
     if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
-    let supports_persisted_flow = persisted_book_exists(auth_db.database_file.as_path(), &book_id)
+    let supports_persisted_flow = persisted_book_exists_from_services(&app, &book_id)
         .await
         .unwrap_or(false);
 
@@ -85,13 +88,11 @@ pub async fn book_read_progress(
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    if let Err(response) =
-        load_accessible_book_media(auth_db.database_file.as_path(), &book_id, &user).await
-    {
+    if let Err(response) = load_accessible_book_media(&app, &book_id, &user).await {
         return response;
     }
     let persisted_user_id = Some(user_id(&user).to_string());
-    let page_count = match load_book_page_count(auth_db.database_file.as_path(), &book_id).await {
+    let page_count = match load_book_page_count_from_services(&app, &book_id).await {
         Ok(Some(value)) if value > 0 => value,
         Ok(_) => 1,
         Err(error) => return internal_error_response(error),
@@ -111,8 +112,7 @@ pub async fn book_read_progress(
 
     if completed_true {
         return persist_and_record_read_progress(
-            auth_db.database_file.as_path(),
-            &state,
+            &app,
             &token,
             &book_id,
             persisted_user_id.as_deref(),
@@ -147,15 +147,13 @@ pub async fn book_read_progress(
         return invalid_read_progress_payload();
     }
 
-    let locator =
-        match load_epub_locator_for_page(auth_db.database_file.as_path(), &book_id, page).await {
-            Ok(locator) => locator,
-            Err(error) => return internal_error_response(error),
-        };
+    let locator = match load_epub_locator_for_page(&app, &book_id, page).await {
+        Ok(locator) => locator,
+        Err(error) => return internal_error_response(error),
+    };
 
     persist_and_record_read_progress(
-        auth_db.database_file.as_path(),
-        &state,
+        &app,
         &token,
         &book_id,
         persisted_user_id.as_deref(),
@@ -167,16 +165,16 @@ pub async fn book_read_progress(
 }
 
 pub async fn book_read_progress_delete(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(state): Extension<ReadProgressState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
+    let auth_db = &app.auth_db;
     if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
-    let supports_persisted_flow = persisted_book_exists(auth_db.database_file.as_path(), &book_id)
+    let supports_persisted_flow = persisted_book_exists_from_services(&app, &book_id)
         .await
         .unwrap_or(false);
 
@@ -188,14 +186,13 @@ pub async fn book_read_progress_delete(
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    if let Err(response) =
-        load_accessible_book_media(auth_db.database_file.as_path(), &book_id, &user).await
-    {
+    if let Err(response) = load_accessible_book_media(&app, &book_id, &user).await {
         return response;
     }
     let token = request_progress_token(&headers, &user);
     {
-        let mut all_progress = state
+        let mut all_progress = app
+            .read_progress
             .progress_by_token
             .lock()
             .expect("read-progress state lock should not be poisoned");
@@ -206,7 +203,7 @@ pub async fn book_read_progress_delete(
     }
 
     if supports_persisted_flow
-        && delete_persisted_read_progress(auth_db.database_file.as_path(), &book_id, user_id(&user))
+        && delete_persisted_read_progress_from_services(&app, &book_id, user_id(&user))
             .await
             .is_err()
     {
@@ -217,16 +214,17 @@ pub async fn book_read_progress_delete(
 }
 
 pub async fn book_progression(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
     body: Bytes,
 ) -> Response {
+    let auth_db = &app.auth_db;
     if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
-    if !persisted_book_exists(auth_db.database_file.as_path(), &book_id)
+    if !persisted_book_exists_from_services(&app, &book_id)
         .await
         .unwrap_or(false)
     {
@@ -237,15 +235,18 @@ pub async fn book_progression(
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let Some(media) =
-        (match load_persisted_book_media(auth_db.database_file.as_path(), &book_id).await {
-            Ok(media) => media,
-            Err(error) => return internal_error_response(error),
-        })
-    else {
+    let Some(media) = (match app
+        .services
+        .media_assets
+        .load_persisted_book_media(app.auth_db.database_file.clone(), book_id.clone())
+        .await
+    {
+        Ok(media) => media,
+        Err(error) => return internal_error_response(error),
+    }) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    if !user_can_access_book_media(auth_db.database_file.as_path(), &book_id, &user, &media).await {
+    if !user_can_access_book_media(&app, &book_id, &user, &media).await {
         return StatusCode::FORBIDDEN.into_response();
     }
 
@@ -279,13 +280,10 @@ pub async fn book_progression(
         let Some(locator) = locator else {
             return invalid_progression_payload();
         };
-        let normalized_locator =
-            match normalize_book_epub_locator(auth_db.database_file.as_path(), &book_id, locator)
-                .await
-            {
-                Ok(locator) => locator,
-                Err(response) => return response,
-            };
+        let normalized_locator = match normalize_book_epub_locator(&app, &book_id, locator).await {
+            Ok(locator) => locator,
+            Err(response) => return response,
+        };
         let Some(progression) = locator_progression(&normalized_locator) else {
             return invalid_progression_payload();
         };
@@ -306,17 +304,11 @@ pub async fn book_progression(
         return invalid_progression_payload();
     }
 
-    let stale_progression = match progression_is_older_than_existing(
-        auth_db.database_file.as_path(),
-        &book_id,
-        user_id(&user),
-        modified,
-    )
-    .await
-    {
-        Ok(stale) => stale,
-        Err(error) => return internal_error_response(error),
-    };
+    let stale_progression =
+        match progression_is_older_than_existing(&app, &book_id, user_id(&user), modified).await {
+            Ok(stale) => stale,
+            Err(error) => return internal_error_response(error),
+        };
     if stale_progression {
         return (
             StatusCode::CONFLICT,
@@ -325,18 +317,21 @@ pub async fn book_progression(
             .into_response();
     }
 
-    match persist_book_progression(
-        auth_db.database_file.as_path(),
-        &book_id,
-        user_id(&user),
-        progression,
-        !is_epub,
-        Some(modified.to_string()),
-        Some(device_id.to_string()),
-        Some(device_name.to_string()),
-        locator_to_persist,
-    )
-    .await
+    match app
+        .services
+        .media_assets
+        .persist_book_progression(
+            app.auth_db.database_file.clone(),
+            book_id.clone(),
+            user_id(&user).to_string(),
+            progression,
+            !is_epub,
+            Some(modified.to_string()),
+            Some(device_id.to_string()),
+            Some(device_name.to_string()),
+            locator_to_persist,
+        )
+        .await
     {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => internal_error_response(error),
@@ -344,16 +339,16 @@ pub async fn book_progression(
 }
 
 pub async fn book_progression_get(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(_profile): Extension<RuntimeProfile>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
+    let auth_db = &app.auth_db;
     if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
         return response;
     }
 
-    if !persisted_book_exists(auth_db.database_file.as_path(), &book_id)
+    if !persisted_book_exists_from_services(&app, &book_id)
         .await
         .unwrap_or(false)
     {
@@ -364,19 +359,22 @@ pub async fn book_progression_get(
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let Some(media) =
-        (match load_persisted_book_media(auth_db.database_file.as_path(), &book_id).await {
-            Ok(media) => media,
-            Err(error) => return internal_error_response(error),
-        })
-    else {
+    let Some(media) = (match app
+        .services
+        .media_assets
+        .load_persisted_book_media(app.auth_db.database_file.clone(), book_id.clone())
+        .await
+    {
+        Ok(media) => media,
+        Err(error) => return internal_error_response(error),
+    }) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    if !user_can_access_book_media(auth_db.database_file.as_path(), &book_id, &user, &media).await {
+    if !user_can_access_book_media(&app, &book_id, &user, &media).await {
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    match load_book_progression(auth_db.database_file.as_path(), &book_id, user_id(&user)).await {
+    match load_book_progression_from_services(&app, &book_id, user_id(&user)).await {
         Ok(Some(progression)) => (
             [(
                 header::CONTENT_TYPE,

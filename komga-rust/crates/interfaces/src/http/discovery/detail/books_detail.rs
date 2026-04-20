@@ -1,22 +1,22 @@
 use super::*;
+use crate::http::state::HttpAppState;
 
 pub async fn book_detail(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    if auth_db.database_file.exists() {
-        let Some(resource) =
-            (match load_persisted_book_resource(auth_db.database_file.as_path(), &book_id).await {
-                Ok(resource) => resource,
-                Err(error) => return internal_error_response(error),
-            })
-        else {
+    if app.auth_db.database_file.exists() {
+        let Some(resource) = (match load_persisted_book_resource(&app, &book_id).await {
+            Ok(resource) => resource,
+            Err(error) => return internal_error_response(error),
+        }) else {
             return StatusCode::NOT_FOUND.into_response();
         };
 
@@ -28,11 +28,12 @@ pub async fn book_detail(
             }),
         };
 
-        let detail_query_context = match auth_state
+        let detail_query_context = match app
+            .discovery_auth
             .resolve_detail_query_context_with_persistence(
                 &headers,
                 &detail_context,
-                auth_db.database_file.as_path(),
+                app.auth_db.database_file.as_path(),
             )
             .await
         {
@@ -42,7 +43,7 @@ pub async fn book_detail(
 
         let is_admin = detail_query_context.is_admin;
         return match load_persisted_book_detail(
-            auth_db.database_file.as_path(),
+            &app,
             &book_id,
             detail_query_context.user_id.as_deref(),
         )
@@ -57,25 +58,23 @@ pub async fn book_detail(
 }
 
 pub async fn book_sibling_previous(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    if auth_db.database_file.exists() {
-        let book_id =
-            resolve_book_id_for_persisted(auth_db.database_file.as_path(), &book_id).await;
+    if app.auth_db.database_file.exists() {
+        let book_id = resolve_book_id_for_persisted(&app, &book_id).await;
 
-        let Some(resource) =
-            (match load_persisted_book_resource(auth_db.database_file.as_path(), &book_id).await {
-                Ok(resource) => resource,
-                Err(error) => return internal_error_response(error),
-            })
-        else {
+        let Some(resource) = (match load_persisted_book_resource(&app, &book_id).await {
+            Ok(resource) => resource,
+            Err(error) => return internal_error_response(error),
+        }) else {
             return StatusCode::NOT_FOUND.into_response();
         };
 
@@ -87,11 +86,12 @@ pub async fn book_sibling_previous(
             }),
         };
 
-        let detail_query_context = match auth_state
+        let detail_query_context = match app
+            .discovery_auth
             .resolve_detail_query_context_with_persistence(
                 &headers,
                 &detail_context,
-                auth_db.database_file.as_path(),
+                app.auth_db.database_file.as_path(),
             )
             .await
         {
@@ -101,7 +101,7 @@ pub async fn book_sibling_previous(
         let is_admin = detail_query_context.is_admin;
 
         return match load_persisted_book_sibling_detail(
-            auth_db.database_file.as_path(),
+            &app,
             &book_id,
             PersistedBookSiblingDirection::Previous,
             detail_query_context.user_id.as_deref(),
@@ -117,25 +117,23 @@ pub async fn book_sibling_previous(
 }
 
 pub async fn book_sibling_next(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    if auth_db.database_file.exists() {
-        let book_id =
-            resolve_book_id_for_persisted(auth_db.database_file.as_path(), &book_id).await;
+    if app.auth_db.database_file.exists() {
+        let book_id = resolve_book_id_for_persisted(&app, &book_id).await;
 
-        let Some(resource) =
-            (match load_persisted_book_resource(auth_db.database_file.as_path(), &book_id).await {
-                Ok(resource) => resource,
-                Err(error) => return internal_error_response(error),
-            })
-        else {
+        let Some(resource) = (match load_persisted_book_resource(&app, &book_id).await {
+            Ok(resource) => resource,
+            Err(error) => return internal_error_response(error),
+        }) else {
             return StatusCode::NOT_FOUND.into_response();
         };
 
@@ -147,11 +145,12 @@ pub async fn book_sibling_next(
             }),
         };
 
-        let detail_query_context = match auth_state
+        let detail_query_context = match app
+            .discovery_auth
             .resolve_detail_query_context_with_persistence(
                 &headers,
                 &detail_context,
-                auth_db.database_file.as_path(),
+                app.auth_db.database_file.as_path(),
             )
             .await
         {
@@ -161,7 +160,7 @@ pub async fn book_sibling_next(
         let is_admin = detail_query_context.is_admin;
 
         return match load_persisted_book_sibling_detail(
-            auth_db.database_file.as_path(),
+            &app,
             &book_id,
             PersistedBookSiblingDirection::Next,
             detail_query_context.user_id.as_deref(),
@@ -177,25 +176,23 @@ pub async fn book_sibling_next(
 }
 
 pub async fn book_readlists(
-    Extension(auth_db): Extension<AuthDatabaseState>,
-    Extension(auth_state): Extension<DiscoveryAuthState>,
+    Extension(app): Extension<HttpAppState>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) =
+        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
+    {
         return response;
     }
 
-    if auth_db.database_file.exists() {
-        let book_id =
-            resolve_book_id_for_persisted(auth_db.database_file.as_path(), &book_id).await;
+    if app.auth_db.database_file.exists() {
+        let book_id = resolve_book_id_for_persisted(&app, &book_id).await;
 
-        let Some(resource) =
-            (match load_persisted_book_resource(auth_db.database_file.as_path(), &book_id).await {
-                Ok(resource) => resource,
-                Err(error) => return internal_error_response(error),
-            })
-        else {
+        let Some(resource) = (match load_persisted_book_resource(&app, &book_id).await {
+            Ok(resource) => resource,
+            Err(error) => return internal_error_response(error),
+        }) else {
             return StatusCode::NOT_FOUND.into_response();
         };
 
@@ -207,11 +204,12 @@ pub async fn book_readlists(
             }),
         };
 
-        let detail_query_context = match auth_state
+        let detail_query_context = match app
+            .discovery_auth
             .resolve_detail_query_context_with_persistence(
                 &headers,
                 &detail_context,
-                auth_db.database_file.as_path(),
+                app.auth_db.database_file.as_path(),
             )
             .await
         {
@@ -220,7 +218,7 @@ pub async fn book_readlists(
         };
 
         let mut readlists = match load_persisted_readlists(
-            auth_db.database_file.as_path(),
+            &app,
             detail_query_context.authorized_library_ids.as_deref(),
         )
         .await
@@ -251,8 +249,7 @@ pub async fn book_readlists(
         let mut visible_readlists = Vec::with_capacity(readlists.len());
         for mut readlist in readlists {
             let Some(visible_books) = (match load_visible_persisted_readlist_books(
-                auth_db.database_file.as_path(),
-                &auth_state,
+                &app,
                 &headers,
                 &readlist.id,
                 &detail_query,

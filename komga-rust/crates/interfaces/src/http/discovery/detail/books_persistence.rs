@@ -1,6 +1,5 @@
 use super::*;
-
-use crate::discovery_detail_access::books as books_access;
+use crate::http::state::HttpAppState;
 
 #[derive(Clone)]
 pub struct PersistedBookResource {
@@ -15,10 +14,7 @@ pub enum PersistedBookSiblingDirection {
     Next,
 }
 
-pub async fn resolve_book_id_for_persisted(
-    database_file: &FsPath,
-    requested_book_id: &str,
-) -> String {
+pub async fn resolve_book_id_for_persisted(app: &HttpAppState, requested_book_id: &str) -> String {
     let Some(index) = requested_book_id
         .strip_prefix("book-")
         .and_then(|value| value.parse::<usize>().ok())
@@ -31,23 +27,31 @@ pub async fn resolve_book_id_for_persisted(
     }
 
     if matches!(
-        load_persisted_book_resource(database_file, requested_book_id).await,
+        load_persisted_book_resource(app, requested_book_id).await,
         Ok(Some(_))
     ) {
         return requested_book_id.to_string();
     }
 
-    match books_access::load_book_id_by_sorted_position(database_file, index).await {
+    match app
+        .services
+        .discovery_detail
+        .load_book_id_by_sorted_position(app.auth_db.database_file.clone(), index)
+        .await
+    {
         Ok(Some(book_id)) => book_id,
         _ => requested_book_id.to_string(),
     }
 }
 
 pub async fn load_persisted_book_resource(
-    database_file: &FsPath,
+    app: &HttpAppState,
     book_id: &str,
 ) -> Result<Option<PersistedBookResource>, String> {
-    let resource = books_access::load_persisted_book_resource(database_file, book_id)
+    let resource = app
+        .services
+        .discovery_detail
+        .load_persisted_book_resource(app.auth_db.database_file.clone(), book_id.to_string())
         .await?
         .map(|row| PersistedBookResource {
             library_id: row.library_id,
@@ -58,11 +62,18 @@ pub async fn load_persisted_book_resource(
 }
 
 pub(super) async fn load_persisted_book_detail(
-    database_file: &FsPath,
+    app: &HttpAppState,
     book_id: &str,
     user_id: Option<&str>,
 ) -> Result<Option<BookDetailReadModel>, String> {
-    let model = books_access::load_persisted_book_detail(database_file, book_id, user_id)
+    let model = app
+        .services
+        .discovery_detail
+        .load_persisted_book_detail(
+            app.auth_db.database_file.clone(),
+            book_id.to_string(),
+            user_id.map(str::to_string),
+        )
         .await?
         .map(|row| BookDetailReadModel {
             id: row.id,
@@ -120,10 +131,10 @@ pub(super) async fn load_persisted_book_detail(
 }
 
 pub async fn load_persisted_book_series_id(
-    database_file: &FsPath,
+    app: &HttpAppState,
     book_id: &str,
 ) -> Result<Option<String>, String> {
-    Ok(load_persisted_book_detail(database_file, book_id, None)
+    Ok(load_persisted_book_detail(app, book_id, None)
         .await?
         .map(|book| book.series_id))
 }
@@ -159,27 +170,30 @@ fn parse_metadata_links(raw: &str) -> Vec<BookMetadataLinkReadModel> {
 }
 
 pub(super) async fn load_persisted_book_sibling_detail(
-    database_file: &FsPath,
+    app: &HttpAppState,
     book_id: &str,
     direction: PersistedBookSiblingDirection,
     user_id: Option<&str>,
 ) -> Result<Option<BookDetailReadModel>, String> {
     let direction = match direction {
-        PersistedBookSiblingDirection::Previous => {
-            books_access::PersistedBookSiblingDirectionRecord::Previous
-        }
-        PersistedBookSiblingDirection::Next => {
-            books_access::PersistedBookSiblingDirectionRecord::Next
-        }
+        PersistedBookSiblingDirection::Previous => PersistedBookSiblingDirectionRecord::Previous,
+        PersistedBookSiblingDirection::Next => PersistedBookSiblingDirectionRecord::Next,
     };
 
-    let Some(sibling_id) =
-        books_access::load_persisted_book_sibling_id(database_file, book_id, direction).await?
+    let Some(sibling_id) = app
+        .services
+        .discovery_detail
+        .load_persisted_book_sibling_id(
+            app.auth_db.database_file.clone(),
+            book_id.to_string(),
+            direction,
+        )
+        .await?
     else {
         return Ok(None);
     };
 
-    load_persisted_book_detail(database_file, &sibling_id, user_id).await
+    load_persisted_book_detail(app, &sibling_id, user_id).await
 }
 
 #[cfg(test)]

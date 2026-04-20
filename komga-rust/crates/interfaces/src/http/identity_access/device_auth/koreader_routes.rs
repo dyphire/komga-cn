@@ -1,7 +1,4 @@
 use super::*;
-use crate::media_assets_runtime_access::facade::{
-    decode_epub_positions, load_persisted_epub_extension_blob,
-};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const KOREADER_PROGRESS_PATH: &str = "/koreader/syncs/progress";
@@ -57,8 +54,36 @@ fn koreader_media_profile(media_type: &str) -> Option<KoreaderMediaProfile> {
     }
 }
 
+async fn load_koreader_book_target(
+    app: &HttpAppState,
+    book_hash: &str,
+) -> Result<Option<crate::runtime_identity_access::KoreaderBookTarget>, KoreaderBookLookupError> {
+    app.services
+        .runtime_identity
+        .load_koreader_book_target(
+            app.operational.runtime.database_file.clone(),
+            book_hash.to_string(),
+        )
+        .await
+}
+
+async fn load_read_progress(
+    app: &HttpAppState,
+    book_id: &str,
+    user_id: &str,
+) -> Result<Option<PersistedReadProgressRecord>, sqlx::Error> {
+    app.services
+        .runtime_identity
+        .load_read_progress(
+            app.operational.runtime.database_file.clone(),
+            book_id.to_string(),
+            user_id.to_string(),
+        )
+        .await
+}
+
 pub async fn koreader_user_create(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
 ) -> Response {
@@ -66,7 +91,7 @@ pub async fn koreader_user_create(
     if let Err(status) = required_koreader_user(
         &headers,
         connection_info.remote_addr(),
-        auth_db.database_file.as_path(),
+        app.auth_db.database_file.as_path(),
     )
     .await
     {
@@ -90,7 +115,7 @@ pub async fn koreader_user_create(
 }
 
 pub async fn koreader_user_auth(
-    Extension(auth_db): Extension<AuthDatabaseState>,
+    Extension(app): Extension<HttpAppState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
 ) -> Response {
@@ -98,7 +123,7 @@ pub async fn koreader_user_auth(
     match required_koreader_user(
         &headers,
         connection_info.remote_addr(),
-        auth_db.database_file.as_path(),
+        app.auth_db.database_file.as_path(),
     )
     .await
     {
@@ -118,7 +143,7 @@ pub async fn koreader_user_auth(
 }
 
 pub async fn koreader_get_progress(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     Path(book_hash): Path<String>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
@@ -126,7 +151,7 @@ pub async fn koreader_get_progress(
     let user_id_value = match required_koreader_user_id(
         &headers,
         connection_info.remote_addr(),
-        state.runtime.database_file.as_path(),
+        app.operational.runtime.database_file.as_path(),
     )
     .await
     {
@@ -134,35 +159,28 @@ pub async fn koreader_get_progress(
         Err(status) => return status.into_response(),
     };
 
-    let target =
-        match load_koreader_book_target(state.runtime.database_file.as_path(), &book_hash).await {
-            Ok(Some(target)) => target,
-            Ok(None) => {
-                return koreader_progress_error_response(
-                    StatusCode::NOT_FOUND,
-                    "Book not found",
-                    &format!("{KOREADER_PROGRESS_PATH_PREFIX}{book_hash}"),
-                );
-            }
-            Err(KoreaderBookLookupError::Conflict) => {
-                return koreader_progress_error_response(
-                    StatusCode::CONFLICT,
-                    "More than 1 book found with the same hash",
-                    &format!("{KOREADER_PROGRESS_PATH_PREFIX}{book_hash}"),
-                );
-            }
-            Err(KoreaderBookLookupError::Persistence) => {
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-            }
-        };
+    let target = match load_koreader_book_target(&app, &book_hash).await {
+        Ok(Some(target)) => target,
+        Ok(None) => {
+            return koreader_progress_error_response(
+                StatusCode::NOT_FOUND,
+                "Book not found",
+                &format!("{KOREADER_PROGRESS_PATH_PREFIX}{book_hash}"),
+            );
+        }
+        Err(KoreaderBookLookupError::Conflict) => {
+            return koreader_progress_error_response(
+                StatusCode::CONFLICT,
+                "More than 1 book found with the same hash",
+                &format!("{KOREADER_PROGRESS_PATH_PREFIX}{book_hash}"),
+            );
+        }
+        Err(KoreaderBookLookupError::Persistence) => {
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
 
-    let Some(progress) = (match load_read_progress(
-        state.runtime.database_file.as_path(),
-        &target.id,
-        &user_id_value,
-    )
-    .await
-    {
+    let Some(progress) = (match load_read_progress(&app, &target.id, &user_id_value).await {
         Ok(progress) => progress,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }) else {
@@ -182,7 +200,8 @@ pub async fn koreader_get_progress(
             (progress.page.max(0) as f64 / target.page_count.max(1) as f64).clamp(0.0, 1.0)
         });
     let progress_value = match koreader_epub_progress_value(
-        state.runtime.database_file.as_path(),
+        &app,
+        app.operational.runtime.database_file.as_path(),
         &target.id,
         &locator,
     )
@@ -214,7 +233,8 @@ pub async fn koreader_get_progress(
 }
 
 async fn koreader_epub_progress_value(
-    database_file: &FsPath,
+    app: &HttpAppState,
+    _database_file: &FsPath,
     book_id: &str,
     locator: &Value,
 ) -> Option<String> {
@@ -223,10 +243,16 @@ async fn koreader_epub_progress_value(
         return None;
     }
 
-    let (_extension_class, blob) = load_persisted_epub_extension_blob(database_file, book_id)
+    let (_extension_class, blob) = app
+        .services
+        .media_assets
+        .load_persisted_epub_extension_blob(
+            app.operational.runtime.database_file.clone(),
+            book_id.to_string(),
+        )
         .await
         .ok()??;
-    let positions = decode_epub_positions(&blob).ok()?;
+    let positions = app.services.media_assets.decode_epub_positions(blob).ok()?;
     let unique_hrefs = dedup_epub_hrefs(&positions);
 
     unique_hrefs
@@ -280,7 +306,7 @@ fn koreader_epub_locator(href: &str, matched_position: &Value) -> Value {
 }
 
 pub async fn koreader_put_progress(
-    Extension(state): Extension<OperationalState>,
+    Extension(app): Extension<HttpAppState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     body: Bytes,
@@ -290,7 +316,7 @@ pub async fn koreader_put_progress(
     let user_id_value = match required_koreader_user_id(
         &headers,
         connection_info.remote_addr(),
-        state.runtime.database_file.as_path(),
+        app.operational.runtime.database_file.as_path(),
     )
     .await
     {
@@ -302,12 +328,7 @@ pub async fn koreader_put_progress(
         return StatusCode::BAD_REQUEST.into_response();
     };
 
-    let target = match load_koreader_book_target(
-        state.runtime.database_file.as_path(),
-        payload.document.as_str(),
-    )
-    .await
-    {
+    let target = match load_koreader_book_target(&app, payload.document.as_str()).await {
         Ok(Some(target)) => target,
         Ok(None) => {
             return koreader_progress_error_response(
@@ -329,109 +350,116 @@ pub async fn koreader_put_progress(
         }
     };
 
-    let (progression, use_locator_position_for_page, locator) = match koreader_media_profile(target.media_type.as_str()) {
-        Some(KoreaderMediaProfile::Epub) => {
-            match load_persisted_epub_extension_blob(
-                state.runtime.database_file.as_path(),
-                &target.id,
-            )
-            .await
-            {
-                Ok(Some((_extension_class, blob))) => {
-                    let Ok(positions) = decode_epub_positions(&blob) else {
-                        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-                    };
-                    let unique_hrefs = dedup_epub_hrefs(&positions);
-                    let Some(resource_index) =
-                        parse_koreader_epub_resource_index(payload.progress.as_str())
-                    else {
-                        return koreader_progress_error_response(
-                            StatusCode::BAD_REQUEST,
-                            &format!(
-                                "Could not get Epub resource index from progress: {}",
-                                payload.progress
-                            ),
-                            KOREADER_PROGRESS_PATH,
-                        );
-                    };
-                    let Some(href) = unique_hrefs.get(resource_index) else {
-                        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-                    };
-                    let Some(matched_position) = positions
-                        .into_iter()
-                        .find(|position| position.get("href").and_then(Value::as_str) == Some(href.as_str()))
-                    else {
-                        return koreader_progress_error_response(
-                            StatusCode::BAD_REQUEST,
-                            &format!(
-                                "Could not get Epub resource index from progress: {}",
-                                payload.progress
-                            ),
-                            KOREADER_PROGRESS_PATH,
-                        );
-                    };
-                    (
-                        0.0,
-                        false,
-                        koreader_epub_locator(href.as_str(), &matched_position),
+    let (progression, use_locator_position_for_page, locator) =
+        match koreader_media_profile(target.media_type.as_str()) {
+            Some(KoreaderMediaProfile::Epub) => {
+                match app
+                    .services
+                    .media_assets
+                    .load_persisted_epub_extension_blob(
+                        app.operational.runtime.database_file.clone(),
+                        target.id.clone(),
                     )
+                    .await
+                {
+                    Ok(Some((_extension_class, blob))) => {
+                        let Ok(positions) = app.services.media_assets.decode_epub_positions(blob)
+                        else {
+                            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                        };
+                        let unique_hrefs = dedup_epub_hrefs(&positions);
+                        let Some(resource_index) =
+                            parse_koreader_epub_resource_index(payload.progress.as_str())
+                        else {
+                            return koreader_progress_error_response(
+                                StatusCode::BAD_REQUEST,
+                                &format!(
+                                    "Could not get Epub resource index from progress: {}",
+                                    payload.progress
+                                ),
+                                KOREADER_PROGRESS_PATH,
+                            );
+                        };
+                        let Some(href) = unique_hrefs.get(resource_index) else {
+                            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                        };
+                        let Some(matched_position) = positions.into_iter().find(|position| {
+                            position.get("href").and_then(Value::as_str) == Some(href.as_str())
+                        }) else {
+                            return koreader_progress_error_response(
+                                StatusCode::BAD_REQUEST,
+                                &format!(
+                                    "Could not get Epub resource index from progress: {}",
+                                    payload.progress
+                                ),
+                                KOREADER_PROGRESS_PATH,
+                            );
+                        };
+                        (
+                            0.0,
+                            false,
+                            koreader_epub_locator(href.as_str(), &matched_position),
+                        )
+                    }
+                    Ok(None) => {
+                        return koreader_progress_error_response(
+                            StatusCode::BAD_REQUEST,
+                            "Epub extension not found",
+                            KOREADER_PROGRESS_PATH,
+                        );
+                    }
+                    Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
                 }
-                Ok(None) => {
-                    return koreader_progress_error_response(
-                        StatusCode::BAD_REQUEST,
-                        "Epub extension not found",
-                        KOREADER_PROGRESS_PATH,
-                    );
+            }
+            Some(KoreaderMediaProfile::Visual) => {
+                let Some(page) = parse_koreader_progress_page(
+                    payload.progress.as_str(),
+                    target.page_count,
+                    payload.percentage,
+                )
+                .map(|value| value as i64) else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                if !(1..=target.page_count.max(1) as i64).contains(&page) {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
                 }
-                Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+                (
+                    page as f64 / target.page_count.max(1) as f64,
+                    true,
+                    json!({
+                        "koreaderProgress": payload.progress,
+                        "locations": {
+                            "position": page,
+                            "totalProgression": page as f64 / target.page_count.max(1) as f64,
+                        },
+                    }),
+                )
             }
-        }
-        Some(KoreaderMediaProfile::Visual) => {
-            let Some(page) = parse_koreader_progress_page(
-                payload.progress.as_str(),
-                target.page_count,
-                payload.percentage,
-            )
-            .map(|value| value as i64) else {
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-            };
-            if !(1..=target.page_count.max(1) as i64).contains(&page) {
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            None => {
+                return koreader_progress_error_response(
+                    StatusCode::NOT_FOUND,
+                    "Book has no media profile",
+                    KOREADER_PROGRESS_PATH,
+                );
             }
-            (
-                page as f64 / target.page_count.max(1) as f64,
-                true,
-                json!({
-                    "koreaderProgress": payload.progress,
-                    "locations": {
-                        "position": page,
-                        "totalProgression": page as f64 / target.page_count.max(1) as f64,
-                    },
-                }),
-            )
-        }
-        None => {
-            return koreader_progress_error_response(
-                StatusCode::NOT_FOUND,
-                "Book has no media profile",
-                KOREADER_PROGRESS_PATH,
-            );
-        }
-    };
+        };
 
-    if persist_book_progression(
-        state.runtime.database_file.as_path(),
-        &target.id,
-        &user_id_value,
-        progression,
-        use_locator_position_for_page,
-        Some(now_sync_marker()),
-        Some(payload.device_id.clone()),
-        Some(payload.device.clone()),
-        Some(locator),
-    )
-    .await
-    .is_err()
+    if app
+        .services
+        .media_assets
+        .persist_book_progression(
+            app.operational.runtime.database_file.clone(),
+            target.id.clone(),
+            user_id_value.clone(),
+            progression,
+            use_locator_position_for_page,
+            Some(now_sync_marker()),
+            Some(payload.device_id.clone()),
+            Some(payload.device.clone()),
+            Some(locator),
+        )
+        .await
+        .is_err()
     {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }

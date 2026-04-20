@@ -119,12 +119,12 @@ impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
             self.database_file.as_path(),
             library_id,
         )
-            .map(|rows| {
-                rows.into_iter()
-                    .map(|row| (row.book_id, row.series_id))
-                    .collect()
-            })
-            .map_err(|error| format!("load library mismatched extension books: {error}"))
+        .map(|rows| {
+            rows.into_iter()
+                .map(|row| (row.book_id, row.series_id))
+                .collect()
+        })
+        .map_err(|error| format!("load library mismatched extension books: {error}"))
     }
 
     async fn library_book_ids(&self, library_id: &str) -> Result<Option<Vec<String>>, String> {
