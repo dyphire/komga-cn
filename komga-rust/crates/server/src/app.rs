@@ -4,7 +4,7 @@ use tokio::net::TcpListener;
 
 use crate::composition::start_server;
 use komga_config::env_config::RuntimeConfig;
-use komga_interfaces::http::state::{RuntimeProfile, StartupTimingState};
+use komga_interfaces::state::{RuntimeProfile, StartupTimingState};
 
 pub fn build_router() -> Router {
     let config = RuntimeConfig::from_env().expect("invalid runtime config");
@@ -80,5 +80,5 @@ pub async fn shutdown_runtime_for_contract() {
 }
 
 pub fn invalidate_sessions_for_user(user_id: &str) {
-    komga_interfaces::http::identity_access::auth::invalidate_user_sessions(user_id)
+    komga_interfaces::identity_access::auth::invalidate_user_sessions(user_id)
 }

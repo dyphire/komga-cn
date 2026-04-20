@@ -6,7 +6,7 @@ use crate::composition::start_server;
 use komga_config::env_config::RuntimeConfig;
 use komga_config::profile::{RuntimeMode, RuntimeProfile};
 use komga_config::writer_ownership::{WriterDecision, WriterKind};
-use komga_interfaces::http::state::StartupTimingState;
+use komga_interfaces::state::StartupTimingState;
 
 pub mod admin_cli;
 pub mod noclaim_bootstrap;

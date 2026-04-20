@@ -3,12 +3,9 @@ use std::collections::{HashMap, HashSet};
 
 use async_trait::async_trait;
 use komga_infrastructure::search::index_lifecycle::{SearchEntityType, SearchQueryLifecycle};
-use komga_interfaces::http::state::{OpdsCatalogService, OpdsPersistedService};
-use komga_interfaces::opds_catalog_access::{
-    BrowsePublisherEntry, BrowseSeriesNavigationEntry, OpdsBookFeedEntry, OpdsReadlistEntry,
-    OpdsSeriesEntry,
-};
-use komga_interfaces::opds_persisted_access::{
+use komga_interfaces::state::{
+    BrowsePublisherEntry, BrowseSeriesNavigationEntry, OpdsBookAuthorEntry, OpdsBookFeedEntry,
+    OpdsCatalogService, OpdsPersistedService, OpdsReadlistEntry, OpdsSeriesEntry,
     PersistedBookFeedRecord, PersistedBookSearchRecord, PersistedLibraryRecord,
     PersistedNamedRecord, PersistedReadlistBookRecord, PersistedReadlistRecord,
     PersistedSeriesBookRecord, PersistedSeriesRecord, PersistedSeriesSearchRecord,
@@ -530,12 +527,10 @@ fn map_opds_book_feed_entry(
         authors: row
             .authors
             .into_iter()
-            .map(
-                |author| komga_interfaces::opds_catalog_access::OpdsBookAuthorEntry {
-                    name: author.name,
-                    role: author.role,
-                },
-            )
+            .map(|author| OpdsBookAuthorEntry {
+                name: author.name,
+                role: author.role,
+            })
             .collect(),
         tags: row.tags,
         file_name: row.file_name,

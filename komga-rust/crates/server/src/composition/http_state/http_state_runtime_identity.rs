@@ -7,9 +7,8 @@ use komga_application::identity_access::{
 use komga_infrastructure::auth::runtime_identity_access as infrastructure_auth_runtime_identity;
 use komga_infrastructure::auth::session_store::RememberMeRuntimeSettings;
 use komga_infrastructure::runtime_identity_access as infrastructure_runtime_identity_access;
-use komga_interfaces::http::state::IdentityService;
-use komga_interfaces::runtime_identity_access::{
-    AuthenticationActivityWriteInput, CreateAuthUserInput,
+use komga_interfaces::state::{
+    AuthenticationActivityWriteInput, CreateAuthUserInput, IdentityService,
     KoboMetadataRecord as InterfacesKoboMetadataRecord,
     KoreaderBookLookupError as InterfacesKoreaderBookLookupError,
     KoreaderBookTarget as InterfacesKoreaderBookTarget,

@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 
 use komga_infrastructure::search::index_lifecycle::SearchQueryLifecycle;
-use komga_interfaces::discovery_persisted_access::PersistedDiscoveryService;
+use komga_interfaces::state::PersistedDiscoveryService;
 
 fn search_ids_or_empty(
     index_dir: &std::path::Path,

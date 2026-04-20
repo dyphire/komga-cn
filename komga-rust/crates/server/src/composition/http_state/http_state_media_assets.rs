@@ -5,8 +5,9 @@ use komga_infrastructure::filesystem::media_access::epub as infrastructure_epub;
 use komga_infrastructure::filesystem::media_access::hashes as infrastructure_hashes;
 use komga_infrastructure::filesystem::media_access::page_content as infrastructure_page_content;
 use komga_infrastructure::filesystem::media_access::read_progress as infrastructure_media_read_progress;
-use komga_interfaces::media_assets_runtime_access::{
-    RuntimeBookMetadataService, RuntimeMediaImportService,
+use komga_interfaces::state::{
+    MediaAssetsService, PersistedMediaFileRecord, RuntimeBookMetadataService,
+    RuntimeMediaImportService,
 };
 use serde_json::Value;
 

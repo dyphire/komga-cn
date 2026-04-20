@@ -3,9 +3,9 @@ use async_trait::async_trait;
 use komga_infrastructure::filesystem::browser as infrastructure_browser;
 use komga_infrastructure::filesystem::fonts as infrastructure_fonts;
 use komga_infrastructure::filesystem::transient_books as infrastructure_transient_books;
-use komga_interfaces::operational_runtime_access::SqlitePoolSnapshot;
-use komga_interfaces::operational_settings_access::{
-    ClaimInitialAdminUserResult, PageHashDeleteTarget, PageHashDeleteTargetPage, PageHashThumbnail,
+use komga_interfaces::state::{
+    ClaimInitialAdminUserResult, OperationalRuntimeService, OperationalSettingsService,
+    PageHashDeleteTarget, PageHashDeleteTargetPage, PageHashThumbnail, SqlitePoolSnapshot,
     TransientBookAnalysis, TransientBookFileMetadata, TransientBookPage,
 };
 use serde_json::Value;

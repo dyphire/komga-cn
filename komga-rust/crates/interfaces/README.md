@@ -5,13 +5,13 @@ Its main job is to map HTTP, OPDS, Kobo, and KOReader requests onto application 
 
 ## Owned module groups
 
-- `http`: the route tree, request parsing, auth extraction, and response mapping for discovery, identity access, library catalog, media assets, OPDS, and operational endpoints.
-- Crate-local runtime access bridges such as `runtime_identity_access`, `media_assets_runtime_access`, `opds_*_access`, and `operational_*_access`: backend contracts and DTOs installed by `komga-server` so transport code can stay focused on mapping.
-- Crate constants re-exported into transport code, such as cache-control and ownership marker headers.
+- Transport modules: `discovery`, `discovery_auth`, `identity_access`, `library_catalog`, `media_assets`, `opds`, and `operational` own request parsing, auth extraction, route wiring, and response mapping.
+- `state` owns transport-facing runtime contracts and DTOs that `komga-server` installs into handlers.
+- Shared transport support lives in `access_log`, `cache`, `helpers`, `request_urls`, `router`, and crate-level header constants.
 
 ## Boundaries
 
-- This crate is transport-focused. It should not become the home for SQLite ownership, filesystem ownership, or search implementation.
-- Business rules and use-case orchestration belong in `komga-application`.
+- This crate maps transport <-> runtime contracts. It does not own SQLite, filesystem, or search implementations.
+- Use-case orchestration belongs in `komga-application`.
 - Concrete adapters belong in `komga-infrastructure`.
-- Bootstrap, backend installation, and runtime composition belong in `komga-server`.
+- Runtime composition belongs in `komga-server`.

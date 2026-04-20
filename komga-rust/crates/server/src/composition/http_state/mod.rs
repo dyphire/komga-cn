@@ -21,49 +21,43 @@ use komga_infrastructure::operational_metrics_access as infrastructure_operation
 use komga_infrastructure::operational_settings_access as infrastructure_operational_settings;
 use komga_infrastructure::page_hashes_access as infrastructure_page_hashes;
 use komga_infrastructure::runtime_identity_access as infrastructure_runtime_identity;
-use komga_interfaces::http::discovery::detail::{
-    ExistingSeriesMetadataRecord, PersistedBookAuthorRecord, PersistedBookDetailRecord,
-    PersistedBookResourceRecord, PersistedBookSiblingDirectionRecord,
-    PersistedCollectionAccessRecord, PersistedComicrackMatchCandidateRecord,
-    PersistedReadProgressRecord as PersistedBookReadProgressRecord, PersistedReadlistBookRecord,
-    PersistedReadlistRecord, PersistedSeriesCollectionRecord, PersistedSeriesDetailRecord,
-    PersistedSeriesResourceRecord, PersistedSeriesRestrictionRecord, SeriesAlternateTitleRecord,
-    SeriesMetadataLinkRecord, SeriesMetadataUpdateRecord, SeriesSummaryRecord,
-};
-use komga_interfaces::http::discovery::persisted::models::{
+use komga_interfaces::discovery::persisted::models::{
     PersistedAuthorEntry, PersistedAuthorsScope, PersistedBookBrowseEntry,
     PersistedBookPosterSummary, PersistedBookSummary, PersistedBookTagsScope,
     PersistedReadProgressSummary, PersistedSeriesSummary, PersistedWebLinkEntry,
 };
-use komga_interfaces::http::discovery_auth::state::DiscoveryAuthState;
-use komga_interfaces::http::state::{
-    AuthDatabaseState, BookImportSseEvent, DiscoveryDetailService, HttpAppState,
-    HttpServerRequestsState, HttpServices, IdentityService, LibraryCatalogService,
-    MediaAssetsService, OAuth2ClientConfig, OperationalBuildMetadata, OperationalRuntimeService,
-    OperationalSettingsService, OperationalState, ReadProgressState, RemoteCacheEntry,
-    RuntimeProfile, RuntimeState, ServerSettingsService, SseOperationalState, StartupTimingState,
-    TaskQueueService, TransientBooksStore,
-};
-use komga_interfaces::media_assets_runtime_access::PersistedMediaFileRecord;
-use komga_interfaces::opds_catalog_access::{
-    BrowsePublisherEntry as InterfacesBrowsePublisherEntry,
-    BrowseSeriesNavigationEntry as InterfacesBrowseSeriesNavigationEntry,
-    OpdsBookFeedEntry as InterfacesOpdsBookFeedEntry,
+use komga_interfaces::discovery_auth::state::DiscoveryAuthState;
+use komga_interfaces::state::{
+    AuthDatabaseState, BookImportSseEvent, BrowsePublisherEntry as InterfacesBrowsePublisherEntry,
+    BrowseSeriesNavigationEntry as InterfacesBrowseSeriesNavigationEntry, DiscoveryDetailService,
+    DiscoveryPersistedReadProgressRecord as PersistedBookReadProgressRecord,
+    DiscoveryPersistedReadlistBookRecord as PersistedReadlistBookRecord,
+    DiscoveryPersistedReadlistRecord as PersistedReadlistRecord, ExistingSeriesMetadataRecord,
+    HttpAppState, HttpServerRequestsState, HttpServices, IdentityService, LibraryCatalogService,
+    OAuth2ClientConfig, OpdsBookFeedEntry as InterfacesOpdsBookFeedEntry,
+    OpdsPersistedBookAuthorRecord as InterfacesPersistedBookAuthorRecord,
     OpdsReadlistEntry as InterfacesOpdsReadlistEntry, OpdsSeriesEntry as InterfacesOpdsSeriesEntry,
-};
-use komga_interfaces::opds_persisted_access::{
-    PersistedBookAuthorRecord as InterfacesPersistedBookAuthorRecord,
-    PersistedBookFeedRecord as InterfacesPersistedBookFeedRecord,
+    OperationalBuildMetadata, OperationalRuntimeService, OperationalSettingsService,
+    OperationalState, PersistedBookAuthorRecord, PersistedBookDetailRecord,
+    PersistedBookFeedRecord as InterfacesPersistedBookFeedRecord, PersistedBookResourceRecord,
     PersistedBookSearchRecord as InterfacesPersistedBookSearchRecord,
+    PersistedBookSiblingDirectionRecord, PersistedCollectionAccessRecord,
+    PersistedComicrackMatchCandidateRecord,
     PersistedLibraryRecord as InterfacesPersistedLibraryRecord,
     PersistedNamedRecord as InterfacesPersistedNamedRecord,
     PersistedReadlistBookRecord as InterfacesPersistedReadlistBookRecord,
     PersistedReadlistRecord as InterfacesPersistedReadlistRecord,
     PersistedSeriesBookRecord as InterfacesPersistedSeriesBookRecord,
-    PersistedSeriesRecord as InterfacesPersistedSeriesRecord,
+    PersistedSeriesCollectionRecord, PersistedSeriesDetailRecord,
+    PersistedSeriesRecord as InterfacesPersistedSeriesRecord, PersistedSeriesResourceRecord,
+    PersistedSeriesRestrictionRecord,
     PersistedSeriesSearchRecord as InterfacesPersistedSeriesSearchRecord,
+    PersistedServerSettings as InterfacesPersistedServerSettings, ReadProgressState,
+    RemoteCacheEntry, RuntimeProfile, RuntimeState, SeriesAlternateTitleRecord,
+    SeriesMetadataLinkRecord, SeriesMetadataUpdateRecord, SeriesSummaryRecord,
+    ServerSettingsService, SseOperationalState, StartupTimingState, TaskQueueService,
+    TransientBooksStore,
 };
-use komga_interfaces::operational_settings_access::PersistedServerSettings as InterfacesPersistedServerSettings;
 use sha2::Digest;
 use tokio::sync::watch;
 
@@ -133,7 +127,6 @@ pub fn compose_http_runtime(
         demo_mode: config.demo_mode,
         session_runtime_key,
         remember_me_runtime_key: remember_me_runtime_key.clone(),
-        runtime_identity: runtime_identity_service.clone(),
     };
     let services = HttpServices {
         library_catalog: Arc::new(

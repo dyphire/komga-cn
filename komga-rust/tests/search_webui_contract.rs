@@ -13,7 +13,7 @@ use support::runtime_router_contract_support::{
     response_helpers::*, user_auth::*,
 };
 
-use komga_interfaces::http::access_log as access_log_impl;
+use komga_interfaces::access_log as access_log_impl;
 
 async fn enrich_book_contract_fixture(paths: &RuntimeDbPaths) {
     let pool = connect_test_pool(paths.main_db.as_path(), 1)

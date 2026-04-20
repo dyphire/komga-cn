@@ -5,7 +5,7 @@ use komga_infrastructure::search::runtime_tasks::{
     sync_entity_delete_from_index, sync_entity_upsert_from_database,
     sync_series_and_oneshot_books_after_metadata_update,
 };
-use komga_interfaces::discovery_persisted_access::PersistedDiscoveryService;
+use komga_interfaces::state::PersistedDiscoveryService;
 
 mod detail_access;
 mod index_dirs;

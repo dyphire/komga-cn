@@ -3,7 +3,7 @@ use komga_infrastructure::search::index_lifecycle::{
     SearchStartupLifecycle, decide_startup_lifecycle, prepare_for_rebuild,
 };
 use komga_infrastructure::sqlite::close_all_shared_pools;
-use komga_interfaces::http::state::StartupTimingState;
+use komga_interfaces::state::StartupTimingState;
 use std::net::SocketAddr;
 use std::time::Duration;
 use std::time::Instant;
@@ -177,7 +177,7 @@ async fn serve_router_with_shutdown_timeout(
 }
 
 fn build_http_router(runtime: HttpRuntimeState) -> Router {
-    komga_interfaces::http::router::build_router(runtime.app)
+    komga_interfaces::router::build_router(runtime.app)
 }
 
 fn finalize_router_startup(
