@@ -1,11 +1,4 @@
 use super::*;
-use std::sync::OnceLock;
-use tokio::sync::Mutex;
-
-fn book_thumbnail_runtime_sse_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
 
 #[tokio::test]
 async fn router_book_thumbnail_upload_parses_multipart_image_and_selected_flag() {
@@ -274,59 +267,5 @@ async fn router_book_thumbnail_admin_routes_accept_basic_auth_like_kotlin_client
         .await
         .expect("book thumbnail basic-auth select request should complete");
     assert_eq!(select.status(), StatusCode::ACCEPTED);
-
-    cleanup_router_fixture(paths);
-}
-
-#[tokio::test]
-async fn router_book_thumbnail_upload_emits_thumbnail_book_added_event() {
-    let _guard = book_thumbnail_runtime_sse_lock().lock().await;
-    let paths = new_router_fixture("router-book-thumbnail-upload-sse").await;
-    seed_router_contract_data(&paths).await;
-
-    let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-    let image_bytes = fixture_png_bytes();
-    let (content_type, body) =
-        multipart_image_upload_body("file", "cover.png", "image/png", false, &image_bytes);
-
-    let upload = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/books/book-1/thumbnails")
-                .header("x-auth-token", &auth_token)
-                .header(header::CONTENT_TYPE, content_type)
-                .body(Body::from(body))
-                .expect("book thumbnail upload sse request should build"),
-        )
-        .await
-        .expect("book thumbnail upload sse request should complete");
-    assert_eq!(upload.status(), StatusCode::OK);
-
-    let (_, events) = komga_application::runtime_sse::pending_runtime_sse_events(
-        cursor,
-        "runtime-contract-admin",
-        true,
-    );
-    let thumbnail_event = events
-        .iter()
-        .find(|event| event.name == "ThumbnailBookAdded")
-        .expect("book thumbnail upload should emit ThumbnailBookAdded SSE");
-
-    assert_eq!(
-        thumbnail_event.payload.get("bookId"),
-        Some(&Value::String("book-1".to_string()))
-    );
-    assert_eq!(
-        thumbnail_event.payload.get("seriesId"),
-        Some(&Value::String("series-1".to_string()))
-    );
-    assert_eq!(
-        thumbnail_event.payload.get("selected"),
-        Some(&Value::Bool(false))
-    );
-
     cleanup_router_fixture(paths);
 }

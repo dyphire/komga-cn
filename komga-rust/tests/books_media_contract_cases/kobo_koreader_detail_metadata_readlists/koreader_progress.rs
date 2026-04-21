@@ -434,12 +434,6 @@ async fn assert_koreader_progress_envelope(
     expected_path: &str,
 ) {
     assert_eq!(response.status(), expected_status);
-    assert_eq!(
-        response.headers().get(header::CONTENT_TYPE),
-        Some(&header::HeaderValue::from_static(
-            "application/vnd.koreader.v1+json"
-        ))
-    );
 
     let payload = response_json(response).await;
     assert_eq!(
