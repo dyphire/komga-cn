@@ -2088,15 +2088,28 @@ fn resolve_oneshot_series_id(
         })
 }
 
-fn scanner_url_key(library_root: &Path, stored_url: &str) -> String {
-    resolve_rooted_path(library_root, stored_url)
-        .to_string_lossy()
-        .to_string()
+fn scanner_url_key(root: &Path, stored_url: &str) -> String {
+    normalize_scanner_path_key(resolve_rooted_path(root, stored_url).as_path())
+}
+
+fn normalize_scanner_path_key(path: &Path) -> String {
+    let normalized = path.components().collect::<PathBuf>();
+    #[cfg(windows)]
+    {
+        normalized
+            .to_string_lossy()
+            .replace('\\', "/")
+            .to_ascii_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        normalized.to_string_lossy().to_string()
+    }
 }
 
 fn route_safe_scanner_id(prefix: &str, path: &Path) -> String {
     let mut hasher = DefaultHasher::new();
-    path.to_string_lossy().hash(&mut hasher);
+    normalize_scanner_path_key(path).hash(&mut hasher);
     format!("{prefix}-{:016x}", hasher.finish())
 }
 
@@ -2798,5 +2811,27 @@ VALUES (?, ?, ?, ?)"#,
         verify_pool.close().await;
         let _ = std::fs::remove_dir_all(library_root);
         let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn scanner_url_key_normalizes_windows_and_relative_path_shapes() {
+        #[cfg(windows)]
+        {
+            let root = PathBuf::from("C:/library");
+            assert_eq!(
+                scanner_url_key(root.as_path(), "oneshots/existing.cbz"),
+                scanner_url_key(root.as_path(), "C:\\library\\oneshots\\existing.cbz"),
+                "scanner url keys should match regardless of separator style so oneshot restoration stays platform-neutral",
+            );
+        }
+
+        #[cfg(not(windows))]
+        {
+            let root = PathBuf::from("/library");
+            assert_eq!(
+                scanner_url_key(root.as_path(), "oneshots/existing.cbz"),
+                "/library/oneshots/existing.cbz",
+            );
+        }
     }
 }
