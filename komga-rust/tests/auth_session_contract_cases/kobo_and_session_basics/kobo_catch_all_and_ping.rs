@@ -581,11 +581,7 @@ async fn router_kobo_catch_all_put_reserializes_json_request_body_before_proxyin
         .get("received")
         .and_then(Value::as_str)
         .expect("kobo catch-all echo response should include received body");
-    assert!(!received.contains(' '));
-    assert!(!received.contains('\n'));
-    let reparsed: Value = serde_json::from_str(received)
-        .expect("kobo catch-all echoed request body should remain valid json");
-    assert_eq!(reparsed, json!({"key":1,"items":[2,3]}));
+    assert_eq!(received, "{\n  \"key\" : 1,\n  \"items\" : [ 2, 3 ]\n}");
 
     cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_KOBO_PROXY_URL", previous);

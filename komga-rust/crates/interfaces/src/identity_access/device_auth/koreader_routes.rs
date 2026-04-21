@@ -1,6 +1,7 @@
 use super::*;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+const KOREADER_VENDOR_MEDIA_TYPE: &str = "application/vnd.koreader.v1+json";
 const KOREADER_PROGRESS_PATH: &str = "/koreader/syncs/progress";
 const KOREADER_PROGRESS_PATH_PREFIX: &str = "/koreader/syncs/progress/";
 
@@ -17,13 +18,38 @@ fn koreader_auth_failure(status: StatusCode, header_user_presented: bool) -> Res
     }
 }
 
-fn koreader_progress_error_response(status: StatusCode, message: &str, path: &str) -> Response {
+fn koreader_response_content_type(headers: &HeaderMap) -> &'static str {
+    let accept = headers
+        .get(header::ACCEPT)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("*/*");
+
+    if accept.split(',').any(|value| {
+        let value = value.trim().to_ascii_lowercase();
+        let media_type = value.split(';').next().map(str::trim).unwrap_or("");
+        media_type == "application/vnd.koreader.v1+json"
+    }) {
+        KOREADER_VENDOR_MEDIA_TYPE
+    } else {
+        "application/json"
+    }
+}
+
+fn koreader_progress_error_response(
+    headers: &HeaderMap,
+    status: StatusCode,
+    message: &str,
+    path: &str,
+) -> Response {
     let reason = status.canonical_reason().unwrap_or("Error");
     (
         status,
         [(
             header::CONTENT_TYPE,
-            HeaderValue::from_static("application/vnd.koreader.v1+json"),
+            HeaderValue::from_str(koreader_response_content_type(headers))
+                .expect("koreader response content type should be valid"),
         )],
         Json(json!({
             "error": reason,
@@ -135,7 +161,8 @@ pub async fn koreader_user_auth(
         StatusCode::OK,
         [(
             header::CONTENT_TYPE,
-            HeaderValue::from_static("application/vnd.koreader.v1+json"),
+            HeaderValue::from_str(koreader_response_content_type(&headers))
+                .expect("koreader response content type should be valid"),
         )],
         Json(json!({ "authorized": "OK" })),
     )
@@ -163,6 +190,7 @@ pub async fn koreader_get_progress(
         Ok(Some(target)) => target,
         Ok(None) => {
             return koreader_progress_error_response(
+                &headers,
                 StatusCode::NOT_FOUND,
                 "Book not found",
                 &format!("{KOREADER_PROGRESS_PATH_PREFIX}{book_hash}"),
@@ -170,6 +198,7 @@ pub async fn koreader_get_progress(
         }
         Err(KoreaderBookLookupError::Conflict) => {
             return koreader_progress_error_response(
+                &headers,
                 StatusCode::CONFLICT,
                 "More than 1 book found with the same hash",
                 &format!("{KOREADER_PROGRESS_PATH_PREFIX}{book_hash}"),
@@ -185,6 +214,7 @@ pub async fn koreader_get_progress(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }) else {
         return koreader_progress_error_response(
+            &headers,
             StatusCode::OK,
             "No progress found for this book",
             &format!("{KOREADER_PROGRESS_PATH_PREFIX}{book_hash}"),
@@ -219,7 +249,8 @@ pub async fn koreader_get_progress(
         StatusCode::OK,
         [(
             header::CONTENT_TYPE,
-            HeaderValue::from_static("application/vnd.koreader.v1+json"),
+            HeaderValue::from_str(koreader_response_content_type(&headers))
+                .expect("koreader response content type should be valid"),
         )],
         Json(KoreaderProgressPayload {
             document: book_hash,
@@ -332,6 +363,7 @@ pub async fn koreader_put_progress(
         Ok(Some(target)) => target,
         Ok(None) => {
             return koreader_progress_error_response(
+                &headers,
                 StatusCode::NOT_FOUND,
                 "Book not found",
                 KOREADER_PROGRESS_PATH,
@@ -339,6 +371,7 @@ pub async fn koreader_put_progress(
         }
         Err(KoreaderBookLookupError::Conflict) => {
             return koreader_progress_error_response(
+                &headers,
                 StatusCode::CONFLICT,
                 "More than 1 book found with the same hash",
                 KOREADER_PROGRESS_PATH,
@@ -372,6 +405,7 @@ pub async fn koreader_put_progress(
                             parse_koreader_epub_resource_index(payload.progress.as_str())
                         else {
                             return koreader_progress_error_response(
+                                &headers,
                                 StatusCode::BAD_REQUEST,
                                 &format!(
                                     "Could not get Epub resource index from progress: {}",
@@ -387,6 +421,7 @@ pub async fn koreader_put_progress(
                             position.get("href").and_then(Value::as_str) == Some(href.as_str())
                         }) else {
                             return koreader_progress_error_response(
+                                &headers,
                                 StatusCode::BAD_REQUEST,
                                 &format!(
                                     "Could not get Epub resource index from progress: {}",
@@ -403,6 +438,7 @@ pub async fn koreader_put_progress(
                     }
                     Ok(None) => {
                         return koreader_progress_error_response(
+                            &headers,
                             StatusCode::BAD_REQUEST,
                             "Epub extension not found",
                             KOREADER_PROGRESS_PATH,
@@ -437,6 +473,7 @@ pub async fn koreader_put_progress(
             }
             None => {
                 return koreader_progress_error_response(
+                    &headers,
                     StatusCode::NOT_FOUND,
                     "Book has no media profile",
                     KOREADER_PROGRESS_PATH,

@@ -410,14 +410,15 @@ async fn router_kobo_auth_device_uses_proxied_response_when_proxy_enabled() {
         .and_then(Value::as_str)
         .expect("proxied auth device response should echo request body");
     assert_eq!(
+        received,
+        "{\n  \"UserKey\": \"Reader 1\",\n  \"Nested\": { \"value\": 7 }\n}"
+    );
+    assert_eq!(
         payload.get("query"),
         Some(&Value::String(
             "affiliate=rakuten&source=device".to_string()
         ))
     );
-    let reparsed: Value = serde_json::from_str(received)
-        .expect("proxied auth device echoed body should remain valid json");
-    assert_eq!(reparsed, json!({"UserKey":"Reader 1","Nested":{"value":7}}));
 
     cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_KOBO_PROXY_URL", previous);

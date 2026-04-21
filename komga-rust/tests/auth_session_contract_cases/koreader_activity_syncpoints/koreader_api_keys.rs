@@ -420,12 +420,62 @@ async fn router_koreader_user_auth_accepts_valid_x_auth_user_api_key() {
         .expect("koreader users auth valid-api-key request should complete");
 
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response_json(response).await, json!({ "authorized": "OK" }));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_koreader_user_auth_accepts_application_json_accept_header() {
+    let paths = new_router_fixture("router-koreader-user-auth-application-json").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v2/users/me/api-keys")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "comment": "KOReader auth json accept" }).to_string(),
+                ))
+                .expect("api key create request should build"),
+        )
+        .await
+        .expect("api key create request should complete");
+    assert_eq!(create_response.status(), StatusCode::OK);
+    let api_key = response_json(create_response)
+        .await
+        .get("key")
+        .and_then(Value::as_str)
+        .expect("api key create response should expose key")
+        .to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/koreader/users/auth")
+                .header("x-auth-user", &api_key)
+                .header(header::ACCEPT, "application/json")
+                .body(Body::empty())
+                .expect("koreader users auth application-json request should build"),
+        )
+        .await
+        .expect("koreader users auth application-json request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response
             .headers()
             .get(header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok()),
-        Some("application/vnd.koreader.v1+json")
+        Some("application/json")
     );
     assert_eq!(response_json(response).await, json!({ "authorized": "OK" }));
 

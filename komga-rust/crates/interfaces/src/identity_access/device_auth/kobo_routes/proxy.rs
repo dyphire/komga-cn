@@ -141,8 +141,8 @@ fn prepare_kobo_proxy_request_body(
         return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE);
     }
 
-    let value = serde_json::from_slice::<Value>(body).map_err(|_| StatusCode::BAD_REQUEST)?;
-    Ok(Some(value.to_string().into_bytes()))
+    serde_json::from_slice::<Value>(body).map_err(|_| StatusCode::BAD_REQUEST)?;
+    Ok(Some(body.to_vec()))
 }
 
 fn validate_kobo_xml_request_body(body: &Bytes) -> Result<(), StatusCode> {
