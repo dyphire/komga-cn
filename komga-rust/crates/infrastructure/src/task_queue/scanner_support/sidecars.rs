@@ -69,6 +69,7 @@ pub(in crate::task_queue) fn enqueue_sidecar_refresh_tasks(
                             book_id: book_id.clone(),
                             series_id: group_id,
                             priority,
+                            capabilities: None,
                         },
                     ));
                 }

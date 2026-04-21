@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
 use komga_application::task_processing::{
@@ -287,6 +287,22 @@ where
             ));
         }
 
+        let mut changed_series_ids = executed_scan
+            .changed_series_ids
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        changed_series_ids.sort();
+        changed_series_ids.dedup();
+        for series_id in changed_series_ids {
+            follow_up_tasks.push(runtime_follow_up_task(
+                RuntimeFollowUpTask::RefreshSeriesMetadata {
+                    series_id,
+                    priority: DEFAULT_PRIORITY,
+                },
+            ));
+        }
+
         let book_series_ids = executed_scan
             .scan
             .series_rows
@@ -298,12 +314,27 @@ where
                     .map(|book| (book.book_id.clone(), series.series_id.clone()))
             })
             .collect::<HashMap<_, _>>();
+        let mut book_metadata_capabilities = BTreeMap::<String, BTreeSet<String>>::new();
+        for refresh in &executed_scan.book_metadata_refreshes {
+            book_metadata_capabilities
+                .entry(refresh.book_id.clone())
+                .or_default()
+                .extend(refresh.capabilities.iter().cloned());
+        }
         for book_id in &executed_scan.renumbered_book_ids {
+            book_metadata_capabilities
+                .entry(book_id.clone())
+                .or_default();
+        }
+        for (book_id, capabilities) in book_metadata_capabilities {
+            let capabilities =
+                (!capabilities.is_empty()).then(|| capabilities.into_iter().collect::<Vec<_>>());
             follow_up_tasks.push(runtime_follow_up_task(
                 RuntimeFollowUpTask::RefreshBookMetadata {
                     book_id: book_id.clone(),
-                    series_id: book_series_ids.get(book_id).cloned(),
+                    series_id: book_series_ids.get(&book_id).cloned(),
                     priority: DEFAULT_PRIORITY,
+                    capabilities,
                 },
             ));
         }
@@ -363,11 +394,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::time::Duration;
 
     use super::*;
     use crate::sqlite::{connect_test_pool, setup};
+    use sha2::{Digest, Sha256};
 
     fn temp_db_path(case_id: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
@@ -375,6 +407,16 @@ mod tests {
             .expect("system time should be after unix epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("komga-rust-{case_id}-{nanos}.sqlite"))
+    }
+
+    fn sha256_hex(bytes: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        hasher
+            .finalize()
+            .iter()
+            .map(|value| format!("{value:02x}"))
+            .collect::<String>()
     }
 
     async fn seed_library_profiles(db_path: &Path, rows: &[(&str, bool, &str)]) {
@@ -462,6 +504,261 @@ mod tests {
         assert_eq!(scheduled.len(), 1);
         assert_eq!(scheduled[0].id, "SCAN_LIBRARY_library-due_DEEP_false");
 
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn run_enqueues_refresh_series_metadata_for_existing_oneshot_with_new_book() {
+        let db_path = temp_db_path("library-scan-pipeline-oneshot-refresh-series");
+        let root = std::env::temp_dir().join(format!(
+            "komga-rust-oneshot-refresh-series-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("oneshots")).expect("oneshot root should be created");
+        std::fs::write(root.join("oneshots").join("existing.cbz"), b"existing")
+            .expect("existing oneshot should be created");
+        std::fs::write(root.join("oneshots").join("new.cbz"), b"new")
+            .expect("new oneshot should be created");
+
+        let pool = connect_test_pool(db_path.as_path(), 1)
+            .await
+            .expect("temporary sqlite db should open");
+        setup::bootstrap_pool(&pool)
+            .await
+            .expect("temporary sqlite db should bootstrap main schema");
+        sqlx::query(
+            "INSERT INTO LIBRARY (ID, NAME, ROOT, ONESHOTS_DIRECTORY, SCAN_CBX) VALUES (?, ?, ?, ?, 1)",
+        )
+        .bind("library-1")
+        .bind("Library 1")
+        .bind(root.to_string_lossy().to_string())
+        .bind("oneshots")
+        .execute(&pool)
+        .await
+        .expect("library row should be inserted");
+        sqlx::query(
+            r#"INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot)
+VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, 1)"#,
+        )
+        .bind("series-existing")
+        .bind(0_i64)
+        .bind("existing")
+        .bind("oneshots/existing.cbz")
+        .bind("library-1")
+        .execute(&pool)
+        .await
+        .expect("existing oneshot series should be inserted");
+        sqlx::query(
+            r#"INSERT INTO SERIES_METADATA (STATUS, TITLE, TITLE_SORT, SERIES_ID)
+VALUES (?, ?, ?, ?)"#,
+        )
+        .bind("ONGOING")
+        .bind("existing")
+        .bind("existing")
+        .bind("series-existing")
+        .execute(&pool)
+        .await
+        .expect("existing oneshot series metadata should be inserted");
+        sqlx::query(
+            r#"INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID, oneshot)
+VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?, 1)"#,
+        )
+        .bind("book-existing")
+        .bind(0_i64)
+        .bind("existing")
+        .bind("oneshots/existing.cbz")
+        .bind("series-existing")
+        .bind(8_i64)
+        .bind(1_i64)
+        .bind("library-1")
+        .execute(&pool)
+        .await
+        .expect("existing oneshot book should be inserted");
+        sqlx::query(
+            r#"INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, BOOK_ID)
+VALUES (?, ?, ?, ?)"#,
+        )
+        .bind("1")
+        .bind(1.0_f64)
+        .bind("existing")
+        .bind("book-existing")
+        .execute(&pool)
+        .await
+        .expect("existing oneshot book metadata should be inserted");
+        pool.close().await;
+
+        let pipeline = SqliteFilesystemLibraryScanPipeline::new(
+            db_path.clone(),
+            DefaultLibraryTaskEmitter::default(),
+        );
+        let result = pipeline
+            .run(ScanOneLibrary::new("library-1".to_string(), false))
+            .expect("scan pipeline should succeed");
+        let refresh_series_tasks = result
+            .follow_up_tasks
+            .into_iter()
+            .filter(|task| task.simple_type == "REFRESH_SERIES_METADATA")
+            .collect::<Vec<_>>();
+
+        assert_eq!(refresh_series_tasks.len(), 2);
+        assert!(
+            refresh_series_tasks
+                .iter()
+                .any(|task| task.group.as_deref() == Some("series-existing"))
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn run_enqueues_refresh_book_metadata_for_restored_book_without_locked_title() {
+        let db_path = temp_db_path("library-scan-pipeline-restore-book-title-refresh");
+        let root = std::env::temp_dir().join(format!(
+            "komga-rust-restore-book-title-refresh-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("books"))
+            .expect("restore-book refresh root should be created");
+        let restored_bytes = b"restored-book-content";
+        std::fs::write(root.join("books/restored.cbz"), restored_bytes)
+            .expect("restored book file should be created");
+
+        let pool = connect_test_pool(db_path.as_path(), 1)
+            .await
+            .expect("temporary sqlite db should open");
+        setup::bootstrap_pool(&pool)
+            .await
+            .expect("temporary sqlite db should bootstrap main schema");
+        sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
+            .bind("library-1")
+            .bind("Library 1")
+            .bind(root.to_string_lossy().to_string())
+            .execute(&pool)
+            .await
+            .expect("library row should be inserted");
+        sqlx::query(
+            r#"INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID)
+VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?)"#,
+        )
+        .bind("series-1")
+        .bind(0_i64)
+        .bind("Series One")
+        .bind("series/series-one")
+        .bind("library-1")
+        .execute(&pool)
+        .await
+        .expect("series row should be inserted");
+        sqlx::query(
+            r#"INSERT INTO SERIES_METADATA (STATUS, TITLE, TITLE_SORT, SERIES_ID)
+VALUES (?, ?, ?, ?)"#,
+        )
+        .bind("ONGOING")
+        .bind("Series One")
+        .bind("Series One")
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("series metadata row should be inserted");
+        sqlx::query(
+            r#"INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID, FILE_HASH, DELETED_DATE)
+VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)"#,
+        )
+        .bind("book-deleted")
+        .bind(0_i64)
+        .bind("legacy-title")
+        .bind("books/legacy.cbz")
+        .bind("series-1")
+        .bind(restored_bytes.len() as i64)
+        .bind(1_i64)
+        .bind("library-1")
+        .bind(sha256_hex(restored_bytes))
+        .execute(&pool)
+        .await
+        .expect("deleted book row should be inserted");
+        sqlx::query(
+            r#"INSERT INTO BOOK_METADATA (TITLE, TITLE_LOCK, SUMMARY, SUMMARY_LOCK, NUMBER, NUMBER_LOCK, NUMBER_SORT, NUMBER_SORT_LOCK, ISBN, ISBN_LOCK, AUTHORS_LOCK, TAGS_LOCK, LINKS_LOCK, BOOK_ID)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+        )
+        .bind("Imported Legacy Title")
+        .bind(false)
+        .bind("legacy summary")
+        .bind(true)
+        .bind("7")
+        .bind(true)
+        .bind(7.0_f64)
+        .bind(true)
+        .bind("isbn-legacy")
+        .bind(true)
+        .bind(false)
+        .bind(false)
+        .bind(false)
+        .bind("book-deleted")
+        .execute(&pool)
+        .await
+        .expect("deleted book metadata row should be inserted");
+        pool.close().await;
+
+        let pipeline = SqliteFilesystemLibraryScanPipeline::new(
+            db_path.clone(),
+            DefaultLibraryTaskEmitter::default(),
+        );
+        let result = pipeline
+            .run(ScanOneLibrary::new("library-1".to_string(), false))
+            .expect("scan pipeline should succeed");
+        let refresh_book_tasks = result
+            .follow_up_tasks
+            .iter()
+            .filter(|task| task.simple_type == "REFRESH_BOOK_METADATA")
+            .collect::<Vec<_>>();
+
+        assert_eq!(refresh_book_tasks.len(), 1);
+
+        let refresh_book_payload = refresh_book_tasks[0]
+            .payload
+            .as_deref()
+            .and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok())
+            .expect("refresh book metadata payload should be valid JSON");
+        assert_eq!(
+            refresh_book_payload
+                .get("capabilities")
+                .and_then(|value| value.as_array())
+                .cloned(),
+            Some(vec![serde_json::Value::String("TITLE".to_string())]),
+        );
+        assert_eq!(
+            refresh_book_payload
+                .get("groupId")
+                .and_then(|value| value.as_str()),
+            refresh_book_tasks[0].group.as_deref(),
+        );
+        assert_eq!(
+            refresh_book_payload
+                .get("bookId")
+                .and_then(|value| value.as_str()),
+            refresh_book_tasks[0]
+                .id
+                .strip_prefix("REFRESH_BOOK_METADATA_"),
+        );
+
+        let refresh_series_tasks = result
+            .follow_up_tasks
+            .iter()
+            .filter(|task| task.simple_type == "REFRESH_SERIES_METADATA")
+            .collect::<Vec<_>>();
+        assert_eq!(refresh_series_tasks.len(), 1);
+        assert_eq!(
+            refresh_series_tasks[0].group.as_deref(),
+            refresh_book_tasks[0].group.as_deref(),
+        );
+
+        let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_file(db_path);
     }
 

@@ -2,7 +2,7 @@ use super::TaskQueueRecord;
 use komga_application::task_processing::{
     DefaultTaskProtocolCatalog, PlannedTaskKind, TaskProtocolCatalog, TaskSchedule,
 };
-use serde_json::json;
+use serde_json::{Value, json};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum RuntimeFollowUpTask {
@@ -15,6 +15,7 @@ pub(super) enum RuntimeFollowUpTask {
         book_id: String,
         series_id: Option<String>,
         priority: i32,
+        capabilities: Option<Vec<String>>,
     },
     RefreshSeriesMetadata {
         series_id: String,
@@ -130,14 +131,26 @@ where
                 book_id,
                 series_id,
                 priority,
-            } => self.plan_task(
-                PlannedTaskKind::RefreshBookMetadata,
-                TaskSchedule::Background,
-                format!("REFRESH_BOOK_METADATA_{book_id}"),
-                priority,
-                series_id,
-                None,
-            ),
+                capabilities,
+            } => {
+                let task_id = format!("REFRESH_BOOK_METADATA_{book_id}");
+                let mut payload = serde_json::Map::new();
+                payload.insert("bookId".to_string(), json!(book_id));
+                payload.insert("priority".to_string(), json!(priority));
+                payload.insert("groupId".to_string(), json!(series_id));
+                payload.insert("uniqueId".to_string(), json!(task_id));
+                if let Some(capabilities) = capabilities {
+                    payload.insert("capabilities".to_string(), json!(capabilities));
+                }
+                self.plan_task(
+                    PlannedTaskKind::RefreshBookMetadata,
+                    TaskSchedule::Background,
+                    task_id,
+                    priority,
+                    series_id,
+                    Some(Value::Object(payload).to_string()),
+                )
+            }
             RuntimeFollowUpTask::RefreshSeriesMetadata {
                 series_id,
                 priority,
@@ -395,11 +408,30 @@ mod tests {
             book_id: "book-1".to_string(),
             series_id: Some("series-1".to_string()),
             priority: 12,
+            capabilities: None,
         });
         assert_eq!(refresh.id, "REFRESH_BOOK_METADATA_book-1");
         assert_eq!(refresh.simple_type, "REFRESH_BOOK_METADATA");
         assert_eq!(refresh.group.as_deref(), Some("series-1"));
+        assert_eq!(
+            refresh.payload.as_deref(),
+            Some(
+                r#"{"bookId":"book-1","groupId":"series-1","priority":12,"uniqueId":"REFRESH_BOOK_METADATA_book-1"}"#,
+            ),
+        );
 
+        let refresh_title_only = runtime_follow_up_task(RuntimeFollowUpTask::RefreshBookMetadata {
+            book_id: "book-1".to_string(),
+            series_id: Some("series-1".to_string()),
+            priority: 12,
+            capabilities: Some(vec!["TITLE".to_string()]),
+        });
+        assert_eq!(
+            refresh_title_only.payload.as_deref(),
+            Some(
+                r#"{"bookId":"book-1","capabilities":["TITLE"],"groupId":"series-1","priority":12,"uniqueId":"REFRESH_BOOK_METADATA_book-1"}"#,
+            ),
+        );
         let hash_pages = runtime_follow_up_task(RuntimeFollowUpTask::HashBookPages {
             book_id: "book-2".to_string(),
             priority: 3,

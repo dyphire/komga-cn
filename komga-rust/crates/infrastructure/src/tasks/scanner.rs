@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 
 use komga_application::runtime_sse::register_runtime_sse_event;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use sqlx::{Row, SqlitePool};
+
+use crate::sql::task_queue::{DELETE_BOOK_DEPENDENCY_SQL, DELETE_SERIES_DEPENDENCY_SQL};
 
 use super::cleanup_workflow::compare_book_names_kotlin_like;
 use crate::persisted_paths::{resolve_rooted_path, resolve_stored_path};
@@ -132,9 +135,33 @@ struct RuntimeSseEventBuffer {
     book_indices: HashMap<String, usize>,
 }
 
-struct PersistScannedLibraryOutcome {
-    renumbered_book_ids: Vec<String>,
+#[derive(Clone, Debug)]
+pub(crate) struct InsertedBookCandidate {
+    pub(crate) book_id: String,
+    pub(crate) book_url: String,
+    pub(crate) file_size: i64,
+    pub(crate) series_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct BookMetadataRefreshRequest {
+    pub(crate) book_id: String,
+    pub(crate) series_id: String,
+    pub(crate) capabilities: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct InsertedSeriesCandidate {
+    pub(crate) series_id: String,
+    pub(crate) series_title: String,
+    pub(crate) books: Vec<InsertedBookCandidate>,
+}
+
+pub(crate) struct PersistScannedLibraryOutcome {
+    pub(crate) renumbered_book_ids: Vec<String>,
     library_changed: bool,
+    pub(crate) changed_series_ids: Vec<String>,
+    pub(crate) book_metadata_refreshes: Vec<BookMetadataRefreshRequest>,
     runtime_events: Vec<RuntimeSseRecord>,
 }
 
@@ -201,6 +228,642 @@ fn record_book_runtime_sse_event(
             kind,
         }));
     events.book_indices.insert(book_id.to_string(), index);
+}
+
+#[derive(Clone, Debug)]
+struct RestoredSeriesMatch {
+    inserted_series_id: String,
+    deleted_series_id: String,
+}
+
+fn compute_file_sha256(path: &Path) -> Result<String, String> {
+    let bytes = fs::read(path).map_err(|error| {
+        format!(
+            "failed to read book file for restore '{}': {error}",
+            path.display()
+        )
+    })?;
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|value| format!("{value:02x}"))
+        .collect::<String>())
+}
+
+async fn try_restore_deleted_books(
+    pool: &SqlitePool,
+    library_root: &Path,
+    inserted_books: &[InsertedBookCandidate],
+) -> Result<(Vec<String>, Vec<BookMetadataRefreshRequest>), String> {
+    let mut restored_series_ids = HashSet::<String>::new();
+    let mut metadata_refreshes = Vec::<BookMetadataRefreshRequest>::new();
+
+    for inserted in inserted_books {
+        let deleted_candidates = sqlx::query(
+            r#"SELECT ID, FILE_HASH
+FROM BOOK
+WHERE DELETED_DATE IS NOT NULL
+  AND FILE_SIZE = ?
+  AND COALESCE(FILE_HASH, '') <> ''
+ORDER BY ID ASC"#,
+        )
+        .bind(inserted.file_size)
+        .fetch_all(pool)
+        .await
+        .map_err(|error| format!("failed to load deleted book restore candidates: {error}"))?;
+        if deleted_candidates.is_empty() {
+            continue;
+        }
+
+        let inserted_hash =
+            compute_file_sha256(resolve_rooted_path(library_root, &inserted.book_url).as_path())?;
+        sqlx::query(
+            r#"UPDATE BOOK
+SET FILE_HASH = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+WHERE ID = ?"#,
+        )
+        .bind(&inserted_hash)
+        .bind(&inserted.book_id)
+        .execute(pool)
+        .await
+        .map_err(|error| format!("failed to persist inserted book hash during restore: {error}"))?;
+
+        let Some(matched_deleted_book_id) = deleted_candidates.into_iter().find_map(|row| {
+            let file_hash = row.get::<String, _>("FILE_HASH");
+            (file_hash == inserted_hash).then(|| row.get::<String, _>("ID"))
+        }) else {
+            continue;
+        };
+
+        sqlx::query(
+            r#"UPDATE MEDIA
+SET BOOK_ID = ?
+WHERE BOOK_ID = ?"#,
+        )
+        .bind(&inserted.book_id)
+        .bind(&matched_deleted_book_id)
+        .execute(pool)
+        .await
+        .map_err(|error| {
+            format!(
+                "failed to restore MEDIA rows for '{}': {error}",
+                inserted.book_id
+            )
+        })?;
+        sqlx::query(
+            r#"UPDATE MEDIA_FILE
+SET BOOK_ID = ?
+WHERE BOOK_ID = ?"#,
+        )
+        .bind(&inserted.book_id)
+        .bind(&matched_deleted_book_id)
+        .execute(pool)
+        .await
+        .map_err(|error| {
+            format!(
+                "failed to restore MEDIA_FILE rows for '{}': {error}",
+                inserted.book_id
+            )
+        })?;
+        sqlx::query(
+            r#"UPDATE MEDIA_PAGE
+SET BOOK_ID = ?
+WHERE BOOK_ID = ?"#,
+        )
+        .bind(&inserted.book_id)
+        .bind(&matched_deleted_book_id)
+        .execute(pool)
+        .await
+        .map_err(|error| {
+            format!(
+                "failed to restore MEDIA_PAGE rows for '{}': {error}",
+                inserted.book_id
+            )
+        })?;
+        sqlx::query(
+            r#"UPDATE THUMBNAIL_BOOK
+SET BOOK_ID = ?
+WHERE BOOK_ID = ?
+  AND TYPE IN ('GENERATED', 'USER_UPLOADED')"#,
+        )
+        .bind(&inserted.book_id)
+        .bind(&matched_deleted_book_id)
+        .execute(pool)
+        .await
+        .map_err(|error| {
+            format!(
+                "failed to restore THUMBNAIL_BOOK rows for '{}': {error}",
+                inserted.book_id
+            )
+        })?;
+        sqlx::query(
+            r#"UPDATE READ_PROGRESS
+SET BOOK_ID = ?
+WHERE BOOK_ID = ?"#,
+        )
+        .bind(&inserted.book_id)
+        .bind(&matched_deleted_book_id)
+        .execute(pool)
+        .await
+        .map_err(|error| {
+            format!(
+                "failed to restore READ_PROGRESS rows for '{}': {error}",
+                inserted.book_id
+            )
+        })?;
+        sqlx::query(
+            r#"UPDATE READLIST_BOOK
+SET BOOK_ID = ?
+WHERE BOOK_ID = ?"#,
+        )
+        .bind(&inserted.book_id)
+        .bind(&matched_deleted_book_id)
+        .execute(pool)
+        .await
+        .map_err(|error| {
+            format!(
+                "failed to restore READLIST_BOOK rows for '{}': {error}",
+                inserted.book_id
+            )
+        })?;
+
+        let metadata_row = sqlx::query(
+            r#"SELECT TITLE, TITLE_LOCK, SUMMARY, SUMMARY_LOCK, NUMBER, NUMBER_LOCK, NUMBER_SORT,
+       NUMBER_SORT_LOCK, RELEASE_DATE, RELEASE_DATE_LOCK, AUTHORS_LOCK, TAGS_LOCK, ISBN,
+       ISBN_LOCK, LINKS_LOCK
+FROM BOOK_METADATA
+WHERE BOOK_ID = ?
+LIMIT 1"#,
+        )
+        .bind(&matched_deleted_book_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| format!("failed to load deleted BOOK_METADATA for restore: {error}"))?;
+        let inserted_metadata_row =
+            sqlx::query(r#"SELECT TITLE FROM BOOK_METADATA WHERE BOOK_ID = ? LIMIT 1"#)
+                .bind(&inserted.book_id)
+                .fetch_optional(pool)
+                .await
+                .map_err(|error| {
+                    format!("failed to load inserted BOOK_METADATA for restore: {error}")
+                })?;
+        if let (Some(deleted_metadata), Some(inserted_metadata)) =
+            (metadata_row, inserted_metadata_row)
+        {
+            let deleted_title_locked = deleted_metadata.get::<bool, _>("TITLE_LOCK");
+            sqlx::query(
+                r#"UPDATE BOOK_METADATA
+SET TITLE = ?, TITLE_LOCK = ?, SUMMARY = ?, SUMMARY_LOCK = ?, NUMBER = ?, NUMBER_LOCK = ?,
+    NUMBER_SORT = ?, NUMBER_SORT_LOCK = ?, RELEASE_DATE = ?, RELEASE_DATE_LOCK = ?,
+    AUTHORS_LOCK = ?, TAGS_LOCK = ?, ISBN = ?, ISBN_LOCK = ?, LINKS_LOCK = ?,
+    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+WHERE BOOK_ID = ?"#,
+            )
+            .bind(if deleted_title_locked {
+                deleted_metadata.get::<String, _>("TITLE")
+            } else {
+                inserted_metadata.get::<String, _>("TITLE")
+            })
+            .bind(deleted_title_locked)
+            .bind(deleted_metadata.get::<String, _>("SUMMARY"))
+            .bind(deleted_metadata.get::<bool, _>("SUMMARY_LOCK"))
+            .bind(deleted_metadata.get::<String, _>("NUMBER"))
+            .bind(deleted_metadata.get::<bool, _>("NUMBER_LOCK"))
+            .bind(deleted_metadata.get::<f64, _>("NUMBER_SORT"))
+            .bind(deleted_metadata.get::<bool, _>("NUMBER_SORT_LOCK"))
+            .bind(deleted_metadata.get::<Option<String>, _>("RELEASE_DATE"))
+            .bind(deleted_metadata.get::<bool, _>("RELEASE_DATE_LOCK"))
+            .bind(deleted_metadata.get::<bool, _>("AUTHORS_LOCK"))
+            .bind(deleted_metadata.get::<bool, _>("TAGS_LOCK"))
+            .bind(deleted_metadata.get::<String, _>("ISBN"))
+            .bind(deleted_metadata.get::<bool, _>("ISBN_LOCK"))
+            .bind(deleted_metadata.get::<bool, _>("LINKS_LOCK"))
+            .bind(&inserted.book_id)
+            .execute(pool)
+            .await
+            .map_err(|error| {
+                format!(
+                    "failed to restore BOOK_METADATA row for '{}': {error}",
+                    inserted.book_id
+                )
+            })?;
+            if !deleted_title_locked {
+                metadata_refreshes.push(BookMetadataRefreshRequest {
+                    book_id: inserted.book_id.clone(),
+                    series_id: inserted.series_id.clone(),
+                    capabilities: vec!["TITLE".to_string()],
+                });
+            }
+            sqlx::query("DELETE FROM BOOK_METADATA_AUTHOR WHERE BOOK_ID = ?")
+                .bind(&inserted.book_id)
+                .execute(pool)
+                .await
+                .map_err(|error| {
+                    format!("failed to clear BOOK_METADATA_AUTHOR rows during restore: {error}")
+                })?;
+            sqlx::query(
+                r#"INSERT INTO BOOK_METADATA_AUTHOR (BOOK_ID, NAME, ROLE)
+SELECT ?, NAME, ROLE FROM BOOK_METADATA_AUTHOR WHERE BOOK_ID = ?"#,
+            )
+            .bind(&inserted.book_id)
+            .bind(&matched_deleted_book_id)
+            .execute(pool)
+            .await
+            .map_err(|error| format!("failed to restore BOOK_METADATA_AUTHOR rows: {error}"))?;
+            sqlx::query("DELETE FROM BOOK_METADATA_TAG WHERE BOOK_ID = ?")
+                .bind(&inserted.book_id)
+                .execute(pool)
+                .await
+                .map_err(|error| {
+                    format!("failed to clear BOOK_METADATA_TAG rows during restore: {error}")
+                })?;
+            sqlx::query(
+                r#"INSERT INTO BOOK_METADATA_TAG (BOOK_ID, TAG)
+SELECT ?, TAG FROM BOOK_METADATA_TAG WHERE BOOK_ID = ?"#,
+            )
+            .bind(&inserted.book_id)
+            .bind(&matched_deleted_book_id)
+            .execute(pool)
+            .await
+            .map_err(|error| format!("failed to restore BOOK_METADATA_TAG rows: {error}"))?;
+            sqlx::query("DELETE FROM BOOK_METADATA_LINK WHERE BOOK_ID = ?")
+                .bind(&inserted.book_id)
+                .execute(pool)
+                .await
+                .map_err(|error| {
+                    format!("failed to clear BOOK_METADATA_LINK rows during restore: {error}")
+                })?;
+            sqlx::query(
+                r#"INSERT INTO BOOK_METADATA_LINK (BOOK_ID, LABEL, URL)
+SELECT ?, LABEL, URL FROM BOOK_METADATA_LINK WHERE BOOK_ID = ?"#,
+            )
+            .bind(&inserted.book_id)
+            .bind(&matched_deleted_book_id)
+            .execute(pool)
+            .await
+            .map_err(|error| format!("failed to restore BOOK_METADATA_LINK rows: {error}"))?;
+        }
+
+        for sql in DELETE_BOOK_DEPENDENCY_SQL {
+            sqlx::query(sql)
+                .bind(&matched_deleted_book_id)
+                .execute(pool)
+                .await
+                .map_err(|error| {
+                    format!("failed to delete restored legacy book dependencies: {error}")
+                })?;
+        }
+        sqlx::query("DELETE FROM BOOK WHERE ID = ?")
+            .bind(&matched_deleted_book_id)
+            .execute(pool)
+            .await
+            .map_err(|error| format!("failed to delete restored legacy BOOK row: {error}"))?;
+
+        let progress_user_rows = sqlx::query(
+            "SELECT DISTINCT USER_ID FROM READ_PROGRESS WHERE BOOK_ID = ? ORDER BY USER_ID ASC",
+        )
+        .bind(&inserted.book_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|error| format!("failed to load restored READ_PROGRESS users: {error}"))?;
+        for row in progress_user_rows {
+            let user_id = row.get::<String, _>("USER_ID");
+            let aggregate = sqlx::query(
+                r#"SELECT COUNT(rp.BOOK_ID) AS PROGRESS_COUNT,
+       COALESCE(SUM(CASE WHEN rp.COMPLETED = 1 THEN 1 ELSE 0 END), 0) AS READ_COUNT,
+       COALESCE(SUM(CASE WHEN rp.COMPLETED = 0 THEN 1 ELSE 0 END), 0) AS IN_PROGRESS_COUNT,
+       MAX(rp.READ_DATE) AS MOST_RECENT_READ_DATE
+FROM BOOK b
+LEFT JOIN READ_PROGRESS rp ON rp.BOOK_ID = b.ID AND rp.USER_ID = ?
+WHERE b.SERIES_ID = ? AND b.DELETED_DATE IS NULL"#,
+            )
+            .bind(&user_id)
+            .bind(&inserted.series_id)
+            .fetch_one(pool)
+            .await
+            .map_err(|error| {
+                format!("failed to aggregate restored READ_PROGRESS_SERIES rows: {error}")
+            })?;
+            let progress_count = aggregate.get::<i64, _>("PROGRESS_COUNT");
+            if progress_count == 0 {
+                sqlx::query("DELETE FROM READ_PROGRESS_SERIES WHERE SERIES_ID = ? AND USER_ID = ?")
+                    .bind(&inserted.series_id)
+                    .bind(&user_id)
+                    .execute(pool)
+                    .await
+                    .map_err(|error| {
+                        format!(
+                            "failed to delete empty READ_PROGRESS_SERIES row after restore: {error}"
+                        )
+                    })?;
+            } else {
+                sqlx::query(
+                    r#"INSERT INTO READ_PROGRESS_SERIES (SERIES_ID, USER_ID, READ_COUNT, IN_PROGRESS_COUNT, MOST_RECENT_READ_DATE, LAST_MODIFIED_DATE)
+VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+ON CONFLICT(SERIES_ID, USER_ID) DO UPDATE
+SET READ_COUNT = excluded.READ_COUNT,
+    IN_PROGRESS_COUNT = excluded.IN_PROGRESS_COUNT,
+    MOST_RECENT_READ_DATE = excluded.MOST_RECENT_READ_DATE,
+    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP"#,
+                )
+                .bind(&inserted.series_id)
+                .bind(&user_id)
+                .bind(aggregate.get::<i64, _>("READ_COUNT"))
+                .bind(aggregate.get::<i64, _>("IN_PROGRESS_COUNT"))
+                .bind(aggregate.get::<Option<String>, _>("MOST_RECENT_READ_DATE"))
+                .execute(pool)
+                .await
+                .map_err(|error| format!("failed to upsert READ_PROGRESS_SERIES row after restore: {error}"))?;
+            }
+        }
+
+        restored_series_ids.insert(inserted.series_id.clone());
+    }
+
+    Ok((
+        restored_series_ids.into_iter().collect(),
+        metadata_refreshes,
+    ))
+}
+
+async fn try_restore_deleted_series(
+    pool: &SqlitePool,
+    library_root: &Path,
+    inserted_series: &[InsertedSeriesCandidate],
+) -> Result<Vec<RestoredSeriesMatch>, String> {
+    let mut restored_series_ids = Vec::new();
+
+    for inserted in inserted_series {
+        if inserted.books.is_empty() {
+            continue;
+        }
+
+        let deleted_series_rows = sqlx::query(
+            r#"SELECT s.ID AS ID
+FROM SERIES s
+WHERE s.DELETED_DATE IS NOT NULL
+ORDER BY s.ID ASC"#,
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(|error| format!("failed to load deleted series restore candidates: {error}"))?;
+        if deleted_series_rows.is_empty() {
+            continue;
+        }
+
+        let mut inserted_books_with_hash = Vec::<(InsertedBookCandidate, String)>::new();
+        for book in &inserted.books {
+            inserted_books_with_hash.push((
+                book.clone(),
+                compute_file_sha256(resolve_rooted_path(library_root, &book.book_url).as_path())?,
+            ));
+        }
+
+        let mut matched_deleted_series_id = None::<String>;
+        for deleted_series_row in deleted_series_rows {
+            let deleted_series_id = deleted_series_row.get::<String, _>("ID");
+            let deleted_books = sqlx::query(
+                r#"SELECT ID, FILE_SIZE, FILE_HASH
+FROM BOOK
+WHERE SERIES_ID = ?
+ORDER BY ID ASC"#,
+            )
+            .bind(&deleted_series_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|error| format!("failed to load deleted series books for restore: {error}"))?;
+            if deleted_books.len() != inserted_books_with_hash.len() {
+                continue;
+            }
+
+            let deleted_sizes = deleted_books
+                .iter()
+                .map(|row| row.get::<i64, _>("FILE_SIZE"))
+                .collect::<Vec<_>>();
+            let inserted_sizes = inserted_books_with_hash
+                .iter()
+                .map(|(book, _)| book.file_size)
+                .collect::<Vec<_>>();
+            let mut deleted_sizes_sorted = deleted_sizes.clone();
+            let mut inserted_sizes_sorted = inserted_sizes.clone();
+            deleted_sizes_sorted.sort();
+            inserted_sizes_sorted.sort();
+            if deleted_sizes_sorted != inserted_sizes_sorted {
+                continue;
+            }
+
+            let deleted_hashes = deleted_books
+                .iter()
+                .map(|row| row.get::<String, _>("FILE_HASH"))
+                .collect::<Vec<_>>();
+            let inserted_hashes = inserted_books_with_hash
+                .iter()
+                .map(|(_, hash)| hash.clone())
+                .collect::<Vec<_>>();
+            let mut deleted_hashes_sorted = deleted_hashes.clone();
+            let mut inserted_hashes_sorted = inserted_hashes.clone();
+            deleted_hashes_sorted.sort();
+            inserted_hashes_sorted.sort();
+            if deleted_hashes_sorted != inserted_hashes_sorted {
+                continue;
+            }
+
+            matched_deleted_series_id = Some(deleted_series_id);
+            break;
+        }
+
+        let Some(deleted_series_id) = matched_deleted_series_id else {
+            continue;
+        };
+
+        let deleted_series_metadata = sqlx::query(
+            r#"SELECT STATUS, STATUS_LOCK, TITLE, TITLE_LOCK, TITLE_SORT, TITLE_SORT_LOCK, SUMMARY,
+       SUMMARY_LOCK, READING_DIRECTION, READING_DIRECTION_LOCK, PUBLISHER, PUBLISHER_LOCK,
+       AGE_RATING, AGE_RATING_LOCK, LANGUAGE, LANGUAGE_LOCK, GENRES_LOCK, TAGS_LOCK,
+       TOTAL_BOOK_COUNT, TOTAL_BOOK_COUNT_LOCK, SHARING_LABELS_LOCK, LINKS_LOCK,
+       ALTERNATE_TITLES_LOCK
+FROM SERIES_METADATA
+WHERE SERIES_ID = ?
+LIMIT 1"#,
+        )
+        .bind(&deleted_series_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| format!("failed to load deleted SERIES_METADATA for restore: {error}"))?;
+        let inserted_series_metadata = sqlx::query(
+            r#"SELECT TITLE, TITLE_SORT FROM SERIES_METADATA WHERE SERIES_ID = ? LIMIT 1"#,
+        )
+        .bind(&inserted.series_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| format!("failed to load inserted SERIES_METADATA for restore: {error}"))?;
+        if let (Some(deleted_metadata), Some(inserted_metadata)) =
+            (deleted_series_metadata, inserted_series_metadata)
+        {
+            sqlx::query(
+                r#"UPDATE SERIES
+SET NAME = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+WHERE ID = ?"#,
+            )
+            .bind(&inserted.series_title)
+            .bind(&inserted.series_id)
+            .execute(pool)
+            .await
+            .map_err(|error| {
+                format!(
+                    "failed to touch restored SERIES row for '{}': {error}",
+                    inserted.series_id
+                )
+            })?;
+            sqlx::query(
+                r#"UPDATE SERIES_METADATA
+SET STATUS = ?, STATUS_LOCK = ?, TITLE = ?, TITLE_LOCK = ?, TITLE_SORT = ?, TITLE_SORT_LOCK = ?,
+    SUMMARY = ?, SUMMARY_LOCK = ?, READING_DIRECTION = ?, READING_DIRECTION_LOCK = ?,
+    PUBLISHER = ?, PUBLISHER_LOCK = ?, AGE_RATING = ?, AGE_RATING_LOCK = ?, LANGUAGE = ?,
+    LANGUAGE_LOCK = ?, GENRES_LOCK = ?, TAGS_LOCK = ?, TOTAL_BOOK_COUNT = ?, TOTAL_BOOK_COUNT_LOCK = ?,
+    SHARING_LABELS_LOCK = ?, LINKS_LOCK = ?, ALTERNATE_TITLES_LOCK = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+WHERE SERIES_ID = ?"#,
+            )
+            .bind(deleted_metadata.get::<String, _>("STATUS"))
+            .bind(deleted_metadata.get::<bool, _>("STATUS_LOCK"))
+            .bind(if deleted_metadata.get::<bool, _>("TITLE_LOCK") {
+                deleted_metadata.get::<String, _>("TITLE")
+            } else {
+                inserted_metadata.get::<String, _>("TITLE")
+            })
+            .bind(deleted_metadata.get::<bool, _>("TITLE_LOCK"))
+            .bind(if deleted_metadata.get::<bool, _>("TITLE_SORT_LOCK") {
+                deleted_metadata.get::<String, _>("TITLE_SORT")
+            } else {
+                inserted_metadata.get::<String, _>("TITLE_SORT")
+            })
+            .bind(deleted_metadata.get::<bool, _>("TITLE_SORT_LOCK"))
+            .bind(deleted_metadata.get::<String, _>("SUMMARY"))
+            .bind(deleted_metadata.get::<bool, _>("SUMMARY_LOCK"))
+            .bind(deleted_metadata.get::<Option<String>, _>("READING_DIRECTION"))
+            .bind(deleted_metadata.get::<bool, _>("READING_DIRECTION_LOCK"))
+            .bind(deleted_metadata.get::<String, _>("PUBLISHER"))
+            .bind(deleted_metadata.get::<bool, _>("PUBLISHER_LOCK"))
+            .bind(deleted_metadata.get::<Option<i64>, _>("AGE_RATING"))
+            .bind(deleted_metadata.get::<bool, _>("AGE_RATING_LOCK"))
+            .bind(deleted_metadata.get::<String, _>("LANGUAGE"))
+            .bind(deleted_metadata.get::<bool, _>("LANGUAGE_LOCK"))
+            .bind(deleted_metadata.get::<bool, _>("GENRES_LOCK"))
+            .bind(deleted_metadata.get::<bool, _>("TAGS_LOCK"))
+            .bind(deleted_metadata.get::<Option<i64>, _>("TOTAL_BOOK_COUNT"))
+            .bind(deleted_metadata.get::<bool, _>("TOTAL_BOOK_COUNT_LOCK"))
+            .bind(deleted_metadata.get::<bool, _>("SHARING_LABELS_LOCK"))
+            .bind(deleted_metadata.get::<bool, _>("LINKS_LOCK"))
+            .bind(deleted_metadata.get::<bool, _>("ALTERNATE_TITLES_LOCK"))
+            .bind(&inserted.series_id)
+            .execute(pool)
+            .await
+            .map_err(|error| format!("failed to restore SERIES_METADATA row for '{}': {error}", inserted.series_id))?;
+            for table in [
+                "SERIES_METADATA_GENRE",
+                "SERIES_METADATA_TAG",
+                "SERIES_METADATA_SHARING",
+            ] {
+                sqlx::query(&format!("DELETE FROM {table} WHERE SERIES_ID = ?"))
+                    .bind(&inserted.series_id)
+                    .execute(pool)
+                    .await
+                    .map_err(|error| {
+                        format!("failed to clear restored series metadata strings: {error}")
+                    })?;
+            }
+            sqlx::query(
+                r#"INSERT INTO SERIES_METADATA_GENRE (SERIES_ID, GENRE)
+SELECT ?, GENRE FROM SERIES_METADATA_GENRE WHERE SERIES_ID = ?"#,
+            )
+            .bind(&inserted.series_id)
+            .bind(&deleted_series_id)
+            .execute(pool)
+            .await
+            .map_err(|error| format!("failed to restore SERIES_METADATA_GENRE rows: {error}"))?;
+            sqlx::query(
+                r#"INSERT INTO SERIES_METADATA_TAG (SERIES_ID, TAG)
+SELECT ?, TAG FROM SERIES_METADATA_TAG WHERE SERIES_ID = ?"#,
+            )
+            .bind(&inserted.series_id)
+            .bind(&deleted_series_id)
+            .execute(pool)
+            .await
+            .map_err(|error| format!("failed to restore SERIES_METADATA_TAG rows: {error}"))?;
+            sqlx::query(
+                r#"INSERT INTO SERIES_METADATA_SHARING (SERIES_ID, LABEL)
+SELECT ?, LABEL FROM SERIES_METADATA_SHARING WHERE SERIES_ID = ?"#,
+            )
+            .bind(&inserted.series_id)
+            .bind(&deleted_series_id)
+            .execute(pool)
+            .await
+            .map_err(|error| format!("failed to restore SERIES_METADATA_SHARING rows: {error}"))?;
+            sqlx::query("DELETE FROM SERIES_METADATA_LINK WHERE SERIES_ID = ?")
+                .bind(&inserted.series_id)
+                .execute(pool)
+                .await
+                .map_err(|error| {
+                    format!("failed to clear SERIES_METADATA_LINK rows during restore: {error}")
+                })?;
+            sqlx::query(
+                r#"INSERT INTO SERIES_METADATA_LINK (SERIES_ID, LABEL, URL)
+SELECT ?, LABEL, URL FROM SERIES_METADATA_LINK WHERE SERIES_ID = ?"#,
+            )
+            .bind(&inserted.series_id)
+            .bind(&deleted_series_id)
+            .execute(pool)
+            .await
+            .map_err(|error| format!("failed to restore SERIES_METADATA_LINK rows: {error}"))?;
+            sqlx::query("DELETE FROM SERIES_METADATA_ALTERNATE_TITLE WHERE SERIES_ID = ?")
+                .bind(&inserted.series_id)
+                .execute(pool)
+                .await
+                .map_err(|error| format!("failed to clear SERIES_METADATA_ALTERNATE_TITLE rows during restore: {error}"))?;
+            sqlx::query(
+                r#"INSERT INTO SERIES_METADATA_ALTERNATE_TITLE (SERIES_ID, LABEL, TITLE)
+SELECT ?, LABEL, TITLE FROM SERIES_METADATA_ALTERNATE_TITLE WHERE SERIES_ID = ?"#,
+            )
+            .bind(&inserted.series_id)
+            .bind(&deleted_series_id)
+            .execute(pool)
+            .await
+            .map_err(|error| {
+                format!("failed to restore SERIES_METADATA_ALTERNATE_TITLE rows: {error}")
+            })?;
+        }
+
+        sqlx::query(
+            r#"UPDATE THUMBNAIL_SERIES
+SET SERIES_ID = ?
+WHERE SERIES_ID = ?
+  AND TYPE = 'USER_UPLOADED'"#,
+        )
+        .bind(&inserted.series_id)
+        .bind(&deleted_series_id)
+        .execute(pool)
+        .await
+        .map_err(|error| format!("failed to restore THUMBNAIL_SERIES rows: {error}"))?;
+        sqlx::query(
+            r#"UPDATE COLLECTION_SERIES
+SET SERIES_ID = ?
+WHERE SERIES_ID = ?"#,
+        )
+        .bind(&inserted.series_id)
+        .bind(&deleted_series_id)
+        .execute(pool)
+        .await
+        .map_err(|error| format!("failed to restore COLLECTION_SERIES rows: {error}"))?;
+
+        restored_series_ids.push(RestoredSeriesMatch {
+            inserted_series_id: inserted.series_id.clone(),
+            deleted_series_id: deleted_series_id.clone(),
+        });
+    }
+
+    Ok(restored_series_ids)
 }
 
 fn emit_scanned_library_runtime_sse_events(
@@ -555,7 +1218,7 @@ pub(crate) fn persist_scanned_library(
     database_file: &Path,
     library_id: &str,
     scanned: &ScannedLibrary,
-) -> Result<Vec<String>, String> {
+) -> Result<PersistScannedLibraryOutcome, String> {
     let database_file = database_file.to_path_buf();
     let library_id = library_id.to_string();
     let library_id_for_events = library_id.clone();
@@ -563,7 +1226,11 @@ pub(crate) fn persist_scanned_library(
 
     let outcome = run_database_query(database_file, move |pool| {
         Box::pin(async move {
+            let mut book_metadata_refreshes = Vec::<BookMetadataRefreshRequest>::new();
             let mut runtime_events = RuntimeSseEventBuffer::default();
+            let mut changed_series_ids = HashSet::<String>::new();
+            let mut inserted_books = Vec::<InsertedBookCandidate>::new();
+            let mut inserted_series = Vec::<InsertedSeriesCandidate>::new();
             let library_was_unavailable = sqlx::query(
                 r#"SELECT UNAVAILABLE_DATE
 FROM LIBRARY
@@ -594,6 +1261,8 @@ WHERE ID = ?"#,
                 return Ok(PersistScannedLibraryOutcome {
                     renumbered_book_ids: Vec::new(),
                     library_changed: !library_was_unavailable,
+                    changed_series_ids: Vec::new(),
+                    book_metadata_refreshes: Vec::new(),
                     runtime_events: runtime_events.events,
                 });
             }
@@ -678,6 +1347,7 @@ WHERE ID = ?"#,
                         &library_id,
                         RuntimeSseMutationKind::Changed,
                     );
+                    changed_series_ids.insert(series_id.clone());
                 }
 
                 for series_id in &missing_series_ids {
@@ -724,10 +1394,12 @@ WHERE ID = ?"#,
                         &library_id,
                         RuntimeSseMutationKind::Changed,
                     );
+                    changed_series_ids.insert(series_id.clone());
                 }
             }
 
             for series in &scanned.series_rows {
+                let mut inserted_in_series = Vec::<InsertedBookCandidate>::new();
                 let series_updated = sqlx::query(
                     r#"UPDATE SERIES
 SET FILE_LAST_MODIFIED = datetime(?, 'unixepoch'), NAME = ?, URL = ?, LIBRARY_ID = ?, oneshot = ?,
@@ -744,6 +1416,10 @@ WHERE ID = ?"#,
                 .await
                 .map_err(|error| format!("failed to update SERIES rows: {error}"))?
                 .rows_affected();
+
+                if series_updated != 0 {
+                    changed_series_ids.insert(series.series_id.clone());
+                }
 
                 if series_updated == 0 {
                     sqlx::query(
@@ -765,6 +1441,11 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)"#,
                         &library_id,
                         RuntimeSseMutationKind::Added,
                     );
+                    inserted_series.push(InsertedSeriesCandidate {
+                        series_id: series.series_id.clone(),
+                        series_title: series.series_name.clone(),
+                        books: Vec::new(),
+                    });
                 }
 
                 ensure_series_metadata_seed(&pool, series)
@@ -819,6 +1500,19 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?)"#,
                             &library_id,
                             RuntimeSseMutationKind::Added,
                         );
+                        inserted_in_series.push(InsertedBookCandidate {
+                            book_id: book.book_id.clone(),
+                            book_url: book.book_url.clone(),
+                            file_size: book.file_size,
+                            series_id: series.series_id.clone(),
+                        });
+                        inserted_books.push(InsertedBookCandidate {
+                            book_id: book.book_id.clone(),
+                            book_url: book.book_url.clone(),
+                            file_size: book.file_size,
+                            series_id: series.series_id.clone(),
+                        });
+                        changed_series_ids.insert(series.series_id.clone());
                     }
 
                     ensure_book_metadata_seed(&pool, book)
@@ -855,6 +1549,15 @@ VALUES (?, ?, ?)"#,
                         .execute(&pool)
                         .await
                         .map_err(|error| format!("failed to insert MEDIA_FILE rows: {error}"))?;
+                    }
+                }
+
+                if !inserted_in_series.is_empty() {
+                    if let Some(series_candidate) = inserted_series
+                        .iter_mut()
+                        .find(|candidate| candidate.series_id == series.series_id)
+                    {
+                        series_candidate.books.extend(inserted_in_series.clone());
                     }
                 }
             }
@@ -931,17 +1634,87 @@ WHERE LIBRARY_ID = ?"#,
                         )
                     },
                 )?;
+            let library_root = resolve_stored_path(
+                sqlx::query("SELECT ROOT FROM LIBRARY WHERE ID = ? LIMIT 1")
+                    .bind(&library_id)
+                    .fetch_one(&pool)
+                    .await
+                    .map_err(|error| {
+                        format!(
+                            "failed to resolve library root for restore in '{library_id}': {error}"
+                        )
+                    })?
+                    .get::<String, _>("ROOT")
+                    .as_str(),
+            );
+            let restored_series_matches =
+                try_restore_deleted_series(&pool, library_root.as_path(), &inserted_series).await?;
+            for restored in &restored_series_matches {
+                changed_series_ids.insert(restored.inserted_series_id.clone());
+            }
+            let (restored_series_ids, restored_book_metadata_refreshes) =
+                try_restore_deleted_books(&pool, library_root.as_path(), &inserted_books).await?;
+            changed_series_ids.extend(restored_series_ids);
+            book_metadata_refreshes.extend(restored_book_metadata_refreshes);
+            for restored in &restored_series_matches {
+                changed_series_ids.insert(restored.inserted_series_id.clone());
+                let deleted_book_ids =
+                    sqlx::query("SELECT ID FROM BOOK WHERE SERIES_ID = ? ORDER BY ID ASC")
+                        .bind(&restored.deleted_series_id)
+                        .fetch_all(&pool)
+                        .await
+                        .map_err(|error| {
+                            format!(
+                                "failed to load restored legacy series books for cleanup: {error}"
+                            )
+                        })?;
+                for deleted_book_row in deleted_book_ids {
+                    let deleted_book_id = deleted_book_row.get::<String, _>("ID");
+                    for sql in DELETE_BOOK_DEPENDENCY_SQL {
+                        sqlx::query(sql)
+                            .bind(&deleted_book_id)
+                            .execute(&pool)
+                            .await
+                            .map_err(|error| format!("failed to delete restored legacy series book dependencies: {error}"))?;
+                    }
+                }
+                sqlx::query("DELETE FROM BOOK WHERE SERIES_ID = ?")
+                    .bind(&restored.deleted_series_id)
+                    .execute(&pool)
+                    .await
+                    .map_err(|error| {
+                        format!("failed to delete restored legacy series BOOK rows: {error}")
+                    })?;
+                for sql in DELETE_SERIES_DEPENDENCY_SQL {
+                    sqlx::query(sql)
+                        .bind(&restored.deleted_series_id)
+                        .execute(&pool)
+                        .await
+                        .map_err(|error| {
+                            format!("failed to delete restored legacy series dependencies: {error}")
+                        })?;
+                }
+                sqlx::query("DELETE FROM SERIES WHERE ID = ?")
+                    .bind(&restored.deleted_series_id)
+                    .execute(&pool)
+                    .await
+                    .map_err(|error| {
+                        format!("failed to delete restored legacy SERIES row: {error}")
+                    })?;
+            }
 
             Ok(PersistScannedLibraryOutcome {
                 renumbered_book_ids,
                 library_changed: library_was_unavailable,
+                changed_series_ids: changed_series_ids.into_iter().collect(),
+                book_metadata_refreshes,
                 runtime_events: runtime_events.events,
             })
         })
     })?;
 
     emit_scanned_library_runtime_sse_events(&library_id_for_events, &outcome);
-    Ok(outcome.renumbered_book_ids)
+    Ok(outcome)
 }
 
 async fn resort_scanned_series_books(
@@ -1440,4 +2213,591 @@ where
     })
     .join()
     .map_err(|_| "database operation worker thread panicked".to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sqlite::{connect_test_pool, setup};
+    use sha2::{Digest, Sha256};
+    use sqlx::Row;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_path(prefix: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "{prefix}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        ))
+    }
+
+    fn sha256_hex(bytes: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        hasher
+            .finalize()
+            .iter()
+            .map(|value| format!("{value:02x}"))
+            .collect::<String>()
+    }
+
+    #[tokio::test]
+    async fn persist_scanned_library_restores_matching_deleted_book_state() {
+        let db_path = temp_path("scanner-restore-book-db");
+        let library_root = temp_path("scanner-restore-book-root");
+        std::fs::create_dir_all(library_root.join("books"))
+            .expect("restore-book root should be created");
+        let new_bytes = b"restored-book-content";
+        std::fs::write(library_root.join("books/restored.cbz"), new_bytes)
+            .expect("restore-book source file should be written");
+        let expected_hash = sha256_hex(new_bytes);
+
+        let pool = connect_test_pool(db_path.as_path(), 1)
+            .await
+            .expect("restore-book db should open");
+        setup::bootstrap_pool(&pool)
+            .await
+            .expect("restore-book db should bootstrap");
+
+        sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
+            .bind("library-1")
+            .bind("Library 1")
+            .bind(library_root.to_string_lossy().to_string())
+            .execute(&pool)
+            .await
+            .expect("library row should be inserted");
+        sqlx::query(
+            r#"INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID)
+VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?)"#,
+        )
+        .bind("series-1")
+        .bind(0_i64)
+        .bind("Series One")
+        .bind("series/series-one")
+        .bind("library-1")
+        .execute(&pool)
+        .await
+        .expect("series row should be inserted");
+        sqlx::query(
+            r#"INSERT INTO SERIES_METADATA (STATUS, TITLE, TITLE_SORT, SERIES_ID)
+VALUES (?, ?, ?, ?)"#,
+        )
+        .bind("ONGOING")
+        .bind("Series One")
+        .bind("Series One")
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("series metadata row should be inserted");
+
+        sqlx::query(
+            r#"INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID, FILE_HASH, DELETED_DATE)
+VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)"#,
+        )
+        .bind("book-deleted")
+        .bind(0_i64)
+        .bind("legacy-title")
+        .bind("books/legacy.cbz")
+        .bind("series-1")
+        .bind(new_bytes.len() as i64)
+        .bind(1_i64)
+        .bind("library-1")
+        .bind(&expected_hash)
+        .execute(&pool)
+        .await
+        .expect("deleted book row should be inserted");
+        sqlx::query(
+            r#"INSERT INTO BOOK_METADATA (TITLE, TITLE_LOCK, SUMMARY, SUMMARY_LOCK, NUMBER, NUMBER_LOCK, NUMBER_SORT, NUMBER_SORT_LOCK, ISBN, ISBN_LOCK, AUTHORS_LOCK, TAGS_LOCK, LINKS_LOCK, BOOK_ID)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+        )
+        .bind("Imported Legacy Title")
+        .bind(false)
+        .bind("legacy summary")
+        .bind(true)
+        .bind("7")
+        .bind(true)
+        .bind(7.0_f64)
+        .bind(true)
+        .bind("isbn-legacy")
+        .bind(true)
+        .bind(false)
+        .bind(false)
+        .bind(false)
+        .bind("book-deleted")
+        .execute(&pool)
+        .await
+        .expect("deleted book metadata row should be inserted");
+        sqlx::query("INSERT INTO BOOK_METADATA_AUTHOR (BOOK_ID, NAME, ROLE) VALUES (?, ?, ?)")
+            .bind("book-deleted")
+            .bind("Jane Doe")
+            .bind("writer")
+            .execute(&pool)
+            .await
+            .expect("deleted book author should be inserted");
+        sqlx::query("INSERT INTO BOOK_METADATA_TAG (BOOK_ID, TAG) VALUES (?, ?)")
+            .bind("book-deleted")
+            .bind("restored")
+            .execute(&pool)
+            .await
+            .expect("deleted book tag should be inserted");
+        sqlx::query("INSERT INTO BOOK_METADATA_LINK (BOOK_ID, LABEL, URL) VALUES (?, ?, ?)")
+            .bind("book-deleted")
+            .bind("wiki")
+            .bind("https://example.invalid")
+            .execute(&pool)
+            .await
+            .expect("deleted book link should be inserted");
+        sqlx::query(
+            "INSERT INTO MEDIA (BOOK_ID, STATUS, MEDIA_TYPE, PAGE_COUNT, COMMENT, EPUB_DIVINA_COMPATIBLE, EPUB_IS_KEPUB) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind("book-deleted")
+        .bind("READY")
+        .bind("application/zip")
+        .bind(12_i64)
+        .bind("legacy media")
+        .bind(true)
+        .bind(false)
+        .execute(&pool)
+        .await
+        .expect("deleted media row should be inserted");
+        sqlx::query(
+            "INSERT INTO MEDIA_FILE (FILE_NAME, BOOK_ID, MEDIA_TYPE, FILE_SIZE) VALUES (?, ?, ?, ?)",
+        )
+        .bind("legacy.cbz")
+        .bind("book-deleted")
+        .bind("application/zip")
+        .bind(new_bytes.len() as i64)
+        .execute(&pool)
+        .await
+        .expect("deleted media file row should be inserted");
+        sqlx::query(
+            "INSERT INTO MEDIA_PAGE (FILE_NAME, MEDIA_TYPE, NUMBER, BOOK_ID, FILE_HASH, FILE_SIZE) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind("page-1.jpg")
+        .bind("image/jpeg")
+        .bind(0_i64)
+        .bind("book-deleted")
+        .bind("page-hash")
+        .bind(111_i64)
+        .execute(&pool)
+        .await
+        .expect("deleted media page row should be inserted");
+        sqlx::query(
+            "INSERT INTO THUMBNAIL_BOOK (ID, BOOK_ID, TYPE, SELECTED, THUMBNAIL, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind("thumbnail-book-1")
+        .bind("book-deleted")
+        .bind("GENERATED")
+        .bind(true)
+        .bind(vec![1_u8, 2_u8, 3_u8])
+        .bind("image/jpeg")
+        .bind(3_i64)
+        .bind(10_i64)
+        .bind(10_i64)
+        .execute(&pool)
+        .await
+        .expect("deleted book thumbnail row should be inserted");
+        sqlx::query(
+            "INSERT INTO USER (ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES, AGE_RESTRICTION_ALLOW_ONLY) VALUES (?, ?, ?, ?, ?)",
+        )
+            .bind("user-1")
+            .bind("user-1@example.com")
+            .bind("password")
+            .bind(true)
+            .bind(false)
+            .execute(&pool)
+            .await
+            .expect("restore-book user row should be inserted");
+        sqlx::query(
+            "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, READ_DATE, LAST_MODIFIED_DATE, CREATED_DATE, DEVICE_ID, DEVICE_NAME) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind("book-deleted")
+        .bind("user-1")
+        .bind(12_i64)
+        .bind(true)
+        .bind("2024-01-01 00:00:00")
+        .bind("2024-01-01 00:00:00")
+        .bind("2024-01-01 00:00:00")
+        .bind("device-1")
+        .bind("Device 1")
+        .execute(&pool)
+        .await
+        .expect("deleted read progress row should be inserted");
+        sqlx::query(
+            "INSERT INTO READLIST (ID, NAME, BOOK_COUNT, SUMMARY, ORDERED) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind("readlist-1")
+        .bind("ReadList 1")
+        .bind(1_i64)
+        .bind("")
+        .bind(true)
+        .execute(&pool)
+        .await
+        .expect("readlist row should be inserted");
+        sqlx::query("INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)")
+            .bind("readlist-1")
+            .bind("book-deleted")
+            .bind(0_i64)
+            .execute(&pool)
+            .await
+            .expect("readlist book row should be inserted");
+        pool.close().await;
+
+        let scanned = ScannedLibrary {
+            root_available: true,
+            series_rows: vec![ScannedSeriesRow {
+                series_id: "series-1".to_string(),
+                series_name: "Series One".to_string(),
+                series_url: "series/series-one".to_string(),
+                series_last_modified_unix_seconds: 1,
+                oneshot: false,
+                books: vec![ScannedBookRow {
+                    book_id: "book-new".to_string(),
+                    book_name: "restored".to_string(),
+                    book_url: "books/restored.cbz".to_string(),
+                    file_name: "restored.cbz".to_string(),
+                    file_size: new_bytes.len() as i64,
+                    file_last_modified_unix_seconds: 1,
+                    oneshot: false,
+                }],
+            }],
+            sidecars: Vec::new(),
+            book_ids: vec!["book-new".to_string()],
+            changed_existing_book_ids: HashSet::new(),
+            discovered_series_ids: HashSet::from(["series-1".to_string()]),
+            discovered_book_ids: HashSet::from(["book-new".to_string()]),
+        };
+
+        let outcome = persist_scanned_library(db_path.as_path(), "library-1", &scanned)
+            .expect("restore-book scan persist should succeed");
+        assert!(outcome.changed_series_ids.iter().any(|id| id == "series-1"));
+        assert_eq!(
+            outcome.book_metadata_refreshes,
+            vec![BookMetadataRefreshRequest {
+                book_id: "book-new".to_string(),
+                series_id: "series-1".to_string(),
+                capabilities: vec!["TITLE".to_string()],
+            }],
+        );
+
+        let verify_pool = connect_test_pool(db_path.as_path(), 1)
+            .await
+            .expect("restore-book verify db should open");
+        let new_book =
+            sqlx::query("SELECT FILE_HASH, SERIES_ID, DELETED_DATE FROM BOOK WHERE ID = ? LIMIT 1")
+                .bind("book-new")
+                .fetch_one(&verify_pool)
+                .await
+                .expect("restored book should exist");
+        assert_eq!(new_book.get::<String, _>("FILE_HASH"), expected_hash);
+        assert_eq!(new_book.get::<String, _>("SERIES_ID"), "series-1");
+        assert!(new_book.get::<Option<String>, _>("DELETED_DATE").is_none());
+
+        let new_metadata = sqlx::query(
+            "SELECT TITLE, SUMMARY, ISBN, NUMBER, NUMBER_SORT FROM BOOK_METADATA WHERE BOOK_ID = ? LIMIT 1",
+        )
+        .bind("book-new")
+        .fetch_one(&verify_pool)
+        .await
+        .expect("restored book metadata should exist");
+        assert_eq!(new_metadata.get::<String, _>("TITLE"), "restored");
+        assert_eq!(new_metadata.get::<String, _>("SUMMARY"), "legacy summary");
+        assert_eq!(new_metadata.get::<String, _>("ISBN"), "isbn-legacy");
+        assert_eq!(new_metadata.get::<String, _>("NUMBER"), "7");
+        assert_eq!(new_metadata.get::<f64, _>("NUMBER_SORT"), 7.0_f64);
+
+        let author_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM BOOK_METADATA_AUTHOR WHERE BOOK_ID = ? AND NAME = ? AND ROLE = ?",
+        )
+        .bind("book-new")
+        .bind("Jane Doe")
+        .bind("writer")
+        .fetch_one(&verify_pool)
+        .await
+        .expect("restored author count should be queryable");
+        assert_eq!(author_count, 1);
+
+        let media = sqlx::query(
+            "SELECT STATUS, MEDIA_TYPE, PAGE_COUNT, COMMENT FROM MEDIA WHERE BOOK_ID = ? LIMIT 1",
+        )
+        .bind("book-new")
+        .fetch_one(&verify_pool)
+        .await
+        .expect("restored media should exist");
+        assert_eq!(media.get::<String, _>("STATUS"), "READY");
+        assert_eq!(media.get::<String, _>("MEDIA_TYPE"), "application/zip");
+        assert_eq!(media.get::<i64, _>("PAGE_COUNT"), 12_i64);
+        assert_eq!(media.get::<String, _>("COMMENT"), "legacy media");
+
+        let thumbnail_book_id =
+            sqlx::query("SELECT BOOK_ID FROM THUMBNAIL_BOOK WHERE ID = ? LIMIT 1")
+                .bind("thumbnail-book-1")
+                .fetch_one(&verify_pool)
+                .await
+                .expect("restored thumbnail should exist")
+                .get::<String, _>("BOOK_ID");
+        assert_eq!(thumbnail_book_id, "book-new");
+
+        let read_progress_book_id =
+            sqlx::query("SELECT BOOK_ID FROM READ_PROGRESS WHERE USER_ID = ? LIMIT 1")
+                .bind("user-1")
+                .fetch_one(&verify_pool)
+                .await
+                .expect("restored read progress should exist")
+                .get::<String, _>("BOOK_ID");
+        assert_eq!(read_progress_book_id, "book-new");
+
+        let readlist_book_id =
+            sqlx::query("SELECT BOOK_ID FROM READLIST_BOOK WHERE READLIST_ID = ? LIMIT 1")
+                .bind("readlist-1")
+                .fetch_one(&verify_pool)
+                .await
+                .expect("restored readlist mapping should exist")
+                .get::<String, _>("BOOK_ID");
+        assert_eq!(readlist_book_id, "book-new");
+
+        let deleted_old = sqlx::query("SELECT 1 FROM BOOK WHERE ID = ? LIMIT 1")
+            .bind("book-deleted")
+            .fetch_optional(&verify_pool)
+            .await
+            .expect("deleted legacy book lookup should succeed");
+        assert!(deleted_old.is_none());
+
+        verify_pool.close().await;
+        let _ = std::fs::remove_dir_all(library_root);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn persist_scanned_library_restores_matching_deleted_series_state() {
+        let db_path = temp_path("scanner-restore-series-db");
+        let library_root = temp_path("scanner-restore-series-root");
+        std::fs::create_dir_all(library_root.join("restored-series"))
+            .expect("restore-series root should be created");
+        let book_one = b"restored-series-book-one";
+        let book_two = b"restored-series-book-two";
+        std::fs::write(library_root.join("restored-series/001.cbz"), book_one)
+            .expect("restore-series first file should be written");
+        std::fs::write(library_root.join("restored-series/002.cbz"), book_two)
+            .expect("restore-series second file should be written");
+        let hash_one = sha256_hex(book_one);
+        let hash_two = sha256_hex(book_two);
+
+        let pool = connect_test_pool(db_path.as_path(), 1)
+            .await
+            .expect("restore-series db should open");
+        setup::bootstrap_pool(&pool)
+            .await
+            .expect("restore-series db should bootstrap");
+
+        sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
+            .bind("library-1")
+            .bind("Library 1")
+            .bind(library_root.to_string_lossy().to_string())
+            .execute(&pool)
+            .await
+            .expect("restore-series library row should be inserted");
+        sqlx::query(
+            r#"INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, DELETED_DATE)
+VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, CURRENT_TIMESTAMP)"#,
+        )
+        .bind("series-deleted")
+        .bind(0_i64)
+        .bind("Old Deleted Series")
+        .bind("deleted-series")
+        .bind("library-1")
+        .execute(&pool)
+        .await
+        .expect("deleted series row should be inserted");
+        sqlx::query(
+            r#"INSERT INTO SERIES_METADATA (STATUS, STATUS_LOCK, TITLE, TITLE_LOCK, TITLE_SORT, TITLE_SORT_LOCK, SUMMARY, SUMMARY_LOCK, SERIES_ID)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+        )
+        .bind("ENDED")
+        .bind(true)
+        .bind("Locked Legacy Series")
+        .bind(true)
+        .bind("Locked Legacy Series")
+        .bind(true)
+        .bind("legacy series summary")
+        .bind(true)
+        .bind("series-deleted")
+        .execute(&pool)
+        .await
+        .expect("deleted series metadata should be inserted");
+        sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
+            .bind("collection-1")
+            .bind("Collection 1")
+            .bind(false)
+            .bind(1_i64)
+            .execute(&pool)
+            .await
+            .expect("collection row should be inserted");
+        sqlx::query(
+            "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
+        )
+        .bind("collection-1")
+        .bind("series-deleted")
+        .bind(0_i64)
+        .execute(&pool)
+        .await
+        .expect("collection membership should be inserted");
+        sqlx::query(
+            "INSERT INTO THUMBNAIL_SERIES (ID, SERIES_ID, TYPE, SELECTED, THUMBNAIL, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind("thumbnail-series-1")
+        .bind("series-deleted")
+        .bind("USER_UPLOADED")
+        .bind(true)
+        .bind(vec![9_u8, 9_u8, 9_u8])
+        .bind("image/jpeg")
+        .bind(3_i64)
+        .bind(10_i64)
+        .bind(10_i64)
+        .execute(&pool)
+        .await
+        .expect("series thumbnail should be inserted");
+
+        for (book_id, name, url, hash, size, number) in [
+            (
+                "book-deleted-1",
+                "legacy-one",
+                "deleted/one.cbz",
+                hash_one.as_str(),
+                book_one.len() as i64,
+                1_i64,
+            ),
+            (
+                "book-deleted-2",
+                "legacy-two",
+                "deleted/two.cbz",
+                hash_two.as_str(),
+                book_two.len() as i64,
+                2_i64,
+            ),
+        ] {
+            sqlx::query(
+                r#"INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID, FILE_HASH, DELETED_DATE)
+VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)"#,
+            )
+            .bind(book_id)
+            .bind(0_i64)
+            .bind(name)
+            .bind(url)
+            .bind("series-deleted")
+            .bind(size)
+            .bind(number)
+            .bind("library-1")
+            .bind(hash)
+            .execute(&pool)
+            .await
+            .expect("deleted series book should be inserted");
+            sqlx::query(
+                r#"INSERT INTO BOOK_METADATA (TITLE, NUMBER, NUMBER_SORT, BOOK_ID)
+VALUES (?, ?, ?, ?)"#,
+            )
+            .bind(name)
+            .bind(number.to_string())
+            .bind(number as f64)
+            .bind(book_id)
+            .execute(&pool)
+            .await
+            .expect("deleted series book metadata should be inserted");
+        }
+        pool.close().await;
+
+        let scanned = ScannedLibrary {
+            root_available: true,
+            series_rows: vec![ScannedSeriesRow {
+                series_id: "series-new".to_string(),
+                series_name: "Folder Name".to_string(),
+                series_url: "restored-series".to_string(),
+                series_last_modified_unix_seconds: 1,
+                oneshot: false,
+                books: vec![
+                    ScannedBookRow {
+                        book_id: "book-new-1".to_string(),
+                        book_name: "001".to_string(),
+                        book_url: "restored-series/001.cbz".to_string(),
+                        file_name: "001.cbz".to_string(),
+                        file_size: book_one.len() as i64,
+                        file_last_modified_unix_seconds: 1,
+                        oneshot: false,
+                    },
+                    ScannedBookRow {
+                        book_id: "book-new-2".to_string(),
+                        book_name: "002".to_string(),
+                        book_url: "restored-series/002.cbz".to_string(),
+                        file_name: "002.cbz".to_string(),
+                        file_size: book_two.len() as i64,
+                        file_last_modified_unix_seconds: 1,
+                        oneshot: false,
+                    },
+                ],
+            }],
+            sidecars: Vec::new(),
+            book_ids: vec!["book-new-1".to_string(), "book-new-2".to_string()],
+            changed_existing_book_ids: HashSet::new(),
+            discovered_series_ids: HashSet::from(["series-new".to_string()]),
+            discovered_book_ids: HashSet::from([
+                "book-new-1".to_string(),
+                "book-new-2".to_string(),
+            ]),
+        };
+
+        let outcome = persist_scanned_library(db_path.as_path(), "library-1", &scanned)
+            .expect("restore-series scan persist should succeed");
+        assert!(
+            outcome
+                .changed_series_ids
+                .iter()
+                .any(|id| id == "series-new")
+        );
+
+        let verify_pool = connect_test_pool(db_path.as_path(), 1)
+            .await
+            .expect("restore-series verify db should open");
+        let restored_series =
+            sqlx::query("SELECT TITLE FROM SERIES_METADATA WHERE SERIES_ID = ? LIMIT 1")
+                .bind("series-new")
+                .fetch_one(&verify_pool)
+                .await
+                .expect("restored series metadata should exist");
+        assert_eq!(
+            restored_series.get::<String, _>("TITLE"),
+            "Locked Legacy Series"
+        );
+
+        let collection_series_id =
+            sqlx::query("SELECT SERIES_ID FROM COLLECTION_SERIES WHERE COLLECTION_ID = ? LIMIT 1")
+                .bind("collection-1")
+                .fetch_one(&verify_pool)
+                .await
+                .expect("restored collection membership should exist")
+                .get::<String, _>("SERIES_ID");
+        assert_eq!(collection_series_id, "series-new");
+
+        let thumbnail_series_id =
+            sqlx::query("SELECT SERIES_ID FROM THUMBNAIL_SERIES WHERE ID = ? LIMIT 1")
+                .bind("thumbnail-series-1")
+                .fetch_one(&verify_pool)
+                .await
+                .expect("restored series thumbnail should exist")
+                .get::<String, _>("SERIES_ID");
+        assert_eq!(thumbnail_series_id, "series-new");
+
+        let deleted_series = sqlx::query("SELECT 1 FROM SERIES WHERE ID = ? LIMIT 1")
+            .bind("series-deleted")
+            .fetch_optional(&verify_pool)
+            .await
+            .expect("deleted legacy series lookup should succeed");
+        assert!(deleted_series.is_none());
+
+        verify_pool.close().await;
+        let _ = std::fs::remove_dir_all(library_root);
+        let _ = std::fs::remove_file(db_path);
+    }
 }

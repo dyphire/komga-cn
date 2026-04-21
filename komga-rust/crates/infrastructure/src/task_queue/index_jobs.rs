@@ -46,6 +46,7 @@ pub(super) fn try_execute(
                         book_id: book_id.to_string(),
                         series_id: Some(outcome.series_id),
                         priority: follow_up_priority,
+                        capabilities: None,
                     },
                 ));
             }
