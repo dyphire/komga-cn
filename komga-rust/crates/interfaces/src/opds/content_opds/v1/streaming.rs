@@ -1,5 +1,4 @@
 use super::*;
-use std::sync::Arc;
 
 pub(super) async fn build_book_feed_acquisition_entries(
     app: &HttpAppState,
@@ -113,7 +112,7 @@ async fn opds_book_page_streaming_links(
     last_read_date: Option<&str>,
 ) -> Vec<String> {
     let media_types = opds_book_page_stream_media_types(
-        &app.services.media_assets,
+        app.services.media_assets.as_ref(),
         app.auth_db.database_file.as_path(),
         book_id,
         media_type,
@@ -173,7 +172,7 @@ async fn opds_book_page_streaming_links(
 }
 
 async fn opds_book_page_stream_media_types(
-    media_assets: &Arc<dyn crate::state::MediaAssetsService>,
+    media_assets: &dyn crate::state::MediaAssetsService,
     database_file: &Path,
     book_id: &str,
     media_type: &str,
@@ -202,7 +201,7 @@ async fn opds_book_page_stream_media_types(
 }
 
 async fn load_divina_page_media_types_for_opds(
-    media_assets: &Arc<dyn crate::state::MediaAssetsService>,
+    media_assets: &dyn crate::state::MediaAssetsService,
     database_file: &Path,
     book_id: &str,
 ) -> Vec<String> {

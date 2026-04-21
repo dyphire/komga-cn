@@ -48,7 +48,8 @@ async fn opds_v2_recommended(
     };
 
     let database_file = app.auth_db.database_file.as_path();
-    let libraries = match load_libraries(&app.services.opds_persisted, database_file).await {
+    let libraries = match load_libraries(app.services.opds_persisted.as_ref(), database_file).await
+    {
         Ok(libraries) => libraries,
         Err(error) => {
             return (
@@ -171,7 +172,7 @@ async fn opds_v2_recommended(
         .collect::<Vec<_>>();
 
     let has_visible_collections = has_visible_collections_for_scope(
-        &app.services.opds_persisted,
+        app.services.opds_persisted.as_ref(),
         database_file,
         &allowed_library_ids,
         restrictions.as_ref(),
@@ -179,8 +180,8 @@ async fn opds_v2_recommended(
     )
     .await;
     let has_visible_readlists = has_visible_readlists_for_scope(
-        &app.services.opds_catalog,
-        &app.services.opds_persisted,
+        app.services.opds_catalog.as_ref(),
+        app.services.opds_persisted.as_ref(),
         database_file,
         &allowed_library_ids,
         restrictions.as_ref(),
@@ -541,7 +542,7 @@ pub(crate) async fn opds_v2_library_browse(
 
     let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = validate_library_scope(
-        &app.services.opds_persisted,
+        app.services.opds_persisted.as_ref(),
         database_file,
         &allowed_library_ids,
         library_id,
@@ -551,7 +552,8 @@ pub(crate) async fn opds_v2_library_browse(
         return response;
     }
 
-    let libraries = match load_libraries(&app.services.opds_persisted, database_file).await {
+    let libraries = match load_libraries(app.services.opds_persisted.as_ref(), database_file).await
+    {
         Ok(libraries) => libraries,
         Err(error) => {
             return (
@@ -604,7 +606,7 @@ pub(crate) async fn opds_v2_library_browse(
         ),
     ];
     let has_collections = has_visible_collections_for_scope(
-        &app.services.opds_persisted,
+        app.services.opds_persisted.as_ref(),
         database_file,
         &allowed_library_ids,
         restrictions.as_ref(),
@@ -619,8 +621,8 @@ pub(crate) async fn opds_v2_library_browse(
         ));
     }
     let has_readlists = has_visible_readlists_for_scope(
-        &app.services.opds_catalog,
-        &app.services.opds_persisted,
+        app.services.opds_catalog.as_ref(),
+        app.services.opds_persisted.as_ref(),
         database_file,
         &allowed_library_ids,
         restrictions.as_ref(),
@@ -636,7 +638,7 @@ pub(crate) async fn opds_v2_library_browse(
     }
 
     let (series_navigation, total_series) = load_browse_series_navigation(
-        &app.services.opds_catalog,
+        app.services.opds_catalog.as_ref(),
         &headers,
         database_file,
         &allowed_library_ids,
@@ -648,7 +650,7 @@ pub(crate) async fn opds_v2_library_browse(
     .await
     .unwrap_or_default();
     let publisher_navigation = load_browse_publisher_navigation(
-        &app.services.opds_catalog,
+        app.services.opds_catalog.as_ref(),
         &headers,
         database_file,
         &allowed_library_ids,

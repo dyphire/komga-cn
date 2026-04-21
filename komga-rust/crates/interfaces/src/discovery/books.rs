@@ -668,7 +668,7 @@ pub async fn books_list(
         should_use_strict_runtime_shape(&payload, is_exact_oneshot_bootstrap);
 
     if let Some(runtime_response) = runtime_owned_books_list_response(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         &headers,
         &uri,
         Some(&payload),
@@ -704,7 +704,7 @@ pub(super) async fn books_deprecated_get(
     let query = uri.query().unwrap_or_default();
     let requested_library_ids = requested_query_values(query, "library_id");
     let library_ids = remap_requested_library_ids_for_persisted(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         database_file,
         requested_library_ids.as_ref(),
     )
@@ -757,7 +757,7 @@ pub(super) async fn books_deprecated_get(
     .map(|condition| json!({ "condition": condition }));
 
     if let Some(runtime_response) = runtime_owned_books_list_response(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         &headers,
         &uri,
         payload.as_ref(),
@@ -827,7 +827,7 @@ pub async fn series_books_deprecated(
     };
 
     if let Some(response) = runtime_owned_books_list_response(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         &headers,
         &uri,
         Some(&payload),
@@ -862,7 +862,7 @@ pub async fn books_latest(
     if app.auth_db.database_file.exists() {
         let requested_library_ids = requested_query_values(query, "library_id");
         let library_ids = remap_requested_library_ids_for_persisted(
-            &app.services.discovery_persisted,
+            app.services.discovery_persisted.as_ref(),
             app.auth_db.database_file.as_path(),
             requested_library_ids.as_ref(),
         )
@@ -892,7 +892,7 @@ pub async fn books_latest(
         let unpaged = query_bool(query, "unpaged");
 
         match load_persisted_books_page(
-            &app.services.discovery_persisted,
+            app.services.discovery_persisted.as_ref(),
             app.auth_db.database_file.as_path(),
             &context,
             PersistedBooksBrowseQuery::from_filters(
@@ -924,7 +924,7 @@ pub async fn books_latest(
 
     if app.auth_db.database_file.exists()
         && let Some(runtime_response) = runtime_owned_books_latest_response(
-            &app.services.discovery_persisted,
+            app.services.discovery_persisted.as_ref(),
             &headers,
             &uri,
             &app.discovery_auth,
@@ -962,7 +962,7 @@ pub async fn books_ondeck(
     let query = uri.query().unwrap_or_default();
     let requested_library_ids = requested_query_values(query, "library_id");
     let library_ids = remap_requested_library_ids_for_persisted(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         app.auth_db.database_file.as_path(),
         requested_library_ids.as_ref(),
     )
@@ -985,7 +985,7 @@ pub async fn books_ondeck(
     };
 
     match load_persisted_ondeck_books(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         app.auth_db.database_file.as_path(),
         user_id,
     )
@@ -1082,7 +1082,7 @@ pub async fn books_duplicates(
     let sort_modes = duplicate_books_sort_modes(query, unpaged);
 
     match load_persisted_duplicate_books(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         app.auth_db.database_file.as_path(),
     )
     .await
@@ -1191,7 +1191,7 @@ pub async fn book_tags(
         .or(Some(PersistedBookTagsScope::All));
 
     match load_persisted_book_tags(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         app.auth_db.database_file.as_path(),
         scope.as_ref(),
         context.authorized_library_ids.as_deref(),

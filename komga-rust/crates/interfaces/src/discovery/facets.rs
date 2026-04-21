@@ -107,7 +107,7 @@ pub async fn authors_names(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> 
     };
 
     match load_persisted_author_names(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         database_file,
         &search,
         context.authorized_library_ids.as_deref(),
@@ -142,7 +142,7 @@ pub async fn authors_roles(headers: HeaderMap, app: &HttpAppState) -> Response {
     };
 
     match load_persisted_author_roles(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         database_file,
         context.authorized_library_ids.as_deref(),
     )
@@ -201,7 +201,7 @@ pub(super) async fn authors_deprecated_get(
     };
 
     let mut authors = match load_persisted_authors_by_scope(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         database_file,
         &scope,
         context.authorized_library_ids.as_deref(),
@@ -285,7 +285,7 @@ pub async fn authors_v2(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Res
     };
 
     let mut authors = match load_persisted_authors_by_scope(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         database_file,
         &scope,
         context.authorized_library_ids.as_deref(),
@@ -329,7 +329,7 @@ pub async fn genres(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Respons
         };
 
     match load_persisted_genres(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         database_file,
         scope.authorized_library_ids(),
         scope.collection_id(),
@@ -361,7 +361,7 @@ pub async fn tags(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response 
         };
 
     match load_persisted_tags(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         database_file,
         scope.authorized_library_ids(),
         scope.collection_id(),
@@ -393,7 +393,7 @@ pub async fn series_tags(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Re
         };
 
     match load_persisted_series_tags(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         database_file,
         scope.authorized_library_ids(),
         scope.collection_id(),
@@ -425,7 +425,7 @@ pub async fn languages(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Resp
         };
 
     match load_persisted_languages(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         database_file,
         scope.authorized_library_ids(),
         scope.collection_id(),
@@ -457,7 +457,7 @@ pub async fn publishers(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Res
         };
 
     match load_persisted_publishers(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         database_file,
         scope.authorized_library_ids(),
         scope.collection_id(),
@@ -489,7 +489,7 @@ pub async fn age_ratings(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Re
         };
 
     match load_persisted_age_ratings(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         database_file,
         scope.authorized_library_ids(),
         scope.collection_id(),
@@ -521,7 +521,7 @@ pub async fn sharing_labels(headers: HeaderMap, uri: Uri, app: &HttpAppState) ->
         };
 
     match load_persisted_sharing_labels(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         database_file,
         scope.authorized_library_ids(),
         scope.collection_id(),
@@ -553,7 +553,7 @@ pub async fn series_release_dates(headers: HeaderMap, uri: Uri, app: &HttpAppSta
         };
 
     match load_persisted_series_release_dates(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         database_file,
         scope.authorized_library_ids(),
         scope.collection_id(),

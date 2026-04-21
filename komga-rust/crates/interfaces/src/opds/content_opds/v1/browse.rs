@@ -416,7 +416,7 @@ pub(crate) async fn opds_v1_libraries(headers: HeaderMap, app: &HttpAppState) ->
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    let rows = load_libraries(&app.services.opds_persisted, database_file)
+    let rows = load_libraries(app.services.opds_persisted.as_ref(), database_file)
         .await
         .unwrap_or_default()
         .into_iter()
@@ -458,12 +458,12 @@ pub(crate) async fn opds_v1_collections(
     };
 
     let mut rows = Vec::new();
-    for collection in load_collections(&app.services.opds_persisted, database_file, None)
+    for collection in load_collections(app.services.opds_persisted.as_ref(), database_file, None)
         .await
         .unwrap_or_default()
     {
         let series = load_collection_series(
-            &app.services.opds_persisted,
+            app.services.opds_persisted.as_ref(),
             database_file,
             &collection.id,
             collection.ordered,
@@ -522,7 +522,7 @@ pub(crate) async fn opds_v1_readlists(
         .unwrap_or_default()
     {
         let books = load_readlist_books(
-            &app.services.opds_persisted,
+            app.services.opds_persisted.as_ref(),
             app.auth_db.database_file.as_path(),
             &readlist.id,
         )
@@ -570,7 +570,7 @@ pub(crate) async fn opds_v1_publishers(
     };
 
     let publishers = load_publishers(
-        &app.services.opds_persisted,
+        app.services.opds_persisted.as_ref(),
         database_file,
         &allowed_library_ids,
     )
@@ -620,9 +620,9 @@ pub(crate) async fn opds_v1_series(headers: HeaderMap, uri: Uri, app: &HttpAppSt
 
     let search_rows = if let Some(search_term) = search.as_deref() {
         load_opds_v1_series_search_results(
-            &app.services.opds_persisted,
+            app.services.opds_persisted.as_ref(),
             app.auth_db.database_file.as_path(),
-            &app.services.opds_catalog,
+            app.services.opds_catalog.as_ref(),
             &allowed_library_ids,
             search_term,
             publishers.as_slice(),

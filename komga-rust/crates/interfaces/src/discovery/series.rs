@@ -231,7 +231,7 @@ async fn series_feed(
     };
 
     match load_persisted_series_page(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         database_file,
         &context,
         PersistedSeriesBrowseQuery::from_filters(
@@ -295,7 +295,7 @@ pub async fn series_deprecated_get(headers: HeaderMap, uri: Uri, app: &HttpAppSt
     let query = uri.query().unwrap_or_default();
     let requested_library_ids = requested_query_values(query, "library_id");
     let library_ids = remap_requested_library_ids_for_persisted(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         database_file,
         requested_library_ids.as_ref(),
     )
@@ -408,7 +408,7 @@ pub async fn series_deprecated_get(headers: HeaderMap, uri: Uri, app: &HttpAppSt
     let requested_unpaged = unpaged || requires_age_post_filter;
 
     match load_persisted_series_page(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         database_file,
         &context,
         PersistedSeriesBrowseQuery::from_filters(
@@ -508,7 +508,7 @@ pub async fn series_alphabetical_groups(
 
     let mut filters = filters;
     filters.criteria.library_ids = remap_requested_library_ids_for_persisted(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         database_file,
         filters.criteria.library_ids.as_ref(),
     )
@@ -526,7 +526,7 @@ pub async fn series_alphabetical_groups(
     };
 
     match load_persisted_alphabetical_groups(
-        &app.services.discovery_persisted,
+        app.services.discovery_persisted.as_ref(),
         database_file,
         &context,
         filters,
@@ -564,7 +564,7 @@ pub async fn series_list(
 
     if app.auth_db.database_file.exists()
         && let Some(runtime_response) = runtime_owned_series_list_response(
-            &app.services.discovery_persisted,
+            app.services.discovery_persisted.as_ref(),
             &headers,
             &uri,
             Some(&payload),

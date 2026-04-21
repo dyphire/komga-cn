@@ -579,7 +579,7 @@ pub(super) async fn opds_v2_collections_feed(
     let mut visible_collections = Vec::new();
     for collection in collections {
         let series = match load_collection_series(
-            &app.services.opds_persisted,
+            app.services.opds_persisted.as_ref(),
             database_file,
             &collection.id,
             collection.ordered,
@@ -612,7 +612,7 @@ pub(super) async fn opds_v2_collections_feed(
     let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
     let self_path = format!("/opds/v2/libraries{library_segment}/collections");
     let has_visible_collections = has_visible_collections_for_scope(
-        &app.services.opds_persisted,
+        app.services.opds_persisted.as_ref(),
         database_file,
         &allowed_library_ids,
         restrictions.as_ref(),
@@ -620,8 +620,8 @@ pub(super) async fn opds_v2_collections_feed(
     )
     .await;
     let has_visible_readlists = has_visible_readlists_for_scope(
-        &app.services.opds_catalog,
-        &app.services.opds_persisted,
+        app.services.opds_catalog.as_ref(),
+        app.services.opds_persisted.as_ref(),
         database_file,
         &allowed_library_ids,
         restrictions.as_ref(),
@@ -795,7 +795,7 @@ pub(super) async fn opds_v2_readlists_feed(
         let mut visible = Vec::new();
         for readlist in readlists {
             let readlist_books = match load_readlist_books(
-                &app.services.opds_persisted,
+                app.services.opds_persisted.as_ref(),
                 database_file,
                 &readlist.id,
             )
@@ -830,7 +830,7 @@ pub(super) async fn opds_v2_readlists_feed(
 
     let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
     let has_visible_collections = has_visible_collections_for_scope(
-        &app.services.opds_persisted,
+        app.services.opds_persisted.as_ref(),
         database_file,
         &allowed_library_ids,
         restrictions.as_ref(),
@@ -838,8 +838,8 @@ pub(super) async fn opds_v2_readlists_feed(
     )
     .await;
     let has_visible_readlists = has_visible_readlists_for_scope(
-        &app.services.opds_catalog,
-        &app.services.opds_persisted,
+        app.services.opds_catalog.as_ref(),
+        app.services.opds_persisted.as_ref(),
         database_file,
         &allowed_library_ids,
         restrictions.as_ref(),
