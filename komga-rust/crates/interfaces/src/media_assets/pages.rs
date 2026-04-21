@@ -1,8 +1,10 @@
 use super::*;
+use axum::extract::State;
 use komga_application::media_assets::BookPageRecord;
+use std::sync::Arc;
 
 pub async fn book_page(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Query(query): Query<BookPageQuery>,
     Path((book_id, page_number)): Path<(String, u32)>,
@@ -11,7 +13,7 @@ pub async fn book_page(
 }
 
 pub async fn book_page_opds_v1(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Query(mut query): Query<BookPageQuery>,
     Path((book_id, page_number)): Path<(String, u32)>,
@@ -22,7 +24,7 @@ pub async fn book_page_opds_v1(
 }
 
 pub async fn book_page_opds_v2(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Query(mut query): Query<BookPageQuery>,
     Path((book_id, page_number)): Path<(String, u32)>,
@@ -197,7 +199,7 @@ async fn book_page_response(
 }
 
 pub async fn book_page_raw(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path((book_id, page_number_signed)): Path<(String, i32)>,
 ) -> Response {
@@ -522,7 +524,7 @@ fn read_media_image_dimensions(app: &HttpAppState, path: &FsPath) -> Option<(i64
 }
 
 pub async fn book_page_thumbnail(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path((book_id, page_number)): Path<(String, u32)>,
 ) -> Response {
@@ -591,7 +593,7 @@ pub async fn book_page_thumbnail(
 }
 
 pub async fn book_pages(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
@@ -726,7 +728,7 @@ fn scale_pdf_dimensions(width: Option<i64>, height: Option<i64>) -> (Option<i64>
 }
 
 pub async fn book_positions(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {

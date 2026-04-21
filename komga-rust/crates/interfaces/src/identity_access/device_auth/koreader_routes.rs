@@ -1,4 +1,6 @@
 use super::*;
+use axum::extract::State;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const KOREADER_VENDOR_MEDIA_TYPE: &str = "application/vnd.koreader.v1+json";
@@ -109,7 +111,7 @@ async fn load_read_progress(
 }
 
 pub async fn koreader_user_create(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
 ) -> Response {
@@ -141,7 +143,7 @@ pub async fn koreader_user_create(
 }
 
 pub async fn koreader_user_auth(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
 ) -> Response {
@@ -170,7 +172,7 @@ pub async fn koreader_user_auth(
 }
 
 pub async fn koreader_get_progress(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Path(book_hash): Path<String>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
@@ -337,7 +339,7 @@ fn koreader_epub_locator(href: &str, matched_position: &Value) -> Value {
 }
 
 pub async fn koreader_put_progress(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     body: Bytes,

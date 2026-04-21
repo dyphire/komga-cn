@@ -3,7 +3,7 @@ use std::path::{Path as FsPath, PathBuf};
 
 use axum::Json;
 use axum::body::Bytes;
-use axum::extract::{Extension, Path, Query};
+use axum::extract::{Path, Query};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use image::ImageFormat;

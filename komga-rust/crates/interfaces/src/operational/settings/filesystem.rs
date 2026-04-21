@@ -1,11 +1,12 @@
 use axum::Json;
 use axum::body::Bytes;
-use axum::extract::Extension;
+use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::identity_access::auth::require_admin;
 use crate::state::HttpAppState;
@@ -19,7 +20,7 @@ struct DirectoryRequestDto {
 }
 
 pub(crate) async fn post_filesystem(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {

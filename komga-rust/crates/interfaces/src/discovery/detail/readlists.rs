@@ -4,6 +4,7 @@ use super::readlists_support::{
 use super::*;
 use crate::helpers::validation_error_response;
 use crate::state::HttpAppState;
+use axum::extract::State;
 use axum_extra::extract::{Multipart, multipart::MultipartRejection};
 use icu::collator::{
     Collator,
@@ -11,12 +12,13 @@ use icu::collator::{
 };
 use icu::locale::locale;
 use std::collections::{BTreeSet, HashMap};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const READLIST_SEARCH_CANDIDATE_LIMIT: usize = 1000;
 
 pub async fn readlists(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -322,7 +324,7 @@ fn readlists_unicode_collator() -> icu::collator::CollatorBorrowed<'static> {
 }
 
 pub async fn readlist_create(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -479,7 +481,7 @@ fn readlist_create_bad_request(message: &str) -> Response {
 }
 
 pub async fn readlist_match_comicrack(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     multipart: Result<Multipart, MultipartRejection>,
 ) -> Response {
@@ -523,7 +525,7 @@ fn comicrack_bad_request_response(error_code: &str) -> Response {
 }
 
 pub async fn readlist_update(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
     body: Bytes,
@@ -556,7 +558,7 @@ pub async fn readlist_update(
 }
 
 pub async fn readlist_delete(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
 ) -> Response {
@@ -579,7 +581,7 @@ pub async fn readlist_delete(
 }
 
 pub async fn readlist_books(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
     uri: Uri,
@@ -635,7 +637,7 @@ pub async fn readlist_books(
 }
 
 pub async fn readlist_detail(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
 ) -> Response {
@@ -709,7 +711,7 @@ pub async fn readlist_detail(
 }
 
 pub async fn readlist_book_sibling_previous(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path((readlist_id, book_id)): Path<(String, String)>,
 ) -> Response {
@@ -723,7 +725,7 @@ pub async fn readlist_book_sibling_previous(
 }
 
 pub async fn readlist_book_sibling_next(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path((readlist_id, book_id)): Path<(String, String)>,
 ) -> Response {

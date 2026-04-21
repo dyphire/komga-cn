@@ -6,12 +6,14 @@ use crate::discovery::series_routes::author_query_to_author_match;
 use crate::helpers::validation_error_response;
 use crate::state::HttpAppState;
 use axum::body::{Body, to_bytes};
+use axum::extract::State;
 use icu::collator::{
     Collator,
     options::{CollatorOptions, Strength},
 };
 use icu::locale::locale;
 use std::collections::{BTreeSet, HashMap};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 struct CollectionPatchInput {
@@ -21,7 +23,7 @@ struct CollectionPatchInput {
 }
 
 pub async fn collection_series(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(collection_id): Path<String>,
     uri: Uri,
@@ -137,7 +139,7 @@ pub async fn collection_series(
 
     let adjusted_uri = collection_series_runtime_uri(&uri, collection.ordered);
     let response = series_list(
-        Extension(app),
+        State(app),
         headers,
         adjusted_uri,
         Bytes::from(body.to_string()),
@@ -331,7 +333,7 @@ fn query_bool_option(query: &str, key: &str) -> Option<bool> {
 }
 
 pub async fn collections(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -514,7 +516,7 @@ pub async fn collections(
 }
 
 pub async fn collection_create(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -808,7 +810,7 @@ fn collections_unicode_collator() -> icu::collator::CollatorBorrowed<'static> {
 }
 
 pub async fn collection_detail(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(collection_id): Path<String>,
 ) -> Response {
@@ -859,7 +861,7 @@ pub async fn collection_detail(
 }
 
 pub async fn collection_update(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(collection_id): Path<String>,
     body: Bytes,
@@ -923,7 +925,7 @@ pub async fn collection_update(
 }
 
 pub async fn collection_delete(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(collection_id): Path<String>,
 ) -> Response {

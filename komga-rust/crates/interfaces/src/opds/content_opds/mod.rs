@@ -1,7 +1,9 @@
+use axum::extract::State;
 use std::path::Path;
+use std::sync::Arc;
 
 use axum::Json;
-use axum::extract::{Extension, Path as AxumPath, Query};
+use axum::extract::{Path as AxumPath, Query};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
@@ -29,7 +31,7 @@ pub(crate) use self::auth_payload::opds_auth;
 pub(crate) use self::manifest::{opds_manifest, opds_manifest_with_profile};
 
 pub(crate) async fn opds_manifest_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
@@ -37,7 +39,7 @@ pub(crate) async fn opds_manifest_route(
 }
 
 pub(crate) async fn opds_manifest_profile_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     AxumPath((book_id, manifest_profile)): AxumPath<(String, String)>,
 ) -> Response {
@@ -49,14 +51,14 @@ pub(crate) async fn opds_auth_route(headers: HeaderMap) -> Response {
 }
 
 pub(crate) async fn opds_catalog_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
     v2::opds_catalog(headers, &app).await
 }
 
 pub(crate) async fn opds_v1_series_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -76,7 +78,7 @@ pub(crate) async fn opds_v1_search_route(headers: HeaderMap) -> Response {
 }
 
 pub(crate) async fn opds_v1_on_deck_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -88,7 +90,7 @@ pub(crate) async fn opds_v1_on_deck_route(
 }
 
 pub(crate) async fn opds_v1_keep_reading_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -100,7 +102,7 @@ pub(crate) async fn opds_v1_keep_reading_route(
 }
 
 pub(crate) async fn opds_v1_series_latest_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -108,7 +110,7 @@ pub(crate) async fn opds_v1_series_latest_route(
 }
 
 pub(crate) async fn opds_v1_books_latest_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -120,14 +122,14 @@ pub(crate) async fn opds_v1_books_latest_route(
 }
 
 pub(crate) async fn opds_v1_libraries_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
     v1::opds_v1_libraries(headers, &app).await
 }
 
 pub(crate) async fn opds_v1_collections_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -139,7 +141,7 @@ pub(crate) async fn opds_v1_collections_route(
 }
 
 pub(crate) async fn opds_v1_readlists_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -151,7 +153,7 @@ pub(crate) async fn opds_v1_readlists_route(
 }
 
 pub(crate) async fn opds_v1_publishers_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -159,7 +161,7 @@ pub(crate) async fn opds_v1_publishers_route(
 }
 
 pub(crate) async fn opds_v1_series_detail_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
     AxumPath(series_id): AxumPath<String>,
@@ -172,7 +174,7 @@ pub(crate) async fn opds_v1_series_detail_route(
 }
 
 pub(crate) async fn opds_v1_library_detail_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
     AxumPath(library_id): AxumPath<String>,
@@ -181,7 +183,7 @@ pub(crate) async fn opds_v1_library_detail_route(
 }
 
 pub(crate) async fn opds_v1_collection_detail_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
     AxumPath(collection_id): AxumPath<String>,
@@ -194,7 +196,7 @@ pub(crate) async fn opds_v1_collection_detail_route(
 }
 
 pub(crate) async fn opds_v1_readlist_detail_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
     AxumPath(readlist_id): AxumPath<String>,
@@ -207,15 +209,15 @@ pub(crate) async fn opds_v1_readlist_detail_route(
 }
 
 pub(crate) async fn opds_v1_book_file_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     AxumPath((book_id, _file_name)): AxumPath<(String, String)>,
 ) -> Response {
-    media_assets::handlers::book_file(Extension(app), headers, AxumPath(book_id)).await
+    media_assets::handlers::book_file(State(app), headers, AxumPath(book_id)).await
 }
 
 pub(crate) async fn opds_v1_book_thumbnail_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
@@ -223,11 +225,11 @@ pub(crate) async fn opds_v1_book_thumbnail_route(
         return v1::opds_v1_basic_unauthorized_response();
     }
 
-    media_assets::handlers::book_thumbnail_opds(Extension(app), headers, AxumPath(book_id)).await
+    media_assets::handlers::book_thumbnail_opds(State(app), headers, AxumPath(book_id)).await
 }
 
 pub(crate) async fn opds_v1_book_thumbnail_small_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
@@ -235,12 +237,11 @@ pub(crate) async fn opds_v1_book_thumbnail_small_route(
         return v1::opds_v1_basic_unauthorized_response();
     }
 
-    media_assets::handlers::book_thumbnail_opds_small(Extension(app), headers, AxumPath(book_id))
-        .await
+    media_assets::handlers::book_thumbnail_opds_small(State(app), headers, AxumPath(book_id)).await
 }
 
 pub(crate) async fn opds_v2_book_file_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
@@ -248,11 +249,11 @@ pub(crate) async fn opds_v2_book_file_route(
         return opds_catalog_unauthorized_response(&headers);
     }
 
-    media_assets::handlers::book_file(Extension(app), headers, AxumPath(book_id)).await
+    media_assets::handlers::book_file(State(app), headers, AxumPath(book_id)).await
 }
 
 pub(crate) async fn opds_v2_book_file_with_suffix_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     AxumPath((book_id, file_name)): AxumPath<(String, String)>,
 ) -> Response {
@@ -261,7 +262,7 @@ pub(crate) async fn opds_v2_book_file_with_suffix_route(
     }
 
     media_assets::handlers::book_file_with_suffix(
-        Extension(app),
+        State(app),
         headers,
         AxumPath((book_id, file_name)),
     )
@@ -269,7 +270,7 @@ pub(crate) async fn opds_v2_book_file_with_suffix_route(
 }
 
 pub(crate) async fn opds_v2_book_page_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Query(query): Query<media_assets::handlers::BookPageQuery>,
     AxumPath((book_id, page_number)): AxumPath<(String, u32)>,
@@ -279,7 +280,7 @@ pub(crate) async fn opds_v2_book_page_route(
     }
 
     media_assets::handlers::book_page_opds_v2(
-        Extension(app),
+        State(app),
         headers,
         Query(query),
         AxumPath((book_id, page_number)),
@@ -288,7 +289,7 @@ pub(crate) async fn opds_v2_book_page_route(
 }
 
 pub(crate) async fn opds_v2_book_page_raw_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     AxumPath((book_id, page_number)): AxumPath<(String, i32)>,
 ) -> Response {
@@ -296,12 +297,12 @@ pub(crate) async fn opds_v2_book_page_raw_route(
         return opds_catalog_unauthorized_response(&headers);
     }
 
-    media_assets::handlers::book_page_raw(Extension(app), headers, AxumPath((book_id, page_number)))
+    media_assets::handlers::book_page_raw(State(app), headers, AxumPath((book_id, page_number)))
         .await
 }
 
 pub(crate) async fn opds_v2_book_thumbnail_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
@@ -309,18 +310,18 @@ pub(crate) async fn opds_v2_book_thumbnail_route(
         return opds_catalog_unauthorized_response(&headers);
     }
 
-    media_assets::handlers::book_thumbnail_opds(Extension(app), headers, AxumPath(book_id)).await
+    media_assets::handlers::book_thumbnail_opds(State(app), headers, AxumPath(book_id)).await
 }
 
 pub(crate) async fn opds_v2_libraries_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
     v2::opds_v2_libraries(headers, &app).await
 }
 
 pub(crate) async fn opds_v2_library_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     AxumPath(library_id): AxumPath<String>,
 ) -> Response {
@@ -328,7 +329,7 @@ pub(crate) async fn opds_v2_library_route(
 }
 
 pub(crate) async fn opds_v2_library_readlists_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
     AxumPath(library_id): AxumPath<String>,
@@ -337,7 +338,7 @@ pub(crate) async fn opds_v2_library_readlists_route(
 }
 
 pub(crate) async fn opds_v2_libraries_readlists_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -345,7 +346,7 @@ pub(crate) async fn opds_v2_libraries_readlists_route(
 }
 
 pub(crate) async fn opds_v2_libraries_keep_reading_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -353,7 +354,7 @@ pub(crate) async fn opds_v2_libraries_keep_reading_route(
 }
 
 pub(crate) async fn opds_v2_library_keep_reading_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
     AxumPath(library_id): AxumPath<String>,
@@ -362,7 +363,7 @@ pub(crate) async fn opds_v2_library_keep_reading_route(
 }
 
 pub(crate) async fn opds_v2_libraries_on_deck_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -370,7 +371,7 @@ pub(crate) async fn opds_v2_libraries_on_deck_route(
 }
 
 pub(crate) async fn opds_v2_library_on_deck_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
     AxumPath(library_id): AxumPath<String>,
@@ -379,7 +380,7 @@ pub(crate) async fn opds_v2_library_on_deck_route(
 }
 
 pub(crate) async fn opds_v2_libraries_latest_books_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -387,7 +388,7 @@ pub(crate) async fn opds_v2_libraries_latest_books_route(
 }
 
 pub(crate) async fn opds_v2_library_latest_books_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
     AxumPath(library_id): AxumPath<String>,
@@ -396,7 +397,7 @@ pub(crate) async fn opds_v2_library_latest_books_route(
 }
 
 pub(crate) async fn opds_v2_libraries_latest_series_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -404,7 +405,7 @@ pub(crate) async fn opds_v2_libraries_latest_series_route(
 }
 
 pub(crate) async fn opds_v2_library_latest_series_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
     AxumPath(library_id): AxumPath<String>,
@@ -413,7 +414,7 @@ pub(crate) async fn opds_v2_library_latest_series_route(
 }
 
 pub(crate) async fn opds_v2_libraries_browse_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -421,7 +422,7 @@ pub(crate) async fn opds_v2_libraries_browse_route(
 }
 
 pub(crate) async fn opds_v2_library_browse_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
     AxumPath(library_id): AxumPath<String>,
@@ -430,7 +431,7 @@ pub(crate) async fn opds_v2_library_browse_route(
 }
 
 pub(crate) async fn opds_v2_libraries_collections_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -438,7 +439,7 @@ pub(crate) async fn opds_v2_libraries_collections_route(
 }
 
 pub(crate) async fn opds_v2_library_collections_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
     AxumPath(library_id): AxumPath<String>,
@@ -447,7 +448,7 @@ pub(crate) async fn opds_v2_library_collections_route(
 }
 
 pub(crate) async fn opds_v2_collection_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
     AxumPath(collection_id): AxumPath<String>,
@@ -456,7 +457,7 @@ pub(crate) async fn opds_v2_collection_route(
 }
 
 pub(crate) async fn opds_v2_series_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
     AxumPath(series_id): AxumPath<String>,
@@ -465,7 +466,7 @@ pub(crate) async fn opds_v2_series_route(
 }
 
 pub(crate) async fn opds_v2_readlist_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
     AxumPath(readlist_id): AxumPath<String>,
@@ -474,7 +475,7 @@ pub(crate) async fn opds_v2_readlist_route(
 }
 
 pub(crate) async fn opds_v2_search_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {

@@ -1,16 +1,18 @@
 use super::*;
+use axum::extract::State;
 use komga_application::media_assets::{
     BooksImportEntry as ApplicationBooksImportEntry,
     BooksImportPayload as ApplicationBooksImportPayload,
     ImportCopyMode as ApplicationImportCopyMode,
 };
 use komga_application::task_processing::TaskQueueRecord as ApplicationTaskQueueRecord;
+use std::sync::Arc;
 use tracing::error;
 
 use crate::state::RuntimeMediaImportService;
 
 pub async fn books_import(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {

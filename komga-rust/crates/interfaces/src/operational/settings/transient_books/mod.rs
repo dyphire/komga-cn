@@ -1,11 +1,12 @@
 use axum::Json;
 use axum::body::Bytes;
-use axum::extract::Extension;
 use axum::extract::Path as AxumPath;
+use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde_json::Value;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::identity_access::auth::require_admin;
@@ -41,7 +42,7 @@ fn transient_books_json_error_response(status: StatusCode, error: &str) -> Respo
 }
 
 pub(crate) async fn post_transient_books(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -128,7 +129,7 @@ pub(crate) async fn post_transient_books(
 }
 
 pub(crate) async fn post_transient_book_analyze(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     AxumPath(transient_book_id): AxumPath<String>,
 ) -> Response {
@@ -192,7 +193,7 @@ pub(crate) async fn post_transient_book_analyze(
 }
 
 pub(crate) async fn get_transient_book_page(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     AxumPath((transient_book_id, page_number)): AxumPath<(String, i32)>,
 ) -> Response {

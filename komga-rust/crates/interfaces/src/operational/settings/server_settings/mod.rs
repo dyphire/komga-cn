@@ -1,9 +1,10 @@
 use axum::Json;
 use axum::body::Bytes;
-use axum::extract::Extension;
+use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::{Value, json};
+use std::sync::Arc;
 
 use crate::identity_access::auth::{require_admin, sync_remember_me_runtime_settings};
 use crate::operational::helpers::{
@@ -14,7 +15,7 @@ use crate::state::PersistedServerSettings;
 use crate::state::{HttpAppState, OperationalSettings, RuntimeState};
 
 pub(crate) async fn get_server_settings(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
@@ -43,7 +44,7 @@ pub(crate) async fn get_server_settings(
 }
 
 pub(crate) async fn update_server_settings(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {

@@ -3,9 +3,11 @@ use super::shared::{
     thumbnail_dimensions,
 };
 use super::*;
+use axum::extract::State;
+use std::sync::Arc;
 
 pub async fn series_thumbnail(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
@@ -50,7 +52,7 @@ pub async fn series_thumbnail(
 }
 
 pub async fn series_thumbnails(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
@@ -102,7 +104,7 @@ pub async fn series_thumbnails(
 }
 
 pub async fn series_thumbnail_by_id(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path((series_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
@@ -150,7 +152,7 @@ pub async fn series_thumbnail_by_id(
 }
 
 pub async fn series_thumbnail_upload(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(series_id): Path<String>,
     multipart: Multipart,
@@ -211,7 +213,7 @@ pub async fn series_thumbnail_upload(
 }
 
 pub async fn series_thumbnail_select(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path((series_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
@@ -230,7 +232,7 @@ pub async fn series_thumbnail_select(
 }
 
 pub async fn series_thumbnail_delete(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path((series_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {

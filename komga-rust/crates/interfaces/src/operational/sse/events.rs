@@ -1,4 +1,4 @@
-use axum::extract::Extension;
+use axum::extract::State;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
@@ -10,6 +10,7 @@ use komga_application::runtime_sse::{
 use serde_json::json;
 use std::collections::{BTreeMap, VecDeque};
 use std::convert::Infallible;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::{Instant, MissedTickBehavior, interval_at};
 
@@ -25,7 +26,7 @@ fn sse_event(name: &str, payload: serde_json::Value) -> Event {
 }
 
 pub(crate) async fn sse_events(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
     let state = &app.operational;
@@ -123,7 +124,7 @@ struct SseStreamState {
     last_runtime_event_id: u64,
     pending_events: VecDeque<Event>,
     runtime_event_updates: tokio::sync::watch::Receiver<u64>,
-    app: HttpAppState,
+    app: Arc<HttpAppState>,
 }
 
 async fn poll_runtime_events(stream_state: &mut SseStreamState) {

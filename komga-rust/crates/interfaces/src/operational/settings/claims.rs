@@ -1,16 +1,17 @@
 use axum::Json;
-use axum::extract::Extension;
+use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
 use serde_json::json;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::identity_access::auth::{AuthUser, user_payload_json};
 use crate::state::ClaimInitialAdminUserResult;
 use crate::state::HttpAppState;
 
-pub(crate) async fn get_claim_status(Extension(app): Extension<HttpAppState>) -> Response {
+pub(crate) async fn get_claim_status(State(app): State<Arc<HttpAppState>>) -> Response {
     let is_claimed = app
         .services
         .operational_settings
@@ -22,7 +23,7 @@ pub(crate) async fn get_claim_status(Extension(app): Extension<HttpAppState>) ->
 }
 
 pub(crate) async fn post_claim(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
     let email = email_header_value(&headers, "x-komga-email");

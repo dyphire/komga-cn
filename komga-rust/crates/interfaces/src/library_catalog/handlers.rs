@@ -1,11 +1,13 @@
 use axum::Json;
-use axum::extract::{Extension, Path};
+use axum::extract::Path;
+use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use komga_application::library_catalog::{LibraryCatalogMutationError, LibraryRecord};
 use komga_domain::discovery::DiscoveryError;
 use serde_json::{Value, json};
 use std::path::Path as FsPath;
+use std::sync::Arc;
 
 use crate::discovery_auth::context::{
     DetailAccessDenial, DetailResourceContext, DiscoveryQueryContext,
@@ -20,15 +22,12 @@ use super::request_mapping::{
 use super::response_mapping::{libraries_payload, library_payload};
 use super::task_mapping::{enqueue_task_records, enqueue_task_records_with_status};
 
-pub async fn libraries_route(
-    Extension(app): Extension<HttpAppState>,
-    headers: HeaderMap,
-) -> Response {
+pub async fn libraries_route(State(app): State<Arc<HttpAppState>>, headers: HeaderMap) -> Response {
     response(headers, &app, app.auth_db.database_file.as_path()).await
 }
 
 pub async fn library_detail_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     path: Path<String>,
 ) -> Response {
@@ -36,7 +35,7 @@ pub async fn library_detail_route(
 }
 
 pub async fn library_create_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
@@ -44,7 +43,7 @@ pub async fn library_create_route(
 }
 
 pub async fn library_update_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     path: Path<String>,
     Json(body): Json<Value>,
@@ -53,7 +52,7 @@ pub async fn library_update_route(
 }
 
 pub async fn library_delete_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     path: Path<String>,
 ) -> Response {
@@ -61,7 +60,7 @@ pub async fn library_delete_route(
 }
 
 pub async fn library_scan_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
     path: Path<String>,
@@ -70,7 +69,7 @@ pub async fn library_scan_route(
 }
 
 pub async fn library_analyze_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     path: Path<String>,
 ) -> Response {
@@ -78,7 +77,7 @@ pub async fn library_analyze_route(
 }
 
 pub async fn library_metadata_refresh_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     path: Path<String>,
 ) -> Response {
@@ -86,7 +85,7 @@ pub async fn library_metadata_refresh_route(
 }
 
 pub async fn library_empty_trash_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     path: Path<String>,
 ) -> Response {
@@ -142,7 +141,7 @@ pub async fn library_detail(
 
 pub async fn library_update(
     headers: HeaderMap,
-    app: HttpAppState,
+    app: Arc<HttpAppState>,
     Path(library_id): Path<String>,
     body: Value,
 ) -> Response {
@@ -169,7 +168,7 @@ pub async fn library_update(
     }
 }
 
-pub async fn library_create(headers: HeaderMap, app: HttpAppState, body: Value) -> Response {
+pub async fn library_create(headers: HeaderMap, app: Arc<HttpAppState>, body: Value) -> Response {
     if let Some(response) = require_admin(&headers) {
         return response;
     }
@@ -192,7 +191,7 @@ pub async fn library_create(headers: HeaderMap, app: HttpAppState, body: Value) 
 
 pub async fn library_delete(
     headers: HeaderMap,
-    app: HttpAppState,
+    app: Arc<HttpAppState>,
     Path(library_id): Path<String>,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
@@ -214,7 +213,7 @@ pub async fn library_delete(
 pub async fn library_scan(
     headers: HeaderMap,
     uri: Uri,
-    app: HttpAppState,
+    app: Arc<HttpAppState>,
     Path(library_id): Path<String>,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
@@ -235,7 +234,7 @@ pub async fn library_scan(
 
 pub async fn library_analyze(
     headers: HeaderMap,
-    app: HttpAppState,
+    app: Arc<HttpAppState>,
     Path(library_id): Path<String>,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
@@ -255,7 +254,7 @@ pub async fn library_analyze(
 
 pub async fn library_metadata_refresh(
     headers: HeaderMap,
-    app: HttpAppState,
+    app: Arc<HttpAppState>,
     Path(library_id): Path<String>,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
@@ -275,7 +274,7 @@ pub async fn library_metadata_refresh(
 
 pub async fn library_empty_trash(
     headers: HeaderMap,
-    app: HttpAppState,
+    app: Arc<HttpAppState>,
     Path(library_id): Path<String>,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {

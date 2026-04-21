@@ -1,6 +1,7 @@
 use axum::Router;
 use axum::middleware;
 use axum::routing::{delete, get, patch, post, put};
+use std::sync::Arc;
 use tower_http::trace::TraceLayer;
 
 use crate::access_log;
@@ -11,6 +12,7 @@ use crate::identity_access::device_auth;
 use crate::state::HttpAppState;
 
 pub fn build_router(app: HttpAppState) -> Router {
+    let app = Arc::new(app);
     let router = Router::new()
         .route(
             "/api/v1/settings",
@@ -693,13 +695,15 @@ pub fn build_router(app: HttpAppState) -> Router {
     ));
 
     #[allow(clippy::let_and_return)]
-    router.layer(axum::extract::Extension(app)).layer(
-        TraceLayer::new_for_http()
-            .make_span_with(access_log::make_request_span)
-            .on_request(access_log::on_request)
-            .on_response(access_log::on_response)
-            .on_failure(access_log::on_failure),
-    )
+    router
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(access_log::make_request_span)
+                .on_request(access_log::on_request)
+                .on_response(access_log::on_response)
+                .on_failure(access_log::on_failure),
+        )
+        .with_state(app)
 }
 
 fn should_expose_actuator_default_contract() -> bool {

@@ -1,8 +1,10 @@
 use super::*;
 use crate::state::HttpAppState;
+use axum::extract::State;
+use std::sync::Arc;
 
 pub async fn book_detail(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
@@ -58,7 +60,7 @@ pub async fn book_detail(
 }
 
 pub async fn book_sibling_previous(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
@@ -117,7 +119,7 @@ pub async fn book_sibling_previous(
 }
 
 pub async fn book_sibling_next(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
@@ -176,7 +178,7 @@ pub async fn book_sibling_next(
 }
 
 pub async fn book_readlists(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {

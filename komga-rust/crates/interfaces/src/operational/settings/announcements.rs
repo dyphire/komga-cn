@@ -1,11 +1,12 @@
 use axum::Json;
 use axum::body::Bytes;
-use axum::extract::Extension;
+use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -14,7 +15,7 @@ use crate::identity_access::auth::{require_admin, resolved_auth_user, user_id};
 use crate::state::HttpAppState;
 
 pub(crate) async fn get_announcements(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
@@ -48,7 +49,7 @@ pub(crate) async fn get_announcements(
 }
 
 pub(crate) async fn put_announcements(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -101,7 +102,7 @@ fn parse_announcement_ids(body: &[u8]) -> Result<Vec<String>, ()> {
 }
 
 pub(crate) async fn get_releases(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {

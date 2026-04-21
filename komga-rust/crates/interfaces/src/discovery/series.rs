@@ -13,7 +13,9 @@ use super::persisted::models::{
 use super::persisted::series_queries::parse_persisted_series_sort_modes;
 use super::series_routes::author_query_to_author_match;
 use super::*;
+use axum::extract::State;
 use komga_domain::discovery::PageEnvelope;
+use std::sync::Arc;
 
 fn optional_query_bool(query: &str, key: &str) -> Result<Option<bool>, ()> {
     match query_value(query, key) {
@@ -538,7 +540,7 @@ pub async fn series_alphabetical_groups(
 }
 
 pub async fn series_list(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
     body: Bytes,

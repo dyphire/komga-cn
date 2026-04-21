@@ -1,9 +1,10 @@
 use axum::Json;
-use axum::extract::Extension;
+use axum::extract::State;
 use axum::http::Uri;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
+use std::sync::Arc;
 
 use crate::identity_access::auth::{require_admin, require_auth, resolved_auth_user, user_id};
 use crate::state::HttpAppState;
@@ -17,7 +18,7 @@ enum SyncpointDeleteScope {
 }
 
 pub(crate) async fn get_history(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -54,7 +55,7 @@ pub(crate) async fn get_history(
 }
 
 pub(crate) async fn delete_syncpoints_me(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -114,7 +115,7 @@ fn syncpoint_delete_scope(query: &str) -> SyncpointDeleteScope {
     }
 }
 
-pub(crate) async fn get_oauth2_providers(Extension(app): Extension<HttpAppState>) -> Response {
+pub(crate) async fn get_oauth2_providers(State(app): State<Arc<HttpAppState>>) -> Response {
     let providers = app
         .operational
         .oauth2_clients
@@ -131,7 +132,7 @@ pub(crate) async fn get_oauth2_providers(Extension(app): Extension<HttpAppState>
 }
 
 pub(crate) async fn delete_tasks(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {

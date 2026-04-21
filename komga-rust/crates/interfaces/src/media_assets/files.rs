@@ -1,7 +1,9 @@
 use super::*;
+use axum::extract::State;
+use std::sync::Arc;
 
 pub async fn readlist_file(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
 ) -> Response {
@@ -82,7 +84,7 @@ pub async fn readlist_file(
 }
 
 pub async fn series_file(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
@@ -137,7 +139,7 @@ pub async fn series_file(
 }
 
 pub async fn book_resource(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path((book_id, resource_path)): Path<(String, String)>,
 ) -> Response {
@@ -226,7 +228,7 @@ pub async fn book_resource(
 }
 
 pub async fn book_file(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
@@ -234,7 +236,7 @@ pub async fn book_file(
 }
 
 pub async fn book_file_with_suffix(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path((book_id, _file_name)): Path<(String, String)>,
 ) -> Response {

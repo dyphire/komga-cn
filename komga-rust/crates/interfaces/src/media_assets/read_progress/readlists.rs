@@ -1,4 +1,6 @@
 use super::*;
+use axum::extract::State;
+use std::sync::Arc;
 
 async fn load_tachiyomi_readlist_book_ids(
     app: &HttpAppState,
@@ -38,7 +40,7 @@ async fn load_tachiyomi_readlist_book_ids(
 }
 
 pub async fn readlist_tachiyomi_read_progress_get(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
 ) -> Response {
@@ -95,7 +97,7 @@ pub async fn readlist_tachiyomi_read_progress_get(
 }
 
 pub async fn readlist_tachiyomi_read_progress_put(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
     Json(body): Json<Value>,

@@ -4,6 +4,8 @@ use crate::media_assets::http_helpers::attachment_disposition;
 use crate::media_assets::read_progress::{
     normalize_book_epub_locator, progression_is_older_than_existing,
 };
+use axum::extract::State;
+use std::sync::Arc;
 mod common;
 mod metadata_helpers;
 mod proxy;
@@ -392,7 +394,7 @@ async fn build_kobo_sync_events_page(
 }
 
 pub async fn kobo_library_sync(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Path(auth_token): Path<String>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
@@ -533,7 +535,7 @@ pub async fn kobo_library_sync(
 }
 
 pub async fn kobo_library_book_metadata(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Path((auth_token, book_id)): Path<(String, String)>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
@@ -671,7 +673,7 @@ pub async fn kobo_library_book_metadata(
 }
 
 pub async fn kobo_library_book_state(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Path((auth_token, book_id)): Path<(String, String)>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
@@ -731,7 +733,7 @@ pub async fn kobo_library_book_state(
 }
 
 pub async fn kobo_library_book_state_update(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Path((auth_token, book_id)): Path<(String, String)>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
@@ -919,7 +921,7 @@ fn kobo_state_update_failure(book_id: &str) -> Response {
 }
 
 pub async fn kobo_book_file_epub(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Path((auth_token, book_id)): Path<(String, String)>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
@@ -1014,7 +1016,7 @@ pub async fn kobo_book_file_epub(
 }
 
 pub async fn kobo_book_thumbnail(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Path((auth_token, thumbnail_id, width, height, _)): Path<(
         String,
         String,
@@ -1039,7 +1041,7 @@ pub async fn kobo_book_thumbnail(
 }
 
 pub async fn kobo_book_thumbnail_with_quality(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Path((auth_token, thumbnail_id, width, height, _, _)): Path<(
         String,
         String,
@@ -1065,7 +1067,7 @@ pub async fn kobo_book_thumbnail_with_quality(
 }
 
 pub async fn kobo_catch_all(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Path((auth_token, path)): Path<(String, String)>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,

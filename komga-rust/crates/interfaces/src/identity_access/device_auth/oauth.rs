@@ -1,11 +1,13 @@
 use super::*;
+use axum::extract::State;
 use axum_extra::extract::cookie::{Cookie, SameSite};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use std::io::Read;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub async fn oauth2_authorization(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Path(registration_id): Path<String>,
     headers: HeaderMap,
 ) -> Response {
@@ -79,7 +81,7 @@ pub async fn oauth2_authorization(
 }
 
 pub async fn oauth2_login_code(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     Path(registration_id): Path<String>,
     headers: HeaderMap,

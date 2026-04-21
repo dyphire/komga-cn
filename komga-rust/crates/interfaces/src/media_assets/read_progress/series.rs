@@ -1,7 +1,9 @@
 use super::*;
+use axum::extract::State;
+use std::sync::Arc;
 
 pub async fn series_read_progress_post(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
@@ -66,7 +68,7 @@ pub async fn series_read_progress_post(
 }
 
 pub async fn series_read_progress_delete(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
@@ -127,7 +129,7 @@ pub async fn series_read_progress_delete(
 }
 
 pub async fn series_tachiyomi_read_progress_get(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
@@ -168,7 +170,7 @@ pub async fn series_tachiyomi_read_progress_get(
 }
 
 pub async fn series_tachiyomi_read_progress_put(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(series_id): Path<String>,
     body: Bytes,

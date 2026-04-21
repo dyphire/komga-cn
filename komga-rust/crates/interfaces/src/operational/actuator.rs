@@ -1,6 +1,6 @@
 use axum::Json;
-use axum::extract::Extension;
 use axum::extract::Path as AxumPath;
+use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use komga_application::task_processing::PlannedTaskKind;
@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[cfg(unix)]
 use std::ffi::CString;
@@ -86,7 +87,7 @@ fn actuator_root_links() -> Value {
 
 pub(crate) async fn actuator_health(
     headers: HeaderMap,
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
 ) -> Response {
     let db = db_health_component(&app);
     let disk_space_probe_path = disk_space_probe_path(&app);
@@ -281,7 +282,7 @@ fn disk_space_details(path: &Path) -> Option<DiskSpaceDetails> {
 }
 
 pub(crate) async fn actuator_info(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
@@ -462,7 +463,7 @@ fn parse_windows_version_from_cmd_output(output: &str) -> Option<String> {
 }
 
 pub(crate) async fn actuator_logfile(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
@@ -492,7 +493,7 @@ pub(crate) async fn actuator_logfile(
 }
 
 pub(crate) async fn actuator_shutdown(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
     if let Some(response) = require_admin(&headers) {
@@ -523,7 +524,7 @@ pub(crate) async fn actuator_metrics_index(headers: HeaderMap) -> Response {
 }
 
 pub(crate) async fn actuator_metric_detail(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
     AxumPath(metric_name): AxumPath<String>,

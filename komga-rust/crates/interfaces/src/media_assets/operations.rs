@@ -1,11 +1,13 @@
 use super::*;
 use crate::state::HttpAppState;
+use axum::extract::State;
 use komga_application::media_assets::{
     BookMetadataAuthor as ApplicationBookMetadataAuthor,
     BookMetadataLink as ApplicationBookMetadataLink,
     BookMetadataPatch as ApplicationBookMetadataPatch,
 };
 use komga_application::runtime_sse::register_runtime_sse_event;
+use std::sync::Arc;
 
 #[derive(Deserialize)]
 pub struct BooksThumbnailsRegenerateQuery {
@@ -14,7 +16,7 @@ pub struct BooksThumbnailsRegenerateQuery {
 }
 
 pub async fn book_analyze(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
@@ -45,7 +47,7 @@ pub async fn book_analyze(
 }
 
 pub async fn book_metadata_refresh(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
@@ -82,7 +84,7 @@ pub async fn book_metadata_refresh(
 }
 
 pub async fn book_metadata_update(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
     Json(body): Json<Value>,
@@ -173,7 +175,7 @@ pub async fn book_metadata_update(
 }
 
 pub async fn book_metadata_batch_update(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
@@ -504,7 +506,7 @@ fn optional_links(
 }
 
 pub async fn books_thumbnails_regenerate(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Query(query): Query<BooksThumbnailsRegenerateQuery>,
 ) -> Response {
@@ -527,7 +529,7 @@ pub async fn books_thumbnails_regenerate(
 }
 
 pub async fn series_file_delete(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
@@ -545,7 +547,7 @@ pub async fn series_file_delete(
 }
 
 pub async fn series_analyze(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
@@ -583,7 +585,7 @@ pub async fn series_analyze(
 }
 
 pub async fn series_metadata_refresh(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
@@ -625,7 +627,7 @@ pub async fn series_metadata_refresh(
 }
 
 pub async fn book_file_delete(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {

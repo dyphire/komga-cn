@@ -3,9 +3,11 @@ use super::shared::{
     response_from_thumbnail_jpeg_bytes, set_one_hour_private_cache_control, thumbnail_dimensions,
 };
 use super::*;
+use axum::extract::State;
+use std::sync::Arc;
 
 pub async fn collection_thumbnail(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(collection_id): Path<String>,
 ) -> Response {
@@ -57,7 +59,7 @@ pub async fn collection_thumbnail(
 }
 
 pub async fn collection_thumbnails(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(collection_id): Path<String>,
 ) -> Response {
@@ -108,7 +110,7 @@ pub async fn collection_thumbnails(
 }
 
 pub async fn collection_thumbnail_by_id(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path((collection_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
@@ -154,7 +156,7 @@ pub async fn collection_thumbnail_by_id(
 }
 
 pub async fn collection_thumbnail_upload(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(collection_id): Path<String>,
     multipart: Multipart,
@@ -208,7 +210,7 @@ pub async fn collection_thumbnail_upload(
 }
 
 pub async fn collection_thumbnail_select(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path((collection_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
@@ -232,7 +234,7 @@ pub async fn collection_thumbnail_select(
 }
 
 pub async fn collection_thumbnail_delete(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path((collection_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {

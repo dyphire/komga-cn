@@ -1,11 +1,12 @@
 use axum::Json;
-use axum::extract::Extension;
 use axum::extract::Path as AxumPath;
+use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use rust_embed::Embed;
 use serde_json::Value;
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use crate::identity_access::auth::require_request_auth;
 use crate::state::HttpAppState;
@@ -15,7 +16,7 @@ use crate::state::HttpAppState;
 struct EmbeddedFonts;
 
 pub(crate) async fn get_fonts_families(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
     if let Some(response) =
@@ -116,7 +117,7 @@ struct FontCharacteristics {
 }
 
 pub(crate) async fn get_font_file(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     AxumPath((font_family, font_file)): AxumPath<(String, String)>,
 ) -> Response {
     if font_family.contains('/')
@@ -165,7 +166,7 @@ pub(crate) async fn get_font_file(
 }
 
 pub(crate) async fn get_font_family_css(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     AxumPath(font_family): AxumPath<String>,
 ) -> Response {
     if font_family.contains('/') || font_family.contains('\\') {

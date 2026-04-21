@@ -1,9 +1,11 @@
 use super::kobo_routes::proxy_kobo_catch_all_request;
 use super::*;
 use axum::body::to_bytes;
+use axum::extract::State;
+use std::sync::Arc;
 
 pub async fn kobo_ping(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Path(auth_token): Path<String>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
@@ -23,7 +25,7 @@ pub async fn kobo_ping(
     "pong".into_response()
 }
 pub async fn kobo_initialization(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Path(auth_token): Path<String>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
@@ -152,7 +154,7 @@ fn apply_initialization_overrides(resources: &mut Value, auth_token: &str, conte
 }
 
 pub async fn kobo_auth_device(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Path(auth_token): Path<String>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,

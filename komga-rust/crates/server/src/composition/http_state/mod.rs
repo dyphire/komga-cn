@@ -144,19 +144,19 @@ pub fn compose_http_runtime(
                 config.database_file.as_path(),
             ),
         ),
-        runtime_identity: runtime_identity_service.clone(),
-        operational_runtime: operational_runtime_service.clone(),
-        operational_settings: operational_settings_service.clone(),
-        media_assets: media_assets_service.clone(),
+        runtime_identity: runtime_identity_service,
+        operational_runtime: operational_runtime_service,
+        operational_settings: operational_settings_service,
+        media_assets: media_assets_service,
         opds_catalog: Arc::new(opds_catalog),
         opds_persisted: Arc::new(opds_persisted),
         discovery_persisted,
-        discovery_detail: discovery_detail_service.clone(),
+        discovery_detail: discovery_detail_service,
     };
     let operational = http_state_operational_state::compose_operational_state(
         config,
         startup_timing,
-        remember_me_runtime_key.clone(),
+        remember_me_runtime_key,
         shutdown_trigger,
     );
 

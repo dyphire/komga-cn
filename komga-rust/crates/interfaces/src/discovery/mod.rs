@@ -1,8 +1,10 @@
+use axum::extract::State;
 use std::path::Path as FsPath;
+use std::sync::Arc;
 
 use axum::Json;
 use axum::body::Bytes;
-use axum::extract::{Extension, Path as AxumPath};
+use axum::extract::Path as AxumPath;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use komga_application::discovery::{
@@ -31,7 +33,7 @@ pub mod series;
 mod series_routes;
 
 pub(super) async fn authors_names_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -39,7 +41,7 @@ pub(super) async fn authors_names_route(
 }
 
 pub(super) async fn authors_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -47,14 +49,14 @@ pub(super) async fn authors_route(
 }
 
 pub(super) async fn authors_roles_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
     facets::authors_roles(headers, &app).await
 }
 
 pub(super) async fn genres_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -62,7 +64,7 @@ pub(super) async fn genres_route(
 }
 
 pub(super) async fn tags_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -70,7 +72,7 @@ pub(super) async fn tags_route(
 }
 
 pub(super) async fn series_tags_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -78,7 +80,7 @@ pub(super) async fn series_tags_route(
 }
 
 pub(super) async fn languages_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -86,7 +88,7 @@ pub(super) async fn languages_route(
 }
 
 pub(super) async fn publishers_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -94,7 +96,7 @@ pub(super) async fn publishers_route(
 }
 
 pub(super) async fn age_ratings_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -102,7 +104,7 @@ pub(super) async fn age_ratings_route(
 }
 
 pub(super) async fn sharing_labels_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -110,7 +112,7 @@ pub(super) async fn sharing_labels_route(
 }
 
 pub(super) async fn series_new_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -118,7 +120,7 @@ pub(super) async fn series_new_route(
 }
 
 pub(super) async fn series_updated_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -126,7 +128,7 @@ pub(super) async fn series_updated_route(
 }
 
 pub(super) async fn series_release_dates_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -134,7 +136,7 @@ pub(super) async fn series_release_dates_route(
 }
 
 pub(super) async fn series_latest_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -142,7 +144,7 @@ pub(super) async fn series_latest_route(
 }
 
 pub(super) async fn series_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -150,7 +152,7 @@ pub(super) async fn series_route(
 }
 
 pub(super) async fn books_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -158,7 +160,7 @@ pub(super) async fn books_route(
 }
 
 pub(super) async fn series_detail_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     AxumPath(series_id): AxumPath<String>,
 ) -> Response {
@@ -166,7 +168,7 @@ pub(super) async fn series_detail_route(
 }
 
 pub(super) async fn series_collections_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     AxumPath(series_id): AxumPath<String>,
 ) -> Response {
@@ -174,16 +176,16 @@ pub(super) async fn series_collections_route(
 }
 
 pub(super) async fn series_books_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
     AxumPath(series_id): AxumPath<String>,
 ) -> Response {
-    books::series_books_deprecated(Extension(app), headers, uri, AxumPath(series_id)).await
+    books::series_books_deprecated(State(app), headers, uri, AxumPath(series_id)).await
 }
 
 pub(super) async fn series_metadata_update_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     AxumPath(series_id): AxumPath<String>,
     Json(body): Json<Value>,
@@ -192,7 +194,7 @@ pub(super) async fn series_metadata_update_route(
 }
 
 pub(super) async fn series_alphabetical_groups_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
@@ -200,7 +202,7 @@ pub(super) async fn series_alphabetical_groups_route(
 }
 
 pub(super) async fn authors_v2_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {

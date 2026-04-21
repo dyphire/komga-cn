@@ -43,8 +43,8 @@ async fn update_server_settings_does_not_apply_runtime_task_pool_before_persiste
 
     let apply_count = Arc::new(AtomicUsize::new(0));
     let state = test_operational_state(database_file.clone(), fixture_root.clone());
-    let app = test_app_state(
-        state.clone(),
+    let app = Arc::new(test_app_state(
+        state,
         Arc::new(FakeTaskQueueService {
             apply: {
                 let apply_count = apply_count.clone();
@@ -55,11 +55,11 @@ async fn update_server_settings_does_not_apply_runtime_task_pool_before_persiste
             },
         }),
         settings_store.clone(),
-    );
+    ));
     let headers = admin_headers(&fixture_root);
 
     let response = update_server_settings(
-        Extension(app),
+        State(app),
         headers,
         Bytes::from(serde_json::json!({ "taskPoolSize": 4_u64 }).to_string()),
     )
@@ -96,14 +96,14 @@ async fn get_server_settings_returns_empty_string_placeholders_for_missing_strin
     let settings_store = fake_settings_store(persisted_settings, Arc::new(AtomicUsize::new(0)));
 
     let state = test_operational_state(database_file, fixture_root.clone());
-    let app = test_app_state(
+    let app = Arc::new(test_app_state(
         state,
         Arc::new(FakeTaskQueueService { apply: |_| Ok(()) }),
         settings_store,
-    );
+    ));
     let headers = admin_headers(&fixture_root);
 
-    let response = get_server_settings(Extension(app), headers).await;
+    let response = get_server_settings(State(app), headers).await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_body = to_bytes(response.into_body(), usize::MAX)
@@ -136,14 +136,14 @@ async fn get_server_settings_returns_runtime_server_port_configuration_source() 
 
     let mut state = test_operational_state(database_file, fixture_root.clone());
     state.runtime.bind_address = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8081));
-    let app = test_app_state(
+    let app = Arc::new(test_app_state(
         state,
         Arc::new(FakeTaskQueueService { apply: |_| Ok(()) }),
         settings_store,
-    );
+    ));
     let headers = admin_headers(&fixture_root);
 
-    let response = get_server_settings(Extension(app), headers).await;
+    let response = get_server_settings(State(app), headers).await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_body = to_bytes(response.into_body(), usize::MAX)

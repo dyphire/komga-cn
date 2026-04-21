@@ -4,9 +4,11 @@ use super::shared::{
     thumbnail_dimensions, thumbnail_max_edge_from_setting,
 };
 use super::*;
+use axum::extract::State;
+use std::sync::Arc;
 
 pub async fn book_thumbnail(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
@@ -117,7 +119,7 @@ async fn book_thumbnail_opds_small_response(
 }
 
 pub async fn book_thumbnail_opds(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
@@ -131,7 +133,7 @@ pub async fn book_thumbnail_opds(
 }
 
 pub async fn book_thumbnail_opds_small(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
@@ -156,7 +158,7 @@ pub async fn book_thumbnail_opds_small(
 }
 
 pub async fn book_thumbnail_by_id(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path((book_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
@@ -185,7 +187,7 @@ pub async fn book_thumbnail_by_id(
 }
 
 pub async fn book_thumbnails(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
@@ -244,7 +246,7 @@ pub async fn book_thumbnails(
 }
 
 pub async fn book_thumbnail_upload(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
     multipart: Multipart,
@@ -298,7 +300,7 @@ pub async fn book_thumbnail_upload(
 }
 
 pub async fn book_thumbnail_select(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path((_book_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
@@ -320,7 +322,7 @@ pub async fn book_thumbnail_select(
 }
 
 pub async fn book_thumbnail_delete(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path((book_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {

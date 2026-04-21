@@ -15,12 +15,14 @@ use crate::discovery_auth::context::{
 };
 use crate::discovery_auth::principal::AgeRestrictionKind;
 use crate::helpers::detail_access_denial_response;
+use axum::extract::State;
 use icu::collator::{
     Collator,
     options::{CollatorOptions, Strength},
 };
 use icu::locale::locale;
 use komga_domain::discovery::PageEnvelope;
+use std::sync::Arc;
 
 fn optional_query_bool(query: &str, key: &str) -> Result<Option<bool>, ()> {
     match query_value(query, key) {
@@ -636,7 +638,7 @@ fn should_use_strict_runtime_shape(payload: &Value, has_oneshot_bootstrap: bool)
 }
 
 pub async fn books_list(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
     body: Bytes,
@@ -775,7 +777,7 @@ pub(super) async fn books_deprecated_get(
 }
 
 pub async fn series_books_deprecated(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
     AxumPath(series_id): AxumPath<String>,
@@ -845,7 +847,7 @@ pub async fn series_books_deprecated(
 }
 
 pub async fn books_latest(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -943,7 +945,7 @@ pub async fn books_latest(
 }
 
 pub async fn books_ondeck(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -1048,7 +1050,7 @@ pub async fn books_ondeck(
 }
 
 pub async fn books_duplicates(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -1133,7 +1135,7 @@ pub async fn books_duplicates(
 }
 
 pub async fn book_tags(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {

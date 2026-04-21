@@ -1,6 +1,5 @@
 use super::*;
 
-#[derive(Clone)]
 pub struct HttpServices {
     pub library_catalog: Arc<dyn LibraryCatalogService>,
     pub task_queue: Arc<dyn TaskQueueService>,
@@ -15,7 +14,6 @@ pub struct HttpServices {
     pub discovery_detail: Arc<dyn DiscoveryDetailService>,
 }
 
-#[derive(Clone)]
 pub struct HttpAppState {
     pub profile: RuntimeProfile,
     pub read_progress: ReadProgressState,
@@ -25,7 +23,6 @@ pub struct HttpAppState {
     pub services: HttpServices,
 }
 
-#[derive(Clone)]
 pub struct OperationalState {
     pub runtime: RuntimeState,
     pub startup_timing: StartupTimingState,

@@ -2,16 +2,17 @@
 
 use axum::Json;
 use axum::body::Bytes;
-use axum::extract::Extension;
+use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::Value;
+use std::sync::Arc;
 
 use crate::identity_access::auth::{require_admin, require_auth, resolved_auth_user, user_id};
 use crate::state::HttpAppState;
 
 pub(crate) async fn get_client_settings_global(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
     let include_unauthorized_only = resolved_auth_user(&headers).is_none();
@@ -31,7 +32,7 @@ pub(crate) async fn get_client_settings_global(
 }
 
 pub(crate) async fn get_client_settings_user(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
     if let Some(response) = require_auth(&headers) {
@@ -57,7 +58,7 @@ pub(crate) async fn get_client_settings_user(
 }
 
 pub(crate) async fn patch_client_settings_global(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -82,7 +83,7 @@ pub(crate) async fn patch_client_settings_global(
 }
 
 pub(crate) async fn patch_client_settings_user(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -114,7 +115,7 @@ pub(crate) async fn patch_client_settings_user(
 }
 
 pub(crate) async fn delete_client_settings_global(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -139,7 +140,7 @@ pub(crate) async fn delete_client_settings_global(
 }
 
 pub(crate) async fn delete_client_settings_user(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {

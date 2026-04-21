@@ -1,4 +1,5 @@
 use axum::Json;
+use axum::extract::State;
 use axum::extract::{Extension, Path, Request};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
@@ -7,6 +8,7 @@ use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
 use serde_json::Value;
 use serde_json::json;
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use crate::access_log::RequestConnectionInfo;
 use crate::discovery_auth::principal::principal_from_user_payload;
@@ -233,7 +235,7 @@ pub(super) async fn users_list(headers: HeaderMap, app: &HttpAppState) -> Respon
 }
 
 pub(super) async fn users_create(
-    app: HttpAppState,
+    app: Arc<HttpAppState>,
     headers: HeaderMap,
     connection_info: RequestConnectionInfo,
     body: Value,
@@ -330,7 +332,7 @@ pub(super) async fn users_create(
 }
 
 pub(super) async fn users_delete(
-    app: HttpAppState,
+    app: Arc<HttpAppState>,
     headers: HeaderMap,
     connection_info: RequestConnectionInfo,
     Path(target_user_id): Path<String>,
@@ -365,7 +367,7 @@ pub(super) async fn users_delete(
 }
 
 pub(super) async fn users_update(
-    app: HttpAppState,
+    app: Arc<HttpAppState>,
     headers: HeaderMap,
     connection_info: RequestConnectionInfo,
     Path(target_user_id): Path<String>,
@@ -562,21 +564,21 @@ pub(super) async fn users_by_id_password(
 }
 
 pub(crate) async fn users_me_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     request: Request,
 ) -> Response {
     users_me(&app, request).await
 }
 
 pub(crate) async fn users_list_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
     users_list(headers, &app).await
 }
 
 pub(crate) async fn users_create_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     Json(body): Json<Value>,
@@ -585,7 +587,7 @@ pub(crate) async fn users_create_route(
 }
 
 pub(crate) async fn users_update_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     path: Path<String>,
@@ -595,7 +597,7 @@ pub(crate) async fn users_update_route(
 }
 
 pub(crate) async fn users_delete_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     path: Path<String>,
@@ -604,7 +606,7 @@ pub(crate) async fn users_delete_route(
 }
 
 pub(crate) async fn users_me_password_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     Json(body): Json<Value>,
@@ -613,7 +615,7 @@ pub(crate) async fn users_me_password_route(
 }
 
 pub(crate) async fn users_by_id_password_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     path: Path<String>,
@@ -623,7 +625,7 @@ pub(crate) async fn users_by_id_password_route(
 }
 
 pub(crate) async fn users_me_api_keys_create_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     Json(body): Json<Value>,
@@ -632,7 +634,7 @@ pub(crate) async fn users_me_api_keys_create_route(
 }
 
 pub(crate) async fn users_me_api_keys_list_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
 ) -> Response {
@@ -640,7 +642,7 @@ pub(crate) async fn users_me_api_keys_list_route(
 }
 
 pub(crate) async fn users_me_api_keys_delete_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     path: Path<String>,
@@ -649,7 +651,7 @@ pub(crate) async fn users_me_api_keys_delete_route(
 }
 
 pub(crate) async fn users_me_authentication_activity_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     uri: Uri,
@@ -658,7 +660,7 @@ pub(crate) async fn users_me_authentication_activity_route(
 }
 
 pub(crate) async fn users_authentication_activity_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     uri: Uri,
@@ -667,7 +669,7 @@ pub(crate) async fn users_authentication_activity_route(
 }
 
 pub(crate) async fn users_by_id_authentication_activity_latest_route(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     path: Path<String>,

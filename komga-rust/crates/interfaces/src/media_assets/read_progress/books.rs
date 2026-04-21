@@ -3,6 +3,8 @@ use super::epub::{
     progression_is_older_than_existing, progression_locator,
 };
 use super::*;
+use axum::extract::State;
+use std::sync::Arc;
 
 fn request_progress_token(headers: &HeaderMap, user: &AuthUser) -> String {
     if resolved_auth_user(headers).is_some() {
@@ -62,7 +64,7 @@ async fn persist_and_record_read_progress(
 }
 
 pub async fn book_read_progress(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
     body: Bytes,
@@ -165,7 +167,7 @@ pub async fn book_read_progress(
 }
 
 pub async fn book_read_progress_delete(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
@@ -214,7 +216,7 @@ pub async fn book_read_progress_delete(
 }
 
 pub async fn book_progression(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
     body: Bytes,
@@ -339,7 +341,7 @@ pub async fn book_progression(
 }
 
 pub async fn book_progression_get(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {

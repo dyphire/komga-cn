@@ -1,12 +1,13 @@
 use axum::Json;
 use axum::body::Bytes;
-use axum::extract::Extension;
 use axum::extract::Path as AxumPath;
+use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use komga_application::task_processing::TaskQueueRecord;
 use serde::Deserialize;
 use serde_json::Value;
+use std::sync::Arc;
 
 use crate::identity_access::auth::require_admin;
 
@@ -27,7 +28,7 @@ struct DeletePageHashMatchRequest {
 }
 
 pub(crate) async fn get_page_hashes(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -121,7 +122,7 @@ fn build_remove_hashed_pages_task(
 }
 
 pub(crate) async fn get_page_hashes_unknown(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -158,7 +159,7 @@ pub(crate) async fn get_page_hashes_unknown(
 }
 
 pub(crate) async fn get_page_hash_matches(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     AxumPath(page_hash): AxumPath<String>,
     uri: Uri,
@@ -197,7 +198,7 @@ pub(crate) async fn get_page_hash_matches(
 }
 
 pub(crate) async fn get_page_hash_thumbnail(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     AxumPath(page_hash): AxumPath<String>,
 ) -> Response {
@@ -220,7 +221,7 @@ pub(crate) async fn get_page_hash_thumbnail(
 }
 
 pub(crate) async fn get_page_hash_unknown_thumbnail(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     AxumPath(page_hash): AxumPath<String>,
     uri: Uri,
@@ -261,7 +262,7 @@ pub(crate) async fn get_page_hash_unknown_thumbnail(
 }
 
 pub(crate) async fn put_page_hash(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -311,7 +312,7 @@ pub(crate) async fn put_page_hash(
 }
 
 pub(crate) async fn post_page_hash_delete_all(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     AxumPath(page_hash): AxumPath<String>,
 ) -> Response {
@@ -366,7 +367,7 @@ pub(crate) async fn post_page_hash_delete_all(
 }
 
 pub(crate) async fn post_page_hash_delete_match(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     AxumPath(page_hash): AxumPath<String>,
     body: Bytes,

@@ -1,7 +1,9 @@
 use super::*;
+use axum::extract::State;
+use std::sync::Arc;
 
 pub async fn book_manifest(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
@@ -28,7 +30,7 @@ pub async fn book_manifest(
 }
 
 pub async fn book_manifest_epub(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
@@ -55,7 +57,7 @@ pub async fn book_manifest_epub(
 }
 
 pub async fn book_manifest_pdf(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
@@ -82,7 +84,7 @@ pub async fn book_manifest_pdf(
 }
 
 pub async fn book_manifest_divina(
-    Extension(app): Extension<HttpAppState>,
+    State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
