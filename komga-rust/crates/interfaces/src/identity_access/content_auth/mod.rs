@@ -41,6 +41,11 @@ use activity_routes::{
 };
 use helpers::*;
 
+fn expire_user_sessions_for_runtime_key(user_id: &str, runtime_key: &str) {
+    invalidate_user_sessions_for_runtime_key(user_id, runtime_key);
+    register_session_expired_event(user_id);
+}
+
 pub(super) async fn users_me(app: &HttpAppState, request: Request) -> Response {
     let auth_db = &app.auth_db;
     let auth_state = &app.discovery_auth;
@@ -348,11 +353,10 @@ pub(super) async fn users_delete(
         .await
     {
         Ok(true) => {
-            invalidate_user_sessions_for_runtime_key(
+            expire_user_sessions_for_runtime_key(
                 &target_user_id,
                 auth_db.session_runtime_key.as_str(),
             );
-            register_session_expired_event(&target_user_id);
             StatusCode::NO_CONTENT.into_response()
         }
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
@@ -456,11 +460,10 @@ pub(super) async fn users_update(
         Ok(result) if !result.updated => StatusCode::NOT_FOUND.into_response(),
         Ok(result) => {
             if result.expire_sessions {
-                invalidate_user_sessions_for_runtime_key(
+                expire_user_sessions_for_runtime_key(
                     &target_user_id,
                     auth_db.session_runtime_key.as_str(),
                 );
-                register_session_expired_event(&target_user_id);
             }
             StatusCode::NO_CONTENT.into_response()
         }
@@ -546,11 +549,10 @@ pub(super) async fn users_by_id_password(
     {
         Some(true) => {
             if user_id(&current_user) != target_user_id {
-                invalidate_user_sessions_for_runtime_key(
+                expire_user_sessions_for_runtime_key(
                     &target_user_id,
                     auth_db.session_runtime_key.as_str(),
                 );
-                register_session_expired_event(&target_user_id);
             }
             StatusCode::NO_CONTENT.into_response()
         }

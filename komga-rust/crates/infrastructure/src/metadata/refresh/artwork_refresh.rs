@@ -11,6 +11,7 @@ use crate::filesystem::media_access::epub::load_epub_cover_bytes;
 use crate::filesystem::media_access::page_content::{
     load_archive_page_row, resolve_book_page_bytes,
 };
+use crate::metadata::thumbnails::{emit_thumbnail_book_event, emit_thumbnail_series_event};
 use crate::{resolve_library_item_path, resolve_stored_path};
 
 use super::artwork_support::{
@@ -45,6 +46,17 @@ pub fn refresh_book_local_artwork(database_file: &Path, book_id: &str) -> Result
             })?;
 
             if let Some(book_row) = &book_row {
+                let series_id = sqlx::query("SELECT SERIES_ID FROM BOOK WHERE ID = ? LIMIT 1")
+                    .bind(&book_id)
+                    .fetch_optional(&pool)
+                    .await
+                    .map_err(|error| {
+                        format!(
+                            "failed to resolve book series for artwork refresh '{book_id}': {error}"
+                        )
+                    })?
+                    .map(|row| row.get::<String, _>("SERIES_ID"))
+                    .unwrap_or_default();
                 let import_local_artwork = sqlx::query(
                     r#"
                     SELECT l.IMPORT_LOCAL_ARTWORK AS IMPORT_LOCAL_ARTWORK
@@ -72,18 +84,20 @@ pub fn refresh_book_local_artwork(database_file: &Path, book_id: &str) -> Result
                     .into_iter()
                     .enumerate()
                 {
-                    import_book_local_artwork_thumbnail(
+                    let selected = if index == 0 {
+                        MarkSelectedPreference::IfNoneOrGenerated
+                    } else {
+                        MarkSelectedPreference::No
+                    };
+                    let selected = import_book_local_artwork_thumbnail(
                         &pool,
                         &book_id,
                         &library_root,
                         &artwork_url,
-                        if index == 0 {
-                            MarkSelectedPreference::IfNoneOrGenerated
-                        } else {
-                            MarkSelectedPreference::No
-                        },
+                        selected,
                     )
                     .await?;
+                    emit_thumbnail_book_event(&book_id, &series_id, selected, true);
                 }
             }
 
@@ -132,6 +146,7 @@ pub fn generate_book_thumbnail(database_file: &Path, book_id: &str) -> Result<()
             let media_row = sqlx::query(
                 r#"
                 SELECT b.LIBRARY_ID AS LIBRARY_ID,
+                       b.SERIES_ID AS SERIES_ID,
                        b.NAME AS FILE_NAME,
                        b.URL AS BOOK_URL,
                        l.ROOT AS LIBRARY_ROOT,
@@ -159,6 +174,7 @@ pub fn generate_book_thumbnail(database_file: &Path, book_id: &str) -> Result<()
             };
 
             let library_root = media_row.get::<String, _>("LIBRARY_ROOT");
+            let series_id = media_row.get::<String, _>("SERIES_ID");
             let resolved_library_root = resolve_stored_path(&library_root);
             let media = BookMediaRecord {
                 library_id: media_row.get::<String, _>("LIBRARY_ID"),
@@ -351,6 +367,7 @@ pub fn generate_book_thumbnail(database_file: &Path, book_id: &str) -> Result<()
             tx.commit()
                 .await
                 .map_err(|error| format!("commit generate thumbnail tx: {error}"))?;
+            emit_thumbnail_book_event(&book_id, &series_id, should_select, true);
 
             Ok(())
         })
@@ -402,7 +419,7 @@ pub fn refresh_series_local_artwork(database_file: &Path, series_id: &str) -> Re
                         .into_iter()
                         .enumerate()
                 {
-                    import_series_local_artwork_thumbnail(
+                    let selected = import_series_local_artwork_thumbnail(
                         &pool,
                         &series_id,
                         &library_root,
@@ -414,6 +431,7 @@ pub fn refresh_series_local_artwork(database_file: &Path, series_id: &str) -> Re
                         },
                     )
                     .await?;
+                    emit_thumbnail_series_event(&series_id, selected, true);
                 }
             }
 

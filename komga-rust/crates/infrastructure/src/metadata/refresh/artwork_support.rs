@@ -315,7 +315,7 @@ pub(super) async fn import_book_local_artwork_thumbnail(
     library_root: &Path,
     artwork_url: &str,
     selected_preference: MarkSelectedPreference,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let artwork_path = library_root.join(artwork_url);
     let metadata = fs::metadata(&artwork_path).map_err(|error| {
         format!(
@@ -377,7 +377,7 @@ pub(super) async fn import_book_local_artwork_thumbnail(
         })?;
     }
 
-    Ok(())
+    Ok(selected)
 }
 
 pub(super) async fn import_series_local_artwork_thumbnail(
@@ -386,7 +386,7 @@ pub(super) async fn import_series_local_artwork_thumbnail(
     library_root: &Path,
     artwork_url: &str,
     selected_preference: MarkSelectedPreference,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let artwork_path = library_root.join(artwork_url);
     let metadata = fs::metadata(&artwork_path).map_err(|error| {
         format!(
@@ -450,7 +450,7 @@ pub(super) async fn import_series_local_artwork_thumbnail(
         })?;
     }
 
-    Ok(())
+    Ok(selected)
 }
 
 async fn should_select_book_local_artwork(

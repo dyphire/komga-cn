@@ -1,11 +1,11 @@
 use std::path::Path;
 
 use komga_application::media_assets::{EntityThumbnailBinary, EntityThumbnailRecord};
-use sqlx::Row;
+use sqlx::{Row, SqlitePool};
 
 use crate::sqlite::connect_read_pool;
 
-use super::generated_thumbnail_id;
+use super::{emit_thumbnail_book_event, generated_thumbnail_id};
 
 pub async fn load_persisted_book_thumbnails(
     database_file: &Path,
@@ -111,6 +111,15 @@ pub async fn load_book_thumbnail_by_id(
     }))
 }
 
+async fn load_book_series_id(pool: &SqlitePool, book_id: &str) -> Result<Option<String>, String> {
+    sqlx::query("SELECT SERIES_ID FROM BOOK WHERE ID = ? LIMIT 1")
+        .bind(book_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| format!("query book series id for thumbnail SSE: {error}"))
+        .map(|row| row.map(|row| row.get::<String, _>("SERIES_ID")))
+}
+
 pub async fn insert_book_thumbnail(
     database_file: &Path,
     book_id: &str,
@@ -205,7 +214,10 @@ pub async fn insert_book_thumbnail(
         .await
         .map_err(|error| format!("commit book thumbnail create tx: {error}"))?;
 
-    Ok(EntityThumbnailRecord {
+    let series_id = load_book_series_id(&pool, book_id)
+        .await?
+        .unwrap_or_default();
+    let record = EntityThumbnailRecord {
         id,
         book_id: book_id.to_string(),
         thumbnail_type: "USER_UPLOADED".to_string(),
@@ -214,7 +226,9 @@ pub async fn insert_book_thumbnail(
         file_size: thumbnail.len() as i64,
         width,
         height,
-    })
+    };
+    emit_thumbnail_book_event(&record.book_id, &series_id, record.selected, true);
+    Ok(record)
 }
 
 pub async fn select_book_thumbnail(
@@ -272,7 +286,7 @@ pub async fn select_book_thumbnail(
         "#,
     )
     .bind(thumbnail_id)
-    .bind(target_book_id)
+    .bind(&target_book_id)
     .execute(&mut *tx)
     .await
     .map_err(|error| format!("mark selected book thumbnail: {error}"))?;
@@ -280,6 +294,10 @@ pub async fn select_book_thumbnail(
     tx.commit()
         .await
         .map_err(|error| format!("commit book thumbnail select tx: {error}"))?;
+    let selected_series_id = load_book_series_id(&pool, &target_book_id)
+        .await?
+        .unwrap_or_default();
+    emit_thumbnail_book_event(&target_book_id, &selected_series_id, true, true);
     Ok(true)
 }
 
@@ -323,6 +341,9 @@ pub async fn delete_book_thumbnail(
     let target_book_id = target.get::<String, _>("BOOK_ID");
     let target_type = target.get::<String, _>("TYPE");
     let deleted_selected = target.get::<bool, _>("SELECTED");
+    let series_id = load_book_series_id(&pool, &target_book_id)
+        .await?
+        .unwrap_or_default();
     if target_type != "USER_UPLOADED" {
         tx.rollback()
             .await
@@ -346,6 +367,7 @@ pub async fn delete_book_thumbnail(
     tx.commit()
         .await
         .map_err(|error| format!("commit book thumbnail delete tx: {error}"))?;
+    emit_thumbnail_book_event(&target_book_id, &series_id, deleted_selected, false);
     Ok(true)
 }
 

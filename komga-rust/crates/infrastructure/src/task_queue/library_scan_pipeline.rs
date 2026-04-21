@@ -287,11 +287,7 @@ where
             ));
         }
 
-        let mut changed_series_ids = executed_scan
-            .changed_series_ids
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>();
+        let mut changed_series_ids = executed_scan.changed_series_ids.to_vec();
         changed_series_ids.sort();
         changed_series_ids.dedup();
         for series_id in changed_series_ids {

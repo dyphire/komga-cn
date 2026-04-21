@@ -1,4 +1,11 @@
 use super::*;
+use std::sync::OnceLock;
+use tokio::sync::Mutex;
+
+fn delete_runtime_sse_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 fn enqueue_delete_book(scheduler: &mut TaskQueueScheduler, book_id: &str) {
     scheduler.enqueue(
@@ -277,6 +284,63 @@ async fn runtime_delete_book_soft_deletes_rows_and_removes_book_sidecar_files() 
         series_row.get::<String, _>("LAST_MODIFIED"),
         series_old_last_modified,
         "delete-book runtime should refresh series last-modified so series changes remain externally visible",
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn runtime_delete_book_emits_book_changed_event_after_soft_delete() {
+    let _guard = delete_runtime_sse_lock().lock().await;
+    let paths = new_router_fixture("runtime-delete-book-sse-book-changed").await;
+    seed_router_contract_data(&paths).await;
+
+    let delete_dir = paths.config_dir.join("delete-book-sse");
+    std::fs::create_dir_all(&delete_dir).expect("delete-book sse fixture directory should exist");
+    let book_file = delete_dir.join("book-1.epub");
+    std::fs::write(&book_file, b"delete-book-sse-fixture")
+        .expect("delete-book sse fixture book file should be written");
+
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for delete-book sse fixture setup");
+    sqlx::query("UPDATE BOOK SET URL = ? WHERE ID = ?")
+        .bind("delete-book-sse/book-1.epub")
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("delete-book sse fixture book url should be updated");
+    pool.close().await;
+
+    let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
+    let runtime = runtime_task_context(&paths);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    enqueue_delete_book(&mut scheduler, "book-1");
+    scheduler
+        .process_available(&runtime)
+        .expect("delete-book runtime should process successfully for sse contract");
+
+    let (_, events) = komga_application::runtime_sse::pending_runtime_sse_events(
+        cursor,
+        "runtime-contract-admin",
+        true,
+    );
+    let book_changed = events
+        .iter()
+        .find(|event| event.name == "BookChanged")
+        .expect("delete-book runtime should emit BookChanged SSE");
+
+    assert_eq!(
+        book_changed.payload.get("bookId"),
+        Some(&Value::String("book-1".to_string()))
+    );
+    assert_eq!(
+        book_changed.payload.get("seriesId"),
+        Some(&Value::String("series-1".to_string()))
+    );
+    assert_eq!(
+        book_changed.payload.get("libraryId"),
+        Some(&Value::String("library-1".to_string()))
     );
 
     cleanup_router_fixture(paths);
@@ -983,6 +1047,66 @@ async fn runtime_delete_series_soft_deletes_rows_and_removes_series_sidecar_file
     assert_eq!(book_thumbnail_count, 2);
     assert_eq!(series_thumbnail_count, 1);
     assert_eq!(read_progress_count, 1);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn runtime_delete_series_emits_series_changed_event_after_soft_delete() {
+    let _guard = delete_runtime_sse_lock().lock().await;
+    let paths = new_router_fixture("runtime-delete-series-sse-series-changed").await;
+    seed_router_contract_data(&paths).await;
+
+    let series_dir = paths.config_dir.join("delete-series-sse/series-1");
+    std::fs::create_dir_all(&series_dir)
+        .expect("delete-series sse fixture series directory should exist");
+    let book_file = series_dir.join("book-1.epub");
+    std::fs::write(&book_file, b"delete-series-sse-fixture")
+        .expect("delete-series sse fixture book file should be written");
+
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for delete-series sse fixture setup");
+    sqlx::query("UPDATE SERIES SET URL = ? WHERE ID = ?")
+        .bind("delete-series-sse/series-1")
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("delete-series sse fixture series url should be updated");
+    sqlx::query("UPDATE BOOK SET URL = ? WHERE ID = ?")
+        .bind("delete-series-sse/series-1/book-1.epub")
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("delete-series sse fixture book url should be updated");
+    pool.close().await;
+
+    let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
+    let runtime = runtime_task_context(&paths);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    enqueue_delete_series(&mut scheduler, "series-1");
+    scheduler
+        .process_available(&runtime)
+        .expect("delete-series runtime should process successfully for sse contract");
+
+    let (_, events) = komga_application::runtime_sse::pending_runtime_sse_events(
+        cursor,
+        "runtime-contract-admin",
+        true,
+    );
+    let series_changed = events
+        .iter()
+        .find(|event| event.name == "SeriesChanged")
+        .expect("delete-series runtime should emit SeriesChanged SSE");
+
+    assert_eq!(
+        series_changed.payload.get("seriesId"),
+        Some(&Value::String("series-1".to_string()))
+    );
+    assert_eq!(
+        series_changed.payload.get("libraryId"),
+        Some(&Value::String("library-1".to_string()))
+    );
 
     cleanup_router_fixture(paths);
 }

@@ -9,6 +9,8 @@ use komga_application::media_assets::{
     BooksImportEntry, ImportBookOutcome, ImportCopyMode, MediaImportPort,
     register_runtime_book_import_event,
 };
+use komga_application::runtime_sse::register_runtime_sse_event;
+use serde_json::json;
 use sqlx::Row;
 
 use crate::sqlite::{connect_read_pool, connect_write_pool};
@@ -34,15 +36,28 @@ impl MediaImportPort for FilesystemImportPort {
         entry: BooksImportEntry,
     ) -> Result<Option<ImportBookOutcome>, String> {
         let source_file = entry.source_file.clone();
+        let series_id = entry.series_id.clone();
         let result = import_book_impl(self.database_file.as_path(), copy_mode, entry).await;
 
         match &result {
-            Ok(Some(outcome)) => register_runtime_book_import_event(
-                Some(outcome.imported_book_id.clone()),
-                source_file.to_string_lossy().to_string(),
-                true,
-                None,
-            ),
+            Ok(Some(outcome)) => {
+                register_runtime_book_import_event(
+                    Some(outcome.imported_book_id.clone()),
+                    source_file.to_string_lossy().to_string(),
+                    true,
+                    None,
+                );
+                register_runtime_sse_event(
+                    "BookAdded",
+                    json!({
+                        "bookId": outcome.imported_book_id,
+                        "seriesId": series_id,
+                        "libraryId": outcome.library_id,
+                    }),
+                    false,
+                    None,
+                );
+            }
             Err(error) => register_runtime_book_import_event(
                 None,
                 source_file.to_string_lossy().to_string(),

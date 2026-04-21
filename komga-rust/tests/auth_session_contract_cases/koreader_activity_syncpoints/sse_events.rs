@@ -522,3 +522,78 @@ async fn router_sse_events_emit_session_expired_when_admin_deletes_user() {
 
     cleanup_router_fixture(paths);
 }
+
+#[tokio::test]
+async fn router_sse_events_do_not_emit_session_expired_when_user_changes_own_password() {
+    let _guard = auth_session_runtime_env_lock().lock().await;
+    let paths = new_router_fixture("router-sse-events-self-password-no-session-expired").await;
+    seed_router_contract_data(&paths).await;
+    seed_router_library_restricted_user(
+        &paths,
+        "member-user",
+        "member@example.org",
+        "router-contract-member-123",
+        &["library-1"],
+    )
+    .await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let member_token = login_with_basic_credentials_and_get_token(
+        app.clone(),
+        "member@example.org",
+        "router-contract-member-123",
+    )
+    .await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/sse/v1/events")
+                .header("x-auth-token", &member_token)
+                .body(Body::empty())
+                .expect("self-password sse request should build"),
+        )
+        .await
+        .expect("self-password sse request should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let update_app = app.clone();
+    let update_token = member_token.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let response = update_app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/api/v2/users/me/password")
+                    .header("x-auth-token", &update_token)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({ "password": "router-contract-member-456" }).to_string(),
+                    ))
+                    .expect("self password update request should build"),
+            )
+            .await
+            .expect("self password update request should complete");
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    });
+
+    let body = read_sse_until(
+        response.into_body(),
+        |raw| raw.contains("heartbeat"),
+        Duration::from_secs(17),
+    )
+    .await;
+    let parsed = parse_event_log(&body).expect("self-password sse body should parse");
+    assert!(
+        parsed
+            .events
+            .iter()
+            .all(|event| event.name != "SessionExpired"),
+        "self password change must not emit SessionExpired SSE: {body}"
+    );
+
+    cleanup_router_fixture(paths);
+}

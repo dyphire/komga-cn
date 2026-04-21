@@ -6,7 +6,7 @@ use sqlx::Row;
 
 use crate::sqlite::connect_read_pool;
 
-use super::generated_thumbnail_id;
+use super::{emit_thumbnail_series_event, generated_thumbnail_id};
 
 pub async fn load_persisted_series_thumbnails(
     database_file: &Path,
@@ -198,7 +198,7 @@ pub async fn insert_series_thumbnail(
         .await
         .map_err(|error| format!("commit series thumbnail create tx: {error}"))?;
 
-    Ok(SeriesThumbnailRecord {
+    let record = SeriesThumbnailRecord {
         id,
         series_id: series_id.to_string(),
         thumbnail_type: "USER_UPLOADED".to_string(),
@@ -207,7 +207,9 @@ pub async fn insert_series_thumbnail(
         file_size: thumbnail.len() as i64,
         width,
         height,
-    })
+    };
+    emit_thumbnail_series_event(&record.series_id, record.selected, true);
+    Ok(record)
 }
 
 fn load_thumbnail_bytes_or_sidecar(
@@ -315,6 +317,7 @@ pub async fn select_series_thumbnail(
     tx.commit()
         .await
         .map_err(|error| format!("commit series thumbnail select tx: {error}"))?;
+    emit_thumbnail_series_event(&target_series_id, true, true);
     Ok(true)
 }
 
@@ -355,6 +358,27 @@ pub async fn delete_series_thumbnail(
         return Ok(false);
     }
 
+    let target = sqlx::query(
+        r#"
+        SELECT SELECTED
+        FROM THUMBNAIL_SERIES
+        WHERE ID = ? AND SERIES_ID = ?
+        LIMIT 1
+        "#,
+    )
+    .bind(thumbnail_id)
+    .bind(series_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|error| format!("query series thumbnail delete target: {error}"))?;
+    let Some(target) = target else {
+        tx.rollback()
+            .await
+            .map_err(|error| format!("rollback series thumbnail delete tx: {error}"))?;
+        return Ok(false);
+    };
+    let deleted_selected = target.get::<bool, _>("SELECTED");
+
     let deleted = sqlx::query(
         r#"
         DELETE FROM THUMBNAIL_SERIES
@@ -378,5 +402,6 @@ pub async fn delete_series_thumbnail(
     tx.commit()
         .await
         .map_err(|error| format!("commit series thumbnail delete tx: {error}"))?;
+    emit_thumbnail_series_event(series_id, deleted_selected, false);
     Ok(true)
 }

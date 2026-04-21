@@ -23,6 +23,17 @@ mod main_db_guards;
 use metadata_refresh::{
     write_router_epub_with_package_document, write_router_epub_with_package_document_and_entries,
 };
+use std::sync::OnceLock;
+use tokio::sync::{Mutex, MutexGuard};
+
+fn runtime_sse_contract_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+async fn runtime_sse_contract_guard() -> MutexGuard<'static, ()> {
+    runtime_sse_contract_lock().lock().await
+}
 
 #[tokio::test]
 async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task() {

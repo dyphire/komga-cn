@@ -2,12 +2,16 @@ use std::io::ErrorKind;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use komga_application::runtime_sse::register_runtime_sse_event;
+use serde_json::json;
+
 use super::*;
 use crate::search::index_lifecycle::SearchEntityType;
 use crate::search::runtime_tasks::sync_entity_delete_from_index;
 use crate::tasks::delete_workflow::{
-    load_book_delete_decision, load_book_delete_work, load_series_delete_work,
-    soft_delete_book_rows, soft_delete_series_book_rows, soft_delete_series_rows,
+    load_book_delete_decision, load_book_delete_sse_context, load_book_delete_work,
+    load_series_delete_sse_context, load_series_delete_work, soft_delete_book_rows,
+    soft_delete_series_book_rows, soft_delete_series_rows,
 };
 
 pub(super) fn delete_book_task(
@@ -42,8 +46,38 @@ fn load_book_delete_target(
     )
 }
 
+fn emit_book_changed_after_file_delete(book_id: &str, series_id: &str, library_id: &str) {
+    register_runtime_sse_event(
+        "BookChanged",
+        json!({
+            "bookId": book_id,
+            "seriesId": series_id,
+            "libraryId": library_id,
+        }),
+        false,
+        None,
+    );
+}
+
+fn emit_series_changed_after_file_delete(series_id: &str, library_id: &str) {
+    register_runtime_sse_event(
+        "SeriesChanged",
+        json!({
+            "seriesId": series_id,
+            "libraryId": library_id,
+        }),
+        false,
+        None,
+    );
+}
+
 fn delete_book(runtime: &RuntimeConfig, book_id: &str) -> Result<(), TaskExecutionError> {
     let runtime = runtime.task_runtime_context();
+    let Some(context) = load_book_delete_sse_context(runtime.database_file.as_path(), book_id)
+        .map_err(TaskExecutionError::runtime)?
+    else {
+        return Ok(());
+    };
     let Some(work) = load_book_delete_work(runtime.database_file.as_path(), book_id)
         .map_err(TaskExecutionError::runtime)?
     else {
@@ -77,6 +111,8 @@ fn delete_book(runtime: &RuntimeConfig, book_id: &str) -> Result<(), TaskExecuti
         )
         .map_err(TaskExecutionError::runtime)?;
     }
+
+    emit_book_changed_after_file_delete(book_id, &context.series_id, &context.library_id);
 
     Ok(())
 }
@@ -179,6 +215,12 @@ pub(super) fn delete_series(
     }
 
     let runtime_context = runtime.task_runtime_context();
+    let Some(context) =
+        load_series_delete_sse_context(runtime_context.database_file.as_path(), series_id)
+            .map_err(TaskExecutionError::runtime)?
+    else {
+        return Ok(());
+    };
     let work = load_series_delete_work(runtime_context.database_file.as_path(), series_id)
         .map_err(TaskExecutionError::runtime)?;
 
@@ -221,6 +263,8 @@ pub(super) fn delete_series(
         )
         .map_err(TaskExecutionError::runtime)?;
     }
+
+    emit_series_changed_after_file_delete(series_id, &context.library_id);
 
     Ok(())
 }

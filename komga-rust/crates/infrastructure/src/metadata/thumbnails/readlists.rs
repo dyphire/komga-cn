@@ -5,7 +5,7 @@ use sqlx::Row;
 
 use crate::sqlite::connect_read_pool;
 
-use super::generated_thumbnail_id;
+use super::{emit_thumbnail_readlist_event, generated_thumbnail_id};
 
 pub async fn load_persisted_readlist_thumbnails(
     database_file: &Path,
@@ -123,7 +123,7 @@ pub async fn insert_readlist_thumbnail(
         .await
         .map_err(|error| format!("commit readlist thumbnail create tx: {error}"))?;
 
-    Ok(ReadlistThumbnailRecord {
+    let record = ReadlistThumbnailRecord {
         id,
         readlist_id: readlist_id.to_string(),
         thumbnail_type: "USER_UPLOADED".to_string(),
@@ -133,7 +133,9 @@ pub async fn insert_readlist_thumbnail(
         width,
         height,
         thumbnail: thumbnail.to_vec(),
-    })
+    };
+    emit_thumbnail_readlist_event(&record.readlist_id, record.selected, true);
+    Ok(record)
 }
 
 pub async fn select_readlist_thumbnail(
@@ -219,6 +221,7 @@ pub async fn select_readlist_thumbnail(
     tx.commit()
         .await
         .map_err(|error| format!("commit readlist thumbnail select tx: {error}"))?;
+    emit_thumbnail_readlist_event(&target_readlist_id, true, true);
     Ok(true)
 }
 
@@ -296,6 +299,7 @@ pub async fn delete_readlist_thumbnail(
     tx.commit()
         .await
         .map_err(|error| format!("commit readlist thumbnail delete tx: {error}"))?;
+    emit_thumbnail_readlist_event(&target_readlist_id, deleted_selected, false);
     Ok(true)
 }
 

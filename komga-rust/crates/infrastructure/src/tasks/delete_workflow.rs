@@ -12,6 +12,12 @@ pub struct PersistedDeleteBookDecision {
 }
 
 #[derive(Clone, Debug)]
+pub struct PersistedDeleteBookSseContext {
+    pub series_id: String,
+    pub library_id: String,
+}
+
+#[derive(Clone, Debug)]
 pub struct PersistedDeleteBookWork {
     pub series_id: String,
     pub book_path: PathBuf,
@@ -23,6 +29,11 @@ pub struct PersistedDeleteSeriesWork {
     pub book_ids: Vec<String>,
     pub series_path: Option<PathBuf>,
     pub sidecar_thumbnail_paths: Vec<PathBuf>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PersistedDeleteSeriesSseContext {
+    pub library_id: String,
 }
 
 pub fn load_book_delete_decision(
@@ -52,6 +63,38 @@ pub fn load_book_delete_decision(
             Ok(row.map(|row| PersistedDeleteBookDecision {
                 series_id: row.get::<String, _>("SERIES_ID"),
                 oneshot: row.get::<i64, _>("ONESHOT") != 0,
+            }))
+        })
+    })
+}
+
+pub fn load_book_delete_sse_context(
+    database_file: &Path,
+    book_id: &str,
+) -> Result<Option<PersistedDeleteBookSseContext>, String> {
+    let database_file = database_file.to_path_buf();
+    let book_id = book_id.to_string();
+
+    run_database_query(database_file, move |pool| {
+        Box::pin(async move {
+            let row = sqlx::query(
+                r#"
+                SELECT SERIES_ID, LIBRARY_ID
+                FROM BOOK
+                WHERE ID = ?
+                LIMIT 1
+                "#,
+            )
+            .bind(&book_id)
+            .fetch_optional(&pool)
+            .await
+            .map_err(|error| {
+                format!("failed to load book delete SSE context for '{book_id}': {error}")
+            })?;
+
+            Ok(row.map(|row| PersistedDeleteBookSseContext {
+                series_id: row.get::<String, _>("SERIES_ID"),
+                library_id: row.get::<String, _>("LIBRARY_ID"),
             }))
         })
     })
@@ -182,6 +225,37 @@ pub fn soft_delete_book_rows(
             })?;
 
             Ok(())
+        })
+    })
+}
+
+pub fn load_series_delete_sse_context(
+    database_file: &Path,
+    series_id: &str,
+) -> Result<Option<PersistedDeleteSeriesSseContext>, String> {
+    let database_file = database_file.to_path_buf();
+    let series_id = series_id.to_string();
+
+    run_database_query(database_file, move |pool| {
+        Box::pin(async move {
+            let row = sqlx::query(
+                r#"
+                SELECT LIBRARY_ID
+                FROM SERIES
+                WHERE ID = ?
+                LIMIT 1
+                "#,
+            )
+            .bind(&series_id)
+            .fetch_optional(&pool)
+            .await
+            .map_err(|error| {
+                format!("failed to load series delete SSE context for '{series_id}': {error}")
+            })?;
+
+            Ok(row.map(|row| PersistedDeleteSeriesSseContext {
+                library_id: row.get::<String, _>("LIBRARY_ID"),
+            }))
         })
     })
 }

@@ -1552,13 +1552,12 @@ VALUES (?, ?, ?)"#,
                     }
                 }
 
-                if !inserted_in_series.is_empty() {
-                    if let Some(series_candidate) = inserted_series
+                if !inserted_in_series.is_empty()
+                    && let Some(series_candidate) = inserted_series
                         .iter_mut()
                         .find(|candidate| candidate.series_id == series.series_id)
-                    {
-                        series_candidate.books.extend(inserted_in_series.clone());
-                    }
+                {
+                    series_candidate.books.extend(inserted_in_series.clone());
                 }
             }
 

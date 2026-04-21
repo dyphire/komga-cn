@@ -1,4 +1,11 @@
 use super::*;
+use std::sync::OnceLock;
+use tokio::sync::Mutex;
+
+fn generated_thumbnail_runtime_sse_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 #[tokio::test]
 async fn generate_book_thumbnail_persists_generated_thumbnail_for_epub_cover() {
@@ -178,6 +185,61 @@ async fn generate_book_thumbnail_persists_generated_thumbnail_for_pdf() {
             .and_then(|items| items.first())
             .and_then(|item| item.get("type")),
         Some(&Value::String("GENERATED".to_string()))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn generate_book_thumbnail_emits_thumbnail_book_added_event() {
+    let _guard = generated_thumbnail_runtime_sse_lock().lock().await;
+    let paths = new_router_fixture("router-generate-book-thumbnail-sse").await;
+    seed_router_contract_data(&paths).await;
+    write_router_epub_with_cover(&paths, "books/book-1.epub");
+
+    let cleanup_pool = connect_test_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for generated thumbnail sse cleanup");
+    sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ?")
+        .bind("book-1")
+        .execute(&cleanup_pool)
+        .await
+        .expect("existing book thumbnails should be deleted before generated thumbnail sse test");
+    cleanup_pool.close().await;
+
+    let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
+    generate_book_thumbnail(paths.main_db.as_path(), "book-1")
+        .expect("generate_book_thumbnail should execute successfully for sse contract");
+
+    let (_, events) = komga_application::runtime_sse::pending_runtime_sse_events(
+        cursor,
+        "runtime-contract-admin",
+        true,
+    );
+    let thumbnail_events = events
+        .iter()
+        .filter(|event| event.name == "ThumbnailBookAdded")
+        .filter(|event| {
+            event.payload.get("bookId").and_then(|value| value.as_str()) == Some("book-1")
+        })
+        .filter(|event| {
+            event
+                .payload
+                .get("seriesId")
+                .and_then(|value| value.as_str())
+                == Some("series-1")
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        thumbnail_events.len(),
+        1,
+        "generated book thumbnail creation should emit one ThumbnailBookAdded event",
+    );
+    assert_eq!(
+        thumbnail_events[0].payload.get("selected"),
+        Some(&Value::Bool(true)),
+        "generated book thumbnail event should reflect the selected generated thumbnail",
     );
 
     cleanup_router_fixture(paths);

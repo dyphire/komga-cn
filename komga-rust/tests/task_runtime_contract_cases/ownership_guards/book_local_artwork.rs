@@ -426,3 +426,79 @@ async fn runtime_replaces_generated_selection_when_importing_book_local_artworks
 
     cleanup_router_fixture(paths);
 }
+
+#[tokio::test]
+async fn runtime_book_local_artwork_refresh_emits_thumbnail_book_added_events() {
+    let _guard = runtime_sse_contract_guard().await;
+    let paths = new_router_fixture("runtime-book-local-artwork-sse-events").await;
+    seed_router_contract_data(&paths).await;
+
+    let sidecar_dir = paths.config_dir.join("books");
+    std::fs::create_dir_all(&sidecar_dir).expect("book artwork directory should exist");
+    std::fs::write(sidecar_dir.join("book-1.png"), fixture_png_bytes())
+        .expect("primary local artwork should be written");
+    std::fs::write(sidecar_dir.join("book-1-1.jpg"), fixture_png_bytes())
+        .expect("secondary local artwork should be written");
+
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for local artwork sse fixture setup");
+    sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 1 WHERE ID = ?")
+        .bind("library-1")
+        .execute(&pool)
+        .await
+        .expect("library import-local-artwork flag should be enabled");
+    sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ?")
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("existing thumbnails should be cleared before local artwork sse test");
+    pool.close().await;
+
+    let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
+    let runtime = runtime_task_context(&paths);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    scheduler.enqueue(
+        TaskQueueRecord::new("REFRESH_BOOK_LOCAL_ARTWORK_book-1", 1_000, None)
+            .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK"),
+    );
+    scheduler
+        .process_available(&runtime)
+        .expect("book local artwork refresh should complete for sse contract");
+
+    let (_, events) = komga_application::runtime_sse::pending_runtime_sse_events(
+        cursor,
+        "runtime-contract-admin",
+        true,
+    );
+    let thumbnail_events = events
+        .iter()
+        .filter(|event| event.name == "ThumbnailBookAdded")
+        .filter(|event| {
+            event.payload.get("bookId").and_then(|value| value.as_str()) == Some("book-1")
+        })
+        .filter(|event| {
+            event
+                .payload
+                .get("seriesId")
+                .and_then(|value| value.as_str())
+                == Some("series-1")
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        thumbnail_events.len() >= 2,
+        "book local artwork refresh should emit thumbnail events for imported sidecar artwork rows",
+    );
+    let selected_states = thumbnail_events
+        .iter()
+        .filter_map(|event| event.payload.get("selected").and_then(Value::as_bool))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        selected_states,
+        std::collections::BTreeSet::from([false, true]),
+        "book local artwork refresh should emit both selected and unselected ThumbnailBookAdded event states",
+    );
+
+    cleanup_router_fixture(paths);
+}

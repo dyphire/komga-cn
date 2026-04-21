@@ -216,7 +216,7 @@ async fn pipeline_run_public_seam_keeps_runtime_follow_ups_ahead_of_sidecar_refr
         .expect("scan run should enqueue runtime metadata refresh follow-up work");
     let sidecar_refresh_index = follow_up_types
         .iter()
-        .position(|simple_type| *simple_type == "REFRESH_SERIES_METADATA")
+        .rposition(|simple_type| *simple_type == "REFRESH_SERIES_METADATA")
         .expect("scan run should enqueue sidecar-driven series metadata refresh work");
 
     assert!(

@@ -404,3 +404,78 @@ async fn runtime_replaces_generated_selection_when_importing_series_local_artwor
 
     cleanup_router_fixture(paths);
 }
+
+#[tokio::test]
+async fn runtime_series_local_artwork_refresh_emits_thumbnail_series_added_events() {
+    let _guard = runtime_sse_contract_guard().await;
+    let paths = new_router_fixture("runtime-series-local-artwork-sse-events").await;
+    seed_router_contract_data(&paths).await;
+
+    let series_dir = paths.config_dir.join("series/series-1");
+    std::fs::create_dir_all(&series_dir).expect("series artwork directory should exist");
+    std::fs::write(series_dir.join("cover.png"), fixture_png_bytes())
+        .expect("primary series artwork should be written");
+    std::fs::write(series_dir.join("poster.jpg"), fixture_png_bytes())
+        .expect("secondary series artwork should be written");
+
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for series local artwork sse fixture setup");
+    sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 1 WHERE ID = ?")
+        .bind("library-1")
+        .execute(&pool)
+        .await
+        .expect("library import-local-artwork flag should be enabled");
+    sqlx::query("UPDATE SERIES SET ONESHOT = 0 WHERE ID = ?")
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("series oneshot flag should be disabled");
+    sqlx::query("DELETE FROM THUMBNAIL_SERIES WHERE SERIES_ID = ?")
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("existing series thumbnails should be cleared before local artwork sse test");
+    pool.close().await;
+
+    let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
+    let runtime = runtime_task_context(&paths);
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    enqueue_refresh_series_local_artwork(&mut scheduler, "series-1");
+    scheduler
+        .process_available(&runtime)
+        .expect("series local artwork refresh should complete for sse contract");
+
+    let (_, events) = komga_application::runtime_sse::pending_runtime_sse_events(
+        cursor,
+        "runtime-contract-admin",
+        true,
+    );
+    let thumbnail_events = events
+        .iter()
+        .filter(|event| event.name == "ThumbnailSeriesAdded")
+        .filter(|event| {
+            event
+                .payload
+                .get("seriesId")
+                .and_then(|value| value.as_str())
+                == Some("series-1")
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        thumbnail_events.len() >= 2,
+        "series local artwork refresh should emit thumbnail events for imported sidecar artwork rows",
+    );
+    let selected_states = thumbnail_events
+        .iter()
+        .filter_map(|event| event.payload.get("selected").and_then(Value::as_bool))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        selected_states,
+        std::collections::BTreeSet::from([false, true]),
+        "series local artwork refresh should emit both selected and unselected ThumbnailSeriesAdded event states",
+    );
+
+    cleanup_router_fixture(paths);
+}

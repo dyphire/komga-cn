@@ -1,4 +1,11 @@
 use super::*;
+use std::sync::OnceLock;
+use tokio::sync::Mutex;
+
+fn book_thumbnail_delete_runtime_sse_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 #[tokio::test]
 async fn router_book_thumbnail_by_id_allows_missing_path_book_when_thumbnail_exists() {
@@ -249,6 +256,148 @@ async fn router_book_thumbnail_delete_reselects_remaining_thumbnail_when_selecte
         .expect("book thumbnail list response should be an array");
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].get("selected"), Some(&Value::Bool(true)));
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_thumbnail_select_emits_thumbnail_book_added_event() {
+    let _guard = book_thumbnail_delete_runtime_sse_lock().lock().await;
+    let paths = new_router_fixture("router-book-thumbnail-select-sse").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let image_bytes = fixture_png_bytes();
+    let (content_type, body) =
+        multipart_image_upload_body("file", "cover.png", "image/png", false, &image_bytes);
+    let upload = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/books/book-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(body))
+                .expect("book thumbnail select sse upload request should build"),
+        )
+        .await
+        .expect("book thumbnail select sse upload request should complete");
+    let thumbnail_id = response_json(upload)
+        .await
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("uploaded book thumbnail should expose id")
+        .to_string();
+
+    let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
+    let select = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!(
+                    "/api/v1/books/book-1/thumbnails/{thumbnail_id}/selected"
+                ))
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book thumbnail select sse request should build"),
+        )
+        .await
+        .expect("book thumbnail select sse request should complete");
+    assert_eq!(select.status(), StatusCode::ACCEPTED);
+
+    let (_, events) = komga_application::runtime_sse::pending_runtime_sse_events(
+        cursor,
+        "runtime-contract-admin",
+        true,
+    );
+    let thumbnail_event = events
+        .iter()
+        .find(|event| event.name == "ThumbnailBookAdded")
+        .expect("book thumbnail select should emit ThumbnailBookAdded SSE");
+    assert_eq!(
+        thumbnail_event.payload.get("selected"),
+        Some(&Value::Bool(true))
+    );
+    assert_eq!(
+        thumbnail_event.payload.get("bookId"),
+        Some(&Value::String("book-1".to_string()))
+    );
+    assert_eq!(
+        thumbnail_event.payload.get("seriesId"),
+        Some(&Value::String("series-1".to_string()))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
+async fn router_book_thumbnail_delete_emits_thumbnail_book_deleted_event() {
+    let _guard = book_thumbnail_delete_runtime_sse_lock().lock().await;
+    let paths = new_router_fixture("router-book-thumbnail-delete-sse").await;
+    seed_router_contract_data(&paths).await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let image_bytes = fixture_png_bytes();
+    let (content_type, body) =
+        multipart_image_upload_body("file", "cover.png", "image/png", true, &image_bytes);
+    let upload = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/books/book-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(body))
+                .expect("book thumbnail delete sse upload request should build"),
+        )
+        .await
+        .expect("book thumbnail delete sse upload request should complete");
+    let thumbnail_id = response_json(upload)
+        .await
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("uploaded book thumbnail should expose id")
+        .to_string();
+
+    let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
+    let delete = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/v1/books/book-1/thumbnails/{thumbnail_id}"))
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book thumbnail delete sse request should build"),
+        )
+        .await
+        .expect("book thumbnail delete sse request should complete");
+    assert_eq!(delete.status(), StatusCode::ACCEPTED);
+
+    let (_, events) = komga_application::runtime_sse::pending_runtime_sse_events(
+        cursor,
+        "runtime-contract-admin",
+        true,
+    );
+    let thumbnail_event = events
+        .iter()
+        .find(|event| event.name == "ThumbnailBookDeleted")
+        .expect("book thumbnail delete should emit ThumbnailBookDeleted SSE");
+    assert_eq!(
+        thumbnail_event.payload.get("selected"),
+        Some(&Value::Bool(true))
+    );
+    assert_eq!(
+        thumbnail_event.payload.get("bookId"),
+        Some(&Value::String("book-1".to_string()))
+    );
+    assert_eq!(
+        thumbnail_event.payload.get("seriesId"),
+        Some(&Value::String("series-1".to_string()))
+    );
 
     cleanup_router_fixture(paths);
 }

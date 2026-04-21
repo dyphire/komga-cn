@@ -1,6 +1,9 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use komga_application::runtime_sse::register_runtime_sse_event;
+use serde_json::json;
+
 mod books;
 mod collections;
 mod readlists;
@@ -34,4 +37,74 @@ fn generated_thumbnail_id(prefix: &str) -> String {
         .as_nanos();
     let counter = GENERATED_THUMBNAIL_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("{prefix}-{timestamp:032x}{counter:016x}")
+}
+
+pub(crate) fn emit_thumbnail_book_event(
+    book_id: &str,
+    series_id: &str,
+    selected: bool,
+    created: bool,
+) {
+    register_runtime_sse_event(
+        if created {
+            "ThumbnailBookAdded"
+        } else {
+            "ThumbnailBookDeleted"
+        },
+        json!({
+            "bookId": book_id,
+            "seriesId": series_id,
+            "selected": selected,
+        }),
+        false,
+        None,
+    );
+}
+
+pub(crate) fn emit_thumbnail_series_event(series_id: &str, selected: bool, created: bool) {
+    register_runtime_sse_event(
+        if created {
+            "ThumbnailSeriesAdded"
+        } else {
+            "ThumbnailSeriesDeleted"
+        },
+        json!({
+            "seriesId": series_id,
+            "selected": selected,
+        }),
+        false,
+        None,
+    );
+}
+
+pub(crate) fn emit_thumbnail_readlist_event(readlist_id: &str, selected: bool, created: bool) {
+    register_runtime_sse_event(
+        if created {
+            "ThumbnailReadListAdded"
+        } else {
+            "ThumbnailReadListDeleted"
+        },
+        json!({
+            "readListId": readlist_id,
+            "selected": selected,
+        }),
+        false,
+        None,
+    );
+}
+
+pub(crate) fn emit_thumbnail_collection_event(collection_id: &str, selected: bool, created: bool) {
+    register_runtime_sse_event(
+        if created {
+            "ThumbnailSeriesCollectionAdded"
+        } else {
+            "ThumbnailSeriesCollectionDeleted"
+        },
+        json!({
+            "collectionId": collection_id,
+            "selected": selected,
+        }),
+        false,
+        None,
+    );
 }

@@ -1,5 +1,13 @@
 use super::*;
 use crate::sqlite::connect_test_pool;
+use serde_json::Value;
+use std::sync::OnceLock;
+use tokio::sync::Mutex;
+
+fn import_runtime_sse_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 fn unique_temp_dir(case: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -368,6 +376,55 @@ async fn import_book_uses_oneshot_parent_directory_and_destination_basename() {
     assert!(
         !oneshot_dir.join("existing-1.jpg").exists(),
         "upgrade import should remove the previous numbered artwork sidecar when destination differs"
+    );
+
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn import_book_emits_book_added_runtime_sse_event() {
+    let _guard = import_runtime_sse_lock().lock().await;
+    let (db_path, pool, root) = create_test_db("import-book-runtime-sse").await;
+    let port = FilesystemImportPort::new(&db_path);
+    let source_path = root.join("incoming.cbz");
+    fs::write(&source_path, b"fixture").expect("source fixture should be written");
+
+    let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
+    let outcome = port
+        .import_book(
+            ImportCopyMode::Copy,
+            BooksImportEntry {
+                source_file: source_path,
+                series_id: "series-1".to_string(),
+                destination_name: None,
+                upgrade_book_id: None,
+            },
+        )
+        .await
+        .expect("import should succeed")
+        .expect("import should return an outcome");
+
+    let (_, events) = komga_application::runtime_sse::pending_runtime_sse_events(
+        cursor,
+        "runtime-contract-admin",
+        true,
+    );
+    let book_added = events
+        .iter()
+        .find(|event| event.name == "BookAdded")
+        .expect("successful non-scan import should emit BookAdded runtime SSE");
+
+    assert_eq!(
+        book_added.payload.get("bookId"),
+        Some(&Value::String(outcome.imported_book_id.clone()))
+    );
+    assert_eq!(
+        book_added.payload.get("seriesId"),
+        Some(&Value::String("series-1".to_string()))
+    );
+    assert_eq!(
+        book_added.payload.get("libraryId"),
+        Some(&Value::String("library-1".to_string()))
     );
 
     pool.close().await;

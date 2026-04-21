@@ -5,7 +5,7 @@ use sqlx::Row;
 
 use crate::sqlite::connect_read_pool;
 
-use super::generated_thumbnail_id;
+use super::{emit_thumbnail_collection_event, generated_thumbnail_id};
 
 pub async fn persisted_collection_exists(
     database_file: &Path,
@@ -149,7 +149,7 @@ pub async fn insert_collection_thumbnail(
         .await
         .map_err(|error| format!("commit collection thumbnail create tx: {error}"))?;
 
-    Ok(CollectionThumbnailRecord {
+    let record = CollectionThumbnailRecord {
         id,
         collection_id: collection_id.to_string(),
         thumbnail_type: "USER_UPLOADED".to_string(),
@@ -159,7 +159,9 @@ pub async fn insert_collection_thumbnail(
         width,
         height,
         thumbnail: thumbnail.to_vec(),
-    })
+    };
+    emit_thumbnail_collection_event(&record.collection_id, record.selected, true);
+    Ok(record)
 }
 
 pub async fn select_collection_thumbnail(
@@ -217,7 +219,7 @@ pub async fn select_collection_thumbnail(
         "#,
     )
     .bind(thumbnail_id)
-    .bind(target_collection_id)
+    .bind(&target_collection_id)
     .execute(&mut *tx)
     .await
     .map_err(|error| format!("mark selected collection thumbnail: {error}"))?;
@@ -225,6 +227,7 @@ pub async fn select_collection_thumbnail(
     tx.commit()
         .await
         .map_err(|error| format!("commit collection thumbnail select tx: {error}"))?;
+    emit_thumbnail_collection_event(&target_collection_id, true, true);
     Ok(true)
 }
 
@@ -303,6 +306,7 @@ pub async fn delete_collection_thumbnail(
     tx.commit()
         .await
         .map_err(|error| format!("commit collection thumbnail delete tx: {error}"))?;
+    emit_thumbnail_collection_event(&target_collection_id, deleted_selected, false);
     Ok(true)
 }
 

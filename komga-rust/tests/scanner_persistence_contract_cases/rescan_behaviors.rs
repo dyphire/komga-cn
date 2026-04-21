@@ -661,10 +661,9 @@ async fn scanner_runtime_sse_scan_events_follow_kotlin_lifecycle_order() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(
-        rescan_names,
-        vec!["BookChanged", "SeriesChanged"],
-        "scanner runtime SSE should soft-delete books before series, matching Kotlin SeriesLifecycle.softDeleteMany semantics",
+    assert!(
+        rescan_names.starts_with(&["BookChanged", "SeriesChanged"]),
+        "scanner runtime SSE should soft-delete books before series before any later maintenance follow-up events: {rescan_names:?}",
     );
 
     fixture.cleanup();
