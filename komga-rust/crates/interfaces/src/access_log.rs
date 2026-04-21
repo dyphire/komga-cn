@@ -2,7 +2,6 @@ use std::cell::RefCell;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
@@ -14,7 +13,7 @@ use axum::middleware::Next;
 use axum::response::Response;
 use tracing::Span;
 
-use crate::state::{HttpAppState, HttpServerRequestMetricKey, HttpServerRequestsState};
+use crate::state::{HttpServerRequestMetricKey, HttpServerRequestsState};
 
 const ANONYMOUS_USER_ID: &str = "anonymous";
 static ACCESS_LOG_REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -78,14 +77,14 @@ pub(crate) fn record_resolved_auth_user_id(user_id: Option<&str>) {
 }
 
 pub async fn prepare_access_log_middleware(
-    State(app): State<Arc<HttpAppState>>,
+    State(http_server_requests): State<HttpServerRequestsState>,
     request: Request,
     next: Next,
 ) -> Response {
     let started_at = Instant::now();
     let request_id = next_request_id();
     let mut request = request;
-    let http_server_requests = Some(app.operational.http_server_requests.clone());
+    let http_server_requests = Some(http_server_requests);
     let remote_addr = request
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()

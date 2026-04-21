@@ -223,6 +223,7 @@ jobs:
       - binary_release
     env:
       VERSION: ${{ needs.version.outputs.version_next }}
+      VERSION_CURRENT: ${{ needs.version.outputs.version_current }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -235,9 +236,17 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Generate changelog
+        id: changelog
+        uses: janheinrichmerker/action-github-changelog-generator@v2.4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          sinceTag: ${{ env.VERSION_CURRENT }}
+
       - name: Create release notes
         env:
           RELEASE_NOTES: ${{ inputs.release_notes }}
+          CHANGELOG: ${{ steps.changelog.outputs.changelog }}
         run: |
           set -euo pipefail
           mkdir -p release_notes
@@ -246,6 +255,9 @@ jobs:
           if [[ ${#release_artifacts[@]} -eq 0 ]]; then
             echo "No release artifacts were downloaded" >&2
             exit 1
+          fi
+          if [[ -n "$CHANGELOG" ]]; then
+            printf '\n%s\n' "$CHANGELOG" >> release_notes/release_notes.md
           fi
           {
             echo ""

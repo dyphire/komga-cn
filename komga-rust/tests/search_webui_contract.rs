@@ -333,6 +333,7 @@ fn router_access_log_tracks_first_byte_for_streaming_downloads_and_deferred_erro
     use axum::http::Method;
     use axum::routing::get;
     use http_body::Frame;
+    use komga_interfaces::state::HttpServerRequestsState;
     use tower_http::trace::TraceLayer;
 
     struct FailingBody {
@@ -369,6 +370,7 @@ fn router_access_log_tracks_first_byte_for_streaming_downloads_and_deferred_erro
         let config = runtime_config_for_paths(&paths);
 
         let (logs, read_result) = capture_router_logs_async_result(&config, async move {
+            let metrics = HttpServerRequestsState::default();
             let app = Router::new()
                 .route(
                     "/api/v1/books/{book_id}/file",
@@ -381,7 +383,8 @@ fn router_access_log_tracks_first_byte_for_streaming_downloads_and_deferred_erro
                             .expect("failing body response should build")
                     }),
                 )
-                .route_layer(axum::middleware::from_fn(
+                .route_layer(axum::middleware::from_fn_with_state(
+                    metrics.clone(),
                     access_log_impl::prepare_access_log_middleware,
                 ))
                 .layer(

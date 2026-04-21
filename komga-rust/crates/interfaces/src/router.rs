@@ -692,7 +692,7 @@ pub fn build_router(app: HttpAppState) -> Router {
     router
         .route_layer(middleware::from_fn(cache::cache_workflow_middleware))
         .route_layer(middleware::from_fn_with_state(
-            app.clone(),
+            app.operational.http_server_requests.clone(),
             access_log::prepare_access_log_middleware,
         ))
         .layer(
