@@ -2,12 +2,13 @@ use std::cell::RefCell;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use axum::body::Body;
-use axum::extract::{ConnectInfo, MatchedPath, Request};
+use axum::extract::{ConnectInfo, MatchedPath, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::Response;
@@ -76,14 +77,15 @@ pub(crate) fn record_resolved_auth_user_id(user_id: Option<&str>) {
     });
 }
 
-pub async fn prepare_access_log_middleware(request: Request, next: Next) -> Response {
+pub async fn prepare_access_log_middleware(
+    State(app): State<Arc<HttpAppState>>,
+    request: Request,
+    next: Next,
+) -> Response {
     let started_at = Instant::now();
     let request_id = next_request_id();
     let mut request = request;
-    let http_server_requests = request
-        .extensions()
-        .get::<HttpAppState>()
-        .map(|app| app.operational.http_server_requests.clone());
+    let http_server_requests = Some(app.operational.http_server_requests.clone());
     let remote_addr = request
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()

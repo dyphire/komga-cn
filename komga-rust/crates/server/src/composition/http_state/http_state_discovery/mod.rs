@@ -11,14 +11,14 @@ mod detail_access;
 mod index_dirs;
 mod persisted_access;
 
-pub(super) fn compose_discovery_detail_service() -> Arc<dyn DiscoveryDetailService> {
+pub(super) fn compose_discovery_detail_service() -> Box<dyn DiscoveryDetailService> {
     detail_access::compose_discovery_detail_service()
 }
 
 pub(super) fn compose_persisted_discovery_service(
     database_file: &std::path::Path,
     lucene_data_directory: &std::path::Path,
-) -> Arc<dyn PersistedDiscoveryService> {
+) -> Box<dyn PersistedDiscoveryService> {
     persisted_access::compose_persisted_discovery_service(database_file, lucene_data_directory)
 }
 

@@ -330,7 +330,7 @@ mod tests {
         }
     }
 
-    fn test_app_state(task_queue: Arc<dyn TaskQueueService>) -> HttpAppState {
+    fn test_app_state(task_queue: Box<dyn TaskQueueService>) -> HttpAppState {
         let operational = OperationalState {
             runtime: RuntimeState {
                 database_file: PathBuf::from("/tmp/main.db"),
@@ -352,15 +352,13 @@ mod tests {
                 git_commit_id: None,
                 git_commit_time: None,
             },
-            oauth2_clients: Arc::new(Vec::<OAuth2ClientConfig>::new()),
+            oauth2_clients: Vec::<OAuth2ClientConfig>::new(),
             oauth2_account_creation: false,
             oidc_email_verification: false,
-            sse: Arc::new(Mutex::new(SseOperationalState::default())),
-            announcements_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
-            releases_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
-            transient_books: Arc::new(Mutex::new(
-                TransientBooksStore::with_records(HashMap::new()),
-            )),
+            sse: Mutex::new(SseOperationalState::default()),
+            announcements_cache: Mutex::new(None::<RemoteCacheEntry>),
+            releases_cache: Mutex::new(None::<RemoteCacheEntry>),
+            transient_books: Mutex::new(TransientBooksStore::with_records(HashMap::new())),
             shutdown_trigger: None,
         };
 
@@ -375,17 +373,17 @@ mod tests {
                 remember_me_runtime_key: operational.remember_me_runtime_key.clone(),
             },
             services: HttpServices {
-                library_catalog: Arc::new(NoopLibraryCatalogService),
+                library_catalog: Box::new(NoopLibraryCatalogService),
                 task_queue,
-                server_settings: Arc::new(TestServerSettingsService),
+                server_settings: Box::new(TestServerSettingsService),
                 runtime_identity: crate::state::default_test_identity_service(),
-                operational_runtime: Arc::new(NoopOperationalRuntimeService),
-                operational_settings: Arc::new(NoopOperationalSettingsService),
-                media_assets: Arc::new(NoopMediaAssetsService),
-                opds_catalog: Arc::new(NoopOpdsCatalogService),
-                opds_persisted: Arc::new(NoopOpdsPersistedService),
-                discovery_persisted: Arc::new(NoopPersistedDiscoveryService),
-                discovery_detail: Arc::new(NoopDiscoveryDetailService),
+                operational_runtime: Box::new(NoopOperationalRuntimeService),
+                operational_settings: Box::new(NoopOperationalSettingsService),
+                media_assets: Box::new(NoopMediaAssetsService),
+                opds_catalog: Box::new(NoopOpdsCatalogService),
+                opds_persisted: Box::new(NoopOpdsPersistedService),
+                discovery_persisted: Box::new(NoopPersistedDiscoveryService),
+                discovery_detail: Box::new(NoopDiscoveryDetailService),
             },
             operational,
         }
@@ -412,7 +410,7 @@ mod tests {
             ],
         };
         let persisted_ids = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-        let app = test_app_state(Arc::new(TestTaskQueueService {
+        let app = test_app_state(Box::new(TestTaskQueueService {
             persisted_ids: persisted_ids.clone(),
         }));
 

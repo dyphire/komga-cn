@@ -253,18 +253,18 @@ pub(super) fn compose_operational_state(
             git_commit_id: build_metadata.git_commit_id,
             git_commit_time: build_metadata.git_commit_time,
         },
-        oauth2_clients: Arc::new(oauth2_clients(config)),
+        oauth2_clients: oauth2_clients(config),
         oauth2_account_creation: config.oauth2_account_creation,
         oidc_email_verification: config.oidc_email_verification,
-        sse: Arc::new(Mutex::new(SseOperationalState {
+        sse: Mutex::new(SseOperationalState {
             accepting_connections: true,
             book_import_events: Vec::<BookImportSseEvent>::new(),
             session_expired_events: Vec::new(),
             next_session_expired_event_id: 1,
-        })),
-        announcements_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
-        releases_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
-        transient_books: Arc::new(Mutex::new(TransientBooksStore::default())),
+        }),
+        announcements_cache: Mutex::new(None::<RemoteCacheEntry>),
+        releases_cache: Mutex::new(None::<RemoteCacheEntry>),
+        transient_books: Mutex::new(TransientBooksStore::default()),
         shutdown_trigger,
     }
 }
@@ -292,6 +292,7 @@ mod tests {
     use komga_application::task_processing::TaskQueueRecord;
     use komga_infrastructure::task_queue::queue_scheduler::TaskQueueScheduler;
     use serde_json::json;
+    use std::sync::Arc;
     use std::time::Duration;
 
     fn scan_library_task() -> TaskQueueRecord {

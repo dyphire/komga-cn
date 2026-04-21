@@ -645,9 +645,9 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
 pub(super) fn compose_persisted_discovery_service(
     database_file: &std::path::Path,
     lucene_data_directory: &std::path::Path,
-) -> Arc<dyn PersistedDiscoveryService> {
+) -> Box<dyn PersistedDiscoveryService> {
     register_discovery_index_dir(database_file, lucene_data_directory);
-    Arc::new(RuntimePersistedDiscoveryService {
+    Box::new(RuntimePersistedDiscoveryService {
         lucene_data_directory: lucene_data_directory.to_path_buf(),
     })
 }

@@ -740,6 +740,6 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
     }
 }
 
-pub(super) fn compose_discovery_detail_service() -> Arc<dyn DiscoveryDetailService> {
-    Arc::new(RuntimeDiscoveryDetailService)
+pub(super) fn compose_discovery_detail_service() -> Box<dyn DiscoveryDetailService> {
+    Box::new(RuntimeDiscoveryDetailService)
 }

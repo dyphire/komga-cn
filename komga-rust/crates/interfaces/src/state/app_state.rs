@@ -1,17 +1,17 @@
 use super::*;
 
 pub struct HttpServices {
-    pub library_catalog: Arc<dyn LibraryCatalogService>,
-    pub task_queue: Arc<dyn TaskQueueService>,
-    pub server_settings: Arc<dyn ServerSettingsService>,
-    pub runtime_identity: Arc<dyn IdentityService>,
-    pub operational_runtime: Arc<dyn OperationalRuntimeService>,
-    pub operational_settings: Arc<dyn OperationalSettingsService>,
-    pub media_assets: Arc<dyn MediaAssetsService>,
-    pub opds_catalog: Arc<dyn OpdsCatalogService>,
-    pub opds_persisted: Arc<dyn OpdsPersistedService>,
-    pub discovery_persisted: Arc<dyn PersistedDiscoveryService>,
-    pub discovery_detail: Arc<dyn DiscoveryDetailService>,
+    pub library_catalog: Box<dyn LibraryCatalogService>,
+    pub task_queue: Box<dyn TaskQueueService>,
+    pub server_settings: Box<dyn ServerSettingsService>,
+    pub runtime_identity: Box<dyn IdentityService>,
+    pub operational_runtime: Box<dyn OperationalRuntimeService>,
+    pub operational_settings: Box<dyn OperationalSettingsService>,
+    pub media_assets: Box<dyn MediaAssetsService>,
+    pub opds_catalog: Box<dyn OpdsCatalogService>,
+    pub opds_persisted: Box<dyn OpdsPersistedService>,
+    pub discovery_persisted: Box<dyn PersistedDiscoveryService>,
+    pub discovery_detail: Box<dyn DiscoveryDetailService>,
 }
 
 pub struct HttpAppState {
@@ -29,13 +29,13 @@ pub struct OperationalState {
     pub http_server_requests: HttpServerRequestsState,
     pub remember_me_runtime_key: String,
     pub build_metadata: OperationalBuildMetadata,
-    pub oauth2_clients: Arc<Vec<OAuth2ClientConfig>>,
+    pub oauth2_clients: Vec<OAuth2ClientConfig>,
     pub oauth2_account_creation: bool,
     pub oidc_email_verification: bool,
-    pub sse: Arc<Mutex<SseOperationalState>>,
-    pub announcements_cache: Arc<Mutex<Option<RemoteCacheEntry>>>,
-    pub releases_cache: Arc<Mutex<Option<RemoteCacheEntry>>>,
-    pub transient_books: Arc<Mutex<TransientBooksStore>>,
+    pub sse: Mutex<SseOperationalState>,
+    pub announcements_cache: Mutex<Option<RemoteCacheEntry>>,
+    pub releases_cache: Mutex<Option<RemoteCacheEntry>>,
+    pub transient_books: Mutex<TransientBooksStore>,
     pub shutdown_trigger: Option<watch::Sender<bool>>,
 }
 
@@ -210,9 +210,9 @@ fn current_unix_epoch_seconds() -> i64 {
         .as_secs() as i64
 }
 
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct ReadProgressState {
-    pub progress_by_token: Arc<Mutex<HashMap<String, HashMap<String, ReadProgress>>>>,
+    pub progress_by_token: Mutex<HashMap<String, HashMap<String, ReadProgress>>>,
 }
 
 #[derive(Clone)]

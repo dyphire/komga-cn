@@ -45,7 +45,7 @@ async fn update_server_settings_does_not_apply_runtime_task_pool_before_persiste
     let state = test_operational_state(database_file.clone(), fixture_root.clone());
     let app = Arc::new(test_app_state(
         state,
-        Arc::new(FakeTaskQueueService {
+        Box::new(FakeTaskQueueService {
             apply: {
                 let apply_count = apply_count.clone();
                 move |_value| {
@@ -54,7 +54,7 @@ async fn update_server_settings_does_not_apply_runtime_task_pool_before_persiste
                 }
             },
         }),
-        settings_store.clone(),
+        fake_settings_store(persisted_settings.clone(), persist_attempts.clone()),
     ));
     let headers = admin_headers(&fixture_root);
 
@@ -98,7 +98,7 @@ async fn get_server_settings_returns_empty_string_placeholders_for_missing_strin
     let state = test_operational_state(database_file, fixture_root.clone());
     let app = Arc::new(test_app_state(
         state,
-        Arc::new(FakeTaskQueueService { apply: |_| Ok(()) }),
+        Box::new(FakeTaskQueueService { apply: |_| Ok(()) }),
         settings_store,
     ));
     let headers = admin_headers(&fixture_root);
@@ -138,7 +138,7 @@ async fn get_server_settings_returns_runtime_server_port_configuration_source() 
     state.runtime.bind_address = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8081));
     let app = Arc::new(test_app_state(
         state,
-        Arc::new(FakeTaskQueueService { apply: |_| Ok(()) }),
+        Box::new(FakeTaskQueueService { apply: |_| Ok(()) }),
         settings_store,
     ));
     let headers = admin_headers(&fixture_root);
@@ -368,8 +368,8 @@ impl LibraryCatalogService for NoopLibraryCatalogService {
 
 fn test_app_state(
     operational: OperationalState,
-    task_queue: Arc<dyn TaskQueueService>,
-    server_settings: Arc<dyn ServerSettingsService>,
+    task_queue: Box<dyn TaskQueueService>,
+    server_settings: Box<dyn ServerSettingsService>,
 ) -> HttpAppState {
     HttpAppState {
         profile: crate::state::RuntimeProfile::LiveLocaldb,
@@ -382,17 +382,17 @@ fn test_app_state(
             remember_me_runtime_key: operational.remember_me_runtime_key.clone(),
         },
         services: HttpServices {
-            library_catalog: Arc::new(NoopLibraryCatalogService),
+            library_catalog: Box::new(NoopLibraryCatalogService),
             task_queue,
             server_settings,
             runtime_identity: crate::state::default_test_identity_service(),
-            operational_runtime: Arc::new(NoopOperationalRuntimeService),
-            operational_settings: Arc::new(NoopOperationalSettingsService),
-            media_assets: Arc::new(NoopMediaAssetsService),
-            opds_catalog: Arc::new(NoopOpdsCatalogService),
-            opds_persisted: Arc::new(NoopOpdsPersistedService),
-            discovery_persisted: Arc::new(NoopPersistedDiscoveryService),
-            discovery_detail: Arc::new(NoopDiscoveryDetailService),
+            operational_runtime: Box::new(NoopOperationalRuntimeService),
+            operational_settings: Box::new(NoopOperationalSettingsService),
+            media_assets: Box::new(NoopMediaAssetsService),
+            opds_catalog: Box::new(NoopOpdsCatalogService),
+            opds_persisted: Box::new(NoopOpdsPersistedService),
+            discovery_persisted: Box::new(NoopPersistedDiscoveryService),
+            discovery_detail: Box::new(NoopDiscoveryDetailService),
         },
         operational,
     }
@@ -420,20 +420,20 @@ fn test_operational_state(database_file: PathBuf, fixture_root: PathBuf) -> Oper
             git_commit_id: Some("deadbeef".to_string()),
             git_commit_time: Some("2026-04-09T00:00:00Z".to_string()),
         },
-        oauth2_clients: Arc::new(Vec::<OAuth2ClientConfig>::new()),
+        oauth2_clients: Vec::<OAuth2ClientConfig>::new(),
         oauth2_account_creation: false,
         oidc_email_verification: true,
-        sse: Arc::new(Mutex::new(SseOperationalState {
+        sse: Mutex::new(SseOperationalState {
             accepting_connections: true,
             book_import_events: Vec::<BookImportSseEvent>::new(),
             session_expired_events: Vec::new(),
             next_session_expired_event_id: 1,
-        })),
-        announcements_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
-        releases_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
-        transient_books: Arc::new(Mutex::new(TransientBooksStore::with_records(
+        }),
+        announcements_cache: Mutex::new(None::<RemoteCacheEntry>),
+        releases_cache: Mutex::new(None::<RemoteCacheEntry>),
+        transient_books: Mutex::new(TransientBooksStore::with_records(
             std::collections::HashMap::new(),
-        ))),
+        )),
         shutdown_trigger: None,
     }
 }
@@ -441,8 +441,8 @@ fn test_operational_state(database_file: PathBuf, fixture_root: PathBuf) -> Oper
 fn fake_settings_store(
     persisted: Arc<Mutex<HashMap<String, Option<String>>>>,
     persist_attempts: Arc<AtomicUsize>,
-) -> Arc<dyn ServerSettingsService> {
-    Arc::new(FakeSettingsStore {
+) -> Box<dyn ServerSettingsService> {
+    Box::new(FakeSettingsStore {
         persisted,
         persist_attempts,
     })

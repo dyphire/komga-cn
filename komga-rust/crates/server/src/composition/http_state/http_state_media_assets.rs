@@ -68,8 +68,8 @@ impl RuntimeBookMetadataService for ComposedBookMetadataService {
 #[derive(Clone, Default)]
 pub(super) struct RuntimeMediaAssetsService;
 
-pub(super) fn compose_media_assets_service() -> Arc<dyn MediaAssetsService> {
-    Arc::new(RuntimeMediaAssetsService)
+pub(super) fn compose_media_assets_service() -> Box<dyn MediaAssetsService> {
+    Box::new(RuntimeMediaAssetsService)
 }
 
 #[async_trait::async_trait]

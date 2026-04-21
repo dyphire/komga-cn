@@ -689,13 +689,12 @@ pub fn build_router(app: HttpAppState) -> Router {
         router
     };
 
-    let router = router.route_layer(middleware::from_fn(cache::cache_workflow_middleware));
-    let router = router.route_layer(middleware::from_fn(
-        access_log::prepare_access_log_middleware,
-    ));
-
-    #[allow(clippy::let_and_return)]
     router
+        .route_layer(middleware::from_fn(cache::cache_workflow_middleware))
+        .route_layer(middleware::from_fn_with_state(
+            app.clone(),
+            access_log::prepare_access_log_middleware,
+        ))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(access_log::make_request_span)

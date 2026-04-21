@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use komga_infrastructure::discovery_detail_access::{
     books as infrastructure_detail_books, collections as infrastructure_detail_collections,
@@ -74,22 +74,18 @@ mod http_state_operational_state;
 mod http_state_runtime_config;
 mod http_state_runtime_identity;
 
-pub struct HttpRuntimeState {
-    pub app: HttpAppState,
-}
-
 pub fn compose_http_runtime(
     config: &RuntimeConfig,
     background: RuntimeBackgroundState,
     worker_runtime_guard: Option<WorkerRuntimeGuard>,
     shutdown_trigger: Option<watch::Sender<bool>>,
     startup_timing: StartupTimingState,
-) -> HttpRuntimeState {
+) -> HttpAppState {
     let runtime_identity_service = http_state_runtime_identity::compose_runtime_identity_service();
-    let operational_runtime_service: Arc<dyn OperationalRuntimeService> =
-        Arc::new(http_state_operational_access::compose_operational_runtime_service());
-    let operational_settings_service: Arc<dyn OperationalSettingsService> =
-        Arc::new(http_state_operational_access::compose_operational_settings_service());
+    let operational_runtime_service: Box<dyn OperationalRuntimeService> =
+        Box::new(http_state_operational_access::compose_operational_runtime_service());
+    let operational_settings_service: Box<dyn OperationalSettingsService> =
+        Box::new(http_state_operational_access::compose_operational_settings_service());
     let media_assets_service = http_state_media_assets::compose_media_assets_service();
     let discovery_detail_service = http_state_discovery::compose_discovery_detail_service();
     let discovery_persisted = http_state_discovery::compose_persisted_discovery_service(
@@ -118,7 +114,7 @@ pub fn compose_http_runtime(
     );
 
     let read_progress = ReadProgressState {
-        progress_by_token: Arc::new(Mutex::new(HashMap::new())),
+        progress_by_token: Mutex::new(HashMap::new()),
     };
     let profile = http_state_runtime_config::runtime_profile(config);
     let discovery_auth = DiscoveryAuthState::default();
@@ -129,17 +125,17 @@ pub fn compose_http_runtime(
         remember_me_runtime_key: remember_me_runtime_key.clone(),
     };
     let services = HttpServices {
-        library_catalog: Arc::new(
+        library_catalog: Box::new(
             http_state_operational_state::SqliteLibraryCatalogService::new(
                 config.database_file.as_path(),
             ),
         ),
-        task_queue: Arc::new(http_state_operational_state::RuntimeTaskQueueService::new(
+        task_queue: Box::new(http_state_operational_state::RuntimeTaskQueueService::new(
             background.task_queue,
             background.task_wakeup,
             worker_runtime_guard,
         )),
-        server_settings: Arc::new(
+        server_settings: Box::new(
             http_state_operational_state::RuntimeServerSettingsService::new(
                 config.database_file.as_path(),
             ),
@@ -148,8 +144,8 @@ pub fn compose_http_runtime(
         operational_runtime: operational_runtime_service,
         operational_settings: operational_settings_service,
         media_assets: media_assets_service,
-        opds_catalog: Arc::new(opds_catalog),
-        opds_persisted: Arc::new(opds_persisted),
+        opds_catalog: Box::new(opds_catalog),
+        opds_persisted: Box::new(opds_persisted),
         discovery_persisted,
         discovery_detail: discovery_detail_service,
     };
@@ -160,15 +156,13 @@ pub fn compose_http_runtime(
         shutdown_trigger,
     );
 
-    HttpRuntimeState {
-        app: HttpAppState {
-            profile,
-            read_progress,
-            discovery_auth,
-            auth_db,
-            operational,
-            services,
-        },
+    HttpAppState {
+        profile,
+        read_progress,
+        discovery_auth,
+        auth_db,
+        operational,
+        services,
     }
 }
 

@@ -3,7 +3,7 @@ use super::*;
 #[cfg(test)]
 use std::collections::HashMap;
 #[cfg(test)]
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 #[derive(Clone)]
 pub struct PersistedBookMediaFile {
@@ -347,8 +347,8 @@ fn test_state() -> &'static Mutex<RuntimeIdentityAccessTestState> {
 struct TestIdentityService;
 
 #[cfg(test)]
-pub(crate) fn default_test_identity_service() -> Arc<dyn IdentityService> {
-    Arc::new(TestIdentityService)
+pub(crate) fn default_test_identity_service() -> Box<dyn IdentityService> {
+    Box::new(TestIdentityService)
 }
 
 #[cfg(test)]

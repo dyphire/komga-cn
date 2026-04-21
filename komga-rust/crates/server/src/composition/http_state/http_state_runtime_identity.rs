@@ -22,8 +22,8 @@ use sqlx::SqlitePool;
 #[derive(Clone, Default)]
 pub(super) struct RuntimeIdentityService;
 
-pub(super) fn compose_runtime_identity_service() -> Arc<dyn IdentityService> {
-    Arc::new(RuntimeIdentityService)
+pub(super) fn compose_runtime_identity_service() -> Box<dyn IdentityService> {
+    Box::new(RuntimeIdentityService)
 }
 
 #[async_trait::async_trait]

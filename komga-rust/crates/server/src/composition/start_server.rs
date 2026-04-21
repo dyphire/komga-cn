@@ -12,7 +12,7 @@ use tokio::signal;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 
-use crate::composition::http_state::{HttpRuntimeState, compose_http_runtime};
+use crate::composition::http_state::compose_http_runtime;
 use crate::runtime::background_workers::{prepare_task_queue, spawn_runtime_workers};
 use komga_config::env_config::RuntimeConfig;
 use komga_config::writer_ownership::WriterKind;
@@ -176,17 +176,17 @@ async fn serve_router_with_shutdown_timeout(
     }
 }
 
-fn build_http_router(runtime: HttpRuntimeState) -> Router {
-    komga_interfaces::router::build_router(runtime.app)
+fn build_http_router(app: komga_interfaces::state::HttpAppState) -> Router {
+    komga_interfaces::router::build_router(app)
 }
 
 fn finalize_router_startup(
-    runtime: HttpRuntimeState,
+    app: komga_interfaces::state::HttpAppState,
     startup_timing: StartupTimingState,
     startup_started_at: Instant,
 ) -> Router {
     startup_timing.record_application_started(startup_started_at.elapsed());
-    let router = build_http_router(runtime);
+    let router = build_http_router(app);
     startup_timing.record_application_ready(startup_started_at.elapsed());
     router
 }
