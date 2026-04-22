@@ -238,10 +238,11 @@ jobs:
 
       - name: Generate changelog
         id: changelog
-        uses: janheinrichmerker/action-github-changelog-generator@v2.4
+        uses: metcalfc/changelog-generator@v4.7.0
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          sinceTag: ${{ env.VERSION_CURRENT }}
+          myToken: ${{ secrets.GITHUB_TOKEN }}
+          base-ref: ${{ env.VERSION_CURRENT }}
+          head-ref: ${{ github.sha }}
 
       - name: Create release notes
         env:
