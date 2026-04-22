@@ -20,43 +20,29 @@ static REWRITTEN_INDEX_HTML_CACHE: LazyLock<RwLock<IndexHtmlCache>> =
 #[derive(Default)]
 struct IndexHtmlCache {
     entries: HashMap<String, Bytes>,
-    usage_order: Vec<String>,
+    insertion_order: Vec<String>,
 }
 
 impl IndexHtmlCache {
-    fn get(&mut self, resource_base_url: &str) -> Option<Bytes> {
-        let cached = self.entries.get(resource_base_url).cloned()?;
-        self.touch(resource_base_url);
-        Some(cached)
+    fn get(&self, resource_base_url: &str) -> Option<Bytes> {
+        self.entries.get(resource_base_url).cloned()
     }
 
     fn insert(&mut self, resource_base_url: String, value: Bytes) {
         if self.entries.contains_key(resource_base_url.as_str()) {
-            self.entries.insert(resource_base_url.clone(), value);
-            self.touch(resource_base_url.as_str());
+            self.entries.insert(resource_base_url, value);
             return;
         }
 
         if self.entries.len() >= INDEX_HTML_CACHE_MAX_ENTRIES
-            && let Some(oldest) = self.usage_order.first().cloned()
+            && let Some(oldest) = self.insertion_order.first().cloned()
         {
             self.entries.remove(oldest.as_str());
-            self.usage_order.remove(0);
+            self.insertion_order.remove(0);
         }
 
         self.entries.insert(resource_base_url.clone(), value);
-        self.usage_order.push(resource_base_url);
-    }
-
-    fn touch(&mut self, resource_base_url: &str) {
-        if let Some(index) = self
-            .usage_order
-            .iter()
-            .position(|existing| existing == resource_base_url)
-        {
-            let key = self.usage_order.remove(index);
-            self.usage_order.push(key);
-        }
+        self.insertion_order.push(resource_base_url);
     }
 }
 
@@ -124,7 +110,7 @@ fn request_scoped_resource_base_url(headers: &HeaderMap) -> String {
 
 fn cached_rewritten_index_html(resource_base_url: &str) -> Bytes {
     if let Some(cached) = REWRITTEN_INDEX_HTML_CACHE
-        .write()
+        .read()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .get(resource_base_url)
     {
@@ -473,25 +459,25 @@ mod tests {
     }
 
     #[test]
-    fn index_html_cache_evicts_oldest_entry_after_recent_access_reorders_usage() {
+    fn index_html_cache_hit_does_not_refresh_eviction_order() {
         let mut cache = IndexHtmlCache::default();
-        let stable_entry = "/stable/".to_string();
+        let oldest_entry = "/oldest/".to_string();
 
         for index in 0..INDEX_HTML_CACHE_MAX_ENTRIES {
             let key = if index == 0 {
-                stable_entry.clone()
+                oldest_entry.clone()
             } else {
                 format!("/entry-{index}/")
             };
             cache.insert(key, Bytes::from(format!("value-{index}")));
         }
 
-        assert!(cache.get(stable_entry.as_str()).is_some());
+        assert!(cache.get(oldest_entry.as_str()).is_some());
 
         cache.insert("/fresh/".to_string(), Bytes::from_static(b"fresh"));
 
-        assert!(cache.get(stable_entry.as_str()).is_some());
-        assert!(cache.get("/entry-1/").is_none());
+        assert!(cache.get(oldest_entry.as_str()).is_none());
+        assert!(cache.get("/entry-1/").is_some());
         assert!(cache.get("/fresh/").is_some());
     }
 
