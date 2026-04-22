@@ -1,4 +1,7 @@
 use super::*;
+use std::sync::RwLock;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeProfile {
@@ -76,32 +79,85 @@ pub struct HttpServerRequestMetricSummary {
     pub max_time_seconds: f64,
 }
 
+#[derive(Default)]
+struct HttpServerRequestMetricCell {
+    count: AtomicU64,
+    total_time_micros: AtomicU64,
+    max_time_micros: AtomicU64,
+}
+
+impl HttpServerRequestMetricCell {
+    fn record(&self, elapsed_micros: u64) {
+        self.count.fetch_add(1, Ordering::Relaxed);
+        self.total_time_micros
+            .fetch_add(elapsed_micros, Ordering::Relaxed);
+        let mut current_max = self.max_time_micros.load(Ordering::Relaxed);
+        while elapsed_micros > current_max {
+            match self.max_time_micros.compare_exchange_weak(
+                current_max,
+                elapsed_micros,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(observed) => current_max = observed,
+            }
+        }
+    }
+
+    fn snapshot(&self) -> HttpServerRequestMetricSummary {
+        HttpServerRequestMetricSummary {
+            count: self.count.load(Ordering::Relaxed),
+            total_time_seconds: micros_to_seconds(self.total_time_micros.load(Ordering::Relaxed)),
+            max_time_seconds: micros_to_seconds(self.max_time_micros.load(Ordering::Relaxed)),
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct HttpServerRequestsState {
-    metrics: Arc<Mutex<HashMap<HttpServerRequestMetricKey, HttpServerRequestMetricSummary>>>,
+    metrics: Arc<RwLock<HashMap<HttpServerRequestMetricKey, Arc<HttpServerRequestMetricCell>>>>,
 }
 
 impl HttpServerRequestsState {
     pub fn record(&self, key: HttpServerRequestMetricKey, elapsed: Duration) {
-        let elapsed_seconds = elapsed.as_secs_f64();
-        let mut metrics = self
+        let elapsed_micros = u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX);
+        if let Some(cell) = self
             .metrics
-            .lock()
-            .expect("http server request metrics lock should not be poisoned");
-        let entry = metrics.entry(key).or_default();
-        entry.count += 1;
-        entry.total_time_seconds += elapsed_seconds;
-        entry.max_time_seconds = entry.max_time_seconds.max(elapsed_seconds);
+            .read()
+            .expect("http server request metrics lock should not be poisoned")
+            .get(&key)
+            .cloned()
+        {
+            cell.record(elapsed_micros);
+            return;
+        }
+
+        let cell = {
+            let mut metrics = self
+                .metrics
+                .write()
+                .expect("http server request metrics lock should not be poisoned");
+            metrics
+                .entry(key)
+                .or_insert_with(|| Arc::new(HttpServerRequestMetricCell::default()))
+                .clone()
+        };
+        cell.record(elapsed_micros);
     }
 
     pub fn snapshot(&self) -> Vec<(HttpServerRequestMetricKey, HttpServerRequestMetricSummary)> {
         self.metrics
-            .lock()
+            .read()
             .expect("http server request metrics lock should not be poisoned")
             .iter()
-            .map(|(key, value)| (key.clone(), value.clone()))
+            .map(|(key, cell)| (key.clone(), cell.snapshot()))
             .collect()
     }
+}
+
+fn micros_to_seconds(value: u64) -> f64 {
+    value as f64 / 1_000_000.0
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -75,13 +75,7 @@ pub(crate) async fn post_transient_books(
 
     let scanned_books = list_transient_book_entries(&app, PathBuf::from(requested_path));
 
-    let mut store = app
-        .operational
-        .transient_books
-        .lock()
-        .expect("transient books state lock should not be poisoned");
-
-    let mut payload = Vec::new();
+    let mut records = Vec::new();
     for scanned in scanned_books {
         let Some(path) = scanned.get("path").and_then(Value::as_str) else {
             continue;
@@ -99,8 +93,8 @@ pub(crate) async fn post_transient_books(
         };
         let id = transient_book_id();
 
-        let record = TransientBookRecord {
-            id: id.clone(),
+        records.push(TransientBookRecord {
+            id,
             name: name.to_string(),
             path: path.to_string(),
             file_last_modified_unix_nanos: file_metadata.file_last_modified_unix_nanos,
@@ -113,12 +107,21 @@ pub(crate) async fn post_transient_books(
             comment: String::new(),
             number: None,
             series_id: None,
-        };
+        });
+    }
+
+    let mut store = app
+        .operational
+        .transient_books
+        .lock()
+        .expect("transient books state lock should not be poisoned");
+    let mut payload = Vec::with_capacity(records.len());
+    for record in records {
         store.insert(record.clone());
         payload.push(transient_book_payload(&record));
     }
-
     drop(store);
+
     payload.sort_by(|left, right| {
         left["url"]
             .as_str()

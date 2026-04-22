@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -21,10 +21,10 @@ static SESSION_REGISTRY: LazyLock<SessionRegistry> = LazyLock::new(SessionRegist
 
 pub struct SessionRegistry {
     counter: AtomicU64,
-    sessions: Mutex<HashMap<String, SessionTokenRecord>>,
-    session_max_inactive_seconds_by_runtime_key: Mutex<HashMap<String, u64>>,
-    remember_me_settings_by_runtime_key: Mutex<HashMap<String, RememberMeRuntimeSettings>>,
-    remember_me_database_paths_by_runtime_key: Mutex<HashMap<String, PathBuf>>,
+    sessions: RwLock<HashMap<String, Arc<SessionTokenRecord>>>,
+    session_max_inactive_seconds_by_runtime_key: RwLock<HashMap<String, u64>>,
+    remember_me_settings_by_runtime_key: RwLock<HashMap<String, RememberMeRuntimeSettings>>,
+    remember_me_database_paths_by_runtime_key: RwLock<HashMap<String, PathBuf>>,
 }
 
 #[derive(Clone)]
@@ -33,13 +33,12 @@ pub struct RememberMeRuntimeSettings {
     pub duration_days: u64,
 }
 
-#[derive(Clone)]
 struct SessionTokenRecord {
     user: Option<AuthUserSessionSnapshot>,
     issued_at_epoch_seconds: u64,
-    last_accessed_epoch_seconds: u64,
+    last_accessed_epoch_seconds: AtomicU64,
     runtime_key: String,
-    oauth2_authorization_states: HashMap<String, String>,
+    oauth2_authorization_states: Mutex<HashMap<String, String>>,
 }
 
 const DEFAULT_REMEMBER_ME_DURATION_DAYS: u64 = 365;
@@ -50,16 +49,16 @@ impl SessionRegistry {
     fn new() -> Self {
         Self {
             counter: AtomicU64::new(1),
-            sessions: Mutex::new(HashMap::new()),
-            session_max_inactive_seconds_by_runtime_key: Mutex::new(HashMap::new()),
-            remember_me_settings_by_runtime_key: Mutex::new(HashMap::new()),
-            remember_me_database_paths_by_runtime_key: Mutex::new(HashMap::new()),
+            sessions: RwLock::new(HashMap::new()),
+            session_max_inactive_seconds_by_runtime_key: RwLock::new(HashMap::new()),
+            remember_me_settings_by_runtime_key: RwLock::new(HashMap::new()),
+            remember_me_database_paths_by_runtime_key: RwLock::new(HashMap::new()),
         }
     }
 
     fn session_max_inactive_seconds_for_runtime_key(&self, runtime_key: &str) -> u64 {
         self.session_max_inactive_seconds_by_runtime_key
-            .lock()
+            .read()
             .expect("session settings lock should not be poisoned")
             .get(runtime_key)
             .cloned()
@@ -69,7 +68,7 @@ impl SessionRegistry {
     pub fn sync_session_settings(&self, runtime_key: &str, max_inactive_seconds: u64) {
         let runtime_key = normalized_runtime_key(runtime_key);
         self.session_max_inactive_seconds_by_runtime_key
-            .lock()
+            .write()
             .expect("session settings lock should not be poisoned")
             .insert(
                 runtime_key,
@@ -79,7 +78,7 @@ impl SessionRegistry {
 
     fn remember_me_database_path_for_runtime_key(&self, runtime_key: &str) -> Option<PathBuf> {
         self.remember_me_database_paths_by_runtime_key
-            .lock()
+            .read()
             .expect("remember-me database paths lock should not be poisoned")
             .get(runtime_key)
             .cloned()
@@ -87,7 +86,7 @@ impl SessionRegistry {
 
     fn remember_me_settings_for_runtime_key(&self, runtime_key: &str) -> RememberMeRuntimeSettings {
         self.remember_me_settings_by_runtime_key
-            .lock()
+            .read()
             .expect("remember-me settings lock should not be poisoned")
             .get(runtime_key)
             .cloned()
@@ -97,7 +96,7 @@ impl SessionRegistry {
     pub fn sync_remember_me_settings(&self, runtime_key: &str, key: &str, duration_days: u64) {
         let runtime_key = normalized_runtime_key(runtime_key);
         self.remember_me_settings_by_runtime_key
-            .lock()
+            .write()
             .expect("remember-me settings lock should not be poisoned")
             .insert(
                 runtime_key,
@@ -119,7 +118,7 @@ impl SessionRegistry {
     pub fn sync_remember_me_database_path(&self, runtime_key: &str, database_file: &Path) {
         let runtime_key = normalized_runtime_key(runtime_key);
         self.remember_me_database_paths_by_runtime_key
-            .lock()
+            .write()
             .expect("remember-me database paths lock should not be poisoned")
             .insert(runtime_key, database_file.to_path_buf());
     }
@@ -132,7 +131,7 @@ impl SessionRegistry {
         let runtime_key = normalized_runtime_key(runtime_key);
         let mut sessions = self
             .sessions
-            .lock()
+            .write()
             .expect("session registry lock should not be poisoned");
         sessions.retain(|_, entry| {
             !(entry.runtime_key == runtime_key
@@ -154,33 +153,61 @@ impl SessionRegistry {
         let now = now_epoch_seconds();
         let session_max_inactive_seconds =
             self.session_max_inactive_seconds_for_runtime_key(runtime_key.as_str());
-        let mut sessions = self
-            .sessions
-            .lock()
-            .expect("session registry lock should not be poisoned");
 
-        if session_record_expired(
-            sessions.get(session_token),
+        self.remove_session_if_expired(
+            session_token,
             runtime_key.as_str(),
             session_max_inactive_seconds,
             now,
-        ) {
-            sessions.remove(session_token);
+        );
+
+        let session = {
+            let mut sessions = self
+                .sessions
+                .write()
+                .expect("session registry lock should not be poisoned");
+            sessions
+                .entry(session_token.to_string())
+                .or_insert_with(|| {
+                    Arc::new(SessionTokenRecord {
+                        user: None,
+                        issued_at_epoch_seconds: now,
+                        last_accessed_epoch_seconds: AtomicU64::new(now),
+                        runtime_key: runtime_key.clone(),
+                        oauth2_authorization_states: Mutex::new(HashMap::new()),
+                    })
+                })
+                .clone()
+        };
+
+        if session.runtime_key != runtime_key {
+            let mut sessions = self
+                .sessions
+                .write()
+                .expect("session registry lock should not be poisoned");
+            sessions.insert(
+                session_token.to_string(),
+                Arc::new(SessionTokenRecord {
+                    user: None,
+                    issued_at_epoch_seconds: now,
+                    last_accessed_epoch_seconds: AtomicU64::new(now),
+                    runtime_key,
+                    oauth2_authorization_states: Mutex::new(HashMap::from([(
+                        registration_id.to_string(),
+                        state.to_string(),
+                    )])),
+                }),
+            );
+            return;
         }
 
-        let session = sessions
-            .entry(session_token.to_string())
-            .or_insert_with(|| SessionTokenRecord {
-                user: None,
-                issued_at_epoch_seconds: now,
-                last_accessed_epoch_seconds: now,
-                runtime_key: runtime_key.clone(),
-                oauth2_authorization_states: HashMap::new(),
-            });
-        session.runtime_key = runtime_key;
-        session.last_accessed_epoch_seconds = now;
+        session
+            .last_accessed_epoch_seconds
+            .store(now, Ordering::Relaxed);
         session
             .oauth2_authorization_states
+            .lock()
+            .expect("oauth2 authorization states lock should not be poisoned")
             .insert(registration_id.to_string(), state.to_string());
     }
 
@@ -194,27 +221,65 @@ impl SessionRegistry {
         let now = now_epoch_seconds();
         let session_max_inactive_seconds =
             self.session_max_inactive_seconds_for_runtime_key(runtime_key.as_str());
-        let mut sessions = self
-            .sessions
-            .lock()
-            .expect("session registry lock should not be poisoned");
 
-        if session_record_expired(
-            sessions.get(session_token),
+        if self.remove_session_if_expired(
+            session_token,
             runtime_key.as_str(),
             session_max_inactive_seconds,
             now,
         ) {
-            sessions.remove(session_token);
             return None;
         }
 
-        let session = sessions.get_mut(session_token)?;
+        let session = self
+            .sessions
+            .read()
+            .expect("session registry lock should not be poisoned")
+            .get(session_token)
+            .cloned()?;
         if session.runtime_key != runtime_key {
             return None;
         }
-        session.last_accessed_epoch_seconds = now;
-        session.oauth2_authorization_states.remove(registration_id)
+
+        session
+            .last_accessed_epoch_seconds
+            .store(now, Ordering::Relaxed);
+        session
+            .oauth2_authorization_states
+            .lock()
+            .expect("oauth2 authorization states lock should not be poisoned")
+            .remove(registration_id)
+    }
+
+    fn remove_session_if_expired(
+        &self,
+        session_token: &str,
+        runtime_key: &str,
+        session_max_inactive_seconds: u64,
+        now: u64,
+    ) -> bool {
+        let should_remove = self
+            .sessions
+            .read()
+            .expect("session registry lock should not be poisoned")
+            .get(session_token)
+            .is_some_and(|session| {
+                session_record_expired(
+                    Some(session.as_ref()),
+                    runtime_key,
+                    session_max_inactive_seconds,
+                    now,
+                )
+            });
+        if !should_remove {
+            return false;
+        }
+
+        self.sessions
+            .write()
+            .expect("session registry lock should not be poisoned")
+            .remove(session_token);
+        true
     }
 }
 
@@ -271,58 +336,59 @@ impl SessionRuntime for SessionRegistry {
         let runtime_key = normalized_runtime_key(runtime_key);
         let next = self.counter.fetch_add(1, Ordering::Relaxed);
         let token = format!("komga-session-{next}-{}", random_hex_token(24));
+        let now = now_epoch_seconds();
         let mut sessions = self
             .sessions
-            .lock()
+            .write()
             .expect("session registry lock should not be poisoned");
         sessions.insert(
             token.clone(),
-            SessionTokenRecord {
+            Arc::new(SessionTokenRecord {
                 user: Some(user_session_snapshot(user)),
-                issued_at_epoch_seconds: now_epoch_seconds(),
-                last_accessed_epoch_seconds: now_epoch_seconds(),
+                issued_at_epoch_seconds: now,
+                last_accessed_epoch_seconds: AtomicU64::new(now),
                 runtime_key,
-                oauth2_authorization_states: HashMap::new(),
-            },
+                oauth2_authorization_states: Mutex::new(HashMap::new()),
+            }),
         );
         token
     }
 
     fn resolve_session_user(&self, token: &str) -> Option<AuthUser> {
-        let now = now_epoch_seconds();
-        let mut sessions = self
+        let session = self
             .sessions
-            .lock()
-            .expect("session registry lock should not be poisoned");
-
-        let mut resolved_user = None;
-        let mut should_remove = false;
-        if let Some(entry) = sessions.get_mut(token) {
-            let session_max_inactive_seconds =
-                self.session_max_inactive_seconds_for_runtime_key(entry.runtime_key.as_str());
-            let last_seen = entry
-                .last_accessed_epoch_seconds
-                .max(entry.issued_at_epoch_seconds);
-            let inactive_for = now.saturating_sub(last_seen);
-            if inactive_for >= session_max_inactive_seconds {
-                should_remove = true;
-            } else {
-                entry.last_accessed_epoch_seconds = now;
-                resolved_user = entry.user.as_ref().map(user_from_session_snapshot);
-            }
+            .read()
+            .expect("session registry lock should not be poisoned")
+            .get(token)
+            .cloned()?;
+        let now = now_epoch_seconds();
+        let session_max_inactive_seconds =
+            self.session_max_inactive_seconds_for_runtime_key(session.runtime_key.as_str());
+        let last_seen = session
+            .last_accessed_epoch_seconds
+            .load(Ordering::Relaxed)
+            .max(session.issued_at_epoch_seconds);
+        let inactive_for = now.saturating_sub(last_seen);
+        if inactive_for >= session_max_inactive_seconds {
+            self.remove_session_if_expired(
+                token,
+                session.runtime_key.as_str(),
+                session_max_inactive_seconds,
+                now,
+            );
+            return None;
         }
 
-        if should_remove {
-            sessions.remove(token);
-        }
-
-        resolved_user
+        session
+            .last_accessed_epoch_seconds
+            .store(now, Ordering::Relaxed);
+        session.user.as_ref().map(user_from_session_snapshot)
     }
 
     fn invalidate_user_sessions(&self, target_user_id: &str) {
         let mut sessions = self
             .sessions
-            .lock()
+            .write()
             .expect("session registry lock should not be poisoned");
         sessions.retain(|_, entry| {
             entry
@@ -335,7 +401,7 @@ impl SessionRuntime for SessionRegistry {
     fn invalidate_session_token(&self, token: &str) {
         let mut sessions = self
             .sessions
-            .lock()
+            .write()
             .expect("session registry lock should not be poisoned");
         sessions.remove(token);
     }
@@ -355,6 +421,7 @@ fn session_record_expired(
     }
     let last_seen = session
         .last_accessed_epoch_seconds
+        .load(Ordering::Relaxed)
         .max(session.issued_at_epoch_seconds);
     now.saturating_sub(last_seen) >= session_max_inactive_seconds
 }

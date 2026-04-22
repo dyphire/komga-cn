@@ -1,7 +1,8 @@
 use axum::http::HeaderMap;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::context::{
     DetailAccessDenial, DetailResourceContext, DiscoveryQueryContext, to_query_context,
@@ -10,9 +11,19 @@ use super::principal::{DiscoveryPrincipal, principal_from_user_payload};
 use super::utils::session_token_from_headers;
 use crate::identity_access::auth::{resolved_request_auth_user, user_payload_json};
 
+const DISCOVERY_PRINCIPAL_TTL_SECONDS: u64 = 30 * 60;
+const DISCOVERY_PRINCIPAL_CACHE_MAX_ENTRIES: usize = 1024;
+
+#[derive(Clone)]
+struct CachedDiscoveryPrincipal {
+    principal: DiscoveryPrincipal,
+    expires_at_epoch_seconds: u64,
+    inserted_at_epoch_seconds: u64,
+}
+
 #[derive(Clone, Default)]
 pub struct DiscoveryAuthState {
-    principals_by_session_token: Arc<Mutex<HashMap<String, DiscoveryPrincipal>>>,
+    principals_by_session_token: Arc<RwLock<HashMap<String, CachedDiscoveryPrincipal>>>,
 }
 
 impl DiscoveryAuthState {
@@ -21,11 +32,23 @@ impl DiscoveryAuthState {
         if token.is_empty() {
             return;
         }
+        let now = now_epoch_seconds();
         let mut sessions = self
             .principals_by_session_token
-            .lock()
+            .write()
             .expect("discovery auth session store lock should not be poisoned");
-        sessions.insert(token.to_string(), principal);
+        purge_expired_principals(&mut sessions, now);
+        if sessions.len() >= DISCOVERY_PRINCIPAL_CACHE_MAX_ENTRIES {
+            evict_oldest_principal(&mut sessions);
+        }
+        sessions.insert(
+            token.to_string(),
+            CachedDiscoveryPrincipal {
+                principal,
+                expires_at_epoch_seconds: now.saturating_add(DISCOVERY_PRINCIPAL_TTL_SECONDS),
+                inserted_at_epoch_seconds: now,
+            },
+        );
     }
 
     pub fn resolve_query_context(
@@ -34,12 +57,15 @@ impl DiscoveryAuthState {
         requested_library_ids: Option<&[String]>,
     ) -> Option<DiscoveryQueryContext> {
         let session_token = session_token_from_headers(headers)?;
+        let now = now_epoch_seconds();
         let principal = self
             .principals_by_session_token
-            .lock()
+            .read()
             .expect("discovery auth session store lock should not be poisoned")
             .get(&session_token)
-            .cloned()?;
+            .and_then(|cached| {
+                (cached.expires_at_epoch_seconds > now).then(|| cached.principal.clone())
+            })?;
 
         Some(to_query_context(&principal, requested_library_ids))
     }
@@ -51,12 +77,15 @@ impl DiscoveryAuthState {
     ) -> Result<DiscoveryQueryContext, DetailAccessDenial> {
         let session_token =
             session_token_from_headers(headers).ok_or(DetailAccessDenial::Unauthorized)?;
+        let now = now_epoch_seconds();
         let principal = self
             .principals_by_session_token
-            .lock()
+            .read()
             .expect("discovery auth session store lock should not be poisoned")
             .get(&session_token)
-            .cloned()
+            .and_then(|cached| {
+                (cached.expires_at_epoch_seconds > now).then(|| cached.principal.clone())
+            })
             .ok_or(DetailAccessDenial::Unauthorized)?;
 
         if !principal.can_access_all_libraries() {
@@ -164,4 +193,26 @@ impl DiscoveryAuthState {
             requested_library_ids.as_deref(),
         ))
     }
+}
+
+fn purge_expired_principals(sessions: &mut HashMap<String, CachedDiscoveryPrincipal>, now: u64) {
+    sessions.retain(|_, cached| cached.expires_at_epoch_seconds > now);
+}
+
+fn evict_oldest_principal(sessions: &mut HashMap<String, CachedDiscoveryPrincipal>) {
+    let Some(oldest_key) = sessions
+        .iter()
+        .min_by_key(|(_, cached)| cached.inserted_at_epoch_seconds)
+        .map(|(token, _)| token.clone())
+    else {
+        return;
+    };
+    sessions.remove(&oldest_key);
+}
+
+fn now_epoch_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default()
 }
