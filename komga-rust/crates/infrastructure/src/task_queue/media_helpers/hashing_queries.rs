@@ -32,14 +32,9 @@ pub(in crate::task_queue) fn hash_book_pages(
     let book_id = book_id.to_string();
 
     std::thread::spawn(move || {
-        let async_runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|error| {
-                TaskExecutionError::runtime(format!(
-                    "build hash-book-pages runtime failed: {error}"
-                ))
-            })?;
+        let async_runtime = crate::tokio_runtime::current_thread_runtime().map_err(|error| {
+            TaskExecutionError::runtime(format!("build hash-book-pages runtime failed: {error}"))
+        })?;
 
         async_runtime.block_on(async move {
             persist_book_page_hashes_from_media_content(database_file.as_path(), &book_id)

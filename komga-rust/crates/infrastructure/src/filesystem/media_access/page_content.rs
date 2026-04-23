@@ -1,4 +1,4 @@
-use std::fs;
+use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
@@ -16,7 +16,7 @@ use zip::ZipArchive;
 use crate::load_pdfium;
 use crate::rar_support::{list_rar_entries, read_rar_entry_bytes};
 
-pub fn resolve_book_page_bytes(
+pub async fn resolve_book_page_bytes(
     media: &BookMediaRecord,
     page: &BookPageRecord,
     page_number: u64,
@@ -32,16 +32,18 @@ pub fn resolve_book_page_bytes(
         candidates.push(media.file_path.clone());
     }
     for candidate in candidates {
-        if let Ok(bytes) = fs::read(candidate) {
+        if let Ok(bytes) = tokio::fs::read(candidate).await {
             return Some(bytes);
         }
     }
-    read_zip_archive_page_bytes(media, page, page_number)
-        .or_else(|| read_rar_archive_page_bytes(media, page, page_number))
+    if let Some(bytes) = read_zip_archive_page_bytes(media, page, page_number).await {
+        return Some(bytes);
+    }
+    read_rar_archive_page_bytes(media, page, page_number)
         .or_else(|| read_pdf_page_bytes(media, page_number))
 }
 
-pub fn render_book_page_thumbnail(
+pub async fn render_book_page_thumbnail(
     media: &BookMediaRecord,
     page: &BookPageRecord,
     page_number: u64,
@@ -51,22 +53,26 @@ pub fn render_book_page_thumbnail(
         return render_pdf_page_thumbnail(media, page_number, max_edge);
     }
 
-    let bytes = resolve_book_page_bytes(media, page, page_number)?;
+    let bytes = resolve_book_page_bytes(media, page, page_number).await?;
     render_image_thumbnail_as_jpeg(&bytes, max_edge)
 }
 
-pub fn load_archive_page_row(media: &BookMediaRecord, page_number: u64) -> Option<BookPageRecord> {
+pub async fn load_archive_page_row(
+    media: &BookMediaRecord,
+    page_number: u64,
+) -> Option<BookPageRecord> {
     if page_number == 0 {
         return None;
     }
-    load_archive_page_rows(media)?
+    load_archive_page_rows(media)
+        .await?
         .into_iter()
         .nth(usize::try_from(page_number - 1).ok()?)
 }
 
-pub fn load_archive_page_rows(media: &BookMediaRecord) -> Option<Vec<BookPageRecord>> {
+pub async fn load_archive_page_rows(media: &BookMediaRecord) -> Option<Vec<BookPageRecord>> {
     if book_media_is_zip_archive(media) {
-        return load_zip_archive_page_rows(media);
+        return load_zip_archive_page_rows(media).await;
     }
     if book_media_is_rar_archive(media) {
         return load_rar_archive_page_rows(media);
@@ -247,7 +253,7 @@ fn pdf_numeric_value(object: &lopdf::Object) -> Option<f64> {
     }
 }
 
-fn read_zip_archive_page_bytes(
+async fn read_zip_archive_page_bytes(
     media: &BookMediaRecord,
     page: &BookPageRecord,
     page_number: u64,
@@ -255,7 +261,7 @@ fn read_zip_archive_page_bytes(
     if !book_media_is_zip_archive(media) || page_number == 0 {
         return None;
     }
-    let file = fs::File::open(&media.file_path).ok()?;
+    let file = open_sync_file(&media.file_path).await?;
     let mut archive = ZipArchive::new(file).ok()?;
     if !page.file_name.is_empty()
         && let Ok(mut entry) = archive.by_name(&page.file_name)
@@ -286,8 +292,8 @@ fn read_zip_archive_page_bytes(
     None
 }
 
-fn load_zip_archive_page_rows(media: &BookMediaRecord) -> Option<Vec<BookPageRecord>> {
-    let file = fs::File::open(&media.file_path).ok()?;
+async fn load_zip_archive_page_rows(media: &BookMediaRecord) -> Option<Vec<BookPageRecord>> {
+    let file = open_sync_file(&media.file_path).await?;
     let mut archive = ZipArchive::new(file).ok()?;
     let mut rows = Vec::new();
     for index in 0..archive.len() {
@@ -351,12 +357,17 @@ fn read_rar_archive_page_bytes(
         .flatten()
 }
 
-pub fn read_media_file_bytes(path: &Path) -> Option<Vec<u8>> {
-    fs::read(path).ok()
+pub async fn read_media_file_bytes(path: &Path) -> Option<Vec<u8>> {
+    tokio::fs::read(path).await.ok()
 }
 
-pub fn read_media_file_size(path: &Path) -> Option<i64> {
-    fs::metadata(path)
+pub async fn read_media_file_size(path: &Path) -> Option<i64> {
+    tokio::fs::metadata(path)
+        .await
         .ok()
         .and_then(|value| i64::try_from(value.len()).ok())
+}
+
+async fn open_sync_file(path: &Path) -> Option<File> {
+    Some(tokio::fs::File::open(path).await.ok()?.into_std().await)
 }

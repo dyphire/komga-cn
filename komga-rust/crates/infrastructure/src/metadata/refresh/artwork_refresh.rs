@@ -203,7 +203,7 @@ pub fn generate_book_thumbnail(database_file: &Path, book_id: &str) -> Result<()
                 thumbnail_max_edge_from_setting(thumbnail_size_setting.as_deref());
 
             let epub_cover = if book_media_is_epub(&media) {
-                load_epub_cover_bytes(&media)
+                load_epub_cover_bytes(&media).await
             } else {
                 None
             };
@@ -266,13 +266,13 @@ pub fn generate_book_thumbnail(database_file: &Path, book_id: &str) -> Result<()
                                 .unwrap_or(0),
                         })
                     } else {
-                        load_archive_page_row(&media, 1)
+                        load_archive_page_row(&media, 1).await
                     };
 
                     let Some(page_row) = page_row else {
                         return Ok(());
                     };
-                    let Some(thumbnail_bytes) = resolve_book_page_bytes(&media, &page_row, 1)
+                    let Some(thumbnail_bytes) = resolve_book_page_bytes(&media, &page_row, 1).await
                     else {
                         return Ok(());
                     };

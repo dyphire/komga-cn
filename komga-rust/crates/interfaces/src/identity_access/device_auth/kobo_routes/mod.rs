@@ -982,6 +982,7 @@ pub async fn kobo_book_file_epub(
             .services
             .media_assets
             .read_media_file_bytes(media.file_path.clone())
+            .await
         {
             Some(body) => body,
             None => {

@@ -131,14 +131,14 @@ fn load_comicinfo_series_patch_for_book(
     Some(extract_comicinfo_series_patch(&xml, append_volume_to_title))
 }
 
-fn load_epub_series_patch_for_book(
+async fn load_epub_series_patch_for_book(
     source: &SeriesBookRefreshSource,
 ) -> Option<SeriesMetadataImportPatch> {
     if !book_media_is_epub(&source.media) {
         return None;
     }
 
-    let package_document = load_epub_package_document(&source.media)?;
+    let package_document = load_epub_package_document(&source.media).await?;
     Some(extract_epub_series_patch(&package_document))
 }
 
@@ -636,10 +636,12 @@ pub(super) async fn apply_series_metadata_from_book_imports(
     }
 
     if import_epub_series {
-        let patches = books
-            .iter()
-            .filter_map(load_epub_series_patch_for_book)
-            .collect::<Vec<_>>();
+        let mut patches = Vec::new();
+        for source in &books {
+            if let Some(patch) = load_epub_series_patch_for_book(source).await {
+                patches.push(patch);
+            }
+        }
 
         if let Some(aggregated) = aggregate_series_metadata_import_patches(&patches) {
             apply_series_metadata_import_patch(pool, series_id, aggregated).await?;

@@ -241,9 +241,7 @@ impl SqliteTaskQueueStore {
     {
         let tasks_db_file = self.tasks_db_file.clone();
         std::thread::spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
+            let runtime = crate::tokio_runtime::current_thread_runtime()
                 .expect("persisted task runtime should build");
 
             runtime.block_on(async move {

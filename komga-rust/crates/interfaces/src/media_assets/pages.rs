@@ -154,7 +154,9 @@ async fn book_page_response(
             &media,
             &page_row,
             requested_page_number as u64,
-        ) {
+        )
+        .await
+        {
             let mut effective_bytes = bytes;
             let content_type = page_row_media_type(&page_row, &media);
 
@@ -317,12 +319,13 @@ fn page_number_does_not_exist_response() -> Response {
     json_error_response(StatusCode::BAD_REQUEST, "Page number does not exist")
 }
 
-fn single_image_page_row(
+async fn single_image_page_row(
     app: &HttpAppState,
     media: &PersistedBookMedia,
     page_number: u64,
 ) -> PersistedBookPageRow {
     let (width, height) = read_media_image_dimensions(app, media.file_path.as_path())
+        .await
         .map(|(width, height)| (Some(width), Some(height)))
         .unwrap_or((None, None));
     PersistedBookPageRow {
@@ -331,12 +334,17 @@ fn single_image_page_row(
         media_type: content_type_from_filename(&media.file_name, &media.media_type),
         width,
         height,
-        file_size: read_media_file_size_from_services(app, &media.file_path).unwrap_or(0),
+        file_size: read_media_file_size_from_services(app, &media.file_path)
+            .await
+            .unwrap_or(0),
     }
 }
 
-fn single_image_page_record(app: &HttpAppState, media: &PersistedBookMedia) -> BookPageRecord {
-    let page = single_image_page_row(app, media, 1);
+async fn single_image_page_record(
+    app: &HttpAppState,
+    media: &PersistedBookMedia,
+) -> BookPageRecord {
+    let page = single_image_page_row(app, media, 1).await;
     BookPageRecord {
         number: page.number,
         file_name: page.file_name,
@@ -357,10 +365,10 @@ async fn load_page_row(
     match load_persisted_book_page_row_from_services(app, book_id, page_number).await {
         Ok(Some(row)) => Ok(Some(row)),
         Ok(None) if book_media_is_single_image(media) && page_number == 1 => {
-            Ok(Some(single_image_page_row(app, media, page_number)))
+            Ok(Some(single_image_page_row(app, media, page_number).await))
         }
         Ok(None) => {
-            if let Some(row) = load_archive_page_row_from_services(app, media, page_number) {
+            if let Some(row) = load_archive_page_row_from_services(app, media, page_number).await {
                 return Ok(Some(row));
             }
             if allow_pdf_fallback {
@@ -517,8 +525,8 @@ fn convert_page_image_bytes(
     Some(output.into_inner())
 }
 
-fn read_media_image_dimensions(app: &HttpAppState, path: &FsPath) -> Option<(i64, i64)> {
-    let bytes = read_media_file_bytes_from_services(app, path)?;
+async fn read_media_image_dimensions(app: &HttpAppState, path: &FsPath) -> Option<(i64, i64)> {
+    let bytes = read_media_file_bytes_from_services(app, path).await?;
     let image = image::load_from_memory(&bytes).ok()?;
     Some((i64::from(image.width()), i64::from(image.height())))
 }
@@ -566,7 +574,9 @@ pub async fn book_page_thumbnail(
             &page_row,
             page_number as u64,
             300,
-        ) {
+        )
+        .await
+        {
             let content_type = "image/jpeg".to_string();
 
             let etag = asset_etag(bytes.as_slice());
@@ -645,7 +655,7 @@ pub async fn book_pages(
         return page_rows_response(page_rows);
     }
 
-    if let Some(archive_rows) = load_archive_page_rows_from_services(&app, &media)
+    if let Some(archive_rows) = load_archive_page_rows_from_services(&app, &media).await
         && !archive_rows.is_empty()
     {
         return page_rows_response(archive_rows);
@@ -660,7 +670,7 @@ pub async fn book_pages(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    page_rows_response(vec![single_image_page_record(&app, &media)])
+    page_rows_response(vec![single_image_page_record(&app, &media).await])
 }
 
 fn page_rows_response(page_rows: Vec<BookPageRecord>) -> Response {

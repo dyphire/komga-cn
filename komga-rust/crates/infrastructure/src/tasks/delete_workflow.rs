@@ -457,9 +457,7 @@ where
     T: Send + 'static,
 {
     std::thread::spawn(move || {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
+        let runtime = crate::tokio_runtime::current_thread_runtime()
             .map_err(|error| format!("failed to build task runtime: {error}"))?;
 
         runtime.block_on(async move {

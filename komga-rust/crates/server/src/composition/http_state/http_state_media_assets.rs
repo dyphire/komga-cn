@@ -121,28 +121,26 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         infrastructure_epub::decode_epub_positions_blob(blob.as_slice())
     }
 
-    fn load_epub_archive_positions(
+    async fn load_epub_archive_positions(
         &self,
         media: komga_application::media_assets::BookMediaRecord,
     ) -> Option<Vec<Value>> {
-        infrastructure_epub::load_epub_archive_positions(&media)
+        infrastructure_epub::load_epub_archive_positions(&media).await
     }
 
-    fn read_media_file_bytes(&self, path: PathBuf) -> Option<Vec<u8>> {
-        std::fs::read(path).ok()
+    async fn read_media_file_bytes(&self, path: PathBuf) -> Option<Vec<u8>> {
+        infrastructure_page_content::read_media_file_bytes(path.as_path()).await
     }
 
-    fn read_media_file_size(&self, path: PathBuf) -> Option<i64> {
-        std::fs::metadata(path)
-            .ok()
-            .and_then(|meta| i64::try_from(meta.len()).ok())
+    async fn read_media_file_size(&self, path: PathBuf) -> Option<i64> {
+        infrastructure_page_content::read_media_file_size(path.as_path()).await
     }
 
-    fn load_epub_cover_bytes(
+    async fn load_epub_cover_bytes(
         &self,
         media: komga_application::media_assets::BookMediaRecord,
     ) -> Option<(Vec<u8>, String)> {
-        infrastructure_epub::load_epub_cover_bytes(&media)
+        infrastructure_epub::load_epub_cover_bytes(&media).await
     }
 
     async fn load_persisted_book_media(
@@ -219,16 +217,16 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         .await
     }
 
-    fn resolve_book_page_bytes(
+    async fn resolve_book_page_bytes(
         &self,
         media: komga_application::media_assets::BookMediaRecord,
         page: komga_application::media_assets::BookPageRecord,
         page_number: u64,
     ) -> Option<Vec<u8>> {
-        infrastructure_page_content::resolve_book_page_bytes(&media, &page, page_number)
+        infrastructure_page_content::resolve_book_page_bytes(&media, &page, page_number).await
     }
 
-    fn render_book_page_thumbnail(
+    async fn render_book_page_thumbnail(
         &self,
         media: komga_application::media_assets::BookMediaRecord,
         page: komga_application::media_assets::BookPageRecord,
@@ -241,21 +239,22 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
             page_number,
             max_edge,
         )
+        .await
     }
 
-    fn load_archive_page_row(
+    async fn load_archive_page_row(
         &self,
         media: komga_application::media_assets::BookMediaRecord,
         page_number: u64,
     ) -> Option<komga_application::media_assets::BookPageRecord> {
-        infrastructure_page_content::load_archive_page_row(&media, page_number)
+        infrastructure_page_content::load_archive_page_row(&media, page_number).await
     }
 
-    fn load_archive_page_rows(
+    async fn load_archive_page_rows(
         &self,
         media: komga_application::media_assets::BookMediaRecord,
     ) -> Option<Vec<komga_application::media_assets::BookPageRecord>> {
-        infrastructure_page_content::load_archive_page_rows(&media)
+        infrastructure_page_content::load_archive_page_rows(&media).await
     }
 
     fn load_pdf_page_row(
@@ -741,12 +740,12 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         infrastructure_epub::is_font_resource(&resource_name)
     }
 
-    fn read_epub_resource_bytes(
+    async fn read_epub_resource_bytes(
         &self,
         epub_path: PathBuf,
         resource_name: String,
     ) -> Option<Vec<u8>> {
-        infrastructure_epub::read_epub_resource_bytes(epub_path.as_path(), &resource_name)
+        infrastructure_epub::read_epub_resource_bytes(epub_path.as_path(), &resource_name).await
     }
 
     async fn load_persisted_manifest_book(

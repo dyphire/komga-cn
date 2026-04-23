@@ -38,9 +38,7 @@ pub fn spawn_runtime_workers(
     let thread_handle = std::thread::Builder::new()
         .name("komga-task-runtime".to_string())
         .spawn(move || {
-            let dedicated_runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
+            let dedicated_runtime = crate::runtime::tokio_runtime::current_thread_runtime()
                 .expect("isolated task runtime should build");
 
             dedicated_runtime.block_on(async move {

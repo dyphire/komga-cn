@@ -89,6 +89,12 @@ pub async fn run_process() {
     }
 }
 
+pub fn run_process_blocking() {
+    let runtime =
+        crate::runtime::tokio_runtime::multi_thread_runtime().expect("komga runtime should build");
+    runtime.block_on(run_process());
+}
+
 async fn run_admin_action(commands: admin_cli::AdminCliCommands) {
     let config = komga_config::env_config::AdminActionConfig::from_env().unwrap_or_else(|error| {
         eprintln!("failed to resolve admin action config: {error}");

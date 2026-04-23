@@ -107,12 +107,9 @@ where
     Fut: Future<Output = Result<Vec<TaskQueueRecord>, String>>,
 {
     std::thread::spawn(move || {
-        let async_runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|error| {
-                TaskExecutionError::runtime(format!("{build_runtime_error}: {error}"))
-            })?;
+        let async_runtime = crate::tokio_runtime::current_thread_runtime().map_err(|error| {
+            TaskExecutionError::runtime(format!("{build_runtime_error}: {error}"))
+        })?;
 
         async_runtime.block_on(async move {
             let service =

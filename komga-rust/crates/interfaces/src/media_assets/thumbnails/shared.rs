@@ -136,7 +136,9 @@ pub(super) async fn load_book_thumbnail_source_bytes(
     }
 
     if book_media_is_epub(media) {
-        return load_epub_cover_bytes_from_services(app, media).map(|(bytes, _)| bytes);
+        return load_epub_cover_bytes_from_services(app, media)
+            .await
+            .map(|(bytes, _)| bytes);
     }
 
     if book_media_is_pdf(media) {
@@ -145,18 +147,23 @@ pub(super) async fn load_book_thumbnail_source_bytes(
             .ok()
             .flatten()
             .or_else(|| load_pdf_page_row_from_services(app, media, 1))?;
-        return render_book_page_thumbnail_from_services(app, media, &page_row, 1, 300);
+        return render_book_page_thumbnail_from_services(app, media, &page_row, 1, 300).await;
     }
 
     if book_media_is_single_image(media) {
-        return read_media_file_bytes_from_services(app, &media.file_path);
+        return read_media_file_bytes_from_services(app, &media.file_path).await;
     }
 
-    let page_row = load_persisted_book_page_row_from_services(app, book_id, 1)
-        .await
-        .ok()
-        .flatten()
-        .or_else(|| load_archive_page_row_from_services(app, media, 1))?;
+    let page_row = if let Some(page_row) =
+        load_persisted_book_page_row_from_services(app, book_id, 1)
+            .await
+            .ok()
+            .flatten()
+    {
+        page_row
+    } else {
+        load_archive_page_row_from_services(app, media, 1).await?
+    };
     let media_type = if page_row.media_type.is_empty() {
         content_type_from_filename(&page_row.file_name, &media.media_type)
     } else {
@@ -166,7 +173,7 @@ pub(super) async fn load_book_thumbnail_source_bytes(
         return None;
     }
 
-    resolve_book_page_bytes_from_services(app, media, &page_row, 1)
+    resolve_book_page_bytes_from_services(app, media, &page_row, 1).await
 }
 
 pub(super) async fn load_series_thumbnail(

@@ -296,19 +296,19 @@ impl MediaAssetsService for NoopMediaAssetsService {
     fn decode_epub_positions(&self, blob: Vec<u8>) -> Result<Vec<Value>, String> {
         panic!("unused test service")
     }
-    fn load_epub_archive_positions(
+    async fn load_epub_archive_positions(
         &self,
         media: komga_application::media_assets::BookMediaRecord,
     ) -> Option<Vec<Value>> {
         panic!("unused test service")
     }
-    fn read_media_file_bytes(&self, path: PathBuf) -> Option<Vec<u8>> {
+    async fn read_media_file_bytes(&self, path: PathBuf) -> Option<Vec<u8>> {
         panic!("unused test service")
     }
-    fn read_media_file_size(&self, path: PathBuf) -> Option<i64> {
+    async fn read_media_file_size(&self, path: PathBuf) -> Option<i64> {
         panic!("unused test service")
     }
-    fn load_epub_cover_bytes(
+    async fn load_epub_cover_bytes(
         &self,
         media: komga_application::media_assets::BookMediaRecord,
     ) -> Option<(Vec<u8>, String)> {
@@ -357,7 +357,7 @@ impl MediaAssetsService for NoopMediaAssetsService {
     ) -> Result<Option<komga_application::media_assets::BookPageRecord>, String> {
         panic!("unused test service")
     }
-    fn resolve_book_page_bytes(
+    async fn resolve_book_page_bytes(
         &self,
         media: komga_application::media_assets::BookMediaRecord,
         page: komga_application::media_assets::BookPageRecord,
@@ -365,7 +365,7 @@ impl MediaAssetsService for NoopMediaAssetsService {
     ) -> Option<Vec<u8>> {
         panic!("unused test service")
     }
-    fn render_book_page_thumbnail(
+    async fn render_book_page_thumbnail(
         &self,
         media: komga_application::media_assets::BookMediaRecord,
         page: komga_application::media_assets::BookPageRecord,
@@ -374,14 +374,14 @@ impl MediaAssetsService for NoopMediaAssetsService {
     ) -> Option<Vec<u8>> {
         panic!("unused test service")
     }
-    fn load_archive_page_row(
+    async fn load_archive_page_row(
         &self,
         media: komga_application::media_assets::BookMediaRecord,
         page_number: u64,
     ) -> Option<komga_application::media_assets::BookPageRecord> {
         panic!("unused test service")
     }
-    fn load_archive_page_rows(
+    async fn load_archive_page_rows(
         &self,
         media: komga_application::media_assets::BookMediaRecord,
     ) -> Option<Vec<komga_application::media_assets::BookPageRecord>> {
@@ -692,7 +692,7 @@ impl MediaAssetsService for NoopMediaAssetsService {
     fn is_font_resource(&self, resource_name: String) -> bool {
         panic!("unused test service")
     }
-    fn read_epub_resource_bytes(
+    async fn read_epub_resource_bytes(
         &self,
         epub_path: PathBuf,
         resource_name: String,

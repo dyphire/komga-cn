@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::fs;
+use std::fs::File;
 use std::io::{Cursor, Read, Seek};
 use std::path::Path;
 
@@ -21,8 +21,8 @@ pub fn is_font_resource(resource_name: &str) -> bool {
     )
 }
 
-pub fn read_epub_resource_bytes(epub_path: &Path, resource_name: &str) -> Option<Vec<u8>> {
-    let file = fs::File::open(epub_path).ok()?;
+pub async fn read_epub_resource_bytes(epub_path: &Path, resource_name: &str) -> Option<Vec<u8>> {
+    let file = open_sync_file(epub_path).await?;
     let mut archive = ZipArchive::new(file).ok()?;
     read_zip_entry_bytes(&mut archive, resource_name)
 }
@@ -43,12 +43,12 @@ pub fn decode_epub_positions_blob(blob: &[u8]) -> Result<Vec<Value>, String> {
         .unwrap_or_default())
 }
 
-pub fn load_epub_archive_positions(media: &BookMediaRecord) -> Option<Vec<Value>> {
+pub async fn load_epub_archive_positions(media: &BookMediaRecord) -> Option<Vec<Value>> {
     if !book_media_is_epub(media) {
         return None;
     }
 
-    let file = fs::File::open(&media.file_path).ok()?;
+    let file = open_sync_file(&media.file_path).await?;
     let mut archive = ZipArchive::new(file).ok()?;
     let container_xml = read_zip_entry_bytes_normalized(&mut archive, "META-INF/container.xml")?;
     let rootfile_path = parse_epub_rootfile_path(&container_xml)?;
@@ -149,12 +149,12 @@ pub fn load_epub_archive_positions(media: &BookMediaRecord) -> Option<Vec<Value>
     )
 }
 
-pub fn load_epub_cover_bytes(media: &BookMediaRecord) -> Option<(Vec<u8>, String)> {
+pub async fn load_epub_cover_bytes(media: &BookMediaRecord) -> Option<(Vec<u8>, String)> {
     if !book_media_is_epub(media) {
         return None;
     }
 
-    let file = fs::File::open(&media.file_path).ok()?;
+    let file = open_sync_file(&media.file_path).await?;
     let mut archive = ZipArchive::new(file).ok()?;
     let container_xml = read_zip_entry_bytes_normalized(&mut archive, "META-INF/container.xml")?;
     let rootfile_path = parse_epub_rootfile_path(&container_xml)?;
@@ -183,17 +183,21 @@ pub fn load_epub_cover_bytes(media: &BookMediaRecord) -> Option<(Vec<u8>, String
     Some((bytes, cover_item.media_type))
 }
 
-pub fn load_epub_package_document(media: &BookMediaRecord) -> Option<Vec<u8>> {
+pub async fn load_epub_package_document(media: &BookMediaRecord) -> Option<Vec<u8>> {
     if !book_media_is_epub(media) {
         return None;
     }
 
-    let file = fs::File::open(&media.file_path).ok()?;
+    let file = open_sync_file(&media.file_path).await?;
     let mut archive = ZipArchive::new(file).ok()?;
     let container_xml = read_zip_entry_bytes_normalized(&mut archive, "META-INF/container.xml")?;
     let rootfile_path = parse_epub_rootfile_path(&container_xml)?;
 
     read_zip_entry_bytes_normalized(&mut archive, &rootfile_path)
+}
+
+async fn open_sync_file(path: &Path) -> Option<File> {
+    Some(tokio::fs::File::open(path).await.ok()?.into_std().await)
 }
 
 fn read_zip_entry_bytes<R: Read + Seek>(

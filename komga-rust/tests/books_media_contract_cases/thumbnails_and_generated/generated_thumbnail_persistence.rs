@@ -30,8 +30,9 @@ async fn generate_book_thumbnail_persists_generated_thumbnail_for_epub_cover() {
         file_name: "book-1.epub".to_string(),
         page_count: 10,
     };
-    let (cover_bytes, cover_media_type) =
-        load_epub_cover_bytes(&media).expect("epub cover bytes should be extractable");
+    let (cover_bytes, cover_media_type) = load_epub_cover_bytes(&media)
+        .await
+        .expect("epub cover bytes should be extractable");
     assert!(!cover_bytes.is_empty());
     assert_eq!(cover_media_type, "image/png");
 

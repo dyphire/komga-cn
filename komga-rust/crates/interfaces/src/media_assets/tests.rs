@@ -387,8 +387,8 @@ fn if_modified_since_uses_http_date_ordering() {
     ));
 }
 
-#[test]
-fn resolve_book_page_bytes_does_not_use_whole_archive_for_non_image() {
+#[tokio::test]
+async fn resolve_book_page_bytes_does_not_use_whole_archive_for_non_image() {
     let file_path = unique_temp_path("komga-media-archive");
     fs::write(&file_path, b"archive-bytes").expect("archive test file should be written");
 
@@ -408,14 +408,14 @@ fn resolve_book_page_bytes_does_not_use_whole_archive_for_non_image() {
         file_size: 0,
     };
 
-    let bytes = resolve_book_page_bytes(&media, &page, 5);
+    let bytes = resolve_book_page_bytes(&media, &page, 5).await;
     assert!(bytes.is_none());
 
     let _ = fs::remove_file(file_path);
 }
 
-#[test]
-fn resolve_book_page_bytes_allows_single_image_first_page() {
+#[tokio::test]
+async fn resolve_book_page_bytes_allows_single_image_first_page() {
     let file_path = unique_temp_path("komga-media-image");
     fs::write(&file_path, b"image-bytes").expect("image test file should be written");
 
@@ -435,14 +435,14 @@ fn resolve_book_page_bytes_allows_single_image_first_page() {
         file_size: 0,
     };
 
-    let bytes = resolve_book_page_bytes(&media, &page, 1);
+    let bytes = resolve_book_page_bytes(&media, &page, 1).await;
     assert_eq!(bytes, Some(b"image-bytes".to_vec()));
 
     let _ = fs::remove_file(file_path);
 }
 
-#[test]
-fn load_archive_page_rows_uses_zip_image_entries_only() {
+#[tokio::test]
+async fn load_archive_page_rows_uses_zip_image_entries_only() {
     let file_path = unique_temp_path("komga-media-zip-rows");
     let archive = build_stored_zip_archive(vec![
         ("001.jpg".to_string(), b"page-1".to_vec()),
@@ -460,7 +460,9 @@ fn load_archive_page_rows_uses_zip_image_entries_only() {
         page_count: 2,
     };
 
-    let rows = load_archive_page_rows(&media).expect("archive rows should be parsed");
+    let rows = load_archive_page_rows(&media)
+        .await
+        .expect("archive rows should be parsed");
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].number, 1);
     assert_eq!(rows[0].file_name, "001.jpg");
@@ -470,8 +472,8 @@ fn load_archive_page_rows_uses_zip_image_entries_only() {
     let _ = fs::remove_file(file_path);
 }
 
-#[test]
-fn resolve_book_page_bytes_extracts_zip_page_by_logical_index() {
+#[tokio::test]
+async fn resolve_book_page_bytes_extracts_zip_page_by_logical_index() {
     let file_path = unique_temp_path("komga-media-zip-by-index");
     let archive = build_stored_zip_archive(vec![
         ("001.jpg".to_string(), b"page-1".to_vec()),
@@ -497,7 +499,7 @@ fn resolve_book_page_bytes_extracts_zip_page_by_logical_index() {
         file_size: 0,
     };
 
-    let bytes = resolve_book_page_bytes(&media, &page, 2);
+    let bytes = resolve_book_page_bytes(&media, &page, 2).await;
     assert_eq!(bytes, Some(b"page-2".to_vec()));
 
     let _ = fs::remove_file(file_path);

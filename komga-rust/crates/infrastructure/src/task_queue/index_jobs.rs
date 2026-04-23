@@ -73,10 +73,7 @@ pub(super) fn try_execute(
                 let runtime_context = runtime.task_runtime_context();
                 let settings_store =
                     ServerSettingsStore::new(runtime_context.database_file.clone());
-                let settings = match tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                {
+                let settings = match crate::tokio_runtime::current_thread_runtime() {
                     Ok(async_runtime) => {
                         match async_runtime.block_on(load_server_settings(&settings_store)) {
                             Ok(settings) => settings,

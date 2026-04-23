@@ -28,6 +28,7 @@ pub mod sql;
 pub mod sqlite;
 pub mod task_queue;
 pub mod tasks;
+pub(crate) mod tokio_runtime;
 
 pub(crate) use persisted_paths::{
     resolve_library_item_path, resolve_optional_library_item_path, resolve_rooted_path,

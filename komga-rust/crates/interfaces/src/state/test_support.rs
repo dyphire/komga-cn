@@ -60,7 +60,7 @@ pub(crate) mod media_assets {
         content_type_from_filename(file_name, "application/octet-stream").starts_with("image/")
     }
 
-    pub(crate) fn resolve_book_page_bytes(
+    pub(crate) async fn resolve_book_page_bytes(
         media: &BookMediaRecord,
         page: &BookPageRecord,
         page_number: u64,
@@ -76,25 +76,33 @@ pub(crate) mod media_assets {
             candidates.push(media.file_path.clone());
         }
         for candidate in candidates {
-            if let Ok(bytes) = fs::read(candidate) {
+            if let Ok(bytes) = tokio::fs::read(candidate).await {
                 return Some(bytes);
             }
         }
-        read_zip_archive_page_bytes(media, page, page_number).or_else(|| {
-            if book_media_is_single_image(media) && page_number == 1 {
-                fs::read(&media.file_path).ok()
-            } else {
-                None
-            }
-        })
+        read_zip_archive_page_bytes(media, page, page_number)
+            .await
+            .or_else(|| {
+                if book_media_is_single_image(media) && page_number == 1 {
+                    fs::read(&media.file_path).ok()
+                } else {
+                    None
+                }
+            })
     }
 
-    pub(crate) fn load_archive_page_rows(media: &BookMediaRecord) -> Option<Vec<BookPageRecord>> {
+    pub(crate) async fn load_archive_page_rows(
+        media: &BookMediaRecord,
+    ) -> Option<Vec<BookPageRecord>> {
         if !book_media_is_zip_archive(media) {
             return None;
         }
 
-        let file = fs::File::open(&media.file_path).ok()?;
+        let file = tokio::fs::File::open(&media.file_path)
+            .await
+            .ok()?
+            .into_std()
+            .await;
         let mut archive = ZipArchive::new(file).ok()?;
         let mut rows = Vec::new();
         for index in 0..archive.len() {
@@ -115,7 +123,7 @@ pub(crate) mod media_assets {
         (!rows.is_empty()).then_some(rows)
     }
 
-    fn read_zip_archive_page_bytes(
+    async fn read_zip_archive_page_bytes(
         media: &BookMediaRecord,
         page: &BookPageRecord,
         page_number: u64,
@@ -123,7 +131,11 @@ pub(crate) mod media_assets {
         if !book_media_is_zip_archive(media) || page_number == 0 {
             return None;
         }
-        let file = fs::File::open(&media.file_path).ok()?;
+        let file = tokio::fs::File::open(&media.file_path)
+            .await
+            .ok()?
+            .into_std()
+            .await;
         let mut archive = ZipArchive::new(file).ok()?;
         if !page.file_name.is_empty()
             && let Ok(mut entry) = archive.by_name(&page.file_name)

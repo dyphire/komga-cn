@@ -381,16 +381,18 @@ async fn delete_book_thumbnail_from_services(
         .await
 }
 
-fn read_media_file_bytes_from_services(app: &HttpAppState, path: &FsPath) -> Option<Vec<u8>> {
+async fn read_media_file_bytes_from_services(app: &HttpAppState, path: &FsPath) -> Option<Vec<u8>> {
     app.services
         .media_assets
         .read_media_file_bytes(path.to_path_buf())
+        .await
 }
 
-fn read_media_file_size_from_services(app: &HttpAppState, path: &FsPath) -> Option<i64> {
+async fn read_media_file_size_from_services(app: &HttpAppState, path: &FsPath) -> Option<i64> {
     app.services
         .media_assets
         .read_media_file_size(path.to_path_buf())
+        .await
 }
 
 fn is_font_resource_from_services(app: &HttpAppState, resource_name: &str) -> bool {
@@ -399,7 +401,7 @@ fn is_font_resource_from_services(app: &HttpAppState, resource_name: &str) -> bo
         .is_font_resource(resource_name.to_string())
 }
 
-fn read_epub_resource_bytes_from_services(
+async fn read_epub_resource_bytes_from_services(
     app: &HttpAppState,
     path: &FsPath,
     resource_name: &str,
@@ -407,6 +409,7 @@ fn read_epub_resource_bytes_from_services(
     app.services
         .media_assets
         .read_epub_resource_bytes(path.to_path_buf(), resource_name.to_string())
+        .await
 }
 
 async fn load_persisted_readlist_name_from_services(
@@ -573,16 +576,17 @@ async fn delete_series_thumbnail_from_services(
         .await
 }
 
-fn load_epub_cover_bytes_from_services(
+async fn load_epub_cover_bytes_from_services(
     app: &HttpAppState,
     media: &PersistedBookMedia,
 ) -> Option<(Vec<u8>, String)> {
     app.services
         .media_assets
         .load_epub_cover_bytes(media.clone())
+        .await
 }
 
-fn load_archive_page_row_from_services(
+async fn load_archive_page_row_from_services(
     app: &HttpAppState,
     media: &PersistedBookMedia,
     page_number: u64,
@@ -590,15 +594,17 @@ fn load_archive_page_row_from_services(
     app.services
         .media_assets
         .load_archive_page_row(media.clone(), page_number)
+        .await
 }
 
-fn load_archive_page_rows_from_services(
+async fn load_archive_page_rows_from_services(
     app: &HttpAppState,
     media: &PersistedBookMedia,
 ) -> Option<Vec<komga_application::media_assets::BookPageRecord>> {
     app.services
         .media_assets
         .load_archive_page_rows(media.clone())
+        .await
 }
 
 fn load_pdf_page_row_from_services(
@@ -639,7 +645,7 @@ fn detect_pdf_page_count_from_services(
         .detect_pdf_page_count(media.clone())
 }
 
-fn resolve_book_page_bytes_from_services(
+async fn resolve_book_page_bytes_from_services(
     app: &HttpAppState,
     media: &PersistedBookMedia,
     page: &PersistedBookPageRow,
@@ -648,6 +654,7 @@ fn resolve_book_page_bytes_from_services(
     app.services
         .media_assets
         .resolve_book_page_bytes(media.clone(), page.clone(), page_number)
+        .await
 }
 
 async fn load_selected_series_thumbnail_from_services(
@@ -670,19 +677,17 @@ async fn load_series_book_number_sorts_from_services(
         .await
 }
 
-fn render_book_page_thumbnail_from_services(
+async fn render_book_page_thumbnail_from_services(
     app: &HttpAppState,
     media: &PersistedBookMedia,
     page: &PersistedBookPageRow,
     page_number: u64,
     max_edge: u32,
 ) -> Option<Vec<u8>> {
-    app.services.media_assets.render_book_page_thumbnail(
-        media.clone(),
-        page.clone(),
-        page_number,
-        max_edge,
-    )
+    app.services
+        .media_assets
+        .render_book_page_thumbnail(media.clone(), page.clone(), page_number, max_edge)
+        .await
 }
 
 async fn process_task_side_effects(

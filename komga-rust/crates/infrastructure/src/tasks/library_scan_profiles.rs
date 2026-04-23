@@ -21,9 +21,7 @@ pub fn load_persisted_library_scan_profiles(
 
     let database_file = database_file.to_path_buf();
     std::thread::spawn(move || {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build();
+        let runtime = crate::tokio_runtime::current_thread_runtime();
         let runtime = runtime.map_err(|error| format!("build scan profile runtime: {error}"))?;
 
         runtime.block_on(async move {
@@ -78,9 +76,7 @@ pub fn load_persisted_library_ids(database_file: &Path) -> Result<Vec<String>, S
 
     let database_file = database_file.to_path_buf();
     std::thread::spawn(move || {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build();
+        let runtime = crate::tokio_runtime::current_thread_runtime();
         let runtime = runtime.map_err(|error| format!("build library id runtime: {error}"))?;
 
         runtime.block_on(async move {

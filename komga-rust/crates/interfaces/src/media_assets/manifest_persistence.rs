@@ -393,7 +393,7 @@ async fn build_manifest_reading_order(
                     persisted_rows,
                     (profile == ManifestProfile::Pdf).then_some("image/jpeg"),
                 )
-            } else if let Some(archive_rows) = load_archive_page_rows_from_services(app, media) {
+            } else if let Some(archive_rows) = load_archive_page_rows_from_services(app, media).await {
                 reading_order_entries(headers, book_id, archive_rows, None)
             } else {
                 reading_order_entries(headers, book_id, load_generated_pdf_page_rows_from_services(app, media), None)

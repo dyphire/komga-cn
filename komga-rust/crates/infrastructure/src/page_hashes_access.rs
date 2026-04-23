@@ -153,7 +153,8 @@ pub async fn load_unknown_page_hash_thumbnail(
     };
 
     if let Some(max_edge) = resize_to {
-        let Some(bytes) = render_book_page_thumbnail(&media, &page, target.page_number, max_edge)
+        let Some(bytes) =
+            render_book_page_thumbnail(&media, &page, target.page_number, max_edge).await
         else {
             return Ok(None);
         };
@@ -170,7 +171,9 @@ pub async fn load_unknown_page_hash_thumbnail(
             &page,
             target.page_number,
             pdf_render_max_edge(&page),
-        ) else {
+        )
+        .await
+        else {
             return Ok(None);
         };
 
@@ -180,7 +183,7 @@ pub async fn load_unknown_page_hash_thumbnail(
         }));
     }
 
-    let Some(bytes) = resolve_book_page_bytes(&media, &page, target.page_number) else {
+    let Some(bytes) = resolve_book_page_bytes(&media, &page, target.page_number).await else {
         return Ok(None);
     };
 
@@ -208,7 +211,7 @@ pub async fn upsert_page_hash(
     Ok(())
 }
 
-fn read_unknown_thumbnail_bytes(source_path: &Path, file_name: &str) -> Option<Vec<u8>> {
+async fn read_unknown_thumbnail_bytes(source_path: &Path, file_name: &str) -> Option<Vec<u8>> {
     let extension = source_path
         .extension()
         .and_then(|value| value.to_str())
@@ -219,11 +222,15 @@ fn read_unknown_thumbnail_bytes(source_path: &Path, file_name: &str) -> Option<V
         extension.as_str(),
         "jpg" | "jpeg" | "png" | "gif" | "webp" | "avif" | "bmp"
     ) {
-        return fs::read(source_path).ok();
+        return tokio::fs::read(source_path).await.ok();
     }
 
     if matches!(extension.as_str(), "cbz" | "zip" | "epub") {
-        let file = fs::File::open(source_path).ok()?;
+        let file = tokio::fs::File::open(source_path)
+            .await
+            .ok()?
+            .into_std()
+            .await;
         let mut archive = ZipArchive::new(file).ok()?;
         let mut entry = archive.by_name(file_name).ok()?;
         let mut bytes = Vec::new();
@@ -252,7 +259,9 @@ async fn load_page_hash_page_row(
         return Ok(Some(single_image_page_row(media, page_number)));
     }
 
-    Ok(load_archive_page_row(media, page_number).or_else(|| load_pdf_page_row(media, page_number)))
+    Ok(load_archive_page_row(media, page_number)
+        .await
+        .or_else(|| load_pdf_page_row(media, page_number)))
 }
 
 fn single_image_page_row(media: &BookMediaRecord, page_number: u64) -> BookPageRecord {
@@ -324,6 +333,7 @@ async fn load_unknown_page_hash_source_bytes(
         resolve_library_item_path(source.library_root.as_str(), source.book_url.as_str());
     Ok(
         read_unknown_thumbnail_bytes(&source_path, &source.file_name)
+            .await
             .map(|bytes| (bytes, source.media_type)),
     )
 }

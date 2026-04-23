@@ -237,6 +237,7 @@ async fn load_divina_page_media_types_for_opds(
     dedup_media_types(
         media_assets
             .load_archive_page_rows(media)
+            .await
             .unwrap_or_default()
             .into_iter()
             .map(|page| {

@@ -229,7 +229,7 @@ pub fn refresh_book_metadata(
                 if import_epub_book
                     && epub_provider_matches_capabilities(&capabilities)
                     && let Some(media) = load_book_media_for_refresh(&pool, &book_id).await?
-                    && let Some(package_document) = load_epub_package_document(&media)
+                    && let Some(package_document) = load_epub_package_document(&media).await
                 {
                     let patch = extract_epub_book_patch(&package_document);
                     apply_book_metadata_import_patch(&pool, &book_id, patch).await?;
@@ -426,23 +426,29 @@ async fn load_barcode_candidate_image_bytes(
     }
 
     if book_media_is_single_image(media) && page_number == 1 {
-        return fs::read(&media.file_path).map(Some).map_err(|error| {
-            format!(
-                "failed to read single-image barcode candidate '{}' for '{}': {error}",
-                media.file_path.display(),
-                book_id,
-            )
-        });
+        return tokio::fs::read(&media.file_path)
+            .await
+            .map(Some)
+            .map_err(|error| {
+                format!(
+                    "failed to read single-image barcode candidate '{}' for '{}': {error}",
+                    media.file_path.display(),
+                    book_id,
+                )
+            });
     }
 
-    let page = load_book_page_row_for_refresh(pool, book_id, page_number)
-        .await?
-        .or_else(|| load_archive_page_row(media, page_number));
+    let page =
+        if let Some(page) = load_book_page_row_for_refresh(pool, book_id, page_number).await? {
+            Some(page)
+        } else {
+            load_archive_page_row(media, page_number).await
+        };
     let Some(page) = page else {
         return Ok(None);
     };
 
-    Ok(resolve_book_page_bytes(media, &page, page_number))
+    Ok(resolve_book_page_bytes(media, &page, page_number).await)
 }
 
 fn render_pdf_page_image_for_barcode(
@@ -1168,9 +1174,7 @@ where
     T: Send + 'static,
 {
     std::thread::spawn(move || {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
+        let runtime = crate::tokio_runtime::current_thread_runtime()
             .map_err(|error| format!("failed to build metadata runtime: {error}"))?;
 
         runtime.block_on(async move {

@@ -54,7 +54,7 @@ pub async fn readlist_file(
                 else {
                     continue;
                 };
-                let Some(bytes) = read_media_file_bytes_from_services(&app, &media.file_path)
+                let Some(bytes) = read_media_file_bytes_from_services(&app, &media.file_path).await
                 else {
                     continue;
                 };
@@ -108,13 +108,12 @@ pub async fn series_file(
                 Err(error) => return internal_error_response(error),
             }
 
-            let archive_entries = entries
-                .into_iter()
-                .filter_map(|(file_name, file_path)| {
-                    read_media_file_bytes_from_services(&app, &file_path)
-                        .map(|bytes| (file_name, bytes))
-                })
-                .collect::<Vec<_>>();
+            let mut archive_entries = Vec::new();
+            for (file_name, file_path) in entries {
+                if let Some(bytes) = read_media_file_bytes_from_services(&app, &file_path).await {
+                    archive_entries.push((file_name, bytes));
+                }
+            }
 
             let archive_payload = match build_stored_zip_archive(archive_entries) {
                 Ok(payload) => payload,
@@ -186,6 +185,7 @@ pub async fn book_resource(
 
     let Some(bytes) =
         read_epub_resource_bytes_from_services(&app, media.file_path.as_path(), resource_name)
+            .await
     else {
         return StatusCode::NOT_FOUND.into_response();
     };
@@ -260,7 +260,7 @@ async fn book_file_response(app: &HttpAppState, headers: &HeaderMap, book_id: &s
             return StatusCode::FORBIDDEN.into_response();
         }
 
-        let Some(body) = read_media_file_bytes_from_services(app, &media.file_path) else {
+        let Some(body) = read_media_file_bytes_from_services(app, &media.file_path).await else {
             return (
                 StatusCode::NOT_FOUND,
                 Json(json!({ "error": "File not found, it may have moved" })),
