@@ -582,7 +582,7 @@ async fn router_sse_events_do_not_emit_session_expired_when_user_changes_own_pas
 
     let body = read_sse_until(
         response.into_body(),
-        |raw| raw.contains("heartbeat"),
+        |raw| raw.lines().filter(|line| *line == ": heartbeat").count() >= 2,
         Duration::from_secs(17),
     )
     .await;

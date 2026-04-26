@@ -59,6 +59,9 @@ pub(crate) async fn sse_events(
     );
     task_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
+    let mut pending_events = VecDeque::new();
+    pending_events.push_back(Event::default().comment("heartbeat"));
+
     let stream = stream::unfold(
         SseStreamState {
             admin,
@@ -66,7 +69,7 @@ pub(crate) async fn sse_events(
             heartbeat_interval,
             task_interval,
             last_runtime_event_id,
-            pending_events: VecDeque::new(),
+            pending_events,
             runtime_event_updates,
             app,
         },
