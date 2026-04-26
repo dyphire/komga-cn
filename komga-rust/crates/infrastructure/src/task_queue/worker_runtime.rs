@@ -14,11 +14,12 @@ use tracing::{Instrument, Span, error, info};
 
 use super::library_scan_pipeline::SqliteFilesystemLibraryScanPipeline;
 use super::task_protocol::runtime_startup_task;
-use super::{TaskQueueRecord, TaskQueueScheduler};
+use super::{RuntimeConfig, TaskExecutionError, TaskQueueRecord, TaskQueueScheduler};
 use crate::tasks::library_scan_profiles::load_persisted_library_scan_profiles;
 
 pub type SharedTaskQueue = Arc<Mutex<TaskQueueScheduler>>;
 pub type TaskQueueWakeSignal = Arc<Notify>;
+type SharedTaskExecutionGate = Arc<Mutex<()>>;
 
 pub struct RuntimeBackgroundState {
     pub task_queue: SharedTaskQueue,
@@ -159,11 +160,18 @@ pub fn spawn_runtime_workers(
     task_wakeup: TaskQueueWakeSignal,
     shutdown_rx: Option<watch::Receiver<bool>>,
 ) {
-    spawn_periodic_library_scan_workers(task_queue.clone(), runtime.clone(), shutdown_rx.clone());
+    let task_execution_gate = Arc::new(Mutex::new(()));
+    spawn_periodic_library_scan_workers(
+        task_queue.clone(),
+        runtime.clone(),
+        task_execution_gate.clone(),
+        shutdown_rx.clone(),
+    );
     spawn_background_task_worker(
         task_queue,
         runtime.clone(),
         task_wakeup,
+        task_execution_gate,
         shutdown_rx.clone(),
     );
     spawn_authentication_activity_cleanup_worker(runtime, shutdown_rx);
@@ -261,6 +269,7 @@ pub fn process_startup_library_scans(config: impl TaskRuntimeConfig) {
 fn spawn_periodic_library_scan_workers(
     task_queue: SharedTaskQueue,
     runtime: TaskRuntimeContext,
+    task_execution_gate: SharedTaskExecutionGate,
     shutdown_rx: Option<watch::Receiver<bool>>,
 ) {
     if !runtime.consumes_queue || !runtime.owns_main_database {
@@ -297,6 +306,9 @@ fn spawn_periodic_library_scan_workers(
                     break;
                 }
 
+                let Ok(_task_execution_guard) = task_execution_gate.try_lock() else {
+                    continue;
+                };
                 let _ = run_periodic_library_scan_iteration(
                     task_queue.clone(),
                     runtime.clone(),
@@ -349,6 +361,7 @@ fn spawn_background_task_worker(
     task_queue: SharedTaskQueue,
     runtime: TaskRuntimeContext,
     task_wakeup: TaskQueueWakeSignal,
+    task_execution_gate: SharedTaskExecutionGate,
     shutdown_rx: Option<watch::Receiver<bool>>,
 ) {
     if !runtime.consumes_queue {
@@ -371,8 +384,13 @@ fn spawn_background_task_worker(
             let _guard = WorkerLifecycleGuard::new(BACKGROUND_TASK_WORKER, &runtime);
             let startup_task_queue = task_queue.clone();
             let startup_runtime = runtime.clone();
+            let startup_task_execution_gate = task_execution_gate.clone();
             let _ = tokio::task::spawn_blocking(move || {
-                run_background_task_iteration(startup_task_queue, startup_runtime)
+                run_background_task_iteration_with_execution_gate(
+                    startup_task_queue,
+                    startup_runtime,
+                    startup_task_execution_gate,
+                )
             })
             .await;
 
@@ -393,8 +411,13 @@ fn spawn_background_task_worker(
                 }
                 let iteration_task_queue = task_queue.clone();
                 let iteration_runtime = runtime.clone();
+                let iteration_task_execution_gate = task_execution_gate.clone();
                 let _ = tokio::task::spawn_blocking(move || {
-                    run_background_task_iteration(iteration_task_queue, iteration_runtime)
+                    run_background_task_iteration_with_execution_gate(
+                        iteration_task_queue,
+                        iteration_runtime,
+                        iteration_task_execution_gate,
+                    )
                 })
                 .await;
             }
@@ -425,24 +448,19 @@ pub fn run_background_task_iteration(
         RuntimeLifecycleFields::default().with_queued_tasks(queued_tasks),
     );
 
-    let processed = {
-        let mut task_queue = task_queue
-            .lock()
-            .expect("task queue state lock should not be poisoned");
-        match task_queue.process_available(&runtime) {
-            Ok(processed) => processed,
-            Err(error) => {
-                let error_message = error.to_string();
-                log_worker_event(
-                    BACKGROUND_TASK_WORKER,
-                    "failed",
-                    &runtime,
-                    RuntimeLifecycleFields::default()
-                        .with_queued_tasks(queued_tasks)
-                        .with_error(&error_message),
-                );
-                return Err(error_message);
-            }
+    let processed = match process_shared_task_queue(&task_queue, &runtime) {
+        Ok(processed) => processed,
+        Err(error) => {
+            let error_message = error.to_string();
+            log_worker_event(
+                BACKGROUND_TASK_WORKER,
+                "failed",
+                &runtime,
+                RuntimeLifecycleFields::default()
+                    .with_queued_tasks(queued_tasks)
+                    .with_error(&error_message),
+            );
+            return Err(error_message);
         }
     };
 
@@ -455,6 +473,110 @@ pub fn run_background_task_iteration(
             .with_processed(processed),
     );
     Ok(processed)
+}
+
+fn run_background_task_iteration_with_execution_gate(
+    task_queue: SharedTaskQueue,
+    runtime: TaskRuntimeContext,
+    task_execution_gate: SharedTaskExecutionGate,
+) -> Result<usize, String> {
+    let _task_execution_guard = task_execution_gate
+        .lock()
+        .expect("task execution gate lock should not be poisoned");
+    run_background_task_iteration(task_queue, runtime)
+}
+
+fn process_shared_task_queue(
+    task_queue: &SharedTaskQueue,
+    runtime: &TaskRuntimeContext,
+) -> Result<usize, TaskExecutionError> {
+    let uses_persisted_store = {
+        let task_queue = task_queue
+            .lock()
+            .expect("task queue state lock should not be poisoned");
+        task_queue.uses_persisted_store()
+    };
+
+    if !uses_persisted_store {
+        let mut task_queue = task_queue
+            .lock()
+            .expect("task queue state lock should not be poisoned");
+        return task_queue.process_available(runtime);
+    }
+
+    // Execute long-running task bodies outside the shared scheduler mutex. HTTP
+    // handlers also read the scheduler for task status, and blocking those
+    // async workers behind a scan can starve unrelated Axum routes.
+    let mut task_executor = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-runtime-http");
+    process_shared_task_queue_with_executor(task_queue, runtime, |runtime, task| {
+        task_executor.execute_claimed_task(runtime, task)
+    })
+}
+
+fn process_shared_task_queue_with_executor(
+    task_queue: &SharedTaskQueue,
+    runtime: &RuntimeConfig,
+    mut execute_claimed_task: impl FnMut(
+        &RuntimeConfig,
+        &TaskQueueRecord,
+    ) -> Result<(), TaskExecutionError>,
+) -> Result<usize, TaskExecutionError> {
+    let mut processed = 0usize;
+    let mut logged_start = false;
+    loop {
+        let batch = {
+            let mut task_queue = task_queue
+                .lock()
+                .expect("task queue state lock should not be poisoned");
+            let batch = task_queue.take_available_batch();
+            if batch.is_empty() {
+                if logged_start {
+                    task_queue.log_process_available("completed", processed, None);
+                }
+                return Ok(processed);
+            }
+            if !logged_start {
+                task_queue.log_process_available("started", processed, None);
+                logged_start = true;
+            }
+            batch
+        };
+
+        let mut batch_iter = batch.into_iter();
+        while let Some(task) = batch_iter.next() {
+            {
+                let task_queue = task_queue
+                    .lock()
+                    .expect("task queue state lock should not be poisoned");
+                task_queue.log_task_start(&task);
+            }
+
+            match execute_claimed_task(runtime, &task) {
+                Ok(()) => {
+                    let mut task_queue = task_queue
+                        .lock()
+                        .expect("task queue state lock should not be poisoned");
+                    task_queue.complete(&task.id);
+                    processed += 1;
+                }
+                Err(error) => {
+                    let error_message = error.to_string();
+                    let remaining_batch = batch_iter.collect();
+                    let mut task_queue = task_queue
+                        .lock()
+                        .expect("task queue state lock should not be poisoned");
+                    task_queue.fail_claimed_task(&task, error_message.as_str());
+                    task_queue.disown_claimed_tasks_after_failure(remaining_batch);
+                    task_queue.log_process_available(
+                        "failed",
+                        processed,
+                        Some(error_message.as_str()),
+                    );
+                    return Err(error);
+                }
+            }
+        }
+    }
 }
 
 fn spawn_authentication_activity_cleanup_worker(
@@ -676,12 +798,13 @@ fn run_periodic_library_scan_iteration_inner(
 
     let mut scheduler_processed = 0;
     for (library_id, task) in due_tasks {
-        let mut queue = task_queue
-            .lock()
-            .expect("task queue state lock should not be poisoned");
-        queue.enqueue(task);
-        scheduler_processed += queue
-            .process_available(runtime)
+        {
+            let mut queue = task_queue
+                .lock()
+                .expect("task queue state lock should not be poisoned");
+            queue.enqueue(task);
+        }
+        scheduler_processed += process_shared_task_queue(&task_queue, runtime)
             .map_err(|error| (error.to_string(), due_libraries.clone()))?;
         if let Some(next_due) = last_run_by_library.get_mut(&library_id) {
             *next_due = tokio::time::Instant::now();

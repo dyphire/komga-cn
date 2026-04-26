@@ -162,6 +162,10 @@ impl TaskQueueScheduler {
         self.admin.count_by_simple_type()
     }
 
+    pub(super) fn uses_persisted_store(&self) -> bool {
+        self.persisted_store.is_some()
+    }
+
     pub fn process_available(
         &mut self,
         runtime: &RuntimeConfig,
@@ -237,7 +241,10 @@ impl TaskQueueScheduler {
         }
     }
 
-    fn disown_claimed_tasks_after_failure(&mut self, remaining_batch: Vec<TaskQueueRecord>) {
+    pub(super) fn disown_claimed_tasks_after_failure(
+        &mut self,
+        remaining_batch: Vec<TaskQueueRecord>,
+    ) {
         if self.persisted_store.is_some() {
             for task in self.current_owned_tasks() {
                 self.disown_claimed_task(&task);
@@ -256,7 +263,7 @@ impl TaskQueueScheduler {
         }
     }
 
-    fn execute_claimed_task(
+    pub(super) fn execute_claimed_task(
         &mut self,
         runtime: &RuntimeConfig,
         task: &TaskQueueRecord,
@@ -279,7 +286,7 @@ impl TaskQueueScheduler {
         Err(TaskExecutionError::unsupported_task(&task.simple_type))
     }
 
-    fn fail_claimed_task(&mut self, task: &TaskQueueRecord, error_message: &str) {
+    pub(super) fn fail_claimed_task(&mut self, task: &TaskQueueRecord, error_message: &str) {
         if let Some(store) = &self.persisted_store {
             let removed = store.delete_task(&task.id);
             self.reload_admin_from_store();
@@ -314,7 +321,16 @@ impl TaskQueueScheduler {
             .unwrap_or_default()
     }
 
-    fn log_process_available(&self, outcome: &str, processed: usize, error_message: Option<&str>) {
+    pub(super) fn log_task_start(&self, task: &TaskQueueRecord) {
+        self.log_task_event("task_start", task, "started", None);
+    }
+
+    pub(super) fn log_process_available(
+        &self,
+        outcome: &str,
+        processed: usize,
+        error_message: Option<&str>,
+    ) {
         match error_message {
             Some(error_message) => error!(
                 event = "task_process_available",
