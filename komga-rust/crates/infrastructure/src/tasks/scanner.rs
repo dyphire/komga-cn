@@ -1041,6 +1041,10 @@ pub(crate) fn scan_library(
                 continue;
             }
 
+            if is_hidden_path(path.as_path()) {
+                continue;
+            }
+
             if is_supported_book_file(path.as_path(), &scan_config) {
                 let book_url = path.to_string_lossy().to_string();
                 let book_url_key = scanner_url_key(root.as_path(), &book_url);
@@ -1110,6 +1114,12 @@ pub(crate) fn scan_library(
         }
 
         if series_is_oneshot {
+            sidecars.extend(build_sidecars(
+                &series_url,
+                &books,
+                &sidecar_candidates,
+                false,
+            ));
             for book in &books {
                 let book_url_key = scanner_url_key(root.as_path(), &book.book_url);
                 let series_id = resolve_oneshot_series_id(
@@ -1162,10 +1172,11 @@ pub(crate) fn scan_library(
             .unwrap_or_default()
             .to_string();
 
-        sidecars.extend(build_series_sidecars(
+        sidecars.extend(build_sidecars(
             &series_url,
             &books,
             &sidecar_candidates,
+            true,
         ));
 
         series_rows.push(ScannedSeriesRow {
@@ -1298,6 +1309,7 @@ WHERE ID = ?"#,
 
             let discovered_series_ids = scanned.discovered_series_ids.clone();
             let discovered_book_ids = scanned.discovered_book_ids.clone();
+            let mut active_book_ids = HashSet::<String>::new();
 
             if scanned.root_available {
                 let existing_series = sqlx::query(
@@ -1332,6 +1344,10 @@ WHERE LIBRARY_ID = ?
                     )
                 })
                 .collect::<Vec<_>>();
+                active_book_ids = existing_books
+                    .iter()
+                    .map(|(book_id, _)| book_id.clone())
+                    .collect::<HashSet<_>>();
                 let missing_series_ids = existing_series
                     .into_iter()
                     .map(|row| row.get::<String, _>("ID"))
@@ -1496,7 +1512,7 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)"#,
                         .contains(&series.series_id);
                 for book in &series.books {
                     let mut book_changed = false;
-                    if sync_books {
+                    if sync_books || !active_book_ids.contains(&book.book_id) {
                         let book_updated = sqlx::query(
                             r#"UPDATE BOOK
 SET FILE_LAST_MODIFIED = datetime(?, 'unixepoch'), URL = ?, SERIES_ID = ?, FILE_SIZE = ?,
@@ -1671,6 +1687,30 @@ VALUES (?, ?, ?, ?)"#,
                     .await
                     .map_err(|error| format!("failed to insert SIDECAR rows: {error}"))?;
                 }
+            }
+
+            let scanned_sidecar_urls = scanned
+                .sidecars
+                .iter()
+                .map(|sidecar| sidecar.url.clone())
+                .collect::<HashSet<_>>();
+            let existing_sidecar_urls =
+                sqlx::query(r#"SELECT URL FROM SIDECAR WHERE LIBRARY_ID = ?"#)
+                    .bind(&library_id)
+                    .fetch_all(&pool)
+                    .await
+                    .map_err(|error| format!("failed to load SIDECAR rows for cleanup: {error}"))?;
+            for row in existing_sidecar_urls {
+                let url = row.get::<String, _>("URL");
+                if scanned_sidecar_urls.contains(&url) {
+                    continue;
+                }
+                sqlx::query(r#"DELETE FROM SIDECAR WHERE LIBRARY_ID = ? AND URL = ?"#)
+                    .bind(&library_id)
+                    .bind(&url)
+                    .execute(&pool)
+                    .await
+                    .map_err(|error| format!("failed to delete stale SIDECAR row: {error}"))?;
             }
 
             sqlx::query(
@@ -2063,7 +2103,9 @@ fn collect_series_directories(
     scan_config: &LibraryScanConfig,
     discovered: &mut Vec<PathBuf>,
 ) -> Result<(), String> {
-    if is_library_path_excluded(current, root, &scan_config.scan_directory_exclusions) {
+    if is_hidden_path(current)
+        || is_library_path_excluded(current, &scan_config.scan_directory_exclusions)
+    {
         return Ok(());
     }
 
@@ -2078,12 +2120,8 @@ fn collect_series_directories(
             continue;
         };
         if metadata.is_file()
+            && !is_hidden_path(path.as_path())
             && is_supported_book_file(path.as_path(), scan_config)
-            && !is_library_path_excluded(
-                path.as_path(),
-                root,
-                &scan_config.scan_directory_exclusions,
-            )
         {
             has_supported_book = true;
         }
@@ -2101,6 +2139,12 @@ fn collect_series_directories(
     }
 
     Ok(())
+}
+
+fn is_hidden_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .is_some_and(|name| name.starts_with('.'))
 }
 
 fn is_supported_book_file(path: &Path, scan_config: &LibraryScanConfig) -> bool {
@@ -2124,21 +2168,18 @@ fn is_supported_book_file(path: &Path, scan_config: &LibraryScanConfig) -> bool 
         })
 }
 
-fn is_library_path_excluded(path: &Path, root: &Path, exclusions: &[String]) -> bool {
-    let Ok(relative) = path.strip_prefix(root) else {
-        return false;
-    };
-
-    let relative = relative.to_string_lossy().replace('\\', "/");
+fn is_library_path_excluded(path: &Path, exclusions: &[String]) -> bool {
+    let path_key = path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_ascii_lowercase();
     exclusions.iter().any(|entry| {
-        let exclusion = entry.trim().replace('\\', "/");
+        let exclusion = entry.replace('\\', "/").to_ascii_lowercase();
         if exclusion.is_empty() {
             return false;
         }
 
-        relative == exclusion
-            || relative.starts_with(&(exclusion.clone() + "/"))
-            || relative.contains(&("/".to_string() + &exclusion + "/"))
+        path_key.contains(&exclusion)
     })
 }
 
@@ -2181,34 +2222,47 @@ fn route_safe_scanner_id(prefix: &str, path: &Path) -> String {
     format!("{prefix}-{:016x}", hasher.finish())
 }
 
-fn build_series_sidecars(
+fn build_sidecars(
     series_url: &str,
     books: &[ScannedBookRow],
     sidecar_candidates: &[(PathBuf, fs::Metadata)],
+    include_series_sidecars: bool,
 ) -> Vec<ScannedSidecarRow> {
-    let mut series_sidecars = Vec::new();
+    let mut sidecars = Vec::new();
 
-    for (path, metadata) in sidecar_candidates {
+    'candidate: for (path, metadata) in sidecar_candidates {
         let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
             continue;
         };
+        let file_stem = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
 
-        let file_name_lower = file_name.to_ascii_lowercase();
-        let is_image = ["jpg", "jpeg", "png", "webp", "gif", "avif"]
-            .iter()
-            .any(|ext| file_name_lower.ends_with(&format!(".{ext}")));
-
-        if is_image {
-            let base = path
-                .file_stem()
+        let is_image = matches!(
+            path.extension()
                 .and_then(|value| value.to_str())
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            if matches!(base.as_str(), "cover" | "folder" | "poster" | "series") {
-                series_sidecars.push(ScannedSidecarRow {
+                .map(|value| value.to_ascii_lowercase())
+                .as_deref(),
+            Some("jpg")
+                | Some("jpeg")
+                | Some("png")
+                | Some("tbn")
+                | Some("webp")
+                | Some("gif")
+                | Some("avif")
+        );
+
+        if include_series_sidecars && is_image {
+            let base = file_stem.to_ascii_lowercase();
+            if matches!(
+                base.as_str(),
+                "cover" | "default" | "folder" | "poster" | "series"
+            ) {
+                sidecars.push(ScannedSidecarRow {
                     url: path.to_string_lossy().to_string(),
                     parent_url: series_url.to_string(),
-                    last_modified_unix_seconds: to_unix_seconds(metadata.modified().ok()),
+                    last_modified_unix_seconds: metadata_updated_unix_seconds(metadata),
                     source: ScannedSidecarSource::Series,
                     sidecar_type: ScannedSidecarType::Artwork,
                 });
@@ -2216,11 +2270,14 @@ fn build_series_sidecars(
             }
         }
 
-        if file_name.eq_ignore_ascii_case("ComicInfo.xml") {
-            series_sidecars.push(ScannedSidecarRow {
+        if include_series_sidecars
+            && (file_name.eq_ignore_ascii_case("ComicInfo.xml")
+                || file_name.eq_ignore_ascii_case("series.json"))
+        {
+            sidecars.push(ScannedSidecarRow {
                 url: path.to_string_lossy().to_string(),
                 parent_url: series_url.to_string(),
-                last_modified_unix_seconds: to_unix_seconds(metadata.modified().ok()),
+                last_modified_unix_seconds: metadata_updated_unix_seconds(metadata),
                 source: ScannedSidecarSource::Series,
                 sidecar_type: ScannedSidecarType::Metadata,
             });
@@ -2230,35 +2287,42 @@ fn build_series_sidecars(
         for book in books {
             let expected = format!("{}.xml", book.book_name);
             if file_name.eq_ignore_ascii_case(&expected) {
-                series_sidecars.push(ScannedSidecarRow {
+                sidecars.push(ScannedSidecarRow {
                     url: path.to_string_lossy().to_string(),
                     parent_url: book.book_url.clone(),
-                    last_modified_unix_seconds: to_unix_seconds(metadata.modified().ok()),
+                    last_modified_unix_seconds: metadata_updated_unix_seconds(metadata),
                     source: ScannedSidecarSource::Book,
                     sidecar_type: ScannedSidecarType::Metadata,
                 });
-                continue;
+                continue 'candidate;
             }
 
-            if is_image {
-                let base = path
-                    .file_stem()
-                    .and_then(|value| value.to_str())
-                    .unwrap_or_default();
-                if base.eq_ignore_ascii_case(&book.book_name) {
-                    series_sidecars.push(ScannedSidecarRow {
-                        url: path.to_string_lossy().to_string(),
-                        parent_url: book.book_url.clone(),
-                        last_modified_unix_seconds: to_unix_seconds(metadata.modified().ok()),
-                        source: ScannedSidecarSource::Book,
-                        sidecar_type: ScannedSidecarType::Artwork,
-                    });
-                }
+            if is_image && is_book_artwork_sidecar(file_stem, &book.book_name) {
+                sidecars.push(ScannedSidecarRow {
+                    url: path.to_string_lossy().to_string(),
+                    parent_url: book.book_url.clone(),
+                    last_modified_unix_seconds: metadata_updated_unix_seconds(metadata),
+                    source: ScannedSidecarSource::Book,
+                    sidecar_type: ScannedSidecarType::Artwork,
+                });
+                continue 'candidate;
             }
         }
     }
 
-    series_sidecars
+    sidecars
+}
+
+fn is_book_artwork_sidecar(base_name: &str, book_name: &str) -> bool {
+    let base_name = base_name.to_ascii_lowercase();
+    let book_name = book_name.to_ascii_lowercase();
+    if base_name == book_name {
+        return true;
+    }
+
+    base_name
+        .strip_prefix(&format!("{book_name}-"))
+        .is_some_and(|number| !number.is_empty() && number.chars().all(|c| c.is_ascii_digit()))
 }
 
 fn to_unix_seconds(time: Option<std::time::SystemTime>) -> i64 {
@@ -2268,7 +2332,11 @@ fn to_unix_seconds(time: Option<std::time::SystemTime>) -> i64 {
 }
 
 fn metadata_updated_unix_seconds(metadata: &fs::Metadata) -> i64 {
-    to_unix_seconds(metadata.modified().ok())
+    [metadata.created().ok(), metadata.modified().ok()]
+        .into_iter()
+        .map(to_unix_seconds)
+        .max()
+        .unwrap_or(0)
 }
 
 fn run_database_query<T>(

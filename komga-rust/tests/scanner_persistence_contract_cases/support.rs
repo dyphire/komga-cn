@@ -227,6 +227,30 @@ pub(super) async fn update_library_oneshots_directory(
     pool.close().await;
 }
 
+pub(super) async fn replace_library_exclusions(
+    main_db: &Path,
+    library_id: &str,
+    exclusions: &[&str],
+) {
+    let pool = connect_test_pool(main_db, 1)
+        .await
+        .expect("sqlite pool should open for library exclusion update");
+    sqlx::query("DELETE FROM LIBRARY_EXCLUSIONS WHERE LIBRARY_ID = ?")
+        .bind(library_id)
+        .execute(&pool)
+        .await
+        .expect("library exclusions should be cleared for scanner contract");
+    for exclusion in exclusions {
+        sqlx::query("INSERT INTO LIBRARY_EXCLUSIONS (LIBRARY_ID, EXCLUSION) VALUES (?, ?)")
+            .bind(library_id)
+            .bind(exclusion)
+            .execute(&pool)
+            .await
+            .expect("library exclusion should be inserted for scanner contract");
+    }
+    pool.close().await;
+}
+
 pub(super) async fn update_active_book_url(main_db: &Path, from_book_url: &str, to_book_url: &str) {
     let pool = connect_test_pool(main_db, 1)
         .await

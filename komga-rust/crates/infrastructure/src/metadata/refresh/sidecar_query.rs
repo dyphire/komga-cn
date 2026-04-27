@@ -23,6 +23,7 @@ pub(super) async fn load_sidecar_url_for_parent(
                 LOWER(URL) LIKE '%.jpg'
              OR LOWER(URL) LIKE '%.jpeg'
              OR LOWER(URL) LIKE '%.png'
+             OR LOWER(URL) LIKE '%.tbn'
              OR LOWER(URL) LIKE '%.webp'
              OR LOWER(URL) LIKE '%.gif'
              OR LOWER(URL) LIKE '%.avif'

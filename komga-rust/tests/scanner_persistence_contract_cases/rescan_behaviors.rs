@@ -137,8 +137,12 @@ async fn scanner_scan_splits_configured_oneshots_directories_into_per_book_onesh
 
     let root_oneshots_dir = fixture.library_root.join("_oneshots");
     fs::create_dir_all(&root_oneshots_dir).expect("root oneshots directory should be created");
-    write_scannable_cbz_fixture(&root_oneshots_dir.join("Root-001.cbz"), MINIMAL_PNG_BYTES)
+    let root_oneshot_book_path = root_oneshots_dir.join("Root-001.cbz");
+    let root_oneshot_sidecar_path = root_oneshots_dir.join("Root-001.png");
+    write_scannable_cbz_fixture(&root_oneshot_book_path, MINIMAL_PNG_BYTES)
         .expect("root oneshot fixture should be written");
+    fs::write(&root_oneshot_sidecar_path, MINIMAL_PNG_BYTES)
+        .expect("root oneshot sidecar fixture should be written");
 
     update_library_oneshots_directory(&fixture.paths.main_db, "library-1", Some("_oneshots")).await;
 
@@ -172,6 +176,12 @@ async fn scanner_scan_splits_configured_oneshots_directories_into_per_book_onesh
     .fetch_all(&pool)
     .await
     .expect("active book rows should be queryable after oneshots-directory scan");
+    let oneshot_sidecar_rows =
+        sqlx::query("SELECT URL, PARENT_URL FROM SIDECAR WHERE URL = ? ORDER BY URL ASC")
+            .bind(root_oneshot_sidecar_path.to_string_lossy().to_string())
+            .fetch_all(&pool)
+            .await
+            .expect("oneshot book sidecar rows should be queryable after scan");
     pool.close().await;
 
     let persisted_series = series_rows
@@ -212,6 +222,87 @@ async fn scanner_scan_splits_configured_oneshots_directories_into_per_book_onesh
             ("Root-001".to_string(), true),
         ],
         "books discovered under configured `_oneshots` directories must persist with the oneshot flag set",
+    );
+    let oneshot_sidecar_pairs = oneshot_sidecar_rows
+        .into_iter()
+        .map(|row| {
+            (
+                row.get::<String, _>("URL"),
+                row.get::<String, _>("PARENT_URL"),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        oneshot_sidecar_pairs,
+        vec![(
+            root_oneshot_sidecar_path.to_string_lossy().to_string(),
+            root_oneshot_book_path.to_string_lossy().to_string(),
+        )],
+        "scanner should match Kotlin by keeping book sidecars for configured oneshot directories",
+    );
+
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn scanner_scan_skips_hidden_paths_and_kotlin_substring_exclusions() {
+    let fixture = ScannerPersistenceFixture::new("scanner-persistence-hidden-exclusions")
+        .await
+        .expect("scanner hidden/exclusion fixture should be created");
+
+    let hidden_series_dir = fixture.library_root.join(".Hidden-Series");
+    fs::create_dir_all(&hidden_series_dir).expect("hidden series directory should be created");
+    write_scannable_cbz_fixture(&hidden_series_dir.join("Hidden-001.cbz"), MINIMAL_PNG_BYTES)
+        .expect("hidden series book fixture should be written");
+
+    write_scannable_cbz_fixture(
+        &fixture
+            .library_root
+            .join("Series-A")
+            .join(".Hidden-Book.cbz"),
+        MINIMAL_PNG_BYTES,
+    )
+    .expect("hidden book fixture should be written");
+    write_scannable_cbz_fixture(
+        &fixture
+            .library_root
+            .join("Series-A")
+            .join("skip-visible.cbz"),
+        MINIMAL_PNG_BYTES,
+    )
+    .expect("filename-only exclusion book fixture should be written");
+
+    let excluded_series_dir = fixture.library_root.join("CaseSkip-Series");
+    fs::create_dir_all(&excluded_series_dir).expect("excluded series directory should be created");
+    write_scannable_cbz_fixture(
+        &excluded_series_dir.join("Excluded-001.cbz"),
+        MINIMAL_PNG_BYTES,
+    )
+    .expect("excluded book fixture should be written");
+    replace_library_exclusions(&fixture.paths.main_db, "library-1", &["skip"]).await;
+
+    process_scan_library_task(fixture.config.clone(), "library-1", 900, false)
+        .expect("hidden/exclusion scan should complete successfully");
+
+    let pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for hidden/exclusion verification");
+    let book_names = sqlx::query(
+        "SELECT NAME FROM BOOK WHERE LIBRARY_ID = ? AND DELETED_DATE IS NULL ORDER BY NAME ASC",
+    )
+    .bind("library-1")
+    .fetch_all(&pool)
+    .await
+    .expect("active book names should be queryable after hidden/exclusion scan")
+    .into_iter()
+    .map(|row| row.get::<String, _>("NAME"))
+    .collect::<Vec<_>>();
+    pool.close().await;
+
+    assert_eq!(
+        book_names,
+        vec!["Book-001".to_string(), "skip-visible".to_string()],
+        "scanner should match Kotlin by ignoring hidden directories, hidden book files, and case-insensitive substring directory exclusions without excluding matching book filenames",
     );
 
     fixture.cleanup();
@@ -461,7 +552,7 @@ async fn scanner_rescan_recreates_missing_metadata_seed_rows() {
 }
 
 #[tokio::test]
-async fn scanner_rescan_soft_deletes_missing_series_while_leaving_sidecar_rows_visible() {
+async fn scanner_rescan_soft_deletes_missing_series_and_deletes_stale_sidecar_rows_like_kotlin() {
     let fixture = ScannerPersistenceFixture::new("scanner-persistence-soft-delete-missing-series")
         .await
         .expect("scanner soft-delete fixture should be created");
@@ -552,8 +643,8 @@ async fn scanner_rescan_soft_deletes_missing_series_while_leaving_sidecar_rows_v
     assert_eq!(active_books, 0);
     assert_eq!(deleted_books, 1);
     assert_eq!(
-        remaining_sidecars, 2,
-        "current scanner rescan semantics soft-delete missing series/book rows without deleting the persisted sidecar records in the same pass",
+        remaining_sidecars, 0,
+        "scanner should match Kotlin by deleting persisted sidecar rows that are no longer discovered during rescan",
     );
 
     fixture.cleanup();
