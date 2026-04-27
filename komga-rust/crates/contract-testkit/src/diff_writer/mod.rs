@@ -337,7 +337,6 @@ mod tests {
                 vec!["application/json".to_string()],
             )]),
             body: NormalizedBody::Json(serde_json::json!({
-                "ageRestriction": null,
                 "email": email,
                 "id": id,
                 "labelsAllow": [],

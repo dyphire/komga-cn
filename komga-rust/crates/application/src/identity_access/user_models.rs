@@ -185,7 +185,7 @@ pub fn user_payload_json(user: &AuthUser) -> Value {
     }
     roles.insert("USER".to_string());
 
-    json!({
+    let mut payload = json!({
         "id": user.id,
         "email": user.email,
         "roles": roles,
@@ -193,13 +193,14 @@ pub fn user_payload_json(user: &AuthUser) -> Value {
         "sharedLibrariesIds": user.shared_library_ids,
         "labelsAllow": user.labels_allow,
         "labelsExclude": user.labels_exclude,
-        "ageRestriction": user.age_restriction.as_ref().map(|age_restriction| {
-            json!({
-                "age": age_restriction.age,
-                "restriction": age_restriction.restriction,
-            })
-        }),
-    })
+    });
+    if let Some(age_restriction) = &user.age_restriction {
+        payload["ageRestriction"] = json!({
+            "age": age_restriction.age,
+            "restriction": age_restriction.restriction,
+        });
+    }
+    payload
 }
 
 pub fn user_session_snapshot(user: &AuthUser) -> AuthUserSessionSnapshot {
