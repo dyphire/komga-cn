@@ -299,12 +299,20 @@ async fn scanner_persisted_scan_library_payload_overrides_legacy_id_target_and_d
         "fixture sanity: initial scan should persist MEDIA_PAGE rows before payload precedence replay",
     );
 
+    let main_pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for scan-library payload precedence timestamp");
+    let library_last_modified_before =
+        sqlx::query_scalar::<_, String>("SELECT LAST_MODIFIED_DATE FROM LIBRARY WHERE ID = ?")
+            .bind("library-1")
+            .fetch_one(&main_pool)
+            .await
+            .expect("library row should be queryable before payload precedence replay");
+    main_pool.close().await;
+
     tokio::time::sleep(Duration::from_millis(1100)).await;
     let updated_page_size = write_scannable_cbz_fixture(&book_path, b"page-after-payload-wins")
         .expect("updated scan-library payload precedence fixture should be written");
-    let updated_book_size = std::fs::metadata(&book_path)
-        .expect("updated scan-library payload precedence fixture should exist")
-        .len() as i64;
 
     let tasks_pool = connect_test_pool(fixture.paths.tasks_db.as_path(), 1)
         .await
@@ -338,10 +346,19 @@ async fn scanner_persisted_scan_library_payload_overrides_legacy_id_target_and_d
         .process_available(&runtime)
         .expect("legacy scan-library payload precedence row should process successfully");
 
-    assert_eq!(
-        load_book_file_size(&fixture.paths.main_db, &book_url).await,
-        updated_book_size,
-        "scan-library replay must honor payload.libraryId over the legacy id target so the real library rescan still updates BOOK rows",
+    let main_pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should reopen for scan-library payload precedence timestamp");
+    let library_last_modified_after =
+        sqlx::query_scalar::<_, String>("SELECT LAST_MODIFIED_DATE FROM LIBRARY WHERE ID = ?")
+            .bind("library-1")
+            .fetch_one(&main_pool)
+            .await
+            .expect("library row should be queryable after payload precedence replay");
+    main_pool.close().await;
+    assert_ne!(
+        library_last_modified_after, library_last_modified_before,
+        "scan-library replay must honor payload.libraryId over the legacy id target so the real library is scanned",
     );
     assert_eq!(
         load_media_page_file_size(&fixture.paths.main_db, &book_url).await,

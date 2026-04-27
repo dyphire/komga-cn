@@ -370,13 +370,13 @@ async fn scanner_rescan_reapplies_provider_numbering_after_kotlin_like_resort() 
 }
 
 #[tokio::test]
-async fn scanner_rescan_updates_existing_persisted_book_file_size_rows() {
-    let fixture = ScannerPersistenceFixture::new("scanner-persistence-rescan-updates")
+async fn scanner_regular_rescan_skips_existing_book_when_series_timestamp_is_unchanged() {
+    let fixture = ScannerPersistenceFixture::new("scanner-persistence-rescan-skips-unchanged")
         .await
-        .expect("scanner rescan fixture should be created");
+        .expect("scanner rescan skip fixture should be created");
 
     process_scan_library_task(fixture.config.clone(), "library-1", 900, false)
-        .expect("rescan update contract should seed initial persisted rows");
+        .expect("rescan skip contract should seed initial persisted rows");
 
     let book_path = fixture.library_root.join("Series-A").join("Book-001.cbz");
     let book_url = book_path.to_string_lossy().to_string();
@@ -389,20 +389,19 @@ async fn scanner_rescan_updates_existing_persisted_book_file_size_rows() {
 
     let updated_payload = b"book-001-updated-payload-content";
     fs::write(&book_path, updated_payload)
-        .expect("book payload rewrite should succeed for rescan update contract");
+        .expect("book payload rewrite should succeed for rescan skip contract");
 
     let runtime = runtime_task_context_from_config(&fixture.config);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler.enqueue(scan_library_task("library-1", 900, false));
     scheduler
         .process_available(&runtime)
-        .expect("scanner rescan task should process successfully");
+        .expect("scanner rescan skip task should process successfully");
 
     let updated_size = load_book_file_size(&fixture.paths.main_db, &book_url).await;
     assert_eq!(
-        updated_size,
-        updated_payload.len() as i64,
-        "scanner persistence contract requires rescan to update existing BOOK file size rows instead of leaving stale values",
+        updated_size, initial_size,
+        "regular rescan must skip existing books when the containing series timestamp has not changed, matching Kotlin's scanDeep || seriesChanged gate",
     );
 
     fixture.cleanup();

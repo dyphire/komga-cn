@@ -32,6 +32,7 @@ pub(crate) struct ScannedLibrary {
     pub sidecars: Vec<ScannedSidecarRow>,
     pub book_ids: Vec<String>,
     pub changed_existing_book_ids: HashSet<String>,
+    pub series_ids_requiring_book_sync: HashSet<String>,
     pub discovered_series_ids: HashSet<String>,
     pub discovered_book_ids: HashSet<String>,
 }
@@ -1008,6 +1009,7 @@ pub(crate) fn scan_library(
     let mut book_ids = Vec::new();
     let mut changed_existing_book_ids = HashSet::new();
     let mut changed_book_candidates_by_series_id = HashMap::<String, Vec<String>>::new();
+    let mut series_ids_requiring_book_sync = HashSet::new();
     let mut discovered_series_ids = HashSet::new();
     let mut discovered_book_ids = HashSet::new();
 
@@ -1103,26 +1105,29 @@ pub(crate) fn scan_library(
         } else {
             series_dir_last_modified_unix_seconds
         };
-        let series_changed = existing_series_by_url
-            .get(&scanner_url_key(root.as_path(), &series_url))
-            .is_some_and(|existing| {
-                existing.file_last_modified_unix_seconds != series_last_modified_unix_seconds
-            });
-        if deep_scan || series_changed {
-            changed_existing_book_ids.extend(changed_book_candidates);
-        }
-
         for book in &books {
             discovered_book_ids.insert(book.book_id.clone());
         }
 
         if series_is_oneshot {
             for book in &books {
+                let book_url_key = scanner_url_key(root.as_path(), &book.book_url);
                 let series_id = resolve_oneshot_series_id(
                     &existing_books_by_url,
                     root.as_path(),
                     &book.book_url,
                 );
+                let existing_series = existing_series_by_url.get(&book_url_key);
+                let series_changed = existing_series.is_some_and(|existing| {
+                    existing.file_last_modified_unix_seconds != book.file_last_modified_unix_seconds
+                });
+                let should_sync_books = deep_scan || existing_series.is_none() || series_changed;
+                if should_sync_books {
+                    series_ids_requiring_book_sync.insert(series_id.clone());
+                    if let Some(book_ids) = changed_book_candidates_by_series_id.get(&series_id) {
+                        changed_existing_book_ids.extend(book_ids.iter().cloned());
+                    }
+                }
                 discovered_series_ids.insert(series_id.clone());
                 series_rows.push(ScannedSeriesRow {
                     series_id,
@@ -1140,6 +1145,16 @@ pub(crate) fn scan_library(
         }
 
         let series_id = regular_series_id;
+        let existing_series =
+            existing_series_by_url.get(&scanner_url_key(root.as_path(), &series_url));
+        let series_changed = existing_series.is_some_and(|existing| {
+            existing.file_last_modified_unix_seconds != series_last_modified_unix_seconds
+        });
+        let should_sync_books = deep_scan || existing_series.is_none() || series_changed;
+        if should_sync_books {
+            series_ids_requiring_book_sync.insert(series_id.clone());
+            changed_existing_book_ids.extend(changed_book_candidates);
+        }
         discovered_series_ids.insert(series_id.clone());
         let series_name = series_dir
             .file_name()
@@ -1169,6 +1184,7 @@ pub(crate) fn scan_library(
         .map(|existing| existing.series_id.clone())
         .collect::<HashSet<_>>();
     for series_id in series_ids_with_deleted_books {
+        series_ids_requiring_book_sync.insert(series_id.clone());
         if let Some(book_ids) = changed_book_candidates_by_series_id.get(&series_id) {
             changed_existing_book_ids.extend(book_ids.iter().cloned());
         }
@@ -1180,6 +1196,7 @@ pub(crate) fn scan_library(
         sidecars,
         book_ids,
         changed_existing_book_ids,
+        series_ids_requiring_book_sync,
         discovered_series_ids,
         discovered_book_ids,
     })
@@ -1404,7 +1421,13 @@ WHERE ID = ?"#,
                     r#"UPDATE SERIES
 SET FILE_LAST_MODIFIED = datetime(?, 'unixepoch'), NAME = ?, URL = ?, LIBRARY_ID = ?, oneshot = ?,
     LAST_MODIFIED_DATE = CURRENT_TIMESTAMP, DELETED_DATE = NULL
-WHERE ID = ?"#,
+WHERE ID = ?
+  AND (unixepoch(FILE_LAST_MODIFIED) != ?
+       OR NAME != ?
+       OR URL != ?
+       OR LIBRARY_ID != ?
+       OR COALESCE(oneshot, 0) != ?
+       OR DELETED_DATE IS NOT NULL)"#,
                 )
                 .bind(series.series_last_modified_unix_seconds)
                 .bind(&series.series_name)
@@ -1412,6 +1435,11 @@ WHERE ID = ?"#,
                 .bind(&library_id)
                 .bind(series.oneshot)
                 .bind(&series.series_id)
+                .bind(series.series_last_modified_unix_seconds)
+                .bind(&series.series_name)
+                .bind(&series.series_url)
+                .bind(&library_id)
+                .bind(series.oneshot)
                 .execute(&pool)
                 .await
                 .map_err(|error| format!("failed to update SERIES rows: {error}"))?
@@ -1421,8 +1449,9 @@ WHERE ID = ?"#,
                     changed_series_ids.insert(series.series_id.clone());
                 }
 
+                let mut series_inserted = false;
                 if series_updated == 0 {
-                    sqlx::query(
+                    let inserted = sqlx::query(
                         r#"INSERT OR IGNORE INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot)
 VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)"#,
                     )
@@ -1434,18 +1463,22 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)"#,
                     .bind(series.oneshot)
                     .execute(&pool)
                     .await
-                    .map_err(|error| format!("failed to insert SERIES rows: {error}"))?;
-                    record_series_runtime_sse_event(
-                        &mut runtime_events,
-                        &series.series_id,
-                        &library_id,
-                        RuntimeSseMutationKind::Added,
-                    );
-                    inserted_series.push(InsertedSeriesCandidate {
-                        series_id: series.series_id.clone(),
-                        series_title: series.series_name.clone(),
-                        books: Vec::new(),
-                    });
+                    .map_err(|error| format!("failed to insert SERIES rows: {error}"))?
+                    .rows_affected();
+                    if inserted != 0 {
+                        series_inserted = true;
+                        record_series_runtime_sse_event(
+                            &mut runtime_events,
+                            &series.series_id,
+                            &library_id,
+                            RuntimeSseMutationKind::Added,
+                        );
+                        inserted_series.push(InsertedSeriesCandidate {
+                            series_id: series.series_id.clone(),
+                            series_title: series.series_name.clone(),
+                            books: Vec::new(),
+                        });
+                    }
                 }
 
                 ensure_series_metadata_seed(&pool, series)
@@ -1457,34 +1490,34 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)"#,
                         )
                     })?;
 
+                let sync_books = series_inserted
+                    || scanned
+                        .series_ids_requiring_book_sync
+                        .contains(&series.series_id);
                 for book in &series.books {
-                    let book_updated = sqlx::query(
-                        r#"UPDATE BOOK
+                    let mut book_changed = false;
+                    if sync_books {
+                        let book_updated = sqlx::query(
+                            r#"UPDATE BOOK
 SET FILE_LAST_MODIFIED = datetime(?, 'unixepoch'), URL = ?, SERIES_ID = ?, FILE_SIZE = ?,
     LIBRARY_ID = ?, oneshot = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP, DELETED_DATE = NULL
-WHERE ID = ?"#,
-                    )
-                    .bind(book.file_last_modified_unix_seconds)
-                    .bind(&book.book_url)
-                    .bind(&series.series_id)
-                    .bind(book.file_size)
-                    .bind(&library_id)
-                    .bind(book.oneshot)
-                    .bind(&book.book_id)
-                    .execute(&pool)
-                    .await
-                    .map_err(|error| format!("failed to update BOOK rows: {error}"))?
-                    .rows_affected();
-
-                    if book_updated == 0 {
-                        sqlx::query(
-                            r#"INSERT OR IGNORE INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE,
-                             LIBRARY_ID, oneshot)
-VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?)"#,
+WHERE ID = ?
+  AND (unixepoch(FILE_LAST_MODIFIED) != ?
+       OR URL != ?
+       OR SERIES_ID != ?
+       OR FILE_SIZE != ?
+       OR LIBRARY_ID != ?
+       OR COALESCE(oneshot, 0) != ?
+       OR DELETED_DATE IS NOT NULL)"#,
                         )
+                        .bind(book.file_last_modified_unix_seconds)
+                        .bind(&book.book_url)
+                        .bind(&series.series_id)
+                        .bind(book.file_size)
+                        .bind(&library_id)
+                        .bind(book.oneshot)
                         .bind(&book.book_id)
                         .bind(book.file_last_modified_unix_seconds)
-                        .bind(&book.book_name)
                         .bind(&book.book_url)
                         .bind(&series.series_id)
                         .bind(book.file_size)
@@ -1492,27 +1525,55 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?)"#,
                         .bind(book.oneshot)
                         .execute(&pool)
                         .await
-                        .map_err(|error| format!("failed to insert BOOK rows: {error}"))?;
-                        record_book_runtime_sse_event(
-                            &mut runtime_events,
-                            &book.book_id,
-                            &series.series_id,
-                            &library_id,
-                            RuntimeSseMutationKind::Added,
-                        );
-                        inserted_in_series.push(InsertedBookCandidate {
-                            book_id: book.book_id.clone(),
-                            book_url: book.book_url.clone(),
-                            file_size: book.file_size,
-                            series_id: series.series_id.clone(),
-                        });
-                        inserted_books.push(InsertedBookCandidate {
-                            book_id: book.book_id.clone(),
-                            book_url: book.book_url.clone(),
-                            file_size: book.file_size,
-                            series_id: series.series_id.clone(),
-                        });
-                        changed_series_ids.insert(series.series_id.clone());
+                        .map_err(|error| format!("failed to update BOOK rows: {error}"))?
+                        .rows_affected();
+
+                        if book_updated != 0 {
+                            book_changed = true;
+                        }
+
+                        if book_updated == 0 {
+                            let inserted = sqlx::query(
+                                r#"INSERT OR IGNORE INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE,
+                             LIBRARY_ID, oneshot)
+VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?)"#,
+                            )
+                            .bind(&book.book_id)
+                            .bind(book.file_last_modified_unix_seconds)
+                            .bind(&book.book_name)
+                            .bind(&book.book_url)
+                            .bind(&series.series_id)
+                            .bind(book.file_size)
+                            .bind(&library_id)
+                            .bind(book.oneshot)
+                            .execute(&pool)
+                            .await
+                            .map_err(|error| format!("failed to insert BOOK rows: {error}"))?
+                            .rows_affected();
+                            if inserted != 0 {
+                                book_changed = true;
+                                record_book_runtime_sse_event(
+                                    &mut runtime_events,
+                                    &book.book_id,
+                                    &series.series_id,
+                                    &library_id,
+                                    RuntimeSseMutationKind::Added,
+                                );
+                                inserted_in_series.push(InsertedBookCandidate {
+                                    book_id: book.book_id.clone(),
+                                    book_url: book.book_url.clone(),
+                                    file_size: book.file_size,
+                                    series_id: series.series_id.clone(),
+                                });
+                                inserted_books.push(InsertedBookCandidate {
+                                    book_id: book.book_id.clone(),
+                                    book_url: book.book_url.clone(),
+                                    file_size: book.file_size,
+                                    series_id: series.series_id.clone(),
+                                });
+                                changed_series_ids.insert(series.series_id.clone());
+                            }
+                        }
                     }
 
                     ensure_book_metadata_seed(&pool, book)
@@ -1524,31 +1585,35 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?)"#,
                             )
                         })?;
 
-                    let media_updated = sqlx::query(
-                        r#"UPDATE MEDIA_FILE
+                    if book_changed {
+                        let media_updated = sqlx::query(
+                            r#"UPDATE MEDIA_FILE
 SET FILE_SIZE = ?
 WHERE FILE_NAME = ?
   AND BOOK_ID = ?"#,
-                    )
-                    .bind(book.file_size)
-                    .bind(&book.file_name)
-                    .bind(&book.book_id)
-                    .execute(&pool)
-                    .await
-                    .map_err(|error| format!("failed to update MEDIA_FILE rows: {error}"))?
-                    .rows_affected();
-
-                    if media_updated == 0 {
-                        sqlx::query(
-                            r#"INSERT INTO MEDIA_FILE (FILE_NAME, BOOK_ID, FILE_SIZE)
-VALUES (?, ?, ?)"#,
                         )
+                        .bind(book.file_size)
                         .bind(&book.file_name)
                         .bind(&book.book_id)
-                        .bind(book.file_size)
                         .execute(&pool)
                         .await
-                        .map_err(|error| format!("failed to insert MEDIA_FILE rows: {error}"))?;
+                        .map_err(|error| format!("failed to update MEDIA_FILE rows: {error}"))?
+                        .rows_affected();
+
+                        if media_updated == 0 {
+                            sqlx::query(
+                                r#"INSERT INTO MEDIA_FILE (FILE_NAME, BOOK_ID, FILE_SIZE)
+VALUES (?, ?, ?)"#,
+                            )
+                            .bind(&book.file_name)
+                            .bind(&book.book_id)
+                            .bind(book.file_size)
+                            .execute(&pool)
+                            .await
+                            .map_err(|error| {
+                                format!("failed to insert MEDIA_FILE rows: {error}")
+                            })?;
+                        }
                     }
                 }
 
@@ -1861,6 +1926,7 @@ fn unavailable_scanned_library() -> ScannedLibrary {
         sidecars: Vec::new(),
         book_ids: Vec::new(),
         changed_existing_book_ids: HashSet::new(),
+        series_ids_requiring_book_sync: HashSet::new(),
         discovered_series_ids: HashSet::new(),
         discovered_book_ids: HashSet::new(),
     }
@@ -1895,11 +1961,13 @@ async fn ensure_book_metadata_seed(
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"INSERT OR IGNORE INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, BOOK_ID)
-VALUES (?, ?, ?, ?)"#,
+SELECT ?, ?, ?, ?
+WHERE EXISTS (SELECT 1 FROM BOOK WHERE ID = ? AND DELETED_DATE IS NULL)"#,
     )
     .bind("0")
     .bind(0.0_f64)
     .bind(&book.book_name)
+    .bind(&book.book_id)
     .bind(&book.book_id)
     .execute(pool)
     .await?;
@@ -2477,6 +2545,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
             sidecars: Vec::new(),
             book_ids: vec!["book-new".to_string()],
             changed_existing_book_ids: HashSet::new(),
+            series_ids_requiring_book_sync: HashSet::new(),
             discovered_series_ids: HashSet::from(["series-1".to_string()]),
             discovered_book_ids: HashSet::from(["book-new".to_string()]),
         };
@@ -2751,6 +2820,7 @@ VALUES (?, ?, ?, ?)"#,
             sidecars: Vec::new(),
             book_ids: vec!["book-new-1".to_string(), "book-new-2".to_string()],
             changed_existing_book_ids: HashSet::new(),
+            series_ids_requiring_book_sync: HashSet::new(),
             discovered_series_ids: HashSet::from(["series-new".to_string()]),
             discovered_book_ids: HashSet::from([
                 "book-new-1".to_string(),
