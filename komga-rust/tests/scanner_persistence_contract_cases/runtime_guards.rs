@@ -282,7 +282,9 @@ async fn scanner_persisted_scan_library_payload_overrides_legacy_id_target_and_d
         .expect("scanner payload precedence fixture should be created");
 
     let book_path = fixture.library_root.join("Series-A").join("Book-001.cbz");
+    let book_sidecar_path = fixture.library_root.join("Series-A").join("Book-001.xml");
     let book_url = book_path.to_string_lossy().to_string();
+    let book_sidecar_url = book_sidecar_path.to_string_lossy().to_string();
     let initial_page_size = write_scannable_cbz_fixture(&book_path, b"page-before-payload-wins")
         .expect("initial scan-library payload precedence fixture should be written");
 
@@ -301,18 +303,25 @@ async fn scanner_persisted_scan_library_payload_overrides_legacy_id_target_and_d
 
     let main_pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)
         .await
-        .expect("main db should open for scan-library payload precedence timestamp");
-    let library_last_modified_before =
-        sqlx::query_scalar::<_, String>("SELECT LAST_MODIFIED_DATE FROM LIBRARY WHERE ID = ?")
-            .bind("library-1")
-            .fetch_one(&main_pool)
-            .await
-            .expect("library row should be queryable before payload precedence replay");
+        .expect("main db should open for scan-library payload precedence sidecar timestamp");
+    let sidecar_last_modified_before = sqlx::query_scalar::<_, String>(
+        "SELECT LAST_MODIFIED_TIME FROM SIDECAR WHERE URL = ? AND LIBRARY_ID = ?",
+    )
+    .bind(&book_sidecar_url)
+    .bind("library-1")
+    .fetch_one(&main_pool)
+    .await
+    .expect("book sidecar row should be queryable before payload precedence replay");
     main_pool.close().await;
 
     tokio::time::sleep(Duration::from_millis(1100)).await;
     let updated_page_size = write_scannable_cbz_fixture(&book_path, b"page-after-payload-wins")
         .expect("updated scan-library payload precedence fixture should be written");
+    fs::write(
+        &book_sidecar_path,
+        br#"<ComicInfo><Title>payload-precedence-sidecar</Title></ComicInfo>"#,
+    )
+    .expect("book sidecar rewrite should succeed for payload precedence contract");
 
     let tasks_pool = connect_test_pool(fixture.paths.tasks_db.as_path(), 1)
         .await
@@ -348,16 +357,18 @@ async fn scanner_persisted_scan_library_payload_overrides_legacy_id_target_and_d
 
     let main_pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)
         .await
-        .expect("main db should reopen for scan-library payload precedence timestamp");
-    let library_last_modified_after =
-        sqlx::query_scalar::<_, String>("SELECT LAST_MODIFIED_DATE FROM LIBRARY WHERE ID = ?")
-            .bind("library-1")
-            .fetch_one(&main_pool)
-            .await
-            .expect("library row should be queryable after payload precedence replay");
+        .expect("main db should reopen for scan-library payload precedence sidecar timestamp");
+    let sidecar_last_modified_after = sqlx::query_scalar::<_, String>(
+        "SELECT LAST_MODIFIED_TIME FROM SIDECAR WHERE URL = ? AND LIBRARY_ID = ?",
+    )
+    .bind(&book_sidecar_url)
+    .bind("library-1")
+    .fetch_one(&main_pool)
+    .await
+    .expect("book sidecar row should be queryable after payload precedence replay");
     main_pool.close().await;
     assert_ne!(
-        library_last_modified_after, library_last_modified_before,
+        sidecar_last_modified_after, sidecar_last_modified_before,
         "scan-library replay must honor payload.libraryId over the legacy id target so the real library is scanned",
     );
     assert_eq!(
