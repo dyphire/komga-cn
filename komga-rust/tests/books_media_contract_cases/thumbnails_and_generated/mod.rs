@@ -1,4 +1,11 @@
 use super::*;
+use std::sync::OnceLock;
+use tokio::sync::{Mutex, MutexGuard};
+
+async fn thumbnail_runtime_sse_guard() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(())).lock().await
+}
 
 async fn seed_book_thumbnail_bytes(
     paths: &RuntimeDbPaths,

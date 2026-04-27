@@ -1,11 +1,4 @@
 use super::*;
-use std::sync::OnceLock;
-use tokio::sync::Mutex;
-
-fn book_thumbnail_delete_runtime_sse_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
 
 #[tokio::test]
 async fn router_book_thumbnail_by_id_allows_missing_path_book_when_thumbnail_exists() {
@@ -262,7 +255,7 @@ async fn router_book_thumbnail_delete_reselects_remaining_thumbnail_when_selecte
 
 #[tokio::test]
 async fn router_book_thumbnail_select_emits_thumbnail_book_added_event() {
-    let _guard = book_thumbnail_delete_runtime_sse_lock().lock().await;
+    let _guard = thumbnail_runtime_sse_guard().await;
     let paths = new_router_fixture("router-book-thumbnail-select-sse").await;
     seed_router_contract_data(&paths).await;
 
@@ -334,7 +327,7 @@ async fn router_book_thumbnail_select_emits_thumbnail_book_added_event() {
 
 #[tokio::test]
 async fn router_book_thumbnail_delete_emits_thumbnail_book_deleted_event() {
-    let _guard = book_thumbnail_delete_runtime_sse_lock().lock().await;
+    let _guard = thumbnail_runtime_sse_guard().await;
     let paths = new_router_fixture("router-book-thumbnail-delete-sse").await;
     seed_router_contract_data(&paths).await;
 

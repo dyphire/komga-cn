@@ -1,11 +1,4 @@
 use super::*;
-use std::sync::OnceLock;
-use tokio::sync::Mutex;
-
-fn generated_thumbnail_runtime_sse_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
 
 #[tokio::test]
 async fn generate_book_thumbnail_persists_generated_thumbnail_for_epub_cover() {
@@ -193,7 +186,7 @@ async fn generate_book_thumbnail_persists_generated_thumbnail_for_pdf() {
 
 #[tokio::test]
 async fn generate_book_thumbnail_emits_thumbnail_book_added_event() {
-    let _guard = generated_thumbnail_runtime_sse_lock().lock().await;
+    let _guard = thumbnail_runtime_sse_guard().await;
     let paths = new_router_fixture("router-generate-book-thumbnail-sse").await;
     seed_router_contract_data(&paths).await;
     write_router_epub_with_cover(&paths, "books/book-1.epub");
