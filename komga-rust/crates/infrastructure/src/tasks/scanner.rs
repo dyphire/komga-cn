@@ -997,12 +997,7 @@ pub(crate) fn scan_library(
         .collect::<HashMap<_, _>>();
 
     let mut discovered = Vec::new();
-    collect_series_directories(
-        root.as_path(),
-        root.as_path(),
-        &scan_config,
-        &mut discovered,
-    )?;
+    collect_series_directories(root.as_path(), &scan_config, &mut discovered)?;
 
     let mut sidecars = Vec::new();
     let mut series_rows = Vec::new();
@@ -1295,17 +1290,21 @@ WHERE ID = ?"#,
                 });
             }
 
-            sqlx::query(
-                r#"UPDATE LIBRARY
+            if library_was_unavailable {
+                sqlx::query(
+                    r#"UPDATE LIBRARY
 SET UNAVAILABLE_DATE = NULL, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
 WHERE ID = ?"#,
-            )
-            .bind(&library_id)
-            .execute(&pool)
-            .await
-            .map_err(|error| {
-                format!("failed to clear library unavailable marker for '{library_id}': {error}")
-            })?;
+                )
+                .bind(&library_id)
+                .execute(&pool)
+                .await
+                .map_err(|error| {
+                    format!(
+                        "failed to clear library unavailable marker for '{library_id}': {error}"
+                    )
+                })?;
+            }
 
             let discovered_series_ids = scanned.discovered_series_ids.clone();
             let discovered_book_ids = scanned.discovered_book_ids.clone();
@@ -1661,7 +1660,7 @@ WHERE BOOK_ID = ?"#,
             for sidecar in &scanned.sidecars {
                 let sidecar_updated = sqlx::query(
                     r#"UPDATE SIDECAR
-SET PARENT_URL = ?, LAST_MODIFIED_TIME = ?
+SET PARENT_URL = ?, LAST_MODIFIED_TIME = datetime(?, 'unixepoch')
 WHERE URL = ?
   AND LIBRARY_ID = ?"#,
                 )
@@ -1677,7 +1676,7 @@ WHERE URL = ?
                 if sidecar_updated == 0 {
                     sqlx::query(
                         r#"INSERT OR IGNORE INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID)
-VALUES (?, ?, ?, ?)"#,
+VALUES (?, ?, datetime(?, 'unixepoch'), ?)"#,
                     )
                     .bind(&sidecar.url)
                     .bind(&sidecar.parent_url)
@@ -1923,7 +1922,11 @@ pub(crate) fn load_changed_sidecars(
         let scanned_sidecars = scanned_sidecars.clone();
         Box::pin(async move {
             let existing_rows = sqlx::query(
-                r#"SELECT URL, LAST_MODIFIED_TIME
+                r#"SELECT URL,
+       CASE
+           WHEN typeof(LAST_MODIFIED_TIME) IN ('integer', 'real') THEN CAST(LAST_MODIFIED_TIME AS INTEGER)
+           ELSE unixepoch(LAST_MODIFIED_TIME)
+       END AS LAST_MODIFIED_TIME
 FROM SIDECAR
 WHERE LIBRARY_ID = ?"#,
             )
@@ -1939,7 +1942,7 @@ WHERE LIBRARY_ID = ?"#,
                 .map(|row| {
                     (
                         row.get::<String, _>("URL"),
-                        row.get::<i64, _>("LAST_MODIFIED_TIME"),
+                        row.get::<Option<i64>, _>("LAST_MODIFIED_TIME"),
                     )
                 })
                 .collect::<std::collections::HashMap<_, _>>();
@@ -1947,9 +1950,8 @@ WHERE LIBRARY_ID = ?"#,
             Ok(scanned_sidecars
                 .into_iter()
                 .filter(|sidecar| {
-                    existing
-                        .get(&sidecar.url)
-                        .is_none_or(|timestamp| *timestamp != sidecar.last_modified_unix_seconds)
+                    existing.get(&sidecar.url).and_then(|timestamp| *timestamp)
+                        != Some(sidecar.last_modified_unix_seconds)
                 })
                 .map(|sidecar| sidecar.url)
                 .collect())
@@ -2099,7 +2101,6 @@ WHERE LIBRARY_ID = ?
 
 fn collect_series_directories(
     current: &Path,
-    root: &Path,
     scan_config: &LibraryScanConfig,
     discovered: &mut Vec<PathBuf>,
 ) -> Result<(), String> {
@@ -2135,7 +2136,7 @@ fn collect_series_directories(
     }
 
     for child in children {
-        collect_series_directories(child.as_path(), root, scan_config, discovered)?;
+        collect_series_directories(child.as_path(), scan_config, discovered)?;
     }
 
     Ok(())
@@ -2946,6 +2947,50 @@ VALUES (?, ?, ?, ?)"#,
 
         verify_pool.close().await;
         let _ = std::fs::remove_dir_all(library_root);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn load_changed_sidecars_treats_legacy_integer_seconds_as_unchanged() {
+        let db_path = temp_path("scanner-sidecar-legacy-integer-seconds");
+
+        let pool = connect_test_pool(db_path.as_path(), 1)
+            .await
+            .expect("sidecar db should open");
+        setup::bootstrap_pool(&pool)
+            .await
+            .expect("sidecar db should bootstrap");
+
+        sqlx::query(
+            "INSERT INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID) VALUES (?, ?, ?, ?)",
+        )
+        .bind("/library/Series-A/Book-001.xml")
+        .bind("/library/Series-A/Book-001.cbz")
+        .bind(0_i64)
+        .bind("library-1")
+        .execute(&pool)
+        .await
+        .expect("legacy integer sidecar row should be inserted");
+        pool.close().await;
+
+        let changed = load_changed_sidecars(
+            db_path.as_path(),
+            "library-1",
+            &[ScannedSidecarRow {
+                url: "/library/Series-A/Book-001.xml".to_string(),
+                parent_url: "/library/Series-A/Book-001.cbz".to_string(),
+                last_modified_unix_seconds: 0,
+                source: ScannedSidecarSource::Book,
+                sidecar_type: ScannedSidecarType::Metadata,
+            }],
+        )
+        .expect("legacy integer sidecar timestamps should load without false positives");
+
+        assert!(
+            changed.is_empty(),
+            "matching legacy integer sidecar timestamps must not be treated as changed",
+        );
+
         let _ = std::fs::remove_file(db_path);
     }
 

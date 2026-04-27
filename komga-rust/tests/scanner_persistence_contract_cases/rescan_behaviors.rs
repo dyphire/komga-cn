@@ -1,5 +1,9 @@
 use super::support::*;
 use super::*;
+use komga_application::task_processing::{
+    DefaultLibraryTaskEmitter, LibraryScanPipeline, ScanOneLibrary,
+};
+use komga_infrastructure::task_queue::library_scan_pipeline::SqliteFilesystemLibraryScanPipeline;
 use std::sync::OnceLock;
 use tokio::sync::Mutex;
 
@@ -493,6 +497,109 @@ async fn scanner_regular_rescan_skips_existing_book_when_series_timestamp_is_unc
     assert_eq!(
         updated_size, initial_size,
         "regular rescan must skip existing books when the containing series timestamp has not changed, matching Kotlin's scanDeep || seriesChanged gate",
+    );
+
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn scanner_regular_oneshot_rescan_skips_metadata_refresh_follow_ups_when_rows_are_unchanged()
+{
+    let fixture =
+        ScannerPersistenceFixture::new("scanner-persistence-oneshot-rescan-skips-metadata-refresh")
+            .await
+            .expect("scanner oneshot metadata-refresh skip fixture should be created");
+
+    let regular_series_dir = fixture.library_root.join("Series-A");
+    fs::remove_dir_all(&regular_series_dir)
+        .expect("default regular series directory should be removable for oneshot fixture");
+
+    let oneshots_dir = fixture.library_root.join("_oneshots");
+    fs::create_dir_all(&oneshots_dir).expect("oneshots directory should be created");
+    let book_path = oneshots_dir.join("COMIC LOE VOL.5 noir.zip");
+    write_scannable_cbz_fixture(&book_path, MINIMAL_PNG_BYTES)
+        .expect("oneshot fixture should be written");
+    update_library_oneshots_directory(&fixture.paths.main_db, "library-1", Some("_oneshots")).await;
+
+    process_scan_library_task(fixture.config.clone(), "library-1", 900, false)
+        .expect("initial oneshot scan should complete successfully");
+
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+
+    let pipeline = SqliteFilesystemLibraryScanPipeline::new(
+        fixture.paths.main_db.clone(),
+        DefaultLibraryTaskEmitter::default(),
+    );
+    let result = pipeline
+        .run(ScanOneLibrary::new("library-1", false))
+        .expect("unchanged oneshot rescan should complete successfully");
+
+    let metadata_follow_ups = result
+        .follow_up_tasks
+        .iter()
+        .filter(|task| {
+            matches!(
+                task.simple_type.as_str(),
+                "REFRESH_SERIES_METADATA" | "REFRESH_BOOK_METADATA" | "ANALYZE_BOOK"
+            )
+        })
+        .map(|task| task.simple_type.clone())
+        .collect::<Vec<_>>();
+
+    assert!(
+        metadata_follow_ups.is_empty(),
+        "unchanged oneshot rescan must not enqueue metadata refresh/analyze follow-up tasks, got {metadata_follow_ups:?}",
+    );
+
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn scanner_regular_rescan_skips_sidecar_metadata_refresh_when_legacy_sidecar_timestamps_match()
+ {
+    let fixture =
+        ScannerPersistenceFixture::new("scanner-persistence-legacy-sidecar-timestamps-match")
+            .await
+            .expect("scanner legacy sidecar timestamp fixture should be created");
+
+    process_scan_library_task(fixture.config.clone(), "library-1", 900, false)
+        .expect("initial scan should persist the seeded sidecars successfully");
+
+    let pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)
+        .await
+        .expect("sqlite pool should open for legacy sidecar timestamp rewrite");
+    sqlx::query(
+        "UPDATE SIDECAR SET LAST_MODIFIED_TIME = strftime('%Y-%m-%dT%H:%M:%SZ', LAST_MODIFIED_TIME) WHERE LIBRARY_ID = ?",
+    )
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("sidecar timestamps should be rewritten to the legacy datetime shape");
+    pool.close().await;
+
+    let pipeline = SqliteFilesystemLibraryScanPipeline::new(
+        fixture.paths.main_db.clone(),
+        DefaultLibraryTaskEmitter::default(),
+    );
+    let result = pipeline
+        .run(ScanOneLibrary::new("library-1", false))
+        .expect("unchanged rescan with legacy sidecar timestamps should complete successfully");
+
+    let sidecar_metadata_follow_ups = result
+        .follow_up_tasks
+        .iter()
+        .filter(|task| {
+            matches!(
+                task.simple_type.as_str(),
+                "REFRESH_SERIES_METADATA" | "REFRESH_BOOK_METADATA"
+            )
+        })
+        .map(|task| task.simple_type.clone())
+        .collect::<Vec<_>>();
+
+    assert!(
+        sidecar_metadata_follow_ups.is_empty(),
+        "legacy datetime-shaped sidecar timestamps must not make unchanged rescans enqueue metadata refresh tasks, got {sidecar_metadata_follow_ups:?}",
     );
 
     fixture.cleanup();
