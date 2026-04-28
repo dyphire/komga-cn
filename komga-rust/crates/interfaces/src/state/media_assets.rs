@@ -229,7 +229,6 @@ pub trait MediaAssetsService: Send + Sync {
     async fn delete_book_thumbnail(
         &self,
         database_file: PathBuf,
-        book_id: String,
         thumbnail_id: String,
     ) -> Result<bool, String>;
     async fn load_persisted_readlist_thumbnails(

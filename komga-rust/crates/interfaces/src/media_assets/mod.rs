@@ -368,16 +368,11 @@ async fn select_book_thumbnail_from_services(
 
 async fn delete_book_thumbnail_from_services(
     app: &HttpAppState,
-    book_id: &str,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
     app.services
         .media_assets
-        .delete_book_thumbnail(
-            app.auth_db.database_file.clone(),
-            book_id.to_string(),
-            thumbnail_id.to_string(),
-        )
+        .delete_book_thumbnail(app.auth_db.database_file.clone(), thumbnail_id.to_string())
         .await
 }
 

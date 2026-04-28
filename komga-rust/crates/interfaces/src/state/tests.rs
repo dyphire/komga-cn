@@ -538,7 +538,6 @@ impl MediaAssetsService for NoopMediaAssetsService {
     async fn delete_book_thumbnail(
         &self,
         database_file: PathBuf,
-        book_id: String,
         thumbnail_id: String,
     ) -> Result<bool, String> {
         panic!("unused test service")

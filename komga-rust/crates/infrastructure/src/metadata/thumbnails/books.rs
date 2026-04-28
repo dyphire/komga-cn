@@ -303,14 +303,11 @@ pub async fn select_book_thumbnail(
 
 pub async fn delete_book_thumbnail(
     database_file: &Path,
-    book_id: &str,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
     if !database_file.exists() {
         return Ok(false);
     }
-
-    let _ = book_id;
 
     let pool = connect_read_pool(database_file)
         .await

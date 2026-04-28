@@ -16,8 +16,7 @@ pub fn sanitize_identifier(value: &str) -> String {
         .collect()
 }
 
-pub fn generated_kobo_token_triplet(user_key: &str) -> (String, String, String) {
-    let _ = user_key;
+pub fn generated_kobo_token_triplet() -> (String, String, String) {
     let access = random_alphanumeric(24);
     let refresh = random_alphanumeric(24);
     let tracking = random_uuid_like();

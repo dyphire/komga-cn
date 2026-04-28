@@ -180,8 +180,7 @@ pub async fn kobo_auth_device(
         return response;
     }
 
-    let (access_token, refresh_token, tracking_id) =
-        generated_kobo_token_triplet(user_key.as_str());
+    let (access_token, refresh_token, tracking_id) = generated_kobo_token_triplet();
 
     Json(KoboDeviceAuthResponse {
         access_token,

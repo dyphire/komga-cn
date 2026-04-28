@@ -324,7 +324,7 @@ pub async fn book_thumbnail_select(
 pub async fn book_thumbnail_delete(
     State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
-    Path((book_id, thumbnail_id)): Path<(String, String)>,
+    Path((_book_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
     if let Some(response) =
         require_request_admin(&headers, app.auth_db.database_file.as_path()).await
@@ -332,7 +332,7 @@ pub async fn book_thumbnail_delete(
         return response;
     }
 
-    match delete_book_thumbnail_from_services(&app, &book_id, &thumbnail_id).await {
+    match delete_book_thumbnail_from_services(&app, &thumbnail_id).await {
         Ok(true) => {
             let mut response = StatusCode::ACCEPTED.into_response();
             mark_runtime_owned(&mut response);

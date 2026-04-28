@@ -485,15 +485,9 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
     async fn delete_book_thumbnail(
         &self,
         database_file: PathBuf,
-        book_id: String,
         thumbnail_id: String,
     ) -> Result<bool, String> {
-        infrastructure_metadata::delete_book_thumbnail(
-            database_file.as_path(),
-            &book_id,
-            &thumbnail_id,
-        )
-        .await
+        infrastructure_metadata::delete_book_thumbnail(database_file.as_path(), &thumbnail_id).await
     }
 
     async fn load_persisted_readlist_thumbnails(
