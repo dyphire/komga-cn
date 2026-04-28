@@ -977,16 +977,12 @@ pub(crate) async fn scan_library(
     let existing_series_by_url =
         load_existing_scanned_series_by_url(database_file, library_id).await?;
 
-    tokio::task::spawn_blocking(move || {
-        build_scanned_library(
-            scan_config,
-            existing_books_by_url,
-            existing_series_by_url,
-            deep_scan,
-        )
-    })
-    .await
-    .map_err(|error| format!("scan library filesystem join failed: {error}"))?
+    build_scanned_library(
+        scan_config,
+        existing_books_by_url,
+        existing_series_by_url,
+        deep_scan,
+    )
 }
 
 fn build_scanned_library(

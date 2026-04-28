@@ -101,7 +101,7 @@ pub(in crate::task_queue) async fn convert_book(
     let source_path = resolve_library_item_path(&source.library_root, &source.book_url);
     let source_file_last_modified = source.file_last_modified;
     let convert_book_id = book_id.clone();
-    let prepared_conversion = tokio::task::spawn_blocking(move || {
+    let prepared_conversion = (|| {
         if !source_path.exists() {
             return Ok(None);
         }
@@ -166,9 +166,7 @@ pub(in crate::task_queue) async fn convert_book(
             destination_metadata.len() as i64,
             source_path,
         )))
-    })
-    .await
-    .map_err(|error| TaskExecutionError::runtime(format!("conversion task join failed: {error}")))?;
+    })();
 
     let Some((destination_path, destination_url, file_last_modified, file_size, source_path)) =
         (match prepared_conversion {

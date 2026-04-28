@@ -87,13 +87,8 @@ enum SearchEventAttempt {
 }
 
 async fn recover_search_index(database_file: &Path, index_dir: &Path) -> Result<(), String> {
-    let rebuild_dir = index_dir.to_path_buf();
-    tokio::task::spawn_blocking(move || {
-        prepare_for_rebuild(rebuild_dir.as_path())
-            .map_err(|error| format!("failed to prepare search index rebuild: {error}"))
-    })
-    .await
-    .map_err(|error| format!("search index rebuild preparation join failed: {error}"))??;
+    prepare_for_rebuild(index_dir)
+        .map_err(|error| format!("failed to prepare search index rebuild: {error}"))?;
 
     rebuild::rebuild_index_from_database(database_file, index_dir).await
 }
@@ -102,22 +97,16 @@ async fn try_apply_search_event(
     index_dir: &Path,
     event: SearchEvent,
 ) -> Result<SearchEventAttempt, String> {
-    let index_dir = index_dir.to_path_buf();
-
-    tokio::task::spawn_blocking(move || {
-        match SearchIndexLifecycle::bootstrap(index_dir.as_path()) {
-            Ok(index) => index
-                .apply_event(event)
-                .map(|()| SearchEventAttempt::Applied)
-                .map_err(|error| format!("failed to apply search event: {error}")),
-            Err(SearchError::CorruptedIndexRequiresExplicitRebuild(_, _)) => {
-                Ok(SearchEventAttempt::RebuildRequired)
-            }
-            Err(error) => Err(format!("failed to bootstrap search index: {error}")),
+    match SearchIndexLifecycle::bootstrap(index_dir) {
+        Ok(index) => index
+            .apply_event(event)
+            .map(|()| SearchEventAttempt::Applied)
+            .map_err(|error| format!("failed to apply search event: {error}")),
+        Err(SearchError::CorruptedIndexRequiresExplicitRebuild(_, _)) => {
+            Ok(SearchEventAttempt::RebuildRequired)
         }
-    })
-    .await
-    .map_err(|error| format!("search event apply join failed: {error}"))?
+        Err(error) => Err(format!("failed to bootstrap search index: {error}")),
+    }
 }
 
 async fn apply_search_event(

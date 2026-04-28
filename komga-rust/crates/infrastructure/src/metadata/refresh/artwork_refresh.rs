@@ -227,20 +227,12 @@ pub async fn generate_book_thumbnail(database_file: &Path, book_id: &str) -> Res
         })?;
 
         let (thumbnail_bytes, thumbnail_media_type, width, height) = if book_media_is_pdf(&media) {
-            let rendered = tokio::task::spawn_blocking({
-                let media = media.clone();
-                move || render_pdf_thumbnail(&media, configured_max_edge)
-            })
-            .await
-            .map_err(|error| {
-                format!("pdf thumbnail task join failed for '{book_id}': {error}")
-            })??;
-            let Some(rendered) = rendered else {
+            let Some(rendered) = render_pdf_thumbnail(&media, configured_max_edge)? else {
                 break 'result Ok(());
             };
             rendered
         } else if let Some((bytes, _media_type)) = epub_cover {
-            render_generated_thumbnail(&book_id, bytes, configured_max_edge).await?
+            render_generated_thumbnail_from_image_bytes(&book_id, &bytes, configured_max_edge)?
         } else {
             let page_row = if let Some(row) = persisted_page_row {
                 Some(BookPageRecord {
@@ -285,7 +277,11 @@ pub async fn generate_book_thumbnail(database_file: &Path, book_id: &str) -> Res
             {
                 break 'result Ok(());
             }
-            render_generated_thumbnail(&book_id, thumbnail_bytes, configured_max_edge).await?
+            render_generated_thumbnail_from_image_bytes(
+                &book_id,
+                &thumbnail_bytes,
+                configured_max_edge,
+            )?
         };
 
         let selected_thumbnail_type = sqlx::query(
@@ -462,23 +458,4 @@ pub async fn refresh_series_local_artwork(
     };
     pool.close().await;
     result
-}
-
-async fn render_generated_thumbnail(
-    book_id: &str,
-    thumbnail_bytes: Vec<u8>,
-    configured_max_edge: u32,
-) -> Result<(Vec<u8>, String, i64, i64), String> {
-    let book_id = book_id.to_string();
-    let task_book_id = book_id.clone();
-
-    tokio::task::spawn_blocking(move || {
-        render_generated_thumbnail_from_image_bytes(
-            &task_book_id,
-            &thumbnail_bytes,
-            configured_max_edge,
-        )
-    })
-    .await
-    .map_err(|error| format!("generated thumbnail task join failed for '{book_id}': {error}"))?
 }

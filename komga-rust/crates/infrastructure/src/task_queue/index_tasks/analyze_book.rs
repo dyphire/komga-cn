@@ -32,19 +32,13 @@ pub(in crate::task_queue) async fn analyze_book(
     };
 
     let file_path = resolve_library_item_path(&input.root, &input.url);
-    let analyze_path = file_path.clone();
-    let analyze_dimensions = input.analyze_dimensions;
-    let analysis = tokio::task::spawn_blocking(move || {
-        analyze_book_media_file(&analyze_path, analyze_dimensions)
-    })
-    .await
-    .map_err(|error| TaskExecutionError::runtime(format!("analyze-book join failed: {error}")))?
-    .map_err(|error| {
-        TaskExecutionError::runtime(format!(
-            "failed to analyze media file for '{book_id}' ('{}'): {error}",
-            file_path.display(),
-        ))
-    })?;
+    let analysis =
+        analyze_book_media_file(&file_path, input.analyze_dimensions).map_err(|error| {
+            TaskExecutionError::runtime(format!(
+                "failed to analyze media file for '{book_id}' ('{}'): {error}",
+                file_path.display(),
+            ))
+        })?;
 
     let persisted = AnalyzedBookMedia {
         status: analysis.status,

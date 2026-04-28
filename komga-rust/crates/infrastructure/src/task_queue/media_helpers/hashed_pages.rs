@@ -113,14 +113,8 @@ pub(in crate::task_queue) async fn remove_hashed_pages(
         return Ok(false);
     }
 
-    let archive_path = source.file_path.clone();
-    let removed_pages = tokio::task::spawn_blocking(move || {
-        rewrite_zip_book_without_pages(&archive_path, pages_to_remove.as_slice())
-    })
-    .await
-    .map_err(|error| {
-        TaskExecutionError::runtime(format!("hashed-page removal join failed: {error}"))
-    })??;
+    let removed_pages =
+        rewrite_zip_book_without_pages(&source.file_path, pages_to_remove.as_slice())?;
     if removed_pages.is_empty() {
         return Ok(false);
     }

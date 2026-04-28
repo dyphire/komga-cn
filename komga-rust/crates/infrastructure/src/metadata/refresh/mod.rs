@@ -413,19 +413,7 @@ async fn load_barcode_candidate_image_bytes(
     page_number: u64,
 ) -> Result<Option<Vec<u8>>, String> {
     if book_media_is_pdf(media) {
-        let rendered = tokio::task::spawn_blocking({
-            let media = media.clone();
-            move || render_pdf_page_image_for_barcode(&media, page_number)
-        })
-        .await
-        .map_err(|error| {
-            format!(
-                "failed to join PDF barcode render task '{}' for '{}': {error}",
-                media.file_path.display(),
-                book_id,
-            )
-        })??;
-        return Ok(Some(rendered));
+        return Ok(Some(render_pdf_page_image_for_barcode(media, page_number)?));
     }
 
     if book_media_is_single_image(media) && page_number == 1 {

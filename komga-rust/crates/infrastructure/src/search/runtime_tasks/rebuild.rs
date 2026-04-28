@@ -28,9 +28,7 @@ pub(super) async fn rebuild_index_from_database_for_entities(
     };
     pool.close().await;
 
-    tokio::task::spawn_blocking(move || rebuild_index_with_documents(index_dir, entity_types, docs))
-        .await
-        .map_err(|error| format!("search index rebuild join failed: {error}"))?
+    rebuild_index_with_documents(index_dir, entity_types, docs)
 }
 
 fn rebuild_index_with_documents(
