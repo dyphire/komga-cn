@@ -38,6 +38,7 @@ fn runtime_startup_prepare_task_queue_enqueues_search_rebuild_without_processing
             let background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
                 runtime_task_context(&config),
                 Some("REBUILD_INDEX"),
+                1,
             )
             .await;
             let mut queue = background.task_queue.lock().await;
@@ -92,6 +93,37 @@ fn runtime_startup_prepare_task_queue_enqueues_search_rebuild_without_processing
 }
 
 #[test]
+fn runtime_startup_prepare_task_queue_applies_configured_task_pool_size() {
+    let _guard = startup_contract_lock();
+    let mut config =
+        runtime_config_for_logging_contract("komga-runtime-startup-worker-task-pool-size");
+    config.task_pool_size = 4;
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("startup task pool test runtime should build");
+    runtime.block_on(async {
+        komga_server::app::validate_startup_schema_gate_for_contract(&config)
+            .await
+            .expect("startup task pool schema should initialize");
+    });
+
+    let task_pool_size = runtime.block_on(async {
+        let background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
+            runtime_task_context(&config),
+            None,
+            config.task_pool_size,
+        )
+        .await;
+        let queue = background.task_queue.lock().await;
+        queue.task_pool_size()
+    });
+
+    assert_eq!(task_pool_size, 4);
+}
+
+#[test]
 fn runtime_startup_prepare_task_queue_logs_truthful_skip_boundaries_for_external_owned_runtime() {
     let _guard = startup_contract_lock();
     let root = unique_temp_dir("komga-runtime-startup-worker-bootstrap-skip");
@@ -115,6 +147,7 @@ fn runtime_startup_prepare_task_queue_logs_truthful_skip_boundaries_for_external
         let _background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
             runtime,
             Some("REBUILD_INDEX"),
+            1,
         )
         .await;
     });
@@ -168,6 +201,7 @@ fn runtime_startup_prepare_task_queue_skips_search_rebuild_when_search_index_not
         let background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
             runtime,
             Some("REBUILD_INDEX"),
+            1,
         )
         .await;
         let mut queue = background.task_queue.lock().await;
@@ -234,6 +268,7 @@ fn runtime_startup_prepare_task_queue_logs_no_startup_library_scan_skip_when_no_
             let background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
                 runtime_task_context(&config),
                 None,
+                1,
             )
             .await;
             let mut queue = background.task_queue.lock().await;

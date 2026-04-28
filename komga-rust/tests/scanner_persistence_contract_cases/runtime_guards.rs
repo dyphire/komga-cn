@@ -174,6 +174,7 @@ async fn scanner_startup_releases_previously_claimed_persisted_tasks() {
     let _background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
         runtime_task_context_from_config(&fixture.config),
         None,
+        1,
     )
     .await;
 
@@ -246,6 +247,7 @@ async fn scanner_startup_leaves_tasks_untouched_when_tasks_writer_is_external_ow
     let background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
         runtime,
         Some("REBUILD_INDEX"),
+        1,
     )
     .await;
 

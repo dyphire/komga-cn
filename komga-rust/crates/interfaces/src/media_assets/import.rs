@@ -340,7 +340,11 @@ mod tests {
                 log_file: PathBuf::from("/tmp/komga.log"),
                 config_dir: None,
                 bind_address: "127.0.0.1:0".parse().expect("bind address"),
+                configuration_bind_address: "127.0.0.1:0"
+                    .parse()
+                    .expect("configuration bind address"),
                 server_context_path: None,
+                configuration_server_context_path: None,
             },
             startup_timing: StartupTimingState::default(),
             http_server_requests: HttpServerRequestsState::default(),

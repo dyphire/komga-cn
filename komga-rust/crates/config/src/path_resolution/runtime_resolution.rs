@@ -233,6 +233,7 @@ pub(crate) fn resolve_with_env(
 
     let config = RuntimeConfig {
         bind_address,
+        configuration_bind_address: bind_address,
         mode,
         demo_mode,
         oauth2_account_creation,
@@ -240,7 +241,10 @@ pub(crate) fn resolve_with_env(
         runtime_profile,
         platform_profile,
         config_dir: Some(resolved_config_dir),
-        server_context_path: Some(server_context_path),
+        server_context_path: Some(server_context_path.clone()),
+        configuration_server_context_path: Some(server_context_path),
+        database_server_port: None,
+        database_server_context_path: None,
         log_file: derived_paths.log_file,
         database_file: derived_paths.database_file,
         tasks_db_file: derived_paths.tasks_db_file,
@@ -249,6 +253,7 @@ pub(crate) fn resolve_with_env(
         oauth2_clients,
         writer_ownership_policy,
         session_max_inactive_seconds,
+        task_pool_size: 1,
     };
 
     config.validate_single_writer_storage_ownership(env)?;

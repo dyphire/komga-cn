@@ -52,10 +52,12 @@ fn log_and_skip_if_main_db_unowned(component: &str, runtime: &TaskRuntimeContext
 pub async fn prepare_task_queue(
     config: impl TaskRuntimeConfig,
     startup_search_task: Option<&'static str>,
+    task_pool_size: usize,
 ) -> RuntimeBackgroundState {
     let runtime = config.task_runtime_context();
     let startup_task = startup_search_task.unwrap_or("");
     let mut task_queue = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-runtime-http");
+    task_queue.set_task_pool_size(task_pool_size);
     if runtime.consumes_queue {
         let _ = task_queue.disown_all().await;
     }

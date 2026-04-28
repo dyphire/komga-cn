@@ -7,7 +7,9 @@ use komga_config::env_config::RuntimeConfig;
 use komga_interfaces::state::{RuntimeProfile, StartupTimingState};
 
 pub async fn build_router() -> Router {
-    let config = RuntimeConfig::from_env().expect("invalid runtime config");
+    let config = crate::bootstrap::resolve_runtime_config_from_process_env()
+        .await
+        .expect("invalid runtime config");
     build_router_with_config(&config).await
 }
 
@@ -51,7 +53,9 @@ pub fn prepare_startup_search_task_for_contract(
 }
 
 pub async fn serve(listener: TcpListener) -> std::io::Result<()> {
-    let config = RuntimeConfig::from_env().expect("invalid runtime config");
+    let config = crate::bootstrap::resolve_runtime_config_from_process_env()
+        .await
+        .expect("invalid runtime config");
     serve_with_config(listener, config).await
 }
 

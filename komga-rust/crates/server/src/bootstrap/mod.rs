@@ -1,11 +1,15 @@
+use std::collections::BTreeMap;
 use std::time::Instant;
 use tokio::net::TcpListener;
 
 use crate::build_metadata::current_build_metadata;
 use crate::composition::start_server;
-use komga_config::env_config::RuntimeConfig;
+use komga_config::cli_args::RuntimeCli;
+use komga_config::env_config::{RuntimeConfig, RuntimeDatabaseSettings};
 use komga_config::profile::{RuntimeMode, RuntimeProfile};
 use komga_config::writer_ownership::{WriterDecision, WriterKind};
+use komga_infrastructure::operational_settings_access::load_server_settings;
+use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore;
 use komga_interfaces::state::StartupTimingState;
 
 pub mod admin_cli;
@@ -143,11 +147,14 @@ fn ensure_existing_admin_database(database_file: &std::path::Path) -> std::io::R
 }
 
 async fn run_server() {
-    let config = RuntimeConfig::from_env().expect("invalid runtime config");
-    crate::logging::init_global(&config).expect("failed to initialize logging");
-    validate_startup_schema_gate(&config)
+    let base_config = RuntimeConfig::from_env().expect("invalid runtime config");
+    crate::logging::init_global(&base_config).expect("failed to initialize logging");
+    validate_startup_schema_gate(&base_config)
         .await
         .expect("startup schema gate failed");
+    let config = resolve_runtime_config_with_database(base_config)
+        .await
+        .expect("failed to merge persisted runtime settings");
     noclaim_bootstrap::ensure_noclaim_initial_users(&config).await;
 
     let listener = TcpListener::bind(config.bind_address)
@@ -278,6 +285,63 @@ fn schema_gate_failure(
         "Startup schema gate failed",
     );
     std::io::Error::other(error_message)
+}
+
+pub(crate) async fn resolve_runtime_config_from_process_env() -> std::io::Result<RuntimeConfig> {
+    let base_config = RuntimeConfig::from_env()
+        .map_err(|error| std::io::Error::other(format!("invalid runtime config: {error}")))?;
+    validate_startup_schema_gate(&base_config).await?;
+    resolve_runtime_config_with_database(base_config).await
+}
+
+pub(crate) async fn resolve_runtime_config_with_database(
+    base_config: RuntimeConfig,
+) -> std::io::Result<RuntimeConfig> {
+    let database_settings = load_runtime_database_settings(&base_config).await?;
+    let cli = RuntimeCli::default();
+    let env = std::env::vars().collect::<BTreeMap<_, _>>();
+
+    RuntimeConfig::resolve_with_env_and_database(&cli, &env, database_settings)
+        .map_err(|error| std::io::Error::other(format!("invalid runtime config: {error}")))
+}
+
+async fn load_runtime_database_settings(
+    config: &RuntimeConfig,
+) -> std::io::Result<RuntimeDatabaseSettings> {
+    let store = ServerSettingsStore::new(config.database_file.clone());
+    let settings = load_server_settings(&store)
+        .await
+        .map_err(|error| std::io::Error::other(format!("load server settings: {error}")))?;
+
+    if let Some(server_context_path) = settings.server_context_path.as_deref()
+        && !server_context_path.is_empty()
+        && !is_valid_persisted_server_context_path(server_context_path)
+    {
+        tracing::warn!(
+            event = "startup_config",
+            setting = "SERVER_CONTEXT_PATH",
+            value = server_context_path,
+            outcome = "ignored",
+            "Ignoring invalid persisted server context path",
+        );
+    }
+
+    Ok(RuntimeDatabaseSettings {
+        server_port: settings.server_port,
+        server_context_path: settings.server_context_path,
+        task_pool_size: Some(settings.task_pool_size as usize),
+    })
+}
+
+fn is_valid_persisted_server_context_path(value: &str) -> bool {
+    if value.ends_with('/') {
+        return false;
+    }
+
+    value
+        .chars()
+        .all(|ch| ch == '/' || ch == '-' || ch == '_' || ch.is_ascii_alphanumeric())
+        && value.starts_with('/')
 }
 
 fn render_startup_banner(version: &str) -> String {

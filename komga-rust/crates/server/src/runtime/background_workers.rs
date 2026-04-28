@@ -23,6 +23,7 @@ pub async fn prepare_task_queue(
     komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
         crate::config::task_runtime_context(config),
         startup_search_task,
+        config.task_pool_size,
     )
     .await
 }

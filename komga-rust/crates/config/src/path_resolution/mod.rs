@@ -19,9 +19,10 @@ mod startup;
 pub(crate) use startup::{
     build_layered_config, default_home_config_dir, default_log_file_for_config_dir,
     ensure_runtime_directories, expand_path_placeholders, is_default_home_config_dir,
-    path_to_string, preferred_string, read_string, resolve_bind_address_and_context_path,
-    resolve_derived_runtime_paths, resolve_oauth2_clients_for_startup_slice,
-    resolve_writer_ownership_policy_for_startup_slice, validate_temp_directory,
+    is_valid_startup_context_path, path_to_string, preferred_string, read_string,
+    resolve_bind_address_and_context_path, resolve_derived_runtime_paths,
+    resolve_oauth2_clients_for_startup_slice, resolve_writer_ownership_policy_for_startup_slice,
+    validate_temp_directory,
 };
 
 pub(crate) fn resolve_runtime_config_with_env(

@@ -327,14 +327,14 @@ fn settings_json(runtime: &RuntimeState, settings: &OperationalSettings) -> Valu
         "thumbnailSize": settings.thumbnail_size,
         "taskPoolSize": settings.task_pool_size,
         "serverPort": multi_source_number(
-            Some(u64::from(runtime.bind_address.port())),
+            Some(u64::from(runtime.configuration_bind_address.port())),
             settings.server_port.map(u64::from),
-            effective_server_port(runtime, settings).map(u64::from),
+            effective_server_port(runtime).map(u64::from),
         ),
         "serverContextPath": multi_source_string(
-            runtime.server_context_path.as_deref(),
+            runtime.configuration_server_context_path.as_deref(),
             settings.server_context_path.as_deref(),
-            Some(effective_server_context_path(runtime, settings)),
+            Some(effective_server_context_path(runtime)),
         ),
         "kepubifyPath": multi_source_string(None, None, None),
         "koboProxy": settings.kobo_proxy,

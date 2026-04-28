@@ -136,6 +136,8 @@ async fn get_server_settings_returns_runtime_server_port_configuration_source() 
 
     let mut state = test_operational_state(database_file, fixture_root.clone());
     state.runtime.bind_address = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8081));
+    state.runtime.configuration_bind_address =
+        SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8081));
     let app = Arc::new(test_app_state(
         state,
         Box::new(FakeTaskQueueService { apply: |_| Ok(()) }),
@@ -157,7 +159,7 @@ async fn get_server_settings_returns_runtime_server_port_configuration_source() 
         Some(&json!({
             "configurationSource": 8081,
             "databaseSource": 9090,
-            "effectiveValue": 9090,
+            "effectiveValue": 8081,
         }))
     );
 
@@ -408,7 +410,9 @@ fn test_operational_state(database_file: PathBuf, fixture_root: PathBuf) -> Oper
             log_file: fixture_root.join("komga.log"),
             config_dir: Some(fixture_root.clone()),
             bind_address: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)),
+            configuration_bind_address: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)),
             server_context_path: None,
+            configuration_server_context_path: None,
         },
         startup_timing: StartupTimingState::default(),
         http_server_requests: HttpServerRequestsState::default(),

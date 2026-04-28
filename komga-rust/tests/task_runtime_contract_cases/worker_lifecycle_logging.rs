@@ -28,6 +28,7 @@ fn runtime_worker_spawns_log_started_and_shutdown_with_span_context() {
                     komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
                         runtime_task_context_from_config(&config),
                         None,
+                        1,
                     )
                     .await;
                 komga_infrastructure::task_queue::worker_runtime::spawn_runtime_workers(
@@ -98,6 +99,7 @@ fn runtime_workers_observe_shutdown_signal_before_runtime_teardown() {
                     komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
                         runtime_task_context_from_config(&config),
                         None,
+                        1,
                     )
                     .await;
                 let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);

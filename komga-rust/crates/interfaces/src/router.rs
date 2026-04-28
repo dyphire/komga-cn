@@ -1,5 +1,9 @@
 use axum::Router;
+use axum::extract::{Request, State};
+use axum::http::HeaderValue;
 use axum::middleware;
+use axum::middleware::Next;
+use axum::response::Response;
 use axum::routing::{delete, get, patch, post, put};
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
@@ -12,6 +16,8 @@ use crate::identity_access::device_auth;
 use crate::state::HttpAppState;
 
 pub fn build_router(app: HttpAppState) -> Router {
+    let runtime_context_path =
+        mounted_runtime_context_path(app.operational.runtime.server_context_path.as_deref());
     let app = Arc::new(app);
     let router = Router::new()
         .route(
@@ -689,7 +695,7 @@ pub fn build_router(app: HttpAppState) -> Router {
         router
     };
 
-    router
+    let router = router
         .route_layer(middleware::from_fn(cache::cache_workflow_middleware))
         .route_layer(middleware::from_fn_with_state(
             app.operational.http_server_requests.clone(),
@@ -702,7 +708,19 @@ pub fn build_router(app: HttpAppState) -> Router {
                 .on_response(access_log::on_response)
                 .on_failure(access_log::on_failure),
         )
-        .with_state(app)
+        .with_state(app);
+
+    if let Some(runtime_context_path) = runtime_context_path {
+        Router::new().nest(
+            runtime_context_path.as_str(),
+            router.layer(middleware::from_fn_with_state(
+                runtime_context_path.clone(),
+                inject_runtime_context_path,
+            )),
+        )
+    } else {
+        router
+    }
 }
 
 fn should_expose_actuator_default_contract() -> bool {
@@ -721,4 +739,27 @@ fn should_enable_dev_cors() -> bool {
                 .any(|profile| profile.eq_ignore_ascii_case("dev"))
         })
         .unwrap_or(false)
+}
+
+fn mounted_runtime_context_path(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "/")
+        .map(str::to_string)
+}
+
+async fn inject_runtime_context_path(
+    State(runtime_context_path): State<String>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    if !request.headers().contains_key("x-forwarded-prefix") {
+        let header_value = HeaderValue::from_str(runtime_context_path.as_str())
+            .expect("validated runtime context path should serialize as a header");
+        request
+            .headers_mut()
+            .insert("x-forwarded-prefix", header_value);
+    }
+
+    next.run(request).await
 }

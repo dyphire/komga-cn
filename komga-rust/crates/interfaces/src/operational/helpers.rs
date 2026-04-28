@@ -3,7 +3,6 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde_json::{Value, json};
 
-use super::super::OperationalSettings;
 use super::super::RuntimeState;
 
 pub(super) fn multi_source_number(
@@ -30,24 +29,12 @@ pub(super) fn multi_source_string(
     })
 }
 
-pub(super) fn effective_server_port(
-    runtime: &RuntimeState,
-    settings: &OperationalSettings,
-) -> Option<u16> {
-    settings
-        .server_port
-        .or_else(|| Some(runtime.bind_address.port()))
+pub(super) fn effective_server_port(runtime: &RuntimeState) -> Option<u16> {
+    Some(runtime.bind_address.port())
 }
 
-pub(super) fn effective_server_context_path(
-    runtime: &RuntimeState,
-    settings: &OperationalSettings,
-) -> String {
-    settings
-        .server_context_path
-        .clone()
-        .or_else(|| runtime.server_context_path.clone())
-        .unwrap_or_default()
+pub(super) fn effective_server_context_path(runtime: &RuntimeState) -> String {
+    runtime.server_context_path.clone().unwrap_or_default()
 }
 
 pub(super) fn invalid_settings_payload(message: &str) -> Response {

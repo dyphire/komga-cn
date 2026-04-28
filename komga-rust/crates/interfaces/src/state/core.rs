@@ -26,7 +26,9 @@ pub struct RuntimeState {
     pub log_file: PathBuf,
     pub config_dir: Option<PathBuf>,
     pub bind_address: SocketAddr,
+    pub configuration_bind_address: SocketAddr,
     pub server_context_path: Option<String>,
+    pub configuration_server_context_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]

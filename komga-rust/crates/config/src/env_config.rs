@@ -3,11 +3,11 @@ use std::env;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
-use super::cli_args::DEFAULT_BIND_ADDRESS;
+use super::cli_args::{ADDR_ENV, DEFAULT_BIND_ADDRESS, SERVER_CONTEXT_PATH_ENV, SERVER_PORT_ENV};
 use super::error::ConfigError;
 use super::path_resolution::{
-    default_log_file_for_config_dir, resolve_admin_action_config_with_env,
-    resolve_runtime_config_with_env,
+    default_log_file_for_config_dir, is_valid_startup_context_path, preferred_string,
+    resolve_admin_action_config_with_env, resolve_runtime_config_with_env,
 };
 use super::profile::{DEFAULT_CONFIG_DIR, PlatformProfile, RuntimeMode, RuntimeProfile};
 use super::startup_policy::{
@@ -32,6 +32,7 @@ pub struct OAuth2ClientConfig {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RuntimeConfig {
     pub bind_address: SocketAddr,
+    pub configuration_bind_address: SocketAddr,
     pub mode: RuntimeMode,
     pub demo_mode: bool,
     pub oauth2_account_creation: bool,
@@ -40,6 +41,9 @@ pub struct RuntimeConfig {
     pub platform_profile: PlatformProfile,
     pub config_dir: Option<PathBuf>,
     pub server_context_path: Option<String>,
+    pub configuration_server_context_path: Option<String>,
+    pub database_server_port: Option<u16>,
+    pub database_server_context_path: Option<String>,
     pub log_file: PathBuf,
     pub database_file: PathBuf,
     pub tasks_db_file: PathBuf,
@@ -48,6 +52,14 @@ pub struct RuntimeConfig {
     pub oauth2_clients: Vec<OAuth2ClientConfig>,
     pub writer_ownership_policy: WriterOwnershipPolicy,
     pub session_max_inactive_seconds: u64,
+    pub task_pool_size: usize,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RuntimeDatabaseSettings {
+    pub server_port: Option<u16>,
+    pub server_context_path: Option<String>,
+    pub task_pool_size: Option<usize>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -71,12 +83,44 @@ impl RuntimeConfig {
         resolve_runtime_config_with_env(cli, env)
     }
 
+    pub fn resolve_with_env_and_database(
+        cli: &super::cli_args::RuntimeCli,
+        env: &BTreeMap<String, String>,
+        database_settings: RuntimeDatabaseSettings,
+    ) -> Result<Self, ConfigError> {
+        let mut config = resolve_runtime_config_with_env(cli, env)?;
+        config.database_server_port = database_settings.server_port;
+        config.database_server_context_path = database_settings.server_context_path.clone();
+        config.task_pool_size = database_settings.task_pool_size.unwrap_or(1).max(1);
+
+        if !has_explicit_bind_address(cli, env) && !has_explicit_server_port(env) {
+            if let Some(server_port) = database_settings.server_port {
+                config.bind_address.set_port(server_port);
+            }
+        }
+
+        if !has_explicit_server_context_path(env) {
+            if let Some(server_context_path) = database_settings.server_context_path {
+                if is_valid_startup_context_path(server_context_path.as_str()) {
+                    config.server_context_path = Some(server_context_path);
+                }
+            }
+        }
+
+        config.validate_single_writer_storage_ownership(env)?;
+
+        Ok(config)
+    }
+
     pub fn for_runtime_profile(runtime_profile: RuntimeProfile) -> Self {
         let config_dir = PathBuf::from(DEFAULT_CONFIG_DIR);
+        let bind_address = DEFAULT_BIND_ADDRESS
+            .parse()
+            .expect("default bind address should parse");
+        let server_context_path = Some(String::new());
         Self {
-            bind_address: DEFAULT_BIND_ADDRESS
-                .parse()
-                .expect("default bind address should parse"),
+            bind_address,
+            configuration_bind_address: bind_address,
             mode: match runtime_profile {
                 RuntimeProfile::SnapshotAligned => RuntimeMode::Snapshot,
                 RuntimeProfile::LiveLocaldb => RuntimeMode::Localdb,
@@ -87,7 +131,10 @@ impl RuntimeConfig {
             runtime_profile,
             platform_profile: PlatformProfile::Default,
             config_dir: Some(config_dir.clone()),
-            server_context_path: Some(String::new()),
+            server_context_path: server_context_path.clone(),
+            configuration_server_context_path: server_context_path,
+            database_server_port: None,
+            database_server_context_path: None,
             log_file: default_log_file_for_config_dir(&config_dir),
             database_file: config_dir.join("database.sqlite"),
             tasks_db_file: config_dir.join("tasks.sqlite"),
@@ -99,6 +146,7 @@ impl RuntimeConfig {
                 allow_isolated_writes: false,
             },
             session_max_inactive_seconds: DEFAULT_SESSION_MAX_INACTIVE_SECONDS,
+            task_pool_size: 1,
         }
     }
 
@@ -108,6 +156,25 @@ impl RuntimeConfig {
     ) -> Result<(), ConfigError> {
         validate_single_writer_storage_ownership(self, env)
     }
+}
+
+fn has_explicit_bind_address(
+    cli: &super::cli_args::RuntimeCli,
+    env: &BTreeMap<String, String>,
+) -> bool {
+    preferred_string(
+        cli.address.as_deref(),
+        env.get(ADDR_ENV).map(String::as_str),
+    )
+    .is_some()
+}
+
+fn has_explicit_server_port(env: &BTreeMap<String, String>) -> bool {
+    preferred_string(None, env.get(SERVER_PORT_ENV).map(String::as_str)).is_some()
+}
+
+fn has_explicit_server_context_path(env: &BTreeMap<String, String>) -> bool {
+    preferred_string(None, env.get(SERVER_CONTEXT_PATH_ENV).map(String::as_str)).is_some()
 }
 
 impl AdminActionConfig {

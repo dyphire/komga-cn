@@ -491,3 +491,74 @@ fn canary_mode_accepts_non_default_writer_targets_during_startup_resolution() {
     assert_eq!(config.tasks_db_file, canary_root.join("tasks.sqlite"));
     assert_eq!(config.lucene_data_directory, canary_root.join("lucene"));
 }
+
+#[test]
+fn runtime_config_database_settings_override_file_defaults_but_not_env() {
+    let config_dir = unique_temp_dir("komga-runtime-db-settings-precedence");
+    let file_root = config_dir.join("from-file");
+    fs::create_dir_all(&config_dir).expect("test config directory should be created");
+
+    fs::write(
+        config_dir.join("application.yml"),
+        format!(
+            "server:\n  port: 28080\n  servlet:\n    context-path: /from-file\nkomga:\n  database:\n    file: {database}\n  tasks-db:\n    file: {tasks}\n  lucene:\n    data-directory: {lucene}\n  fonts:\n    data-directory: {fonts}\n",
+            database = file_root.join("database.sqlite").to_string_lossy(),
+            tasks = file_root.join("tasks.sqlite").to_string_lossy(),
+            lucene = file_root.join("lucene").to_string_lossy(),
+            fonts = file_root.join("fonts").to_string_lossy(),
+        ),
+    )
+    .expect("application.yml should be written");
+
+    let mut env = BTreeMap::new();
+    env.insert(
+        "KOMGA_CONFIG_DIR".to_string(),
+        config_dir.to_string_lossy().to_string(),
+    );
+
+    let config = komga_config::env_config::RuntimeConfig::resolve_with_env_and_database(
+        &komga_config::cli_args::RuntimeCli::default(),
+        &env,
+        komga_config::env_config::RuntimeDatabaseSettings {
+            server_port: Some(29090),
+            server_context_path: Some("/from-db".to_string()),
+            task_pool_size: Some(4),
+        },
+    )
+    .expect("runtime config should merge database settings");
+
+    assert_eq!(config.bind_address.port(), 29090);
+    assert_eq!(config.server_context_path.as_deref(), Some("/from-db"));
+    assert_eq!(config.task_pool_size, 4);
+    assert_eq!(config.configuration_bind_address.port(), 28080);
+    assert_eq!(
+        config.configuration_server_context_path.as_deref(),
+        Some("/from-file")
+    );
+    assert_eq!(config.database_server_port, Some(29090));
+    assert_eq!(
+        config.database_server_context_path.as_deref(),
+        Some("/from-db")
+    );
+
+    env.insert("SERVER_PORT".to_string(), "29191".to_string());
+    env.insert(
+        "SERVER_SERVLET_CONTEXT_PATH".to_string(),
+        "/from-env".to_string(),
+    );
+
+    let env_wins = komga_config::env_config::RuntimeConfig::resolve_with_env_and_database(
+        &komga_config::cli_args::RuntimeCli::default(),
+        &env,
+        komga_config::env_config::RuntimeDatabaseSettings {
+            server_port: Some(29090),
+            server_context_path: Some("/from-db".to_string()),
+            task_pool_size: Some(4),
+        },
+    )
+    .expect("env settings should override database settings");
+
+    assert_eq!(env_wins.bind_address.port(), 29191);
+    assert_eq!(env_wins.server_context_path.as_deref(), Some("/from-env"));
+    assert_eq!(env_wins.task_pool_size, 4);
+}

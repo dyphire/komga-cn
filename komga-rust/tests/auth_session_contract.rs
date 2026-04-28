@@ -70,6 +70,40 @@ async fn rotating_remember_me_key_invalidates_existing_cookie() {
 }
 
 #[tokio::test]
+async fn server_context_path_mounts_api_routes_under_runtime_prefix() {
+    let paths = new_router_fixture("router-server-context-path-mounts-api").await;
+    let mut config = runtime_config_for_paths(&paths);
+    config.server_context_path = Some("/komga".to_string());
+
+    let app = build_router_with_config(&config).await;
+
+    let prefixed_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/komga/api/v1/settings")
+                .body(Body::empty())
+                .expect("prefixed settings request should build"),
+        )
+        .await
+        .expect("prefixed settings request should complete");
+    assert_eq!(prefixed_response.status(), StatusCode::UNAUTHORIZED);
+
+    let bare_response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/settings")
+                .body(Body::empty())
+                .expect("bare settings request should build"),
+        )
+        .await
+        .expect("bare settings request should complete");
+    assert_eq!(bare_response.status(), StatusCode::NOT_FOUND);
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn password_change_invalidates_existing_remember_me_cookie() {
     koreader_activity_syncpoints::remember_me_lifecycle::verify_password_change_invalidates_existing_remember_me_cookie().await;
 }
