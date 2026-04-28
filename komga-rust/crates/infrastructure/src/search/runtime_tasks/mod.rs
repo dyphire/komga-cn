@@ -98,10 +98,15 @@ async fn try_apply_search_event(
     event: SearchEvent,
 ) -> Result<SearchEventAttempt, String> {
     match SearchIndexLifecycle::bootstrap(index_dir) {
-        Ok(index) => index
-            .apply_event(event)
-            .map(|()| SearchEventAttempt::Applied)
-            .map_err(|error| format!("failed to apply search event: {error}")),
+        Ok(index) => {
+            index
+                .apply_event(event)
+                .map_err(|error| format!("failed to apply search event: {error}"))?;
+            index
+                .shutdown()
+                .map_err(|error| format!("failed to finalize search event writer: {error}"))?;
+            Ok(SearchEventAttempt::Applied)
+        }
         Err(SearchError::CorruptedIndexRequiresExplicitRebuild(_, _)) => {
             Ok(SearchEventAttempt::RebuildRequired)
         }

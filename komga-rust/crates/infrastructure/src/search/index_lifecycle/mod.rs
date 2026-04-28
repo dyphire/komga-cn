@@ -405,6 +405,18 @@ impl SearchIndexLifecycle {
         })
     }
 
+    pub fn shutdown(self) -> Result<(), SearchError> {
+        // Tantivy's `Drop` joins indexing workers but does not wait for merge threads. On Windows
+        // we can otherwise return while segment file handles are still draining, and the next
+        // reopen/commit on the same directory can fail with `AccessDenied`.
+        let writer = self
+            .writer
+            .into_inner()
+            .map_err(|_| SearchError::WriterPoisoned)?;
+        writer.wait_merging_threads()?;
+        Ok(())
+    }
+
     pub fn rebuild(&self, docs: &[SearchDocument]) -> Result<(), SearchError> {
         let mut writer = self
             .writer

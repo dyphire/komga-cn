@@ -41,10 +41,13 @@ fn rebuild_index_with_documents(
     if let Some(entity_types) = &entity_types {
         index
             .rebuild_entities(entity_types, &docs)
-            .map_err(|error| format!("failed to rebuild scoped search index: {error}"))
+            .map_err(|error| format!("failed to rebuild scoped search index: {error}"))?;
     } else {
         index
             .rebuild(&docs)
-            .map_err(|error| format!("failed to rebuild search index: {error}"))
+            .map_err(|error| format!("failed to rebuild search index: {error}"))?;
     }
+    index
+        .shutdown()
+        .map_err(|error| format!("failed to finalize rebuilt search writer: {error}"))
 }
