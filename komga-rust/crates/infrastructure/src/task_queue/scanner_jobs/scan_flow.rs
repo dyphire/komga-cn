@@ -1,27 +1,26 @@
 use super::*;
 use komga_application::task_processing::{
     DefaultLibraryTaskEmitter, LibraryScanPipeline, ScanOneLibrary, ScanOneLibraryResult,
+    TaskRuntimeContext,
 };
 
-pub(super) fn try_execute(
-    scheduler: &mut TaskQueueScheduler,
-    runtime: &RuntimeConfig,
+pub(super) async fn try_execute(
+    runtime: &TaskRuntimeContext,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
-) -> Option<Result<(), TaskExecutionError>> {
+) -> Option<Result<TaskExecutionOutcome, TaskExecutionError>> {
     if task.simple_type != "SCAN_LIBRARY" {
         return None;
     }
 
-    Some(handle_scan_library(scheduler, runtime, task, task_target))
+    Some(handle_scan_library(runtime, task, task_target).await)
 }
 
-fn handle_scan_library(
-    scheduler: &mut TaskQueueScheduler,
-    runtime: &RuntimeConfig,
+async fn handle_scan_library(
+    runtime: &TaskRuntimeContext,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
-) -> Result<(), TaskExecutionError> {
+) -> Result<TaskExecutionOutcome, TaskExecutionError> {
     let library_id = task
         .payload
         .as_deref()
@@ -40,22 +39,21 @@ fn handle_scan_library(
         .and_then(parse_scan_library_payload_deep)
         .or_else(|| task_target.and_then(parse_scan_library_task_target_deep_scan))
         .unwrap_or(false);
-    let runtime_context = runtime.task_runtime_context();
-    let result = if !runtime_context.owns_filesystem_scan_output {
+    let result = if !runtime.owns_filesystem_scan_output {
         ScanOneLibraryResult::skipped_external_owned(library_id)
     } else {
         let pipeline = SqliteFilesystemLibraryScanPipeline::for_runtime(
-            &runtime_context,
+            runtime,
             DefaultLibraryTaskEmitter::default(),
         );
         pipeline
             .run(ScanOneLibrary::new(library_id, deep_scan))
+            .await
             .map_err(|error| TaskExecutionError::runtime(error.to_string()))?
     };
-    for follow_up_task in result.follow_up_tasks {
-        scheduler.enqueue(follow_up_task);
-    }
-    Ok(())
+    Ok(TaskExecutionOutcome::with_follow_up_tasks(
+        result.follow_up_tasks,
+    ))
 }
 
 fn parse_scan_library_payload_library_id(payload: &str) -> Option<String> {

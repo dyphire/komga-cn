@@ -26,7 +26,7 @@ async fn router_opds_v1_publishers_returns_atom_feed() {
     let paths = new_router_fixture("router-opds-v1-publishers-feed").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -108,7 +108,7 @@ async fn router_opds_v1_readlists_filters_out_of_scope_entries_sorts_by_name_and
         .expect("out-of-scope readlist book should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "library-user@example.org",
@@ -227,7 +227,7 @@ async fn router_opds_v1_collections_filters_out_of_scope_entries_sorts_by_name_a
     .expect("out-of-scope collection series should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "library-user@example.org",
@@ -293,7 +293,7 @@ async fn router_opds_v1_collections_keeps_empty_collection_for_all_library_user(
     .expect("empty collection should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -351,7 +351,7 @@ async fn router_opds_v1_collections_formats_sqlite_naive_updated_like_kotlin() {
         .format(&Rfc3339)
         .expect("expected OPDS updated timestamp should format");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -431,7 +431,7 @@ async fn router_opds_v1_collections_preserves_unicode_collation_order() {
     .expect("zulu collection series should insert for Unicode ordering test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -529,7 +529,7 @@ async fn router_opds_v1_collections_preserves_kotlin_tertiary_case_order() {
     .expect("third collection series should insert for tertiary case-order test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -576,7 +576,7 @@ async fn router_opds_v1_library_detail_orders_series_by_title_sort() {
     update_router_series_metadata_titles(&paths, "series-1", "Zeta Display", "Alpha Sort").await;
     update_router_series_metadata_titles(&paths, "series-2", "Alpha Display", "Zeta Sort").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -622,7 +622,7 @@ async fn router_opds_v1_library_detail_hides_age_restricted_series() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -673,7 +673,7 @@ async fn router_opds_v1_library_detail_paginates_after_restrictions_filtering() 
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -714,7 +714,7 @@ async fn router_opds_v1_publishers_preserves_unicode_collation_order() {
     seed_router_custom_series(&paths, "series-ang", "Series Å", "library-1").await;
     update_router_series_publisher(&paths, "series-ang", "Ångström Press").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

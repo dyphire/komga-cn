@@ -31,6 +31,7 @@ async fn scanner_scan_output_is_persisted_into_kotlin_compatible_library_series_
     );
 
     process_scan_library_task(fixture.config.clone(), "library-1", 900, false)
+        .await
         .expect("scan write-shape contract should persist scanner rows");
 
     let snapshot = load_persistence_snapshot(&fixture.paths.main_db, "library-1").await;
@@ -144,6 +145,7 @@ async fn scanner_scan_persistence_emits_scan_and_analyze_tasks_into_persisted_ru
     );
 
     process_scan_library_task(fixture.config.clone(), "library-1", 900, false)
+        .await
         .expect("task-emission contract should execute scan/analyze runtime flow");
 
     let content_snapshot = load_persistence_snapshot(&fixture.paths.main_db, "library-1").await;
@@ -164,9 +166,9 @@ async fn scanner_scan_persistence_emits_scan_and_analyze_tasks_into_persisted_ru
         "scanner-triggered runtime flow must execute analyze tasks and persist MEDIA status transitions",
     );
 
-    let scheduler = scheduler_for_config(&fixture.config);
+    let mut scheduler = scheduler_for_config(&fixture.config);
     assert!(
-        scheduler.count_by_simple_type().is_empty(),
+        scheduler.count_by_simple_type().await.is_empty(),
         "runtime queue should be drained after worker execution instead of leaving persisted pending rows",
     );
 
@@ -195,6 +197,7 @@ async fn pipeline_run_public_seam_keeps_runtime_follow_ups_ahead_of_sidecar_refr
     );
     let result = pipeline
         .run(ScanOneLibrary::new("library-1", false))
+        .await
         .expect("public pipeline run seam should execute scan orchestration");
 
     let follow_up_types = result
@@ -255,11 +258,12 @@ async fn scanner_persisted_rows_remain_visible_after_runtime_rebuild() {
     );
 
     process_scan_library_task(fixture.config.clone(), "library-1", 900, false)
+        .await
         .expect("restart contract should persist scanner rows before rebuild");
     let before_restart = load_persistence_snapshot(&fixture.paths.main_db, "library-1").await;
     let task_before_restart = load_task_snapshot(&fixture.paths.tasks_db).await;
     let media_ready_before_restart = load_media_ready_count(&fixture.paths.main_db).await;
-    let runtime_before_restart = scheduler_for_config(&fixture.config);
+    let mut runtime_before_restart = scheduler_for_config(&fixture.config);
 
     assert!(
         before_restart.series_rows >= 1
@@ -276,15 +280,18 @@ async fn scanner_persisted_rows_remain_visible_after_runtime_rebuild() {
         "restart contract requires analyze side effects before runtime rebuild",
     );
     assert!(
-        runtime_before_restart.count_by_simple_type().is_empty(),
+        runtime_before_restart
+            .count_by_simple_type()
+            .await
+            .is_empty(),
         "runtime pre-restart queue should be empty after worker completion",
     );
 
-    let _restarted_runtime = komga_server::app::build_router_with_config(&fixture.config);
+    let _restarted_runtime = komga_server::app::build_router_with_config(&fixture.config).await;
     let after_restart = load_persistence_snapshot(&fixture.paths.main_db, "library-1").await;
     let task_after_restart = load_task_snapshot(&fixture.paths.tasks_db).await;
     let media_ready_after_restart = load_media_ready_count(&fixture.paths.main_db).await;
-    let runtime_after_restart = scheduler_for_config(&fixture.config);
+    let mut runtime_after_restart = scheduler_for_config(&fixture.config);
 
     assert_eq!(
         after_restart, before_restart,
@@ -299,7 +306,10 @@ async fn scanner_persisted_rows_remain_visible_after_runtime_rebuild() {
         "analyze side effects must remain persisted across runtime rebuild",
     );
     assert!(
-        runtime_after_restart.count_by_simple_type().is_empty(),
+        runtime_after_restart
+            .count_by_simple_type()
+            .await
+            .is_empty(),
         "runtime post-restart queue should stay empty after persisted completion",
     );
 
@@ -325,6 +335,7 @@ async fn scanner_runtime_assigns_kotlin_like_natural_book_numbers_for_unmanaged_
     }
 
     process_scan_library_task(fixture.config.clone(), "library-1", 900, false)
+        .await
         .expect("natural-numbering contract should persist scanned rows");
 
     let pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)

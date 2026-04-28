@@ -19,7 +19,7 @@ async fn router_opds_v2_catalog_latest_series_skips_one_shots_before_limit() {
         .await;
     }
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -74,7 +74,7 @@ async fn router_opds_v2_catalog_latest_series_skips_one_shots_before_limit() {
 async fn router_opds_v2_latest_series_unauthorized_returns_opds_auth_document() {
     let paths = new_router_fixture("router-opds-v2-latest-series-unauthorized-auth-doc").await;
     seed_router_contract_data(&paths).await;
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     for route in [
         "/opds/v2/libraries/series/latest",
@@ -149,7 +149,7 @@ async fn router_opds_v2_latest_series_uses_kotlin_self_links() {
     let paths = new_router_fixture("router-opds-v2-latest-series-self-link").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for (route, expected_title, expected_self_href) in [
@@ -278,7 +278,7 @@ async fn router_opds_v2_latest_series_includes_page_metadata_and_filters_one_sho
         update_router_series_catalog_fields(&paths, &series_id, true, last_modified).await;
     }
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -367,7 +367,7 @@ async fn router_opds_v2_latest_series_hides_age_restricted_series_for_exclude_us
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted-series@example.org",

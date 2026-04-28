@@ -38,7 +38,7 @@ async fn router_kobo_state_update_proxies_missing_book_when_kobo_proxy_enabled()
     seed_admin_kobo_path_token(&paths).await;
     upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -97,7 +97,7 @@ async fn router_kobo_state_update_returns_not_found_for_missing_book_when_proxy_
     seed_router_contract_data(&paths).await;
     seed_admin_kobo_path_token(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -153,7 +153,7 @@ async fn router_kobo_state_update_uses_path_api_key_identity_for_valid_epub_upda
     .await;
     seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-state-user").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -236,7 +236,7 @@ async fn router_kobo_state_update_returns_failure_for_invalid_epub_progression()
     seed_admin_kobo_path_token(&paths).await;
     seed_kobo_state_epub_extension(&paths, fixture_epub_positions_extension_blob()).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -308,7 +308,7 @@ async fn router_kobo_state_update_uses_matched_epub_total_progression_for_page_a
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -387,7 +387,7 @@ async fn router_kobo_state_update_finished_uses_last_epub_position_semantics() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -490,7 +490,7 @@ async fn router_kobo_state_update_returns_failure_for_older_progression() {
     .expect("older progression row should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

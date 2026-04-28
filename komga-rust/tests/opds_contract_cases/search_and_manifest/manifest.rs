@@ -5,7 +5,7 @@ async fn router_opds_v2_manifest_sets_private_cache_and_supports_if_none_match()
     let paths = new_router_fixture("router-opds-v2-manifest-cache-headers").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let first_response = app
@@ -108,7 +108,7 @@ async fn router_opds_v2_manifest_dispatches_to_epub_profile_payload() {
         .expect("opds manifest epub extension should seed");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

@@ -5,7 +5,7 @@ async fn router_discovery_series_metadata_update_refreshes_series_last_modified(
     let paths = new_router_fixture("router-discovery-series-metadata-refresh").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let before_response = app
@@ -86,7 +86,7 @@ async fn router_discovery_series_metadata_update_supports_extended_field_coverag
     let paths = new_router_fixture("router-discovery-series-metadata-extended-fields").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let patch_response = app
@@ -243,7 +243,7 @@ async fn router_discovery_series_metadata_update_rejects_invalid_scalar_values()
     let paths = new_router_fixture("router-discovery-series-metadata-invalid-scalars").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for payload in [
@@ -280,7 +280,7 @@ async fn router_discovery_series_metadata_update_rejects_invalid_structured_valu
     let paths = new_router_fixture("router-discovery-series-metadata-invalid-structured").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for payload in [
@@ -331,7 +331,7 @@ async fn router_discovery_series_metadata_update_accepts_large_age_rating_within
     let paths = new_router_fixture("router-discovery-series-metadata-large-age-rating").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let patch_response = app
@@ -393,7 +393,7 @@ async fn router_discovery_series_metadata_update_clamps_legacy_numeric_values_to
     .expect("legacy numeric parity values should be written");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let patch_response = app

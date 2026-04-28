@@ -7,7 +7,7 @@ async fn router_kobo_ping_does_not_accept_web_auth_fallback_when_path_token_is_i
     let paths = new_router_fixture("router-kobo-ping-path-token-only-auth").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -42,7 +42,7 @@ async fn router_kobo_ping_rejects_path_tokens_with_characters_outside_kotlin_reg
     .await;
     seed_kobo_sync_api_key(&paths, "bad.token", "kobo-user").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -75,7 +75,7 @@ async fn router_kobo_ping_returns_forbidden_for_valid_token_without_kobo_sync_ro
     .await;
     seed_kobo_sync_api_key(&paths, "plain-kobo-token", "plain-user").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -119,7 +119,7 @@ async fn router_kobo_catch_all_returns_internal_error_for_non_json_upstream_body
     .await;
     seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-proxy-user").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -168,7 +168,7 @@ async fn router_kobo_catch_all_preserves_non_success_status_for_non_json_upstrea
     .await;
     seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-proxy-user").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -223,7 +223,7 @@ async fn router_kobo_catch_all_does_not_passthrough_error_body_or_kobo_headers()
     .await;
     seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-proxy-user").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -283,7 +283,7 @@ async fn router_kobo_catch_all_does_not_passthrough_json_error_body_or_kobo_head
     .await;
     seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-proxy-user").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -335,7 +335,7 @@ async fn router_kobo_catch_all_returns_internal_error_for_transport_failure() {
     .await;
     seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-proxy-user").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -380,7 +380,7 @@ async fn router_kobo_catch_all_preserves_success_status_for_empty_body() {
     .await;
     seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-proxy-user").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -427,7 +427,7 @@ async fn router_kobo_catch_all_put_returns_bad_request_for_invalid_json_body() {
     .await;
     seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-proxy-user").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -471,7 +471,7 @@ async fn router_kobo_catch_all_put_returns_unsupported_media_type_for_text_plain
     .await;
     seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-proxy-user").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -515,7 +515,7 @@ async fn router_kobo_catch_all_put_returns_bad_request_for_malformed_xml_body() 
     .await;
     seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-proxy-user").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -561,7 +561,7 @@ async fn router_kobo_catch_all_put_reserializes_json_request_body_before_proxyin
     .await;
     seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-proxy-user").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(

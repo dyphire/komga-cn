@@ -112,6 +112,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task() {
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .process_available(&runtime)
+        .await
         .expect("runtime should execute Kotlin persisted RefreshBookMetadata tasks successfully");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -209,16 +210,19 @@ async fn runtime_refresh_series_metadata_applies_oneshot_provider_fields() {
         ..runtime_task_context(&paths)
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new(
-            "REFRESH_SERIES_METADATA_series-oneshot",
-            1_000,
-            Some("series-oneshot".to_string()),
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new(
+                "REFRESH_SERIES_METADATA_series-oneshot",
+                1_000,
+                Some("series-oneshot".to_string()),
+            )
+            .with_simple_type("REFRESH_SERIES_METADATA"),
         )
-        .with_simple_type("REFRESH_SERIES_METADATA"),
-    );
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("oneshot refresh-series-metadata task should process successfully");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -308,7 +312,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task_with_defau
     let runtime = runtime_task_context(&paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime).await
         .expect("runtime should restore default RefreshBookMetadata capabilities for persisted Kotlin tasks");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -405,6 +409,7 @@ async fn runtime_executes_kotlin_persisted_repair_extension_task() {
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .process_available(&runtime)
+        .await
         .expect("runtime should execute Kotlin persisted RepairExtension tasks successfully");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)

@@ -24,7 +24,7 @@ async fn router_series_thumbnail_upload_parses_multipart_image_and_selected_flag
     let paths = new_router_fixture("router-series-thumbnail-upload-multipart").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
@@ -108,7 +108,7 @@ async fn router_series_thumbnail_upload_rejects_oneshot_series() {
         .expect("series oneshot flag should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
@@ -151,7 +151,7 @@ async fn router_series_thumbnail_select_marks_uploaded_thumbnail_selected() {
     let paths = new_router_fixture("router-series-thumbnail-select-success").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
@@ -248,7 +248,7 @@ async fn router_oneshot_series_thumbnail_falls_back_to_book_thumbnail() {
 
     seed_book_thumbnail_bytes(&paths, "thumb-book-1", "image/png", &png_bytes).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let response = app
         .oneshot(
@@ -308,7 +308,7 @@ async fn router_series_thumbnail_by_id_reads_sidecar_thumbnail_file() {
     .expect("series sidecar thumbnail row should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -368,7 +368,7 @@ async fn router_series_thumbnail_by_id_returns_internal_server_error_when_sideca
     .expect("series missing-sidecar thumbnail row should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -393,7 +393,7 @@ async fn router_series_thumbnail_by_id_allows_missing_path_series_for_unrestrict
     let paths = new_router_fixture("router-series-thumbnail-by-id-missing-path-series").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
@@ -469,7 +469,7 @@ async fn router_series_thumbnail_delete_rejects_non_user_uploaded_thumbnail() {
     .expect("generated series thumbnail row should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

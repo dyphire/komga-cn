@@ -14,7 +14,7 @@ async fn router_opds_v2_library_readlists_respect_kotlin_library_scope_statuses(
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -59,7 +59,7 @@ async fn router_opds_v2_readlists_use_kotlin_grouped_feed_shape() {
     seed_router_readlist(&paths, "readlist-0", "Alpha ReadList", "book-1").await;
     update_router_library_last_modified(&paths, "library-1", "2024-02-03 04:05:06").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for (route, expected_title, expected_self_href, expected_next_href, expected_modified) in [

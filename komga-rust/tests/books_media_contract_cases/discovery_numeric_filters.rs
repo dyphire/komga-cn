@@ -5,7 +5,7 @@ async fn router_discovery_books_list_supports_number_sort_ops_in_runtime_owned_m
     let paths = new_router_fixture("router-discovery-books-list-strict-number-sort").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let number_sort_is_match = app

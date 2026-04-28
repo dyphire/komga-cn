@@ -13,7 +13,7 @@ async fn router_users_delete_invalidates_target_users_existing_session() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
     let member_token = login_with_basic_credentials_and_get_token(
         app.clone(),
@@ -66,7 +66,7 @@ async fn router_non_admin_demo_mode_blocks_sensitive_me_endpoints() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_demo_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_demo_config_for_paths(&paths)).await;
     let member_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "member@example.org",
@@ -133,7 +133,7 @@ async fn router_users_update_expires_target_users_existing_session_when_restrict
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
     let member_token = login_with_basic_credentials_and_get_token(
         app.clone(),
@@ -190,7 +190,7 @@ async fn router_users_update_keeps_target_users_existing_session_when_effective_
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
     let member_token = login_with_basic_credentials_and_get_token(
         app.clone(),
@@ -280,7 +280,7 @@ async fn router_users_update_keeps_session_when_labels_only_change_case_or_overl
         .expect("user exclude label should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
     let member_token = login_with_basic_credentials_and_get_token(
         app.clone(),
@@ -353,7 +353,7 @@ async fn router_users_create_normalizes_content_restriction_labels() {
     let paths = new_router_fixture("router-users-create-normalizes-labels").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -441,7 +441,7 @@ async fn router_users_create_returns_kotlin_like_validation_violations() {
         let paths = new_router_fixture(fixture_name).await;
         seed_router_contract_data(&paths).await;
 
-        let app = build_router_with_config(&runtime_config_for_paths(&paths));
+        let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
         let admin_token = login_with_basic_and_get_token(app.clone()).await;
 
         let response = app
@@ -478,7 +478,7 @@ async fn router_users_create_returns_spring_error_envelope_for_duplicate_email()
     let paths = new_router_fixture("router-users-create-duplicate-email-envelope").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -538,7 +538,7 @@ async fn router_users_by_id_password_allows_self_update_without_expiring_current
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let member_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "member@example.org",
@@ -593,7 +593,7 @@ async fn router_password_endpoints_return_forbidden_in_demo_mode() {
     let paths = new_router_fixture("router-users-password-demo-forbidden").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_demo_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_demo_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for uri in [

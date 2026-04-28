@@ -6,7 +6,7 @@ async fn router_users_me_basic_auth_defaults_to_session_cookie_without_auth_toke
     let paths = new_router_fixture("router-users-me-basic-defaults-to-cookie").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let basic_token = STANDARD.encode("admin@example.org:router-contract-admin-123");
 
     let response = app
@@ -46,7 +46,7 @@ async fn router_users_me_basic_auth_defaults_to_session_cookie_without_auth_toke
 async fn router_claim_rejects_invalid_email_header() {
     let paths = new_router_fixture("router-claim-invalid-email-header").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -70,7 +70,7 @@ async fn router_claim_rejects_invalid_email_header() {
 async fn router_claim_returns_kotlin_already_claimed_message() {
     let paths = new_router_fixture("router-claim-already-claimed-message").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let first_response = app
         .clone()
@@ -121,7 +121,7 @@ pub(crate) async fn verify_login_set_cookie_returns_session_cookie_for_header_se
     let paths = new_router_fixture("router-login-set-cookie-session-header").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -153,7 +153,7 @@ async fn router_logout_post_clears_session_cookie() {
     let paths = new_router_fixture("router-logout-post-clears-session-cookie").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

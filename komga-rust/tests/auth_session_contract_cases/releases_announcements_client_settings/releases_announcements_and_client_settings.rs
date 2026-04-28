@@ -7,7 +7,7 @@ async fn router_put_announcements_deduplicates_duplicate_ids() {
     let paths = new_router_fixture("router-put-announcements-deduplicates-ids").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -47,7 +47,7 @@ async fn router_get_releases_returns_internal_error_when_upstream_fetch_fails() 
     let paths = new_router_fixture("router-get-releases-upstream-failure").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -84,7 +84,7 @@ async fn router_get_releases_returns_internal_error_for_non_array_payload() {
     let paths = new_router_fixture("router-get-releases-non-array-payload").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -129,7 +129,7 @@ async fn router_get_releases_returns_internal_error_for_non_success_status_with_
     let paths = new_router_fixture("router-get-releases-non-success-valid-array").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -170,7 +170,7 @@ async fn router_get_announcements_returns_internal_error_when_upstream_fetch_fai
     let paths = new_router_fixture("router-get-announcements-upstream-failure").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -212,7 +212,7 @@ async fn router_get_announcements_does_not_passthrough_unknown_feed_fields() {
     seed_router_contract_data(&paths).await;
     seed_announcement_read_ids(&paths, "admin-user", &["announcement-1"]).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -260,7 +260,7 @@ async fn router_get_announcements_returns_not_found_for_null_body_payload() {
     let paths = new_router_fixture("router-get-announcements-null-body").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -305,7 +305,7 @@ async fn router_get_announcements_returns_internal_error_for_invalid_date_modifi
     let paths = new_router_fixture("router-get-announcements-invalid-date-modified").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -350,7 +350,7 @@ async fn router_get_announcements_returns_internal_error_for_non_success_upstrea
     let paths = new_router_fixture("router-get-announcements-non-success-status").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -381,7 +381,7 @@ async fn router_client_settings_global_list_does_not_inject_missing_oauth_hide_l
     seed_router_contract_data(&paths).await;
     seed_global_client_setting(&paths, "public.setting", "public-value", true).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(

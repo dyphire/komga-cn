@@ -16,7 +16,7 @@ async fn router_delete_syncpoints_me_without_key_id_deletes_all_syncpoints_for_c
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -53,7 +53,7 @@ async fn router_delete_syncpoints_me_with_repeated_key_id_deletes_only_matching_
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -93,7 +93,7 @@ async fn router_delete_syncpoints_me_with_comma_delimited_single_key_id_deletes_
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -133,7 +133,7 @@ async fn router_delete_syncpoints_me_with_whitespace_only_single_key_id_does_not
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -179,7 +179,7 @@ async fn router_delete_syncpoints_me_without_key_id_deletes_syncpoint_child_rows
     seed_syncpoint_children(&paths, "sp-1").await;
     seed_syncpoint_children(&paths, "sp-2").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -227,7 +227,7 @@ async fn router_delete_syncpoints_me_with_key_id_deletes_syncpoint_child_rows_on
     seed_syncpoint_children(&paths, "sp-2").await;
     seed_syncpoint_children(&paths, "sp-3").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

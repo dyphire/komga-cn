@@ -25,9 +25,12 @@ async fn scanner_deep_scan_reanalyzes_changed_existing_books() {
 
     let runtime = runtime_task_context_from_config(&fixture.config);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .enqueue(scan_library_task("library-1", 900, false))
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("initial scan should analyze the seeded book successfully");
 
     let initial_page_size = load_media_page_file_size(&fixture.paths.main_db, &book_url).await;
@@ -41,9 +44,12 @@ async fn scanner_deep_scan_reanalyzes_changed_existing_books() {
         write_scannable_cbz_fixture(&book_path, b"page-after-deep-scan")
             .expect("updated scannable cbz fixture should be written");
 
-    scheduler.enqueue(scan_library_task("library-1", 900, true));
+    scheduler
+        .enqueue(scan_library_task("library-1", 900, true))
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("deep scan should complete successfully after the book archive changes");
 
     let updated_page_size = load_media_page_file_size(&fixture.paths.main_db, &book_url).await;
@@ -74,9 +80,12 @@ async fn scanner_oneshot_rescan_reuses_existing_series_id_when_book_url_changes(
 
     let runtime = runtime_task_context_from_config(&fixture.config);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .enqueue(scan_library_task("library-1", 900, false))
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("initial oneshot scan should complete successfully");
 
     let existing_book_url = existing_book_path.to_string_lossy().to_string();
@@ -95,9 +104,12 @@ async fn scanner_oneshot_rescan_reuses_existing_series_id_when_book_url_changes(
     )
     .await;
 
-    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .enqueue(scan_library_task("library-1", 900, false))
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("oneshot rescan should complete successfully after rename");
 
     let rescanned_series_id =
@@ -152,9 +164,12 @@ async fn scanner_scan_splits_configured_oneshots_directories_into_per_book_onesh
 
     let runtime = runtime_task_context_from_config(&fixture.config);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .enqueue(scan_library_task("library-1", 900, false))
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("scan should treat configured oneshots directories like Kotlin does");
 
     let pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)
@@ -286,6 +301,7 @@ async fn scanner_scan_skips_hidden_paths_and_kotlin_substring_exclusions() {
     replace_library_exclusions(&fixture.paths.main_db, "library-1", &["skip"]).await;
 
     process_scan_library_task(fixture.config.clone(), "library-1", 900, false)
+        .await
         .expect("hidden/exclusion scan should complete successfully");
 
     let pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)
@@ -337,9 +353,12 @@ async fn scanner_regular_scan_reanalyzes_changed_books_when_series_changed() {
 
         let runtime = runtime_task_context_from_config(&fixture.config);
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-        scheduler.enqueue(scan_library_task("library-1", 900, false));
+        scheduler
+            .enqueue(scan_library_task("library-1", 900, false))
+            .await;
         scheduler
             .process_available(&runtime)
+            .await
             .expect("initial scan should analyze seeded books successfully");
 
         if deleted_sibling {
@@ -384,9 +403,12 @@ async fn scanner_regular_scan_reanalyzes_changed_books_when_series_changed() {
                 .expect("book sidecar rewrite should bump series directory timestamp");
         }
 
-        scheduler.enqueue(scan_library_task("library-1", 900, false));
+        scheduler
+            .enqueue(scan_library_task("library-1", 900, false))
+            .await;
         scheduler
             .process_available(&runtime)
+            .await
             .expect("regular scan should complete successfully after seriesChanged trigger");
 
         let updated_page_size =
@@ -414,9 +436,12 @@ async fn scanner_rescan_reapplies_provider_numbering_after_kotlin_like_resort() 
 
     let runtime = runtime_task_context_from_config(&fixture.config);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .enqueue(scan_library_task("library-1", 900, false))
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("initial scan should apply provider numbering successfully");
 
     let initial_pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)
@@ -437,9 +462,12 @@ async fn scanner_rescan_reapplies_provider_numbering_after_kotlin_like_resort() 
     assert_eq!(initial.get::<f64, _>("METADATA_NUMBER_SORT"), 7.0_f64);
     initial_pool.close().await;
 
-    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .enqueue(scan_library_task("library-1", 900, false))
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("rescan should preserve provider numbering after Kotlin-like resort");
 
     let verify_pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)
@@ -471,6 +499,7 @@ async fn scanner_regular_rescan_skips_existing_book_when_series_timestamp_is_unc
         .expect("scanner rescan skip fixture should be created");
 
     process_scan_library_task(fixture.config.clone(), "library-1", 900, false)
+        .await
         .expect("rescan skip contract should seed initial persisted rows");
 
     let book_path = fixture.library_root.join("Series-A").join("Book-001.cbz");
@@ -488,9 +517,12 @@ async fn scanner_regular_rescan_skips_existing_book_when_series_timestamp_is_unc
 
     let runtime = runtime_task_context_from_config(&fixture.config);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .enqueue(scan_library_task("library-1", 900, false))
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("scanner rescan skip task should process successfully");
 
     let updated_size = load_book_file_size(&fixture.paths.main_db, &book_url).await;
@@ -522,6 +554,7 @@ async fn scanner_regular_oneshot_rescan_skips_metadata_refresh_follow_ups_when_r
     update_library_oneshots_directory(&fixture.paths.main_db, "library-1", Some("_oneshots")).await;
 
     process_scan_library_task(fixture.config.clone(), "library-1", 900, false)
+        .await
         .expect("initial oneshot scan should complete successfully");
 
     tokio::time::sleep(Duration::from_millis(1100)).await;
@@ -532,6 +565,7 @@ async fn scanner_regular_oneshot_rescan_skips_metadata_refresh_follow_ups_when_r
     );
     let result = pipeline
         .run(ScanOneLibrary::new("library-1", false))
+        .await
         .expect("unchanged oneshot rescan should complete successfully");
 
     let metadata_follow_ups = result
@@ -563,6 +597,7 @@ async fn scanner_regular_rescan_skips_sidecar_metadata_refresh_when_legacy_sidec
             .expect("scanner legacy sidecar timestamp fixture should be created");
 
     process_scan_library_task(fixture.config.clone(), "library-1", 900, false)
+        .await
         .expect("initial scan should persist the seeded sidecars successfully");
 
     let pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)
@@ -583,6 +618,7 @@ async fn scanner_regular_rescan_skips_sidecar_metadata_refresh_when_legacy_sidec
     );
     let result = pipeline
         .run(ScanOneLibrary::new("library-1", false))
+        .await
         .expect("unchanged rescan with legacy sidecar timestamps should complete successfully");
 
     let sidecar_metadata_follow_ups = result
@@ -613,9 +649,12 @@ async fn scanner_rescan_recreates_missing_metadata_seed_rows() {
 
     let runtime = runtime_task_context_from_config(&fixture.config);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .enqueue(scan_library_task("library-1", 900, false))
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("initial scan should create persisted metadata seeds");
 
     let pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)
@@ -645,9 +684,12 @@ async fn scanner_rescan_recreates_missing_metadata_seed_rows() {
     assert_eq!(broken_snapshot.book_metadata_rows, 0);
     assert_eq!(broken_snapshot.book_metadata_aggregation_rows, 0);
 
-    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .enqueue(scan_library_task("library-1", 900, false))
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("rescan should recreate missing metadata seed rows");
 
     let repaired_snapshot = load_persistence_snapshot(&fixture.paths.main_db, "library-1").await;
@@ -668,9 +710,12 @@ async fn scanner_rescan_soft_deletes_missing_series_and_deletes_stale_sidecar_ro
 
     let runtime = runtime_task_context_from_config(&fixture.config);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .enqueue(scan_library_task("library-1", 900, false))
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("initial scan should persist the seeded series before missing-series rescan");
 
     let initial_snapshot = load_persistence_snapshot(&fixture.paths.main_db, "library-1").await;
@@ -682,9 +727,12 @@ async fn scanner_rescan_soft_deletes_missing_series_and_deletes_stale_sidecar_ro
     fs::remove_dir_all(&series_dir)
         .expect("series directory should be removable for missing-series soft-delete contract");
 
-    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .enqueue(scan_library_task("library-1", 900, false))
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("rescan should soft-delete missing persisted series successfully");
 
     let pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)
@@ -773,9 +821,12 @@ async fn scanner_runtime_sse_scan_events_follow_kotlin_lifecycle_order() {
     let initial_cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
     let runtime = runtime_task_context_from_config(&fixture.config);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .enqueue(scan_library_task("library-1", 900, false))
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("initial scan should publish runtime SSE events successfully");
 
     let expected_series_id =
@@ -822,9 +873,12 @@ async fn scanner_runtime_sse_scan_events_follow_kotlin_lifecycle_order() {
     let rescan_cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
     fs::remove_dir_all(fixture.library_root.join("Series-A"))
         .expect("series directory should be removable for scanner SSE order contract");
-    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .enqueue(scan_library_task("library-1", 900, false))
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("missing-series rescan should publish runtime SSE events successfully");
 
     let (_, rescan_events) = komga_application::runtime_sse::pending_runtime_sse_events(
@@ -881,9 +935,12 @@ async fn scanner_runtime_sse_mixed_rescan_deletes_missing_items_before_adding_ne
 
     let runtime = runtime_task_context_from_config(&fixture.config);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .enqueue(scan_library_task("library-1", 900, false))
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("initial scan should seed scanner SSE mixed-order fixture successfully");
 
     let original_series_id =
@@ -901,9 +958,12 @@ async fn scanner_runtime_sse_mixed_rescan_deletes_missing_items_before_adding_ne
         .to_string();
 
     let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
-    scheduler.enqueue(scan_library_task("library-1", 900, false));
+    scheduler
+        .enqueue(scan_library_task("library-1", 900, false))
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("mixed rescan should publish runtime SSE events successfully");
 
     let renamed_series_id =

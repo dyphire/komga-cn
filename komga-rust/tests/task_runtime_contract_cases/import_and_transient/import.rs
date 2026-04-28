@@ -7,7 +7,8 @@ use std::sync::{Arc, Mutex};
 async fn enqueue_books_import(paths: &RuntimeDbPaths, payload: Value, context: &str) {
     // These route contracts assert the queued TASK rows themselves, so they must not race
     // the background worker that would claim and delete import jobs during the same test.
-    let app = build_router_without_runtime_workers_for_contract(&runtime_config_for_paths(paths));
+    let app =
+        build_router_without_runtime_workers_for_contract(&runtime_config_for_paths(paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -236,7 +237,8 @@ async fn router_books_import_accepts_missing_books_like_kotlin() {
 async fn router_books_import_reuses_kotlin_style_unique_id_for_duplicate_series_and_source() {
     let paths = new_router_fixture("router-books-import-deterministic-unique-id").await;
     seed_router_contract_data(&paths).await;
-    let app = build_router_without_runtime_workers_for_contract(&runtime_config_for_paths(&paths));
+    let app =
+        build_router_without_runtime_workers_for_contract(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let source = paths.config_dir.join("incoming-dedup.cbz");

@@ -5,6 +5,7 @@ use crate::{resolve_library_item_path, resolve_stored_path};
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
+use tokio::fs;
 
 static SKIPPED_EXTENSION_REPAIRS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
@@ -35,7 +36,7 @@ fn mark_extension_repair_skipped(cache_key: &str) {
         .insert(cache_key.to_string());
 }
 
-pub(in crate::task_queue) fn repair_extension(
+pub(in crate::task_queue) async fn repair_extension(
     runtime: &RuntimeConfig,
     book_id: &str,
 ) -> Result<(), TaskExecutionError> {
@@ -44,12 +45,13 @@ pub(in crate::task_queue) fn repair_extension(
     let skip_cache_key = skipped_extension_repair_key(database_file.as_path(), book_id);
 
     let Some(row) = load_book_for_extension_repair(database_file.as_path(), book_id)
+        .await
         .map_err(TaskExecutionError::runtime)?
     else {
         return Ok(());
     };
 
-    let flags = load_library_maintenance_flags(&runtime, &row.library_id)?;
+    let flags = load_library_maintenance_flags(&runtime, &row.library_id).await?;
     if !flags.repair_extensions {
         return Ok(());
     }
@@ -70,7 +72,7 @@ pub(in crate::task_queue) fn repair_extension(
 
     let resolved_library_root = resolve_stored_path(&library_root);
     let source_path = resolve_library_item_path(&library_root, &book_url);
-    if !source_path.exists() {
+    if fs::metadata(&source_path).await.is_err() {
         return Ok(());
     }
 
@@ -89,29 +91,34 @@ pub(in crate::task_queue) fn repair_extension(
     }
 
     let destination_path = source_path.with_extension(correct_extension);
-    if destination_path.exists() {
+    if fs::metadata(&destination_path).await.is_ok() {
         return Err(TaskExecutionError::runtime(format!(
             "failed to repair extension for '{book_id}': destination already exists '{}'",
             destination_path.display(),
         )));
     }
 
-    fs::rename(&source_path, &destination_path).map_err(|error| {
+    fs::rename(&source_path, &destination_path)
+        .await
+        .map_err(|error| {
+            TaskExecutionError::runtime(format!(
+                "failed to rename book file for extension repair '{}' -> '{}': {error}",
+                source_path.display(),
+                destination_path.display(),
+            ))
+        })?;
+
+    let destination_metadata = fs::metadata(&destination_path).await.map_err(|error| {
         TaskExecutionError::runtime(format!(
-            "failed to rename book file for extension repair '{}' -> '{}': {error}",
-            source_path.display(),
+            "failed to load repaired file metadata '{}' for '{}': {error}",
             destination_path.display(),
+            book_id,
         ))
     })?;
-
     let destination_url =
         normalize_library_relative_url(&resolved_library_root, &destination_path)?;
-    let file_size = fs::metadata(&destination_path)
-        .map(|metadata| metadata.len() as i64)
-        .unwrap_or_default();
-    let file_last_modified = fs::metadata(&destination_path)
-        .map(|metadata| metadata_updated_unix_seconds(&metadata))
-        .unwrap_or_default();
+    let file_size = destination_metadata.len() as i64;
+    let file_last_modified = metadata_updated_unix_seconds(&destination_metadata);
 
     let repair_result = persist_book_extension_repair(
         database_file.as_path(),
@@ -122,10 +129,11 @@ pub(in crate::task_queue) fn repair_extension(
         file_last_modified,
         file_size,
     )
+    .await
     .map_err(TaskExecutionError::runtime);
 
     if let Err(error) = repair_result {
-        let _ = fs::rename(&destination_path, &source_path);
+        let _ = fs::rename(&destination_path, &source_path).await;
         return Err(error);
     }
 
@@ -211,6 +219,7 @@ mod tests {
         let runtime = fixture.runtime_context(true, true);
 
         repair_extension(&runtime, "book-1")
+            .await
             .expect("first repair-extension call should skip EPUB-detected-as-ZIP cleanly");
 
         let pool = connect_test_pool(fixture.database_file.as_path(), 1)
@@ -225,6 +234,7 @@ mod tests {
         pool.close().await;
 
         repair_extension(&runtime, "book-1")
+            .await
             .expect("second repair-extension call should short-circuit previously skipped books");
 
         let verify_pool = connect_test_pool(fixture.database_file.as_path(), 1)
@@ -266,6 +276,7 @@ mod tests {
         let runtime = fixture.runtime_context(true, true);
 
         repair_extension(&runtime, "book-1")
+            .await
             .expect("first repair-extension call should ignore already-correct books cleanly");
 
         let pool = connect_test_pool(fixture.database_file.as_path(), 1)
@@ -285,6 +296,7 @@ mod tests {
         pool.close().await;
 
         repair_extension(&runtime, "book-1")
+            .await
             .expect("second repair-extension call should repair newly mismatched books");
 
         let verify_pool = connect_test_pool(fixture.database_file.as_path(), 1)
@@ -331,6 +343,7 @@ mod tests {
         let skipped_runtime = skipped_fixture.runtime_context(true, true);
 
         repair_extension(&skipped_runtime, "book-1")
+            .await
             .expect("first runtime should mark its epub-detected-as-zip book as skipped");
 
         let candidate_fixture = RuntimeTestFixture::new("repair-extensions-isolated-candidate");
@@ -353,6 +366,7 @@ mod tests {
         let candidate_runtime = candidate_fixture.runtime_context(true, true);
 
         repair_extension(&candidate_runtime, "book-1")
+            .await
             .expect("separate runtime database should still repair its own mismatched book");
 
         let verify_pool = connect_test_pool(candidate_fixture.database_file.as_path(), 1)

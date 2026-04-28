@@ -66,12 +66,12 @@ fn plan_startup_search_task(config: &RuntimeConfig) -> std::io::Result<StartupSe
     }
 }
 
-pub fn build_router_with_config(
+pub async fn build_router_with_config(
     config: &RuntimeConfig,
     startup_timing: StartupTimingState,
     startup_started_at: Instant,
 ) -> Router {
-    let background = prepare_task_queue(config, None);
+    let background = prepare_task_queue(config, None).await;
     let worker_runtime_guard = spawn_runtime_workers(
         background.task_queue.clone(),
         config.clone(),
@@ -91,12 +91,12 @@ pub fn build_router_with_config(
     )
 }
 
-pub fn build_router_without_runtime_workers(
+pub async fn build_router_without_runtime_workers(
     config: &RuntimeConfig,
     startup_timing: StartupTimingState,
     startup_started_at: Instant,
 ) -> Router {
-    let background = prepare_task_queue(config, None);
+    let background = prepare_task_queue(config, None).await;
     finalize_router_startup(
         compose_http_runtime(config, background, None, None, startup_timing.clone()),
         startup_timing,
@@ -116,7 +116,7 @@ pub async fn serve_with_config(
     let startup_search_task = startup_search_plan.startup_task;
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    let background = prepare_task_queue(&config, startup_search_task);
+    let background = prepare_task_queue(&config, startup_search_task).await;
     let worker_shutdown_rx = shutdown_rx.clone();
     let worker_runtime_guard = spawn_runtime_workers(
         background.task_queue.clone(),

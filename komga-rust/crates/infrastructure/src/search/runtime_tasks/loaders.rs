@@ -1,9 +1,27 @@
 use sqlx::Row;
 
-use super::db::{search_field, search_fields};
 use crate::search::index_lifecycle::{SearchDocument, SearchEntityType, SearchFieldEntry};
 
 const AUTHOR_ROLE_DELIMITER: &str = "::";
+
+fn search_field(field: &str, value: String) -> SearchFieldEntry {
+    SearchFieldEntry {
+        field: field.to_string(),
+        value,
+    }
+}
+
+fn search_fields(field: &str, values: String) -> Vec<SearchFieldEntry> {
+    values
+        .split('|')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| SearchFieldEntry {
+            field: field.to_string(),
+            value: value.to_string(),
+        })
+        .collect()
+}
 
 pub(super) async fn load_rebuild_search_documents(
     pool: sqlx::SqlitePool,

@@ -189,14 +189,14 @@ fn router_access_log_tracks_user_identity_and_redacts_sensitive_inputs() {
             .build()
             .expect("search webui access log auth runtime should build")
             .block_on(async {
-                let app = build_router_with_config(&config);
+                let app = build_router_with_config(&config).await;
                 login_with_basic_and_get_token(app).await
             });
         let (logs, response) = capture_router_logs_async_result(&config, {
             let config = config.clone();
             let auth_token = auth_token.clone();
             async move {
-                let app = build_router_with_config(&config);
+                let app = build_router_with_config(&config).await;
 
                 let request_body_marker = "super-secret-body-marker";
                 let response = app
@@ -277,7 +277,7 @@ fn router_access_log_tracks_user_identity_and_redacts_sensitive_inputs() {
         let (logs, response) = capture_router_logs_async_result(&config, {
             let config = config.clone();
             async move {
-                let app = build_router_with_config(&config);
+                let app = build_router_with_config(&config).await;
 
                 app.oneshot(
                     Request::builder()
@@ -453,14 +453,14 @@ fn router_access_log_tracks_first_byte_for_streaming_downloads_and_deferred_erro
             .build()
             .expect("search webui download access log auth runtime should build")
             .block_on(async {
-                let app = build_router_with_config(&config);
+                let app = build_router_with_config(&config).await;
                 login_with_basic_and_get_token(app).await
             });
         let (logs, response) = capture_router_logs_async_result(&config, {
             let config = config.clone();
             let auth_token = auth_token.clone();
             async move {
-                let app = build_router_with_config(&config);
+                let app = build_router_with_config(&config).await;
 
                 let response = app
                     .oneshot(
@@ -521,7 +521,7 @@ async fn router_discovery_books_list_webui_returns_book_contract_fields() {
     seed_router_contract_data(&paths).await;
     enrich_book_contract_fixture(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

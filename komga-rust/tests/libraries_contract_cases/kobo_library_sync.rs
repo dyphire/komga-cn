@@ -98,7 +98,7 @@ async fn router_kobo_library_sync_returns_nested_dto_shape_and_sync_token() {
     seed_router_contract_data(&paths).await;
     seed_admin_kobo_path_token(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let first_response = app
@@ -255,7 +255,7 @@ async fn router_kobo_library_sync_respects_shared_library_scope() {
         .expect("user role should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "kobo-library@example.org",
@@ -312,7 +312,7 @@ async fn router_kobo_library_sync_respects_age_restrictions() {
     .await;
     seed_kobo_sync_api_key(&paths, "any-token", "kobo-age-user").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "kobo-age@example.org",
@@ -355,7 +355,7 @@ async fn router_kobo_library_sync_excludes_regular_readlist_tags_without_ondeck(
     seed_router_contract_data(&paths).await;
     seed_admin_kobo_path_token(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -404,7 +404,7 @@ async fn router_kobo_library_sync_uses_series_read_date_for_ondeck_last_modified
     update_series_read_progress_date(&paths, "series-1", "admin-user", "2026-01-05T00:00:00Z")
         .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -471,7 +471,7 @@ async fn router_kobo_library_sync_persists_api_key_id_in_sync_point_state() {
     .await;
     seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-sync-user").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -507,7 +507,7 @@ async fn router_kobo_library_sync_uses_request_api_key_identity_when_session_aut
     .await;
     seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-sync-user").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "kobo-sync@example.org",
@@ -542,7 +542,7 @@ async fn router_kobo_library_sync_rejects_bare_base64_komga_tokens_as_invalid() 
     seed_router_contract_data(&paths).await;
     seed_admin_kobo_path_token(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let first_response = app
@@ -609,7 +609,7 @@ async fn router_kobo_library_sync_removed_book_matches_kotlin_placeholder_metada
     seed_router_contract_data(&paths).await;
     seed_admin_kobo_path_token(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let initial_response = app
@@ -732,7 +732,7 @@ async fn router_kobo_library_sync_does_not_backfill_missing_api_key_id_on_existi
         STANDARD_NO_PAD.encode(sync_token_payload.as_bytes())
     );
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let response = app
         .oneshot(
             Request::builder()

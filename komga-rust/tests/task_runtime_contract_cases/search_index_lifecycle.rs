@@ -14,9 +14,12 @@ async fn isolated_runtime_keeps_search_index_external_owned() {
 
     let runtime = runtime_task_context_from_config(&config);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(TaskQueueRecord::new("REBUILD_INDEX", 1_000, None));
+    scheduler
+        .enqueue(TaskQueueRecord::new("REBUILD_INDEX", 1_000, None))
+        .await;
     let processed = scheduler
         .process_available(&runtime)
+        .await
         .expect("isolated runtime should process queued tasks without task-execution failure");
     assert_eq!(
         processed, 1,
@@ -43,10 +46,13 @@ async fn runtime_executes_legacy_upgrade_index_task_as_compatibility_noop() {
 
     let runtime = runtime_task_context(&paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(TaskQueueRecord::new("UPGRADE_INDEX", 1_000, None));
+    scheduler
+        .enqueue(TaskQueueRecord::new("UPGRADE_INDEX", 1_000, None))
+        .await;
 
     let processed = scheduler
         .process_available(&runtime)
+        .await
         .expect("legacy upgrade index task should be consumed as a compatibility no-op");
     assert_eq!(
         processed, 1,
@@ -139,9 +145,12 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
     let config = runtime_config_for_paths(&paths);
     let runtime = runtime_task_context_from_config(&config);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(TaskQueueRecord::new("REBUILD_INDEX", 1_000, None));
+    scheduler
+        .enqueue(TaskQueueRecord::new("REBUILD_INDEX", 1_000, None))
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("rebuild index task should succeed for incremental sync contract");
 
     write_stale_analyzer_version_marker(config.lucene_data_directory.as_path());
@@ -161,19 +170,22 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
     .expect("oneshot series publisher should be updated");
     pool.close().await;
 
-    scheduler.enqueue(
-        TaskQueueRecord::new(
-            "REFRESH_SERIES_METADATA_series-oneshot",
-            1_000,
-            Some("series-oneshot".to_string()),
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new(
+                "REFRESH_SERIES_METADATA_series-oneshot",
+                1_000,
+                Some("series-oneshot".to_string()),
+            )
+            .with_simple_type("REFRESH_SERIES_METADATA"),
         )
-        .with_simple_type("REFRESH_SERIES_METADATA"),
-    );
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("refresh-series-metadata task should process for incremental sync contract");
 
-    let app = build_router_with_config(&config);
+    let app = build_router_with_config(&config).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let search_hits = |query: &str, entity_type: SearchEntityType| -> Vec<String> {
@@ -378,9 +390,12 @@ async fn runtime_refresh_book_metadata_upserts_readlist_search_document_after_co
     let config = runtime_config_for_paths(&paths);
     let runtime = runtime_task_context_from_config(&config);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(TaskQueueRecord::new("REBUILD_INDEX", 1_000, None));
+    scheduler
+        .enqueue(TaskQueueRecord::new("REBUILD_INDEX", 1_000, None))
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("initial rebuild index task should succeed for readlist search sync fixture");
 
     let search_hits = |query: &str, entity_type: SearchEntityType| -> Vec<String> {
@@ -440,25 +455,28 @@ async fn runtime_refresh_book_metadata_upserts_readlist_search_document_after_co
     .expect("book metadata sidecar row should be inserted for readlist search sync test");
     pool.close().await;
 
-    scheduler.enqueue(
-        TaskQueueRecord::new(
-            "REFRESH_BOOK_METADATA:book-1",
-            1_000,
-            Some("series-1".to_string()),
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new(
+                "REFRESH_BOOK_METADATA:book-1",
+                1_000,
+                Some("series-1".to_string()),
+            )
+            .with_payload(
+                json!({
+                    "bookId": "book-1",
+                    "capabilities": ["READ_LISTS"],
+                    "priority": 80,
+                    "groupId": "series-1",
+                    "uniqueId": "REFRESH_BOOK_METADATA_book-1"
+                })
+                .to_string(),
+            ),
         )
-        .with_payload(
-            json!({
-                "bookId": "book-1",
-                "capabilities": ["READ_LISTS"],
-                "priority": 80,
-                "groupId": "series-1",
-                "uniqueId": "REFRESH_BOOK_METADATA_book-1"
-            })
-            .to_string(),
-        ),
-    );
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("readlist-only metadata refresh should sync readlist search document");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -489,9 +507,12 @@ async fn runtime_rebuild_index_payload_can_scope_rebuild_to_selected_entities() 
     let config = runtime_config_for_paths(&paths);
     let runtime = runtime_task_context_from_config(&config);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(TaskQueueRecord::new("REBUILD_INDEX", 1_000, None));
+    scheduler
+        .enqueue(TaskQueueRecord::new("REBUILD_INDEX", 1_000, None))
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("initial rebuild index task should succeed for scoped rebuild fixture");
 
     let search_hits = |query: &str, entity_type: SearchEntityType| -> Vec<String> {
@@ -529,16 +550,19 @@ async fn runtime_rebuild_index_payload_can_scope_rebuild_to_selected_entities() 
         .expect("collection name should be updated for scoped rebuild fixture");
     pool.close().await;
 
-    scheduler.enqueue(
-        TaskQueueRecord::new("REBUILD_INDEX", 1_000, None).with_payload(
-            json!({
-                "entities": ["Collection"]
-            })
-            .to_string(),
-        ),
-    );
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new("REBUILD_INDEX", 1_000, None).with_payload(
+                json!({
+                    "entities": ["Collection"]
+                })
+                .to_string(),
+            ),
+        )
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("scoped rebuild index task should succeed");
 
     assert_eq!(
@@ -569,7 +593,7 @@ async fn runtime_delete_sync_recovers_from_analyzer_drift_before_removing_search
     seed_router_contract_data(&paths).await;
 
     let config = runtime_config_for_paths(&paths);
-    let app = build_router_with_config(&config);
+    let app = build_router_with_config(&config).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let create_collection_response = app

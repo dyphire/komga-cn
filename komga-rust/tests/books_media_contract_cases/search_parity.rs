@@ -37,7 +37,7 @@ async fn router_discovery_books_get_route_matches_paperback_compatibility_shape(
     let paths = new_router_fixture("router-discovery-books-get-paperback-compat").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths).await).await;
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
     let route = "/api/v1/books?page=0&size=20&search=Book%201&tag=Favorite&media_status=READY&read_status=UNREAD&released_after=2023-01-01&library_id=library-1";
@@ -106,7 +106,7 @@ async fn router_discovery_books_list_locks_main_search_parity_for_retained_input
     seed_router_authors_scope_variants(&paths).await;
     update_book_search_fixture_title(&paths, "book-2", "Book Book 2").await;
 
-    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths).await).await;
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
 
     let blank_ids = books_list_ids(&app, &admin_token, Some("relevance,desc"), Some("   ")).await;
@@ -169,7 +169,7 @@ async fn router_discovery_books_list_retains_accent_folded_and_cjk_recall() {
     seed_router_contract_data(&paths).await;
     update_book_search_fixture_title(&paths, "book-1", "Café 東京 Book 1").await;
 
-    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths).await).await;
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
 
     let accent_cjk_ids = books_list_ids(
@@ -193,7 +193,7 @@ async fn router_discovery_books_list_ignores_legacy_regex_search_body_input() {
     let paths = new_router_fixture("router-discovery-books-list-legacy-regex-search").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let baseline_ids = books_list_ids(&app, &auth_token, None, None).await;
 
@@ -231,7 +231,7 @@ async fn router_discovery_books_list_rejects_invalid_request_bodies() {
     let paths = new_router_fixture("router-discovery-books-list-invalid-bodies").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for (case, body) in [
@@ -252,7 +252,7 @@ async fn router_discovery_books_list_blank_full_text_search_does_not_report_rele
     let paths = new_router_fixture("router-discovery-books-list-blank-search-unsorted-meta").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -299,7 +299,7 @@ async fn router_discovery_books_list_marks_unsorted_page_shape_without_full_text
     let paths = new_router_fixture("router-discovery-books-list-unsorted-page-shape").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

@@ -5,7 +5,7 @@ async fn router_opds_v2_readlist_unauthorized_returns_opds_auth_document() {
     let paths = new_router_fixture("router-opds-v2-readlist-unauthorized-auth-doc").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -55,7 +55,7 @@ async fn router_opds_v2_readlist_returns_not_found_for_missing_or_out_of_scope_r
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -99,7 +99,7 @@ async fn router_opds_v2_readlist_keeps_books_without_sharing_labels() {
     seed_router_contract_data(&paths).await;
     clear_router_series_sharing_labels(&paths, "series-1").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -142,7 +142,7 @@ async fn router_opds_v2_readlist_uses_kotlin_shape_and_publications() {
     update_router_readlist_last_modified(&paths, "readlist-1", "2024-02-03 04:05:06").await;
     update_router_book_isbn(&paths, "book-1", "9780000000005").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

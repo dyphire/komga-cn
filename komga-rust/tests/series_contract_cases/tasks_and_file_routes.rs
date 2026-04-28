@@ -1,11 +1,12 @@
 use super::*;
 
-fn build_series_task_contract_router(paths: &RuntimeDbPaths) -> axum::Router {
+async fn build_series_task_contract_router(paths: &RuntimeDbPaths) -> axum::Router {
     // These contracts assert queued TASK rows themselves, so runtime workers must stay off or the
     // background consumer can claim and delete the rows before the assertions inspect them.
     komga_server::app::build_router_without_runtime_workers_for_contract(&runtime_config_for_paths(
         paths,
     ))
+    .await
 }
 
 #[tokio::test]
@@ -28,7 +29,7 @@ async fn router_series_media_assets_forbid_age_restricted_user() {
         br#"<html xmlns='http://www.w3.org/1999/xhtml'><body>Restricted</body></html>"#,
     );
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
     let restricted_token = login_with_basic_credentials_and_get_token(
         app.clone(),
@@ -147,7 +148,7 @@ async fn router_series_media_assets_and_progress_accept_basic_auth_like_kotlin_c
         br#"<html xmlns='http://www.w3.org/1999/xhtml'><body>Series Direct Auth</body></html>"#,
     );
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
@@ -249,7 +250,7 @@ async fn router_series_tachiyomi_missing_series_gets_zero_dto_and_put_is_noop() 
     let paths = new_router_fixture("router-series-tachiyomi-missing-series").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let get_response = app
@@ -330,7 +331,7 @@ async fn router_series_tachiyomi_progress_counts_deleted_books_like_kotlin() {
         .expect("series tachiyomi deleted-book row should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -381,7 +382,7 @@ async fn router_series_tachiyomi_progress_counts_completed_false_page_zero_as_in
     .expect("series tachiyomi page-zero read progress row should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -445,7 +446,7 @@ async fn router_series_tachiyomi_progress_refreshes_read_dates_when_marking_comp
     .expect("series read progress aggregate row should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -555,7 +556,7 @@ async fn router_series_tachiyomi_progress_refreshes_series_aggregate_for_page_ze
     .expect("page-zero in-progress row should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -615,7 +616,7 @@ async fn router_series_tachiyomi_progress_does_not_rewrite_already_completed_boo
     .expect("completed read progress row should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -660,7 +661,7 @@ async fn router_series_file_returns_empty_zip_when_all_series_files_are_missing(
     let paths = new_router_fixture("router-series-file-empty-zip").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -698,7 +699,7 @@ async fn router_series_file_delete_enqueues_delete_series_without_group_id() {
     let paths = new_router_fixture("router-series-file-delete-group-null").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_series_task_contract_router(&paths);
+    let app = build_series_task_contract_router(&paths).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -749,7 +750,7 @@ async fn router_series_analyze_enqueues_book_tasks_grouped_by_series_id() {
     let paths = new_router_fixture("router-series-analyze-group-series-id").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_series_task_contract_router(&paths);
+    let app = build_series_task_contract_router(&paths).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -790,7 +791,7 @@ async fn router_series_metadata_refresh_enqueues_kotlin_style_task_groups() {
     let paths = new_router_fixture("router-series-metadata-refresh-groups").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_series_task_contract_router(&paths);
+    let app = build_series_task_contract_router(&paths).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -866,7 +867,7 @@ async fn router_series_metadata_refresh_does_not_canonicalize_series_id() {
     seed_router_contract_data(&paths).await;
     seed_router_custom_series(&paths, "custom-series-2", "Series 2", "library-1").await;
 
-    let app = build_series_task_contract_router(&paths);
+    let app = build_series_task_contract_router(&paths).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

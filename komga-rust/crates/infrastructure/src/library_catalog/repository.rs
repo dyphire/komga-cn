@@ -119,6 +119,7 @@ impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
             self.database_file.as_path(),
             library_id,
         )
+        .await
         .map(|rows| {
             rows.into_iter()
                 .map(|row| (row.book_id, row.series_id))

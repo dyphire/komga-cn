@@ -12,7 +12,7 @@ async fn router_transient_books_scan_and_analyze_returns_non_placeholder_payload
     std::fs::write(&candidate_file, candidate_bytes)
         .expect("transient candidate file should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let scan_response = app
@@ -142,7 +142,7 @@ async fn router_transient_books_scan_returns_kotlin_style_tsid_ids() {
     std::fs::write(&candidate_file, b"transient-image-bytes")
         .expect("tsid transient candidate file should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let scan_response = app
@@ -193,7 +193,7 @@ async fn router_transient_books_scan_skips_hidden_files_and_directories_like_kot
     std::fs::write(hidden_dir.join("nested.jpg"), b"nested-image-bytes")
         .expect("nested hidden transient candidate should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let scan_response = app
@@ -239,7 +239,7 @@ async fn router_transient_books_rescan_generates_a_new_id_like_kotlin() {
     std::fs::write(&candidate_file, b"transient-image-bytes")
         .expect("rescan transient candidate file should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let first_scan_response = app
@@ -313,7 +313,7 @@ async fn router_transient_book_page_returns_not_found_for_missing_id_like_kotlin
     let paths = new_router_fixture("router-transient-page-missing-id").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -345,7 +345,7 @@ async fn router_transient_book_page_returns_not_found_with_message_when_media_no
     std::fs::write(&candidate_file, b"transient-image-bytes")
         .expect("not-ready transient candidate file should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let scan_response = app
@@ -398,7 +398,7 @@ async fn router_transient_book_page_returns_not_found_with_message_when_file_is_
     std::fs::write(&candidate_file, b"transient-image-bytes")
         .expect("file-missing transient candidate file should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let scan_response = app
@@ -466,7 +466,7 @@ async fn router_transient_book_page_returns_rendered_jpeg_for_pdf_like_kotlin() 
     let candidate_file = transient_dir.join("candidate.pdf");
     write_single_page_pdf_fixture(&candidate_file);
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let scan_response = app
@@ -538,7 +538,7 @@ async fn router_transient_book_analyze_returns_not_found_for_missing_id_like_kot
     let paths = new_router_fixture("router-transient-book-analyze-missing-id").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -570,7 +570,7 @@ async fn router_transient_book_analyze_returns_error_dto_when_file_is_missing_li
     std::fs::write(&candidate_file, b"transient-image-bytes")
         .expect("missing-file analyze candidate file should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let scan_response = app
@@ -637,7 +637,7 @@ async fn router_transient_book_analyze_returns_error_dto_for_broken_epub_like_ko
     let candidate_file = transient_dir.join("Series 1 7.epub");
     write_zip_as_epub(&candidate_file);
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let scan_response = app
@@ -710,7 +710,7 @@ async fn router_transient_book_analyze_uses_epub_series_metadata_but_not_epub_nu
         )],
     );
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let scan_response = app
@@ -808,7 +808,7 @@ async fn router_transient_book_analyze_uses_comicinfo_number_for_epub_like_kotli
         ],
     );
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let scan_response = app
@@ -873,7 +873,7 @@ async fn router_transient_book_page_returns_bad_request_for_out_of_bounds_non_di
         )],
     );
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let scan_response = app
@@ -950,7 +950,7 @@ async fn router_transient_book_page_returns_internal_error_for_supported_non_div
         &[("OEBPS/chapter.xhtml", chapter_html.as_bytes())],
     );
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let scan_response = app
@@ -1023,7 +1023,7 @@ async fn router_transient_book_analyze_uses_comicinfo_provider_metadata_like_kot
         ],
     );
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let scan_response = app
@@ -1089,7 +1089,7 @@ async fn router_transient_book_analyze_and_page_support_divina_compatible_epub_l
         ],
     );
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let scan_response = app
@@ -1173,7 +1173,7 @@ async fn router_transient_book_analyze_returns_dynamic_pdf_page_payload_like_kot
     let candidate_file = transient_dir.join("candidate.pdf");
     write_single_page_pdf_fixture(&candidate_file);
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let scan_response = app
@@ -1235,7 +1235,7 @@ async fn router_transient_books_rejects_paths_inside_existing_library_with_err_1
     let contained_dir = paths.config_dir.join("transient-contained");
     std::fs::create_dir_all(&contained_dir).expect("contained transient directory should exist");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -1279,7 +1279,7 @@ async fn router_transient_books_does_not_rebase_relative_paths_to_config_dir_lik
     std::fs::create_dir_all(&config_scoped_dir)
         .expect("config-scoped transient directory should exist");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

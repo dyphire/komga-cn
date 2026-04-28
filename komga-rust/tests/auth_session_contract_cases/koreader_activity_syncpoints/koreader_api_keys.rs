@@ -31,7 +31,7 @@ async fn router_koreader_user_auth_rejects_valid_x_auth_user_api_key_without_kor
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "member-no-koreader-sync@example.org",
@@ -84,7 +84,7 @@ async fn router_koreader_user_create_returns_unauthorized_for_invalid_x_auth_use
     let paths = new_router_fixture("router-koreader-user-create-invalid-auth-header").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -108,7 +108,7 @@ async fn router_koreader_user_create_ignores_invalid_x_api_key_for_koreader_auth
     let paths = new_router_fixture("router-koreader-user-create-invalid-x-api-key").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -132,7 +132,7 @@ async fn router_koreader_user_create_returns_forbidden_without_x_auth_user_or_se
     let paths = new_router_fixture("router-koreader-user-create-missing-header").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -172,7 +172,7 @@ async fn router_koreader_user_create_rejects_valid_x_auth_user_api_key_without_k
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "member-no-koreader-sync@example.org",
@@ -232,7 +232,7 @@ async fn router_koreader_user_create_returns_spring_forbidden_payload_when_creat
     let paths = new_router_fixture("router-koreader-user-create-disabled-spring-error").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let create_response = app
@@ -306,7 +306,7 @@ async fn router_koreader_user_auth_returns_forbidden_without_x_auth_user() {
     let paths = new_router_fixture("router-koreader-user-auth-missing-header").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -329,7 +329,7 @@ async fn router_koreader_user_auth_accepts_koreader_sync_session_without_x_auth_
     let paths = new_router_fixture("router-koreader-user-auth-session-success").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -355,7 +355,7 @@ async fn router_koreader_user_auth_rejects_empty_x_auth_user_even_with_koreader_
     let paths = new_router_fixture("router-koreader-user-auth-empty-header").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -381,7 +381,7 @@ async fn router_koreader_user_auth_accepts_valid_x_auth_user_api_key() {
     let paths = new_router_fixture("router-koreader-user-auth-valid-api-key").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let create_response = app
@@ -430,7 +430,7 @@ async fn router_koreader_user_auth_accepts_application_json_accept_header() {
     let paths = new_router_fixture("router-koreader-user-auth-application-json").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let create_response = app
@@ -487,7 +487,7 @@ async fn router_users_me_api_keys_create_and_list_expose_expected_fields() {
     let paths = new_router_fixture("router-users-me-api-keys-roundtrip-fields").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let create_response = app
@@ -602,7 +602,7 @@ async fn router_users_me_api_keys_delete_is_scoped_to_current_user() {
     let paths = new_router_fixture("router-users-me-api-keys-delete-scope").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let create_response = app

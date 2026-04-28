@@ -5,7 +5,7 @@ async fn router_readlist_thumbnail_upload_parses_multipart_image_and_selected_fl
     let paths = new_router_fixture("router-readlist-thumbnail-upload-multipart").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
@@ -127,7 +127,7 @@ async fn router_readlist_thumbnail_delete_removes_uploaded_thumbnail() {
     let paths = new_router_fixture("router-readlist-thumbnail-delete-success").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
@@ -192,7 +192,7 @@ async fn router_readlist_thumbnail_select_marks_uploaded_thumbnail_selected() {
     let paths = new_router_fixture("router-readlist-thumbnail-select-success").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
@@ -264,7 +264,7 @@ async fn router_readlist_thumbnail_select_returns_accepted_when_thumbnail_is_mis
     let paths = new_router_fixture("router-readlist-thumbnail-select-missing-thumbnail").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -289,7 +289,7 @@ async fn router_readlist_thumbnail_select_returns_not_found_when_path_readlist_m
     let paths = new_router_fixture("router-readlist-thumbnail-select-missing-path-readlist").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -314,7 +314,7 @@ async fn router_collection_thumbnail_upload_parses_multipart_image_and_selected_
     let paths = new_router_fixture("router-collection-thumbnail-upload-multipart").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
@@ -426,7 +426,7 @@ async fn router_collection_thumbnail_select_returns_not_found_when_path_collecti
         new_router_fixture("router-collection-thumbnail-select-missing-path-collection").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
@@ -478,7 +478,7 @@ async fn router_collection_thumbnail_select_returns_accepted_when_thumbnail_is_m
     let paths = new_router_fixture("router-collection-thumbnail-select-missing-thumbnail").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -503,7 +503,7 @@ async fn router_collection_delete_removes_persisted_thumbnails() {
     let paths = new_router_fixture("router-collection-delete-removes-thumbnails").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
@@ -560,7 +560,7 @@ async fn router_readlist_thumbnail_falls_back_to_dynamic_mosaic_when_no_persiste
     let paths = new_router_fixture("router-readlist-thumbnail-mosaic-fallback").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
@@ -634,7 +634,7 @@ async fn router_collection_thumbnails_allow_partially_visible_collection() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
     let restricted_token = login_with_basic_credentials_and_get_token(
         app.clone(),
@@ -690,7 +690,7 @@ async fn router_collection_thumbnail_falls_back_to_dynamic_mosaic_when_no_persis
     let paths = new_router_fixture("router-collection-thumbnail-mosaic-fallback").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =

@@ -125,12 +125,15 @@ async fn runtime_blocks_book_media_analysis_when_main_database_is_external_owned
         ..runtime_task_context(&paths)
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new("ANALYZE_BOOK_book-1", 1_000, Some("series-1".to_string()))
-            .with_simple_type("ANALYZE_BOOK"),
-    );
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new("ANALYZE_BOOK_book-1", 1_000, Some("series-1".to_string()))
+                .with_simple_type("ANALYZE_BOOK"),
+        )
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("blocked main-database analyze-book should still drain cleanly");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -217,13 +220,16 @@ async fn runtime_blocks_sidecar_metadata_refresh_when_sidecar_output_is_external
         ..runtime_task_context(&paths)
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(TaskQueueRecord::new(
-        "REFRESH_BOOK_METADATA:book-1",
-        1_000,
-        Some("book-1".to_string()),
-    ));
+    scheduler
+        .enqueue(TaskQueueRecord::new(
+            "REFRESH_BOOK_METADATA:book-1",
+            1_000,
+            Some("book-1".to_string()),
+        ))
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("blocked sidecar metadata refresh should still drain cleanly");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -277,16 +283,19 @@ async fn runtime_blocks_series_metadata_aggregation_when_main_database_is_extern
         ..runtime_task_context(&paths)
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new(
-            "AGGREGATE_SERIES_METADATA_series-1",
-            1_000,
-            Some("series-1".to_string()),
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new(
+                "AGGREGATE_SERIES_METADATA_series-1",
+                1_000,
+                Some("series-1".to_string()),
+            )
+            .with_simple_type("AGGREGATE_SERIES_METADATA"),
         )
-        .with_simple_type("AGGREGATE_SERIES_METADATA"),
-    );
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("blocked main-database aggregation should still drain cleanly");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -351,16 +360,19 @@ async fn runtime_blocks_empty_trash_cleanup_when_main_database_is_external_owned
         ..runtime_task_context(&paths)
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new(
-            "EMPTY_TRASH_library-1",
-            1_000,
-            Some("library-1".to_string()),
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new(
+                "EMPTY_TRASH_library-1",
+                1_000,
+                Some("library-1".to_string()),
+            )
+            .with_simple_type("EMPTY_TRASH"),
         )
-        .with_simple_type("EMPTY_TRASH"),
-    );
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("blocked main-database cleanup should still drain cleanly");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)

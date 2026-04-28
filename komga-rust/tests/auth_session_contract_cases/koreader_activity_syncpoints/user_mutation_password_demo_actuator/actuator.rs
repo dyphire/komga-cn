@@ -180,7 +180,7 @@ async fn router_actuator_root_exposes_spring_boot_style_discovery_links() {
     let paths = new_router_fixture("router-actuator-root-spring-boot-discovery-links").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -244,7 +244,7 @@ async fn router_actuator_root_returns_unauthorized_for_anonymous() {
     let paths = new_router_fixture("router-actuator-root-anonymous-unauthorized").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -275,7 +275,7 @@ async fn router_actuator_root_returns_forbidden_for_authenticated_non_admin() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "actuator-root-user@example.org",
@@ -306,7 +306,7 @@ async fn router_actuator_info_returns_build_and_os_metadata_for_admin() {
     let paths = new_router_fixture("router-actuator-info-build-and-os").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -412,7 +412,7 @@ async fn router_actuator_logfile_returns_unauthorized_for_anonymous() {
     let paths = new_router_fixture("router-actuator-logfile-anonymous-unauthorized").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -443,7 +443,7 @@ async fn router_actuator_logfile_returns_forbidden_for_authenticated_non_admin()
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "actuator-logfile-user@example.org",
@@ -484,7 +484,7 @@ async fn router_actuator_logfile_returns_plaintext_body_for_admin() {
     std::fs::write(&config.log_file, b"first line\nsecond line\n")
         .expect("actuator logfile fixture should be writable");
 
-    let app = build_router_with_config(&config);
+    let app = build_router_with_config(&config).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -551,7 +551,7 @@ fn router_access_log_skips_actuator_and_sse_noise_routes() {
                 &["USER", "ADMIN", "FILE_DOWNLOAD", "PAGE_STREAMING"],
             )
             .await;
-            let app = build_router_with_config(&config);
+            let app = build_router_with_config(&config).await;
             login_with_basic_credentials_and_get_token(
                 app,
                 "access-log-noise-admin@example.org",
@@ -564,7 +564,7 @@ fn router_access_log_skips_actuator_and_sse_noise_routes() {
         let config = config.clone();
         let auth_token = auth_token.clone();
         async move {
-            let app = build_router_with_config(&config);
+            let app = build_router_with_config(&config).await;
 
             let health = app
                 .clone()
@@ -670,7 +670,7 @@ async fn router_actuator_logfile_reads_current_active_file_after_rotation_compat
         .expect("second period write should succeed");
     writer.flush().expect("second period flush should succeed");
 
-    let app = build_router_with_config(&config);
+    let app = build_router_with_config(&config).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -721,7 +721,7 @@ async fn router_actuator_metrics_returns_unauthorized_for_anonymous() {
     let paths = new_router_fixture("router-actuator-metrics-anonymous-unauthorized").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -752,7 +752,7 @@ async fn router_actuator_metrics_returns_forbidden_for_authenticated_non_admin()
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "actuator-metrics-user@example.org",
@@ -782,7 +782,7 @@ async fn router_actuator_metrics_returns_metric_names_for_admin() {
     let paths = new_router_fixture("router-actuator-metrics-admin-names").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -842,7 +842,7 @@ async fn router_actuator_metric_detail_includes_base_unit_for_books_filesize() {
     let paths = new_router_fixture("router-actuator-metric-detail-base-unit").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -897,7 +897,7 @@ async fn router_actuator_metric_detail_uses_runtime_startup_timings_for_admin() 
     let paths = new_router_fixture("router-actuator-metric-detail-runtime-startup-timings").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let started_response = app
@@ -948,7 +948,7 @@ async fn router_actuator_metric_detail_uses_runtime_process_cpu_usage_for_admin(
     let paths = new_router_fixture("router-actuator-metric-detail-runtime-process-cpu").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -1000,7 +1000,7 @@ async fn router_actuator_metric_detail_exposes_datasource_tags_for_admin() {
         .await
         .expect("tasks shared sqlx pool with max=1 should open");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -1074,7 +1074,7 @@ async fn router_actuator_metric_detail_exposes_task_timer_shape_for_admin() {
     let paths = new_router_fixture("router-actuator-metric-detail-task-timer-shape").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -1122,7 +1122,7 @@ async fn router_actuator_metric_detail_exposes_task_failure_tags_for_admin() {
     let paths = new_router_fixture("router-actuator-metric-detail-task-failure-tags").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -1162,7 +1162,7 @@ async fn router_actuator_metric_detail_reflects_real_http_requests_for_admin() {
     let paths = new_router_fixture("router-actuator-metric-detail-real-http-requests").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let info_response = app
@@ -1250,7 +1250,7 @@ async fn router_actuator_metric_detail_returns_unauthorized_for_anonymous() {
     let paths = new_router_fixture("router-actuator-metric-detail-anonymous-unauthorized").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -1281,7 +1281,7 @@ async fn router_actuator_metric_detail_returns_forbidden_for_authenticated_non_a
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "actuator-metric-detail-user@example.org",
@@ -1311,7 +1311,7 @@ async fn router_actuator_health_is_public_and_hides_details_for_anonymous() {
     let paths = new_router_fixture("router-actuator-health-public-status-only").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -1348,7 +1348,7 @@ async fn router_actuator_health_hides_details_for_authenticated_non_admin() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "health-user@example.org",
@@ -1384,7 +1384,7 @@ async fn router_actuator_health_exposes_spring_style_components_for_admin() {
     let paths = new_router_fixture("router-actuator-health-admin-components").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -1411,7 +1411,7 @@ async fn router_actuator_health_exposes_details_for_admin_basic_auth_like_kotlin
     let paths = new_router_fixture("router-actuator-health-admin-basic-auth").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
 
@@ -1440,7 +1440,7 @@ async fn router_actuator_health_exposes_details_for_admin_api_key_like_kotlin() 
     seed_router_contract_data(&paths).await;
     seed_kobo_sync_api_key(&paths, "actuator-health-admin-api-key", "admin-user").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -1466,7 +1466,7 @@ async fn router_actuator_health_aggregates_down_when_database_file_is_missing() 
     let paths = new_router_fixture("router-actuator-health-down-when-db-missing").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     close_router_fixture_shared_pools(&paths).await;
     std::fs::remove_file(&paths.main_db).expect("main db should be removable for health down test");
@@ -1495,7 +1495,7 @@ async fn router_actuator_shutdown_requires_admin_authentication() {
     let paths = new_router_fixture("router-actuator-shutdown-auth").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -1527,7 +1527,7 @@ async fn router_actuator_shutdown_returns_ok_message_for_admin() {
     let paths = new_router_fixture("router-actuator-shutdown-admin-success").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

@@ -14,7 +14,7 @@ async fn router_opds_v1_collection_detail_returns_empty_feed_when_visible_page_i
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -70,7 +70,7 @@ async fn router_opds_v1_collection_detail_uses_collection_and_series_last_modifi
         .expect("series last modified should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -131,7 +131,7 @@ async fn router_opds_v1_collection_detail_orders_unordered_entries_by_title_sort
     .expect("first series collection number should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -200,7 +200,7 @@ async fn router_opds_v1_collection_detail_returns_not_found_when_collection_is_o
     .expect("library-scoped collection series should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "library-user@example.org",
@@ -239,7 +239,7 @@ async fn router_opds_v1_readlist_detail_returns_empty_feed_when_visible_page_is_
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -307,7 +307,7 @@ async fn router_opds_v1_readlist_detail_returns_not_found_when_readlist_is_outsi
         .expect("library-scoped readlist book should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "library-user@example.org",
@@ -377,7 +377,7 @@ async fn router_opds_v1_readlist_detail_orders_unordered_entries_by_release_date
         .expect("book-2 release date should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -430,7 +430,7 @@ async fn router_opds_v1_readlist_detail_uses_readlist_and_book_last_modified_tim
         .expect("book last modified should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -459,7 +459,7 @@ async fn router_opds_v1_readlist_detail_uses_kotlin_acquisition_entry_shape() {
     let paths = new_router_fixture("router-opds-v1-readlist-detail-entry-shape").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -523,7 +523,7 @@ async fn router_opds_v1_readlist_detail_filters_non_ready_books_without_turning_
         .expect("book-2 should be attached to readlist-1");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

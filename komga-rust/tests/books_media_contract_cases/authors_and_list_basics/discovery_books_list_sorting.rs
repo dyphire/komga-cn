@@ -6,7 +6,7 @@ async fn router_discovery_books_list_applies_default_sort_for_unknown_sort_mode_
     let paths = new_router_fixture("router-discovery-books-list-strict-sort-modes").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for sort in [
@@ -112,7 +112,7 @@ async fn router_discovery_books_list_sorts_runtime_owned_results_by_read_progres
     }
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for (sort, expected_ids) in [
@@ -207,7 +207,7 @@ async fn router_discovery_books_list_sorts_runtime_owned_results_by_number_serie
     }
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for (sort, expected_ids) in [

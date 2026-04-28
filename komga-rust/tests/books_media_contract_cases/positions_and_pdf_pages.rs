@@ -51,7 +51,7 @@ async fn router_book_pages_single_image_fallback_includes_dimensions() {
     std::fs::write(&image_path, fixture_png_bytes())
         .expect("single-image fixture should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -104,7 +104,7 @@ async fn router_book_positions_follow_direct_basic_auth_and_book_visibility() {
         .expect("epub positions extension should be seeded for positions auth test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let admin_response = app
         .clone()
@@ -202,7 +202,7 @@ async fn router_book_raw_page_returns_bad_request_with_message_for_non_pdf_media
     let image_bytes = fixture_png_bytes();
     std::fs::write(&image_path, &image_bytes).expect("single-image raw fixture should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -281,7 +281,7 @@ async fn router_book_raw_page_returns_bad_request_for_non_pdf_media_even_when_no
     std::fs::write(&image_path, fixture_png_bytes())
         .expect("single-image raw not-ready fixture should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -352,7 +352,7 @@ async fn router_book_raw_page_returns_bad_request_for_non_pdf_media_before_missi
     .expect("single-image raw missing-file metadata row should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -392,7 +392,7 @@ async fn router_book_pages_generated_pdf_fallback_matches_kotlin_page_shape() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -442,7 +442,7 @@ async fn router_book_page_returns_bad_request_with_message_for_missing_pdf_page_
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -482,7 +482,7 @@ async fn router_book_page_pdf_negotiation_returns_bad_request_with_message_for_m
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -512,7 +512,7 @@ async fn router_book_positions_returns_not_found_without_epub_extension_position
     let paths = new_router_fixture("router-book-positions-no-extension").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -538,7 +538,7 @@ async fn router_book_positions_does_not_return_not_modified_when_positions_are_m
     seed_router_contract_data(&paths).await;
     write_router_epub_with_cover(&paths, "books/book-1.epub");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -599,7 +599,7 @@ async fn router_book_progression_get_returns_full_r2_progression_shape() {
     .expect("read progress row for progression shape should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -672,7 +672,7 @@ async fn router_book_positions_returns_epub_extension_positions_and_supports_not
         .expect("epub extension positions should be seeded");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let initial = app
@@ -745,7 +745,7 @@ async fn router_book_pages_persisted_pdf_rows_match_kotlin_dynamic_page_shape() 
     .await;
     seed_router_persisted_pdf_page(&paths, "book-pdf-1", 1, "page-1.pdf", 612, 866, None).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

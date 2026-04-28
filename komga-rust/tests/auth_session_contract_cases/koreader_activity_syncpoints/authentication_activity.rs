@@ -31,7 +31,7 @@ async fn router_users_by_id_authentication_activity_latest_treats_blank_apikey_i
     .expect("authentication activity row should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -56,7 +56,7 @@ async fn router_users_by_id_authentication_activity_latest_matches_email_only_ac
     let paths = new_router_fixture("router-user-latest-auth-activity-email-fallback").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -114,7 +114,7 @@ async fn router_users_by_id_authentication_activity_latest_uses_connect_info_for
         new_router_fixture("router-user-latest-auth-activity-koreader-api-key-connect-info").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let create_response = app
@@ -202,7 +202,7 @@ async fn router_users_by_id_authentication_activity_latest_tracks_koreader_progr
     seed_router_contract_data(&paths).await;
     seed_router_read_progress(&paths, false).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let create_response = app
@@ -291,7 +291,7 @@ async fn router_users_me_authentication_activity_honors_page_and_date_time_sort(
     let paths = new_router_fixture("router-users-me-auth-activity-page-sort").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -368,7 +368,7 @@ async fn router_users_by_id_authentication_activity_latest_returns_successful_ko
     .await;
     seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-user").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "kobo@example.org",
@@ -423,7 +423,7 @@ async fn router_users_me_authentication_activity_includes_email_only_rows() {
     let paths = new_router_fixture("router-users-me-auth-activity-email-fallback").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -508,7 +508,7 @@ async fn router_users_me_basic_auth_records_forwarded_ip_and_user_agent() {
         .expect("existing auth activity rows should delete");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let basic_token = STANDARD.encode("admin@example.org:router-contract-admin-123");
 
     let response = app
@@ -553,7 +553,7 @@ async fn router_users_me_api_keys_list_api_key_auth_uses_connect_info_fallback()
     let paths = new_router_fixture("router-users-me-api-keys-list-connect-info").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let create_response = app
@@ -640,7 +640,7 @@ pub(crate) async fn verify_api_key_login_records_apikey_source_after_auth_refact
     let paths = new_router_fixture("router-api-key-login-records-kotlin-source").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let create_response = app
@@ -725,7 +725,7 @@ async fn router_users_authentication_activity_honors_unpaged_date_time_sort() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -801,7 +801,7 @@ async fn router_users_me_invalid_basic_auth_does_not_record_failure_activity_yet
         .expect("existing auth activity rows should delete");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let basic_token = STANDARD.encode("admin@example.org:wrong-password");
 
     let response = app

@@ -320,7 +320,7 @@ async fn router_discovery_books_ondeck_requires_auth() {
     let paths = new_router_fixture("router-discovery-books-ondeck-requires-auth").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let response = books_ondeck_response(&app, None, "/api/v1/books/ondeck").await;
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
@@ -344,7 +344,7 @@ async fn router_discovery_books_ondeck_returns_representative_book_detail_fields
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response =
@@ -401,7 +401,7 @@ async fn router_discovery_books_ondeck_accepts_basic_auth_like_kotlin_clients() 
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let response = app
         .oneshot(
             Request::builder()
@@ -465,7 +465,7 @@ async fn router_discovery_books_ondeck_honors_label_allow_restriction() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "label-allow@example.org",
@@ -495,7 +495,7 @@ async fn router_discovery_books_ondeck_filters_to_requested_library_ids() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let ids = books_ondeck_ids(
@@ -537,7 +537,7 @@ async fn router_discovery_books_ondeck_filters_to_authorized_library_intersectio
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "library-restricted@example.org",
@@ -587,7 +587,7 @@ async fn router_discovery_books_ondeck_hides_age_restricted_series() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -629,7 +629,7 @@ async fn router_discovery_books_ondeck_hides_allow_only_age_mismatch_series() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "allow-only@example.org",
@@ -671,7 +671,7 @@ async fn router_discovery_books_ondeck_hides_label_restricted_series() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "label-restricted@example.org",
@@ -711,7 +711,7 @@ async fn router_discovery_books_ondeck_orders_by_most_recent_read_date_desc() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let ids = books_ondeck_ids(&app, &auth_token, "/api/v1/books/ondeck?page=0&size=20").await;
@@ -746,7 +746,7 @@ async fn router_discovery_books_ondeck_equal_read_dates_match_kotlin_sql_order()
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let route_ids =
@@ -773,7 +773,7 @@ async fn router_discovery_books_ondeck_returns_first_unread_book_per_series() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let ids = books_ondeck_ids(&app, &auth_token, "/api/v1/books/ondeck?page=0&size=20").await;
@@ -821,7 +821,7 @@ async fn router_discovery_books_ondeck_excludes_series_with_in_progress_books() 
     .expect("ondeck in-progress series counters should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let ids = books_ondeck_ids(&app, &auth_token, "/api/v1/books/ondeck?page=0&size=20").await;

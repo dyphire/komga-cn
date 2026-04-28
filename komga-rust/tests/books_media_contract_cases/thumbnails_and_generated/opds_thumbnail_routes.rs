@@ -6,7 +6,7 @@ async fn router_opds_book_thumbnail_routes_convert_selected_png_to_jpeg() {
     seed_router_contract_data(&paths).await;
     seed_book_thumbnail_bytes(&paths, "thumb-book-1", "image/png", &fixture_png_bytes()).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for route in [
@@ -52,7 +52,7 @@ async fn router_opds_book_thumbnail_routes_convert_selected_png_to_jpeg() {
 async fn router_opds_v2_book_thumbnail_unauthorized_returns_opds_auth_document() {
     let paths = new_router_fixture("router-opds-v2-book-thumbnail-auth-doc").await;
     seed_router_contract_data(&paths).await;
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -95,7 +95,7 @@ async fn router_opds_v2_book_thumbnail_unauthorized_returns_opds_auth_document()
 async fn router_opds_v1_book_thumbnail_routes_unauthorized_include_basic_challenge() {
     let paths = new_router_fixture("router-opds-v1-book-thumbnail-basic-challenge").await;
     seed_router_contract_data(&paths).await;
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     for route in [
         "/opds/v1.2/books/book-1/thumbnail",
@@ -142,7 +142,7 @@ async fn router_opds_v1_book_thumbnail_small_resizes_selected_png_to_jpeg() {
     let large_png = distinct_png_bytes(640, 480, 0, 0, 255);
     seed_book_thumbnail_bytes(&paths, "thumb-book-1", "image/png", &large_png).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -220,6 +220,7 @@ async fn router_opds_v1_book_thumbnail_small_returns_selected_generated_thumbnai
     cleanup_pool.close().await;
 
     generate_book_thumbnail(paths.main_db.as_path(), "book-1")
+        .await
         .expect("generate_book_thumbnail should succeed before small generated test");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -244,7 +245,7 @@ async fn router_opds_v1_book_thumbnail_small_returns_selected_generated_thumbnai
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let small = app
@@ -302,7 +303,7 @@ async fn router_opds_v1_book_thumbnail_small_falls_back_to_original_bytes_when_r
     let invalid_png = b"not-a-real-png-thumbnail".to_vec();
     seed_book_thumbnail_bytes(&paths, "thumb-book-1", "image/png", &invalid_png).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -380,9 +381,10 @@ async fn router_opds_v2_book_thumbnail_ignores_mutated_generated_thumbnail_bytes
         cleanup_pool.close().await;
 
         generate_book_thumbnail(paths.main_db.as_path(), book_id)
+            .await
             .expect("generate_book_thumbnail should succeed before generated-source test");
 
-        let app = build_router_with_config(&runtime_config_for_paths(&paths));
+        let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
         let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
         let before = app

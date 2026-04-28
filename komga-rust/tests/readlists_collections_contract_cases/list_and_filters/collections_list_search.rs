@@ -7,7 +7,7 @@ async fn router_collections_supports_search_library_id_and_unpaged() {
     seed_router_contract_data(&paths).await;
     seed_collection_listing_variants(&paths).await;
 
-    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths).await).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -79,8 +79,8 @@ async fn router_collections_search_uses_index_relevance_order_like_kotlin() {
     .expect("collection-3 series membership should insert for collections search relevance seed");
     pool.close().await;
 
-    let config = search_ready_runtime_config_for_paths(&paths);
-    let app = build_router_with_config(&config);
+    let config = search_ready_runtime_config_for_paths(&paths).await;
+    let app = build_router_with_config(&config).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let expected_ids = SearchIndexLifecycle::bootstrap(config.lucene_data_directory.as_path())
@@ -128,13 +128,13 @@ async fn router_collections_missing_search_index_returns_empty_results_like_kotl
     seed_router_contract_data(&paths).await;
     seed_collection_listing_variants(&paths).await;
 
-    let config = search_ready_runtime_config_for_paths(&paths);
+    let config = search_ready_runtime_config_for_paths(&paths).await;
     if config.lucene_data_directory.exists() {
         std::fs::remove_dir_all(&config.lucene_data_directory)
             .expect("collections search index fixture should be removable");
     }
 
-    let app = build_router_with_config(&config);
+    let app = build_router_with_config(&config).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -209,7 +209,7 @@ async fn router_collections_default_name_order_and_filtered_flags_match_kotlin()
     );
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "library1@example.org",
@@ -306,7 +306,7 @@ async fn router_collections_default_name_order_uses_unicode_collation_like_kotli
     .expect("collection-4 membership should insert for collections unicode-order seed");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -356,7 +356,7 @@ async fn router_collections_library_id_does_not_filter_series_ids_for_all_librar
     seed_router_contract_data(&paths).await;
     seed_collection_series_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -440,8 +440,8 @@ async fn router_collections_search_does_not_drop_visible_hits_after_hidden_ranke
     );
     pool.close().await;
 
-    let config = search_ready_runtime_config_for_paths(&paths);
-    let app = build_router_with_config(&config);
+    let config = search_ready_runtime_config_for_paths(&paths).await;
+    let app = build_router_with_config(&config).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "library1@example.org",

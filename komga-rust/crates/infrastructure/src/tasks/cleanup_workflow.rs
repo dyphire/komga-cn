@@ -1,6 +1,6 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, Sqlite, SqlitePool};
 use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
 use crate::sql::task_queue::{EMPTY_TRASH_BOOK_DEPENDENCY_SQL, EMPTY_TRASH_SERIES_DEPENDENCY_SQL};
@@ -12,109 +12,111 @@ struct PersistedCleanupEmptySetsFlags {
     delete_readlists: bool,
 }
 
-pub fn empty_trash_rows(database_file: &Path, library_id: &str) -> Result<(), String> {
-    let database_file = database_file.to_path_buf();
-    let library_id = library_id.to_string();
+pub async fn empty_trash_rows(database_file: &Path, library_id: &str) -> Result<(), String> {
+    let pool = connect_private_write_pool(database_file)
+        .await
+        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| format!("failed to start empty-trash transaction: {error}"))?;
 
-    run_database_query(database_file, move |pool| {
-        let library_id = library_id.clone();
-        Box::pin(async move {
-            let mut tx = pool
-                .begin()
-                .await
-                .map_err(|error| format!("failed to start empty-trash transaction: {error}"))?;
-
-            let affected_series_ids = load_empty_trash_affected_series_ids(&mut tx, &library_id)
-                .await
-                .map_err(|error| {
-                    format!(
-                        "failed to load affected series for empty-trash library '{library_id}': {error}"
-                    )
-                })?;
-
-            for sql in EMPTY_TRASH_BOOK_DEPENDENCY_SQL {
-                sqlx::query(sql)
-                    .bind(&library_id)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|error| format!("failed to delete empty-trash dependent rows for library '{library_id}': {error}"))?;
-            }
-
-            sqlx::query(
-                r#"
-                DELETE FROM BOOK
-                WHERE LIBRARY_ID = ?
-                AND DELETED_DATE IS NOT NULL
-                "#,
+    let affected_series_ids = load_empty_trash_affected_series_ids(&mut tx, library_id)
+        .await
+        .map_err(|error| {
+            format!(
+                "failed to load affected series for empty-trash library '{library_id}': {error}"
             )
-            .bind(&library_id)
+        })?;
+
+    for sql in EMPTY_TRASH_BOOK_DEPENDENCY_SQL {
+        sqlx::query(sql)
+            .bind(library_id)
             .execute(&mut *tx)
             .await
             .map_err(|error| {
-                format!("failed to delete trashed BOOK rows for library '{library_id}': {error}")
-            })?;
-
-            sqlx::query(
-                r#"
-                UPDATE SERIES
-                SET BOOK_COUNT = (
-                SELECT COUNT(*)
-                FROM BOOK
-                WHERE BOOK.SERIES_ID = SERIES.ID
-                )
-                WHERE LIBRARY_ID = ?
-                "#,
-            )
-            .bind(&library_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| {
-                format!("failed to refresh SERIES book counts for library '{library_id}': {error}")
-            })?;
-
-            for sql in EMPTY_TRASH_SERIES_DEPENDENCY_SQL {
-                sqlx::query(sql)
-                    .bind(&library_id)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|error| format!("failed to delete empty-trash SERIES dependents for library '{library_id}': {error}"))?;
-            }
-
-            sqlx::query(
-                r#"
-                DELETE FROM SERIES
-                WHERE LIBRARY_ID = ?
-                AND DELETED_DATE IS NOT NULL
-                "#,
-            )
-            .bind(&library_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| {
-                format!("failed to delete trashed SERIES rows for library '{library_id}': {error}")
-            })?;
-
-            resort_empty_trash_affected_series(&mut tx, &affected_series_ids)
-                .await
-                .map_err(|error| {
-                    format!(
-                        "failed to resort affected series after empty-trash for library '{library_id}': {error}"
-                    )
-                })?;
-
-            tx.commit().await.map_err(|error| {
                 format!(
-                    "failed to commit empty-trash transaction for library '{library_id}': {error}"
+                    "failed to delete empty-trash dependent rows for library '{library_id}': {error}"
                 )
             })?;
+    }
 
-            Ok(())
-        })
-    })
+    sqlx::query(
+        r#"
+        DELETE FROM BOOK
+        WHERE LIBRARY_ID = ?
+        AND DELETED_DATE IS NOT NULL
+        "#,
+    )
+    .bind(library_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| {
+        format!("failed to delete trashed BOOK rows for library '{library_id}': {error}")
+    })?;
+
+    sqlx::query(
+        r#"
+        UPDATE SERIES
+        SET BOOK_COUNT = (
+        SELECT COUNT(*)
+        FROM BOOK
+        WHERE BOOK.SERIES_ID = SERIES.ID
+        )
+        WHERE LIBRARY_ID = ?
+        "#,
+    )
+    .bind(library_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| {
+        format!("failed to refresh SERIES book counts for library '{library_id}': {error}")
+    })?;
+
+    for sql in EMPTY_TRASH_SERIES_DEPENDENCY_SQL {
+        sqlx::query(sql)
+            .bind(library_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| {
+                format!(
+                    "failed to delete empty-trash SERIES dependents for library '{library_id}': {error}"
+                )
+            })?;
+    }
+
+    sqlx::query(
+        r#"
+        DELETE FROM SERIES
+        WHERE LIBRARY_ID = ?
+        AND DELETED_DATE IS NOT NULL
+        "#,
+    )
+    .bind(library_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| {
+        format!("failed to delete trashed SERIES rows for library '{library_id}': {error}")
+    })?;
+
+    resort_empty_trash_affected_series(&mut tx, &affected_series_ids)
+        .await
+        .map_err(|error| {
+            format!(
+                "failed to resort affected series after empty-trash for library '{library_id}': {error}"
+            )
+        })?;
+
+    tx.commit().await.map_err(|error| {
+        format!("failed to commit empty-trash transaction for library '{library_id}': {error}")
+    })?;
+    pool.close().await;
+
+    Ok(())
 }
 
 async fn load_empty_trash_affected_series_ids(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
     library_id: &str,
 ) -> Result<Vec<String>, String> {
     let rows = sqlx::query(
@@ -138,7 +140,7 @@ async fn load_empty_trash_affected_series_ids(
 }
 
 async fn resort_empty_trash_affected_series(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
     series_ids: &[String],
 ) -> Result<(), String> {
     for series_id in series_ids {
@@ -323,48 +325,46 @@ fn trim_leading_zeroes(bytes: &[u8]) -> &[u8] {
     }
 }
 
-pub fn cleanup_empty_sets_rows(database_file: &Path) -> Result<(), String> {
-    let database_file = database_file.to_path_buf();
+pub async fn cleanup_empty_sets_rows(database_file: &Path) -> Result<(), String> {
+    let pool = connect_private_write_pool(database_file)
+        .await
+        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
+    let flags = load_cleanup_empty_sets_flags_from_pool(&pool).await?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| format!("failed to start cleanup-empty-sets transaction: {error}"))?;
 
-    run_database_query(database_file, move |pool| {
-        Box::pin(async move {
-            let flags = load_cleanup_empty_sets_flags_from_pool(&pool).await?;
-            let mut tx = pool.begin().await.map_err(|error| {
-                format!("failed to start cleanup-empty-sets transaction: {error}")
-            })?;
+    let mut deletes = Vec::<&str>::new();
+    if flags.delete_collections {
+        deletes.push(
+            "DELETE FROM THUMBNAIL_COLLECTION WHERE COLLECTION_ID IN (SELECT ID FROM COLLECTION WHERE ID NOT IN (SELECT COLLECTION_ID FROM COLLECTION_SERIES))",
+        );
+        deletes.push(
+            "DELETE FROM COLLECTION WHERE ID NOT IN (SELECT COLLECTION_ID FROM COLLECTION_SERIES)",
+        );
+    }
+    if flags.delete_readlists {
+        deletes.push(
+            "DELETE FROM THUMBNAIL_READLIST WHERE READLIST_ID IN (SELECT ID FROM READLIST WHERE ID NOT IN (SELECT READLIST_ID FROM READLIST_BOOK))",
+        );
+        deletes
+            .push("DELETE FROM READLIST WHERE ID NOT IN (SELECT READLIST_ID FROM READLIST_BOOK)");
+    }
 
-            let mut deletes = Vec::<&str>::new();
-            if flags.delete_collections {
-                deletes.push(
-                    "DELETE FROM THUMBNAIL_COLLECTION WHERE COLLECTION_ID IN (SELECT ID FROM COLLECTION WHERE ID NOT IN (SELECT COLLECTION_ID FROM COLLECTION_SERIES))",
-                );
-                deletes.push(
-                    "DELETE FROM COLLECTION WHERE ID NOT IN (SELECT COLLECTION_ID FROM COLLECTION_SERIES)",
-                );
-            }
-            if flags.delete_readlists {
-                deletes.push(
-                    "DELETE FROM THUMBNAIL_READLIST WHERE READLIST_ID IN (SELECT ID FROM READLIST WHERE ID NOT IN (SELECT READLIST_ID FROM READLIST_BOOK))",
-                );
-                deletes.push(
-                    "DELETE FROM READLIST WHERE ID NOT IN (SELECT READLIST_ID FROM READLIST_BOOK)",
-                );
-            }
+    for sql in deletes {
+        sqlx::query(sql)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| format!("failed to cleanup empty sets rows: {error}"))?;
+    }
 
-            for sql in deletes {
-                sqlx::query(sql)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|error| format!("failed to cleanup empty sets rows: {error}"))?;
-            }
+    tx.commit()
+        .await
+        .map_err(|error| format!("failed to commit cleanup-empty-sets transaction: {error}"))?;
+    pool.close().await;
 
-            tx.commit().await.map_err(|error| {
-                format!("failed to commit cleanup-empty-sets transaction: {error}")
-            })?;
-
-            Ok(())
-        })
-    })
+    Ok(())
 }
 
 async fn load_cleanup_empty_sets_flags_from_pool(
@@ -401,28 +401,4 @@ async fn load_cleanup_empty_sets_flags_from_pool(
         delete_collections,
         delete_readlists,
     })
-}
-
-type BoxFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, String>> + Send>>;
-
-fn run_database_query<T>(
-    database_file: PathBuf,
-    operation: impl FnOnce(SqlitePool) -> BoxFuture<T> + Send + 'static,
-) -> Result<T, String>
-where
-    T: Send + 'static,
-{
-    std::thread::spawn(move || {
-        let runtime = crate::tokio_runtime::current_thread_runtime()
-            .map_err(|error| format!("failed to build task runtime: {error}"))?;
-
-        runtime.block_on(async move {
-            let pool = connect_private_write_pool(&database_file)
-                .await
-                .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
-            operation(pool).await
-        })
-    })
-    .join()
-    .map_err(|_| "database operation worker thread panicked".to_string())?
 }

@@ -17,13 +17,16 @@ async fn runtime_blocks_book_thumbnail_generation_when_main_database_is_external
         ..runtime_task_context(&paths)
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(TaskQueueRecord::new(
-        "GENERATE_BOOK_THUMBNAIL:book-1",
-        1_000,
-        Some("book-1".to_string()),
-    ));
+    scheduler
+        .enqueue(TaskQueueRecord::new(
+            "GENERATE_BOOK_THUMBNAIL:book-1",
+            1_000,
+            Some("book-1".to_string()),
+        ))
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("blocked main-database thumbnail generation should still drain cleanly");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -58,12 +61,15 @@ async fn runtime_generate_book_thumbnail_replaces_invalid_selected_thumbnail_wit
 
     let runtime = runtime_task_context(&paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new("GENERATE_BOOK_THUMBNAIL_book-1", 1_000, None)
-            .with_simple_type("GENERATE_BOOK_THUMBNAIL"),
-    );
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new("GENERATE_BOOK_THUMBNAIL_book-1", 1_000, None)
+                .with_simple_type("GENERATE_BOOK_THUMBNAIL"),
+        )
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("generate-book-thumbnail task should replace invalid selected thumbnail cleanly");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)

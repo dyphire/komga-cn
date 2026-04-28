@@ -37,12 +37,14 @@ async fn runtime_skips_book_local_artwork_refresh_when_library_import_local_artw
 
     let runtime = runtime_task_context(&paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(TaskQueueRecord::new(
-        "REFRESH_BOOK_LOCAL_ARTWORK:book-1",
-        1_000,
-        Some("book-1".to_string()),
-    ));
-    scheduler.process_available(&runtime).expect(
+    scheduler
+        .enqueue(TaskQueueRecord::new(
+            "REFRESH_BOOK_LOCAL_ARTWORK:book-1",
+            1_000,
+            Some("book-1".to_string()),
+        ))
+        .await;
+    scheduler.process_available(&runtime).await.expect(
         "book local artwork refresh should skip cleanly when library.importLocalArtwork is disabled",
     );
 
@@ -129,7 +131,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_local_artwork_task() {
 
     let runtime = runtime_task_context(&paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.process_available(&runtime).expect(
+    scheduler.process_available(&runtime).await.expect(
         "runtime should execute Kotlin persisted RefreshBookLocalArtwork tasks successfully",
     );
 
@@ -189,12 +191,15 @@ async fn runtime_imports_multiple_filesystem_book_local_artworks_and_selects_onl
 
     let runtime = runtime_task_context(&paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new("REFRESH_BOOK_LOCAL_ARTWORK_book-1", 1_000, None)
-            .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK"),
-    );
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new("REFRESH_BOOK_LOCAL_ARTWORK_book-1", 1_000, None)
+                .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK"),
+        )
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("book local artwork refresh should import multiple filesystem candidates cleanly");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -277,11 +282,13 @@ async fn runtime_preserves_existing_non_generated_selection_when_importing_book_
 
     let runtime = runtime_task_context(&paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new("REFRESH_BOOK_LOCAL_ARTWORK_book-1", 1_000, None)
-            .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK"),
-    );
-    scheduler.process_available(&runtime).expect(
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new("REFRESH_BOOK_LOCAL_ARTWORK_book-1", 1_000, None)
+                .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK"),
+        )
+        .await;
+    scheduler.process_available(&runtime).await.expect(
         "book local artwork refresh should preserve existing non-generated selections cleanly",
     );
 
@@ -370,12 +377,15 @@ async fn runtime_replaces_generated_selection_when_importing_book_local_artworks
 
     let runtime = runtime_task_context(&paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new("REFRESH_BOOK_LOCAL_ARTWORK_book-1", 1_000, None)
-            .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK"),
-    );
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new("REFRESH_BOOK_LOCAL_ARTWORK_book-1", 1_000, None)
+                .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK"),
+        )
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("book local artwork refresh should replace generated selection cleanly");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -458,12 +468,15 @@ async fn runtime_book_local_artwork_refresh_emits_thumbnail_book_added_events() 
     let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
     let runtime = runtime_task_context(&paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new("REFRESH_BOOK_LOCAL_ARTWORK_book-1", 1_000, None)
-            .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK"),
-    );
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new("REFRESH_BOOK_LOCAL_ARTWORK_book-1", 1_000, None)
+                .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK"),
+        )
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("book local artwork refresh should complete for sse contract");
 
     let (_, events) = komga_application::runtime_sse::pending_runtime_sse_events(

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use komga_application::task_processing::{
@@ -8,18 +8,18 @@ use komga_application::task_processing::{
 };
 use serde_json::Value;
 use tokio::runtime::Handle;
-use tokio::sync::{Notify, watch};
+use tokio::sync::{Mutex as AsyncMutex, Notify, watch};
 use tokio::time::interval;
 use tracing::{Instrument, Span, error, info};
 
 use super::library_scan_pipeline::SqliteFilesystemLibraryScanPipeline;
 use super::task_protocol::runtime_startup_task;
-use super::{RuntimeConfig, TaskExecutionError, TaskQueueRecord, TaskQueueScheduler};
+use super::{TaskExecutionError, TaskQueueRecord, TaskQueueScheduler};
 use crate::tasks::library_scan_profiles::load_persisted_library_scan_profiles;
 
-pub type SharedTaskQueue = Arc<Mutex<TaskQueueScheduler>>;
+pub type SharedTaskQueue = Arc<AsyncMutex<TaskQueueScheduler>>;
 pub type TaskQueueWakeSignal = Arc<Notify>;
-type SharedTaskExecutionGate = Arc<Mutex<()>>;
+type SharedTaskExecutionGate = Arc<AsyncMutex<()>>;
 
 pub struct RuntimeBackgroundState {
     pub task_queue: SharedTaskQueue,
@@ -49,7 +49,7 @@ fn log_and_skip_if_main_db_unowned(component: &str, runtime: &TaskRuntimeContext
     true
 }
 
-pub fn prepare_task_queue(
+pub async fn prepare_task_queue(
     config: impl TaskRuntimeConfig,
     startup_search_task: Option<&'static str>,
 ) -> RuntimeBackgroundState {
@@ -57,7 +57,7 @@ pub fn prepare_task_queue(
     let startup_task = startup_search_task.unwrap_or("");
     let mut task_queue = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-runtime-http");
     if runtime.consumes_queue {
-        let _ = task_queue.disown_all();
+        let _ = task_queue.disown_all().await;
     }
 
     if !log_and_skip_if_main_db_unowned(STARTUP_LIBRARY_SCANS_COMPONENT, &runtime) {
@@ -68,6 +68,7 @@ pub fn prepare_task_queue(
             RuntimeLifecycleFields::default(),
         );
         let enqueued = bootstrap_startup_library_scans_inner(&mut task_queue, &runtime)
+            .await
             .unwrap_or_else(|error| {
                 log_runtime_bootstrap(
                     STARTUP_LIBRARY_SCANS_COMPONENT,
@@ -125,7 +126,9 @@ pub fn prepare_task_queue(
             &runtime,
             RuntimeLifecycleFields::default().with_startup_task(startup_task),
         );
-        match bootstrap_startup_search_task_inner(&mut task_queue, &runtime, startup_search_task) {
+        match bootstrap_startup_search_task_inner(&mut task_queue, &runtime, startup_search_task)
+            .await
+        {
             Ok(enqueued) => log_runtime_bootstrap(
                 STARTUP_SEARCH_TASK_COMPONENT,
                 "completed",
@@ -149,7 +152,7 @@ pub fn prepare_task_queue(
     }
 
     RuntimeBackgroundState {
-        task_queue: Arc::new(Mutex::new(task_queue)),
+        task_queue: Arc::new(AsyncMutex::new(task_queue)),
         task_wakeup: Arc::new(Notify::new()),
     }
 }
@@ -160,7 +163,7 @@ pub fn spawn_runtime_workers(
     task_wakeup: TaskQueueWakeSignal,
     shutdown_rx: Option<watch::Receiver<bool>>,
 ) {
-    let task_execution_gate = Arc::new(Mutex::new(()));
+    let task_execution_gate = Arc::new(AsyncMutex::new(()));
     spawn_periodic_library_scan_workers(
         task_queue.clone(),
         runtime.clone(),
@@ -177,16 +180,17 @@ pub fn spawn_runtime_workers(
     spawn_authentication_activity_cleanup_worker(runtime, shutdown_rx);
 }
 
-pub fn bootstrap_startup_search_task(
+pub async fn bootstrap_startup_search_task(
     task_queue: &mut TaskQueueScheduler,
     runtime: &TaskRuntimeContext,
     startup_search_task: Option<&'static str>,
 ) {
     bootstrap_startup_search_task_inner(task_queue, runtime, startup_search_task)
+        .await
         .unwrap_or_else(|error| panic!("bootstrap startup search task: {error}"));
 }
 
-pub fn process_startup_library_scans(config: impl TaskRuntimeConfig) {
+pub async fn process_startup_library_scans(config: impl TaskRuntimeConfig) {
     let runtime = config.task_runtime_context();
     if log_and_skip_if_main_db_unowned(STARTUP_LIBRARY_SCAN_PROCESSING_COMPONENT, &runtime) {
         return;
@@ -199,55 +203,8 @@ pub fn process_startup_library_scans(config: impl TaskRuntimeConfig) {
         RuntimeLifecycleFields::default(),
     );
 
-    let startup_scan_batch = schedule_startup_library_scan_batch(
-        &runtime,
-        "schedule startup library scans for processing",
-    )
-    .unwrap_or_else(|error| {
-        log_runtime_bootstrap(
-            STARTUP_LIBRARY_SCAN_PROCESSING_COMPONENT,
-            "failed",
-            &runtime,
-            RuntimeLifecycleFields::default().with_error(&error),
-        );
-        panic!("process startup library scans: {error}");
-    });
-    if startup_scan_batch.is_empty() {
-        let profiles = load_scan_profiles(
-            runtime.database_file.as_path(),
-            "load startup library scan profiles for processing skip boundary",
-        )
-        .unwrap_or_else(|error| {
-            log_runtime_bootstrap(
-                STARTUP_LIBRARY_SCAN_PROCESSING_COMPONENT,
-                "failed",
-                &runtime,
-                RuntimeLifecycleFields::default().with_error(&error),
-            );
-            panic!("process startup library scans: {error}");
-        });
-
-        log_runtime_bootstrap(
-            STARTUP_LIBRARY_SCAN_PROCESSING_COMPONENT,
-            "skipped",
-            &runtime,
-            RuntimeLifecycleFields::default().with_skip_reason(if profiles.is_empty() {
-                "no_libraries"
-            } else {
-                "no_startup_library_scans"
-            }),
-        );
-        return;
-    }
-
-    let mut task_queue = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    let startup_scan_tasks = startup_scan_batch.into_queue_records();
-    let startup_scan_task_count = startup_scan_tasks.len();
-    for task in startup_scan_tasks {
-        task_queue.enqueue(task);
-    }
-    match task_queue.process_available(&runtime) {
-        Ok(_) => log_runtime_bootstrap(
+    match process_startup_library_scans_inner(&runtime).await {
+        Ok(startup_scan_task_count) => log_runtime_bootstrap(
             STARTUP_LIBRARY_SCAN_PROCESSING_COMPONENT,
             "completed",
             &runtime,
@@ -264,6 +221,47 @@ pub fn process_startup_library_scans(config: impl TaskRuntimeConfig) {
             panic!("process startup library scans: {error_message}");
         }
     }
+}
+
+async fn process_startup_library_scans_inner(
+    runtime: &TaskRuntimeContext,
+) -> Result<usize, String> {
+    let startup_scan_batch = schedule_startup_library_scan_batch(
+        runtime,
+        "schedule startup library scans for processing",
+    )
+    .await?;
+    if startup_scan_batch.is_empty() {
+        let profiles = load_scan_profiles(
+            runtime.database_file.as_path(),
+            "load startup library scan profiles for processing skip boundary",
+        )
+        .await?;
+
+        log_runtime_bootstrap(
+            STARTUP_LIBRARY_SCAN_PROCESSING_COMPONENT,
+            "skipped",
+            runtime,
+            RuntimeLifecycleFields::default().with_skip_reason(if profiles.is_empty() {
+                "no_libraries"
+            } else {
+                "no_startup_library_scans"
+            }),
+        );
+        return Ok(0);
+    }
+
+    let mut task_queue = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let startup_scan_tasks = startup_scan_batch.into_queue_records();
+    let startup_scan_task_count = startup_scan_tasks.len();
+    for task in startup_scan_tasks {
+        task_queue.enqueue(task).await;
+    }
+    task_queue
+        .process_available(runtime)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(startup_scan_task_count)
 }
 
 fn spawn_periodic_library_scan_workers(
@@ -313,19 +311,21 @@ fn spawn_periodic_library_scan_workers(
                     task_queue.clone(),
                     runtime.clone(),
                     &mut last_run_by_library,
-                );
+                )
+                .await;
             }
         }
         .instrument(worker_span.or_current()),
     );
 }
 
-pub fn run_periodic_library_scan_iteration(
+pub async fn run_periodic_library_scan_iteration(
     task_queue: SharedTaskQueue,
     runtime: TaskRuntimeContext,
     last_run_by_library: &mut HashMap<String, tokio::time::Instant>,
 ) -> Result<usize, String> {
-    match run_periodic_library_scan_iteration_inner(task_queue, &runtime, last_run_by_library) {
+    match run_periodic_library_scan_iteration_inner(task_queue, &runtime, last_run_by_library).await
+    {
         Ok((scheduler_processed, due_libraries)) => {
             if due_libraries.is_empty() {
                 return Ok(0);
@@ -382,16 +382,11 @@ fn spawn_background_task_worker(
     handle.spawn(
         async move {
             let _guard = WorkerLifecycleGuard::new(BACKGROUND_TASK_WORKER, &runtime);
-            let startup_task_queue = task_queue.clone();
-            let startup_runtime = runtime.clone();
-            let startup_task_execution_gate = task_execution_gate.clone();
-            let _ = tokio::task::spawn_blocking(move || {
-                run_background_task_iteration_with_execution_gate(
-                    startup_task_queue,
-                    startup_runtime,
-                    startup_task_execution_gate,
-                )
-            })
+            let _ = run_background_task_iteration_with_execution_gate(
+                task_queue.clone(),
+                runtime.clone(),
+                task_execution_gate.clone(),
+            )
             .await;
 
             let mut ticker = interval(Duration::from_secs(300));
@@ -409,16 +404,11 @@ fn spawn_background_task_worker(
                 {
                     break;
                 }
-                let iteration_task_queue = task_queue.clone();
-                let iteration_runtime = runtime.clone();
-                let iteration_task_execution_gate = task_execution_gate.clone();
-                let _ = tokio::task::spawn_blocking(move || {
-                    run_background_task_iteration_with_execution_gate(
-                        iteration_task_queue,
-                        iteration_runtime,
-                        iteration_task_execution_gate,
-                    )
-                })
+                let _ = run_background_task_iteration_with_execution_gate(
+                    task_queue.clone(),
+                    runtime.clone(),
+                    task_execution_gate.clone(),
+                )
                 .await;
             }
         }
@@ -426,15 +416,17 @@ fn spawn_background_task_worker(
     );
 }
 
-pub fn run_background_task_iteration(
+pub async fn run_background_task_iteration(
     task_queue: SharedTaskQueue,
     runtime: TaskRuntimeContext,
 ) -> Result<usize, String> {
     let queued_tasks = {
-        let task_queue = task_queue
-            .lock()
-            .expect("task queue state lock should not be poisoned");
-        task_queue.count_by_simple_type().values().sum::<usize>()
+        let mut task_queue = task_queue.lock().await;
+        task_queue
+            .count_by_simple_type()
+            .await
+            .values()
+            .sum::<usize>()
     };
 
     if queued_tasks == 0 {
@@ -448,7 +440,7 @@ pub fn run_background_task_iteration(
         RuntimeLifecycleFields::default().with_queued_tasks(queued_tasks),
     );
 
-    let processed = match process_shared_task_queue(&task_queue, &runtime) {
+    let processed = match process_shared_task_queue(&task_queue, &runtime).await {
         Ok(processed) => processed,
         Err(error) => {
             let error_message = error.to_string();
@@ -475,60 +467,25 @@ pub fn run_background_task_iteration(
     Ok(processed)
 }
 
-fn run_background_task_iteration_with_execution_gate(
+async fn run_background_task_iteration_with_execution_gate(
     task_queue: SharedTaskQueue,
     runtime: TaskRuntimeContext,
     task_execution_gate: SharedTaskExecutionGate,
 ) -> Result<usize, String> {
-    let _task_execution_guard = task_execution_gate
-        .lock()
-        .expect("task execution gate lock should not be poisoned");
-    run_background_task_iteration(task_queue, runtime)
+    let _task_execution_guard = task_execution_gate.lock().await;
+    run_background_task_iteration(task_queue, runtime).await
 }
 
-fn process_shared_task_queue(
+async fn process_shared_task_queue(
     task_queue: &SharedTaskQueue,
     runtime: &TaskRuntimeContext,
-) -> Result<usize, TaskExecutionError> {
-    let uses_persisted_store = {
-        let task_queue = task_queue
-            .lock()
-            .expect("task queue state lock should not be poisoned");
-        task_queue.uses_persisted_store()
-    };
-
-    if !uses_persisted_store {
-        let mut task_queue = task_queue
-            .lock()
-            .expect("task queue state lock should not be poisoned");
-        return task_queue.process_available(runtime);
-    }
-
-    // Execute long-running task bodies outside the shared scheduler mutex. HTTP
-    // handlers also read the scheduler for task status, and blocking those
-    // async workers behind a scan can starve unrelated Axum routes.
-    let mut task_executor = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-runtime-http");
-    process_shared_task_queue_with_executor(task_queue, runtime, |runtime, task| {
-        task_executor.execute_claimed_task(runtime, task)
-    })
-}
-
-fn process_shared_task_queue_with_executor(
-    task_queue: &SharedTaskQueue,
-    runtime: &RuntimeConfig,
-    mut execute_claimed_task: impl FnMut(
-        &RuntimeConfig,
-        &TaskQueueRecord,
-    ) -> Result<(), TaskExecutionError>,
 ) -> Result<usize, TaskExecutionError> {
     let mut processed = 0usize;
     let mut logged_start = false;
     loop {
         let batch = {
-            let mut task_queue = task_queue
-                .lock()
-                .expect("task queue state lock should not be poisoned");
-            let batch = task_queue.take_available_batch();
+            let mut task_queue = task_queue.lock().await;
+            let batch = task_queue.take_available_batch().await;
             if batch.is_empty() {
                 if logged_start {
                     task_queue.log_process_available("completed", processed, None);
@@ -545,28 +502,27 @@ fn process_shared_task_queue_with_executor(
         let mut batch_iter = batch.into_iter();
         while let Some(task) = batch_iter.next() {
             {
-                let task_queue = task_queue
-                    .lock()
-                    .expect("task queue state lock should not be poisoned");
+                let task_queue = task_queue.lock().await;
                 task_queue.log_task_start(&task);
             }
 
-            match execute_claimed_task(runtime, &task) {
-                Ok(()) => {
-                    let mut task_queue = task_queue
-                        .lock()
-                        .expect("task queue state lock should not be poisoned");
-                    task_queue.complete(&task.id);
+            match crate::task_queue::task_executor::execute_task(runtime, &task).await {
+                Ok(outcome) => {
+                    let mut task_queue = task_queue.lock().await;
+                    outcome.enqueue_into(&mut task_queue).await;
+                    task_queue.complete(&task.id).await;
                     processed += 1;
                 }
                 Err(error) => {
                     let error_message = error.to_string();
                     let remaining_batch = batch_iter.collect();
-                    let mut task_queue = task_queue
-                        .lock()
-                        .expect("task queue state lock should not be poisoned");
-                    task_queue.fail_claimed_task(&task, error_message.as_str());
-                    task_queue.disown_claimed_tasks_after_failure(remaining_batch);
+                    let mut task_queue = task_queue.lock().await;
+                    task_queue
+                        .fail_claimed_task(&task, error_message.as_str())
+                        .await;
+                    task_queue
+                        .disown_claimed_tasks_after_failure(remaining_batch)
+                        .await;
                     task_queue.log_process_available(
                         "failed",
                         processed,
@@ -734,7 +690,7 @@ pub async fn cleanup_authentication_activity_once(
     Ok(())
 }
 
-fn bootstrap_startup_search_task_inner(
+async fn bootstrap_startup_search_task_inner(
     task_queue: &mut TaskQueueScheduler,
     runtime: &TaskRuntimeContext,
     startup_search_task: Option<&'static str>,
@@ -747,7 +703,7 @@ fn bootstrap_startup_search_task_inner(
         return Ok(0);
     };
 
-    task_queue.enqueue(runtime_startup_task(task_name));
+    task_queue.enqueue(runtime_startup_task(task_name)).await;
     Ok(1)
 }
 
@@ -768,14 +724,16 @@ fn current_runtime_handle_or_log_skip(
     Some(handle)
 }
 
-fn run_periodic_library_scan_iteration_inner(
+async fn run_periodic_library_scan_iteration_inner(
     task_queue: SharedTaskQueue,
     runtime: &TaskRuntimeContext,
     last_run_by_library: &mut HashMap<String, tokio::time::Instant>,
 ) -> Result<(usize, Vec<String>), (String, Vec<String>)> {
     sync_periodic_library_scan_state(runtime, last_run_by_library)
+        .await
         .map_err(|error| (error, Vec::new()))?;
     let due_tasks = schedule_periodic_library_scan_batch(runtime, last_run_by_library)
+        .await
         .and_then(periodic_library_scan_tasks)
         .map_err(|error| (error, Vec::new()))?;
     let due_libraries = due_tasks
@@ -799,12 +757,11 @@ fn run_periodic_library_scan_iteration_inner(
     let mut scheduler_processed = 0;
     for (library_id, task) in due_tasks {
         {
-            let mut queue = task_queue
-                .lock()
-                .expect("task queue state lock should not be poisoned");
-            queue.enqueue(task);
+            let mut queue = task_queue.lock().await;
+            queue.enqueue(task).await;
         }
         scheduler_processed += process_shared_task_queue(&task_queue, runtime)
+            .await
             .map_err(|error| (error.to_string(), due_libraries.clone()))?;
         if let Some(next_due) = last_run_by_library.get_mut(&library_id) {
             *next_due = tokio::time::Instant::now();
@@ -814,7 +771,7 @@ fn run_periodic_library_scan_iteration_inner(
     Ok((scheduler_processed, due_libraries))
 }
 
-fn bootstrap_startup_library_scans_inner(
+async fn bootstrap_startup_library_scans_inner(
     task_queue: &mut TaskQueueScheduler,
     runtime: &TaskRuntimeContext,
 ) -> Result<usize, String> {
@@ -825,27 +782,30 @@ fn bootstrap_startup_library_scans_inner(
     let profiles = load_scan_profiles(
         runtime.database_file.as_path(),
         "load startup library scan profiles",
-    )?;
+    )
+    .await?;
     if profiles.is_empty() {
         return Ok(0);
     }
 
     let startup_tasks =
-        schedule_startup_library_scan_batch(runtime, "schedule startup library scans")?
+        schedule_startup_library_scan_batch(runtime, "schedule startup library scans")
+            .await?
             .into_queue_records();
     let enqueued = startup_tasks.len();
     for task in startup_tasks {
-        task_queue.enqueue(task);
+        task_queue.enqueue(task).await;
     }
 
     Ok(enqueued)
 }
 
-fn load_scan_profiles(
+async fn load_scan_profiles(
     database_file: &std::path::Path,
     action: &str,
 ) -> Result<Vec<LibraryScanProfile>, String> {
     load_persisted_library_scan_profiles(database_file)
+        .await
         .map_err(|error| format!("{action}: {error}"))
         .map(|profiles| {
             profiles
@@ -859,7 +819,7 @@ fn load_scan_profiles(
         })
 }
 
-fn schedule_startup_library_scan_batch(
+async fn schedule_startup_library_scan_batch(
     runtime: &TaskRuntimeContext,
     action: &str,
 ) -> Result<LibraryTaskBatch, String> {
@@ -871,10 +831,11 @@ fn schedule_startup_library_scan_batch(
         ScanSchedulingTrigger::Startup,
         &LibraryScanScheduleState::default(),
     )
+    .await
     .map_err(|error| format!("{action}: {error}"))
 }
 
-fn schedule_periodic_library_scan_batch(
+async fn schedule_periodic_library_scan_batch(
     runtime: &TaskRuntimeContext,
     last_run_by_library: &HashMap<String, tokio::time::Instant>,
 ) -> Result<LibraryTaskBatch, String> {
@@ -891,10 +852,11 @@ fn schedule_periodic_library_scan_batch(
                 .collect(),
         },
     )
+    .await
     .map_err(|error| format!("schedule periodic library scans: {error}"))
 }
 
-fn sync_periodic_library_scan_state(
+async fn sync_periodic_library_scan_state(
     runtime: &TaskRuntimeContext,
     last_run_by_library: &mut HashMap<String, tokio::time::Instant>,
 ) -> Result<(), String> {
@@ -903,6 +865,7 @@ fn sync_periodic_library_scan_state(
         DefaultLibraryTaskEmitter::default(),
     )
     .sync_periodic_library_scan_state(last_run_by_library)
+    .await
     .map_err(|error| format!("build periodic library scan state: {error}"))
 }
 

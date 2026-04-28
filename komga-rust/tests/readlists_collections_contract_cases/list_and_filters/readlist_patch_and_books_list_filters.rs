@@ -5,7 +5,7 @@ async fn router_readlist_patch_preserves_unspecified_fields() {
     let paths = new_router_fixture("router-readlist-patch-preserves-unspecified-fields").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let patch = app
@@ -49,7 +49,7 @@ async fn router_readlist_admin_routes_accept_basic_auth_like_kotlin_clients() {
     let paths = new_router_fixture("router-readlist-admin-routes-basic-auth-compat").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
 
@@ -159,7 +159,7 @@ async fn router_readlist_create_rejects_invalid_requests_like_kotlin() {
         let paths = new_router_fixture(&fixture_name).await;
         seed_router_contract_data(&paths).await;
 
-        let app = build_router_with_config(&runtime_config_for_paths(&paths));
+        let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
         let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
         let response = app
@@ -190,7 +190,7 @@ async fn router_readlist_create_defaults_optional_fields_like_kotlin() {
     let paths = new_router_fixture("router-readlist-create-defaults-optional-fields").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -227,7 +227,7 @@ async fn router_discovery_books_list_supports_read_list_id_ops_in_runtime_owned_
     let paths = new_router_fixture("router-discovery-books-list-strict-read-list-id").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let read_list_is_match = app
@@ -340,7 +340,7 @@ async fn router_discovery_books_list_supports_combined_read_list_id_filters_in_r
         new_router_fixture("router-discovery-books-list-strict-read-list-id-combined").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let included_response = app

@@ -5,7 +5,7 @@ async fn router_discovery_book_readlists_returns_existing_persisted_readlists() 
     let paths = new_router_fixture("router-discovery-book-readlists-persisted").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -77,7 +77,7 @@ async fn router_book_readlists_and_siblings_accept_basic_auth_like_kotlin_client
         .expect("next basic-auth sibling number sort should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
 
@@ -203,7 +203,7 @@ async fn router_discovery_book_readlists_applies_content_restrictions_to_book_id
         .expect("filtered readlist restricted book should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -312,7 +312,7 @@ async fn router_book_previous_uses_metadata_number_sort_instead_of_book_number()
     zip.finish()
         .expect("previous sibling cbz fixture should finish successfully");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -438,7 +438,7 @@ async fn router_book_previous_returns_deleted_books_when_they_sort_closer() {
             .expect("previous sibling cbz fixture should finish successfully");
     }
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -530,7 +530,7 @@ async fn router_book_previous_skips_equal_number_sort_ties() {
     zip.finish()
         .expect("tie previous sibling cbz fixture should finish successfully");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -610,7 +610,7 @@ async fn router_book_next_uses_metadata_number_sort_instead_of_book_number() {
     zip.finish()
         .expect("next sibling cbz fixture should finish successfully");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -736,7 +736,7 @@ async fn router_book_next_returns_deleted_books_when_they_sort_closer() {
             .expect("next sibling cbz fixture should finish successfully");
     }
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -828,7 +828,7 @@ async fn router_book_next_skips_equal_number_sort_ties() {
     zip.finish()
         .expect("tie next sibling cbz fixture should finish successfully");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -920,7 +920,7 @@ async fn router_book_next_reuses_book_detail_payload_fields() {
     zip.finish()
         .expect("next detail payload cbz fixture should finish successfully");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

@@ -5,13 +5,13 @@ use crate::search::index_lifecycle::SearchEntityType;
 use crate::search::runtime_tasks::{
     sync_entity_upsert_from_database, sync_series_and_oneshot_books_after_metadata_update,
 };
+use komga_application::task_processing::TaskRuntimeContext;
 
-pub(super) fn refresh_book_metadata(
-    runtime: &RuntimeConfig,
+pub(super) async fn refresh_book_metadata(
+    runtime: &TaskRuntimeContext,
     book_id: &str,
     capabilities: &BTreeSet<String>,
 ) -> Result<Option<String>, TaskExecutionError> {
-    let runtime = runtime.task_runtime_context();
     if !runtime.owns_sidecar_output {
         return Ok(None);
     }
@@ -21,6 +21,7 @@ pub(super) fn refresh_book_metadata(
         book_id,
         capabilities,
     )
+    .await
     .map_err(TaskExecutionError::runtime)?;
 
     if runtime.owns_search_index {
@@ -30,6 +31,7 @@ pub(super) fn refresh_book_metadata(
             SearchEntityType::Book,
             book_id,
         )
+        .await
         .map_err(TaskExecutionError::runtime)?;
         for readlist_id in &outcome.changed_readlist_ids {
             sync_entity_upsert_from_database(
@@ -38,6 +40,7 @@ pub(super) fn refresh_book_metadata(
                 SearchEntityType::ReadList,
                 readlist_id,
             )
+            .await
             .map_err(TaskExecutionError::runtime)?;
         }
     }
@@ -45,16 +48,16 @@ pub(super) fn refresh_book_metadata(
     Ok(outcome.series_id)
 }
 
-pub(super) fn refresh_series_metadata(
-    runtime: &RuntimeConfig,
+pub(super) async fn refresh_series_metadata(
+    runtime: &TaskRuntimeContext,
     series_id: &str,
 ) -> Result<(), TaskExecutionError> {
-    let runtime = runtime.task_runtime_context();
     if !runtime.owns_sidecar_output {
         return Ok(());
     }
 
     crate::metadata::refresh_series_metadata(runtime.database_file.as_path(), series_id)
+        .await
         .map_err(TaskExecutionError::runtime)?;
 
     if runtime.owns_search_index {
@@ -63,22 +66,23 @@ pub(super) fn refresh_series_metadata(
             runtime.lucene_data_directory.as_path(),
             series_id,
         )
+        .await
         .map_err(TaskExecutionError::runtime)?;
     }
 
     Ok(())
 }
 
-pub(super) fn aggregate_series_metadata(
-    runtime: &RuntimeConfig,
+pub(super) async fn aggregate_series_metadata(
+    runtime: &TaskRuntimeContext,
     series_id: &str,
 ) -> Result<(), TaskExecutionError> {
-    let runtime = runtime.task_runtime_context();
     if !runtime.owns_main_database {
         return Ok(());
     }
 
     crate::metadata::aggregate_series_metadata(runtime.database_file.as_path(), series_id)
+        .await
         .map_err(TaskExecutionError::runtime)?;
 
     if runtime.owns_search_index {
@@ -88,47 +92,48 @@ pub(super) fn aggregate_series_metadata(
             SearchEntityType::Series,
             series_id,
         )
+        .await
         .map_err(TaskExecutionError::runtime)?;
     }
 
     Ok(())
 }
 
-pub(super) fn refresh_book_local_artwork(
-    runtime: &RuntimeConfig,
+pub(super) async fn refresh_book_local_artwork(
+    runtime: &TaskRuntimeContext,
     book_id: &str,
 ) -> Result<(), TaskExecutionError> {
-    let runtime = runtime.task_runtime_context();
     if !runtime.owns_sidecar_output {
         return Ok(());
     }
 
     crate::metadata::refresh_book_local_artwork(runtime.database_file.as_path(), book_id)
+        .await
         .map_err(TaskExecutionError::runtime)
 }
 
-pub(super) fn generate_book_thumbnail(
-    runtime: &RuntimeConfig,
+pub(super) async fn generate_book_thumbnail(
+    runtime: &TaskRuntimeContext,
     book_id: &str,
 ) -> Result<(), TaskExecutionError> {
-    let runtime = runtime.task_runtime_context();
     if !runtime.owns_main_database {
         return Ok(());
     }
 
     crate::metadata::generate_book_thumbnail(runtime.database_file.as_path(), book_id)
+        .await
         .map_err(TaskExecutionError::runtime)
 }
 
-pub(super) fn refresh_series_local_artwork(
-    runtime: &RuntimeConfig,
+pub(super) async fn refresh_series_local_artwork(
+    runtime: &TaskRuntimeContext,
     series_id: &str,
 ) -> Result<(), TaskExecutionError> {
-    let runtime = runtime.task_runtime_context();
     if !runtime.owns_sidecar_output {
         return Ok(());
     }
 
     crate::metadata::refresh_series_local_artwork(runtime.database_file.as_path(), series_id)
+        .await
         .map_err(TaskExecutionError::runtime)
 }

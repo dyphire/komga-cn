@@ -112,6 +112,7 @@ VALUES (?, ?, ?, ?, ?)"#,
     pool.close().await;
 
     rebuild_index_from_database(database_file.as_path(), index_dir.as_path())
+        .await
         .expect("index rebuild should complete");
 
     let index = SearchIndexLifecycle::bootstrap(index_dir.as_path())
@@ -335,6 +336,7 @@ VALUES (?, ?, ?, ?, ?)"#,
     pool.close().await;
 
     rebuild_index_from_database(database_file.as_path(), index_dir.as_path())
+        .await
         .expect("index rebuild should complete");
 
     let pool = connect_write_pool(database_file.as_path())
@@ -356,6 +358,7 @@ VALUES (?, ?, ?, ?, ?)"#,
         SearchEntityType::Collection,
         "collection-1",
     )
+    .await
     .expect("collection upsert should succeed");
 
     let collection_hits = SearchIndexLifecycle::bootstrap(index_dir.as_path())
@@ -369,6 +372,7 @@ VALUES (?, ?, ?, ?, ?)"#,
         SearchEntityType::Collection,
         "collection-1",
     )
+    .await
     .expect("collection delete should succeed");
     let deleted_collection_hits = SearchIndexLifecycle::bootstrap(index_dir.as_path())
         .expect("index should bootstrap")
@@ -435,6 +439,7 @@ WHERE SERIES_ID = ?"#,
         SearchEntityType::ReadList,
         "readlist-1",
     )
+    .await
     .expect("readlist upsert should succeed");
     sync_entity_upsert_from_database(
         database_file.as_path(),
@@ -442,6 +447,7 @@ WHERE SERIES_ID = ?"#,
         SearchEntityType::Book,
         "book-1",
     )
+    .await
     .expect("book upsert should succeed");
     sync_entity_upsert_from_database(
         database_file.as_path(),
@@ -449,12 +455,14 @@ WHERE SERIES_ID = ?"#,
         SearchEntityType::Series,
         "series-1",
     )
+    .await
     .expect("series upsert should succeed");
     sync_series_and_oneshot_books_after_metadata_update(
         database_file.as_path(),
         index_dir.as_path(),
         "series-oneshot",
     )
+    .await
     .expect("series metadata driven oneshot refresh should succeed");
 
     let index = SearchIndexLifecycle::bootstrap(index_dir.as_path())
@@ -497,10 +505,13 @@ WHERE SERIES_ID = ?"#,
         SearchEntityType::ReadList,
         "readlist-1",
     )
+    .await
     .expect("readlist delete should succeed");
     sync_entity_delete_from_index(index_dir.as_path(), SearchEntityType::Book, "book-1")
+        .await
         .expect("book delete should succeed");
     sync_entity_delete_from_index(index_dir.as_path(), SearchEntityType::Series, "series-1")
+        .await
         .expect("series delete should succeed");
 
     let index = SearchIndexLifecycle::bootstrap(index_dir.as_path())

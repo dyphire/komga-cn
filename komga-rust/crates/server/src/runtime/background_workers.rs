@@ -16,7 +16,7 @@ pub struct IsolatedWorkerRuntimeGuard {
 
 pub type WorkerRuntimeGuard = Arc<IsolatedWorkerRuntimeGuard>;
 
-pub fn prepare_task_queue(
+pub async fn prepare_task_queue(
     config: &RuntimeConfig,
     startup_search_task: Option<&'static str>,
 ) -> RuntimeBackgroundState {
@@ -24,6 +24,7 @@ pub fn prepare_task_queue(
         crate::config::task_runtime_context(config),
         startup_search_task,
     )
+    .await
 }
 
 pub fn spawn_runtime_workers(

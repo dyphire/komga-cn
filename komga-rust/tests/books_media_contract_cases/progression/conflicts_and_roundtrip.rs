@@ -41,7 +41,7 @@ async fn router_book_progression_put_returns_conflict_for_older_progression() {
     .expect("existing read progress row for progression conflict should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -104,7 +104,7 @@ async fn router_book_progression_put_returns_conflict_for_same_modified_retry() 
         .expect("epub extension positions should be seeded for same-modified retry test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let progression = json!({
         "modified": "2024-01-04T05:06:07Z",
@@ -184,7 +184,7 @@ async fn router_book_progression_put_persists_modified_device_and_locator() {
         .expect("epub extension positions should be seeded for progression full-payload test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let progression = json!({
@@ -256,7 +256,7 @@ async fn router_book_progression_put_roundtrips_on_opds_v2_route() {
         .expect("epub extension positions should be seeded for opds progression test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let progression = json!({

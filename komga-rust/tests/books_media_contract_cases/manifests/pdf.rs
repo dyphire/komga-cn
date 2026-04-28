@@ -13,7 +13,7 @@ async fn router_book_manifest_dispatches_to_pdf_profile_payload() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -74,7 +74,7 @@ async fn router_book_manifest_pdf_uses_raw_pdf_pages_in_reading_order() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -114,7 +114,7 @@ async fn router_book_manifest_pdf_returns_bad_request_with_message_for_non_pdf_m
     let paths = new_router_fixture("router-book-manifest-pdf-profile-mismatch").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -156,7 +156,7 @@ async fn router_book_manifest_divina_accepts_pdf_books() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

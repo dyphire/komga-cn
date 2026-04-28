@@ -54,7 +54,7 @@ async fn router_readlists_default_name_order_and_filtered_flags_match_kotlin() {
         .expect("readlist-3 membership should insert for readlists default-order seed");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "library1@example.org",
@@ -134,7 +134,7 @@ async fn router_readlists_apply_content_restrictions_and_filtered_flags_like_kot
         .expect("denied readlist membership should insert for content restriction seed");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -217,7 +217,7 @@ async fn router_readlists_library_filter_and_content_restriction_exclude_nonmatc
         .expect("other-library visible book should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",

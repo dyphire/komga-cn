@@ -21,7 +21,7 @@ async fn router_kobo_book_file_epub_allows_path_token_user_with_file_download_ro
     std::fs::write(books_dir.join("book-1.epub"), expected_body)
         .expect("kobo file path token fixture should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -77,7 +77,7 @@ async fn router_kobo_book_file_epub_forbids_path_token_user_without_file_downloa
     std::fs::write(books_dir.join("book-1.epub"), b"router-kobo-file-content")
         .expect("forbidden kobo file fixture should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -126,7 +126,7 @@ async fn router_kobo_book_file_epub_returns_forbidden_for_restricted_user() {
         .expect("series age rating should be updated for restricted kobo file test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted-kobo-file@example.org",
@@ -157,7 +157,7 @@ async fn router_kobo_book_file_epub_returns_not_found_with_message_when_file_is_
     seed_router_contract_data(&paths).await;
     seed_admin_kobo_path_token(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

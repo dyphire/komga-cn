@@ -1,10 +1,11 @@
 use super::{
-    RuntimeConfig, RuntimeFollowUpTask, TaskExecutionError, TaskQueueRecord, TaskQueueScheduler,
+    RuntimeFollowUpTask, TaskExecutionError, TaskExecutionOutcome, TaskQueueRecord,
     runtime_follow_up_task,
 };
 use crate::operational_settings_access::load_server_settings;
 use crate::search::index_lifecycle::SearchEntityType;
 use crate::sqlite::write_models::server_settings::ServerSettingsStore;
+use komga_application::task_processing::TaskRuntimeContext;
 use serde_json::Value;
 
 fn thumbnail_max_edge(thumbnail_size: &str) -> i64 {
@@ -16,105 +17,94 @@ fn thumbnail_max_edge(thumbnail_size: &str) -> i64 {
     }
 }
 
-pub(super) fn try_execute(
-    scheduler: &mut TaskQueueScheduler,
-    runtime: &RuntimeConfig,
+pub(super) async fn try_execute(
+    runtime: &TaskRuntimeContext,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
-) -> Option<Result<(), TaskExecutionError>> {
-    let result = match task.simple_type.as_str() {
-        "ANALYZE_BOOK" => {
-            let Some(book_id) = task_target else {
-                return Some(Err(TaskExecutionError::invalid_task(
-                    "ANALYZE_BOOK task must include a book id",
-                )));
-            };
-            let outcome = match super::index_tasks::analyze_book(runtime, book_id) {
-                Ok(outcome) => outcome,
-                Err(error) => return Some(Err(error)),
-            };
-            if outcome.media_status.eq_ignore_ascii_case("READY") && !outcome.series_id.is_empty() {
-                let follow_up_priority = task.priority.saturating_add(1);
-                scheduler.enqueue(runtime_follow_up_task(
-                    RuntimeFollowUpTask::GenerateBookThumbnail {
-                        book_id: book_id.to_string(),
-                        priority: follow_up_priority,
-                    },
-                ));
-                scheduler.enqueue(runtime_follow_up_task(
-                    RuntimeFollowUpTask::RefreshBookMetadata {
-                        book_id: book_id.to_string(),
-                        series_id: Some(outcome.series_id),
-                        priority: follow_up_priority,
-                        capabilities: None,
-                    },
-                ));
-            }
-            Ok(())
-        }
-        "REBUILD_INDEX" => {
-            let entity_types = match parse_rebuild_index_entities(task.payload.as_deref()) {
-                Ok(entity_types) => entity_types,
-                Err(error) => return Some(Err(error)),
-            };
-            super::index_tasks::rebuild_index(runtime, entity_types.as_deref())
-        }
-        "UPGRADE_INDEX" | "UpgradeIndex" => {
-            // Rust-owned search indexes are always created and rebuilt by the current runtime,
-            // so there is no Lucene-era on-disk index lineage that still needs an in-place
-            // upgrade step. We still accept legacy UpgradeIndex task ids/types here so old
-            // persisted task rows or manual compatibility probes are consumed cleanly instead of
-            // surfacing an unsupported-task error to operators.
-            Ok(())
-        }
+) -> Option<Result<TaskExecutionOutcome, TaskExecutionError>> {
+    match task.simple_type.as_str() {
+        "ANALYZE_BOOK" => Some(execute_analyze_book(runtime, task, task_target).await),
+        "REBUILD_INDEX" => Some(execute_rebuild_index(runtime, task).await),
+        "UPGRADE_INDEX" | "UpgradeIndex" => Some(Ok(TaskExecutionOutcome::completed())),
         "FIND_BOOK_THUMBNAILS_TO_REGENERATE" => {
-            let for_bigger_result_only = parse_for_bigger_result_only(task.payload.as_deref());
-            let book_ids = if for_bigger_result_only {
-                let runtime_context = runtime.task_runtime_context();
-                let settings_store =
-                    ServerSettingsStore::new(runtime_context.database_file.clone());
-                let settings = match crate::tokio_runtime::current_thread_runtime() {
-                    Ok(async_runtime) => {
-                        match async_runtime.block_on(load_server_settings(&settings_store)) {
-                            Ok(settings) => settings,
-                            Err(error) => {
-                                return Some(Err(TaskExecutionError::runtime(format!(
-                                    "load server settings for thumbnail finder failed: {error}"
-                                ))));
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        return Some(Err(TaskExecutionError::runtime(format!(
-                            "build runtime for thumbnail finder settings failed: {error}"
-                        ))));
-                    }
-                };
-                let max_edge = thumbnail_max_edge(settings.thumbnail_size);
-                match super::find_books_with_undersized_generated_thumbnails(runtime, max_edge) {
-                    Ok(ids) => ids,
-                    Err(error) => return Some(Err(error)),
-                }
-            } else {
-                match super::find_books_for_thumbnail_regeneration(runtime) {
-                    Ok(ids) => ids,
-                    Err(error) => return Some(Err(error)),
-                }
-            };
-            for book_id in book_ids {
-                scheduler.enqueue(runtime_follow_up_task(
-                    RuntimeFollowUpTask::GenerateBookThumbnail {
-                        book_id,
-                        priority: task.priority,
-                    },
-                ));
-            }
-            Ok(())
+            Some(execute_find_book_thumbnails_to_regenerate(runtime, task).await)
         }
-        _ => return None,
+        _ => None,
+    }
+}
+
+async fn execute_analyze_book(
+    runtime: &TaskRuntimeContext,
+    task: &TaskQueueRecord,
+    task_target: Option<&str>,
+) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+    let Some(book_id) = task_target else {
+        return Err(TaskExecutionError::invalid_task(
+            "ANALYZE_BOOK task must include a book id",
+        ));
     };
 
-    Some(result)
+    let book_id = book_id.to_string();
+    let outcome = super::index_tasks::analyze_book(runtime, &book_id).await?;
+
+    if outcome.media_status.eq_ignore_ascii_case("READY") && !outcome.series_id.is_empty() {
+        let follow_up_priority = task.priority.saturating_add(1);
+        return Ok(TaskExecutionOutcome::with_follow_up_tasks(vec![
+            runtime_follow_up_task(RuntimeFollowUpTask::GenerateBookThumbnail {
+                book_id: book_id.clone(),
+                priority: follow_up_priority,
+            }),
+            runtime_follow_up_task(RuntimeFollowUpTask::RefreshBookMetadata {
+                book_id: book_id.clone(),
+                series_id: Some(outcome.series_id),
+                priority: follow_up_priority,
+                capabilities: None,
+            }),
+        ]));
+    }
+
+    Ok(TaskExecutionOutcome::completed())
+}
+
+async fn execute_rebuild_index(
+    runtime: &TaskRuntimeContext,
+    task: &TaskQueueRecord,
+) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+    let entity_types = parse_rebuild_index_entities(task.payload.as_deref())?;
+    super::index_tasks::rebuild_index(runtime, entity_types.as_deref()).await?;
+
+    Ok(TaskExecutionOutcome::completed())
+}
+
+async fn execute_find_book_thumbnails_to_regenerate(
+    runtime: &TaskRuntimeContext,
+    task: &TaskQueueRecord,
+) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+    let for_bigger_result_only = parse_for_bigger_result_only(task.payload.as_deref());
+    let book_ids = if for_bigger_result_only {
+        let settings_store = ServerSettingsStore::new(runtime.database_file.clone());
+        let settings = load_server_settings(&settings_store)
+            .await
+            .map_err(|error| {
+                TaskExecutionError::runtime(format!(
+                    "load server settings for thumbnail finder failed: {error}"
+                ))
+            })?;
+        let max_edge = thumbnail_max_edge(settings.thumbnail_size);
+        super::find_books_with_undersized_generated_thumbnails(runtime, max_edge).await?
+    } else {
+        super::find_books_for_thumbnail_regeneration(runtime).await?
+    };
+    let follow_up_tasks = book_ids
+        .into_iter()
+        .map(|book_id| {
+            runtime_follow_up_task(RuntimeFollowUpTask::GenerateBookThumbnail {
+                book_id,
+                priority: task.priority,
+            })
+        })
+        .collect();
+    Ok(TaskExecutionOutcome::with_follow_up_tasks(follow_up_tasks))
 }
 
 fn parse_rebuild_index_entities(
@@ -183,6 +173,7 @@ fn parse_for_bigger_result_only(payload: Option<&str>) -> bool {
 mod tests {
     use super::*;
     use crate::sqlite::{connect_main_write_context, connect_test_pool};
+    use crate::task_queue::queue_scheduler::TaskQueueScheduler;
     use crate::task_queue::test_support::RuntimeTestFixture;
     use image::{ImageBuffer, Rgba};
     use komga_application::task_processing::TaskQueueAdminPort;
@@ -241,6 +232,22 @@ mod tests {
             .await
             .expect("index-jobs fixture db should bootstrap main schema");
         context.pool().clone()
+    }
+
+    async fn execute_and_enqueue(
+        scheduler: &mut TaskQueueScheduler,
+        runtime: &TaskRuntimeContext,
+        task: &TaskQueueRecord,
+        task_target: Option<&str>,
+    ) -> Option<Result<(), TaskExecutionError>> {
+        match try_execute(runtime, task, task_target).await {
+            Some(Ok(outcome)) => {
+                outcome.enqueue_into(scheduler).await;
+                Some(Ok(()))
+            }
+            Some(Err(error)) => Some(Err(error)),
+            None => None,
+        }
     }
 
     async fn insert_library(
@@ -428,7 +435,7 @@ mod tests {
         let finder_task = TaskQueueRecord::new("FIND_BOOK_THUMBNAILS_TO_REGENERATE", 6, None)
             .with_payload(serde_json::json!({ "for_bigger_result_only": false }).to_string());
 
-        let result = try_execute(&mut scheduler, &runtime, &finder_task, None);
+        let result = execute_and_enqueue(&mut scheduler, &runtime, &finder_task, None).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let generated = scheduler
@@ -496,7 +503,7 @@ mod tests {
         let finder_task = TaskQueueRecord::new("FIND_BOOK_THUMBNAILS_TO_REGENERATE", 6, None)
             .with_payload(serde_json::json!({ "for_bigger_result_only": false }).to_string());
 
-        let result = try_execute(&mut scheduler, &runtime, &finder_task, None);
+        let result = execute_and_enqueue(&mut scheduler, &runtime, &finder_task, None).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let mut generated = Vec::new();
@@ -530,7 +537,7 @@ mod tests {
         let task = TaskQueueRecord::new("ANALYZE_BOOK_book-1", 90, Some("series-1".to_string()))
             .with_simple_type("ANALYZE_BOOK");
 
-        let result = try_execute(&mut scheduler, &runtime, &task, Some("book-1"));
+        let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("book-1")).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let verify_pool = connect_test_pool(fixture.database_file.as_path(), 1)
@@ -603,7 +610,7 @@ mod tests {
         let task = TaskQueueRecord::new("ANALYZE_BOOK_book-1", 90, Some("series-1".to_string()))
             .with_simple_type("ANALYZE_BOOK");
 
-        let result = try_execute(&mut scheduler, &runtime, &task, Some("book-1"));
+        let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("book-1")).await;
         assert!(matches!(result, Some(Ok(()))));
 
         assert_eq!(
@@ -724,7 +731,7 @@ mod tests {
         let task = TaskQueueRecord::new("ANALYZE_BOOK_book-1", 90, Some("series-1".to_string()))
             .with_simple_type("ANALYZE_BOOK");
 
-        let result = try_execute(&mut scheduler, &runtime, &task, Some("book-1"));
+        let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("book-1")).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let verify_pool = connect_test_pool(database_file.as_path(), 1)
@@ -927,7 +934,7 @@ mod tests {
         let task = TaskQueueRecord::new("ANALYZE_BOOK_book-1", 90, Some("series-1".to_string()))
             .with_simple_type("ANALYZE_BOOK");
 
-        let result = try_execute(&mut scheduler, &runtime, &task, Some("book-1"));
+        let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("book-1")).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let verify_pool = connect_test_pool(database_file.as_path(), 1)

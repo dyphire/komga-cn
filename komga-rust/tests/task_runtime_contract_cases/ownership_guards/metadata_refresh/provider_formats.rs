@@ -255,6 +255,7 @@ async fn runtime_refresh_book_metadata_applies_epub_provider_patch_when_title_ca
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .process_available(&runtime)
+        .await
         .expect("runtime should process EPUB RefreshBookMetadata tasks successfully");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -368,6 +369,7 @@ async fn runtime_refresh_book_metadata_applies_barcode_isbn_for_non_epub_books()
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .process_available(&runtime)
+        .await
         .expect("runtime should process barcode RefreshBookMetadata tasks successfully");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)

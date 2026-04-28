@@ -68,12 +68,16 @@ impl ScanOneLibraryResult {
     }
 }
 
+#[allow(async_fn_in_trait)]
 pub trait LibraryScanPipeline {
-    fn schedule(
+    async fn schedule(
         &self,
         trigger: ScanSchedulingTrigger,
         state: &LibraryScanScheduleState,
     ) -> Result<LibraryTaskBatch, TaskProcessingError>;
 
-    fn run(&self, request: ScanOneLibrary) -> Result<ScanOneLibraryResult, TaskProcessingError>;
+    async fn run(
+        &self,
+        request: ScanOneLibrary,
+    ) -> Result<ScanOneLibraryResult, TaskProcessingError>;
 }

@@ -12,94 +12,78 @@ pub struct PersistedLibraryScanProfile {
     pub scan_interval: String,
 }
 
-pub fn load_persisted_library_scan_profiles(
+pub async fn load_persisted_library_scan_profiles(
     database_file: &Path,
 ) -> Result<Vec<PersistedLibraryScanProfile>, String> {
     if !database_file.exists() {
         return Ok(Vec::new());
     }
 
-    let database_file = database_file.to_path_buf();
-    std::thread::spawn(move || {
-        let runtime = crate::tokio_runtime::current_thread_runtime();
-        let runtime = runtime.map_err(|error| format!("build scan profile runtime: {error}"))?;
+    let pool = connect_read_pool(database_file)
+        .await
+        .map_err(|error| format!("open scan profile db: {error}"))?;
 
-        runtime.block_on(async move {
-            let pool = connect_read_pool(database_file.as_path())
-                .await
-                .map_err(|error| format!("open scan profile db: {error}"))?;
+    let rows = sqlx::query(
+        r#"SELECT
+            ID,
+            SCAN_STARTUP,
+            SCAN_INTERVAL
+        FROM LIBRARY
+        ORDER BY ID ASC"#,
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|error| format!("query scan profiles: {error}"))?;
 
-            let rows = sqlx::query(
-                r#"SELECT
-                    ID,
-                    SCAN_STARTUP,
-                    SCAN_INTERVAL
-                FROM LIBRARY
-                ORDER BY ID ASC"#,
-            )
-            .fetch_all(&pool)
-            .await
-            .map_err(|error| format!("query scan profiles: {error}"))?;
-
-            Ok(rows
-                .into_iter()
-                .map(|row| PersistedLibraryScanProfile {
-                    library_id: row.get::<String, _>("ID"),
-                    scan_startup: row.get::<bool, _>("SCAN_STARTUP"),
-                    scan_interval: row.get::<String, _>("SCAN_INTERVAL"),
-                })
-                .collect::<Vec<_>>())
+    Ok(rows
+        .into_iter()
+        .map(|row| PersistedLibraryScanProfile {
+            library_id: row.get::<String, _>("ID"),
+            scan_startup: row.get::<bool, _>("SCAN_STARTUP"),
+            scan_interval: row.get::<String, _>("SCAN_INTERVAL"),
         })
-    })
-    .join()
-    .map_err(|_| "join scan profile loader thread".to_string())?
+        .collect::<Vec<_>>())
 }
 
-pub fn load_library_scan_profiles(database_file: &Path) -> Result<Vec<LibraryScanProfile>, String> {
-    load_persisted_library_scan_profiles(database_file).map(|profiles| {
-        profiles
-            .into_iter()
-            .map(|profile| LibraryScanProfile {
-                library_id: profile.library_id,
-                scan_startup: profile.scan_startup,
-                scan_interval: profile.scan_interval,
-            })
-            .collect()
-    })
+pub async fn load_library_scan_profiles(
+    database_file: &Path,
+) -> Result<Vec<LibraryScanProfile>, String> {
+    load_persisted_library_scan_profiles(database_file)
+        .await
+        .map(|profiles| {
+            profiles
+                .into_iter()
+                .map(|profile| LibraryScanProfile {
+                    library_id: profile.library_id,
+                    scan_startup: profile.scan_startup,
+                    scan_interval: profile.scan_interval,
+                })
+                .collect()
+        })
 }
 
 #[cfg(test)]
-pub fn load_persisted_library_ids(database_file: &Path) -> Result<Vec<String>, String> {
+pub async fn load_persisted_library_ids(database_file: &Path) -> Result<Vec<String>, String> {
     if !database_file.exists() {
         return Ok(Vec::new());
     }
 
-    let database_file = database_file.to_path_buf();
-    std::thread::spawn(move || {
-        let runtime = crate::tokio_runtime::current_thread_runtime();
-        let runtime = runtime.map_err(|error| format!("build library id runtime: {error}"))?;
+    let pool = connect_read_pool(database_file)
+        .await
+        .map_err(|error| format!("open library id db: {error}"))?;
 
-        runtime.block_on(async move {
-            let pool = connect_read_pool(database_file.as_path())
-                .await
-                .map_err(|error| format!("open library id db: {error}"))?;
+    let rows = sqlx::query(
+        r#"SELECT ID
+        FROM LIBRARY"#,
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|error| format!("query library ids: {error}"))?;
 
-            let rows = sqlx::query(
-                r#"SELECT ID
-                FROM LIBRARY"#,
-            )
-            .fetch_all(&pool)
-            .await
-            .map_err(|error| format!("query library ids: {error}"))?;
-
-            Ok(rows
-                .into_iter()
-                .map(|row| row.get::<String, _>("ID"))
-                .collect::<Vec<_>>())
-        })
-    })
-    .join()
-    .map_err(|_| "join library id loader thread".to_string())?
+    Ok(rows
+        .into_iter()
+        .map(|row| row.get::<String, _>("ID"))
+        .collect::<Vec<_>>())
 }
 
 #[cfg(test)]
@@ -124,6 +108,7 @@ mod tests {
         pool.close().await;
 
         let error = load_persisted_library_scan_profiles(db_path.as_path())
+            .await
             .expect_err("missing library table should return error");
         assert!(error.contains("query scan profiles"));
 
@@ -158,6 +143,7 @@ mod tests {
         pool.close().await;
 
         let profiles = load_library_scan_profiles(db_path.as_path())
+            .await
             .expect("application scan profiles should load");
         assert_eq!(profiles.len(), 2);
         assert_eq!(profiles[0].library_id, "library-1");
@@ -179,6 +165,7 @@ mod tests {
         pool.close().await;
 
         let error = load_persisted_library_ids(db_path.as_path())
+            .await
             .expect_err("missing library table should return error");
         assert!(error.contains("query library ids"));
 

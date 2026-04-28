@@ -17,7 +17,7 @@ async fn router_book_progression_put_accepts_url_encoded_epub_href() {
         .expect("epub extension positions should be seeded for url-encoded href test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -66,7 +66,7 @@ async fn router_book_progression_routes_accept_basic_auth_like_kotlin_clients() 
         .expect("epub extension positions should be seeded for basic-auth progression test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
     let progression = json!({
@@ -129,7 +129,7 @@ async fn router_book_progression_put_normalizes_epub_locator_from_matching_posit
         .expect("epub extension positions should be seeded for progression normalization test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let progression = json!({
         "modified": "2024-01-04T05:06:07Z",
@@ -220,7 +220,7 @@ async fn router_book_progression_put_rejects_invalid_epub_progression_between_po
         .expect("epub extension positions should be seeded for invalid progression test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let response = app
         .oneshot(
@@ -276,7 +276,7 @@ async fn router_book_progression_put_accepts_fixed_layout_epub_single_position()
         .expect("fixed-layout epub extension should be seeded");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let progression = json!({
         "modified": "2024-01-04T05:06:07Z",
@@ -350,7 +350,7 @@ async fn router_book_progression_put_uses_total_progression_to_round_epub_page()
         .expect("epub extension positions should be seeded for page-rounding test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let progression = json!({
         "modified": "2024-01-04T05:06:07Z",
@@ -413,7 +413,7 @@ async fn router_book_progression_put_ignores_epub_locator_position_when_persisti
         .expect("epub extension positions should be seeded for conflicting-position test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let progression = json!({
         "modified": "2024-01-04T05:06:07Z",
@@ -478,7 +478,7 @@ async fn router_book_progression_put_marks_completed_when_total_progression_is_a
         .expect("epub extension positions should be seeded for completion-threshold test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let progression = json!({
         "modified": "2024-01-04T05:06:07Z",

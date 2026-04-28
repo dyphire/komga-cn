@@ -5,7 +5,7 @@ async fn router_book_thumbnail_upload_parses_multipart_image_and_selected_flag()
     let paths = new_router_fixture("router-book-thumbnail-upload-multipart").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
@@ -69,7 +69,7 @@ async fn router_book_thumbnail_upload_selects_thumbnail_when_none_was_selected()
         .expect("existing book-1 thumbnails should be deleted before upload test");
     cleanup_pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
@@ -131,7 +131,7 @@ async fn router_book_thumbnail_upload_accepts_oneshot_book() {
         .expect("series oneshot flag should update for thumbnail upload contract consistency");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
@@ -171,7 +171,7 @@ async fn router_book_thumbnail_upload_rejects_invalid_selected_flag() {
     let paths = new_router_fixture("router-book-thumbnail-upload-invalid-selected").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let image_bytes = fixture_png_bytes();
     let boundary = "komga-rust-invalid-selected-boundary";
@@ -222,7 +222,7 @@ async fn router_book_thumbnail_admin_routes_accept_basic_auth_like_kotlin_client
     let paths = new_router_fixture("router-book-thumbnail-admin-basic-auth-compat").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
     let image_bytes = fixture_png_bytes();

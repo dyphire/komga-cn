@@ -6,7 +6,7 @@ async fn router_get_page_hashes_honors_match_count_desc_sort_like_kotlin() {
     seed_router_contract_data(&paths).await;
     seed_known_page_hash_samples(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -48,7 +48,7 @@ async fn router_get_page_hashes_filters_by_action_query_like_kotlin() {
     seed_router_contract_data(&paths).await;
     seed_known_page_hash_samples(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -89,7 +89,7 @@ async fn router_get_page_hashes_rejects_invalid_action_query_like_kotlin() {
     seed_router_contract_data(&paths).await;
     seed_known_page_hash_samples(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -115,7 +115,7 @@ async fn router_get_page_hashes_unknown_honors_hash_desc_sort_query() {
     seed_router_contract_data(&paths).await;
     seed_unknown_page_hash_samples(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -157,7 +157,7 @@ async fn router_get_page_hashes_unknown_honors_kotlin_legacy_sort_keys() {
     seed_router_contract_data(&paths).await;
     seed_unknown_page_hash_samples(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for sort in ["url,desc", "bookId,desc", "pageNumber,desc"] {
@@ -206,7 +206,7 @@ async fn router_get_page_hashes_unknown_groups_same_hash_even_when_file_sizes_di
     seed_router_contract_data(&paths).await;
     seed_unknown_page_hash_samples_with_mixed_sizes(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -240,7 +240,7 @@ async fn router_get_page_hash_matches_honors_page_number_desc_sort_query() {
     seed_router_contract_data(&paths).await;
     seed_page_hash_match_samples(&paths, "match-sort-hash").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -281,7 +281,7 @@ async fn router_get_page_hash_matches_rejects_match_count_and_total_size_sort_ke
     seed_router_contract_data(&paths).await;
     seed_page_hash_match_samples(&paths, "match-sort-hash").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for sort in ["matchCount,desc", "totalSize,desc"] {
@@ -320,7 +320,7 @@ async fn router_get_page_hash_matches_converts_file_url_to_path_string() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -352,7 +352,7 @@ async fn router_get_page_hash_matches_returns_internal_error_for_unparseable_boo
     seed_page_hash_match_samples(&paths, "match-sort-hash").await;
     update_book_url(&paths, "book-match-1", "::not-a-valid-url::").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -384,7 +384,7 @@ async fn router_get_page_hash_matches_decodes_percent_encoded_file_url_path() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -420,7 +420,7 @@ async fn router_get_page_hash_matches_returns_internal_error_for_null_file_size(
         None
     );
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -452,7 +452,7 @@ async fn router_get_page_hash_matches_returns_internal_error_for_non_file_url() 
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

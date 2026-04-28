@@ -1,67 +1,90 @@
 use super::*;
+use komga_application::task_processing::TaskRuntimeContext;
 
-pub(super) fn try_execute(
-    scheduler: &mut TaskQueueScheduler,
-    runtime: &RuntimeConfig,
+pub(super) async fn try_execute(
+    runtime: &TaskRuntimeContext,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
-) -> Option<Result<(), TaskExecutionError>> {
-    let owns_main_database = runtime.task_runtime_context().owns_main_database;
-    let result = match task.simple_type.as_str() {
-        "REPAIR_EXTENSION" => {
-            let Some(book_id) = task_target else {
-                return Some(Err(TaskExecutionError::invalid_task(
-                    "REPAIR_EXTENSION task must include a book id",
-                )));
-            };
-            if !owns_main_database {
-                return Some(Ok(()));
-            }
-            super::super::repair_extension(runtime, book_id)
-        }
+) -> Option<Result<TaskExecutionOutcome, TaskExecutionError>> {
+    match task.simple_type.as_str() {
+        "REPAIR_EXTENSION" => Some(execute_repair_extension(runtime, task_target).await),
         "FIND_BOOKS_TO_CONVERT" => {
-            let Some(library_id) = task_target else {
-                return Some(Err(TaskExecutionError::invalid_task(
-                    "FIND_BOOKS_TO_CONVERT task must include a library id",
-                )));
-            };
-            if !owns_main_database {
-                return Some(Ok(()));
-            }
-            let books = match super::super::find_books_to_convert(runtime, library_id) {
-                Ok(books) => books,
-                Err(error) => return Some(Err(error)),
-            };
-            for book in books {
-                scheduler.enqueue(runtime_follow_up_task(RuntimeFollowUpTask::ConvertBook {
-                    book_id: book.book_id,
-                    series_id: book.series_id,
-                    priority: task.priority + 1,
-                }));
-            }
-            Ok(())
+            Some(execute_find_books_to_convert(runtime, task, task_target).await)
         }
-        "CONVERT_BOOK" => {
-            let Some(book_id) = task_target else {
-                return Some(Err(TaskExecutionError::invalid_task(
-                    "CONVERT_BOOK task must include a book id",
-                )));
-            };
-            if !owns_main_database {
-                return Some(Ok(()));
-            }
-            super::super::convert_book(runtime, book_id)
-        }
-        _ => return None,
-    };
+        "CONVERT_BOOK" => Some(execute_convert_book(runtime, task_target).await),
+        _ => None,
+    }
+}
 
-    Some(result)
+async fn execute_repair_extension(
+    runtime: &TaskRuntimeContext,
+    task_target: Option<&str>,
+) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+    let Some(book_id) = task_target else {
+        return Err(TaskExecutionError::invalid_task(
+            "REPAIR_EXTENSION task must include a book id",
+        ));
+    };
+    if !runtime.owns_main_database {
+        return Ok(TaskExecutionOutcome::completed());
+    }
+
+    super::super::repair_extension(runtime, book_id).await?;
+
+    Ok(TaskExecutionOutcome::completed())
+}
+
+async fn execute_find_books_to_convert(
+    runtime: &TaskRuntimeContext,
+    task: &TaskQueueRecord,
+    task_target: Option<&str>,
+) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+    let Some(library_id) = task_target else {
+        return Err(TaskExecutionError::invalid_task(
+            "FIND_BOOKS_TO_CONVERT task must include a library id",
+        ));
+    };
+    if !runtime.owns_main_database {
+        return Ok(TaskExecutionOutcome::completed());
+    }
+
+    let books = super::super::find_books_to_convert(runtime, library_id).await?;
+
+    let follow_up_tasks = books
+        .into_iter()
+        .map(|book| {
+            runtime_follow_up_task(RuntimeFollowUpTask::ConvertBook {
+                book_id: book.book_id,
+                series_id: book.series_id,
+                priority: task.priority + 1,
+            })
+        })
+        .collect();
+    Ok(TaskExecutionOutcome::with_follow_up_tasks(follow_up_tasks))
+}
+
+async fn execute_convert_book(
+    runtime: &TaskRuntimeContext,
+    task_target: Option<&str>,
+) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+    let Some(book_id) = task_target else {
+        return Err(TaskExecutionError::invalid_task(
+            "CONVERT_BOOK task must include a book id",
+        ));
+    };
+    if !runtime.owns_main_database {
+        return Ok(TaskExecutionOutcome::completed());
+    }
+
+    super::super::convert_book(runtime, book_id).await?;
+    Ok(TaskExecutionOutcome::completed())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::sqlite::connect_test_pool;
+    use crate::task_queue::queue_scheduler::TaskQueueScheduler;
     use crate::task_queue::test_support::RuntimeTestFixture;
     use sqlx::{Row, SqlitePool};
 
@@ -100,6 +123,22 @@ mod tests {
         .execute(pool)
         .await
         .expect("series row should be inserted for conversion fixture");
+    }
+
+    async fn execute_and_enqueue(
+        scheduler: &mut TaskQueueScheduler,
+        runtime: &TaskRuntimeContext,
+        task: &TaskQueueRecord,
+        task_target: Option<&str>,
+    ) -> Option<Result<(), TaskExecutionError>> {
+        match try_execute(runtime, task, task_target).await {
+            Some(Ok(outcome)) => {
+                outcome.enqueue_into(scheduler).await;
+                Some(Ok(()))
+            }
+            Some(Err(error)) => Some(Err(error)),
+            None => None,
+        }
     }
 
     #[tokio::test]
@@ -161,11 +200,12 @@ mod tests {
         )
         .with_simple_type("FIND_BOOKS_TO_CONVERT");
 
-        let result = try_execute(&mut scheduler, &runtime, &task, Some("library-1"));
+        let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("library-1")).await;
         assert!(matches!(result, Some(Ok(()))));
         assert_eq!(
             scheduler
                 .count_by_simple_type()
+                .await
                 .get("CONVERT_BOOK")
                 .copied(),
             Some(1),
@@ -262,10 +302,10 @@ mod tests {
         )
         .with_simple_type("FIND_BOOKS_TO_CONVERT");
 
-        let result = try_execute(&mut scheduler, &runtime, &task, Some("library-1"));
+        let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("library-1")).await;
         assert!(matches!(result, Some(Ok(()))));
         assert!(
-            scheduler.count_by_simple_type().is_empty(),
+            scheduler.count_by_simple_type().await.is_empty(),
             "find-books-to-convert should not enqueue convert-book tasks when convert-to-cbz is disabled",
         );
 
@@ -354,7 +394,7 @@ mod tests {
         )
         .with_simple_type("CONVERT_BOOK");
 
-        let result = try_execute(&mut scheduler, &runtime, &task, Some(book_id));
+        let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some(book_id)).await;
         assert!(matches!(result, Some(Ok(()))));
         assert!(source_path.exists());
         assert!(!fixture.library_root.join("books/book-1.cbz").exists());
@@ -444,10 +484,10 @@ mod tests {
         )
         .with_simple_type("CONVERT_BOOK");
 
-        let first = try_execute(&mut scheduler, &runtime, &task, Some(book_id));
+        let first = execute_and_enqueue(&mut scheduler, &runtime, &task, Some(book_id)).await;
         assert!(matches!(first, Some(Err(_))));
 
-        let second = try_execute(&mut scheduler, &runtime, &task, Some(book_id));
+        let second = execute_and_enqueue(&mut scheduler, &runtime, &task, Some(book_id)).await;
         assert!(matches!(second, Some(Ok(()))));
         assert!(source_path.exists());
         assert!(!fixture.library_root.join("books/book-1.cbz").exists());
@@ -574,7 +614,7 @@ mod tests {
         )
         .with_simple_type("CONVERT_BOOK");
 
-        let result = try_execute(&mut scheduler, &runtime, &task, Some(book_id));
+        let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some(book_id)).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let destination_path = fixture.library_root.join("books/book-1.cbz");
@@ -769,7 +809,7 @@ mod tests {
             .to_string(),
         );
 
-        let result = try_execute(&mut scheduler, &runtime, &task, Some(book_id));
+        let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some(book_id)).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let verify_pool = connect_test_pool(fixture.database_file.as_path(), 1)

@@ -6,7 +6,7 @@ async fn router_opds_v1_ondeck_returns_atom_feed() {
     seed_router_contract_data(&paths).await;
     seed_router_read_progress(&paths, true).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -57,7 +57,7 @@ async fn router_opds_v1_ondeck_uses_kotlin_acquisition_entry_shape() {
         .expect("ondeck author should insert for entry-shape test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -97,7 +97,7 @@ async fn router_opds_v1_ondeck_includes_page_streaming_link_without_read_progres
     seed_router_read_progress(&paths, true).await;
     seed_router_pdf_book(&paths, "book-pdf", "series-1", "book-pdf.pdf", "Book PDF").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -188,7 +188,7 @@ async fn router_opds_v1_ondeck_orders_series_by_most_recent_read_date() {
     .expect("series-2 series progress should upsert for recent-order test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -240,7 +240,7 @@ async fn router_opds_v1_keep_reading_filters_non_ready_books() {
         .expect("book-1 media status should update for keep-reading ready-only test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -298,7 +298,7 @@ async fn router_opds_v1_keep_reading_uses_kotlin_acquisition_entry_shape() {
         .expect("keep-reading author should insert for entry-shape test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -360,7 +360,7 @@ async fn router_opds_v1_keep_reading_includes_page_streaming_link_with_read_prog
         .expect("keep-reading read progress timestamp should update for PSE test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -420,7 +420,7 @@ async fn router_opds_v1_keep_reading_preserves_zero_page_count_in_pse_link() {
         .expect("keep-reading page count should update for zero-page-count test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -483,7 +483,7 @@ async fn router_opds_v1_keep_reading_orders_by_read_progress_date() {
         .expect("book-pdf read date should update for keep-reading ordering test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -512,7 +512,7 @@ async fn router_opds_v1_books_latest_uses_kotlin_acquisition_entry_shape() {
     let paths = new_router_fixture("router-opds-v1-books-latest-entry-shape").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -553,7 +553,7 @@ async fn router_opds_v1_books_latest_filters_non_ready_books() {
         .expect("book-1 media status should update for latest books ready-only test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -628,7 +628,7 @@ async fn router_opds_v1_books_latest_paginates_after_restriction_filtering() {
         .expect("visible book created date should update for restriction-pagination test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -685,7 +685,7 @@ async fn router_opds_v1_books_latest_includes_page_streaming_and_read_progress_f
         .expect("read progress timestamp should update for latest books PSE test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

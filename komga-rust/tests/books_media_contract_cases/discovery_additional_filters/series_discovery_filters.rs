@@ -17,7 +17,7 @@ async fn router_series_latest_excludes_deleted_series_by_default() {
         .expect("series latest default deleted date should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -63,7 +63,7 @@ async fn router_series_latest_supports_deleted_filter() {
         .expect("series deleted date should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let deleted_true_response = app
@@ -148,7 +148,7 @@ async fn router_series_latest_supports_oneshot_filter() {
         .expect("oneshot series metadata should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let oneshot_true_response = app
@@ -223,7 +223,7 @@ async fn router_series_new_sorts_by_created_desc() {
         .expect("new series timestamps should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -275,7 +275,7 @@ async fn router_series_updated_excludes_newly_added_series() {
         .expect("newly added series timestamps should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -326,7 +326,7 @@ async fn router_series_updated_unpaged_keeps_kotlin_page_shape() {
         .expect("newly added series timestamps should update for unpaged shape test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -368,7 +368,7 @@ async fn router_series_latest_rejects_malformed_boolean_filters() {
     let paths = new_router_fixture("router-series-latest-invalid-boolean-filter").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let invalid_deleted_response = app

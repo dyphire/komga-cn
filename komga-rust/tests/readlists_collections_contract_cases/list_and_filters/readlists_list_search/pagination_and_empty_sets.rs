@@ -34,7 +34,7 @@ async fn router_readlists_unpaged_returns_full_sorted_result_set_like_kotlin() {
     }
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -98,7 +98,7 @@ async fn router_readlists_returns_empty_page_when_no_readlists_exist_like_kotlin
         .expect("readlists should delete for empty readlists seed");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -160,7 +160,7 @@ async fn router_readlists_keeps_genuinely_empty_readlists_like_kotlin() {
         .expect("empty readlist row should insert for listing seed");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

@@ -8,7 +8,7 @@ async fn router_kobo_state_empty_payload_omits_progress_fields_and_location() {
     seed_router_contract_data(&paths).await;
     seed_admin_kobo_path_token(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -73,7 +73,7 @@ async fn router_kobo_state_existing_progress_without_locator_omits_progress_fiel
     .expect("read progress row without locator should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -146,7 +146,7 @@ async fn router_kobo_state_existing_progress_preserves_empty_string_locator_fiel
     .expect("read progress row with empty-string locator should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -209,7 +209,7 @@ async fn router_kobo_state_proxies_missing_book_when_kobo_proxy_enabled() {
     seed_admin_kobo_path_token(&paths).await;
     upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -244,7 +244,7 @@ async fn router_kobo_state_returns_not_found_for_missing_book_when_proxy_disable
     seed_router_contract_data(&paths).await;
     seed_admin_kobo_path_token(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

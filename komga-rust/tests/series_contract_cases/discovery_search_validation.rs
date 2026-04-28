@@ -298,7 +298,7 @@ async fn router_discovery_series_get_routes_match_paperback_compatibility_shape(
     let paths = new_router_fixture("router-discovery-series-papperback-get-compat").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths).await).await;
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
 
@@ -349,7 +349,7 @@ async fn router_discovery_series_get_supports_kotlin_legacy_filters_and_regex() 
     seed_router_series_counts(&paths, 1, Some(1)).await;
     seed_router_series_read_progress(&paths, 1, 0).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -392,7 +392,7 @@ async fn router_discovery_series_get_keeps_collection_filter_when_combined_with_
     .await;
     seed_series_read_progress_for(&paths, "series-2", 1, 0).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let ids = legacy_series_get_ids(
@@ -438,7 +438,7 @@ async fn router_discovery_series_get_treats_release_year_values_as_or() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let mut ids = legacy_series_get_ids(
@@ -472,7 +472,7 @@ async fn router_discovery_series_get_matches_sharing_label_and_author_exactly() 
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let ids = legacy_series_get_ids(
@@ -506,7 +506,7 @@ async fn router_discovery_series_get_only_applies_author_filter_when_query_conta
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let ignored_author_ids = legacy_series_get_ids(
@@ -559,7 +559,7 @@ async fn router_discovery_series_get_supports_legacy_age_rating_numeric_or_null_
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let mut ids = legacy_series_get_ids(
@@ -593,7 +593,7 @@ async fn router_discovery_series_get_keeps_kotlin_unsorted_default_when_no_sort_
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let ids = legacy_series_get_ids(&app, &auth_token, "/api/v1/series?page=0&size=20").await;
@@ -622,7 +622,7 @@ async fn router_discovery_series_get_sorts_by_series_name_and_returns_name_field
     .await;
     update_series_metadata_title(&paths, "series-2", "Zeta Display Title").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -669,7 +669,7 @@ async fn router_discovery_series_get_sorts_by_collection_number_when_requested()
     .await;
     update_collection_series_number(&paths, "collection-1", "series-2", 5).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let ids = legacy_series_get_ids(
@@ -705,7 +705,7 @@ async fn router_discovery_series_get_treats_collection_number_sort_as_unsorted_w
     .await;
     update_collection_series_number(&paths, "collection-1", "series-2", 5).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -748,7 +748,7 @@ async fn router_discovery_series_get_sorts_by_read_date_when_requested() {
     update_series_read_date(&paths, "series-1", "2024-06-10T00:00:00Z").await;
     update_series_read_date(&paths, "series-2", "2024-06-11T00:00:00Z").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let ids = legacy_series_get_ids(
@@ -782,7 +782,7 @@ async fn router_discovery_series_get_does_not_inject_relevance_for_unsupported_e
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -812,7 +812,7 @@ async fn router_discovery_series_list_excludes_soft_deleted_series_by_default() 
     seed_router_custom_series(&paths, "series-deleted", "Deleted Series", "library-1").await;
     soft_delete_series(&paths, &["series-deleted"]).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -851,7 +851,7 @@ async fn router_discovery_series_list_supports_deleted_filter_in_runtime_owned_m
     seed_router_custom_series(&paths, "series-deleted", "Deleted Series", "library-1").await;
     soft_delete_series(&paths, &["series-deleted"]).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let not_deleted_response = app
@@ -916,7 +916,7 @@ async fn router_discovery_series_list_deleted_filter_handles_deleted_only_librar
     seed_router_contract_data(&paths).await;
     soft_delete_series(&paths, &["series-1"]).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -953,7 +953,7 @@ async fn router_discovery_removed_series_v1_alphabetical_groups_route_returns_no
     let paths = new_router_fixture("router-discovery-removed-v1-series-routes").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let route = "/api/v1/series/alphabetical-groups?page=0&size=20";
@@ -980,7 +980,7 @@ async fn router_discovery_series_books_route_remains_available_for_deprecated_co
     let paths = new_router_fixture("router-discovery-deprecated-series-books-compat").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -1013,7 +1013,7 @@ async fn router_discovery_series_alphabetical_groups_groups_by_title_sort_first_
     seed_router_series_title_sort(&paths, "series-2", "Beta Shelf").await;
     seed_router_series_title_sort(&paths, "series-3", "Beta Archive").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -1061,7 +1061,7 @@ async fn router_discovery_series_alphabetical_groups_rejects_unknown_condition_t
         new_router_fixture("router-discovery-series-alphabetical-groups-unknown-condition").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -1103,7 +1103,7 @@ async fn router_discovery_series_alphabetical_groups_rejects_empty_untyped_condi
         new_router_fixture("router-discovery-series-alphabetical-groups-empty-condition").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for (case, body) in [
@@ -1154,7 +1154,7 @@ async fn router_discovery_series_alphabetical_groups_rejects_non_object_bodies()
         new_router_fixture("router-discovery-series-alphabetical-groups-non-object-body").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for (case, body) in [("array", Body::from("[]")), ("null", Body::from("null"))] {
@@ -1183,7 +1183,7 @@ async fn router_discovery_series_list_supports_oneshot_filter_in_runtime_owned_m
     let paths = new_router_fixture("router-discovery-series-list-strict-oneshot").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let not_oneshot_response = app
@@ -1254,7 +1254,7 @@ async fn router_discovery_series_list_rejects_unknown_condition_type_in_runtime_
     let paths = new_router_fixture("router-discovery-series-list-strict-unknown-condition").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -1290,7 +1290,7 @@ async fn router_discovery_series_list_rejects_unknown_operator_in_runtime_owned_
     let paths = new_router_fixture("router-discovery-series-list-strict-unknown-operator").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -1326,7 +1326,7 @@ async fn router_discovery_series_list_applies_default_sort_for_unknown_sort_mode
     let paths = new_router_fixture("router-discovery-series-list-strict-sort-modes").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for sort in [
@@ -1469,7 +1469,7 @@ async fn router_discovery_series_list_sorts_runtime_owned_results_by_release_dat
     .expect("series-2 aggregation release date should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for (sort, expected_ids) in [

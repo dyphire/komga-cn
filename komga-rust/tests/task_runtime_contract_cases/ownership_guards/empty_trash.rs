@@ -3,16 +3,19 @@ use super::*;
 async fn run_empty_trash(paths: &RuntimeDbPaths) {
     let runtime = runtime_task_context(paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new(
-            "EMPTY_TRASH_library-1",
-            1_000,
-            Some("library-1".to_string()),
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new(
+                "EMPTY_TRASH_library-1",
+                1_000,
+                Some("library-1".to_string()),
+            )
+            .with_simple_type("EMPTY_TRASH"),
         )
-        .with_simple_type("EMPTY_TRASH"),
-    );
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("empty-trash cleanup should process successfully");
 }
 

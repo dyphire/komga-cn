@@ -6,7 +6,7 @@ async fn router_readlists_library_id_does_not_filter_book_ids_for_all_library_us
     seed_router_contract_data(&paths).await;
     seed_readlist_endpoint_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

@@ -22,9 +22,6 @@ use super::{
     execute_scan_orchestration, runtime_follow_up_task,
 };
 
-/// This seam is introduced before the runtime migration so later tasks can move startup,
-/// periodic scheduling, and scan execution behind one boundary without changing task
-/// protocol ownership in the same patch.
 #[derive(Clone, Debug)]
 pub struct SqliteFilesystemLibraryScanPipeline<
     E = DefaultLibraryTaskEmitter<DefaultTaskProtocolCatalog>,
@@ -51,13 +48,15 @@ impl<E> SqliteFilesystemLibraryScanPipeline<E> {
         }
     }
 
-    fn load_profiles(
+    async fn load_profiles(
         &self,
     ) -> Result<Vec<komga_application::task_processing::LibraryScanProfile>, TaskProcessingError>
     {
-        load_library_scan_profiles(self.database_file.as_path()).map_err(|error| {
-            TaskProcessingError::runtime(format!("load library scan profiles: {error}"))
-        })
+        load_library_scan_profiles(self.database_file.as_path())
+            .await
+            .map_err(|error| {
+                TaskProcessingError::runtime(format!("load library scan profiles: {error}"))
+            })
     }
 }
 
@@ -85,9 +84,9 @@ where
         LibraryTaskBatch::new(planned_tasks)
     }
 
-    fn schedule_startup(&self) -> Result<LibraryTaskBatch, TaskProcessingError> {
+    async fn schedule_startup(&self) -> Result<LibraryTaskBatch, TaskProcessingError> {
         let profiles =
-            normalize_library_scan_profiles(&self.load_profiles()?).map_err(|error| {
+            normalize_library_scan_profiles(&self.load_profiles().await?).map_err(|error| {
                 TaskProcessingError::runtime(format!(
                     "normalize startup library scan profiles: {error}"
                 ))
@@ -99,12 +98,12 @@ where
         Ok(self.emit_scan_tasks(startup_libraries))
     }
 
-    fn schedule_tick(
+    async fn schedule_tick(
         &self,
         state: &LibraryScanScheduleState,
     ) -> Result<LibraryTaskBatch, TaskProcessingError> {
         let profiles =
-            normalize_library_scan_profiles(&self.load_profiles()?).map_err(|error| {
+            normalize_library_scan_profiles(&self.load_profiles().await?).map_err(|error| {
                 TaskProcessingError::runtime(format!(
                     "normalize periodic library scan profiles: {error}"
                 ))
@@ -126,12 +125,12 @@ where
         Ok(self.emit_scan_tasks(due_libraries))
     }
 
-    pub(crate) fn sync_periodic_library_scan_state(
+    pub(crate) async fn sync_periodic_library_scan_state(
         &self,
         last_run_by_library: &mut HashMap<String, Instant>,
     ) -> Result<(), TaskProcessingError> {
         let profiles =
-            normalize_library_scan_profiles(&self.load_profiles()?).map_err(|error| {
+            normalize_library_scan_profiles(&self.load_profiles().await?).map_err(|error| {
                 TaskProcessingError::runtime(format!(
                     "normalize periodic library scan profiles: {error}"
                 ))
@@ -153,25 +152,27 @@ where
         Ok(())
     }
 
-    fn cleanup_empty_sets(&self) -> Result<(), TaskProcessingError> {
+    async fn cleanup_empty_sets(&self) -> Result<(), TaskProcessingError> {
         if !self.owns_main_database {
             return Ok(());
         }
 
         cleanup_empty_sets_rows(self.database_file.as_path())
+            .await
             .map_err(|error| TaskProcessingError::runtime(format!("cleanup empty sets: {error}")))
     }
 
-    fn empty_trash(&self, library_id: &str) -> Result<(), TaskProcessingError> {
+    async fn empty_trash(&self, library_id: &str) -> Result<(), TaskProcessingError> {
         if !self.owns_main_database {
             return Ok(());
         }
 
         empty_trash_rows(self.database_file.as_path(), library_id)
+            .await
             .map_err(|error| TaskProcessingError::runtime(format!("empty trash: {error}")))
     }
 
-    fn collect_runtime_follow_up_tasks(
+    async fn collect_runtime_follow_up_tasks(
         &self,
         library_id: &str,
         executed_scan: &ExecutedLibraryScan,
@@ -183,6 +184,7 @@ where
         let mut follow_up_tasks = Vec::<TaskQueueRecord>::new();
 
         let hashing_flags = load_library_hashing_flags(self.database_file.as_path(), library_id)
+            .await
             .map_err(|error| {
                 TaskProcessingError::runtime(format!("load library hashing flags: {error}"))
             })?;
@@ -190,6 +192,7 @@ where
             self.database_file.as_path(),
             &executed_scan.scan.book_ids,
         )
+        .await
         .map_err(|error| {
             TaskProcessingError::runtime(format!("load books requiring analysis: {error}"))
         })?
@@ -212,6 +215,7 @@ where
         if hashing_flags.hash_files {
             let book_ids =
                 load_books_with_missing_file_hash(self.database_file.as_path(), library_id, false)
+                    .await
                     .map_err(|error| {
                         TaskProcessingError::runtime(format!(
                             "load books with missing file hash: {error}"
@@ -228,11 +232,12 @@ where
         if hashing_flags.hash_koreader {
             let book_ids =
                 load_books_with_missing_file_hash(self.database_file.as_path(), library_id, true)
+                    .await
                     .map_err(|error| {
-                    TaskProcessingError::runtime(format!(
-                        "load books with missing koreader hash: {error}"
-                    ))
-                })?;
+                        TaskProcessingError::runtime(format!(
+                            "load books with missing koreader hash: {error}"
+                        ))
+                    })?;
             for book_id in book_ids {
                 follow_up_tasks.push(runtime_follow_up_task(
                     RuntimeFollowUpTask::HashBookKoreader {
@@ -258,16 +263,19 @@ where
         ));
 
         let maintenance_flags =
-            load_library_maintenance_flags(self.database_file.as_path(), library_id).map_err(
-                |error| {
+            load_library_maintenance_flags(self.database_file.as_path(), library_id)
+                .await
+                .map_err(|error| {
                     TaskProcessingError::runtime(format!("load library maintenance flags: {error}"))
-                },
-            )?;
+                })?;
         if maintenance_flags.repair_extensions {
             let books = load_books_for_extension_repair(self.database_file.as_path(), library_id)
+                .await
                 .map_err(|error| {
-                TaskProcessingError::runtime(format!("load books for extension repair: {error}"))
-            })?;
+                    TaskProcessingError::runtime(format!(
+                        "load books for extension repair: {error}"
+                    ))
+                })?;
             for book in books {
                 follow_up_tasks.push(runtime_follow_up_task(
                     RuntimeFollowUpTask::RepairExtension {
@@ -358,31 +366,37 @@ impl<E> LibraryScanPipeline for SqliteFilesystemLibraryScanPipeline<E>
 where
     E: LibraryTaskEmitter,
 {
-    fn schedule(
+    async fn schedule(
         &self,
         trigger: ScanSchedulingTrigger,
         state: &LibraryScanScheduleState,
     ) -> Result<LibraryTaskBatch, TaskProcessingError> {
         match trigger {
-            ScanSchedulingTrigger::Startup => self.schedule_startup(),
-            ScanSchedulingTrigger::Tick => self.schedule_tick(state),
+            ScanSchedulingTrigger::Startup => self.schedule_startup().await,
+            ScanSchedulingTrigger::Tick => self.schedule_tick(state).await,
         }
     }
 
-    fn run(&self, request: ScanOneLibrary) -> Result<ScanOneLibraryResult, TaskProcessingError> {
+    async fn run(
+        &self,
+        request: ScanOneLibrary,
+    ) -> Result<ScanOneLibraryResult, TaskProcessingError> {
         let library_id = request.library_id;
         let executed_scan = execute_scan_orchestration(
             self.database_file.as_path(),
             &library_id,
             request.deep_scan,
-        )?;
+        )
+        .await?;
 
         if executed_scan.should_empty_trash {
-            self.empty_trash(&library_id)?;
+            self.empty_trash(&library_id).await?;
         }
-        self.cleanup_empty_sets()?;
+        self.cleanup_empty_sets().await?;
 
-        let follow_up_tasks = self.collect_runtime_follow_up_tasks(&library_id, &executed_scan)?;
+        let follow_up_tasks = self
+            .collect_runtime_follow_up_tasks(&library_id, &executed_scan)
+            .await?;
 
         Ok(ScanOneLibraryResult::executed(library_id, follow_up_tasks))
     }
@@ -459,6 +473,7 @@ mod tests {
                 ScanSchedulingTrigger::Startup,
                 &LibraryScanScheduleState::default(),
             )
+            .await
             .expect("startup scheduling should succeed")
             .into_queue_records();
 
@@ -494,6 +509,7 @@ mod tests {
 
         let scheduled = pipeline
             .schedule(ScanSchedulingTrigger::Tick, &state)
+            .await
             .expect("periodic scheduling should succeed")
             .into_queue_records();
 
@@ -592,6 +608,7 @@ VALUES (?, ?, ?, ?)"#,
         );
         let result = pipeline
             .run(ScanOneLibrary::new("library-1".to_string(), false))
+            .await
             .expect("scan pipeline should succeed");
         let refresh_series_tasks = result
             .follow_up_tasks
@@ -707,6 +724,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         );
         let result = pipeline
             .run(ScanOneLibrary::new("library-1".to_string(), false))
+            .await
             .expect("scan pipeline should succeed");
         let refresh_book_tasks = result
             .follow_up_tasks
@@ -779,6 +797,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
                 ScanSchedulingTrigger::Startup,
                 &LibraryScanScheduleState::default(),
             )
+            .await
             .expect_err("invalid intervals should fail startup scheduling");
 
         assert!(

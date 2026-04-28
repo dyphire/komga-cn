@@ -1,11 +1,12 @@
 use super::*;
 
-fn build_library_task_contract_router(paths: &RuntimeDbPaths) -> axum::Router {
+async fn build_library_task_contract_router(paths: &RuntimeDbPaths) -> axum::Router {
     // These contracts assert queued TASK rows themselves, so runtime workers must stay off or the
     // background consumer can claim and delete the rows before the assertions inspect them.
     komga_server::app::build_router_without_runtime_workers_for_contract(&runtime_config_for_paths(
         paths,
     ))
+    .await
 }
 
 async fn count_query_rows(paths: &RuntimeDbPaths, sql: &str, bind: &str) -> i64 {
@@ -74,7 +75,7 @@ async fn router_api_libraries_accepts_basic_auth_like_kotlin_clients() {
     let paths = new_router_fixture("router-api-libraries-basic-auth-compat").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let response = app
         .oneshot(
             Request::builder()
@@ -111,7 +112,7 @@ async fn router_api_libraries_route_matches_kotlin_etag_without_extra_cache_head
     let paths = new_router_fixture("router-api-libraries-kotlin-cache-headers").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let first_response = app
@@ -208,7 +209,7 @@ async fn router_api_library_patch_accepts_null_scan_directory_exclusions_as_clea
         .expect("library exclusions should be seeded");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let patch_response = app
@@ -262,7 +263,7 @@ async fn router_api_library_create_and_scan_enqueue_expected_scan_tasks() {
         .join("created-library-root");
     std::fs::create_dir_all(&new_root).expect("created library root should be creatable");
 
-    let app = build_library_task_contract_router(&paths);
+    let app = build_library_task_contract_router(&paths).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -305,7 +306,7 @@ async fn router_api_library_create_and_scan_enqueue_expected_scan_tasks() {
     let paths = new_router_fixture("router-api-library-scan-task-shape").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_library_task_contract_router(&paths);
+    let app = build_library_task_contract_router(&paths).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -339,7 +340,7 @@ async fn router_api_library_scan_returns_not_found_for_missing_library() {
     let paths = new_router_fixture("router-api-library-scan-missing-library").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_library_task_contract_router(&paths);
+    let app = build_library_task_contract_router(&paths).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -367,7 +368,7 @@ async fn router_api_library_analyze_enqueues_analyze_book_tasks_grouped_by_serie
     let paths = new_router_fixture("router-api-library-analyze-task-groups").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_library_task_contract_router(&paths);
+    let app = build_library_task_contract_router(&paths).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -407,7 +408,7 @@ async fn router_api_library_metadata_refresh_leaves_series_local_artwork_ungroup
     let paths = new_router_fixture("router-api-library-metadata-refresh-task-shape").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_library_task_contract_router(&paths);
+    let app = build_library_task_contract_router(&paths).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -463,7 +464,7 @@ async fn router_api_library_empty_trash_enqueues_ungrouped_task() {
     let paths = new_router_fixture("router-api-library-empty-trash-task-shape").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_library_task_contract_router(&paths);
+    let app = build_library_task_contract_router(&paths).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -552,7 +553,7 @@ async fn router_api_library_delete_rejects_invalid_access_paths() {
             .await;
         }
 
-        let app = build_router_with_config(&runtime_config_for_paths(&paths));
+        let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
         let auth_token = match auth_mode {
             DeleteAuth::None => None,
             DeleteAuth::Admin => Some(login_with_basic_and_get_token(app.clone()).await),
@@ -595,7 +596,7 @@ async fn router_api_library_put_route_is_removed() {
     let paths = new_router_fixture("router-api-library-put-route-removed").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -654,7 +655,7 @@ async fn router_api_library_delete_cascades_library_rows_like_kotlin() {
         .expect("aggregation tag should be seeded");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -829,7 +830,7 @@ async fn router_api_library_patch_rejects_blank_fields_with_kotlin_validation_pa
         let paths = new_router_fixture(fixture_name).await;
         seed_router_contract_data(&paths).await;
 
-        let app = build_router_with_config(&runtime_config_for_paths(&paths));
+        let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
         let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
         let patch_response = app

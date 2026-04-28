@@ -13,7 +13,7 @@ async fn router_books_duplicates_requires_admin() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let restricted_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -63,7 +63,7 @@ async fn router_books_duplicates_accepts_admin_x_api_key_like_kotlin_clients() {
         .expect("duplicate api-key file size should align for book-2");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let create_response = app
@@ -138,7 +138,7 @@ async fn router_books_duplicates_returns_full_book_dto_page() {
         .expect("duplicate file size should align for book-2");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -196,7 +196,7 @@ async fn router_books_duplicates_ignores_same_hash_with_different_sizes() {
     }
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -248,7 +248,7 @@ async fn router_books_duplicates_honors_sort_query() {
         .expect("sort duplicate file size should align for book-2");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -312,7 +312,7 @@ async fn router_books_duplicates_sorts_series_by_title_sort() {
         .expect("series-2 title sort should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -371,7 +371,7 @@ async fn router_books_duplicates_defaults_to_file_hash_asc_sort() {
     }
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -435,7 +435,7 @@ async fn router_books_duplicates_unpaged_ignores_explicit_sort_query() {
         .expect("book-2 title should update for unpaged ignore-sort test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -501,7 +501,7 @@ async fn router_books_duplicates_includes_same_hash_books_outside_duplicate_size
         .expect("same hash different size book should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

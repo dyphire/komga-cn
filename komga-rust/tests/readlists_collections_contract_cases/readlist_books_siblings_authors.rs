@@ -6,7 +6,7 @@ async fn router_readlist_books_returns_paginated_content_and_library_filter() {
     seed_router_contract_data(&paths).await;
     seed_readlist_endpoint_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let paged_response = app
@@ -99,7 +99,7 @@ async fn router_readlist_detail_books_siblings_and_book_tags_accept_basic_auth_l
     seed_router_contract_data(&paths).await;
     seed_readlist_endpoint_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
 
@@ -145,7 +145,7 @@ async fn router_readlist_books_returns_empty_page_when_library_id_filter_exclude
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "library-restricted@example.org",
@@ -193,7 +193,7 @@ async fn router_book_tags_supports_readlist_scope() {
     seed_router_contract_data(&paths).await;
     seed_readlist_endpoint_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -225,7 +225,7 @@ async fn router_book_tags_supports_repeated_library_id_query() {
     seed_router_contract_data(&paths).await;
     seed_readlist_endpoint_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -258,7 +258,7 @@ async fn router_readlist_books_and_siblings_follow_release_date_when_unordered()
     seed_readlist_endpoint_variants(&paths).await;
     mark_readlist_unordered(&paths, "readlist-1").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let books = app
@@ -421,7 +421,7 @@ async fn router_readlist_books_filters_content_restricted_books_like_kotlin() {
         .expect("restricted readlist book row should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -490,7 +490,7 @@ async fn router_readlist_books_returns_not_found_for_library_hidden_readlist_lik
         .expect("library-hidden readlist book row should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "library-restricted@example.org",
@@ -521,7 +521,7 @@ async fn router_readlist_books_author_filter_requires_matching_role() {
     seed_router_contract_data(&paths).await;
     seed_readlist_endpoint_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let matching = app
@@ -579,7 +579,7 @@ async fn router_readlist_books_author_filter_accepts_empty_role_like_kotlin() {
     seed_readlist_endpoint_variants(&paths).await;
     seed_readlist_author_edge_case(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -618,7 +618,7 @@ async fn router_readlist_books_author_filter_ignores_bare_name_like_kotlin_http_
     seed_readlist_endpoint_variants(&paths).await;
     seed_readlist_author_edge_case(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -656,7 +656,7 @@ async fn router_readlist_books_preserves_blank_and_comma_author_roles() {
     seed_readlist_endpoint_variants(&paths).await;
     seed_readlist_author_edge_case(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -700,7 +700,7 @@ async fn router_readlist_book_siblings_follow_readlist_order() {
     seed_router_contract_data(&paths).await;
     seed_readlist_endpoint_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let previous = app

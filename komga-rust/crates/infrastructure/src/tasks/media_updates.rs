@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use komga_application::runtime_sse::register_runtime_sse_event;
@@ -46,119 +46,109 @@ async fn load_book_sse_context(
         })
 }
 
-pub fn persist_book_hash(
+pub async fn persist_book_hash(
     database_file: &Path,
     book_id: &str,
     hash: &str,
     koreader: bool,
 ) -> Result<(), String> {
     let database_file = database_file.to_path_buf();
-    let book_id = book_id.to_string();
-    let hash = hash.to_string();
+    let pool = connect_private_write_pool(database_file.as_path())
+        .await
+        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
+    let sql = if koreader {
+        r#"
+        UPDATE BOOK
+        SET FILE_HASH_KOREADER = ?,
+            LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+        WHERE ID = ?
+        "#
+    } else {
+        r#"
+        UPDATE BOOK
+        SET FILE_HASH = ?,
+            LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+        WHERE ID = ?
+        "#
+    };
 
-    run_database_query(database_file, move |pool| {
-        let book_id = book_id.clone();
-        let hash = hash.clone();
-        Box::pin(async move {
-            let sql = if koreader {
-                r#"
-                UPDATE BOOK
-                SET FILE_HASH_KOREADER = ?,
-                    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-                WHERE ID = ?
-                "#
-            } else {
-                r#"
-                UPDATE BOOK
-                SET FILE_HASH = ?,
-                    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-                WHERE ID = ?
-                "#
-            };
+    sqlx::query(sql)
+        .bind(hash)
+        .bind(book_id)
+        .execute(&pool)
+        .await
+        .map_err(|error| format!("failed to persist book hash for '{book_id}': {error}"))?;
+    pool.close().await;
 
-            sqlx::query(sql)
-                .bind(hash)
-                .bind(&book_id)
-                .execute(&pool)
-                .await
-                .map_err(|error| format!("failed to persist book hash for '{book_id}': {error}"))?;
-
-            Ok(())
-        })
-    })
+    Ok(())
 }
 
-pub fn persist_removed_hashed_pages(
+pub async fn persist_removed_hashed_pages(
     database_file: &Path,
     book_id: &str,
     deleted_count_by_hash: &HashMap<String, i64>,
     file_last_modified: i64,
     file_size: i64,
 ) -> Result<(), String> {
-    let database_file = database_file.to_path_buf();
-    let book_id = book_id.to_string();
-    let book_id_for_events = book_id.clone();
-    let deleted_count_by_hash = deleted_count_by_hash.clone();
-
-    let book_context = run_database_query(database_file, move |pool| {
-        let book_id = book_id.clone();
-        let deleted_count_by_hash = deleted_count_by_hash.clone();
-        Box::pin(async move {
-            let mut tx = pool.begin().await.map_err(|error| {
-                format!("failed to start remove-hashed-pages transaction for '{book_id}': {error}")
-            })?;
-
-            for (hash, deleted) in deleted_count_by_hash {
-                sqlx::query(
-                    r#"
-                    UPDATE PAGE_HASH
-                    SET DELETE_COUNT = DELETE_COUNT + ?,
-                        LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-                    WHERE HASH = ?
-                    "#,
-                )
-                .bind(deleted)
-                .bind(hash)
-                .execute(&mut *tx)
-                .await
-                .map_err(|error| {
-                    format!("failed to update PAGE_HASH delete count for '{book_id}': {error}")
-                })?;
-            }
-
-            sqlx::query(
-                r#"
-                UPDATE BOOK
-                SET FILE_LAST_MODIFIED = datetime(?, 'unixepoch'),
-                    FILE_SIZE = ?,
-                    FILE_HASH = '',
-                    FILE_HASH_KOREADER = '',
-                    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-                WHERE ID = ?
-                "#,
-            )
-            .bind(file_last_modified)
-            .bind(file_size)
-            .bind(&book_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| format!("failed to update BOOK metadata after hashed-page removal for '{book_id}': {error}"))?;
-
-            tx.commit().await.map_err(|error| {
-                format!("failed to commit remove-hashed-pages transaction for '{book_id}': {error}")
-            })?;
-
-            load_book_sse_context(&pool, &book_id).await
-        })
+    let pool = connect_private_write_pool(database_file)
+        .await
+        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
+    let mut tx = pool.begin().await.map_err(|error| {
+        format!("failed to start remove-hashed-pages transaction for '{book_id}': {error}")
     })?;
 
+    for (hash, deleted) in deleted_count_by_hash {
+        sqlx::query(
+            r#"
+            UPDATE PAGE_HASH
+            SET DELETE_COUNT = DELETE_COUNT + ?,
+                LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+            WHERE HASH = ?
+            "#,
+        )
+        .bind(deleted)
+        .bind(hash)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            format!("failed to update PAGE_HASH delete count for '{book_id}': {error}")
+        })?;
+    }
+
+    sqlx::query(
+        r#"
+        UPDATE BOOK
+        SET FILE_LAST_MODIFIED = datetime(?, 'unixepoch'),
+            FILE_SIZE = ?,
+            FILE_HASH = '',
+            FILE_HASH_KOREADER = '',
+            LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+        WHERE ID = ?
+        "#,
+    )
+    .bind(file_last_modified)
+    .bind(file_size)
+    .bind(book_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| {
+        format!("failed to update BOOK metadata after hashed-page removal for '{book_id}': {error}")
+    })?;
+
+    tx.commit().await.map_err(|error| {
+        format!("failed to commit remove-hashed-pages transaction for '{book_id}': {error}")
+    })?;
+
+    let book_context = load_book_sse_context(&pool, book_id).await?;
+    pool.close().await;
+
     if let Some(book_context) = book_context {
-        emit_book_changed(&book_id_for_events, &book_context);
+        emit_book_changed(book_id, &book_context);
     }
     Ok(())
 }
 
-pub fn persist_book_extension_repair(
+pub async fn persist_book_extension_repair(
     database_file: &Path,
     book_id: &str,
     library_id: &str,
@@ -167,73 +157,59 @@ pub fn persist_book_extension_repair(
     file_last_modified: i64,
     file_size: i64,
 ) -> Result<(), String> {
-    let database_file = database_file.to_path_buf();
-    let book_id = book_id.to_string();
-    let library_id = library_id.to_string();
-    let book_url = book_url.to_string();
-    let destination_url = destination_url.to_string();
+    let pool = connect_private_write_pool(database_file)
+        .await
+        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
+    let mut tx = pool.begin().await.map_err(|error| {
+        format!("failed to start extension-repair transaction for '{book_id}': {error}")
+    })?;
 
-    run_database_query(database_file, move |pool| {
-        let book_id = book_id.clone();
-        let library_id = library_id.clone();
-        let book_url = book_url.clone();
-        let destination_url = destination_url.clone();
-        Box::pin(async move {
-            let mut tx = pool.begin().await.map_err(|error| {
-                format!("failed to start extension-repair transaction for '{book_id}': {error}")
-            })?;
+    sqlx::query(
+        r#"
+        UPDATE BOOK
+        SET URL = ?,
+            FILE_LAST_MODIFIED = datetime(?, 'unixepoch'),
+            FILE_SIZE = ?,
+            LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+        WHERE ID = ?
+        "#,
+    )
+    .bind(destination_url)
+    .bind(file_last_modified)
+    .bind(file_size)
+    .bind(book_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| {
+        format!("failed to update BOOK row during extension repair for '{book_id}': {error}")
+    })?;
 
-            sqlx::query(
-                r#"
-                UPDATE BOOK
-                SET URL = ?,
-                    FILE_LAST_MODIFIED = datetime(?, 'unixepoch'),
-                    FILE_SIZE = ?,
-                    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-                WHERE ID = ?
-                "#,
-            )
-            .bind(&destination_url)
-            .bind(file_last_modified)
-            .bind(file_size)
-            .bind(&book_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| {
-                format!(
-                    "failed to update BOOK row during extension repair for '{book_id}': {error}"
-                )
-            })?;
+    sqlx::query(
+        r#"
+        UPDATE SIDECAR
+        SET PARENT_URL = ?
+        WHERE LIBRARY_ID = ?
+        AND PARENT_URL = ?
+        "#,
+    )
+    .bind(destination_url)
+    .bind(library_id)
+    .bind(book_url)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| {
+        format!("failed to update SIDECAR rows during extension repair for '{book_id}': {error}")
+    })?;
 
-            sqlx::query(
-                r#"
-                UPDATE SIDECAR
-                SET PARENT_URL = ?
-                WHERE LIBRARY_ID = ?
-                AND PARENT_URL = ?
-                "#,
-            )
-            .bind(&destination_url)
-            .bind(&library_id)
-            .bind(&book_url)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| {
-                format!(
-                    "failed to update SIDECAR rows during extension repair for '{book_id}': {error}"
-                )
-            })?;
+    tx.commit().await.map_err(|error| {
+        format!("failed to commit extension-repair transaction for '{book_id}': {error}")
+    })?;
+    pool.close().await;
 
-            tx.commit().await.map_err(|error| {
-                format!("failed to commit extension-repair transaction for '{book_id}': {error}")
-            })?;
-
-            Ok(())
-        })
-    })
+    Ok(())
 }
 
-pub fn persist_book_conversion(
+pub async fn persist_book_conversion(
     database_file: &Path,
     book_id: &str,
     library_id: &str,
@@ -242,93 +218,82 @@ pub fn persist_book_conversion(
     file_last_modified: i64,
     file_size: i64,
 ) -> Result<(), String> {
-    let database_file = database_file.to_path_buf();
-    let book_id = book_id.to_string();
-    let book_id_for_events = book_id.clone();
-    let library_id = library_id.to_string();
-    let book_url = book_url.to_string();
-    let destination_url = destination_url.to_string();
-
-    let book_context = run_database_query(database_file, move |pool| {
-        let book_id = book_id.clone();
-        let library_id = library_id.clone();
-        let book_url = book_url.clone();
-        let destination_url = destination_url.clone();
-        Box::pin(async move {
-            let mut tx = pool.begin().await.map_err(|error| {
-                format!("failed to start convert-book transaction for '{book_id}': {error}")
-            })?;
-
-            sqlx::query(
-                r#"
-                UPDATE BOOK
-                SET URL = ?,
-                    FILE_LAST_MODIFIED = datetime(?, 'unixepoch'),
-                    FILE_SIZE = ?,
-                    FILE_HASH = '',
-                    FILE_HASH_KOREADER = '',
-                    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-                WHERE ID = ?
-                "#,
-            )
-            .bind(&destination_url)
-            .bind(file_last_modified)
-            .bind(file_size)
-            .bind(&book_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| {
-                format!("failed to update BOOK row during conversion for '{book_id}': {error}")
-            })?;
-
-            sqlx::query(
-                r#"
-                UPDATE SIDECAR
-                SET PARENT_URL = ?
-                WHERE LIBRARY_ID = ?
-                AND PARENT_URL = ?
-                "#,
-            )
-            .bind(&destination_url)
-            .bind(&library_id)
-            .bind(&book_url)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| {
-                format!("failed to update SIDECAR rows during conversion for '{book_id}': {error}")
-            })?;
-
-            sqlx::query(
-                r#"
-                UPDATE MEDIA
-                SET STATUS = 'OUTDATED',
-                    MEDIA_TYPE = 'application/zip',
-                    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-                WHERE BOOK_ID = ?
-                "#,
-            )
-            .bind(&book_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| {
-                format!("failed to refresh MEDIA row during conversion for '{book_id}': {error}")
-            })?;
-
-            tx.commit().await.map_err(|error| {
-                format!("failed to commit convert-book transaction for '{book_id}': {error}")
-            })?;
-
-            load_book_sse_context(&pool, &book_id).await
-        })
+    let pool = connect_private_write_pool(database_file)
+        .await
+        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
+    let mut tx = pool.begin().await.map_err(|error| {
+        format!("failed to start convert-book transaction for '{book_id}': {error}")
     })?;
 
+    sqlx::query(
+        r#"
+        UPDATE BOOK
+        SET URL = ?,
+            FILE_LAST_MODIFIED = datetime(?, 'unixepoch'),
+            FILE_SIZE = ?,
+            FILE_HASH = '',
+            FILE_HASH_KOREADER = '',
+            LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+        WHERE ID = ?
+        "#,
+    )
+    .bind(destination_url)
+    .bind(file_last_modified)
+    .bind(file_size)
+    .bind(book_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| {
+        format!("failed to update BOOK row during conversion for '{book_id}': {error}")
+    })?;
+
+    sqlx::query(
+        r#"
+        UPDATE SIDECAR
+        SET PARENT_URL = ?
+        WHERE LIBRARY_ID = ?
+        AND PARENT_URL = ?
+        "#,
+    )
+    .bind(destination_url)
+    .bind(library_id)
+    .bind(book_url)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| {
+        format!("failed to update SIDECAR rows during conversion for '{book_id}': {error}")
+    })?;
+
+    sqlx::query(
+        r#"
+        UPDATE MEDIA
+        SET STATUS = 'OUTDATED',
+            MEDIA_TYPE = 'application/zip',
+            LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+        WHERE BOOK_ID = ?
+        "#,
+    )
+    .bind(book_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| {
+        format!("failed to refresh MEDIA row during conversion for '{book_id}': {error}")
+    })?;
+
+    tx.commit().await.map_err(|error| {
+        format!("failed to commit convert-book transaction for '{book_id}': {error}")
+    })?;
+
+    let book_context = load_book_sse_context(&pool, book_id).await?;
+    pool.close().await;
+
     if let Some(book_context) = book_context {
-        emit_book_changed(&book_id_for_events, &book_context);
+        emit_book_changed(book_id, &book_context);
     }
     Ok(())
 }
 
-pub fn adjust_analyzed_book_read_progress(
+pub async fn adjust_analyzed_book_read_progress(
     database_file: &Path,
     book_id: &str,
     series_id: &str,
@@ -343,89 +308,78 @@ pub fn adjust_analyzed_book_read_progress(
         return Ok(());
     }
 
-    let database_file = database_file.to_path_buf();
-    let book_id = book_id.to_string();
-    let series_id = series_id.to_string();
     let current_page_count = current_page_count.max(0);
+    let pool = connect_private_write_pool(database_file)
+        .await
+        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
+    let mut tx = pool.begin().await.map_err(|error| {
+        format!("failed to start analyze-book read-progress adjustment for '{book_id}': {error}")
+    })?;
 
-    run_database_query(database_file, move |pool| {
-        let book_id = book_id.clone();
-        let series_id = series_id.clone();
-        Box::pin(async move {
-            let mut tx = pool.begin().await.map_err(|error| {
-                format!(
-                    "failed to start analyze-book read-progress adjustment for '{book_id}': {error}"
-                )
-            })?;
+    let progress_rows = sqlx::query(
+        "SELECT USER_ID, COMPLETED FROM READ_PROGRESS WHERE BOOK_ID = ?",
+    )
+    .bind(book_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|error| {
+        format!(
+            "failed to load READ_PROGRESS rows for analyze-book adjustment '{book_id}': {error}"
+        )
+    })?;
 
-            let progress_rows = sqlx::query(
-                "SELECT USER_ID, COMPLETED FROM READ_PROGRESS WHERE BOOK_ID = ?",
+    if progress_rows.is_empty() {
+        tx.commit().await.map_err(|error| {
+            format!("failed to commit empty analyze-book read-progress adjustment for '{book_id}': {error}")
+        })?;
+        pool.close().await;
+        return Ok(());
+    }
+
+    let mut affected_user_ids = HashSet::new();
+    for row in progress_rows {
+        let user_id = row.get::<String, _>("USER_ID");
+        let completed = row
+            .get::<Option<i64>, _>("COMPLETED")
+            .is_some_and(|value| value != 0);
+        let adjusted_page = if completed { current_page_count } else { 1_i64 };
+        sqlx::query(
+            "UPDATE READ_PROGRESS SET PAGE = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP WHERE BOOK_ID = ? AND USER_ID = ?",
+        )
+        .bind(adjusted_page)
+        .bind(book_id)
+        .bind(&user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            format!(
+                "failed to update READ_PROGRESS for analyze-book adjustment '{book_id}' user '{user_id}': {error}"
             )
-            .bind(&book_id)
-            .fetch_all(&mut *tx)
-            .await
-            .map_err(|error| {
-                format!(
-                    "failed to load READ_PROGRESS rows for analyze-book adjustment '{book_id}': {error}"
-                )
-            })?;
+        })?;
+        affected_user_ids.insert(user_id);
+    }
 
-            if progress_rows.is_empty() {
-                tx.commit().await.map_err(|error| {
-                    format!(
-                        "failed to commit empty analyze-book read-progress adjustment for '{book_id}': {error}"
-                    )
-                })?;
-                return Ok(());
-            }
-
-            let mut affected_user_ids = HashSet::new();
-            for row in progress_rows {
-                let user_id = row.get::<String, _>("USER_ID");
-                let completed = row
-                    .get::<Option<i64>, _>("COMPLETED")
-                    .is_some_and(|value| value != 0);
-                let adjusted_page = if completed { current_page_count } else { 1_i64 };
-                sqlx::query(
-                    "UPDATE READ_PROGRESS SET PAGE = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP WHERE BOOK_ID = ? AND USER_ID = ?",
-                )
-                .bind(adjusted_page)
-                .bind(&book_id)
-                .bind(&user_id)
-                .execute(&mut *tx)
+    if !series_id.is_empty() {
+        for user_id in &affected_user_ids {
+            upsert_series_read_progress_row(&mut tx, series_id, user_id)
                 .await
                 .map_err(|error| {
                     format!(
-                        "failed to update READ_PROGRESS for analyze-book adjustment '{book_id}' user '{user_id}': {error}"
+                        "failed to refresh READ_PROGRESS_SERIES during analyze-book adjustment '{book_id}' for user '{user_id}': {error}"
                     )
                 })?;
-                affected_user_ids.insert(user_id);
-            }
+        }
+    }
 
-            if !series_id.is_empty() {
-                for user_id in &affected_user_ids {
-                    upsert_series_read_progress_row(&mut tx, &series_id, user_id)
-                        .await
-                        .map_err(|error| {
-                            format!(
-                                "failed to refresh READ_PROGRESS_SERIES during analyze-book adjustment '{book_id}' for user '{user_id}': {error}"
-                            )
-                        })?;
-                }
-            }
+    tx.commit().await.map_err(|error| {
+        format!("failed to commit analyze-book read-progress adjustment for '{book_id}': {error}")
+    })?;
+    pool.close().await;
 
-            tx.commit().await.map_err(|error| {
-                format!(
-                    "failed to commit analyze-book read-progress adjustment for '{book_id}': {error}"
-                )
-            })?;
-
-            Ok(())
-        })
-    })
+    Ok(())
 }
 
-pub fn persist_book_conversion_events(
+pub async fn persist_book_conversion_events(
     database_file: &Path,
     book_id: &str,
     series_id: &str,
@@ -437,73 +391,56 @@ pub fn persist_book_conversion_events(
         return Ok(());
     }
 
-    let database_file = database_file.to_path_buf();
-    let book_id = book_id.to_string();
-    let series_id = series_id.to_string();
     let source_name = source_path.to_string_lossy().to_string();
     let destination_name = destination_path.to_string_lossy().to_string();
+    let pool = connect_private_write_pool(database_file)
+        .await
+        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
+    let mut tx = pool.begin().await.map_err(|error| {
+        format!("failed to start historical conversion-event transaction for '{book_id}': {error}")
+    })?;
 
-    run_database_query(database_file, move |pool| {
-        let book_id = book_id.clone();
-        let series_id = series_id.clone();
-        let source_name = source_name.clone();
-        let destination_name = destination_name.clone();
-        Box::pin(async move {
-            let mut tx = pool.begin().await.map_err(|error| {
-                format!(
-                    "failed to start historical conversion-event transaction for '{book_id}': {error}"
-                )
-            })?;
-
-            if source_deleted {
-                insert_historical_event(
-                    &mut tx,
-                    "BookFileDeleted",
-                    &book_id,
-                    &series_id,
-                    vec![
-                        (
-                            "reason",
-                            "File was deleted after conversion to CBZ".to_string(),
-                        ),
-                        ("name", source_name.clone()),
-                    ],
-                )
-                .await
-                .map_err(|error| {
-                    format!(
-                        "failed to insert BookFileDeleted event for converted book '{book_id}': {error}"
-                    )
-                })?;
-            }
-
-            insert_historical_event(
-                &mut tx,
-                "BookConverted",
-                &book_id,
-                &series_id,
-                vec![
-                    ("name", destination_name.clone()),
-                    ("former file", source_name.clone()),
-                ],
+    if source_deleted {
+        insert_historical_event(
+            &mut tx,
+            "BookFileDeleted",
+            book_id,
+            series_id,
+            vec![
+                (
+                    "reason",
+                    "File was deleted after conversion to CBZ".to_string(),
+                ),
+                ("name", source_name.clone()),
+            ],
+        )
+        .await
+        .map_err(|error| {
+            format!(
+                "failed to insert BookFileDeleted event for converted book '{book_id}': {error}"
             )
-            .await
-            .map_err(|error| {
-                format!("failed to insert BookConverted event for '{book_id}': {error}")
-            })?;
+        })?;
+    }
 
-            tx.commit().await.map_err(|error| {
-                format!(
-                    "failed to commit historical conversion-event transaction for '{book_id}': {error}"
-                )
-            })?;
+    insert_historical_event(
+        &mut tx,
+        "BookConverted",
+        book_id,
+        series_id,
+        vec![("name", destination_name), ("former file", source_name)],
+    )
+    .await
+    .map_err(|error| format!("failed to insert BookConverted event for '{book_id}': {error}"))?;
 
-            Ok(())
-        })
-    })
+    tx.commit().await.map_err(|error| {
+        format!("failed to commit historical conversion-event transaction for '{book_id}': {error}")
+    })?;
+    pool.close().await;
+
+    Ok(())
 }
 
-pub fn persist_book_page_hashes(
+pub async fn persist_book_page_hashes(
     database_file: &Path,
     book_id: &str,
     page_hashes: &[(i64, String)],
@@ -512,43 +449,37 @@ pub fn persist_book_page_hashes(
         return Ok(());
     }
 
-    let database_file = database_file.to_path_buf();
-    let book_id = book_id.to_string();
-    let page_hashes = page_hashes.to_vec();
+    let pool = connect_private_write_pool(database_file)
+        .await
+        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
+    let mut tx = pool.begin().await.map_err(|error| {
+        format!("failed to start restore-page-hash transaction for '{book_id}': {error}")
+    })?;
 
-    run_database_query(database_file, move |pool| {
-        let book_id = book_id.clone();
-        let page_hashes = page_hashes.clone();
-        Box::pin(async move {
-            let mut tx = pool.begin().await.map_err(|error| {
-                format!("failed to start restore-page-hash transaction for '{book_id}': {error}")
+    for (page_number, file_hash) in page_hashes {
+        sqlx::query("UPDATE MEDIA_PAGE SET FILE_HASH = ? WHERE BOOK_ID = ? AND NUMBER = ?")
+            .bind(file_hash)
+            .bind(book_id)
+            .bind(page_number.saturating_sub(1))
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| {
+                format!(
+                    "failed to restore MEDIA_PAGE hash for '{book_id}' page {}: {error}",
+                    page_number
+                )
             })?;
+    }
 
-            for (page_number, file_hash) in &page_hashes {
-                sqlx::query("UPDATE MEDIA_PAGE SET FILE_HASH = ? WHERE BOOK_ID = ? AND NUMBER = ?")
-                    .bind(file_hash)
-                    .bind(&book_id)
-                    .bind(page_number.saturating_sub(1))
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|error| {
-                        format!(
-                            "failed to restore MEDIA_PAGE hash for '{book_id}' page {}: {error}",
-                            page_number
-                        )
-                    })?;
-            }
+    tx.commit().await.map_err(|error| {
+        format!("failed to commit restore-page-hash transaction for '{book_id}': {error}")
+    })?;
+    pool.close().await;
 
-            tx.commit().await.map_err(|error| {
-                format!("failed to commit restore-page-hash transaction for '{book_id}': {error}")
-            })?;
-
-            Ok(())
-        })
-    })
+    Ok(())
 }
 
-pub fn persist_duplicate_page_deleted_events(
+pub async fn persist_duplicate_page_deleted_events(
     database_file: &Path,
     book_id: &str,
     series_id: &str,
@@ -559,54 +490,41 @@ pub fn persist_duplicate_page_deleted_events(
         return Ok(());
     }
 
-    let database_file = database_file.to_path_buf();
-    let book_id = book_id.to_string();
-    let series_id = series_id.to_string();
     let book_name = book_path.to_string_lossy().to_string();
-    let removed_pages = removed_pages.to_vec();
+    let pool = connect_private_write_pool(database_file)
+        .await
+        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
+    let mut tx = pool.begin().await.map_err(|error| {
+        format!("failed to start duplicate-page-deleted transaction for '{book_id}': {error}")
+    })?;
 
-    run_database_query(database_file, move |pool| {
-        let book_id = book_id.clone();
-        let series_id = series_id.clone();
-        let book_name = book_name.clone();
-        let removed_pages = removed_pages.clone();
-        Box::pin(async move {
-            let mut tx = pool.begin().await.map_err(|error| {
-                format!(
-                    "failed to start duplicate-page-deleted transaction for '{book_id}': {error}"
-                )
-            })?;
+    for removed_page in removed_pages {
+        insert_historical_event(
+            &mut tx,
+            "DuplicatePageDeleted",
+            book_id,
+            series_id,
+            vec![
+                ("name", book_name.clone()),
+                ("page number", removed_page.page_number.to_string()),
+                ("page file name", removed_page.file_name.clone()),
+                ("page file hash", removed_page.file_hash.clone()),
+                ("page file size", removed_page.file_size.to_string()),
+                ("page media type", removed_page.media_type.clone()),
+            ],
+        )
+        .await
+        .map_err(|error| {
+            format!("failed to insert DuplicatePageDeleted event for '{book_id}': {error}")
+        })?;
+    }
 
-            for removed_page in removed_pages {
-                insert_historical_event(
-                    &mut tx,
-                    "DuplicatePageDeleted",
-                    &book_id,
-                    &series_id,
-                    vec![
-                        ("name", book_name.clone()),
-                        ("page number", removed_page.page_number.to_string()),
-                        ("page file name", removed_page.file_name.clone()),
-                        ("page file hash", removed_page.file_hash.clone()),
-                        ("page file size", removed_page.file_size.to_string()),
-                        ("page media type", removed_page.media_type.clone()),
-                    ],
-                )
-                .await
-                .map_err(|error| {
-                    format!("failed to insert DuplicatePageDeleted event for '{book_id}': {error}")
-                })?;
-            }
+    tx.commit().await.map_err(|error| {
+        format!("failed to commit duplicate-page-deleted transaction for '{book_id}': {error}")
+    })?;
+    pool.close().await;
 
-            tx.commit().await.map_err(|error| {
-                format!(
-                    "failed to commit duplicate-page-deleted transaction for '{book_id}': {error}"
-                )
-            })?;
-
-            Ok(())
-        })
-    })
+    Ok(())
 }
 
 async fn insert_historical_event(
@@ -707,30 +625,4 @@ fn random_hex_token(byte_len: usize) -> String {
     }
 
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-type BoxFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, String>> + Send>>;
-
-fn run_database_query<T>(
-    database_file: PathBuf,
-    operation: impl FnOnce(SqlitePool) -> BoxFuture<T> + Send + 'static,
-) -> Result<T, String>
-where
-    T: Send + 'static,
-{
-    std::thread::spawn(move || {
-        let runtime = crate::tokio_runtime::current_thread_runtime()
-            .map_err(|error| format!("failed to build task runtime: {error}"))?;
-
-        runtime.block_on(async move {
-            let pool = connect_private_write_pool(&database_file)
-                .await
-                .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
-            let result = operation(pool.clone()).await;
-            pool.close().await;
-            result
-        })
-    })
-    .join()
-    .map_err(|_| "database operation worker thread panicked".to_string())?
 }

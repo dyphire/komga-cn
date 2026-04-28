@@ -6,7 +6,7 @@ async fn router_discovery_series_list_supports_release_date_string_ops_in_runtim
         new_router_fixture("router-discovery-series-list-strict-release-date-string-ops").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let begins_with_match = app

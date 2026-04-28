@@ -59,7 +59,7 @@ pub(in crate::task_queue) fn remove_hashed_pages_task_id(book_id: &str) -> Strin
     format!("REMOVE_HASHED_PAGES_{book_id}")
 }
 
-pub(in crate::task_queue) fn remove_hashed_pages(
+pub(in crate::task_queue) async fn remove_hashed_pages(
     runtime: &RuntimeConfig,
     book_id: &str,
     pages: &[HashedPageToDelete],
@@ -68,7 +68,7 @@ pub(in crate::task_queue) fn remove_hashed_pages(
         return Ok(false);
     }
 
-    let source = load_book_archive_source(runtime, book_id)?;
+    let source = load_book_archive_source(runtime, book_id).await?;
     let Some(source) = source else {
         return Ok(false);
     };
@@ -107,14 +107,20 @@ pub(in crate::task_queue) fn remove_hashed_pages(
         return Ok(false);
     }
 
-    let current_pages = load_book_hashed_pages(runtime, book_id)?;
+    let current_pages = load_book_hashed_pages(runtime, book_id).await?;
     let pages_to_remove = matching_hashed_pages_to_remove(current_pages.as_slice(), pages);
     if pages_to_remove.len() != pages.len() {
         return Ok(false);
     }
 
-    let removed_pages =
-        rewrite_zip_book_without_pages(&source.file_path, pages_to_remove.as_slice())?;
+    let archive_path = source.file_path.clone();
+    let removed_pages = tokio::task::spawn_blocking(move || {
+        rewrite_zip_book_without_pages(&archive_path, pages_to_remove.as_slice())
+    })
+    .await
+    .map_err(|error| {
+        TaskExecutionError::runtime(format!("hashed-page removal join failed: {error}"))
+    })??;
     if removed_pages.is_empty() {
         return Ok(false);
     }
@@ -155,9 +161,10 @@ pub(in crate::task_queue) fn remove_hashed_pages(
         file_last_modified,
         file_size,
     )
+    .await
     .map_err(TaskExecutionError::runtime)?;
 
-    super::index_tasks::analyze_book(runtime, analyze_book_id.as_str())?;
+    super::index_tasks::analyze_book(runtime, analyze_book_id.as_str()).await?;
 
     persist_duplicate_page_deleted_events(
         database_file.as_path(),
@@ -166,18 +173,20 @@ pub(in crate::task_queue) fn remove_hashed_pages(
         &source.file_path,
         &removed_page_events,
     )
+    .await
     .map_err(TaskExecutionError::runtime)?;
 
     Ok(removed_pages.iter().any(|page| page.page_number == 1))
 }
 
-pub(in crate::task_queue) fn load_book_archive_source(
+pub(in crate::task_queue) async fn load_book_archive_source(
     runtime: &RuntimeConfig,
     book_id: &str,
 ) -> Result<Option<BookArchiveSource>, TaskExecutionError> {
     let runtime = runtime.task_runtime_context();
     Ok(
         load_persisted_book_archive_source(runtime.database_file.as_path(), book_id)
+            .await
             .map_err(TaskExecutionError::runtime)?
             .map(|source| BookArchiveSource {
                 file_path: source.file_path,
@@ -189,12 +198,13 @@ pub(in crate::task_queue) fn load_book_archive_source(
     )
 }
 
-fn load_book_hashed_pages(
+async fn load_book_hashed_pages(
     runtime: &RuntimeConfig,
     book_id: &str,
 ) -> Result<Vec<HashedPageToDelete>, TaskExecutionError> {
     let runtime = runtime.task_runtime_context();
     load_persisted_book_hashed_pages(runtime.database_file.as_path(), book_id)
+        .await
         .map(|pages| {
             pages
                 .into_iter()

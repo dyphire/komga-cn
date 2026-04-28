@@ -6,7 +6,7 @@ async fn router_readlist_tachiyomi_progress_get_returns_kotlin_counter_fields() 
     seed_router_contract_data(&paths).await;
     seed_readlist_endpoint_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -42,7 +42,7 @@ async fn router_readlist_tachiyomi_progress_routes_accept_basic_auth_like_kotlin
     seed_router_contract_data(&paths).await;
     seed_readlist_endpoint_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
 
@@ -107,7 +107,7 @@ async fn router_readlist_tachiyomi_progress_get_counts_in_progress_and_continuou
     }
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -159,7 +159,7 @@ async fn router_readlist_tachiyomi_progress_get_counts_page_zero_incomplete_as_i
     .expect("page-zero incomplete read progress row should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -195,7 +195,7 @@ async fn router_readlist_tachiyomi_progress_marks_books_completed_at_real_page_c
     seed_router_contract_data(&paths).await;
     seed_readlist_endpoint_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -265,7 +265,7 @@ async fn router_readlist_tachiyomi_progress_skips_books_already_completed() {
     .expect("existing completed read-progress row should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

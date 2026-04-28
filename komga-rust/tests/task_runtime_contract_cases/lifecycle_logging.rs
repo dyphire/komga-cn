@@ -25,9 +25,10 @@ fn scheduler_logs_truthful_success_lifecycle_at_commit_boundaries() {
         async move {
             let runtime = runtime_task_context_from_config(&config);
             let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-            scheduler.enqueue(task);
+            scheduler.enqueue(task).await;
             scheduler
                 .process_available(&runtime)
+                .await
                 .expect("upgrade-index lifecycle fixture should process successfully")
         }
     });
@@ -122,11 +123,12 @@ fn scheduler_logs_failure_and_disown_without_fake_success_events() {
             let runtime = runtime_task_context_from_config(&config);
             let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
             scheduler.set_task_pool_size(2);
-            scheduler.enqueue(failed_task);
-            scheduler.enqueue(disowned_task);
+            scheduler.enqueue(failed_task).await;
+            scheduler.enqueue(disowned_task).await;
 
             scheduler
                 .process_available(&runtime)
+                .await
                 .expect_err("unsupported task should fail process_available")
                 .to_string()
         }
@@ -205,15 +207,17 @@ fn scheduler_logs_recover_before_reclaiming_owned_work() {
         async move {
             let runtime = runtime_task_context_from_config(&config);
             let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-            scheduler.enqueue(task);
+            scheduler.enqueue(task).await;
 
             let claimed = scheduler
                 .take_next()
+                .await
                 .expect("recover fixture should claim the queued task before recovery");
             assert_eq!(claimed.id, "UPGRADE_INDEX:logging-recover");
 
             scheduler
                 .recover_and_process(&runtime)
+                .await
                 .expect("recover fixture should reclaim and complete the disowned task")
         }
     });
@@ -311,7 +315,7 @@ async fn scheduler_claim_batch_respects_priority_order_group_locks_and_owner_per
     let runtime = runtime_task_context_from_config(&config);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime, "rust-main");
     scheduler.set_task_pool_size(3);
-    let claimed = scheduler.take_available_batch();
+    let claimed = scheduler.take_available_batch().await;
 
     assert_eq!(
         claimed

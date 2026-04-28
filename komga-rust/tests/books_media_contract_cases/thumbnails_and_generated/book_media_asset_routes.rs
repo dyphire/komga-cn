@@ -20,7 +20,7 @@ async fn router_book_media_asset_routes_forbid_age_restricted_user() {
         br#"<html xmlns='http://www.w3.org/1999/xhtml'><body>Restricted</body></html>"#,
     );
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -90,7 +90,8 @@ async fn router_book_file_delete_enqueues_delete_book_even_when_book_is_missing(
     // background consumer can claim and delete the missing-book delete task before verification.
     let app = komga_server::app::build_router_without_runtime_workers_for_contract(
         &runtime_config_for_paths(&paths),
-    );
+    )
+    .await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

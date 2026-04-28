@@ -50,32 +50,34 @@ fn restored_page_hashes(
         .collect()
 }
 
-pub(in crate::task_queue) fn find_books_to_convert(
+pub(in crate::task_queue) async fn find_books_to_convert(
     runtime: &RuntimeConfig,
     library_id: &str,
 ) -> Result<Vec<PersistedBookToConvert>, TaskExecutionError> {
     let runtime = runtime.task_runtime_context();
     let maintenance_flags =
         load_library_maintenance_flags(runtime.database_file.as_path(), library_id)
+            .await
             .map_err(TaskExecutionError::runtime)?;
     if !maintenance_flags.convert_to_cbz {
         return Ok(Vec::new());
     }
 
     load_books_to_convert(runtime.database_file.as_path(), library_id)
+        .await
         .map_err(TaskExecutionError::runtime)
 }
 
-pub(in crate::task_queue) fn convert_book(
+pub(in crate::task_queue) async fn convert_book(
     runtime: &RuntimeConfig,
     book_id: &str,
 ) -> Result<(), TaskExecutionError> {
     let runtime_context = runtime.task_runtime_context();
     let database_file = runtime_context.database_file.clone();
     let book_id = book_id.to_string();
-    let analyze_book_id = book_id.clone();
 
     let Some(source) = load_book_conversion_target(database_file.as_path(), &book_id)
+        .await
         .map_err(TaskExecutionError::runtime)?
     else {
         return Ok(());
@@ -97,30 +99,32 @@ pub(in crate::task_queue) fn convert_book(
 
     let library_root = resolve_stored_path(&source.library_root);
     let source_path = resolve_library_item_path(&source.library_root, &source.book_url);
-    if !source_path.exists() {
-        return Ok(());
-    }
-    let Ok(source_metadata) = fs::metadata(&source_path) else {
-        return Ok(());
-    };
-    if metadata_updated_unix_seconds(&source_metadata) != source.file_last_modified {
-        return Ok(());
-    }
+    let source_file_last_modified = source.file_last_modified;
+    let convert_book_id = book_id.clone();
+    let prepared_conversion = tokio::task::spawn_blocking(move || {
+        if !source_path.exists() {
+            return Ok(None);
+        }
+        let Ok(source_metadata) = fs::metadata(&source_path) else {
+            return Ok(None);
+        };
+        if metadata_updated_unix_seconds(&source_metadata) != source_file_last_modified {
+            return Ok(None);
+        }
 
-    let destination_path = source_path.with_extension("cbz");
-    if destination_path.exists() {
-        return Err(TaskExecutionError::runtime(format!(
-            "failed to convert book '{book_id}' to CBZ: destination already exists '{}'",
-            destination_path.display(),
-        )));
-    }
+        let destination_path = source_path.with_extension("cbz");
+        if destination_path.exists() {
+            return Err(TaskExecutionError::runtime(format!(
+                "failed to convert book '{convert_book_id}' to CBZ: destination already exists '{}'",
+                destination_path.display(),
+            )));
+        }
 
-    let prepared_conversion: Result<(String, i64, i64), TaskExecutionError> = (|| {
         let payload = {
             let archive_entries = load_rar_entries_for_conversion(&source_path)?;
             if archive_entries.is_empty() {
                 return Err(TaskExecutionError::runtime(format!(
-                    "failed to convert book '{book_id}' to CBZ: no archive entries extracted",
+                    "failed to convert book '{convert_book_id}' to CBZ: no archive entries extracted",
                 )));
             }
 
@@ -128,7 +132,7 @@ pub(in crate::task_queue) fn convert_book(
         };
         fs::write(&destination_path, payload).map_err(|error| {
             TaskExecutionError::runtime(format!(
-                "failed to write converted CBZ file for '{book_id}' to '{}': {error}",
+                "failed to write converted CBZ file for '{convert_book_id}' to '{}': {error}",
                 destination_path.display(),
             ))
         })?;
@@ -136,13 +140,13 @@ pub(in crate::task_queue) fn convert_book(
         {
             let destination_file = fs::File::open(&destination_path).map_err(|error| {
                 TaskExecutionError::runtime(format!(
-                    "failed to open converted file for '{book_id}' ('{}'): {error}",
+                    "failed to open converted file for '{convert_book_id}' ('{}'): {error}",
                     destination_path.display(),
                 ))
             })?;
             let _validated_archive = ZipArchive::new(destination_file).map_err(|error| {
                 TaskExecutionError::runtime(format!(
-                    "failed to validate converted CBZ for '{book_id}': {error}",
+                    "failed to validate converted CBZ for '{convert_book_id}': {error}",
                 ))
             })?;
         }
@@ -150,25 +154,32 @@ pub(in crate::task_queue) fn convert_book(
         let destination_url = normalize_library_relative_url(&library_root, &destination_path)?;
         let destination_metadata = fs::metadata(&destination_path).map_err(|error| {
             TaskExecutionError::runtime(format!(
-                "failed to read converted CBZ metadata for '{book_id}' ('{}'): {error}",
+                "failed to read converted CBZ metadata for '{convert_book_id}' ('{}'): {error}",
                 destination_path.display(),
             ))
         })?;
 
-        Ok((
+        Ok(Some((
+            destination_path,
             destination_url,
             metadata_updated_unix_seconds(&destination_metadata),
             destination_metadata.len() as i64,
-        ))
-    })();
+            source_path,
+        )))
+    })
+    .await
+    .map_err(|error| TaskExecutionError::runtime(format!("conversion task join failed: {error}")))?;
 
-    let (destination_url, file_last_modified, file_size) = match prepared_conversion {
-        Ok(prepared) => prepared,
-        Err(error) => {
-            let _ = fs::remove_file(&destination_path);
-            mark_book_conversion_failed(&book_id);
-            return Err(error);
-        }
+    let Some((destination_path, destination_url, file_last_modified, file_size, source_path)) =
+        (match prepared_conversion {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                mark_book_conversion_failed(&book_id);
+                return Err(error);
+            }
+        })
+    else {
+        return Ok(());
     };
 
     if let Err(error) = persist_book_conversion(
@@ -179,12 +190,18 @@ pub(in crate::task_queue) fn convert_book(
         &destination_url,
         file_last_modified,
         file_size,
-    ) {
-        let _ = fs::remove_file(&destination_path);
+    )
+    .await
+    {
+        let revert_destination_path = destination_path.clone();
+        let _ = tokio::fs::remove_file(&revert_destination_path).await;
         return Err(TaskExecutionError::runtime(error));
     }
 
-    let source_deleted = fs::remove_file(&source_path).is_ok();
+    let source_path_for_delete = source_path.clone();
+    let source_deleted = tokio::fs::remove_file(&source_path_for_delete)
+        .await
+        .is_ok();
     persist_book_conversion_events(
         database_file.as_path(),
         &book_id,
@@ -193,17 +210,21 @@ pub(in crate::task_queue) fn convert_book(
         &destination_path,
         source_deleted,
     )
+    .await
     .map_err(TaskExecutionError::runtime)?;
 
     let previous_hashed_pages = load_book_hashed_pages(database_file.as_path(), &book_id)
+        .await
         .map_err(TaskExecutionError::runtime)?;
 
-    super::index_tasks::analyze_book(runtime, &analyze_book_id)?;
+    super::index_tasks::analyze_book(runtime, &book_id).await?;
 
     let analyzed_pages = load_book_hashed_pages(database_file.as_path(), &book_id)
+        .await
         .map_err(TaskExecutionError::runtime)?;
     let page_hashes_to_restore = restored_page_hashes(&analyzed_pages, &previous_hashed_pages);
     persist_book_page_hashes(database_file.as_path(), &book_id, &page_hashes_to_restore)
+        .await
         .map_err(TaskExecutionError::runtime)?;
 
     Ok(())

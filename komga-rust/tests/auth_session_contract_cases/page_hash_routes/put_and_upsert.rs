@@ -5,7 +5,7 @@ async fn router_put_page_hash_normalizes_negative_size_to_null() {
     let paths = new_router_fixture("router-put-page-hash-negative-size-null").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -37,7 +37,7 @@ async fn router_put_page_hash_preserves_whitespace_padded_hash() {
     let paths = new_router_fixture("router-put-page-hash-whitespace-hash").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -69,7 +69,7 @@ async fn router_put_page_hash_rejects_blank_only_hash() {
     let paths = new_router_fixture("router-put-page-hash-blank-only-hash").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -95,7 +95,7 @@ async fn router_put_page_hash_rejects_whitespace_padded_action() {
     let paths = new_router_fixture("router-put-page-hash-whitespace-action").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -123,7 +123,7 @@ async fn router_put_page_hash_rejects_non_integer_size_values() {
     let paths = new_router_fixture("router-put-page-hash-non-integer-size").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -157,7 +157,7 @@ async fn router_put_page_hash_preserves_existing_size_on_update() {
     seed_router_contract_data(&paths).await;
     seed_page_hash_row(&paths, "existing-size-hash", Some(5), "IGNORE").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -197,7 +197,7 @@ async fn router_put_page_hash_persists_known_thumbnail_so_it_survives_source_rem
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let put_response = app

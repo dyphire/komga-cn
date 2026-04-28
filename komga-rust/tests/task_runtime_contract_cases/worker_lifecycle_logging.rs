@@ -1,6 +1,8 @@
 use super::*;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Mutex;
 use tracing::Instrument;
 
 #[test]
@@ -26,7 +28,8 @@ fn runtime_worker_spawns_log_started_and_shutdown_with_span_context() {
                     komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
                         runtime_task_context_from_config(&config),
                         None,
-                    );
+                    )
+                    .await;
                 komga_infrastructure::task_queue::worker_runtime::spawn_runtime_workers(
                     background.task_queue,
                     runtime,
@@ -95,7 +98,8 @@ fn runtime_workers_observe_shutdown_signal_before_runtime_teardown() {
                     komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
                         runtime_task_context_from_config(&config),
                         None,
-                    );
+                    )
+                    .await;
                 let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
                 komga_infrastructure::task_queue::worker_runtime::spawn_runtime_workers(
                     background.task_queue,
@@ -180,7 +184,7 @@ fn periodic_scan_iteration_logs_completion_only_when_due_and_stays_silent_when_i
     });
     let config = runtime_config_for_paths(&paths);
     let runtime = runtime_task_context(&paths);
-    let task_queue = std::sync::Arc::new(std::sync::Mutex::new(TaskQueueScheduler::for_runtime(
+    let task_queue = Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
         runtime.clone(),
         "rust-main",
     )));
@@ -195,6 +199,7 @@ fn periodic_scan_iteration_logs_completion_only_when_due_and_stays_silent_when_i
                 runtime,
                 &mut last_run,
             )
+            .await
             .expect("idle periodic scan iteration should succeed");
         }
     })
@@ -212,15 +217,16 @@ fn periodic_scan_iteration_logs_completion_only_when_due_and_stays_silent_when_i
         let runtime = runtime.clone();
         let task_queue = task_queue.clone();
         async move {
-            tokio::time::pause();
-            let mut last_run =
-                HashMap::from([("library-1".to_string(), tokio::time::Instant::now())]);
-            tokio::time::advance(Duration::from_secs(3_700)).await;
+            let mut last_run = HashMap::from([(
+                "library-1".to_string(),
+                tokio::time::Instant::now() - Duration::from_secs(3_700),
+            )]);
             komga_infrastructure::task_queue::worker_runtime::run_periodic_library_scan_iteration(
                 task_queue,
                 runtime,
                 &mut last_run,
             )
+            .await
             .expect("due periodic scan iteration should succeed");
         }
     })
@@ -264,6 +270,7 @@ fn periodic_scan_iteration_logs_completion_only_when_due_and_stays_silent_when_i
                 runtime,
                 &mut last_run,
             )
+            .await
             .expect_err("invalid periodic scan interval should fail worker iteration")
         }
     })
@@ -314,7 +321,7 @@ fn periodic_scan_iteration_drains_each_due_library_separately_and_cleans_stale_s
     });
     let config = runtime_config_for_paths(&paths);
     let runtime = runtime_task_context(&paths);
-    let task_queue = std::sync::Arc::new(std::sync::Mutex::new(TaskQueueScheduler::for_runtime(
+    let task_queue = Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
         runtime.clone(),
         "rust-main",
     )));
@@ -323,19 +330,27 @@ fn periodic_scan_iteration_drains_each_due_library_separately_and_cleans_stale_s
         let runtime = runtime.clone();
         let task_queue = task_queue.clone();
         async move {
-            tokio::time::pause();
             let mut last_run = HashMap::from([
-                ("library-1".to_string(), tokio::time::Instant::now()),
-                ("library-2".to_string(), tokio::time::Instant::now()),
-                ("stale-library".to_string(), tokio::time::Instant::now()),
+                (
+                    "library-1".to_string(),
+                    tokio::time::Instant::now() - Duration::from_secs(3_700),
+                ),
+                (
+                    "library-2".to_string(),
+                    tokio::time::Instant::now() - Duration::from_secs(3_700),
+                ),
+                (
+                    "stale-library".to_string(),
+                    tokio::time::Instant::now() - Duration::from_secs(3_700),
+                ),
             ]);
-            tokio::time::advance(Duration::from_secs(3_700)).await;
             let processed =
                 komga_infrastructure::task_queue::worker_runtime::run_periodic_library_scan_iteration(
                     task_queue,
                     runtime,
                     &mut last_run,
                 )
+                .await
                 .expect("due periodic scan iteration should drain each library separately");
             (processed, last_run)
         }
@@ -361,11 +376,11 @@ fn periodic_scan_iteration_drains_each_due_library_separately_and_cleans_stale_s
 
 #[test]
 fn background_task_iteration_logs_completion_and_failure_without_empty_poll_noise() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let executor = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("background worker iteration test runtime should build");
-    let paths = runtime.block_on(async {
+    let paths = executor.block_on(async {
         let paths = new_router_fixture("worker-background-task-lifecycle").await;
         seed_router_contract_data(&paths).await;
         paths
@@ -373,7 +388,7 @@ fn background_task_iteration_logs_completion_and_failure_without_empty_poll_nois
     let config = runtime_config_for_paths(&paths);
     let runtime = runtime_task_context(&paths);
 
-    let idle_queue = std::sync::Arc::new(std::sync::Mutex::new(TaskQueueScheduler::for_runtime(
+    let idle_queue = Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
         runtime.clone(),
         "rust-main",
     )));
@@ -384,6 +399,7 @@ fn background_task_iteration_logs_completion_and_failure_without_empty_poll_nois
             komga_infrastructure::task_queue::worker_runtime::run_background_task_iteration(
                 idle_queue, runtime,
             )
+            .await
             .expect("idle background task iteration should succeed");
         }
     })
@@ -397,15 +413,16 @@ fn background_task_iteration_logs_completion_and_failure_without_empty_poll_nois
         0
     );
 
-    let success_queue = std::sync::Arc::new(std::sync::Mutex::new(
-        TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main"),
-    ));
-    {
-        let mut queue = success_queue
-            .lock()
-            .expect("success queue lock should not be poisoned");
-        queue.enqueue(TaskQueueRecord::new("REBUILD_INDEX", 1_000, None));
-    }
+    let success_queue = Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
+        runtime.clone(),
+        "rust-main",
+    )));
+    executor.block_on(async {
+        let mut queue = success_queue.lock().await;
+        queue
+            .enqueue(TaskQueueRecord::new("REBUILD_INDEX", 1_000, None))
+            .await;
+    });
     let success_logs = capture_router_logs_async_result(&config, {
         let runtime = runtime.clone();
         let success_queue = success_queue.clone();
@@ -414,6 +431,7 @@ fn background_task_iteration_logs_completion_and_failure_without_empty_poll_nois
                 success_queue,
                 runtime,
             )
+            .await
             .expect("background task iteration should process queued task");
         }
     })
@@ -427,18 +445,19 @@ fn background_task_iteration_logs_completion_and_failure_without_empty_poll_nois
     assert_eq!(field_u64(success_run, "queued_tasks"), Some(1));
     assert_eq!(field_u64(success_complete, "processed"), Some(1));
 
-    let failure_queue = std::sync::Arc::new(std::sync::Mutex::new(
-        TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main"),
-    ));
-    {
-        let mut queue = failure_queue
-            .lock()
-            .expect("failure queue lock should not be poisoned");
-        queue.enqueue(
-            TaskQueueRecord::new("UNSUPPORTED_TASK:worker-failure", 1_000, None)
-                .with_simple_type("UNSUPPORTED_TASK"),
-        );
-    }
+    let failure_queue = Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
+        runtime.clone(),
+        "rust-main",
+    )));
+    executor.block_on(async {
+        let mut queue = failure_queue.lock().await;
+        queue
+            .enqueue(
+                TaskQueueRecord::new("UNSUPPORTED_TASK:worker-failure", 1_000, None)
+                    .with_simple_type("UNSUPPORTED_TASK"),
+            )
+            .await;
+    });
     let failure_logs = capture_router_logs_async_result(&config, {
         let runtime = runtime.clone();
         let failure_queue = failure_queue.clone();
@@ -447,6 +466,7 @@ fn background_task_iteration_logs_completion_and_failure_without_empty_poll_nois
                 failure_queue,
                 runtime,
             )
+            .await
             .expect_err("unsupported task should fail background worker iteration")
             .to_string()
         }

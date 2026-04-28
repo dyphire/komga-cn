@@ -268,6 +268,7 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
             SearchEntityType::Collection,
             &collection_id,
         )
+        .await
     }
 
     async fn delete_collection_search_document(
@@ -280,6 +281,7 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
             SearchEntityType::Collection,
             &collection_id,
         )
+        .await
     }
 
     async fn load_persisted_readlists(
@@ -448,6 +450,7 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
             SearchEntityType::ReadList,
             &readlist_id,
         )
+        .await
     }
 
     async fn delete_readlist_search_document(
@@ -460,6 +463,7 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
             SearchEntityType::ReadList,
             &readlist_id,
         )
+        .await
     }
 
     async fn load_persisted_series_resource(
@@ -737,6 +741,7 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
             index_dir.as_path(),
             &series_id,
         )
+        .await
     }
 }
 

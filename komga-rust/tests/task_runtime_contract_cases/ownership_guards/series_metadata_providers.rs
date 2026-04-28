@@ -61,16 +61,19 @@ async fn runtime_refresh_series_metadata_applies_epub_from_book_provider_patch()
         ..runtime_task_context(&paths)
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new(
-            "REFRESH_SERIES_METADATA_series-1",
-            1_000,
-            Some("series-1".to_string()),
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new(
+                "REFRESH_SERIES_METADATA_series-1",
+                1_000,
+                Some("series-1".to_string()),
+            )
+            .with_simple_type("REFRESH_SERIES_METADATA"),
         )
-        .with_simple_type("REFRESH_SERIES_METADATA"),
-    );
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("EPUB series metadata refresh task should process successfully");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -172,16 +175,19 @@ async fn runtime_refresh_series_metadata_ignores_non_iso_language_tags_from_book
         ..runtime_task_context(&paths)
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new(
-            "REFRESH_SERIES_METADATA_series-1",
-            1_000,
-            Some("series-1".to_string()),
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new(
+                "REFRESH_SERIES_METADATA_series-1",
+                1_000,
+                Some("series-1".to_string()),
+            )
+            .with_simple_type("REFRESH_SERIES_METADATA"),
         )
-        .with_simple_type("REFRESH_SERIES_METADATA"),
-    );
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("invalid language series metadata refresh task should process successfully");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -271,16 +277,19 @@ async fn runtime_refresh_series_metadata_ignores_generic_series_xml_sidecar_with
         ..runtime_task_context(&paths)
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new(
-            "REFRESH_SERIES_METADATA_series-1",
-            1_000,
-            Some("series-1".to_string()),
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new(
+                "REFRESH_SERIES_METADATA_series-1",
+                1_000,
+                Some("series-1".to_string()),
+            )
+            .with_simple_type("REFRESH_SERIES_METADATA"),
         )
-        .with_simple_type("REFRESH_SERIES_METADATA"),
-    );
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("generic series sidecar refresh task should process successfully");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -389,16 +398,19 @@ async fn runtime_refresh_series_metadata_applies_comicinfo_from_book_provider_an
         ..runtime_task_context(&paths)
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new(
-            "REFRESH_SERIES_METADATA_series-1",
-            1_000,
-            Some("series-1".to_string()),
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new(
+                "REFRESH_SERIES_METADATA_series-1",
+                1_000,
+                Some("series-1".to_string()),
+            )
+            .with_simple_type("REFRESH_SERIES_METADATA"),
         )
-        .with_simple_type("REFRESH_SERIES_METADATA"),
-    );
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("ComicInfo series metadata refresh task should process successfully");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -579,16 +591,19 @@ async fn runtime_refresh_series_metadata_ignores_deleted_books_from_book_provide
         ..runtime_task_context(&paths)
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new(
-            "REFRESH_SERIES_METADATA_series-1",
-            1_000,
-            Some("series-1".to_string()),
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new(
+                "REFRESH_SERIES_METADATA_series-1",
+                1_000,
+                Some("series-1".to_string()),
+            )
+            .with_simple_type("REFRESH_SERIES_METADATA"),
         )
-        .with_simple_type("REFRESH_SERIES_METADATA"),
-    );
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("deleted-book series metadata refresh task should process successfully");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -695,16 +710,19 @@ async fn runtime_refresh_series_metadata_applies_mylar_series_provider() {
         ..runtime_task_context(&paths)
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new(
-            "REFRESH_SERIES_METADATA_series-1",
-            1_000,
-            Some("series-1".to_string()),
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new(
+                "REFRESH_SERIES_METADATA_series-1",
+                1_000,
+                Some("series-1".to_string()),
+            )
+            .with_simple_type("REFRESH_SERIES_METADATA"),
         )
-        .with_simple_type("REFRESH_SERIES_METADATA"),
-    );
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("Mylar series metadata refresh task should process successfully");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -799,16 +817,19 @@ async fn runtime_refresh_series_metadata_ignores_mylar_series_json_when_library_
         ..runtime_task_context(&paths)
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new(
-            "REFRESH_SERIES_METADATA_series-1",
-            1_000,
-            Some("series-1".to_string()),
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new(
+                "REFRESH_SERIES_METADATA_series-1",
+                1_000,
+                Some("series-1".to_string()),
+            )
+            .with_simple_type("REFRESH_SERIES_METADATA"),
         )
-        .with_simple_type("REFRESH_SERIES_METADATA"),
-    );
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("disabled Mylar series metadata refresh task should process successfully");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)

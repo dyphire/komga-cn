@@ -5,7 +5,7 @@ async fn router_discovery_books_list_supports_genre_condition_in_runtime_owned_m
     let paths = new_router_fixture("router-discovery-books-list-strict-filter-combo").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -52,7 +52,7 @@ async fn router_discovery_books_list_rejects_unknown_condition_type_in_runtime_o
     let paths = new_router_fixture("router-discovery-books-list-strict-unknown-condition").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -88,7 +88,7 @@ async fn router_discovery_books_list_rejects_unknown_operator_in_runtime_owned_m
     let paths = new_router_fixture("router-discovery-books-list-strict-unknown-operator").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -123,7 +123,7 @@ async fn router_discovery_books_list_supports_series_metadata_conditions_in_runt
     let paths = new_router_fixture("router-discovery-books-list-strict-series-metadata").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for condition in [
@@ -168,7 +168,7 @@ async fn router_discovery_books_list_series_id_with_query_is_not_silent_empty_in
     let paths = new_router_fixture("router-discovery-books-list-strict-seriesid-query").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -246,7 +246,7 @@ async fn router_discovery_books_list_supports_anyof_and_allof_in_runtime_owned_m
     let paths = new_router_fixture("router-discovery-books-list-strict-anyof-allof").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let all_of_match_response = app

@@ -48,7 +48,7 @@ async fn router_get_history_honors_type_sort_override_like_kotlin() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -95,7 +95,7 @@ async fn router_get_history_marks_unknown_sort_as_unsorted_like_kotlin() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -161,7 +161,7 @@ async fn router_post_filesystem_returns_unauthorized_for_anonymous_user_like_kot
     let paths = new_router_fixture("router-post-filesystem-anonymous-unauthorized").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -192,7 +192,7 @@ async fn router_post_filesystem_returns_forbidden_for_regular_user_like_kotlin()
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "filesystem@example.org",
@@ -222,7 +222,7 @@ async fn router_post_filesystem_empty_body_returns_root_directories_like_kotlin(
     let paths = new_router_fixture("router-post-filesystem-empty-body-root").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -257,7 +257,7 @@ async fn router_post_filesystem_rejects_relative_path_even_when_it_exists_like_k
     std::fs::create_dir_all(paths.config_dir.join("relative-dir"))
         .expect("relative filesystem test directory should be created");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -294,7 +294,7 @@ async fn router_post_filesystem_absolute_directory_hides_hidden_entries_and_uses
     std::fs::write(&visible_file, b"visible").expect("visible browse file should be written");
     std::fs::write(&hidden_file, b"hidden").expect("hidden browse file should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -352,7 +352,7 @@ async fn router_post_filesystem_returns_bad_request_for_nonexistent_absolute_pat
     let missing_parent = paths.config_dir.join("missing-parent");
     let missing_path = missing_parent.join("missing-child");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

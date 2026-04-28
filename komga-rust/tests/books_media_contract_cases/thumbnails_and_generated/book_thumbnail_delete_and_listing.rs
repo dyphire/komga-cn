@@ -5,7 +5,7 @@ async fn router_book_thumbnail_by_id_allows_missing_path_book_when_thumbnail_exi
     let paths = new_router_fixture("router-book-thumbnail-by-id-missing-path-book").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
@@ -56,7 +56,7 @@ async fn router_book_thumbnail_delete_allows_missing_path_book_when_thumbnail_ex
     let paths = new_router_fixture("router-book-thumbnail-delete-missing-path-book").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
@@ -131,6 +131,7 @@ async fn router_book_thumbnail_delete_rejects_generated_thumbnail() {
     cleanup_pool.close().await;
 
     generate_book_thumbnail(paths.main_db.as_path(), "book-1")
+        .await
         .expect("generate_book_thumbnail should succeed before delete test");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -146,7 +147,7 @@ async fn router_book_thumbnail_delete_rejects_generated_thumbnail() {
     .get::<String, _>("ID");
     verify_pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let response = app
         .oneshot(
@@ -182,7 +183,7 @@ async fn router_book_thumbnail_delete_reselects_remaining_thumbnail_when_selecte
         .expect("existing book-1 thumbnails should be deleted before delete reselect test");
     cleanup_pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let image_bytes = fixture_png_bytes();
 
@@ -259,7 +260,7 @@ async fn router_book_thumbnail_select_emits_thumbnail_book_added_event() {
     let paths = new_router_fixture("router-book-thumbnail-select-sse").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
@@ -331,7 +332,7 @@ async fn router_book_thumbnail_delete_emits_thumbnail_book_deleted_event() {
     let paths = new_router_fixture("router-book-thumbnail-delete-sse").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
@@ -401,7 +402,7 @@ async fn router_book_thumbnails_returns_empty_array_for_existing_book_without_po
     seed_router_contract_data(&paths).await;
     seed_router_authors_scope_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -474,7 +475,7 @@ async fn router_book_thumbnail_returns_not_found_for_existing_single_image_witho
     std::fs::write(&image_path, fixture_png_bytes())
         .expect("single-image fixture should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

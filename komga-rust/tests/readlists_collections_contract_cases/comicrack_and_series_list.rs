@@ -23,7 +23,7 @@ async fn router_readlist_match_comicrack_rejects_invalid_xml_and_reports_matches
     seed_router_contract_data(&paths).await;
     seed_readlist_endpoint_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let missing_file_part_body = "--komga-rust-comicrack-boundary\r\nContent-Disposition: form-data; name=\"upload\"; filename=\"list.cbl\"\r\nContent-Type: application/xml\r\n\r\n<ReadingList />\r\n--komga-rust-comicrack-boundary--\r\n".to_string();
@@ -191,7 +191,7 @@ async fn router_discovery_series_list_supports_metadata_and_collection_filters_i
         new_router_fixture("router-discovery-series-list-strict-metadata-and-collection").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let genre_match = app

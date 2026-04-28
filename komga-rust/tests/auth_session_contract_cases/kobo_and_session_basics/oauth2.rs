@@ -98,7 +98,7 @@ async fn oauth2_authorization_response_for_config(
     config: &RuntimeConfig,
     registration_id: &str,
 ) -> Response {
-    let app = build_router_with_config(config);
+    let app = build_router_with_config(config).await;
     app.oneshot(
         Request::builder()
             .method("GET")
@@ -125,7 +125,7 @@ async fn oauth2_callback_response_for_config_with_request_metadata(
     remote_addr: Option<SocketAddr>,
     user_agent: Option<&str>,
 ) -> Response {
-    let app = build_router_with_config(config);
+    let app = build_router_with_config(config).await;
     let authorization_response = app
         .clone()
         .oneshot(
@@ -390,7 +390,7 @@ async fn router_oauth2_authorization_uses_registration_configured_scope() {
 
     let config = RuntimeConfig::resolve_with_env(&RuntimeCli::default(), &env)
         .expect("runtime config should resolve oauth2 client env");
-    let app = build_router_with_config(&config);
+    let app = build_router_with_config(&config).await;
 
     let response = app
         .oneshot(
@@ -455,7 +455,7 @@ async fn router_oauth2_authorization_includes_forwarded_prefix_in_redirect_uri()
 
     let config =
         oauth2_runtime_config_for_base_url(&paths, "github", "https://github.example", "read:user");
-    let app = build_router_with_config(&config);
+    let app = build_router_with_config(&config).await;
 
     let response = app
         .oneshot(
@@ -498,7 +498,7 @@ async fn router_oauth2_callback_expires_authorization_state_with_session_lifetim
     let mut config =
         oauth2_runtime_config_for_base_url(&paths, "github", "https://github.example", "read:user");
     config.session_max_inactive_seconds = 1;
-    let app = build_router_with_config(&config);
+    let app = build_router_with_config(&config).await;
 
     let authorization_response = app
         .clone()
@@ -1119,7 +1119,7 @@ async fn router_oauth2_callback_records_failure_activity() {
         "https://issuer.example",
         "openid email",
     );
-    let app = build_router_with_config(&config);
+    let app = build_router_with_config(&config).await;
 
     let authorization_response = app
         .clone()

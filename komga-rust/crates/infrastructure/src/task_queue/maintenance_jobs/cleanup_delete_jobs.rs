@@ -1,21 +1,19 @@
 use super::*;
+use komga_application::task_processing::TaskRuntimeContext;
 
-pub(super) fn try_execute(
-    runtime: &RuntimeConfig,
+pub(super) async fn try_execute(
+    runtime: &TaskRuntimeContext,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
-) -> Option<Result<(), TaskExecutionError>> {
-    let result = match task.simple_type.as_str() {
+) -> Option<Result<TaskExecutionOutcome, TaskExecutionError>> {
+    Some(match task.simple_type.as_str() {
         "EMPTY_TRASH" => {
             let Some(library_id) = task_target else {
                 return Some(Err(TaskExecutionError::invalid_task(
                     "EMPTY_TRASH task must include a library id",
                 )));
             };
-            if let Err(error) = super::super::cleanup_tasks::empty_trash(runtime, library_id) {
-                return Some(Err(error));
-            }
-            super::super::cleanup_tasks::cleanup_empty_sets(runtime)
+            execute_empty_trash(runtime, library_id).await
         }
         "DELETE_BOOK" => {
             let Some(book_id) = task_target else {
@@ -24,6 +22,8 @@ pub(super) fn try_execute(
                 )));
             };
             super::super::delete_tasks::delete_book_task(runtime, book_id)
+                .await
+                .map(|()| TaskExecutionOutcome::completed())
         }
         "DELETE_SERIES" => {
             let Some(series_id) = task_target else {
@@ -32,9 +32,18 @@ pub(super) fn try_execute(
                 )));
             };
             super::super::delete_tasks::delete_series(runtime, series_id)
+                .await
+                .map(|()| TaskExecutionOutcome::completed())
         }
         _ => return None,
-    };
+    })
+}
 
-    Some(result)
+async fn execute_empty_trash(
+    runtime: &RuntimeConfig,
+    library_id: &str,
+) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+    super::super::cleanup_tasks::empty_trash(runtime, library_id).await?;
+    super::super::cleanup_tasks::cleanup_empty_sets(runtime).await?;
+    Ok(TaskExecutionOutcome::completed())
 }

@@ -137,11 +137,10 @@ impl TaskQueueService for RuntimeTaskQueueService {
         urgent: bool,
     ) -> Result<(), String> {
         let _worker_runtime_guard = self.worker_runtime_guard.clone();
-        with_task_queue(&self.task_queue, |queue| {
-            for task_record in task_records {
-                queue.enqueue(task_record);
-            }
-        })?;
+        let mut queue = self.task_queue.lock().await;
+        for task_record in task_records {
+            queue.enqueue(task_record).await;
+        }
         if urgent {
             self.task_wakeup.notify_one();
         }
@@ -149,17 +148,18 @@ impl TaskQueueService for RuntimeTaskQueueService {
     }
 
     async fn clear_unowned_tasks(&self) -> usize {
-        with_task_queue(&self.task_queue, |queue| queue.clear_unowned())
-            .expect("task queue state lock should not be poisoned")
+        let mut queue = self.task_queue.lock().await;
+        queue.clear_unowned().await
     }
 
     async fn count_task_queue_by_type(&self) -> BTreeMap<String, usize> {
-        with_task_queue(&self.task_queue, |queue| queue.count_by_simple_type())
-            .expect("task queue state lock should not be poisoned")
+        let mut queue = self.task_queue.lock().await;
+        queue.count_by_simple_type().await
     }
 
     async fn apply_task_pool_size(&self, value: usize) -> Result<(), String> {
-        with_task_queue(&self.task_queue, |queue| queue.set_task_pool_size(value))?;
+        let mut queue = self.task_queue.lock().await;
+        queue.set_task_pool_size(value);
         self.task_wakeup.notify_one();
         Ok(())
     }
@@ -211,18 +211,6 @@ impl ServerSettingsService for RuntimeServerSettingsService {
             .await
             .map_err(|error| error.to_string())
     }
-}
-
-fn with_task_queue<T>(
-    task_queue: &SharedTaskQueue,
-    operation: impl FnOnce(
-        &mut komga_infrastructure::task_queue::queue_scheduler::TaskQueueScheduler,
-    ) -> T,
-) -> Result<T, String> {
-    let mut queue = task_queue
-        .lock()
-        .map_err(|_| String::from("task queue lock poisoned"))?;
-    Ok(operation(&mut queue))
 }
 
 pub(super) fn compose_operational_state(
@@ -294,6 +282,7 @@ mod tests {
     use serde_json::json;
     use std::sync::Arc;
     use std::time::Duration;
+    use tokio::sync::Mutex;
 
     fn scan_library_task() -> TaskQueueRecord {
         TaskQueueRecord::new("SCAN_LIBRARY_library-1_DEEP_false", 8, None)
@@ -338,10 +327,7 @@ mod tests {
                 "urgent={urgent} should control background worker wakeup"
             );
 
-            let queued_tasks = task_queue
-                .lock()
-                .expect("task queue lock should not be poisoned")
-                .count_by_simple_type();
+            let queued_tasks = task_queue.lock().await.count_by_simple_type().await;
             assert_eq!(
                 queued_tasks.get("SCAN_LIBRARY"),
                 Some(&1),

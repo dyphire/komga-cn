@@ -1,10 +1,10 @@
-use std::fs;
 use std::io::Cursor;
 use std::path::Path;
 
 use komga_application::media_assets::BookMediaRecord;
 use pdfium_render::prelude::*;
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
+use tokio::fs;
 
 use crate::load_pdfium;
 use crate::resolve_rooted_path;
@@ -171,7 +171,7 @@ pub(super) enum MarkSelectedPreference {
     No,
 }
 
-pub(super) fn load_book_local_artwork_urls(
+pub(super) async fn load_book_local_artwork_urls(
     library_root: &Path,
     book_url: &str,
 ) -> Result<Vec<String>, String> {
@@ -184,23 +184,29 @@ pub(super) fn load_book_local_artwork_urls(
     };
 
     let mut artwork_urls = Vec::new();
-    let entries = fs::read_dir(book_dir).map_err(|error| {
+    let mut entries = fs::read_dir(book_dir).await.map_err(|error| {
         format!(
             "failed to scan local artwork directory '{}' for '{}': {error}",
             book_dir.display(),
             book_url,
         )
     })?;
-    for entry in entries {
-        let entry = entry.map_err(|error| {
+    while let Some(entry) = entries.next_entry().await.map_err(|error| {
+        format!(
+            "failed to read local artwork entry in '{}' for '{}': {error}",
+            book_dir.display(),
+            book_url,
+        )
+    })? {
+        let file_type = entry.file_type().await.map_err(|error| {
             format!(
-                "failed to read local artwork entry in '{}' for '{}': {error}",
+                "failed to inspect local artwork entry in '{}' for '{}': {error}",
                 book_dir.display(),
                 book_url,
             )
         })?;
         let path = entry.path();
-        if !path.is_file() || !supported_book_local_artwork_path(path.as_path()) {
+        if !file_type.is_file() || !supported_book_local_artwork_path(path.as_path()) {
             continue;
         }
         let Some(candidate_stem) = path.file_stem().and_then(|value| value.to_str()) else {
@@ -227,29 +233,35 @@ pub(super) fn load_book_local_artwork_urls(
     Ok(artwork_urls)
 }
 
-pub(super) fn load_series_local_artwork_urls(
+pub(super) async fn load_series_local_artwork_urls(
     library_root: &Path,
     series_url: &str,
 ) -> Result<Vec<String>, String> {
     let series_path = resolve_rooted_path(library_root, series_url);
     let mut artwork_urls = Vec::new();
-    let entries = fs::read_dir(&series_path).map_err(|error| {
+    let mut entries = fs::read_dir(&series_path).await.map_err(|error| {
         format!(
             "failed to scan series local artwork directory '{}' for '{}': {error}",
             series_path.display(),
             series_url,
         )
     })?;
-    for entry in entries {
-        let entry = entry.map_err(|error| {
+    while let Some(entry) = entries.next_entry().await.map_err(|error| {
+        format!(
+            "failed to read series local artwork entry in '{}' for '{}': {error}",
+            series_path.display(),
+            series_url,
+        )
+    })? {
+        let file_type = entry.file_type().await.map_err(|error| {
             format!(
-                "failed to read series local artwork entry in '{}' for '{}': {error}",
+                "failed to inspect series local artwork entry in '{}' for '{}': {error}",
                 series_path.display(),
                 series_url,
             )
         })?;
         let path = entry.path();
-        if !path.is_file() || !supported_series_local_artwork_path(path.as_path()) {
+        if !file_type.is_file() || !supported_series_local_artwork_path(path.as_path()) {
             continue;
         }
         let Some(candidate_stem) = path.file_stem().and_then(|value| value.to_str()) else {
@@ -317,7 +329,7 @@ pub(super) async fn import_book_local_artwork_thumbnail(
     selected_preference: MarkSelectedPreference,
 ) -> Result<bool, String> {
     let artwork_path = library_root.join(artwork_url);
-    let metadata = fs::metadata(&artwork_path).map_err(|error| {
+    let metadata = tokio::fs::metadata(&artwork_path).await.map_err(|error| {
         format!(
             "failed to read local artwork '{}' for book '{}': {error}",
             artwork_path.display(),
@@ -388,7 +400,7 @@ pub(super) async fn import_series_local_artwork_thumbnail(
     selected_preference: MarkSelectedPreference,
 ) -> Result<bool, String> {
     let artwork_path = library_root.join(artwork_url);
-    let metadata = fs::metadata(&artwork_path).map_err(|error| {
+    let metadata = tokio::fs::metadata(&artwork_path).await.map_err(|error| {
         format!(
             "failed to read series local artwork '{}' for '{}': {error}",
             artwork_path.display(),

@@ -57,7 +57,7 @@ async fn router_readlists_explicit_created_date_sort_matches_kotlin() {
         .expect("readlist-3 membership should insert for created-date sort seed");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -143,7 +143,7 @@ async fn router_readlists_explicit_last_modified_date_sort_matches_kotlin() {
         .expect("readlist-3 membership should insert for last-modified sort seed");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -216,7 +216,7 @@ async fn router_readlists_default_name_order_uses_unicode_collation_like_kotlin(
         .expect("readlist-4 membership should insert for readlists unicode-order seed");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -289,7 +289,7 @@ async fn router_readlists_explicit_name_sort_uses_unicode_collation_like_kotlin(
         .expect("readlist-4 membership should insert for readlists explicit unicode-order seed");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

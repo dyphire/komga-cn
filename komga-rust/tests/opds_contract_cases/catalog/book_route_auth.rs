@@ -4,7 +4,7 @@ use super::*;
 async fn router_opds_v2_book_file_unauthorized_returns_opds_auth_document() {
     let paths = new_router_fixture("router-opds-v2-book-file-unauthorized-auth-doc").await;
     seed_router_contract_data(&paths).await;
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     for route in [
         "/opds/v2/books/book-1/file",
@@ -100,7 +100,7 @@ async fn router_opds_v2_book_file_unauthorized_returns_opds_auth_document() {
 async fn router_opds_v2_book_page_routes_unauthorized_return_opds_auth_document() {
     let paths = new_router_fixture("router-opds-v2-book-page-unauthorized-auth-doc").await;
     seed_router_contract_data(&paths).await;
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     for route in [
         "/opds/v2/books/book-1/pages/1",

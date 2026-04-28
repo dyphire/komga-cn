@@ -23,7 +23,7 @@ async fn router_discovery_books_latest_ignores_sort_query_and_stays_last_modifie
         .expect("book-2 lastModified should update for latest sort parity");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -58,7 +58,7 @@ async fn router_discovery_books_latest_accepts_basic_auth_like_kotlin_clients() 
     let paths = new_router_fixture("router-discovery-books-latest-basic-auth-compat").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let response = app
         .oneshot(
             Request::builder()
@@ -90,7 +90,7 @@ async fn router_discovery_books_latest_unpaged_keeps_kotlin_page_shape() {
     seed_router_contract_data(&paths).await;
     seed_router_primary_series_cbz_book(&paths, "book-2", "book-2.cbz", "Another Book").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

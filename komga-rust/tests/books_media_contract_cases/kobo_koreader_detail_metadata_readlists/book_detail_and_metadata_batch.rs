@@ -6,7 +6,7 @@ async fn router_discovery_book_detail_includes_persisted_authors_tags_and_read_p
     seed_router_contract_data(&paths).await;
     seed_router_read_progress(&paths, true).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -71,7 +71,7 @@ async fn router_discovery_book_detail_accepts_basic_auth_like_kotlin_clients() {
     let paths = new_router_fixture("router-discovery-book-detail-basic-auth-compat").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let response = app
         .oneshot(
             Request::builder()
@@ -118,7 +118,7 @@ async fn router_discovery_book_detail_exposes_oneshot_flag_from_persisted_book_r
         .expect("series oneshot flag should update for detail contract consistency");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -159,7 +159,7 @@ async fn router_discovery_book_detail_preserves_empty_read_progress_device_field
     .expect("read progress device fields should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -208,7 +208,7 @@ async fn router_discovery_book_detail_converts_admin_url_to_file_path() {
         .expect("book url should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -238,7 +238,7 @@ async fn router_discovery_book_detail_formats_file_last_modified_as_utc_timestam
     let paths = new_router_fixture("router-discovery-book-detail-file-last-modified-utc").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -270,7 +270,7 @@ async fn router_discovery_book_detail_does_not_bridge_missing_book_n_ids() {
     seed_router_primary_series_cbz_book(&paths, "book-z-2", "book-z-2.cbz", "Second Real Book")
         .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -309,7 +309,7 @@ async fn router_book_metadata_batch_update_persists_title_and_updates_book_snaps
     .get::<String, _>("LAST_MODIFIED");
     pool_before.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let patch = json!({
@@ -376,7 +376,7 @@ async fn router_book_metadata_batch_update_refreshes_book_search_results() {
     let paths = new_router_fixture("router-book-metadata-batch-update-refreshes-search").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let initial_search = app
@@ -476,7 +476,7 @@ async fn router_book_metadata_update_refreshes_book_full_text_search_results() {
     let paths = new_router_fixture("router-book-metadata-update-refreshes-search").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let initial_search = app
@@ -564,7 +564,7 @@ async fn router_book_metadata_update_rejects_invalid_isbn_values() {
     let paths = new_router_fixture("router-book-metadata-update-invalid-isbn").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for invalid_isbn in ["1617290459", "978-123-456-789-6"] {
@@ -598,7 +598,7 @@ async fn router_book_metadata_update_rejects_blank_title_and_number_values() {
     let paths = new_router_fixture("router-book-metadata-update-blank-title-number").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for payload in [json!({ "title": "" }), json!({ "number": "" })] {
@@ -627,7 +627,7 @@ async fn router_book_metadata_update_returns_not_found_for_missing_book() {
     let paths = new_router_fixture("router-book-metadata-update-missing-book").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -653,7 +653,7 @@ async fn router_book_metadata_update_rejects_invalid_link_urls() {
     let paths = new_router_fixture("router-book-metadata-update-invalid-link-url").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -689,7 +689,7 @@ async fn router_book_metadata_update_accepts_normalized_valid_isbn_13() {
     let paths = new_router_fixture("router-book-metadata-update-valid-isbn-13").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let update = app

@@ -7,7 +7,7 @@ async fn router_discovery_series_list_supports_read_status_is_and_is_not_in_runt
     seed_router_series_counts(&paths, 1, Some(1)).await;
     seed_router_series_read_progress(&paths, 1, 0).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let matched_read_response = app
@@ -143,7 +143,7 @@ async fn router_discovery_series_list_supports_complete_in_runtime_owned_mode() 
     seed_router_contract_data(&paths).await;
     seed_router_series_counts(&paths, 1, Some(1)).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let complete_true_response = app

@@ -8,7 +8,7 @@ async fn router_discovery_series_detail_uses_persisted_title_sort_value() {
     seed_router_contract_data(&paths).await;
     seed_router_series_title_sort(&paths, "series-1", "Series Sort 1").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -45,7 +45,7 @@ async fn router_discovery_series_detail_includes_persisted_metadata_and_aggregat
     seed_router_series_read_progress(&paths, 1, 0).await;
     seed_router_series_aggregated_tag(&paths, "series-1", "aggregated-tag").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -131,7 +131,7 @@ async fn router_discovery_series_detail_uses_persisted_series_name_for_top_level
         .expect("series metadata title should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -168,7 +168,7 @@ async fn router_discovery_series_detail_id_bridge_preserves_real_library_id() {
     seed_router_contract_data(&paths).await;
     seed_router_custom_series(&paths, "custom-series-2", "Series 2", "library-1").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -203,7 +203,7 @@ async fn router_discovery_series_detail_accepts_oneshot_true_with_extra_query_pa
     let paths = new_router_fixture("router-discovery-series-detail-oneshot-query-shape").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

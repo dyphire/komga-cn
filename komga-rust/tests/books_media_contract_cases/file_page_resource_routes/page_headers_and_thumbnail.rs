@@ -156,7 +156,7 @@ async fn router_book_pages_and_raw_pages_include_inline_content_disposition() {
     .await;
     update_router_book_name(&paths, "book-pdf-1", "Readable Page Title").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for route in [
@@ -208,7 +208,7 @@ async fn router_book_page_routes_accept_basic_auth_like_kotlin_clients() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
 
@@ -250,7 +250,7 @@ async fn router_persisted_cbz_pages_follow_kotlin_one_based_numbering() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let pages_response = app
@@ -342,7 +342,7 @@ async fn router_persisted_cbz_page_route_reads_legacy_file_urls() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let pages_response = app
@@ -393,7 +393,7 @@ async fn router_book_page_thumbnail_resizes_largest_dimension_to_300px() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let pages_response = app
@@ -467,7 +467,7 @@ async fn router_book_page_thumbnail_returns_bad_request_for_missing_page_number(
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for route in [

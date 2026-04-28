@@ -49,12 +49,13 @@ pub fn runtime_config_for_paths(paths: &RuntimeDbPaths) -> RuntimeConfig {
         .expect("runtime config should resolve fixture paths")
 }
 
-pub fn search_ready_runtime_config_for_paths(paths: &RuntimeDbPaths) -> RuntimeConfig {
+pub async fn search_ready_runtime_config_for_paths(paths: &RuntimeDbPaths) -> RuntimeConfig {
     let config = runtime_config_for_paths(paths);
     rebuild_index_from_database(
         paths.main_db.as_path(),
         config.lucene_data_directory.as_path(),
     )
+    .await
     .expect("search-ready runtime config should rebuild the search index from fixture data");
     config
 }

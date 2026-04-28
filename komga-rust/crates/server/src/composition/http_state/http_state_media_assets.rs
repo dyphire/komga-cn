@@ -102,6 +102,7 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
             komga_infrastructure::search::index_lifecycle::SearchEntityType::Book,
             &book_id,
         )
+        .await
         .map(|_| ())
     }
 

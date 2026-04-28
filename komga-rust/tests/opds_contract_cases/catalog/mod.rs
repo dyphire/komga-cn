@@ -21,7 +21,7 @@ async fn router_opds_v1_catalog_route_returns_atom_feed() {
     let paths = new_router_fixture("router-opds-v1-catalog-route").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -52,7 +52,7 @@ async fn router_opds_v1_catalog_includes_search_and_opds_v2_alternate_links() {
     let paths = new_router_fixture("router-opds-v1-catalog-links").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -88,7 +88,7 @@ async fn router_opds_v1_libraries_unauthorized_includes_basic_challenge() {
     let paths = new_router_fixture("router-opds-v1-libraries-basic-challenge").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -120,7 +120,7 @@ async fn router_opds_v1_libraries_preserves_kotlin_dao_iteration_order() {
     update_router_library_name(&paths, "library-1", "Z Library").await;
     seed_router_library(&paths, "library-2", "A Library").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -249,7 +249,7 @@ async fn router_opds_v2_catalog_uses_kotlin_top_level_links_when_authenticated()
     let paths = new_router_fixture("router-opds-v2-catalog-self-link").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -342,7 +342,7 @@ async fn router_opds_v2_libraries_uses_kotlin_top_level_links_when_authenticated
     let paths = new_router_fixture("router-opds-v2-libraries-top-level-links").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -436,7 +436,7 @@ async fn router_opds_v2_catalog_latest_books_publication_uses_webpub_like_shape(
     update_router_book_isbn(&paths, "book-1", "9781234567890").await;
     update_router_book_number_metadata(&paths, "book-1", "Special", 10.0).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -640,7 +640,7 @@ async fn router_opds_v2_catalog_latest_books_filters_before_limit_for_library_re
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "library-user@example.org",

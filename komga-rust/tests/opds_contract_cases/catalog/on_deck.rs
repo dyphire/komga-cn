@@ -5,7 +5,7 @@ async fn router_opds_v2_on_deck_unauthorized_returns_opds_auth_document() {
     let paths = new_router_fixture("router-opds-v2-on-deck-unauthorized-auth-doc").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -89,7 +89,7 @@ async fn router_opds_v2_on_deck_uses_kotlin_shape_and_visible_results() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -263,7 +263,7 @@ async fn router_opds_v2_on_deck_filters_results_for_restricted_user() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -315,7 +315,7 @@ async fn router_opds_v2_library_on_deck_unauthorized_returns_opds_auth_document(
     seed_router_read_progress(&paths, true).await;
     seed_router_pdf_book(&paths, "book-pdf", "series-1", "book-pdf.pdf", "Book PDF").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -347,7 +347,7 @@ async fn router_opds_v2_library_on_deck_respects_kotlin_library_scope_statuses()
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -394,7 +394,7 @@ async fn router_opds_v2_library_on_deck_uses_kotlin_shape() {
     update_router_library_last_modified(&paths, "library-1", "2024-02-03 04:05:06").await;
     update_router_book_isbn(&paths, "book-pdf", "9780000000002").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

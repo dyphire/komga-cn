@@ -75,7 +75,7 @@ pub(super) fn scan_library_task(
         .with_payload(scan_library_task_payload(library_id, priority, deep_scan))
 }
 
-pub(super) fn process_scan_library_task(
+pub(super) async fn process_scan_library_task(
     config: RuntimeConfig,
     library_id: &str,
     priority: i32,
@@ -83,8 +83,10 @@ pub(super) fn process_scan_library_task(
 ) -> Result<usize, TaskProcessingError> {
     let runtime = runtime_task_context_from_config(&config);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(scan_library_task(library_id, priority, deep_scan));
-    scheduler.process_available(&runtime)
+    scheduler
+        .enqueue(scan_library_task(library_id, priority, deep_scan))
+        .await;
+    scheduler.process_available(&runtime).await
 }
 
 pub(super) fn runtime_task_context_from_config(config: &RuntimeConfig) -> TaskRuntimeContext {

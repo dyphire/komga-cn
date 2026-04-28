@@ -13,7 +13,7 @@ async fn router_opds_v1_book_page_uses_zero_based_external_page_numbers() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let zero_response = app
@@ -66,7 +66,7 @@ async fn router_opds_book_page_routes_do_not_negotiate_pdf_for_pdf_books() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for route in [

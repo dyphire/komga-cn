@@ -11,7 +11,7 @@ async fn router_book_file_direct_route_returns_attachment_headers_and_body() {
     std::fs::write(books_dir.join("book-1.epub"), expected_body)
         .expect("book fixture file should be written for direct file route test");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -75,7 +75,7 @@ async fn router_book_file_direct_route_accepts_basic_auth_like_kotlin_clients() 
     std::fs::write(books_dir.join("book-1.epub"), expected_body)
         .expect("book fixture file should be written for basic-auth direct file route test");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let response = app
         .oneshot(
             Request::builder()
@@ -115,7 +115,7 @@ async fn router_book_file_direct_route_ignores_range_and_returns_full_body() {
     std::fs::write(books_dir.join("book-1.epub"), expected_body)
         .expect("book fixture file should be written for range-ignoring file route test");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -153,7 +153,7 @@ async fn router_book_file_direct_route_returns_not_found_with_message_when_file_
     let paths = new_router_fixture("router-book-file-direct-route-missing-file").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -210,7 +210,7 @@ async fn router_book_file_direct_route_uses_persisted_media_type_for_comic_archi
     std::fs::write(books_dir.join("book-1.cbz"), expected_body)
         .expect("comic archive fixture file should be written for direct file route test");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -265,7 +265,7 @@ async fn router_book_file_direct_route_percent_encodes_unicode_attachment_name()
     std::fs::write(books_dir.join(unicode_file_name), b"unicode-book-file")
         .expect("unicode book fixture file should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

@@ -30,6 +30,7 @@ async fn generate_book_thumbnail_persists_generated_thumbnail_for_epub_cover() {
     assert_eq!(cover_media_type, "image/png");
 
     generate_book_thumbnail(paths.main_db.as_path(), "book-1")
+        .await
         .expect("generate_book_thumbnail should execute successfully for epub cover");
 
     let main_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -51,7 +52,7 @@ async fn generate_book_thumbnail_persists_generated_thumbnail_for_epub_cover() {
     assert_eq!(generated_row.get::<String, _>("MEDIA_TYPE"), "image/jpeg");
 
     let runtime_config = runtime_config_for_paths(&paths);
-    let app = build_router_with_config(&runtime_config);
+    let app = build_router_with_config(&runtime_config).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let after = app
@@ -113,6 +114,7 @@ async fn generate_book_thumbnail_persists_generated_thumbnail_for_pdf() {
     .await;
 
     generate_book_thumbnail(paths.main_db.as_path(), "book-pdf-1")
+        .await
         .expect("generate_book_thumbnail should execute successfully for pdf");
 
     let main_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -136,7 +138,7 @@ async fn generate_book_thumbnail_persists_generated_thumbnail_for_pdf() {
     assert!(generated_row.get::<i64, _>("HEIGHT") > 0);
 
     let runtime_config = runtime_config_for_paths(&paths);
-    let app = build_router_with_config(&runtime_config);
+    let app = build_router_with_config(&runtime_config).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let after = app
@@ -203,6 +205,7 @@ async fn generate_book_thumbnail_emits_thumbnail_book_added_event() {
 
     let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
     generate_book_thumbnail(paths.main_db.as_path(), "book-1")
+        .await
         .expect("generate_book_thumbnail should execute successfully for sse contract");
 
     let (_, events) = komga_application::runtime_sse::pending_runtime_sse_events(

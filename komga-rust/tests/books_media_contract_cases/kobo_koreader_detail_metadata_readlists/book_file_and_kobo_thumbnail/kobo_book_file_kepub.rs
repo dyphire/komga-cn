@@ -7,7 +7,7 @@ async fn router_kobo_book_file_epub_convert_kepub_uses_kepub_attachment_name() {
     seed_admin_kobo_path_token(&paths).await;
     write_router_epub_with_cover(&paths, "books/book-1.epub");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

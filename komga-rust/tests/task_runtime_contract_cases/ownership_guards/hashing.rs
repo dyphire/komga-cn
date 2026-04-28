@@ -17,13 +17,16 @@ async fn runtime_blocks_book_hash_when_main_database_is_external_owned() {
         ..runtime_task_context(&paths)
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(TaskQueueRecord::new(
-        "HASH_BOOK:book-1",
-        1_000,
-        Some("book-1".to_string()),
-    ));
+    scheduler
+        .enqueue(TaskQueueRecord::new(
+            "HASH_BOOK:book-1",
+            1_000,
+            Some("book-1".to_string()),
+        ))
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("blocked main-database hash-book should still drain cleanly");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -85,11 +88,13 @@ async fn runtime_skips_book_hash_when_library_hash_files_was_disabled_after_enqu
 
     let runtime = runtime_task_context(&paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new("HASH_BOOK_book-hash-flag-1", 1_000, None)
-            .with_simple_type("HASH_BOOK"),
-    );
-    scheduler.process_available(&runtime).expect(
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new("HASH_BOOK_book-hash-flag-1", 1_000, None)
+                .with_simple_type("HASH_BOOK"),
+        )
+        .await;
+    scheduler.process_available(&runtime).await.expect(
         "hash-book task should skip cleanly when library hash-files was disabled after enqueue",
     );
 
@@ -138,11 +143,14 @@ async fn runtime_skips_book_hash_when_book_already_has_hash() {
 
     let runtime = runtime_task_context(&paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new("HASH_BOOK_book-1", 1_000, None).with_simple_type("HASH_BOOK"),
-    );
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new("HASH_BOOK_book-1", 1_000, None).with_simple_type("HASH_BOOK"),
+        )
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("hash-book task should skip cleanly when the book already has a hash");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -225,13 +233,16 @@ async fn runtime_blocks_book_page_hash_when_main_database_is_external_owned() {
         ..runtime_task_context(&paths)
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(TaskQueueRecord::new(
-        "HASH_BOOK_PAGES:book-hash-1",
-        1_000,
-        Some("book-hash-1".to_string()),
-    ));
+    scheduler
+        .enqueue(TaskQueueRecord::new(
+            "HASH_BOOK_PAGES:book-hash-1",
+            1_000,
+            Some("book-hash-1".to_string()),
+        ))
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("blocked main-database page-hash should still drain cleanly");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -295,12 +306,14 @@ async fn runtime_skips_book_koreader_hash_when_library_hash_koreader_was_disable
 
     let runtime = runtime_task_context(&paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new("HASH_BOOK_KOREADER_book-koreader-flag-1", 1_000, None)
-            .with_simple_type("HASH_BOOK_KOREADER"),
-    );
     scheduler
-        .process_available(&runtime)
+        .enqueue(
+            TaskQueueRecord::new("HASH_BOOK_KOREADER_book-koreader-flag-1", 1_000, None)
+                .with_simple_type("HASH_BOOK_KOREADER"),
+        )
+        .await;
+    scheduler
+        .process_available(&runtime).await
         .expect("koreader-hash task should skip cleanly when library hash-koreader was disabled after enqueue");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -337,12 +350,15 @@ async fn runtime_skips_book_koreader_hash_when_book_already_has_hash() {
 
     let runtime = runtime_task_context(&paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new("HASH_BOOK_KOREADER_book-1", 1_000, None)
-            .with_simple_type("HASH_BOOK_KOREADER"),
-    );
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new("HASH_BOOK_KOREADER_book-1", 1_000, None)
+                .with_simple_type("HASH_BOOK_KOREADER"),
+        )
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("koreader-hash task should skip cleanly when the book already has a koreader hash");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -424,11 +440,13 @@ async fn runtime_skips_book_page_hash_when_library_hash_pages_was_disabled_after
 
     let runtime = runtime_task_context(&paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new("HASH_BOOK_PAGES_book-hash-flag-1", 1_000, None)
-            .with_simple_type("HASH_BOOK_PAGES"),
-    );
-    scheduler.process_available(&runtime).expect(
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new("HASH_BOOK_PAGES_book-hash-flag-1", 1_000, None)
+                .with_simple_type("HASH_BOOK_PAGES"),
+        )
+        .await;
+    scheduler.process_available(&runtime).await.expect(
         "page-hash task should skip cleanly when library hash-pages was disabled after enqueue",
     );
 

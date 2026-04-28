@@ -11,7 +11,7 @@ async fn router_kobo_catch_all_returns_empty_json_when_proxy_disabled() {
     seed_router_contract_data(&paths).await;
     seed_admin_kobo_path_token(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

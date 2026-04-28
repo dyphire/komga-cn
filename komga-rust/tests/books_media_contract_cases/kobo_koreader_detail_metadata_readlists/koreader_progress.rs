@@ -15,7 +15,7 @@ async fn router_koreader_progress_get_returns_forbidden_for_session_user_without
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "member-no-koreader-sync@example.org",
@@ -57,7 +57,7 @@ async fn router_koreader_progress_put_then_get_roundtrip() {
         .expect("epub extension positions should be seeded for koreader roundtrip test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let put_response = app
@@ -129,7 +129,7 @@ async fn router_koreader_progress_put_persists_kotlin_style_epub_locator() {
         .expect("epub extension positions should be seeded for koreader locator test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -207,7 +207,7 @@ async fn router_koreader_progress_put_treats_cbz_as_visual_and_marks_last_page_c
         .expect("cbz book koreader hash should be set");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -271,7 +271,7 @@ async fn router_koreader_progress_put_marks_epub_completed_from_matched_total_pr
         .expect("epub extension positions should be seeded for koreader completion test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -335,7 +335,7 @@ async fn router_koreader_progress_put_keeps_page_zero_when_epub_match_lacks_tota
         .expect("epub extension positions should be seeded for koreader missing-total test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -398,7 +398,7 @@ async fn router_koreader_progress_put_returns_forbidden_without_header_or_sessio
     let paths = new_router_fixture("router-koreader-progress-put-anonymous-forbidden").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -460,7 +460,7 @@ async fn router_koreader_progress_get_returns_kotlin_error_envelopes() {
     let paths = new_router_fixture("router-koreader-progress-error-envelopes").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let empty_response = app
@@ -558,7 +558,7 @@ async fn router_koreader_progress_put_returns_kotlin_error_envelopes_for_lookup_
     let paths = new_router_fixture("router-koreader-progress-put-error-envelopes").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let not_found_response = app
@@ -665,7 +665,7 @@ async fn router_koreader_progress_put_rejects_invalid_epub_progress_string() {
         .expect("epub extension positions should be seeded for koreader invalid epub test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -720,7 +720,7 @@ async fn router_koreader_progress_put_returns_internal_error_for_out_of_range_ep
         .expect("epub extension positions should be seeded for koreader out-of-range epub test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -755,7 +755,7 @@ async fn router_koreader_progress_put_rejects_missing_epub_extension_like_kotlin
     let paths = new_router_fixture("router-koreader-progress-missing-epub-extension").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -816,7 +816,7 @@ async fn router_koreader_progress_put_rejects_invalid_non_epub_progress_string()
         .expect("pdf book koreader hash should be set");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -870,7 +870,7 @@ async fn router_koreader_progress_put_rejects_out_of_range_non_epub_progress() {
         .expect("pdf book koreader hash should be set for out-of-range test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -906,7 +906,7 @@ async fn router_koreader_progress_get_preserves_empty_device_fields() {
     seed_router_contract_data(&paths).await;
     seed_router_read_progress(&paths, false).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

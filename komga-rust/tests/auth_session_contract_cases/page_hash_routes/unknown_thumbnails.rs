@@ -17,7 +17,7 @@ async fn router_get_page_hash_unknown_thumbnail_returns_original_image_without_r
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -59,7 +59,7 @@ async fn router_get_page_hash_unknown_thumbnail_renders_pdf_page_without_resize_
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -100,7 +100,7 @@ async fn router_get_page_hash_unknown_thumbnail_honors_resize_and_renders_jpeg_f
     seed_unknown_page_hash_pdf_match(&paths, "book-unknown-thumb-pdf", "unknown-thumb-pdf-hash")
         .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -139,7 +139,7 @@ async fn router_get_page_hash_unknown_thumbnail_returns_not_found_when_match_is_
     let paths = new_router_fixture("router-page-hash-unknown-thumbnail-missing-match").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -176,7 +176,7 @@ async fn router_get_page_hash_unknown_thumbnail_returns_not_found_when_page_sour
     .await;
     std::fs::remove_file(&source_path).expect("missing-source fixture should be removable");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

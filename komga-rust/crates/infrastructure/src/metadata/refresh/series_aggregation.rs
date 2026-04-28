@@ -5,173 +5,177 @@ use komga_application::runtime_sse::register_runtime_sse_event;
 use serde_json::json;
 use sqlx::Row;
 
-use super::run_database_query;
+use crate::sqlite::connect_private_write_pool;
 
-pub fn aggregate_series_metadata(database_file: &Path, series_id: &str) -> Result<(), String> {
-    let database_file = database_file.to_path_buf();
+pub async fn aggregate_series_metadata(
+    database_file: &Path,
+    series_id: &str,
+) -> Result<(), String> {
+    let pool = connect_private_write_pool(database_file)
+        .await
+        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let series_id = series_id.to_string();
     let series_id_for_events = series_id.clone();
 
-    let library_id = run_database_query(database_file, move |pool| {
-        let series_id = series_id.clone();
-        Box::pin(async move {
-            let mut tx = pool.begin().await.map_err(|error| {
-                format!(
-                    "failed to start series metadata aggregation transaction for '{series_id}': {error}"
-                )
-            })?;
+    let library_id = {
+        let mut tx = pool.begin().await.map_err(|error| {
+            format!(
+                "failed to start series metadata aggregation transaction for '{series_id}': {error}"
+            )
+        })?;
 
-            let row = sqlx::query(
-                r#"
+        let row = sqlx::query(
+            r#"
                 SELECT ID
                 FROM SERIES
                 WHERE ID = ?
                 LIMIT 1
                 "#,
-            )
-            .bind(&series_id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|error| {
-                format!("failed to load series for aggregation '{series_id}': {error}")
-            })?;
+        )
+        .bind(&series_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|error| format!("failed to load series for aggregation '{series_id}': {error}"))?;
 
-            let Some(row) = row else {
-                return Ok(None);
-            };
+        match row {
+            // The transaction still owns a pooled connection here. Returning a sentinel keeps
+            // the close outside this scope so the connection can be dropped before pool shutdown.
+            None => None,
+            Some(row) => {
+                let _series_id = row.get::<String, _>("ID");
+                let aggregate = load_series_book_metadata_aggregate(&mut tx, &series_id).await?;
 
-            let _series_id = row.get::<String, _>("ID");
-            let aggregate = load_series_book_metadata_aggregate(&mut tx, &series_id).await?;
-
-            sqlx::query(
-                r#"
-                INSERT INTO BOOK_METADATA_AGGREGATION (
-                    SERIES_ID,
-                    RELEASE_DATE,
-                    SUMMARY,
-                    SUMMARY_NUMBER,
-                    LAST_MODIFIED_DATE
-                )
-                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(SERIES_ID) DO UPDATE SET
-                    RELEASE_DATE = excluded.RELEASE_DATE,
-                    SUMMARY = excluded.SUMMARY,
-                    SUMMARY_NUMBER = excluded.SUMMARY_NUMBER,
-                    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-                "#,
-            )
-            .bind(&series_id)
-            .bind(aggregate.release_date.as_deref())
-            .bind(&aggregate.summary)
-            .bind(&aggregate.summary_number)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| {
-                format!("failed to upsert BOOK_METADATA_AGGREGATION for '{series_id}': {error}")
-            })?;
-
-            sqlx::query("DELETE FROM BOOK_METADATA_AGGREGATION_AUTHOR WHERE SERIES_ID = ?")
-                .bind(&series_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(|error| {
-                    format!(
-                        "failed to clear BOOK_METADATA_AGGREGATION_AUTHOR for '{series_id}': {error}"
-                    )
-                })?;
-
-            for author in aggregate.authors {
                 sqlx::query(
                     r#"
-                    INSERT INTO BOOK_METADATA_AGGREGATION_AUTHOR (SERIES_ID, NAME, ROLE)
-                    VALUES (?, ?, ?)
-                    "#,
+                        INSERT INTO BOOK_METADATA_AGGREGATION (
+                            SERIES_ID,
+                            RELEASE_DATE,
+                            SUMMARY,
+                            SUMMARY_NUMBER,
+                            LAST_MODIFIED_DATE
+                        )
+                        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        ON CONFLICT(SERIES_ID) DO UPDATE SET
+                            RELEASE_DATE = excluded.RELEASE_DATE,
+                            SUMMARY = excluded.SUMMARY,
+                            SUMMARY_NUMBER = excluded.SUMMARY_NUMBER,
+                            LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+                        "#,
                 )
                 .bind(&series_id)
-                .bind(author.name)
-                .bind(author.role)
+                .bind(aggregate.release_date.as_deref())
+                .bind(&aggregate.summary)
+                .bind(&aggregate.summary_number)
                 .execute(&mut *tx)
                 .await
                 .map_err(|error| {
-                    format!(
-                        "failed to populate BOOK_METADATA_AGGREGATION_AUTHOR for '{series_id}': {error}"
-                    )
-                })?;
-            }
-
-            sqlx::query("DELETE FROM BOOK_METADATA_AGGREGATION_TAG WHERE SERIES_ID = ?")
-                .bind(&series_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(|error| {
-                    format!(
-                        "failed to clear BOOK_METADATA_AGGREGATION_TAG for '{series_id}': {error}"
-                    )
+                    format!("failed to upsert BOOK_METADATA_AGGREGATION for '{series_id}': {error}")
                 })?;
 
-            for tag in aggregate.tags {
+                sqlx::query("DELETE FROM BOOK_METADATA_AGGREGATION_AUTHOR WHERE SERIES_ID = ?")
+                    .bind(&series_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|error| {
+                        format!(
+                            "failed to clear BOOK_METADATA_AGGREGATION_AUTHOR for '{series_id}': {error}"
+                        )
+                    })?;
+
+                for author in aggregate.authors {
+                    sqlx::query(
+                        r#"
+                            INSERT INTO BOOK_METADATA_AGGREGATION_AUTHOR (SERIES_ID, NAME, ROLE)
+                            VALUES (?, ?, ?)
+                            "#,
+                    )
+                    .bind(&series_id)
+                    .bind(author.name)
+                    .bind(author.role)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|error| {
+                        format!(
+                            "failed to populate BOOK_METADATA_AGGREGATION_AUTHOR for '{series_id}': {error}"
+                        )
+                    })?;
+                }
+
+                sqlx::query("DELETE FROM BOOK_METADATA_AGGREGATION_TAG WHERE SERIES_ID = ?")
+                    .bind(&series_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|error| {
+                        format!(
+                            "failed to clear BOOK_METADATA_AGGREGATION_TAG for '{series_id}': {error}"
+                        )
+                    })?;
+
+                for tag in aggregate.tags {
+                    sqlx::query(
+                        r#"
+                            INSERT INTO BOOK_METADATA_AGGREGATION_TAG (SERIES_ID, TAG)
+                            VALUES (?, ?)
+                            "#,
+                    )
+                    .bind(&series_id)
+                    .bind(tag)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|error| {
+                        format!(
+                            "failed to populate BOOK_METADATA_AGGREGATION_TAG for '{series_id}': {error}"
+                        )
+                    })?;
+                }
+
                 sqlx::query(
                     r#"
-                    INSERT INTO BOOK_METADATA_AGGREGATION_TAG (SERIES_ID, TAG)
-                    VALUES (?, ?)
-                    "#,
+                        UPDATE SERIES
+                        SET BOOK_COUNT = (
+                                SELECT COUNT(*)
+                                FROM BOOK
+                                WHERE BOOK.SERIES_ID = SERIES.ID
+                                  AND BOOK.DELETED_DATE IS NULL
+                            ),
+                            LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+                        WHERE ID = ?
+                        "#,
                 )
                 .bind(&series_id)
-                .bind(tag)
                 .execute(&mut *tx)
                 .await
                 .map_err(|error| {
+                    format!("failed to aggregate SERIES counters for '{series_id}': {error}")
+                })?;
+
+                tx.commit().await.map_err(|error| {
                     format!(
-                        "failed to populate BOOK_METADATA_AGGREGATION_TAG for '{series_id}': {error}"
+                        "failed to commit series metadata aggregation transaction for '{series_id}': {error}"
                     )
                 })?;
+
+                sqlx::query(
+                    r#"
+                        SELECT LIBRARY_ID
+                        FROM SERIES
+                        WHERE ID = ?
+                        LIMIT 1
+                        "#,
+                )
+                .bind(&series_id)
+                .fetch_optional(&pool)
+                .await
+                .map_err(|error| {
+                    format!(
+                        "failed to resolve LIBRARY_ID after series aggregation '{series_id}': {error}"
+                    )
+                })
+                .map(|row| row.and_then(|row| row.get::<Option<String>, _>("LIBRARY_ID")))?
             }
-
-            sqlx::query(
-                r#"
-                UPDATE SERIES
-                SET BOOK_COUNT = (
-                        SELECT COUNT(*)
-                        FROM BOOK
-                        WHERE BOOK.SERIES_ID = SERIES.ID
-                          AND BOOK.DELETED_DATE IS NULL
-                    ),
-                    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-                WHERE ID = ?
-                "#,
-            )
-            .bind(&series_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| {
-                format!("failed to aggregate SERIES counters for '{series_id}': {error}")
-            })?;
-
-            tx.commit().await.map_err(|error| {
-                format!(
-                    "failed to commit series metadata aggregation transaction for '{series_id}': {error}"
-                )
-            })?;
-
-            sqlx::query(
-                r#"
-                SELECT LIBRARY_ID
-                FROM SERIES
-                WHERE ID = ?
-                LIMIT 1
-                "#,
-            )
-            .bind(&series_id)
-            .fetch_optional(&pool)
-            .await
-            .map_err(|error| {
-                format!(
-                    "failed to resolve LIBRARY_ID after series aggregation '{series_id}': {error}"
-                )
-            })
-            .map(|row| row.and_then(|row| row.get::<Option<String>, _>("LIBRARY_ID")))
-        })
-    })?;
+        }
+    };
+    pool.close().await;
 
     if let Some(library_id) = library_id.as_deref() {
         register_runtime_sse_event(

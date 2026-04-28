@@ -38,12 +38,12 @@ fn runtime_startup_prepare_task_queue_enqueues_search_rebuild_without_processing
             let background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
                 runtime_task_context(&config),
                 Some("REBUILD_INDEX"),
-            );
-            background
-                .task_queue
-                .lock()
-                .expect("startup worker bootstrap queue lock should not be poisoned")
+            )
+            .await;
+            let mut queue = background.task_queue.lock().await;
+            queue
                 .count_by_simple_type()
+                .await
                 .get("REBUILD_INDEX")
                 .copied()
                 .unwrap_or(0)
@@ -115,7 +115,8 @@ fn runtime_startup_prepare_task_queue_logs_truthful_skip_boundaries_for_external
         let _background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
             runtime,
             Some("REBUILD_INDEX"),
-        );
+        )
+        .await;
     });
 
     let events = parse_json_log_lines(&logs);
@@ -167,12 +168,12 @@ fn runtime_startup_prepare_task_queue_skips_search_rebuild_when_search_index_not
         let background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
             runtime,
             Some("REBUILD_INDEX"),
-        );
-        background
-            .task_queue
-            .lock()
-            .expect("mixed ownership startup queue lock should not be poisoned")
+        )
+        .await;
+        let mut queue = background.task_queue.lock().await;
+        queue
             .count_by_simple_type()
+            .await
             .get("REBUILD_INDEX")
             .copied()
             .unwrap_or(0)
@@ -233,12 +234,12 @@ fn runtime_startup_prepare_task_queue_logs_no_startup_library_scan_skip_when_no_
             let background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
                 runtime_task_context(&config),
                 None,
-            );
-            background
-                .task_queue
-                .lock()
-                .expect("startup no-startup-profile queue lock should not be poisoned")
+            )
+            .await;
+            let mut queue = background.task_queue.lock().await;
+            queue
                 .count_by_simple_type()
+                .await
                 .get("SCAN_LIBRARY")
                 .copied()
                 .unwrap_or(0)
@@ -306,7 +307,8 @@ fn runtime_startup_library_scan_processing_logs_run_complete_and_skip_boundaries
         async move {
             komga_infrastructure::task_queue::worker_runtime::process_startup_library_scans(
                 runtime_task_context(&config),
-            );
+            )
+            .await;
         }
     });
     let run_events = parse_json_log_lines(&run_logs);
@@ -365,7 +367,8 @@ fn runtime_startup_library_scan_processing_logs_run_complete_and_skip_boundaries
         async move {
             komga_infrastructure::task_queue::worker_runtime::process_startup_library_scans(
                 runtime_task_context(&config),
-            );
+            )
+            .await;
         }
     });
     let disabled_startup_events = parse_json_log_lines(&disabled_startup_logs);
@@ -404,7 +407,8 @@ fn runtime_startup_library_scan_processing_logs_run_complete_and_skip_boundaries
     let skip_logs = capture_contract_log_async(&skip_config, async move {
         komga_infrastructure::task_queue::worker_runtime::process_startup_library_scans(
             skip_runtime,
-        );
+        )
+        .await;
     });
     let skip_events = parse_json_log_lines(&skip_logs);
     let skip = runtime_event_with_component(
@@ -443,7 +447,8 @@ fn runtime_startup_library_scan_processing_logs_no_libraries_skip_boundary() {
         async move {
             komga_infrastructure::task_queue::worker_runtime::process_startup_library_scans(
                 runtime_task_context(&config),
-            );
+            )
+            .await;
         }
     });
     let events = parse_json_log_lines(&logs);

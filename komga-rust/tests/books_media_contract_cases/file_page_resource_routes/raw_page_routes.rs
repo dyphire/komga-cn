@@ -22,7 +22,7 @@ async fn router_book_raw_page_does_not_return_not_modified_before_page_streaming
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "admin-access-no-page-streaming@example.org",
@@ -61,7 +61,7 @@ async fn router_book_raw_page_returns_bad_request_for_negative_page_number() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -99,7 +99,7 @@ async fn router_book_raw_page_accepts_basic_auth_like_kotlin_clients() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let response = app
         .oneshot(
             Request::builder()
@@ -137,7 +137,7 @@ async fn router_book_raw_page_returns_bad_request_for_non_integer_page_number() 
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -171,7 +171,7 @@ async fn router_book_raw_page_content_disposition_uses_book_name_not_metadata_ti
     .await;
     update_router_book_name(&paths, "book-pdf-1", "Filesystem Shelf Name").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -217,7 +217,7 @@ async fn router_book_raw_page_returns_bad_request_for_missing_pdf_page_number() 
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -266,7 +266,7 @@ async fn router_book_raw_page_returns_not_found_with_message_when_media_not_read
         .expect("media status should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -330,7 +330,7 @@ async fn router_book_raw_page_forbidden_before_not_ready_for_restricted_user() {
         .expect("series age rating should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted-page-user@example.org",
@@ -371,7 +371,7 @@ async fn router_book_raw_page_returns_not_found_with_message_when_file_is_missin
     let pdf_path = paths.config_dir.join("books/fixture-page.pdf");
     std::fs::remove_file(&pdf_path).expect("pdf fixture should be removable");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -422,7 +422,7 @@ async fn router_book_raw_page_returns_not_modified_before_not_ready_checks() {
         .expect("media status should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

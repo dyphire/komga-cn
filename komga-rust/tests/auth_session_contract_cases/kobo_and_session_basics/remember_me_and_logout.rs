@@ -110,7 +110,7 @@ async fn basic_login_with_remember_me_true_issues_session_and_remember_me_cookie
     let paths = new_router_fixture("router-remember-me-basic-login-cookies").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let response =
         login_with_basic_and_remember_me(app, "admin@example.org", "router-contract-admin-123")
             .await;
@@ -136,7 +136,7 @@ pub(crate) async fn verify_remember_me_reauthenticates_after_session_expiry() {
     seed_router_contract_data(&paths).await;
 
     let config = one_second_session_runtime_config(&paths);
-    let app = build_router_with_config(&config);
+    let app = build_router_with_config(&config).await;
     let login_response = login_with_basic_and_remember_me(
         app.clone(),
         "admin@example.org",
@@ -187,7 +187,7 @@ pub(crate) async fn verify_remember_me_auto_login_records_remember_me_source() {
     pool.close().await;
 
     let config = one_second_session_runtime_config(&paths);
-    let app = build_router_with_config(&config);
+    let app = build_router_with_config(&config).await;
     let login_response = login_with_basic_and_remember_me(
         app.clone(),
         "admin@example.org",
@@ -230,7 +230,7 @@ async fn logout_clears_session_and_remember_me_replay() {
     let paths = new_router_fixture("router-logout-clears-session-and-remember-me-replay").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let login_response = login_with_basic_and_remember_me(
         app.clone(),
         "admin@example.org",
@@ -295,7 +295,7 @@ async fn malformed_remember_me_cookie_is_rejected() {
     let paths = new_router_fixture("router-malformed-remember-me-cookie-rejected").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let response = users_me_with_cookie(app, "komga-remember-me=not-a-valid-token").await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
@@ -316,7 +316,7 @@ async fn auth_resolution_priority_prefers_header_then_session_cookie_then_rememb
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
     let member_login_response = login_with_basic_and_remember_me(
         app.clone(),
@@ -409,7 +409,7 @@ pub(crate) async fn verify_remember_me_duration_setting_changes_cookie_ttl() {
     let paths = new_router_fixture("router-remember-me-settings-affect-runtime").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
 
     let patch_response = patch_server_settings(
@@ -455,7 +455,7 @@ pub(crate) async fn verify_remember_me_cold_start_uses_persisted_runtime_setting
     upsert_server_setting(&paths, "REMEMBER_ME_KEY", "cold-start-remember-key").await;
     upsert_server_setting(&paths, "REMEMBER_ME_DURATION", "15").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let login_response = login_with_basic_and_remember_me(
         app.clone(),
         "admin@example.org",
@@ -499,7 +499,7 @@ pub(crate) async fn verify_rotating_remember_me_key_invalidates_existing_cookie(
     let paths = new_router_fixture("router-remember-me-key-rotation-invalidates-cookie").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
     let login_response = login_with_basic_and_remember_me(
         app.clone(),

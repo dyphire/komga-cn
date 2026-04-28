@@ -6,7 +6,7 @@ async fn router_opds_v2_library_recommended_unauthorized_returns_opds_auth_docum
         new_router_fixture("router-opds-v2-library-recommended-unauthorized-auth-doc").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -32,7 +32,7 @@ async fn router_opds_v2_library_recommended_uses_kotlin_shape() {
     update_router_book_isbn(&paths, "book-1", "9781234567890").await;
     update_router_book_number_metadata(&paths, "book-1", "Special", 10.0).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

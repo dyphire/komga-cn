@@ -11,7 +11,7 @@ async fn router_download_routes_do_not_get_shallow_etag_headers() {
     std::fs::write(books_dir.join("book-1.epub"), b"download-exclusion-body")
         .expect("book fixture file should be written for download exclusion test");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let libraries_response = app

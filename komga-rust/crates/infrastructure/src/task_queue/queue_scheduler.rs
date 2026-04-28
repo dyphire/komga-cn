@@ -5,6 +5,7 @@ use tracing::{error, info};
 #[derive(Clone, Debug)]
 pub struct TaskQueueScheduler {
     admin: TaskQueueAdmin,
+    admin_loaded: bool,
     consumer_owner: String,
     consumes_queue: bool,
     persisted_store: Option<SqliteTaskQueueStore>,
@@ -21,13 +22,12 @@ impl TaskQueueScheduler {
             None
         };
         let consumer_owner = consumer_owner.into();
-        let admin = persisted_store
-            .as_ref()
-            .map(load_admin_from_store)
-            .unwrap_or_else(|| TaskQueueOrchestrator::new(consumer_owner.clone(), true));
+        let admin_loaded = persisted_store.is_none();
+        let admin = TaskQueueOrchestrator::new(consumer_owner.clone(), true);
 
         Self {
             admin,
+            admin_loaded,
             consumer_owner,
             consumes_queue,
             persisted_store,
@@ -35,10 +35,12 @@ impl TaskQueueScheduler {
         }
     }
 
-    pub fn enqueue(&mut self, task: TaskQueueRecord) {
+    pub async fn enqueue(&mut self, task: TaskQueueRecord) {
         if let Some(store) = &self.persisted_store {
-            store.persist_task(&store_record(&task));
-            self.reload_admin_from_store();
+            store.persist_task(&store_record(&task)).await;
+            if self.admin_loaded {
+                self.admin.enqueue(task.clone());
+            }
             self.log_task_event("task_enqueue", &task, "queued", None);
             return;
         }
@@ -46,17 +48,16 @@ impl TaskQueueScheduler {
         self.log_task_event("task_enqueue", &task, "queued", None);
     }
 
-    pub fn take_next(&mut self) -> Option<TaskQueueRecord> {
+    pub async fn take_next(&mut self) -> Option<TaskQueueRecord> {
         if !self.consumes_queue {
             return None;
         }
 
-        self.reload_admin_from_store();
+        self.ensure_admin_loaded().await;
 
         let task = self.admin.take_available(&self.consumer_owner)?;
         if let Some(store) = &self.persisted_store {
-            store.claim_task(&task.id, &self.consumer_owner);
-            self.reload_admin_from_store();
+            store.claim_task(&task.id, &self.consumer_owner).await;
         }
 
         self.log_task_event("task_claim", &task, "claimed", None);
@@ -64,16 +65,16 @@ impl TaskQueueScheduler {
         Some(task)
     }
 
-    pub fn take_available_batch(&mut self) -> Vec<TaskQueueRecord> {
+    pub async fn take_available_batch(&mut self) -> Vec<TaskQueueRecord> {
         if !self.consumes_queue {
             return Vec::new();
         }
 
         if self.task_pool_size <= 1 {
-            return self.take_next().into_iter().collect();
+            return self.take_next().await.into_iter().collect();
         }
 
-        self.reload_admin_from_store();
+        self.ensure_admin_loaded().await;
 
         let mut selected = Vec::new();
         while selected.len() < self.task_pool_size {
@@ -81,21 +82,20 @@ impl TaskQueueScheduler {
                 break;
             };
             if let Some(store) = &self.persisted_store {
-                store.claim_task(&task.id, &self.consumer_owner);
+                store.claim_task(&task.id, &self.consumer_owner).await;
             }
             self.log_task_event("task_claim", &task, "claimed", None);
             selected.push(task);
         }
-        self.reload_admin_from_store();
         selected
     }
 
-    pub fn complete(&mut self, task_id: &str) -> bool {
+    pub async fn complete(&mut self, task_id: &str) -> bool {
         let task = self.current_task(task_id);
         if let Some(store) = &self.persisted_store {
-            let removed = store.delete_task(task_id);
-            self.reload_admin_from_store();
+            let removed = store.delete_task(task_id).await;
             if removed && let Some(task) = task.as_ref() {
+                self.admin.complete(task_id);
                 self.log_task_event("task_complete", task, "completed", None);
             }
             return removed;
@@ -124,17 +124,14 @@ impl TaskQueueScheduler {
         self.task_pool_size = task_pool_size.max(1);
     }
 
-    pub fn disown_all(&mut self) -> usize {
-        if self.persisted_store.is_some() {
-            self.reload_admin_from_store();
-        }
+    pub async fn disown_all(&mut self) -> usize {
+        self.ensure_admin_loaded().await;
         let owned_tasks = self.current_owned_tasks();
         if self.persisted_store.is_some() {
             let disowned = self.admin.disown_all();
             if let Some(store) = &self.persisted_store {
-                store.disown_all();
+                store.disown_all().await;
             }
-            self.reload_admin_from_store();
             for task in &owned_tasks {
                 self.log_task_event("task_disown", task, "disowned", None);
             }
@@ -148,27 +145,30 @@ impl TaskQueueScheduler {
         disowned
     }
 
-    pub fn clear_unowned(&mut self) -> usize {
-        if let Some(store) = &self.persisted_store {
-            let deleted = store.clear_unowned();
-            self.reload_admin_from_store();
+    pub async fn clear_unowned(&mut self) -> usize {
+        if self.persisted_store.is_some() {
+            self.ensure_admin_loaded().await;
+            let store = self
+                .persisted_store
+                .as_ref()
+                .expect("persisted store should exist after presence check")
+                .clone();
+            let deleted = store.clear_unowned().await;
+            self.admin.clear_unowned();
             return deleted;
         }
 
         self.admin.clear_unowned()
     }
 
-    pub fn count_by_simple_type(&self) -> BTreeMap<String, usize> {
+    pub async fn count_by_simple_type(&mut self) -> BTreeMap<String, usize> {
+        self.ensure_admin_loaded().await;
         self.admin.count_by_simple_type()
     }
 
-    pub(super) fn uses_persisted_store(&self) -> bool {
-        self.persisted_store.is_some()
-    }
-
-    pub fn process_available(
+    pub async fn process_available(
         &mut self,
-        runtime: &RuntimeConfig,
+        runtime: &TaskRuntimeContext,
     ) -> Result<usize, TaskExecutionError> {
         if !self.consumes_queue {
             return Ok(0);
@@ -177,7 +177,7 @@ impl TaskQueueScheduler {
         let mut processed = 0usize;
         let mut logged_start = false;
         loop {
-            let batch = self.take_available_batch();
+            let batch = self.take_available_batch().await;
             if batch.is_empty() {
                 if logged_start {
                     self.log_process_available("completed", processed, None);
@@ -191,16 +191,18 @@ impl TaskQueueScheduler {
 
             let mut batch_iter = batch.into_iter();
             while let Some(task) = batch_iter.next() {
-                self.log_task_event("task_start", &task, "started", None);
-                match self.execute_claimed_task(runtime, &task) {
-                    Ok(()) => {
-                        self.complete(&task.id);
+                self.log_task_start(&task);
+                match task_executor::execute_task(runtime, &task).await {
+                    Ok(outcome) => {
+                        outcome.enqueue_into(self).await;
+                        self.complete(&task.id).await;
                         processed += 1;
                     }
                     Err(error) => {
                         let error_message = error.to_string();
-                        self.fail_claimed_task(&task, error_message.as_str());
-                        self.disown_claimed_tasks_after_failure(batch_iter.collect());
+                        self.fail_claimed_task(&task, error_message.as_str()).await;
+                        self.disown_claimed_tasks_after_failure(batch_iter.collect())
+                            .await;
                         self.log_process_available(
                             "failed",
                             processed,
@@ -213,84 +215,24 @@ impl TaskQueueScheduler {
         }
     }
 
-    pub fn recover_and_process(
+    pub async fn recover_and_process(
         &mut self,
-        runtime: &RuntimeConfig,
+        runtime: &TaskRuntimeContext,
     ) -> Result<usize, TaskExecutionError> {
-        if self.persisted_store.is_some() {
-            self.reload_admin_from_store();
-        }
+        self.ensure_admin_loaded().await;
         let recovered_tasks = self.current_owned_tasks();
-        self.disown_all();
+        self.disown_all().await;
         for task in &recovered_tasks {
             self.log_task_event("task_recover", task, "recovered", None);
         }
-        self.process_available(runtime)
+        self.process_available(runtime).await
     }
 
-    fn disown_claimed_task(&mut self, task: &TaskQueueRecord) {
+    pub(super) async fn fail_claimed_task(&mut self, task: &TaskQueueRecord, error_message: &str) {
         if let Some(store) = &self.persisted_store {
-            store.disown_task(&task.id);
-            self.reload_admin_from_store();
-            self.log_task_event("task_disown", task, "disowned", None);
-            return;
-        }
-
-        if self.admin.disown(&task.id) {
-            self.log_task_event("task_disown", task, "disowned", None);
-        }
-    }
-
-    pub(super) fn disown_claimed_tasks_after_failure(
-        &mut self,
-        remaining_batch: Vec<TaskQueueRecord>,
-    ) {
-        if self.persisted_store.is_some() {
-            for task in self.current_owned_tasks() {
-                self.disown_claimed_task(&task);
-            }
-            return;
-        }
-
-        for task in remaining_batch {
-            self.disown_claimed_task(&task);
-        }
-    }
-
-    fn reload_admin_from_store(&mut self) {
-        if let Some(store) = &self.persisted_store {
-            self.admin = load_admin_from_store(store);
-        }
-    }
-
-    pub(super) fn execute_claimed_task(
-        &mut self,
-        runtime: &RuntimeConfig,
-        task: &TaskQueueRecord,
-    ) -> Result<(), TaskExecutionError> {
-        let task_target = queue_core::task_target(task);
-
-        if let Some(result) = scanner_jobs::try_execute(self, runtime, task, task_target) {
-            return result;
-        }
-        if let Some(result) = maintenance_jobs::try_execute(self, runtime, task, task_target) {
-            return result;
-        }
-        if let Some(result) = index_jobs::try_execute(self, runtime, task, task_target) {
-            return result;
-        }
-        if let Some(result) = import_jobs::try_execute(self, runtime, task) {
-            return result;
-        }
-
-        Err(TaskExecutionError::unsupported_task(&task.simple_type))
-    }
-
-    pub(super) fn fail_claimed_task(&mut self, task: &TaskQueueRecord, error_message: &str) {
-        if let Some(store) = &self.persisted_store {
-            let removed = store.delete_task(&task.id);
-            self.reload_admin_from_store();
+            let removed = store.delete_task(&task.id).await;
             if removed {
+                self.admin.complete(&task.id);
                 self.log_task_event("task_fail", task, "failed", Some(error_message));
             }
             return;
@@ -301,24 +243,53 @@ impl TaskQueueScheduler {
         }
     }
 
-    fn current_task(&self, task_id: &str) -> Option<TaskQueueRecord> {
-        self.persisted_store
-            .as_ref()
-            .and_then(|store| store_record_by_id(store, task_id))
+    async fn disown_claimed_task(&mut self, task: &TaskQueueRecord) {
+        if let Some(store) = &self.persisted_store {
+            if self.admin.disown(&task.id) {
+                store.disown_task(&task.id).await;
+                self.log_task_event("task_disown", task, "disowned", None);
+            }
+            return;
+        }
+
+        if self.admin.disown(&task.id) {
+            self.log_task_event("task_disown", task, "disowned", None);
+        }
     }
 
-    fn current_owned_tasks(&self) -> Vec<TaskQueueRecord> {
-        self.persisted_store
-            .as_ref()
-            .map(|store| {
-                store
-                    .load_records()
-                    .into_iter()
-                    .filter(|task| task.owner.as_deref() == Some(self.consumer_owner.as_str()))
-                    .map(record_to_runtime_task)
-                    .collect()
-            })
-            .unwrap_or_default()
+    pub(super) async fn disown_claimed_tasks_after_failure(
+        &mut self,
+        remaining_batch: Vec<TaskQueueRecord>,
+    ) {
+        for task in remaining_batch {
+            self.disown_claimed_task(&task).await;
+        }
+    }
+
+    async fn ensure_admin_loaded(&mut self) {
+        if !self.admin_loaded {
+            if let Some(store) = &self.persisted_store {
+                self.admin = load_admin_from_store(store).await;
+            }
+            self.admin_loaded = true;
+        }
+    }
+
+    fn current_task(&self, task_id: &str) -> Option<TaskQueueRecord> {
+        self.admin
+            .tasks()
+            .iter()
+            .find(|task| task.id == task_id)
+            .cloned()
+    }
+
+    pub(super) fn current_owned_tasks(&self) -> Vec<TaskQueueRecord> {
+        self.admin
+            .tasks()
+            .iter()
+            .filter(|task| task.owner.as_deref() == Some(self.consumer_owner.as_str()))
+            .cloned()
+            .collect()
     }
 
     pub(super) fn log_task_start(&self, task: &TaskQueueRecord) {
@@ -350,7 +321,7 @@ impl TaskQueueScheduler {
         }
     }
 
-    fn log_task_event(
+    pub(super) fn log_task_event(
         &self,
         event_name: &str,
         task: &TaskQueueRecord,
@@ -384,9 +355,9 @@ impl TaskQueueScheduler {
     }
 }
 
-fn load_admin_from_store(store: &SqliteTaskQueueStore) -> TaskQueueAdmin {
+async fn load_admin_from_store(store: &SqliteTaskQueueStore) -> TaskQueueAdmin {
     let mut admin = TaskQueueOrchestrator::new("runtime-store", true);
-    for record in store.load_records() {
+    for record in store.load_records().await {
         let owner = record.owner.clone();
         let task = record_to_runtime_task(record);
         let id = task.id.clone();
@@ -419,12 +390,4 @@ fn record_to_runtime_task(record: PersistedTaskStoreRecord) -> TaskQueueRecord {
         owner: record.owner,
         order: 0,
     }
-}
-
-fn store_record_by_id(store: &SqliteTaskQueueStore, task_id: &str) -> Option<TaskQueueRecord> {
-    store
-        .load_records()
-        .into_iter()
-        .find(|record| record.id == task_id)
-        .map(record_to_runtime_task)
 }

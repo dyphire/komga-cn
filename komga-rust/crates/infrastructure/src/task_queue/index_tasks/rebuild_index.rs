@@ -1,7 +1,7 @@
 use super::*;
 use crate::search::index_lifecycle::SearchEntityType;
 
-pub(in crate::task_queue) fn rebuild_index(
+pub(in crate::task_queue) async fn rebuild_index(
     runtime: &RuntimeConfig,
     entity_types: Option<&[SearchEntityType]>,
 ) -> Result<(), TaskExecutionError> {
@@ -15,5 +15,6 @@ pub(in crate::task_queue) fn rebuild_index(
         runtime.lucene_data_directory.as_path(),
         entity_types,
     )
+    .await
     .map_err(TaskExecutionError::runtime)
 }

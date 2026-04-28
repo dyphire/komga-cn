@@ -31,7 +31,7 @@ async fn router_collection_detail_returns_kotlin_collection_dto_fields() {
     let last_modified_date =
         kotlin_collection_datetime(&timestamps.get::<String, _>("LAST_MODIFIED_DATE"));
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -98,7 +98,7 @@ async fn router_collection_detail_marks_partially_visible_collection_as_filtered
     let last_modified_date =
         kotlin_collection_datetime(&timestamps.get::<String, _>("LAST_MODIFIED_DATE"));
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "library1@example.org",
@@ -140,7 +140,7 @@ async fn router_collection_create_rejects_missing_name_like_kotlin() {
     let paths = new_router_fixture("router-collection-create-missing-name").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -172,7 +172,7 @@ async fn router_collection_create_rejects_missing_ordered_like_kotlin() {
     let paths = new_router_fixture("router-collection-create-missing-ordered").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -204,7 +204,7 @@ async fn router_collection_create_rejects_blank_name_like_kotlin() {
     let paths = new_router_fixture("router-collection-create-blank-name").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -237,7 +237,7 @@ async fn router_collection_create_rejects_empty_series_ids_like_kotlin() {
     let paths = new_router_fixture("router-collection-create-empty-series-ids").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -270,7 +270,7 @@ async fn router_collection_create_rejects_duplicate_series_ids_like_kotlin() {
     let paths = new_router_fixture("router-collection-create-duplicate-series-ids").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -303,7 +303,7 @@ async fn router_collection_create_rejects_duplicate_name_like_kotlin() {
     let paths = new_router_fixture("router-collection-create-duplicate-name").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -336,7 +336,7 @@ async fn router_collection_patch_preserves_unspecified_fields_like_kotlin() {
     let paths = new_router_fixture("router-collection-patch-preserves-unspecified").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let patch_response = app
@@ -386,7 +386,7 @@ async fn router_collection_patch_rejects_duplicate_name_like_kotlin() {
     seed_router_contract_data(&paths).await;
     seed_collection_listing_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let patch_response = app
@@ -445,7 +445,7 @@ async fn router_collection_patch_ignores_historical_duplicate_when_name_is_uncha
     .expect("historical duplicate collection series row should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let patch_response = app
@@ -494,7 +494,7 @@ async fn router_collection_patch_rejects_duplicate_series_ids_like_kotlin() {
     let paths = new_router_fixture("router-collection-patch-duplicate-series-ids").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let patch_response = app

@@ -34,17 +34,20 @@ async fn runtime_blocks_import_book_when_main_database_is_external_owned() {
         ..runtime_task_context(&paths)
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new(
-            "IMPORT_BOOK:blocked-import",
-            1_000,
-            Some("series-1".to_string()),
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new(
+                "IMPORT_BOOK:blocked-import",
+                1_000,
+                Some("series-1".to_string()),
+            )
+            .with_simple_type("IMPORT_BOOK")
+            .with_payload(payload),
         )
-        .with_simple_type("IMPORT_BOOK")
-        .with_payload(payload),
-    );
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("blocked main-database import should still drain cleanly");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -140,25 +143,28 @@ async fn runtime_blocks_extension_repair_when_main_database_is_external_owned() 
         ..runtime_task_context(&paths)
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new(
-            "REPAIR_EXTENSION_book-repair-1",
-            1_000,
-            Some("series-1".to_string()),
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new(
+                "REPAIR_EXTENSION_book-repair-1",
+                1_000,
+                Some("series-1".to_string()),
+            )
+            .with_simple_type("REPAIR_EXTENSION")
+            .with_payload(
+                json!({
+                    "bookId": "book-repair-1",
+                    "priority": 1000,
+                    "groupId": "series-1",
+                    "uniqueId": "REPAIR_EXTENSION_book-repair-1"
+                })
+                .to_string(),
+            ),
         )
-        .with_simple_type("REPAIR_EXTENSION")
-        .with_payload(
-            json!({
-                "bookId": "book-repair-1",
-                "priority": 1000,
-                "groupId": "series-1",
-                "uniqueId": "REPAIR_EXTENSION_book-repair-1"
-            })
-            .to_string(),
-        ),
-    );
+        .await;
     scheduler
         .process_available(&runtime)
+        .await
         .expect("blocked main-database extension repair should still drain cleanly");
 
     let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -232,16 +238,19 @@ async fn runtime_blocks_find_books_to_convert_when_main_database_is_external_own
         ..runtime_task_context(&paths)
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler.enqueue(
-        TaskQueueRecord::new(
-            "FIND_BOOKS_TO_CONVERT_library-1",
-            1_000,
-            Some("library-1".to_string()),
+    scheduler
+        .enqueue(
+            TaskQueueRecord::new(
+                "FIND_BOOKS_TO_CONVERT_library-1",
+                1_000,
+                Some("library-1".to_string()),
+            )
+            .with_simple_type("FIND_BOOKS_TO_CONVERT"),
         )
-        .with_simple_type("FIND_BOOKS_TO_CONVERT"),
-    );
+        .await;
     let processed = scheduler
         .process_available(&runtime)
+        .await
         .expect("blocked main-database find-books-to-convert should still drain cleanly");
 
     assert_eq!(

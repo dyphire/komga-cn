@@ -5,7 +5,7 @@ async fn router_book_read_progress_accepts_basic_auth_without_session_bootstrap(
     let paths = new_router_fixture("router-book-read-progress-basic-auth-compat").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let response = app
         .oneshot(
             Request::builder()
@@ -61,7 +61,7 @@ async fn router_book_read_progress_forbids_basic_auth_user_without_library_acces
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let response = app
         .oneshot(
             Request::builder()
@@ -93,7 +93,7 @@ async fn router_book_read_progress_requires_page_when_completed_is_false_or_miss
     let paths = new_router_fixture("router-book-read-progress-requires-page").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for body in [
@@ -129,7 +129,7 @@ async fn router_book_read_progress_rejects_non_positive_page_with_validation_pay
     let paths = new_router_fixture("router-book-read-progress-non-positive-page").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for body in [
@@ -172,7 +172,7 @@ async fn router_book_read_progress_completed_true_ignores_positive_page_and_mark
     let paths = new_router_fixture("router-book-read-progress-completed-true-ignores-page").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for page in [5, 999] {
@@ -233,7 +233,7 @@ async fn router_book_read_progress_rejects_page_beyond_page_count_with_specific_
     let paths = new_router_fixture("router-book-read-progress-page-out-of-range").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -267,7 +267,7 @@ async fn router_book_read_progress_marks_completed_when_page_equals_last_page() 
     let paths = new_router_fixture("router-book-read-progress-last-page-completes").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let update = app
@@ -351,7 +351,7 @@ async fn router_book_read_progress_refreshes_read_date_and_series_aggregate_on_p
     .expect("existing series read progress aggregate row should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let update = app
@@ -445,7 +445,7 @@ async fn router_book_read_progress_persists_epub_locator_for_page_updates() {
         .expect("epub extension positions should be seeded for read-progress locator test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let update = app
@@ -502,7 +502,7 @@ async fn router_book_read_progress_delete_clears_persisted_progress_and_koreader
         seed_read_progress_delete_fixture(&paths, fixture_epub_positions_extension_blob(), oneshot)
             .await;
 
-        let app = build_router_with_config(&runtime_config_for_paths(&paths));
+        let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
         let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
         let update = app

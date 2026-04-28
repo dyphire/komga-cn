@@ -9,7 +9,7 @@ use crate::search::runtime_tasks::{
 };
 use crate::tasks::persisted_queue::{PersistedTaskStoreRecord, SqliteTaskQueueStore};
 use komga_application::task_processing::{
-    TaskProcessingError, TaskQueueOrchestrator, TaskRuntimeConfig,
+    TaskProcessingError, TaskQueueOrchestrator, TaskRuntimeConfig, TaskRuntimeContext,
 };
 use sha2::{Digest, Sha256};
 use zip::ZipArchive;
@@ -27,6 +27,7 @@ mod queue_core;
 pub mod queue_scheduler;
 mod scanner_jobs;
 mod scanner_support;
+mod task_executor;
 mod task_protocol;
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -41,6 +42,27 @@ use task_protocol::{RuntimeFollowUpTask, runtime_follow_up_task};
 pub use komga_application::task_processing::{LibraryScanInterval, TaskQueueRecord};
 pub type TaskQueueAdmin = TaskQueueOrchestrator;
 
-type RuntimeConfig = dyn TaskRuntimeConfig;
+type RuntimeConfig = TaskRuntimeContext;
 
 type TaskExecutionError = TaskProcessingError;
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct TaskExecutionOutcome {
+    follow_up_tasks: Vec<TaskQueueRecord>,
+}
+
+impl TaskExecutionOutcome {
+    fn completed() -> Self {
+        Self::default()
+    }
+
+    fn with_follow_up_tasks(follow_up_tasks: Vec<TaskQueueRecord>) -> Self {
+        Self { follow_up_tasks }
+    }
+
+    async fn enqueue_into(self, scheduler: &mut TaskQueueScheduler) {
+        for task in self.follow_up_tasks {
+            scheduler.enqueue(task).await;
+        }
+    }
+}

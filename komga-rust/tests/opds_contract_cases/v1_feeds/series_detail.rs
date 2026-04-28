@@ -16,7 +16,7 @@ async fn router_opds_v1_series_detail_filters_non_ready_books() {
         .expect("book-1 media status should update to non-ready");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -45,7 +45,7 @@ async fn router_opds_v1_series_detail_uses_kotlin_acquisition_entry_shape() {
     let paths = new_router_fixture("router-opds-v1-series-detail-entry-shape").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -85,7 +85,7 @@ async fn router_opds_v1_series_detail_formats_summary_content_like_kotlin() {
         .expect("book summary should update for summary-content test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -113,7 +113,7 @@ async fn router_opds_v1_series_detail_includes_page_streaming_link_for_pdf_books
     seed_router_contract_data(&paths).await;
     seed_router_pdf_book(&paths, "book-pdf", "series-1", "book-pdf.pdf", "Book PDF").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -143,7 +143,7 @@ async fn router_opds_v1_series_detail_declares_pse_namespace_for_page_streaming_
     seed_router_contract_data(&paths).await;
     seed_router_pdf_book(&paths, "book-pdf", "series-1", "book-pdf.pdf", "Book PDF").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -195,7 +195,7 @@ async fn router_opds_v1_series_detail_includes_read_progress_attributes_on_page_
         .expect("read progress timestamp should update for series detail PSE test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -227,7 +227,7 @@ async fn router_opds_v1_series_detail_includes_page_streaming_link_for_cbz_books
     seed_router_contract_data(&paths).await;
     seed_router_cbz_book(&paths, "book-cbz", "series-1", "book-cbz.cbz", "Book CBZ").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -266,7 +266,7 @@ async fn router_opds_v1_series_detail_includes_page_streaming_link_for_divina_co
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -333,7 +333,7 @@ async fn router_opds_v1_series_detail_formats_sqlite_naive_updated_like_kotlin()
     .format(&Rfc3339)
     .expect("book updated timestamp should format");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -370,7 +370,7 @@ async fn router_opds_v1_series_detail_returns_forbidden_for_age_restricted_user(
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -411,7 +411,7 @@ async fn router_opds_v1_series_detail_keeps_deleted_series_accessible_like_kotli
         .expect("series deleted date should update for deleted-series test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

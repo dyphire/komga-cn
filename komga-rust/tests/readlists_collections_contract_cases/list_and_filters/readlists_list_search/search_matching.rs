@@ -48,7 +48,7 @@ async fn router_readlists_search_uses_relevance_order_like_kotlin() {
         .expect("readlist-3 membership should insert for readlists search relevance seed");
     pool.close().await;
 
-    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths).await).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -115,7 +115,7 @@ async fn router_readlists_search_does_not_match_summary_only_hits_like_kotlin() 
         .expect("readlist-2 membership should insert for readlists name-only search seed");
     pool.close().await;
 
-    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths).await).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -167,7 +167,7 @@ async fn router_readlists_search_matches_accent_folded_names_like_kotlin() {
         .expect("readlist-1 should update for readlists accent-folding seed");
     pool.close().await;
 
-    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths).await).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -234,7 +234,7 @@ async fn router_readlists_search_matches_non_contiguous_multi_token_names_like_k
         .expect("readlist-2 membership should insert for readlists multi-token seed");
     pool.close().await;
 
-    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths).await).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -274,7 +274,7 @@ async fn router_readlists_invalid_search_syntax_returns_empty_result_like_kotlin
     let paths = new_router_fixture("router-readlists-search-invalid-syntax").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths).await).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -351,8 +351,8 @@ async fn router_readlists_search_does_not_drop_visible_hits_after_hidden_ranked_
     }
     pool.close().await;
 
-    let config = search_ready_runtime_config_for_paths(&paths);
-    let app = build_router_with_config(&config);
+    let config = search_ready_runtime_config_for_paths(&paths).await;
+    let app = build_router_with_config(&config).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "library1@example.org",

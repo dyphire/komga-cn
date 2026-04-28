@@ -5,7 +5,7 @@ use komga_application::task_processing::{
     TaskQueueRecord,
 };
 use serde_json::{Map, Value, json};
-use sqlx::{Row, SqlitePool};
+use sqlx::Row;
 
 use crate::sqlite::connect_private_write_pool;
 
@@ -91,174 +91,153 @@ impl SqliteTaskQueueStore {
         Some(Self { tasks_db_file })
     }
 
-    pub fn load_records(&self) -> Vec<PersistedTaskStoreRecord> {
-        self.run(|pool| {
-            Box::pin(async move {
-                let compatibility = compatibility();
-                let rows = sqlx::query(
-                    r#"SELECT
-                        ID,
-                        PRIORITY,
-                        GROUP_ID,
-                        CLASS,
-                        SIMPLE_TYPE,
-                        PAYLOAD,
-                        OWNER
-                    FROM TASK
-                    ORDER BY PRIORITY DESC, LAST_MODIFIED_DATE ASC, ID ASC"#,
-                )
-                .fetch_all(&pool)
-                .await
-                .expect("persisted task queue rows should be readable");
+    pub async fn load_records(&self) -> Vec<PersistedTaskStoreRecord> {
+        let pool = connect_private_write_pool(&self.tasks_db_file)
+            .await
+            .expect("tasks sqlite pool should open for task persistence");
 
-                rows.into_iter()
-                    .map(persisted_row_shape)
-                    .map(|row| compatibility.runtime_record_from_persisted_row(row))
-                    .map(store_record_from_runtime_record)
-                    .collect::<Vec<_>>()
-            })
-        })
+        let compatibility = compatibility();
+        let rows = sqlx::query(
+            r#"SELECT
+                ID,
+                PRIORITY,
+                GROUP_ID,
+                CLASS,
+                SIMPLE_TYPE,
+                PAYLOAD,
+                OWNER
+            FROM TASK
+            ORDER BY PRIORITY DESC, LAST_MODIFIED_DATE ASC, ID ASC"#,
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("persisted task queue rows should be readable");
+        pool.close().await;
+
+        rows.into_iter()
+            .map(persisted_row_shape)
+            .map(|row| compatibility.runtime_record_from_persisted_row(row))
+            .map(store_record_from_runtime_record)
+            .collect::<Vec<_>>()
     }
 
-    pub fn persist_task(&self, task: &PersistedTaskStoreRecord) {
+    pub async fn persist_task(&self, task: &PersistedTaskStoreRecord) {
         let row = compatibility().persisted_row_from_runtime_record(task);
-        self.run(move |pool| {
-            Box::pin(async move {
-                sqlx::query(
-                    r#"INSERT INTO TASK (
-                        ID,
-                        PRIORITY,
-                        GROUP_ID,
-                        CLASS,
-                        SIMPLE_TYPE,
-                        PAYLOAD,
-                        OWNER
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(ID) DO UPDATE
-                    SET PRIORITY = excluded.PRIORITY,
-                        GROUP_ID = excluded.GROUP_ID,
-                        CLASS = excluded.CLASS,
-                        SIMPLE_TYPE = excluded.SIMPLE_TYPE,
-                        PAYLOAD = excluded.PAYLOAD,
-                        OWNER = excluded.OWNER,
-                        LAST_MODIFIED_DATE = CURRENT_TIMESTAMP"#,
-                )
-                .bind(row.id)
-                .bind(row.priority)
-                .bind(row.group)
-                .bind(row.class_name)
-                .bind(row.simple_type)
-                .bind(row.payload)
-                .bind(row.owner)
-                .execute(&pool)
-                .await
-                .expect("queued task rows should persist to TASK table");
-            })
-        });
+        let pool = connect_private_write_pool(&self.tasks_db_file)
+            .await
+            .expect("tasks sqlite pool should open for task persistence");
+        sqlx::query(
+            r#"INSERT INTO TASK (
+                ID,
+                PRIORITY,
+                GROUP_ID,
+                CLASS,
+                SIMPLE_TYPE,
+                PAYLOAD,
+                OWNER
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(ID) DO UPDATE
+            SET PRIORITY = excluded.PRIORITY,
+                GROUP_ID = excluded.GROUP_ID,
+                CLASS = excluded.CLASS,
+                SIMPLE_TYPE = excluded.SIMPLE_TYPE,
+                PAYLOAD = excluded.PAYLOAD,
+                OWNER = excluded.OWNER,
+                LAST_MODIFIED_DATE = CURRENT_TIMESTAMP"#,
+        )
+        .bind(row.id)
+        .bind(row.priority)
+        .bind(row.group)
+        .bind(row.class_name)
+        .bind(row.simple_type)
+        .bind(row.payload)
+        .bind(row.owner)
+        .execute(&pool)
+        .await
+        .expect("queued task rows should persist to TASK table");
+        pool.close().await;
     }
 
-    pub fn claim_task(&self, task_id: &str, owner: &str) {
+    pub async fn claim_task(&self, task_id: &str, owner: &str) {
         let task_id = task_id.to_string();
         let owner = owner.to_string();
-        self.run(move |pool| {
-            Box::pin(async move {
-                sqlx::query(
-                    r#"UPDATE TASK
-                    SET OWNER = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-                    WHERE ID = ?"#,
-                )
-                .bind(owner)
-                .bind(task_id)
-                .execute(&pool)
-                .await
-                .expect("claimed task owner should persist to TASK table");
-            })
-        });
+        let pool = connect_private_write_pool(&self.tasks_db_file)
+            .await
+            .expect("tasks sqlite pool should open for task persistence");
+        sqlx::query(
+            r#"UPDATE TASK
+            SET OWNER = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+            WHERE ID = ?"#,
+        )
+        .bind(owner)
+        .bind(task_id)
+        .execute(&pool)
+        .await
+        .expect("claimed task owner should persist to TASK table");
+        pool.close().await;
     }
 
-    pub fn delete_task(&self, task_id: &str) -> bool {
+    pub async fn delete_task(&self, task_id: &str) -> bool {
         let task_id = task_id.to_string();
-        self.run(move |pool| {
-            Box::pin(async move {
-                sqlx::query("DELETE FROM TASK WHERE ID = ?")
-                    .bind(task_id)
-                    .execute(&pool)
-                    .await
-                    .expect("completed task rows should be deleted from TASK table")
-                    .rows_affected()
-                    > 0
-            })
-        })
+        let pool = connect_private_write_pool(&self.tasks_db_file)
+            .await
+            .expect("tasks sqlite pool should open for task persistence");
+        let removed = sqlx::query("DELETE FROM TASK WHERE ID = ?")
+            .bind(task_id)
+            .execute(&pool)
+            .await
+            .expect("completed task rows should be deleted from TASK table")
+            .rows_affected()
+            > 0;
+        pool.close().await;
+        removed
     }
 
-    pub fn disown_all(&self) {
-        self.run(|pool| {
-            Box::pin(async move {
-                sqlx::query(
-                    r#"UPDATE TASK
-                    SET OWNER = NULL, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-                    WHERE OWNER IS NOT NULL"#,
-                )
-                .execute(&pool)
-                .await
-                .expect("owned task rows should be disowned in TASK table");
-            })
-        });
+    pub async fn disown_all(&self) {
+        let pool = connect_private_write_pool(&self.tasks_db_file)
+            .await
+            .expect("tasks sqlite pool should open for task persistence");
+        sqlx::query(
+            r#"UPDATE TASK
+            SET OWNER = NULL, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+            WHERE OWNER IS NOT NULL"#,
+        )
+        .execute(&pool)
+        .await
+        .expect("owned task rows should be disowned in TASK table");
+        pool.close().await;
     }
 
-    pub fn disown_task(&self, task_id: &str) {
+    pub async fn disown_task(&self, task_id: &str) {
         let task_id = task_id.to_string();
-        self.run(move |pool| {
-            Box::pin(async move {
-                sqlx::query(
-                    r#"UPDATE TASK
-                    SET OWNER = NULL, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-                    WHERE ID = ?"#,
-                )
-                .bind(task_id)
-                .execute(&pool)
-                .await
-                .expect("task row should be disowned in TASK table");
-            })
-        });
+        let pool = connect_private_write_pool(&self.tasks_db_file)
+            .await
+            .expect("tasks sqlite pool should open for task persistence");
+        sqlx::query(
+            r#"UPDATE TASK
+            SET OWNER = NULL, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+            WHERE ID = ?"#,
+        )
+        .bind(task_id)
+        .execute(&pool)
+        .await
+        .expect("task row should be disowned in TASK table");
+        pool.close().await;
     }
 
-    pub fn clear_unowned(&self) -> usize {
-        self.run(|pool| {
-            Box::pin(async move {
-                sqlx::query("DELETE FROM TASK WHERE OWNER IS NULL")
-                    .execute(&pool)
-                    .await
-                    .expect("unowned task rows should be deleted from TASK table")
-                    .rows_affected() as usize
-            })
-        })
-    }
-
-    fn run<T>(&self, operation: impl FnOnce(SqlitePool) -> BoxFuture<T> + Send + 'static) -> T
-    where
-        T: Send + 'static,
-    {
-        let tasks_db_file = self.tasks_db_file.clone();
-        std::thread::spawn(move || {
-            let runtime = crate::tokio_runtime::current_thread_runtime()
-                .expect("persisted task runtime should build");
-
-            runtime.block_on(async move {
-                let pool = connect_private_write_pool(&tasks_db_file)
-                    .await
-                    .expect("tasks sqlite pool should open for task persistence");
-                let result = operation(pool.clone()).await;
-                pool.close().await;
-                result
-            })
-        })
-        .join()
-        .expect("persisted task worker thread should complete")
+    pub async fn clear_unowned(&self) -> usize {
+        let pool = connect_private_write_pool(&self.tasks_db_file)
+            .await
+            .expect("tasks sqlite pool should open for task persistence");
+        let deleted = sqlx::query("DELETE FROM TASK WHERE OWNER IS NULL")
+            .execute(&pool)
+            .await
+            .expect("unowned task rows should be deleted from TASK table")
+            .rows_affected() as usize;
+        pool.close().await;
+        deleted
     }
 }
-
-type BoxFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
 
 fn compatibility() -> PersistedTaskCompatibility<DefaultTaskProtocolCatalog> {
     PersistedTaskCompatibility::default()

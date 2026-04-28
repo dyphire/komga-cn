@@ -5,7 +5,7 @@ async fn router_discovery_books_list_supports_release_date_is_in_runtime_owned_m
     let paths = new_router_fixture("router-discovery-books-list-strict-release-date").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let matched_response = app
@@ -78,7 +78,7 @@ async fn router_discovery_books_list_supports_release_date_is_not_in_runtime_own
     let paths = new_router_fixture("router-discovery-books-list-strict-release-date-is-not").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let excluded_response = app
@@ -151,7 +151,7 @@ async fn router_discovery_books_list_supports_release_date_null_operators_in_run
     let paths = new_router_fixture("router-discovery-books-list-strict-release-date-null").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let is_null_response = app
@@ -223,7 +223,7 @@ async fn router_discovery_books_list_supports_release_date_greater_than_and_less
     let paths = new_router_fixture("router-discovery-books-list-strict-release-date-range").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let gt_matched_response = app
@@ -361,7 +361,7 @@ async fn router_discovery_books_list_supports_release_date_date_style_ops_in_run
         new_router_fixture("router-discovery-books-list-strict-release-date-date-style").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let after_match = app

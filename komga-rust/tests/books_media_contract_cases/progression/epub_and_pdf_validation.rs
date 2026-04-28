@@ -5,7 +5,7 @@ async fn router_book_progression_put_rejects_epub_locator_without_progression() 
     let paths = new_router_fixture("router-book-progression-put-epub-missing-progression").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -49,7 +49,7 @@ async fn router_book_progression_put_rejects_epub_locator_when_extension_is_miss
     let paths = new_router_fixture("router-book-progression-put-epub-missing-extension").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -103,7 +103,7 @@ async fn router_book_progression_put_rejects_epub_locator_with_non_existing_href
         .expect("epub extension positions should be seeded for progression bad-href test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -155,7 +155,7 @@ async fn router_book_progression_put_accepts_pdf_position_payload() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let progression = json!({
         "modified": "2024-01-04T05:06:07Z",
@@ -215,7 +215,7 @@ async fn router_book_progression_put_rejects_pdf_position_beyond_page_count() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     let response = app
         .oneshot(

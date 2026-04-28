@@ -5,7 +5,7 @@ async fn router_opds_v2_keep_reading_unauthorized_returns_opds_auth_document() {
     let paths = new_router_fixture("router-opds-v2-keep-reading-unauthorized-auth-doc").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -59,7 +59,7 @@ async fn router_opds_v2_keep_reading_uses_kotlin_shape_and_visible_results() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -204,7 +204,7 @@ async fn router_opds_v2_keep_reading_filters_results_for_restricted_user() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -255,7 +255,7 @@ async fn router_opds_v2_library_keep_reading_unauthorized_returns_opds_auth_docu
         new_router_fixture("router-opds-v2-library-keep-reading-unauthorized-auth-doc").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -287,7 +287,7 @@ async fn router_opds_v2_library_keep_reading_respects_kotlin_library_scope_statu
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -362,7 +362,7 @@ async fn router_opds_v2_library_keep_reading_uses_kotlin_shape_and_unscoped_resu
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

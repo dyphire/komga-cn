@@ -73,7 +73,7 @@ pub(crate) async fn verify_password_change_invalidates_existing_remember_me_cook
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
     let (member_session_cookie, member_remember_me_cookie, member_user_id) =
         login_member_with_remember_me(
@@ -195,7 +195,7 @@ pub(crate) async fn verify_self_password_change_keeps_session_but_invalidates_ol
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let (member_session_cookie, member_remember_me_cookie, _) = login_member_with_remember_me(
         app.clone(),
         "member@example.org",
@@ -286,7 +286,7 @@ pub(crate) async fn verify_admin_user_update_expires_sessions_and_emits_session_
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
     let member_header_token = login_with_basic_credentials_and_get_token(
         app.clone(),
@@ -385,7 +385,7 @@ async fn user_deletion_invalidates_existing_session_and_remember_me_and_emits_se
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
     let member_header_token = login_with_basic_credentials_and_get_token(
         app.clone(),

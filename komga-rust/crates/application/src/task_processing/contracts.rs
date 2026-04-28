@@ -173,6 +173,10 @@ impl TaskQueueOrchestrator {
         self.task_pool_size = task_pool_size.max(1);
     }
 
+    pub fn tasks(&self) -> &[TaskQueueRecord] {
+        &self.tasks
+    }
+
     pub fn take_available_batch(&mut self) -> Vec<TaskQueueRecord> {
         if !self.consumes_queue {
             return Vec::new();

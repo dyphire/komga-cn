@@ -6,7 +6,7 @@ async fn router_discovery_books_list_supports_read_status_is_and_is_not_in_runti
     seed_router_contract_data(&paths).await;
     seed_router_read_progress(&paths, true).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let unread_response = app
@@ -149,7 +149,7 @@ async fn router_discovery_books_list_supports_library_id_in_runtime_owned_mode()
     let paths = new_router_fixture("router-discovery-books-list-strict-library-id").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let matched_response = app
@@ -221,7 +221,7 @@ async fn router_discovery_books_list_supports_oneshot_filter_in_runtime_owned_mo
     let paths = new_router_fixture("router-discovery-books-list-strict-oneshot").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let oneshot_true_response = app

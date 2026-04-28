@@ -15,7 +15,7 @@ async fn router_kobo_book_metadata_route_sets_etag_and_supports_if_none_match() 
     seed_router_contract_data(&paths).await;
     seed_admin_kobo_path_token(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let first_response = app
@@ -81,7 +81,7 @@ async fn router_kobo_book_metadata_uses_persisted_fields_instead_of_placeholders
         .expect("book metadata epub is kepub should be updated");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -154,7 +154,7 @@ async fn router_kobo_book_metadata_uses_epub3fl_for_fixed_layout_books() {
         .expect("book metadata media extension should be updated");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -196,7 +196,7 @@ async fn router_kobo_book_metadata_returns_empty_array_when_book_is_missing_and_
     seed_router_contract_data(&paths).await;
     seed_admin_kobo_path_token(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -250,7 +250,7 @@ async fn router_kobo_book_metadata_returns_empty_array_when_book_exists_but_meta
         .expect("book metadata row should be deleted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -295,7 +295,7 @@ async fn router_kobo_book_metadata_proxies_missing_books_when_proxy_enabled() {
     seed_admin_kobo_path_token(&paths).await;
     upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

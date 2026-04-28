@@ -6,7 +6,7 @@ async fn router_referential_facets_support_repeated_library_id() {
     seed_router_contract_data(&paths).await;
     seed_facet_scope_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let cases = [
@@ -77,7 +77,7 @@ async fn router_referential_and_tag_facets_accept_basic_auth_like_kotlin_clients
     seed_router_contract_data(&paths).await;
     seed_facet_scope_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
 
@@ -123,7 +123,7 @@ async fn router_referential_facets_filter_repeated_library_scope_to_authorized_l
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "library1@example.org",
@@ -205,7 +205,7 @@ async fn router_genres_deduplicates_shared_values_across_series() {
         .expect("duplicate genre row should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -255,7 +255,7 @@ async fn router_referential_facets_handle_empty_and_null_series_metadata_values(
         .expect("series age rating should update to null for facet test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let cases = [
@@ -292,7 +292,7 @@ async fn router_sharing_labels_prefers_library_scope_over_collection_scope() {
     seed_router_contract_data(&paths).await;
     seed_facet_scope_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -321,7 +321,7 @@ async fn router_series_release_dates_prefers_library_scope_over_collection_scope
     seed_router_contract_data(&paths).await;
     seed_facet_scope_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -384,7 +384,7 @@ async fn router_series_release_dates_uses_series_aggregated_release_date() {
         .expect("series aggregation release date should be updated");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -420,7 +420,7 @@ async fn router_book_tags_scope_rules_match_visible_libraries() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
     let restricted_token = login_with_basic_credentials_and_get_token(
         app.clone(),
@@ -490,7 +490,7 @@ async fn router_referential_facets_support_collection_id_scope() {
     seed_router_contract_data(&paths).await;
     seed_facet_scope_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let cases = [

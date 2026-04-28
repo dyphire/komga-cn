@@ -6,7 +6,7 @@ async fn router_collection_series_supports_kotlin_style_query_filters() {
     seed_router_contract_data(&paths).await;
     seed_collection_series_variants(&paths).await;
 
-    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths).await).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -50,7 +50,7 @@ async fn router_collection_series_ignores_search_query_like_kotlin() {
     seed_router_contract_data(&paths).await;
     seed_collection_series_variants(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -116,7 +116,7 @@ async fn router_collection_series_uses_collection_order_for_ordered_collection_l
         .expect("series-2 titleSort should update for ordered collection series alignment");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -182,7 +182,7 @@ async fn router_collection_series_paginates_after_ordering_for_ordered_collectio
         .expect("series-2 titleSort should update for ordered collection pagination");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -229,7 +229,7 @@ async fn router_collection_series_filters_invisible_series_for_partially_visible
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "library1@example.org",
@@ -278,7 +278,7 @@ async fn router_collection_series_returns_not_found_for_fully_hidden_collection_
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "library1@example.org",
@@ -317,7 +317,7 @@ async fn router_series_collections_filter_series_ids_for_partially_visible_user(
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "library1@example.org",
@@ -415,7 +415,7 @@ async fn router_series_collections_does_not_accept_sorted_position_series_alias(
 
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

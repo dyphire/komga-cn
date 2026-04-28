@@ -7,7 +7,7 @@ async fn router_opds_v2_library_browse_uses_kotlin_top_level_title_and_links() {
     let paths = new_router_fixture("router-opds-v2-library-browse-route").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for (route, expected_title, expected_self_href) in [
@@ -119,7 +119,7 @@ async fn router_opds_v2_collections_use_kotlin_top_level_shape() {
     let paths = new_router_fixture("router-opds-v2-collections-shape").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for (route, expected_title, expected_self_href) in [
@@ -266,7 +266,7 @@ async fn router_opds_v2_collections_include_kotlin_paging_metadata_and_links() {
     .expect("second collection series should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for (route, expected_self_href, expected_next_href) in [
@@ -369,7 +369,7 @@ async fn router_opds_v2_collections_keep_restricted_collections_in_groups_like_k
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -428,7 +428,7 @@ async fn router_opds_v2_collections_top_level_navigation_hides_empty_subsections
     seed_router_contract_data(&paths).await;
     clear_router_collections_and_readlists(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for route in [
@@ -473,7 +473,7 @@ async fn router_opds_v2_collection_unauthorized_returns_opds_auth_document() {
     let paths = new_router_fixture("router-opds-v2-collection-unauthorized-auth-doc").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -527,7 +527,7 @@ async fn router_opds_v2_collection_returns_not_found_for_missing_or_out_of_scope
     .expect("library-scoped collection series should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "library-user@example.org",
@@ -562,7 +562,7 @@ async fn router_opds_v2_collection_uses_kotlin_navigation_shape_and_ordering() {
     update_router_collection_last_modified(&paths, "collection-1", "2024-01-20 01:02:03").await;
     seed_router_collection_series_entry(&paths, "collection-1", "series-2", 99).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -656,7 +656,7 @@ async fn router_opds_v2_collection_returns_empty_feed_when_series_are_filtered_b
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -705,7 +705,7 @@ async fn router_opds_v2_collection_keeps_empty_navigation_for_out_of_range_pages
     update_router_series_metadata_titles(&paths, "series-2", "Alpha Display", "Alpha Sort").await;
     seed_router_collection_series_entry(&paths, "collection-1", "series-2", 99).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -782,7 +782,7 @@ async fn router_opds_v2_series_uses_kotlin_shape_tag_filter_and_facets() {
         .expect("tagged book summary should be updated for opds series route");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -967,7 +967,7 @@ async fn router_opds_v2_series_facets_keep_tags_from_non_ready_books() {
         .expect("hidden-tag book metadata tag should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app

@@ -20,7 +20,7 @@ async fn router_readlist_and_collection_media_assets_hide_age_restricted_content
         br#"<html xmlns='http://www.w3.org/1999/xhtml'><body>Restricted</body></html>"#,
     );
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
     let restricted_token = login_with_basic_credentials_and_get_token(
         app.clone(),
@@ -135,7 +135,7 @@ async fn router_readlist_tachiyomi_progress_ignores_content_restrictions_like_ko
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let restricted_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -185,7 +185,7 @@ async fn router_readlist_detail_filters_books_for_partially_restricted_user() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let restricted_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "partial@example.org",
@@ -228,7 +228,7 @@ async fn router_readlist_tachiyomi_progress_ignores_content_restriction_subsets_
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let restricted_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "partial@example.org",
@@ -277,7 +277,7 @@ async fn router_readlist_tachiyomi_progress_counts_full_readlist_for_library_res
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let restricted_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "library1@example.org",
@@ -326,7 +326,7 @@ async fn router_readlist_tachiyomi_progress_returns_not_found_when_library_shari
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let restricted_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "nolib@example.org",
@@ -365,7 +365,7 @@ async fn router_readlist_tachiyomi_progress_put_returns_not_found_when_library_s
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let restricted_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "nolib@example.org",
@@ -416,7 +416,7 @@ async fn router_readlist_tachiyomi_progress_put_ignores_fully_hidden_content_lik
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let restricted_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "restricted@example.org",
@@ -468,7 +468,7 @@ async fn router_readlist_tachiyomi_progress_put_marks_only_visible_books_for_res
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let restricted_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "partial@example.org",
@@ -546,7 +546,7 @@ async fn router_readlist_media_assets_allow_partially_visible_restricted_readlis
         );
     }
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let admin_token = login_with_basic_and_get_token(app.clone()).await;
     let restricted_token = login_with_basic_credentials_and_get_token(
         app.clone(),
@@ -653,7 +653,7 @@ async fn router_readlist_file_uses_deflated_zip_entries() {
         );
     }
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let archive = app
@@ -699,7 +699,7 @@ async fn router_readlist_file_emits_zip64_records() {
         );
     }
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let archive = app

@@ -9,7 +9,7 @@ async fn router_get_font_file_downloads_embedded_font_without_auth_like_kotlin()
     let paths = new_router_fixture("router-get-font-file-embedded-anonymous").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -47,7 +47,7 @@ async fn router_get_font_family_css_downloads_embedded_css_without_auth_like_kot
     let paths = new_router_fixture("router-get-font-css-embedded-anonymous").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -95,7 +95,7 @@ async fn router_get_font_family_css_downloads_filesystem_css_without_auth_like_k
     std::fs::write(family_dir.join("Custom-Regular.ttf"), b"font-bytes")
         .expect("custom regular ttf should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -142,7 +142,7 @@ async fn router_get_font_file_downloads_filesystem_font_without_auth_like_kotlin
     std::fs::write(family_dir.join("Custom-Regular.ttf"), b"font-bytes")
         .expect("custom font file should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -180,7 +180,7 @@ async fn router_get_fonts_families_requires_auth_like_kotlin() {
     let paths = new_router_fixture("router-get-fonts-families-requires-auth").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
 
     let response = app
         .oneshot(
@@ -216,7 +216,7 @@ async fn router_get_fonts_families_returns_embedded_and_filesystem_families_like
     std::fs::write(family_dir.join("Custom-Regular.ttf"), b"font-bytes")
         .expect("custom font file should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "fonts@example.org",

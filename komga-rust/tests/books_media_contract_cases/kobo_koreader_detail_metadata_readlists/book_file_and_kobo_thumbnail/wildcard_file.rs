@@ -11,7 +11,7 @@ async fn router_book_file_wildcard_routes_match_api_v1_and_opds_v2() {
     std::fs::write(books_dir.join("book-1.epub"), expected_body)
         .expect("book fixture file should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     for route in [
@@ -46,7 +46,7 @@ async fn router_book_file_wildcard_returns_not_found_with_message_when_file_is_m
     let paths = new_router_fixture("router-book-file-wildcard-missing-file").await;
     seed_router_contract_data(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -87,7 +87,7 @@ async fn router_book_file_wildcard_returns_forbidden_for_restricted_user_even_wh
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let member_token = login_with_basic_credentials_and_get_token(
         app.clone(),
         "member@example.org",

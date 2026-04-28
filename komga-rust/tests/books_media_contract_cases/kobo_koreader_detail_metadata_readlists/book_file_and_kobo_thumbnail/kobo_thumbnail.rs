@@ -56,7 +56,7 @@ async fn router_kobo_thumbnail_exact_id_local_response_is_jpeg() {
     seed_admin_kobo_path_token(&paths).await;
     seed_kobo_thumbnail_bytes(&paths, "thumb-book-1", "image/png", &fixture_png_bytes()).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -98,7 +98,7 @@ async fn router_kobo_thumbnail_redirects_to_kobo_cdn_when_exact_thumbnail_is_mis
     seed_admin_kobo_path_token(&paths).await;
     upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -132,7 +132,7 @@ async fn router_kobo_thumbnail_returns_not_found_when_exact_thumbnail_is_missing
     seed_router_contract_data(&paths).await;
     seed_admin_kobo_path_token(&paths).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
@@ -167,7 +167,7 @@ async fn router_kobo_thumbnail_exact_id_sidecar_stays_local_when_proxy_enabled()
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths));
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
 
     let response = app
