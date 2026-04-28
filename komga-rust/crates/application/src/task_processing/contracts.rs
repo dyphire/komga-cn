@@ -113,6 +113,7 @@ pub struct TaskRuntimeContext {
     pub owns_filesystem_scan_output: bool,
     pub owns_sidecar_output: bool,
     pub owns_search_index: bool,
+    pub task_pool_size: usize,
 }
 
 pub trait TaskRuntimeConfig {

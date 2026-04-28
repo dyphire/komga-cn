@@ -91,7 +91,7 @@ fn scheduler_logs_truthful_success_lifecycle_at_commit_boundaries() {
 }
 
 #[test]
-fn scheduler_logs_failure_and_disown_without_fake_success_events() {
+fn scheduler_logs_failure_with_concurrent_success_without_fake_success_events() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -136,7 +136,8 @@ fn scheduler_logs_failure_and_disown_without_fake_success_events() {
 
     let events = parse_json_log_lines(&logs);
     let fail = event_fields_with_task_id(&events, "task_fail", "UNSUPPORTED_TASK:logging-failure");
-    let disown = event_fields_with_task_id(&events, "task_disown", "UPGRADE_INDEX:logging-disown");
+    let complete =
+        event_fields_with_task_id(&events, "task_complete", "UPGRADE_INDEX:logging-disown");
     let process_failed = event_fields_with_outcome(&events, "task_process_available", "failed");
 
     println!("scheduler_failure_disown_logs {logs}");
@@ -158,17 +159,18 @@ fn scheduler_logs_failure_and_disown_without_fake_success_events() {
         "failed task should emit actionable error text: {fail:?}",
     );
     assert_task_fields(
-        disown,
+        complete,
         "UPGRADE_INDEX:logging-disown",
         "UPGRADE_INDEX",
         1_000,
     );
-    assert_eq!(field_str(disown, "outcome"), Some("disowned"));
-    assert_eq!(field_str(disown, "consumer_owner"), Some("rust-main"));
+    assert_eq!(field_str(complete, "outcome"), Some("completed"));
+    assert_eq!(field_str(complete, "consumer_owner"), Some("rust-main"));
     assert_eq!(
         field_str(process_failed, "consumer_owner"),
         Some("rust-main")
     );
+    assert_eq!(field_u64(process_failed, "processed"), Some(1));
     assert!(
         field_str(process_failed, "error")
             .is_some_and(|value| value.contains("unsupported runtime task type: UNSUPPORTED_TASK")),
@@ -179,6 +181,12 @@ fn scheduler_logs_failure_and_disown_without_fake_success_events() {
             .into_iter()
             .all(|fields| field_str(fields, "task_id") != Some("UNSUPPORTED_TASK:logging-failure")),
         "failed task must not emit task_complete: {events:?}",
+    );
+    assert!(
+        matching_event_fields(&events, "task_disown")
+            .into_iter()
+            .all(|fields| field_str(fields, "task_id") != Some("UPGRADE_INDEX:logging-disown")),
+        "concurrently completed tasks must not be logged as disowned: {events:?}",
     );
 }
 

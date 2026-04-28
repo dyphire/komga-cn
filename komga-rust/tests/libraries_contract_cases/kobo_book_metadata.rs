@@ -191,6 +191,45 @@ async fn router_kobo_book_metadata_uses_epub3fl_for_fixed_layout_books() {
 }
 
 #[tokio::test]
+async fn router_kobo_book_metadata_uses_kobo_port_when_host_omits_port() {
+    let paths = new_router_fixture("router-kobo-book-metadata-kobo-port").await;
+    seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
+    upsert_server_setting(&paths, "KOBO_PORT", "8085").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/kobo/any-token/v1/library/book-1/metadata")
+                .header(header::HOST, "localhost")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("kobo metadata koboPort request should build"),
+        )
+        .await
+        .expect("kobo metadata koboPort request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let metadata = payload
+        .as_array()
+        .and_then(|items| items.first())
+        .expect("kobo metadata response should contain one item");
+    assert_eq!(
+        metadata.pointer("/DownloadUrls/0/Url"),
+        Some(&json!(
+            "http://localhost:8085/kobo/any-token/v1/books/book-1/file/epub?convert_kepub=true"
+        ))
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_kobo_book_metadata_returns_empty_array_when_book_is_missing_and_proxy_disabled() {
     let paths = new_router_fixture("router-kobo-book-metadata-missing-local").await;
     seed_router_contract_data(&paths).await;

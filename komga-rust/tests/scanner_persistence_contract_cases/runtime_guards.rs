@@ -28,6 +28,7 @@ async fn scanner_runtime_blocks_scan_output_when_filesystem_scan_writer_is_exter
         owns_filesystem_scan_output: false,
         owns_sidecar_output: true,
         owns_search_index: true,
+        task_pool_size: 1,
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
@@ -174,7 +175,6 @@ async fn scanner_startup_releases_previously_claimed_persisted_tasks() {
     let _background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
         runtime_task_context_from_config(&fixture.config),
         None,
-        1,
     )
     .await;
 
@@ -242,12 +242,12 @@ async fn scanner_startup_leaves_tasks_untouched_when_tasks_writer_is_external_ow
         owns_filesystem_scan_output: false,
         owns_sidecar_output: false,
         owns_search_index: false,
+        task_pool_size: 1,
     };
 
     let background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
         runtime,
         Some("REBUILD_INDEX"),
-        1,
     )
     .await;
 

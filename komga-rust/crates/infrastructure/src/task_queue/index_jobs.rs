@@ -429,6 +429,7 @@ mod tests {
             owns_filesystem_scan_output: true,
             owns_sidecar_output: true,
             owns_search_index: true,
+            task_pool_size: 1,
         };
         let mut scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "thumbnail-finder-test");
@@ -497,6 +498,7 @@ mod tests {
             owns_filesystem_scan_output: true,
             owns_sidecar_output: true,
             owns_search_index: true,
+            task_pool_size: 1,
         };
         let mut scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "thumbnail-finder-all-books-test");
@@ -723,6 +725,7 @@ mod tests {
             owns_filesystem_scan_output: true,
             owns_sidecar_output: true,
             owns_search_index: false,
+            task_pool_size: 1,
         };
         let mut scheduler = TaskQueueScheduler::for_runtime(
             runtime.clone(),
@@ -926,6 +929,7 @@ mod tests {
             owns_filesystem_scan_output: true,
             owns_sidecar_output: true,
             owns_search_index: false,
+            task_pool_size: 1,
         };
         let mut scheduler = TaskQueueScheduler::for_runtime(
             runtime.clone(),

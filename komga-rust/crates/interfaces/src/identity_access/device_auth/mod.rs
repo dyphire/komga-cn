@@ -200,5 +200,23 @@ async fn load_kobo_proxy_enabled(
         .unwrap_or(false)
 }
 
+async fn effective_kobo_port(app: &HttpAppState) -> u16 {
+    app.services
+        .server_settings
+        .load_settings()
+        .await
+        .ok()
+        .and_then(|settings| settings.kobo_port)
+        .unwrap_or_else(|| app.operational.runtime.bind_address.port())
+}
+
+async fn kobo_request_base_url(app: &HttpAppState, headers: &HeaderMap) -> String {
+    format!(
+        "{}{}",
+        request_base_url_with_port(headers, Some(effective_kobo_port(app).await)),
+        request_context_path(headers)
+    )
+}
+
 #[cfg(test)]
 mod tests;

@@ -38,6 +38,7 @@ fn runtime_task_context(paths: &RuntimeDbPaths) -> TaskRuntimeContext {
         owns_filesystem_scan_output: true,
         owns_sidecar_output: true,
         owns_search_index: true,
+        task_pool_size: 1,
     }
 }
 
@@ -74,6 +75,7 @@ fn runtime_task_context_from_config(
             komga_config::writer_ownership::WriterDecision::Allowed
                 | komga_config::writer_ownership::WriterDecision::Isolated
         ),
+        task_pool_size: config.task_pool_size,
     }
 }
 

@@ -31,7 +31,7 @@ impl TaskQueueScheduler {
             consumer_owner,
             consumes_queue,
             persisted_store,
-            task_pool_size: 1,
+            task_pool_size: runtime.task_pool_size.max(1),
         }
     }
 
@@ -189,28 +189,18 @@ impl TaskQueueScheduler {
                 logged_start = true;
             }
 
-            let mut batch_iter = batch.into_iter();
-            while let Some(task) = batch_iter.next() {
-                self.log_task_start(&task);
-                match task_executor::execute_task(runtime, &task).await {
-                    Ok(outcome) => {
-                        outcome.enqueue_into(self).await;
-                        self.complete(&task.id).await;
-                        processed += 1;
-                    }
-                    Err(error) => {
-                        let error_message = error.to_string();
-                        self.fail_claimed_task(&task, error_message.as_str()).await;
-                        self.disown_claimed_tasks_after_failure(batch_iter.collect())
-                            .await;
-                        self.log_process_available(
-                            "failed",
-                            processed,
-                            Some(error_message.as_str()),
-                        );
-                        return Err(error);
-                    }
-                }
+            for task in &batch {
+                self.log_task_start(task);
+            }
+
+            let batch_results = task_executor::execute_task_batch(runtime, batch).await;
+            if let Err(error) = self
+                .finalize_task_batch(batch_results, &mut processed)
+                .await
+            {
+                let error_message = error.to_string();
+                self.log_process_available("failed", processed, Some(error_message.as_str()));
+                return Err(error);
             }
         }
     }
@@ -243,26 +233,34 @@ impl TaskQueueScheduler {
         }
     }
 
-    async fn disown_claimed_task(&mut self, task: &TaskQueueRecord) {
-        if let Some(store) = &self.persisted_store {
-            if self.admin.disown(&task.id) {
-                store.disown_task(&task.id).await;
-                self.log_task_event("task_disown", task, "disowned", None);
-            }
-            return;
-        }
-
-        if self.admin.disown(&task.id) {
-            self.log_task_event("task_disown", task, "disowned", None);
-        }
-    }
-
-    pub(super) async fn disown_claimed_tasks_after_failure(
+    pub(super) async fn finalize_task_batch(
         &mut self,
-        remaining_batch: Vec<TaskQueueRecord>,
-    ) {
-        for task in remaining_batch {
-            self.disown_claimed_task(&task).await;
+        batch_results: Vec<TaskBatchExecutionResult>,
+        processed: &mut usize,
+    ) -> Result<(), TaskExecutionError> {
+        let mut first_error: Option<TaskExecutionError> = None;
+
+        for batch_result in batch_results {
+            match batch_result.outcome {
+                Ok(outcome) => {
+                    outcome.enqueue_into(self).await;
+                    self.complete(&batch_result.task.id).await;
+                    *processed += 1;
+                }
+                Err(error) => {
+                    let error_message = error.to_string();
+                    self.fail_claimed_task(&batch_result.task, error_message.as_str())
+                        .await;
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+        }
+
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
         }
     }
 

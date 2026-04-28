@@ -57,6 +57,7 @@ impl RuntimeTestFixture {
             owns_filesystem_scan_output: true,
             owns_sidecar_output: true,
             owns_search_index,
+            task_pool_size: 1,
         }
     }
 

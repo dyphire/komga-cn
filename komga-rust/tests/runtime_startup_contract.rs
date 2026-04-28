@@ -41,5 +41,6 @@ fn runtime_task_context(
             komga_config::writer_ownership::WriterDecision::Allowed
                 | komga_config::writer_ownership::WriterDecision::Isolated
         ),
+        task_pool_size: config.task_pool_size,
     }
 }

@@ -38,7 +38,6 @@ fn runtime_startup_prepare_task_queue_enqueues_search_rebuild_without_processing
             let background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
                 runtime_task_context(&config),
                 Some("REBUILD_INDEX"),
-                1,
             )
             .await;
             let mut queue = background.task_queue.lock().await;
@@ -113,7 +112,6 @@ fn runtime_startup_prepare_task_queue_applies_configured_task_pool_size() {
         let background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
             runtime_task_context(&config),
             None,
-            config.task_pool_size,
         )
         .await;
         let queue = background.task_queue.lock().await;
@@ -137,6 +135,7 @@ fn runtime_startup_prepare_task_queue_logs_truthful_skip_boundaries_for_external
         owns_filesystem_scan_output: false,
         owns_sidecar_output: false,
         owns_search_index: false,
+        task_pool_size: 1,
     };
 
     let mut config =
@@ -147,7 +146,6 @@ fn runtime_startup_prepare_task_queue_logs_truthful_skip_boundaries_for_external
         let _background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
             runtime,
             Some("REBUILD_INDEX"),
-            1,
         )
         .await;
     });
@@ -190,6 +188,7 @@ fn runtime_startup_prepare_task_queue_skips_search_rebuild_when_search_index_not
         owns_filesystem_scan_output: false,
         owns_sidecar_output: false,
         owns_search_index: false,
+        task_pool_size: 1,
     };
 
     let mut config = runtime_config_for_logging_contract(
@@ -201,7 +200,6 @@ fn runtime_startup_prepare_task_queue_skips_search_rebuild_when_search_index_not
         let background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
             runtime,
             Some("REBUILD_INDEX"),
-            1,
         )
         .await;
         let mut queue = background.task_queue.lock().await;
@@ -268,7 +266,6 @@ fn runtime_startup_prepare_task_queue_logs_no_startup_library_scan_skip_when_no_
             let background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
                 runtime_task_context(&config),
                 None,
-                1,
             )
             .await;
             let mut queue = background.task_queue.lock().await;
@@ -433,6 +430,7 @@ fn runtime_startup_library_scan_processing_logs_run_complete_and_skip_boundaries
         owns_filesystem_scan_output: false,
         owns_sidecar_output: false,
         owns_search_index: false,
+        task_pool_size: 1,
     };
     let mut skip_config = runtime_config_for_logging_contract(
         "komga-runtime-startup-library-scan-processing-skip-logs",

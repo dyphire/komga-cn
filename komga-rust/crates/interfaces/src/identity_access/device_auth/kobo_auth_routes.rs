@@ -46,12 +46,10 @@ pub async fn kobo_initialization(
         Ok(resources) => resources,
         Err(status) => return status.into_response(),
     };
-    let base_url = request_base_url_with_port(&headers, initialization_port(&app).await);
-    let context_base_url = format!("{base_url}{}", request_context_path(&headers));
     apply_initialization_overrides(
         &mut resources,
         auth_token.as_str(),
-        context_base_url.as_str(),
+        kobo_request_base_url(&app, &headers).await.as_str(),
     );
 
     let mut response = (StatusCode::OK, Json(json!({ "Resources": resources }))).into_response();
@@ -118,16 +116,6 @@ async fn proxied_initialization_resources(
     let payload =
         serde_json::from_slice::<Value>(&body).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(payload.get("Resources").cloned())
-}
-
-async fn initialization_port(app: &HttpAppState) -> Option<u16> {
-    let persisted = app.services.server_settings.load_map().await.ok();
-    let configured_kobo_port = persisted
-        .as_ref()
-        .and_then(|settings| settings.get("KOBO_PORT"))
-        .and_then(|value| value.as_ref())
-        .and_then(|value| value.trim().parse::<u16>().ok());
-    configured_kobo_port.or(Some(app.operational.runtime.bind_address.port()))
 }
 
 fn apply_initialization_overrides(resources: &mut Value, auth_token: &str, context_base_url: &str) {

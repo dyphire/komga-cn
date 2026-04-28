@@ -425,7 +425,7 @@ pub async fn kobo_library_sync(
         .as_deref()
         .and_then(parse_komga_sync_token_payload);
 
-    let base_url = request_base_url(&headers);
+    let base_url = kobo_request_base_url(&app, &headers).await;
     let sync_page = match load_kobo_sync_page(
         &app,
         &current_user,
@@ -576,11 +576,7 @@ pub async fn kobo_library_book_metadata(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    let base_url = format!(
-        "{}{}",
-        request_base_url_with_port(&headers, Some(app.operational.runtime.bind_address.port())),
-        request_context_path(&headers)
-    );
+    let base_url = kobo_request_base_url(&app, &headers).await;
     let (format, convert_kepub) = if metadata.is_pre_paginated {
         ("EPUB3FL", false)
     } else {

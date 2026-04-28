@@ -6,7 +6,7 @@ use axum::response::{IntoResponse, Response};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
-use crate::identity_access::auth::{require_admin, sync_remember_me_runtime_settings};
+use crate::identity_access::auth::require_admin;
 use crate::operational::helpers::{
     effective_server_context_path, effective_server_port, invalid_settings_payload,
     is_valid_context_path, multi_source_number, multi_source_string,
@@ -26,19 +26,6 @@ pub(crate) async fn get_server_settings(
         Ok(settings) => settings,
         Err(response) => return response,
     };
-
-    if let Err(error) = app
-        .services
-        .task_queue
-        .apply_task_pool_size(settings.task_pool_size as usize)
-        .await
-    {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "message": format!("failed to process queued tasks: {error}") })),
-        )
-            .into_response();
-    }
 
     Json(settings_json(&app.operational.runtime, &settings)).into_response()
 }
@@ -248,12 +235,6 @@ pub(crate) async fn update_server_settings(
             .into_response();
     }
 
-    sync_remember_me_runtime_settings(
-        app.operational.remember_me_runtime_key.as_str(),
-        settings.remember_me_key.as_str(),
-        settings.remember_me_duration_days,
-    );
-
     if let Some(value) = task_pool_size_change
         && let Err(error) = app
             .services
@@ -302,14 +283,7 @@ async fn load_operational_settings(app: &HttpAppState) -> Result<OperationalSett
         .server_settings
         .load_settings()
         .await
-        .map(|settings| {
-            sync_remember_me_runtime_settings(
-                app.operational.remember_me_runtime_key.as_str(),
-                settings.remember_me_key.as_str(),
-                settings.remember_me_duration_days,
-            );
-            operational_settings_from_persisted(settings)
-        })
+        .map(operational_settings_from_persisted)
         .map_err(|error| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,

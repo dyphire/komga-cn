@@ -52,12 +52,10 @@ fn log_and_skip_if_main_db_unowned(component: &str, runtime: &TaskRuntimeContext
 pub async fn prepare_task_queue(
     config: impl TaskRuntimeConfig,
     startup_search_task: Option<&'static str>,
-    task_pool_size: usize,
 ) -> RuntimeBackgroundState {
     let runtime = config.task_runtime_context();
     let startup_task = startup_search_task.unwrap_or("");
     let mut task_queue = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-runtime-http");
-    task_queue.set_task_pool_size(task_pool_size);
     if runtime.consumes_queue {
         let _ = task_queue.disown_all().await;
     }
@@ -501,38 +499,23 @@ async fn process_shared_task_queue(
             batch
         };
 
-        let mut batch_iter = batch.into_iter();
-        while let Some(task) = batch_iter.next() {
-            {
-                let task_queue = task_queue.lock().await;
-                task_queue.log_task_start(&task);
+        {
+            let task_queue = task_queue.lock().await;
+            for task in &batch {
+                task_queue.log_task_start(task);
             }
+        }
 
-            match crate::task_queue::task_executor::execute_task(runtime, &task).await {
-                Ok(outcome) => {
-                    let mut task_queue = task_queue.lock().await;
-                    outcome.enqueue_into(&mut task_queue).await;
-                    task_queue.complete(&task.id).await;
-                    processed += 1;
-                }
-                Err(error) => {
-                    let error_message = error.to_string();
-                    let remaining_batch = batch_iter.collect();
-                    let mut task_queue = task_queue.lock().await;
-                    task_queue
-                        .fail_claimed_task(&task, error_message.as_str())
-                        .await;
-                    task_queue
-                        .disown_claimed_tasks_after_failure(remaining_batch)
-                        .await;
-                    task_queue.log_process_available(
-                        "failed",
-                        processed,
-                        Some(error_message.as_str()),
-                    );
-                    return Err(error);
-                }
-            }
+        let batch_results =
+            crate::task_queue::task_executor::execute_task_batch(runtime, batch).await;
+        let mut task_queue = task_queue.lock().await;
+        if let Err(error) = task_queue
+            .finalize_task_batch(batch_results, &mut processed)
+            .await
+        {
+            let error_message = error.to_string();
+            task_queue.log_process_available("failed", processed, Some(error_message.as_str()));
+            return Err(error);
         }
     }
 }

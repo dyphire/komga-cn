@@ -30,8 +30,8 @@ async fn remember_me_reauthenticates_after_session_expiry() {
 }
 
 #[tokio::test]
-async fn remember_me_duration_setting_changes_cookie_ttl() {
-    kobo_and_session_basics::remember_me_and_logout::verify_remember_me_duration_setting_changes_cookie_ttl().await;
+async fn remember_me_duration_setting_requires_restart_before_cookie_ttl_changes() {
+    kobo_and_session_basics::remember_me_and_logout::verify_remember_me_duration_setting_requires_restart_before_cookie_ttl_changes().await;
 }
 
 #[tokio::test]
@@ -65,8 +65,8 @@ async fn admin_user_update_expires_sessions_and_emits_session_expired_event() {
 }
 
 #[tokio::test]
-async fn rotating_remember_me_key_invalidates_existing_cookie() {
-    kobo_and_session_basics::remember_me_and_logout::verify_rotating_remember_me_key_invalidates_existing_cookie().await;
+async fn rotating_remember_me_key_requires_restart_before_existing_cookie_is_invalidated() {
+    kobo_and_session_basics::remember_me_and_logout::verify_rotating_remember_me_key_requires_restart_before_existing_cookie_is_invalidated().await;
 }
 
 #[tokio::test]

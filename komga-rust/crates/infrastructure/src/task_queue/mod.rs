@@ -66,3 +66,9 @@ impl TaskExecutionOutcome {
         }
     }
 }
+
+#[derive(Debug)]
+pub(crate) struct TaskBatchExecutionResult {
+    task: TaskQueueRecord,
+    outcome: Result<TaskExecutionOutcome, TaskExecutionError>,
+}

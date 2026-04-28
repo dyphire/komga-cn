@@ -93,18 +93,18 @@ impl RuntimeConfig {
         config.database_server_context_path = database_settings.server_context_path.clone();
         config.task_pool_size = database_settings.task_pool_size.unwrap_or(1).max(1);
 
-        if !has_explicit_bind_address(cli, env) && !has_explicit_server_port(env) {
-            if let Some(server_port) = database_settings.server_port {
-                config.bind_address.set_port(server_port);
-            }
+        if !has_explicit_bind_address(cli, env)
+            && !has_explicit_server_port(env)
+            && let Some(server_port) = database_settings.server_port
+        {
+            config.bind_address.set_port(server_port);
         }
 
-        if !has_explicit_server_context_path(env) {
-            if let Some(server_context_path) = database_settings.server_context_path {
-                if is_valid_startup_context_path(server_context_path.as_str()) {
-                    config.server_context_path = Some(server_context_path);
-                }
-            }
+        if !has_explicit_server_context_path(env)
+            && let Some(server_context_path) = database_settings.server_context_path
+            && is_valid_startup_context_path(server_context_path.as_str())
+        {
+            config.server_context_path = Some(server_context_path);
         }
 
         config.validate_single_writer_storage_ownership(env)?;

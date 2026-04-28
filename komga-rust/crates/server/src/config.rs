@@ -27,5 +27,6 @@ pub(crate) fn task_runtime_context(config: &RuntimeConfig) -> TaskRuntimeContext
             config.writer_decision(WriterKind::SearchIndex),
             WriterDecision::Allowed | WriterDecision::Isolated
         ),
+        task_pool_size: config.task_pool_size,
     }
 }

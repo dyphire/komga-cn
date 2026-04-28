@@ -298,6 +298,49 @@ async fn router_kobo_library_sync_respects_shared_library_scope() {
 }
 
 #[tokio::test]
+async fn router_kobo_library_sync_uses_kobo_port_when_host_omits_port() {
+    let paths = new_router_fixture("router-kobo-library-sync-kobo-port").await;
+    seed_router_contract_data(&paths).await;
+    seed_admin_kobo_path_token(&paths).await;
+    upsert_server_setting(&paths, "KOBO_PORT", "8085").await;
+
+    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/kobo/any-token/v1/library/sync")
+                .header(header::HOST, "localhost")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("kobo library sync koboPort request should build"),
+        )
+        .await
+        .expect("kobo library sync koboPort request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let payload = response_json(response).await;
+    let download_url = payload
+        .as_array()
+        .expect("kobo sync response should be a JSON array")
+        .iter()
+        .find_map(|event| event.get("NewEntitlement"))
+        .and_then(|event| event.get("BookMetadata"))
+        .and_then(|metadata| metadata.pointer("/DownloadUrls/0/Url"))
+        .and_then(Value::as_str);
+
+    assert_eq!(
+        download_url,
+        Some("http://localhost:8085/kobo/any-token/v1/books/book-1/file/epub")
+    );
+
+    cleanup_router_fixture(paths);
+}
+
+#[tokio::test]
 async fn router_kobo_library_sync_respects_age_restrictions() {
     let paths = new_router_fixture("router-kobo-library-sync-age-restriction").await;
     seed_router_contract_data(&paths).await;

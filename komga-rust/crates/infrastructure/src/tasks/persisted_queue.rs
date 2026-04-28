@@ -208,23 +208,6 @@ impl SqliteTaskQueueStore {
         pool.close().await;
     }
 
-    pub async fn disown_task(&self, task_id: &str) {
-        let task_id = task_id.to_string();
-        let pool = connect_private_write_pool(&self.tasks_db_file)
-            .await
-            .expect("tasks sqlite pool should open for task persistence");
-        sqlx::query(
-            r#"UPDATE TASK
-            SET OWNER = NULL, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-            WHERE ID = ?"#,
-        )
-        .bind(task_id)
-        .execute(&pool)
-        .await
-        .expect("task row should be disowned in TASK table");
-        pool.close().await;
-    }
-
     pub async fn clear_unowned(&self) -> usize {
         let pool = connect_private_write_pool(&self.tasks_db_file)
             .await

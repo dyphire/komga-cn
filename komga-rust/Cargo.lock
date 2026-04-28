@@ -2485,6 +2485,7 @@ dependencies = [
  "base64",
  "bcrypt",
  "flate2",
+ "futures-util",
  "icu",
  "image",
  "komga-application",
