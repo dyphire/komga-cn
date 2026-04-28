@@ -114,8 +114,7 @@ fn runtime_startup_prepare_task_queue_applies_configured_task_pool_size() {
             None,
         )
         .await;
-        let queue = background.task_queue.lock().await;
-        queue.task_pool_size()
+        background.task_execution_pool.desired_size()
     });
 
     assert_eq!(task_pool_size, 4);

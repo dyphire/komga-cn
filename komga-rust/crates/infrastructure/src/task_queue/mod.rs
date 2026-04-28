@@ -16,6 +16,7 @@ use zip::ZipArchive;
 
 mod cleanup_tasks;
 mod delete_tasks;
+mod execution_pool;
 mod import_jobs;
 mod index_jobs;
 mod index_tasks;
@@ -39,6 +40,7 @@ use queue_scheduler::TaskQueueScheduler;
 use scanner_support::*;
 use task_protocol::{RuntimeFollowUpTask, runtime_follow_up_task};
 
+pub use execution_pool::TaskExecutionPoolHandle;
 pub use komga_application::task_processing::{LibraryScanInterval, TaskQueueRecord};
 pub type TaskQueueAdmin = TaskQueueOrchestrator;
 
@@ -68,7 +70,7 @@ impl TaskExecutionOutcome {
 }
 
 #[derive(Debug)]
-pub(crate) struct TaskBatchExecutionResult {
+pub(crate) struct TaskExecutionResult {
     task: TaskQueueRecord,
     outcome: Result<TaskExecutionOutcome, TaskExecutionError>,
 }

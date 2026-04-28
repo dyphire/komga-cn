@@ -1,20 +1,19 @@
 use komga_application::task_processing::TaskRuntimeContext;
+use komga_infrastructure::task_queue::TaskExecutionPoolHandle;
 pub use komga_infrastructure::task_queue::worker_runtime::{
     RuntimeBackgroundState, SharedTaskQueue, TaskQueueWakeSignal,
 };
-use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
+use std::sync::Arc;
 use tokio::sync::watch;
 
 use komga_config::env_config::RuntimeConfig;
 
 #[derive(Debug)]
-pub struct IsolatedWorkerRuntimeGuard {
+pub struct WorkerRuntimeLifecycleGuard {
     shutdown_tx: watch::Sender<bool>,
-    thread_handle: Mutex<Option<JoinHandle<()>>>,
 }
 
-pub type WorkerRuntimeGuard = Arc<IsolatedWorkerRuntimeGuard>;
+pub type WorkerRuntimeGuard = Arc<WorkerRuntimeLifecycleGuard>;
 
 pub async fn prepare_task_queue(
     config: &RuntimeConfig,
@@ -29,58 +28,37 @@ pub async fn prepare_task_queue(
 
 pub fn spawn_runtime_workers(
     task_queue: SharedTaskQueue,
+    task_execution_pool: TaskExecutionPoolHandle,
     config: RuntimeConfig,
     task_wakeup: TaskQueueWakeSignal,
     shutdown_rx: Option<watch::Receiver<bool>>,
 ) -> WorkerRuntimeGuard {
     let runtime: TaskRuntimeContext = crate::config::task_runtime_context(&config);
     let (internal_shutdown_tx, internal_shutdown_rx) = watch::channel(false);
-    let thread_shutdown_tx = internal_shutdown_tx.clone();
-    let thread_handle = std::thread::Builder::new()
-        .name("komga-task-runtime".to_string())
-        .spawn(move || {
-            let dedicated_runtime = crate::runtime::tokio_runtime::current_thread_runtime()
-                .expect("isolated task runtime should build");
+    if let Some(mut external_shutdown_rx) = shutdown_rx {
+        let forward_shutdown_tx = internal_shutdown_tx.clone();
+        tokio::spawn(async move {
+            wait_for_shutdown_signal(&mut external_shutdown_rx).await;
+            let _ = forward_shutdown_tx.send(true);
+        });
+    }
 
-            dedicated_runtime.block_on(async move {
-                if let Some(mut external_shutdown_rx) = shutdown_rx {
-                    let forward_shutdown_tx = thread_shutdown_tx.clone();
-                    tokio::spawn(async move {
-                        wait_for_shutdown_signal(&mut external_shutdown_rx).await;
-                        let _ = forward_shutdown_tx.send(true);
-                    });
-                }
+    komga_infrastructure::task_queue::worker_runtime::spawn_runtime_workers(
+        task_queue,
+        task_execution_pool,
+        runtime,
+        task_wakeup,
+        Some(internal_shutdown_rx),
+    );
 
-                komga_infrastructure::task_queue::worker_runtime::spawn_runtime_workers(
-                    task_queue,
-                    runtime,
-                    task_wakeup,
-                    Some(internal_shutdown_rx.clone()),
-                );
-
-                let mut runtime_shutdown_rx = internal_shutdown_rx;
-                wait_for_shutdown_signal(&mut runtime_shutdown_rx).await;
-            });
-        })
-        .expect("isolated task runtime thread should spawn");
-
-    Arc::new(IsolatedWorkerRuntimeGuard {
+    Arc::new(WorkerRuntimeLifecycleGuard {
         shutdown_tx: internal_shutdown_tx,
-        thread_handle: Mutex::new(Some(thread_handle)),
     })
 }
 
-impl Drop for IsolatedWorkerRuntimeGuard {
+impl Drop for WorkerRuntimeLifecycleGuard {
     fn drop(&mut self) {
         let _ = self.shutdown_tx.send(true);
-        if let Some(thread_handle) = self
-            .thread_handle
-            .lock()
-            .expect("isolated task runtime thread handle lock should not be poisoned")
-            .take()
-        {
-            let _ = thread_handle.join();
-        }
     }
 }
 

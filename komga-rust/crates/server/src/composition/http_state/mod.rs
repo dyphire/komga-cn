@@ -133,6 +133,7 @@ pub fn compose_http_runtime(
         task_queue: Box::new(http_state_operational_state::RuntimeTaskQueueService::new(
             background.task_queue,
             background.task_wakeup,
+            background.task_execution_pool,
             worker_runtime_guard,
         )),
         server_settings: Box::new(

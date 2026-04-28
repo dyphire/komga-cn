@@ -16,6 +16,7 @@ use komga_application::task_processing::TaskQueueRecord;
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 use komga_infrastructure::library_catalog::SqliteLibraryCatalogAdapter;
 use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore as InfrastructureServerSettingsStore;
+use komga_infrastructure::task_queue::TaskExecutionPoolHandle;
 
 #[derive(Clone)]
 pub(super) struct SqliteLibraryCatalogService {
@@ -112,6 +113,7 @@ impl LibraryCatalogService for SqliteLibraryCatalogService {
 pub(super) struct RuntimeTaskQueueService {
     task_queue: SharedTaskQueue,
     task_wakeup: TaskQueueWakeSignal,
+    task_execution_pool: TaskExecutionPoolHandle,
     worker_runtime_guard: Option<WorkerRuntimeGuard>,
 }
 
@@ -119,11 +121,13 @@ impl RuntimeTaskQueueService {
     pub(super) fn new(
         task_queue: SharedTaskQueue,
         task_wakeup: TaskQueueWakeSignal,
+        task_execution_pool: TaskExecutionPoolHandle,
         worker_runtime_guard: Option<WorkerRuntimeGuard>,
     ) -> Self {
         Self {
             task_queue,
             task_wakeup,
+            task_execution_pool,
             worker_runtime_guard,
         }
     }
@@ -158,8 +162,7 @@ impl TaskQueueService for RuntimeTaskQueueService {
     }
 
     async fn apply_task_pool_size(&self, value: usize) -> Result<(), String> {
-        let mut queue = self.task_queue.lock().await;
-        queue.set_task_pool_size(value);
+        self.task_execution_pool.resize(value);
         self.task_wakeup.notify_one();
         Ok(())
     }
@@ -307,13 +310,20 @@ mod tests {
             let config = RuntimeConfig::for_runtime_profile(
                 komga_config::profile::RuntimeProfile::LiveLocaldb,
             );
+            let task_execution_pool = TaskExecutionPoolHandle::new(
+                crate::config::task_runtime_context(&config).task_pool_size,
+            );
             let task_queue = Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
                 crate::config::task_runtime_context(&config),
                 "rust-main",
             )));
             let task_wakeup = Arc::new(tokio::sync::Notify::new());
-            let service =
-                RuntimeTaskQueueService::new(task_queue.clone(), task_wakeup.clone(), None);
+            let service = RuntimeTaskQueueService::new(
+                task_queue.clone(),
+                task_wakeup.clone(),
+                task_execution_pool,
+                None,
+            );
 
             service
                 .enqueue_task_records(vec![scan_library_task()], urgent)
@@ -336,5 +346,35 @@ mod tests {
                 "urgent={urgent}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn apply_task_pool_size_resizes_execution_pool_and_wakes_scheduler() {
+        let config =
+            RuntimeConfig::for_runtime_profile(komga_config::profile::RuntimeProfile::LiveLocaldb);
+        let task_execution_pool = TaskExecutionPoolHandle::new(
+            crate::config::task_runtime_context(&config).task_pool_size,
+        );
+        let task_queue = Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
+            crate::config::task_runtime_context(&config),
+            "rust-main",
+        )));
+        let task_wakeup = Arc::new(tokio::sync::Notify::new());
+        let service = RuntimeTaskQueueService::new(
+            task_queue,
+            task_wakeup.clone(),
+            task_execution_pool.clone(),
+            None,
+        );
+
+        service
+            .apply_task_pool_size(3)
+            .await
+            .expect("task pool resize should succeed");
+
+        tokio::time::timeout(Duration::from_millis(100), task_wakeup.notified())
+            .await
+            .expect("task pool resize should wake the background scheduler");
+        assert_eq!(task_execution_pool.desired_size(), 3);
     }
 }

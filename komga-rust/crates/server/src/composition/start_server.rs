@@ -74,6 +74,7 @@ pub async fn build_router_with_config(
     let background = prepare_task_queue(config, None).await;
     let worker_runtime_guard = spawn_runtime_workers(
         background.task_queue.clone(),
+        background.task_execution_pool.clone(),
         config.clone(),
         background.task_wakeup.clone(),
         None,
@@ -120,6 +121,7 @@ pub async fn serve_with_config(
     let worker_shutdown_rx = shutdown_rx.clone();
     let worker_runtime_guard = spawn_runtime_workers(
         background.task_queue.clone(),
+        background.task_execution_pool.clone(),
         config.clone(),
         background.task_wakeup.clone(),
         Some(worker_shutdown_rx),

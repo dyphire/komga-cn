@@ -120,17 +120,23 @@ fn scheduler_logs_failure_with_concurrent_success_without_fake_success_events() 
         let failed_task = failed_task.clone();
         let disowned_task = disowned_task.clone();
         async move {
-            let runtime = runtime_task_context_from_config(&config);
-            let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-            scheduler.set_task_pool_size(2);
-            scheduler.enqueue(failed_task).await;
-            scheduler.enqueue(disowned_task).await;
+            let mut runtime = runtime_task_context_from_config(&config);
+            runtime.task_pool_size = 2;
+            let task_queue = std::sync::Arc::new(tokio::sync::Mutex::new(
+                TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main"),
+            ));
+            {
+                let mut queue = task_queue.lock().await;
+                queue.enqueue(failed_task).await;
+                queue.enqueue(disowned_task).await;
+            }
 
-            scheduler
-                .process_available(&runtime)
-                .await
-                .expect_err("unsupported task should fail process_available")
-                .to_string()
+            komga_infrastructure::task_queue::worker_runtime::run_background_task_iteration(
+                task_queue, runtime,
+            )
+            .await
+            .expect_err("unsupported task should fail the background task iteration")
+            .to_string()
         }
     });
 
@@ -263,7 +269,7 @@ fn scheduler_logs_recover_before_reclaiming_owned_work() {
 }
 
 #[tokio::test]
-async fn scheduler_claim_batch_respects_priority_order_group_locks_and_owner_persistence() {
+async fn scheduler_take_next_respects_priority_order_group_locks_and_owner_persistence() {
     let paths = new_router_fixture("scheduler-batch-claim-ordering").await;
     seed_router_contract_data(&paths).await;
 
@@ -322,8 +328,20 @@ async fn scheduler_claim_batch_respects_priority_order_group_locks_and_owner_per
     let config = runtime_config_for_paths(&paths);
     let runtime = runtime_task_context_from_config(&config);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime, "rust-main");
-    scheduler.set_task_pool_size(3);
-    let claimed = scheduler.take_available_batch().await;
+    let claimed = [
+        scheduler
+            .take_next()
+            .await
+            .expect("first claim should exist"),
+        scheduler
+            .take_next()
+            .await
+            .expect("second claim should exist"),
+        scheduler
+            .take_next()
+            .await
+            .expect("third claim should exist"),
+    ];
 
     assert_eq!(
         claimed

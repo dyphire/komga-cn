@@ -32,6 +32,7 @@ fn runtime_worker_spawns_log_started_and_shutdown_with_span_context() {
                     .await;
                 komga_infrastructure::task_queue::worker_runtime::spawn_runtime_workers(
                     background.task_queue,
+                    background.task_execution_pool,
                     runtime,
                     background.task_wakeup,
                     None,
@@ -103,6 +104,7 @@ fn runtime_workers_observe_shutdown_signal_before_runtime_teardown() {
                 let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
                 komga_infrastructure::task_queue::worker_runtime::spawn_runtime_workers(
                     background.task_queue,
+                    background.task_execution_pool,
                     runtime,
                     background.task_wakeup,
                     Some(shutdown_rx),
@@ -196,6 +198,7 @@ fn periodic_scan_iteration_logs_completion_only_when_due_and_stays_silent_when_i
             let mut last_run = HashMap::new();
             komga_infrastructure::task_queue::worker_runtime::run_periodic_library_scan_iteration(
                 task_queue,
+                None,
                 runtime,
                 &mut last_run,
             )
@@ -213,40 +216,45 @@ fn periodic_scan_iteration_logs_completion_only_when_due_and_stays_silent_when_i
         0
     );
 
-    let run_logs = capture_router_logs_async_result(&config, {
+    let (run_logs, woke_scheduler) = capture_router_logs_async_result(&config, {
         let runtime = runtime.clone();
         let task_queue = task_queue.clone();
+        let task_wakeup = Arc::new(tokio::sync::Notify::new());
         async move {
             let mut last_run = HashMap::from([(
                 "library-1".to_string(),
                 tokio::time::Instant::now() - Duration::from_secs(3_700),
             )]);
+            let wakeup = task_wakeup.notified();
             komga_infrastructure::task_queue::worker_runtime::run_periodic_library_scan_iteration(
                 task_queue,
+                Some(task_wakeup.clone()),
                 runtime,
                 &mut last_run,
             )
             .await
             .expect("due periodic scan iteration should succeed");
+            tokio::time::timeout(Duration::from_millis(100), wakeup)
+                .await
+                .is_ok()
         }
-    })
-    .0;
+    });
     let run_events = parse_json_log_lines(&run_logs);
     let run = worker_event(&run_events, "periodic_library_scan", "running");
     let complete = worker_event(&run_events, "periodic_library_scan", "completed");
-    let scheduler_complete = matching_event_fields(&run_events, "task_process_available")
-        .into_iter()
-        .find(|fields| field_str(fields, "outcome") == Some("completed"))
-        .expect("periodic scan success path should emit scheduler completed boundary");
 
     println!("periodic_scan_run_logs {run_logs}");
 
     assert_eq!(field_str(run, "library_id"), Some("library-1"));
     assert_eq!(field_u64(complete, "enqueued"), Some(1));
-    assert_eq!(
-        field_u64(complete, "processed"),
-        field_u64(scheduler_complete, "processed"),
-        "periodic worker completed.processed should reflect actual scheduler processed count",
+    assert_eq!(field_u64(complete, "processed"), Some(0));
+    assert!(
+        woke_scheduler,
+        "due periodic scan should wake the background scheduler"
+    );
+    assert!(
+        matching_event_fields(&run_events, "task_process_available").is_empty(),
+        "periodic scan iteration should only enqueue + wake, not process the queue inline",
     );
 
     let failure_logs = capture_router_logs_async_result(&config, {
@@ -267,6 +275,7 @@ fn periodic_scan_iteration_logs_completion_only_when_due_and_stays_silent_when_i
 
             komga_infrastructure::task_queue::worker_runtime::run_periodic_library_scan_iteration(
                 task_queue,
+                None,
                 runtime,
                 &mut last_run,
             )
@@ -326,7 +335,7 @@ fn periodic_scan_iteration_drains_each_due_library_separately_and_cleans_stale_s
         "rust-main",
     )));
 
-    let (run_logs, (processed, last_run)) = capture_router_logs_async_result(&config, {
+    let (run_logs, (enqueued, last_run)) = capture_router_logs_async_result(&config, {
         let runtime = runtime.clone();
         let task_queue = task_queue.clone();
         async move {
@@ -344,29 +353,30 @@ fn periodic_scan_iteration_drains_each_due_library_separately_and_cleans_stale_s
                     tokio::time::Instant::now() - Duration::from_secs(3_700),
                 ),
             ]);
-            let processed =
+            let enqueued =
                 komga_infrastructure::task_queue::worker_runtime::run_periodic_library_scan_iteration(
                     task_queue,
+                    None,
                     runtime,
                     &mut last_run,
                 )
                 .await
                 .expect("due periodic scan iteration should drain each library separately");
-            (processed, last_run)
+            (enqueued, last_run)
         }
     });
     let run_events = parse_json_log_lines(&run_logs);
     let complete = worker_event(&run_events, "periodic_library_scan", "completed");
-    let scheduler_completions = matching_event_fields(&run_events, "task_process_available")
-        .into_iter()
-        .filter(|fields| field_str(fields, "outcome") == Some("completed"))
-        .collect::<Vec<_>>();
 
     println!("periodic_scan_multi_library_logs {run_logs}");
 
     assert_eq!(field_u64(complete, "enqueued"), Some(2));
-    assert_eq!(field_u64(complete, "processed"), Some(processed as u64));
-    assert_eq!(scheduler_completions.len(), 2);
+    assert_eq!(field_u64(complete, "processed"), Some(0));
+    assert_eq!(enqueued, 2);
+    assert!(
+        matching_event_fields(&run_events, "task_process_available").is_empty(),
+        "periodic scan iteration should not emit inline scheduler completion logs",
+    );
     assert!(last_run.contains_key("library-1"));
     assert!(last_run.contains_key("library-2"));
     assert!(!last_run.contains_key("stale-library"));

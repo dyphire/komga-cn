@@ -9,7 +9,6 @@ pub struct TaskQueueScheduler {
     consumer_owner: String,
     consumes_queue: bool,
     persisted_store: Option<SqliteTaskQueueStore>,
-    task_pool_size: usize,
 }
 
 impl TaskQueueScheduler {
@@ -31,7 +30,6 @@ impl TaskQueueScheduler {
             consumer_owner,
             consumes_queue,
             persisted_store,
-            task_pool_size: runtime.task_pool_size.max(1),
         }
     }
 
@@ -65,31 +63,6 @@ impl TaskQueueScheduler {
         Some(task)
     }
 
-    pub async fn take_available_batch(&mut self) -> Vec<TaskQueueRecord> {
-        if !self.consumes_queue {
-            return Vec::new();
-        }
-
-        if self.task_pool_size <= 1 {
-            return self.take_next().await.into_iter().collect();
-        }
-
-        self.ensure_admin_loaded().await;
-
-        let mut selected = Vec::new();
-        while selected.len() < self.task_pool_size {
-            let Some(task) = self.admin.take_available(&self.consumer_owner) else {
-                break;
-            };
-            if let Some(store) = &self.persisted_store {
-                store.claim_task(&task.id, &self.consumer_owner).await;
-            }
-            self.log_task_event("task_claim", &task, "claimed", None);
-            selected.push(task);
-        }
-        selected
-    }
-
     pub async fn complete(&mut self, task_id: &str) -> bool {
         let task = self.current_task(task_id);
         if let Some(store) = &self.persisted_store {
@@ -114,14 +87,6 @@ impl TaskQueueScheduler {
 
     pub fn admin_mut(&mut self) -> &mut TaskQueueAdmin {
         &mut self.admin
-    }
-
-    pub fn task_pool_size(&self) -> usize {
-        self.task_pool_size
-    }
-
-    pub fn set_task_pool_size(&mut self, task_pool_size: usize) {
-        self.task_pool_size = task_pool_size.max(1);
     }
 
     pub async fn disown_all(&mut self) -> usize {
@@ -177,25 +142,21 @@ impl TaskQueueScheduler {
         let mut processed = 0usize;
         let mut logged_start = false;
         loop {
-            let batch = self.take_available_batch().await;
-            if batch.is_empty() {
+            let Some(task) = self.take_next().await else {
                 if logged_start {
                     self.log_process_available("completed", processed, None);
                 }
                 return Ok(processed);
-            }
+            };
             if !logged_start {
                 self.log_process_available("started", processed, None);
                 logged_start = true;
             }
 
-            for task in &batch {
-                self.log_task_start(task);
-            }
-
-            let batch_results = task_executor::execute_task_batch(runtime, batch).await;
+            self.log_task_start(&task);
+            let outcome = task_executor::execute_task(runtime, &task).await;
             if let Err(error) = self
-                .finalize_task_batch(batch_results, &mut processed)
+                .finalize_task_result(TaskExecutionResult { task, outcome }, &mut processed)
                 .await
             {
                 let error_message = error.to_string();
@@ -233,34 +194,24 @@ impl TaskQueueScheduler {
         }
     }
 
-    pub(super) async fn finalize_task_batch(
+    pub(super) async fn finalize_task_result(
         &mut self,
-        batch_results: Vec<TaskBatchExecutionResult>,
+        task_result: TaskExecutionResult,
         processed: &mut usize,
     ) -> Result<(), TaskExecutionError> {
-        let mut first_error: Option<TaskExecutionError> = None;
-
-        for batch_result in batch_results {
-            match batch_result.outcome {
-                Ok(outcome) => {
-                    outcome.enqueue_into(self).await;
-                    self.complete(&batch_result.task.id).await;
-                    *processed += 1;
-                }
-                Err(error) => {
-                    let error_message = error.to_string();
-                    self.fail_claimed_task(&batch_result.task, error_message.as_str())
-                        .await;
-                    if first_error.is_none() {
-                        first_error = Some(error);
-                    }
-                }
+        match task_result.outcome {
+            Ok(outcome) => {
+                outcome.enqueue_into(self).await;
+                self.complete(&task_result.task.id).await;
+                *processed += 1;
+                Ok(())
             }
-        }
-
-        match first_error {
-            Some(error) => Err(error),
-            None => Ok(()),
+            Err(error) => {
+                let error_message = error.to_string();
+                self.fail_claimed_task(&task_result.task, error_message.as_str())
+                    .await;
+                Err(error)
+            }
         }
     }
 

@@ -8,22 +8,23 @@ use komga_application::task_processing::{
 };
 use serde_json::Value;
 use tokio::runtime::Handle;
-use tokio::sync::{Mutex as AsyncMutex, Notify, watch};
+use tokio::sync::{Mutex as AsyncMutex, Notify, mpsc, watch};
 use tokio::time::interval;
 use tracing::{Instrument, Span, error, info};
 
+use super::execution_pool::TaskExecutionPoolHandle;
 use super::library_scan_pipeline::SqliteFilesystemLibraryScanPipeline;
 use super::task_protocol::runtime_startup_task;
-use super::{TaskExecutionError, TaskQueueRecord, TaskQueueScheduler};
+use super::{TaskExecutionError, TaskExecutionResult, TaskQueueRecord, TaskQueueScheduler};
 use crate::tasks::library_scan_profiles::load_persisted_library_scan_profiles;
 
 pub type SharedTaskQueue = Arc<AsyncMutex<TaskQueueScheduler>>;
 pub type TaskQueueWakeSignal = Arc<Notify>;
-type SharedTaskExecutionGate = Arc<AsyncMutex<()>>;
 
 pub struct RuntimeBackgroundState {
     pub task_queue: SharedTaskQueue,
     pub task_wakeup: TaskQueueWakeSignal,
+    pub task_execution_pool: TaskExecutionPoolHandle,
 }
 
 const WORKER_BOOTSTRAP_EVENT: &str = "worker_bootstrap";
@@ -154,27 +155,28 @@ pub async fn prepare_task_queue(
     RuntimeBackgroundState {
         task_queue: Arc::new(AsyncMutex::new(task_queue)),
         task_wakeup: Arc::new(Notify::new()),
+        task_execution_pool: TaskExecutionPoolHandle::new(runtime.task_pool_size),
     }
 }
 
 pub fn spawn_runtime_workers(
     task_queue: SharedTaskQueue,
+    task_execution_pool: TaskExecutionPoolHandle,
     runtime: TaskRuntimeContext,
     task_wakeup: TaskQueueWakeSignal,
     shutdown_rx: Option<watch::Receiver<bool>>,
 ) {
-    let task_execution_gate = Arc::new(AsyncMutex::new(()));
     spawn_periodic_library_scan_workers(
         task_queue.clone(),
+        task_wakeup.clone(),
         runtime.clone(),
-        task_execution_gate.clone(),
         shutdown_rx.clone(),
     );
     spawn_background_task_worker(
         task_queue,
+        task_execution_pool,
         runtime.clone(),
         task_wakeup,
-        task_execution_gate,
         shutdown_rx.clone(),
     );
     spawn_authentication_activity_cleanup_worker(runtime, shutdown_rx);
@@ -266,8 +268,8 @@ async fn process_startup_library_scans_inner(
 
 fn spawn_periodic_library_scan_workers(
     task_queue: SharedTaskQueue,
+    task_wakeup: TaskQueueWakeSignal,
     runtime: TaskRuntimeContext,
-    task_execution_gate: SharedTaskExecutionGate,
     shutdown_rx: Option<watch::Receiver<bool>>,
 ) {
     if !runtime.consumes_queue || !runtime.owns_main_database {
@@ -304,11 +306,9 @@ fn spawn_periodic_library_scan_workers(
                     break;
                 }
 
-                let Ok(_task_execution_guard) = task_execution_gate.try_lock() else {
-                    continue;
-                };
                 let _ = run_periodic_library_scan_iteration(
                     task_queue.clone(),
+                    Some(task_wakeup.clone()),
                     runtime.clone(),
                     &mut last_run_by_library,
                 )
@@ -321,12 +321,19 @@ fn spawn_periodic_library_scan_workers(
 
 pub async fn run_periodic_library_scan_iteration(
     task_queue: SharedTaskQueue,
+    task_wakeup: Option<TaskQueueWakeSignal>,
     runtime: TaskRuntimeContext,
     last_run_by_library: &mut HashMap<String, tokio::time::Instant>,
 ) -> Result<usize, String> {
-    match run_periodic_library_scan_iteration_inner(task_queue, &runtime, last_run_by_library).await
+    match run_periodic_library_scan_iteration_inner(
+        task_queue,
+        task_wakeup.as_ref(),
+        &runtime,
+        last_run_by_library,
+    )
+    .await
     {
-        Ok((scheduler_processed, due_libraries)) => {
+        Ok((enqueued, due_libraries)) => {
             if due_libraries.is_empty() {
                 return Ok(0);
             }
@@ -338,9 +345,9 @@ pub async fn run_periodic_library_scan_iteration(
                 RuntimeLifecycleFields::default()
                     .with_library_id(single_value_or_empty(&due_libraries))
                     .with_enqueued(due_libraries.len())
-                    .with_processed(scheduler_processed),
+                    .with_processed(0),
             );
-            Ok(scheduler_processed)
+            Ok(enqueued)
         }
         Err((error, due_libraries)) => {
             log_worker_event(
@@ -359,9 +366,9 @@ pub async fn run_periodic_library_scan_iteration(
 
 fn spawn_background_task_worker(
     task_queue: SharedTaskQueue,
+    task_execution_pool: TaskExecutionPoolHandle,
     runtime: TaskRuntimeContext,
     task_wakeup: TaskQueueWakeSignal,
-    task_execution_gate: SharedTaskExecutionGate,
     shutdown_rx: Option<watch::Receiver<bool>>,
 ) {
     if !runtime.consumes_queue {
@@ -382,10 +389,14 @@ fn spawn_background_task_worker(
     handle.spawn(
         async move {
             let _guard = WorkerLifecycleGuard::new(BACKGROUND_TASK_WORKER, &runtime);
-            let _ = run_background_task_iteration_with_execution_gate(
+            let mut result_rx = task_execution_pool.take_result_receiver().expect(
+                "background task worker should own the dedicated execution result receiver",
+            );
+            let _ = run_background_task_iteration_with_pool(
                 task_queue.clone(),
+                &task_execution_pool,
                 runtime.clone(),
-                task_execution_gate.clone(),
+                &mut result_rx,
             )
             .await;
 
@@ -404,10 +415,11 @@ fn spawn_background_task_worker(
                 {
                     break;
                 }
-                let _ = run_background_task_iteration_with_execution_gate(
+                let _ = run_background_task_iteration_with_pool(
                     task_queue.clone(),
+                    &task_execution_pool,
                     runtime.clone(),
-                    task_execution_gate.clone(),
+                    &mut result_rx,
                 )
                 .await;
             }
@@ -419,6 +431,25 @@ fn spawn_background_task_worker(
 pub async fn run_background_task_iteration(
     task_queue: SharedTaskQueue,
     runtime: TaskRuntimeContext,
+) -> Result<usize, String> {
+    let task_execution_pool = TaskExecutionPoolHandle::new(runtime.task_pool_size);
+    let mut result_rx = task_execution_pool
+        .take_result_receiver()
+        .expect("one-shot background task iteration should own the result receiver");
+    run_background_task_iteration_with_pool(
+        task_queue,
+        &task_execution_pool,
+        runtime,
+        &mut result_rx,
+    )
+    .await
+}
+
+async fn run_background_task_iteration_with_pool(
+    task_queue: SharedTaskQueue,
+    task_execution_pool: &TaskExecutionPoolHandle,
+    runtime: TaskRuntimeContext,
+    result_rx: &mut mpsc::UnboundedReceiver<TaskExecutionResult>,
 ) -> Result<usize, String> {
     let queued_tasks = {
         let mut task_queue = task_queue.lock().await;
@@ -440,7 +471,14 @@ pub async fn run_background_task_iteration(
         RuntimeLifecycleFields::default().with_queued_tasks(queued_tasks),
     );
 
-    let processed = match process_shared_task_queue(&task_queue, &runtime).await {
+    let processed = match process_shared_task_queue(
+        &task_queue,
+        task_execution_pool,
+        &runtime,
+        result_rx,
+    )
+    .await
+    {
         Ok(processed) => processed,
         Err(error) => {
             let error_message = error.to_string();
@@ -467,57 +505,108 @@ pub async fn run_background_task_iteration(
     Ok(processed)
 }
 
-async fn run_background_task_iteration_with_execution_gate(
-    task_queue: SharedTaskQueue,
-    runtime: TaskRuntimeContext,
-    task_execution_gate: SharedTaskExecutionGate,
-) -> Result<usize, String> {
-    let _task_execution_guard = task_execution_gate.lock().await;
-    run_background_task_iteration(task_queue, runtime).await
-}
-
 async fn process_shared_task_queue(
     task_queue: &SharedTaskQueue,
+    task_execution_pool: &TaskExecutionPoolHandle,
     runtime: &TaskRuntimeContext,
+    result_rx: &mut mpsc::UnboundedReceiver<TaskExecutionResult>,
 ) -> Result<usize, TaskExecutionError> {
     let mut processed = 0usize;
     let mut logged_start = false;
+    let mut in_flight = 0usize;
+    let mut first_error: Option<TaskExecutionError> = None;
     loop {
-        let batch = {
-            let mut task_queue = task_queue.lock().await;
-            let batch = task_queue.take_available_batch().await;
-            if batch.is_empty() {
-                if logged_start {
-                    task_queue.log_process_available("completed", processed, None);
+        if first_error.is_none() {
+            let claimed = match claim_tasks_up_to_capacity(
+                task_queue,
+                task_execution_pool,
+                runtime,
+                &mut in_flight,
+            )
+            .await
+            {
+                Ok(claimed) => claimed,
+                Err(error) => {
+                    first_error = Some(error);
+                    0
                 }
-                return Ok(processed);
-            }
-            if !logged_start {
+            };
+
+            if claimed > 0 && !logged_start {
+                let task_queue = task_queue.lock().await;
                 task_queue.log_process_available("started", processed, None);
                 logged_start = true;
             }
-            batch
+        }
+
+        if in_flight == 0 {
+            let task_queue = task_queue.lock().await;
+            if let Some(error) = first_error {
+                let error_message = error.to_string();
+                task_queue.log_process_available("failed", processed, Some(error_message.as_str()));
+                return Err(error);
+            }
+            if logged_start {
+                task_queue.log_process_available("completed", processed, None);
+            }
+            return Ok(processed);
+        }
+
+        let Some(task_result) = result_rx.recv().await else {
+            let error = TaskExecutionError::runtime("task execution pool result channel closed");
+            let error_message = error.to_string();
+            let task_queue = task_queue.lock().await;
+            task_queue.log_process_available("failed", processed, Some(error_message.as_str()));
+            return Err(error);
         };
+        in_flight = in_flight.saturating_sub(1);
+
+        let finalize_result = {
+            let mut task_queue = task_queue.lock().await;
+            task_queue
+                .finalize_task_result(task_result, &mut processed)
+                .await
+        };
+        if let Err(error) = finalize_result
+            && first_error.is_none()
+        {
+            first_error = Some(error);
+        }
+    }
+}
+
+async fn claim_tasks_up_to_capacity(
+    task_queue: &SharedTaskQueue,
+    task_execution_pool: &TaskExecutionPoolHandle,
+    runtime: &TaskRuntimeContext,
+    in_flight: &mut usize,
+) -> Result<usize, TaskExecutionError> {
+    let mut claimed = 0usize;
+    while *in_flight < task_execution_pool.desired_size() {
+        let task = {
+            let mut task_queue = task_queue.lock().await;
+            task_queue.take_next().await
+        };
+        let Some(task) = task else {
+            break;
+        };
+
+        if let Err(error_message) = task_execution_pool.submit(task.clone(), runtime.clone()) {
+            let mut task_queue = task_queue.lock().await;
+            task_queue
+                .fail_claimed_task(&task, error_message.as_str())
+                .await;
+            return Err(TaskExecutionError::runtime(error_message));
+        }
 
         {
             let task_queue = task_queue.lock().await;
-            for task in &batch {
-                task_queue.log_task_start(task);
-            }
+            task_queue.log_task_start(&task);
         }
-
-        let batch_results =
-            crate::task_queue::task_executor::execute_task_batch(runtime, batch).await;
-        let mut task_queue = task_queue.lock().await;
-        if let Err(error) = task_queue
-            .finalize_task_batch(batch_results, &mut processed)
-            .await
-        {
-            let error_message = error.to_string();
-            task_queue.log_process_available("failed", processed, Some(error_message.as_str()));
-            return Err(error);
-        }
+        *in_flight += 1;
+        claimed += 1;
     }
+    Ok(claimed)
 }
 
 fn spawn_authentication_activity_cleanup_worker(
@@ -711,6 +800,7 @@ fn current_runtime_handle_or_log_skip(
 
 async fn run_periodic_library_scan_iteration_inner(
     task_queue: SharedTaskQueue,
+    task_wakeup: Option<&TaskQueueWakeSignal>,
     runtime: &TaskRuntimeContext,
     last_run_by_library: &mut HashMap<String, tokio::time::Instant>,
 ) -> Result<(usize, Vec<String>), (String, Vec<String>)> {
@@ -739,21 +829,20 @@ async fn run_periodic_library_scan_iteration_inner(
             .with_enqueued(due_libraries.len()),
     );
 
-    let mut scheduler_processed = 0;
     for (library_id, task) in due_tasks {
         {
             let mut queue = task_queue.lock().await;
             queue.enqueue(task).await;
         }
-        scheduler_processed += process_shared_task_queue(&task_queue, runtime)
-            .await
-            .map_err(|error| (error.to_string(), due_libraries.clone()))?;
         if let Some(next_due) = last_run_by_library.get_mut(&library_id) {
             *next_due = tokio::time::Instant::now();
         }
     }
+    if let Some(task_wakeup) = task_wakeup {
+        task_wakeup.notify_one();
+    }
 
-    Ok((scheduler_processed, due_libraries))
+    Ok((due_libraries.len(), due_libraries))
 }
 
 async fn bootstrap_startup_library_scans_inner(
@@ -1067,6 +1156,122 @@ impl Drop for WorkerLifecycleGuard {
             "shutdown",
             &self.runtime,
             RuntimeLifecycleFields::default(),
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::task_queue::execution_pool::TaskExecutionPoolHandle;
+    use std::collections::BTreeSet;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::sync::{Barrier, Mutex as AsyncMutex, watch};
+
+    fn runtime_context() -> TaskRuntimeContext {
+        let root = std::env::temp_dir().join(format!(
+            "komga-task-execution-pool-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        ));
+        TaskRuntimeContext {
+            database_file: root.join("main.sqlite"),
+            tasks_db_file: root.join("tasks.sqlite"),
+            lucene_data_directory: root.join("lucene"),
+            consumes_queue: true,
+            owns_main_database: true,
+            owns_filesystem_scan_output: true,
+            owns_sidecar_output: true,
+            owns_search_index: true,
+            task_pool_size: 1,
+        }
+    }
+
+    #[tokio::test]
+    async fn task_execution_pool_resize_allows_parallel_fake_tasks_without_restart() {
+        let runtime = runtime_context();
+        let started = Arc::new(Barrier::new(3));
+        let (release_tx, release_rx) = watch::channel(false);
+        let worker_threads = Arc::new(AsyncMutex::new(Vec::new()));
+        let pool = TaskExecutionPoolHandle::new_for_test(1, {
+            let started = started.clone();
+            let worker_threads = worker_threads.clone();
+            move |_runtime, _task| {
+                let started = started.clone();
+                let mut release_rx = release_rx.clone();
+                let worker_threads = worker_threads.clone();
+                async move {
+                    worker_threads.lock().await.push(
+                        std::thread::current()
+                            .name()
+                            .unwrap_or("<unnamed>")
+                            .to_string(),
+                    );
+                    started.wait().await;
+                    loop {
+                        if *release_rx.borrow() {
+                            break;
+                        }
+                        release_rx
+                            .changed()
+                            .await
+                            .expect("fake task release signal should remain open");
+                    }
+                    Ok(crate::task_queue::TaskExecutionOutcome::completed())
+                }
+            }
+        });
+        let mut result_rx = pool
+            .take_result_receiver()
+            .expect("task execution pool test should expose a single result receiver");
+
+        pool.submit(
+            TaskQueueRecord::new("TEST_TASK:1", 0, None),
+            runtime.clone(),
+        )
+        .expect("first fake task should be submitted");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+
+        pool.resize(2);
+        pool.submit(TaskQueueRecord::new("TEST_TASK:2", 0, None), runtime)
+            .expect("second fake task should be submitted after resize");
+
+        tokio::time::timeout(Duration::from_secs(1), started.wait())
+            .await
+            .expect("resized pool should start the second fake task without restart");
+
+        release_tx
+            .send(true)
+            .expect("fake task release signal should send");
+
+        let _ = tokio::time::timeout(Duration::from_secs(1), result_rx.recv())
+            .await
+            .expect("first fake task result should arrive")
+            .expect("first fake task result should exist");
+        let _ = tokio::time::timeout(Duration::from_secs(1), result_rx.recv())
+            .await
+            .expect("second fake task result should arrive")
+            .expect("second fake task result should exist");
+
+        let worker_threads = worker_threads.lock().await.clone();
+        assert_eq!(worker_threads.len(), 2);
+        assert!(
+            worker_threads
+                .iter()
+                .all(|name| name.starts_with("komga-task-worker-")),
+            "fake tasks should run on dedicated worker threads: {worker_threads:?}",
+        );
+        assert_eq!(
+            worker_threads
+                .iter()
+                .cloned()
+                .collect::<BTreeSet<_>>()
+                .len(),
+            2,
+            "resize 1 -> 2 should let two distinct worker threads enter execution",
         );
     }
 }
