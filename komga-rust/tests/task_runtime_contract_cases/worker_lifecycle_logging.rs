@@ -221,10 +221,12 @@ fn periodic_scan_iteration_logs_completion_only_when_due_and_stays_silent_when_i
         let task_queue = task_queue.clone();
         let task_wakeup = Arc::new(tokio::sync::Notify::new());
         async move {
-            let mut last_run = HashMap::from([(
-                "library-1".to_string(),
-                tokio::time::Instant::now() - Duration::from_secs(3_700),
-            )]);
+            // Drive elapsed scan time with Tokio's paused clock so the test does not depend on host uptime.
+            tokio::time::pause();
+            let last_run_at = tokio::time::Instant::now();
+            tokio::time::advance(Duration::from_secs(3_700)).await;
+            tokio::time::resume();
+            let mut last_run = HashMap::from([("library-1".to_string(), last_run_at)]);
             let wakeup = task_wakeup.notified();
             komga_infrastructure::task_queue::worker_runtime::run_periodic_library_scan_iteration(
                 task_queue,
@@ -339,19 +341,15 @@ fn periodic_scan_iteration_drains_each_due_library_separately_and_cleans_stale_s
         let runtime = runtime.clone();
         let task_queue = task_queue.clone();
         async move {
+            // Drive elapsed scan time with Tokio's paused clock so the test does not depend on host uptime.
+            tokio::time::pause();
+            let last_run_at = tokio::time::Instant::now();
+            tokio::time::advance(Duration::from_secs(3_700)).await;
+            tokio::time::resume();
             let mut last_run = HashMap::from([
-                (
-                    "library-1".to_string(),
-                    tokio::time::Instant::now() - Duration::from_secs(3_700),
-                ),
-                (
-                    "library-2".to_string(),
-                    tokio::time::Instant::now() - Duration::from_secs(3_700),
-                ),
-                (
-                    "stale-library".to_string(),
-                    tokio::time::Instant::now() - Duration::from_secs(3_700),
-                ),
+                ("library-1".to_string(), last_run_at),
+                ("library-2".to_string(), last_run_at),
+                ("stale-library".to_string(), last_run_at),
             ]);
             let enqueued =
                 komga_infrastructure::task_queue::worker_runtime::run_periodic_library_scan_iteration(
