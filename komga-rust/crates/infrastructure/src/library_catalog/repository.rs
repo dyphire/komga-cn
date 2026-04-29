@@ -115,7 +115,7 @@ impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
         &self,
         library_id: &str,
     ) -> Result<Vec<(String, String)>, String> {
-        crate::tasks::media_queries::load_books_for_extension_repair(
+        crate::task_queue::media_helpers::media_queries::load_books_for_extension_repair(
             self.database_file.as_path(),
             library_id,
         )

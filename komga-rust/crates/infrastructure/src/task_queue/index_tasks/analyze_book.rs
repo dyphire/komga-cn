@@ -1,6 +1,6 @@
+use super::super::media_helpers::media_updates::adjust_analyzed_book_read_progress;
 use super::*;
 use crate::resolve_library_item_path;
-use crate::tasks::media_updates::adjust_analyzed_book_read_progress;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::task_queue) struct AnalyzeBookOutcome {

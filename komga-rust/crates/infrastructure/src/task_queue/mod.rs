@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::Read;
 use std::path::PathBuf;
@@ -7,10 +7,10 @@ use crate::search::runtime_tasks::{
     AnalyzedBookMedia, AnalyzedBookPage, analyze_book_input, persist_book_analysis,
     rebuild_index_from_database_for_entities,
 };
-use crate::tasks::persisted_queue::{PersistedTaskStoreRecord, SqliteTaskQueueStore};
 use komga_application::task_processing::{
     TaskProcessingError, TaskQueueOrchestrator, TaskRuntimeConfig, TaskRuntimeContext,
 };
+use queue_core::{PersistedTaskStoreRecord, SqliteTaskQueueStore};
 use sha2::{Digest, Sha256};
 use zip::ZipArchive;
 
@@ -22,7 +22,7 @@ mod index_jobs;
 mod index_tasks;
 pub mod library_scan_pipeline;
 mod maintenance_jobs;
-mod media_helpers;
+pub(crate) mod media_helpers;
 mod metadata_tasks;
 mod queue_core;
 pub mod queue_scheduler;

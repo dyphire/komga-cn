@@ -1,8 +1,8 @@
-use super::*;
-use crate::tasks::media_queries::{
+use super::media_queries::{
     load_library_hashing_flags as load_persisted_library_hashing_flags,
     load_library_maintenance_flags as load_persisted_library_maintenance_flags,
 };
+use super::*;
 
 pub(in crate::task_queue) fn parse_scan_library_payload_deep(payload: &str) -> Option<bool> {
     let payload = serde_json::from_str::<serde_json::Value>(payload).ok()?;

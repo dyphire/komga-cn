@@ -1,14 +1,14 @@
 use super::hashed_pages::HashedPageToDelete;
-use super::*;
-use crate::filesystem::media_access::hashes::persist_book_page_hashes_from_media_content;
-use crate::tasks::media_queries::{
+use super::media_queries::{
     load_book_file_path, load_book_hash_runtime_state, load_book_library_id,
     load_books_with_missing_page_hash as load_persisted_books_with_missing_page_hash,
     load_books_with_undersized_generated_thumbnails,
     load_duplicate_pages_to_delete as load_persisted_duplicate_pages_to_delete,
     load_non_deleted_book_ids as load_persisted_non_deleted_book_ids,
 };
-use crate::tasks::media_updates::persist_book_hash;
+use super::media_updates::persist_book_hash;
+use super::*;
+use crate::filesystem::media_access::hashes::persist_book_page_hashes_from_media_content;
 use komga_application::task_processing::TaskRuntimeContext;
 use tokio::fs;
 

@@ -1,7 +1,10 @@
-use super::*;
+use std::collections::{HashMap, HashSet};
+
 use komga_application::task_processing::{
-    RefreshBookMetadataPayload, SeriesPayload, TaskKind, TaskRequest,
+    RefreshBookMetadataPayload, SeriesPayload, TaskKind, TaskQueueRecord, TaskRequest,
 };
+
+use super::scan_models::{ScannedLibrary, ScannedSidecarSource, ScannedSidecarType};
 
 pub(in crate::task_queue) fn enqueue_sidecar_refresh_tasks(
     tasks: &mut Vec<TaskQueueRecord>,

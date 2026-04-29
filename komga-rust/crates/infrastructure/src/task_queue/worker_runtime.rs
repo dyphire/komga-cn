@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -7,6 +8,7 @@ use komga_application::task_processing::{
     ScanSchedulingTrigger, TaskKind, TaskRequest, TaskRuntimeConfig, TaskRuntimeContext,
 };
 use serde_json::Value;
+use sqlx::Row;
 use tokio::runtime::Handle;
 use tokio::sync::{Mutex as AsyncMutex, Notify, mpsc, watch};
 use tokio::time::interval;
@@ -15,7 +17,47 @@ use tracing::{Instrument, Span, error, info};
 use super::execution_pool::TaskExecutionPoolHandle;
 use super::library_scan_pipeline::SqliteFilesystemLibraryScanPipeline;
 use super::{TaskExecutionError, TaskExecutionResult, TaskQueueRecord, TaskQueueScheduler};
-use crate::tasks::library_scan_profiles::load_persisted_library_scan_profiles;
+use crate::sqlite::connect_read_pool;
+
+#[derive(Clone, Debug)]
+struct PersistedLibraryScanProfile {
+    library_id: String,
+    scan_startup: bool,
+    scan_interval: String,
+}
+
+async fn load_persisted_library_scan_profiles(
+    database_file: &Path,
+) -> Result<Vec<PersistedLibraryScanProfile>, String> {
+    if !database_file.exists() {
+        return Ok(Vec::new());
+    }
+
+    let pool = connect_read_pool(database_file)
+        .await
+        .map_err(|error| format!("open scan profile db: {error}"))?;
+
+    let rows = sqlx::query(
+        r#"SELECT
+            ID,
+            SCAN_STARTUP,
+            SCAN_INTERVAL
+        FROM LIBRARY
+        ORDER BY ID ASC"#,
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|error| format!("query scan profiles: {error}"))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| PersistedLibraryScanProfile {
+            library_id: row.get::<String, _>("ID"),
+            scan_startup: row.get::<bool, _>("SCAN_STARTUP"),
+            scan_interval: row.get::<String, _>("SCAN_INTERVAL"),
+        })
+        .collect::<Vec<_>>())
+}
 
 pub type SharedTaskQueue = Arc<AsyncMutex<TaskQueueScheduler>>;
 pub type TaskQueueWakeSignal = Arc<Notify>;

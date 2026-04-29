@@ -1,23 +1,56 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use komga_application::task_processing::{
-    BookPayload, LibraryPayload, LibraryScanInterval, LibraryScanPipeline,
+    BookPayload, LibraryPayload, LibraryScanInterval, LibraryScanPipeline, LibraryScanProfile,
     LibraryScanScheduleState, LibraryTaskBatch, RefreshBookMetadataPayload, ScanOneLibrary,
     ScanOneLibraryResult, ScanSchedulingTrigger, SeriesPayload, TaskKind, TaskProcessingError,
     TaskQueueRecord, TaskRequest, TaskRuntimeContext, TaskSchedule,
     normalize_library_scan_profiles,
 };
+use sqlx::Row;
 use tokio::time::Instant;
 
-use crate::tasks::cleanup_workflow::{cleanup_empty_sets_rows, empty_trash_rows};
-use crate::tasks::library_scan_profiles::load_library_scan_profiles;
-use crate::tasks::media_queries::{
+use super::cleanup_tasks::{cleanup_empty_sets_rows, empty_trash_rows};
+use super::media_helpers::media_queries::{
     load_books_for_extension_repair, load_books_requiring_analysis,
     load_books_with_missing_file_hash, load_library_hashing_flags, load_library_maintenance_flags,
 };
-
 use super::{ExecutedLibraryScan, enqueue_sidecar_refresh_tasks, execute_scan_orchestration};
+use crate::sqlite::connect_read_pool;
+
+async fn load_library_scan_profiles(
+    database_file: &Path,
+) -> Result<Vec<LibraryScanProfile>, String> {
+    if !database_file.exists() {
+        return Ok(Vec::new());
+    }
+
+    let pool = connect_read_pool(database_file)
+        .await
+        .map_err(|error| format!("open scan profile db: {error}"))?;
+
+    let rows = sqlx::query(
+        r#"SELECT
+            ID,
+            SCAN_STARTUP,
+            SCAN_INTERVAL
+        FROM LIBRARY
+        ORDER BY ID ASC"#,
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|error| format!("query scan profiles: {error}"))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| LibraryScanProfile {
+            library_id: row.get::<String, _>("ID"),
+            scan_startup: row.get::<bool, _>("SCAN_STARTUP"),
+            scan_interval: row.get::<String, _>("SCAN_INTERVAL"),
+        })
+        .collect::<Vec<_>>())
+}
 
 #[derive(Clone, Debug)]
 pub struct SqliteFilesystemLibraryScanPipeline {
@@ -167,193 +200,189 @@ impl SqliteFilesystemLibraryScanPipeline {
         library_id: &str,
         executed_scan: &ExecutedLibraryScan,
     ) -> Result<Vec<TaskQueueRecord>, TaskProcessingError> {
-        const DEFAULT_PRIORITY: i32 = 4;
-        const LOW_PRIORITY: i32 = 2;
-        const LOWEST_PRIORITY: i32 = 0;
+        collect_follow_up_tasks(self.database_file.as_path(), library_id, executed_scan).await
+    }
+}
 
-        let mut follow_up_tasks = Vec::<TaskQueueRecord>::new();
+async fn collect_follow_up_tasks(
+    database_file: &Path,
+    library_id: &str,
+    executed_scan: &ExecutedLibraryScan,
+) -> Result<Vec<TaskQueueRecord>, TaskProcessingError> {
+    const DEFAULT_PRIORITY: i32 = 4;
+    const LOW_PRIORITY: i32 = 2;
+    const LOWEST_PRIORITY: i32 = 0;
 
-        let hashing_flags = load_library_hashing_flags(self.database_file.as_path(), library_id)
-            .await
-            .map_err(|error| {
-                TaskProcessingError::runtime(format!("load library hashing flags: {error}"))
-            })?;
-        let analyzable_book_ids = load_books_requiring_analysis(
-            self.database_file.as_path(),
-            &executed_scan.scan.book_ids,
-        )
+    let mut follow_up_tasks = Vec::<TaskQueueRecord>::new();
+
+    let hashing_flags = load_library_hashing_flags(database_file, library_id)
         .await
         .map_err(|error| {
-            TaskProcessingError::runtime(format!("load books requiring analysis: {error}"))
-        })?
-        .into_iter()
-        .collect::<HashSet<_>>();
-        for series in &executed_scan.scan.series_rows {
-            for book in &series.books {
-                if analyzable_book_ids.contains(&book.book_id) {
-                    follow_up_tasks.push(
-                        TaskRequest::new(TaskKind::AnalyzeBook)
-                            .priority(DEFAULT_PRIORITY)
-                            .group(series.series_id.clone())
-                            .into_queue_record_with_id(&book.book_id),
-                    );
-                }
-            }
-        }
-
-        if hashing_flags.hash_files {
-            let book_ids =
-                load_books_with_missing_file_hash(self.database_file.as_path(), library_id, false)
-                    .await
-                    .map_err(|error| {
-                        TaskProcessingError::runtime(format!(
-                            "load books with missing file hash: {error}"
-                        ))
-                    })?;
-            for book_id in book_ids {
+            TaskProcessingError::runtime(format!("load library hashing flags: {error}"))
+        })?;
+    let analyzable_book_ids =
+        load_books_requiring_analysis(database_file, &executed_scan.scan.book_ids)
+            .await
+            .map_err(|error| {
+                TaskProcessingError::runtime(format!("load books requiring analysis: {error}"))
+            })?
+            .into_iter()
+            .collect::<HashSet<_>>();
+    for series in &executed_scan.scan.series_rows {
+        for book in &series.books {
+            if analyzable_book_ids.contains(&book.book_id) {
                 follow_up_tasks.push(
-                    TaskRequest::with_payload(TaskKind::HashBook, BookPayload::new(book_id))
-                        .priority(LOWEST_PRIORITY)
-                        .into_queue_record(),
+                    TaskRequest::new(TaskKind::AnalyzeBook)
+                        .priority(DEFAULT_PRIORITY)
+                        .group(series.series_id.clone())
+                        .into_queue_record_with_id(&book.book_id),
                 );
             }
         }
+    }
 
-        if hashing_flags.hash_koreader {
-            let book_ids =
-                load_books_with_missing_file_hash(self.database_file.as_path(), library_id, true)
-                    .await
-                    .map_err(|error| {
-                        TaskProcessingError::runtime(format!(
-                            "load books with missing koreader hash: {error}"
-                        ))
-                    })?;
-            for book_id in book_ids {
-                follow_up_tasks.push(
-                    TaskRequest::with_payload(
-                        TaskKind::HashBookKoreader,
-                        BookPayload::new(book_id),
-                    )
+    if hashing_flags.hash_files {
+        let book_ids = load_books_with_missing_file_hash(database_file, library_id, false)
+            .await
+            .map_err(|error| {
+                TaskProcessingError::runtime(format!("load books with missing file hash: {error}"))
+            })?;
+        for book_id in book_ids {
+            follow_up_tasks.push(
+                TaskRequest::with_payload(TaskKind::HashBook, BookPayload::new(book_id))
                     .priority(LOWEST_PRIORITY)
                     .into_queue_record(),
-                );
-            }
+            );
         }
+    }
 
-        if hashing_flags.hash_pages {
+    if hashing_flags.hash_koreader {
+        let book_ids = load_books_with_missing_file_hash(database_file, library_id, true)
+            .await
+            .map_err(|error| {
+                TaskProcessingError::runtime(format!(
+                    "load books with missing koreader hash: {error}"
+                ))
+            })?;
+        for book_id in book_ids {
+            follow_up_tasks.push(
+                TaskRequest::with_payload(TaskKind::HashBookKoreader, BookPayload::new(book_id))
+                    .priority(LOWEST_PRIORITY)
+                    .into_queue_record(),
+            );
+        }
+    }
+
+    if hashing_flags.hash_pages {
+        follow_up_tasks.push(
+            TaskRequest::with_payload(
+                TaskKind::FindBooksWithMissingPageHash,
+                LibraryPayload::new(library_id.to_string()),
+            )
+            .priority(LOWEST_PRIORITY)
+            .into_queue_record(),
+        );
+    }
+    follow_up_tasks.push(
+        TaskRequest::new(TaskKind::FindDuplicatePagesToDelete)
+            .priority(LOWEST_PRIORITY)
+            .into_queue_record_with_id(library_id),
+    );
+
+    let maintenance_flags = load_library_maintenance_flags(database_file, library_id)
+        .await
+        .map_err(|error| {
+            TaskProcessingError::runtime(format!("load library maintenance flags: {error}"))
+        })?;
+    if maintenance_flags.repair_extensions {
+        let books = load_books_for_extension_repair(database_file, library_id)
+            .await
+            .map_err(|error| {
+                TaskProcessingError::runtime(format!("load books for extension repair: {error}"))
+            })?;
+        for book in books {
             follow_up_tasks.push(
                 TaskRequest::with_payload(
-                    TaskKind::FindBooksWithMissingPageHash,
-                    LibraryPayload::new(library_id.to_string()),
+                    TaskKind::RepairExtension,
+                    BookPayload::new(book.book_id.clone()),
                 )
-                .priority(LOWEST_PRIORITY)
+                .priority(LOW_PRIORITY)
+                .group(book.series_id.clone())
                 .into_queue_record(),
             );
         }
+    }
+    if maintenance_flags.convert_to_cbz {
         follow_up_tasks.push(
-            TaskRequest::new(TaskKind::FindDuplicatePagesToDelete)
+            TaskRequest::new(TaskKind::FindBooksToConvert)
                 .priority(LOWEST_PRIORITY)
                 .into_queue_record_with_id(library_id),
         );
-
-        let maintenance_flags =
-            load_library_maintenance_flags(self.database_file.as_path(), library_id)
-                .await
-                .map_err(|error| {
-                    TaskProcessingError::runtime(format!("load library maintenance flags: {error}"))
-                })?;
-        if maintenance_flags.repair_extensions {
-            let books = load_books_for_extension_repair(self.database_file.as_path(), library_id)
-                .await
-                .map_err(|error| {
-                    TaskProcessingError::runtime(format!(
-                        "load books for extension repair: {error}"
-                    ))
-                })?;
-            for book in books {
-                follow_up_tasks.push(
-                    TaskRequest::with_payload(
-                        TaskKind::RepairExtension,
-                        BookPayload::new(book.book_id.clone()),
-                    )
-                    .priority(LOW_PRIORITY)
-                    .group(book.series_id.clone())
-                    .into_queue_record(),
-                );
-            }
-        }
-        if maintenance_flags.convert_to_cbz {
-            follow_up_tasks.push(
-                TaskRequest::new(TaskKind::FindBooksToConvert)
-                    .priority(LOWEST_PRIORITY)
-                    .into_queue_record_with_id(library_id),
-            );
-        }
-
-        let mut changed_series_ids = executed_scan.changed_series_ids.to_vec();
-        changed_series_ids.sort();
-        changed_series_ids.dedup();
-        for series_id in changed_series_ids {
-            follow_up_tasks.push(
-                TaskRequest::with_payload(
-                    TaskKind::RefreshSeriesMetadata,
-                    SeriesPayload::new(&series_id),
-                )
-                .priority(DEFAULT_PRIORITY)
-                .group(&series_id)
-                .into_queue_record(),
-            );
-        }
-
-        let book_series_ids = executed_scan
-            .scan
-            .series_rows
-            .iter()
-            .flat_map(|series| {
-                series
-                    .books
-                    .iter()
-                    .map(|book| (book.book_id.clone(), series.series_id.clone()))
-            })
-            .collect::<HashMap<_, _>>();
-        let mut book_metadata_capabilities = BTreeMap::<String, BTreeSet<String>>::new();
-        for refresh in &executed_scan.book_metadata_refreshes {
-            book_metadata_capabilities
-                .entry(refresh.book_id.clone())
-                .or_default()
-                .extend(refresh.capabilities.iter().cloned());
-        }
-        for book_id in &executed_scan.renumbered_book_ids {
-            book_metadata_capabilities
-                .entry(book_id.clone())
-                .or_default();
-        }
-        for (book_id, capabilities) in book_metadata_capabilities {
-            let capabilities =
-                (!capabilities.is_empty()).then(|| capabilities.into_iter().collect::<Vec<_>>());
-            {
-                let mut payload = RefreshBookMetadataPayload::new(&book_id);
-                if let Some(caps) = capabilities {
-                    payload = payload.with_capabilities(caps);
-                }
-                let mut req = TaskRequest::with_payload(TaskKind::RefreshBookMetadata, payload)
-                    .priority(DEFAULT_PRIORITY);
-                if let Some(gid) = book_series_ids.get(&book_id) {
-                    req = req.group(gid.clone());
-                }
-                follow_up_tasks.push(req.into_queue_record());
-            }
-        }
-
-        enqueue_sidecar_refresh_tasks(
-            &mut follow_up_tasks,
-            &executed_scan.scan,
-            &executed_scan.changed_sidecar_urls,
-            DEFAULT_PRIORITY,
-        );
-
-        Ok(follow_up_tasks)
     }
+
+    let mut changed_series_ids = executed_scan.changed_series_ids.to_vec();
+    changed_series_ids.sort();
+    changed_series_ids.dedup();
+    for series_id in changed_series_ids {
+        follow_up_tasks.push(
+            TaskRequest::with_payload(
+                TaskKind::RefreshSeriesMetadata,
+                SeriesPayload::new(&series_id),
+            )
+            .priority(DEFAULT_PRIORITY)
+            .group(&series_id)
+            .into_queue_record(),
+        );
+    }
+
+    let book_series_ids = executed_scan
+        .scan
+        .series_rows
+        .iter()
+        .flat_map(|series| {
+            series
+                .books
+                .iter()
+                .map(|book| (book.book_id.clone(), series.series_id.clone()))
+        })
+        .collect::<HashMap<_, _>>();
+    let mut book_metadata_capabilities = BTreeMap::<String, BTreeSet<String>>::new();
+    for refresh in &executed_scan.book_metadata_refreshes {
+        book_metadata_capabilities
+            .entry(refresh.book_id.clone())
+            .or_default()
+            .extend(refresh.capabilities.iter().cloned());
+    }
+    for book_id in &executed_scan.renumbered_book_ids {
+        book_metadata_capabilities
+            .entry(book_id.clone())
+            .or_default();
+    }
+    for (book_id, capabilities) in book_metadata_capabilities {
+        let capabilities =
+            (!capabilities.is_empty()).then(|| capabilities.into_iter().collect::<Vec<_>>());
+        {
+            let mut payload = RefreshBookMetadataPayload::new(&book_id);
+            if let Some(caps) = capabilities {
+                payload = payload.with_capabilities(caps);
+            }
+            let mut req = TaskRequest::with_payload(TaskKind::RefreshBookMetadata, payload)
+                .priority(DEFAULT_PRIORITY);
+            if let Some(gid) = book_series_ids.get(&book_id) {
+                req = req.group(gid.clone());
+            }
+            follow_up_tasks.push(req.into_queue_record());
+        }
+    }
+
+    enqueue_sidecar_refresh_tasks(
+        &mut follow_up_tasks,
+        &executed_scan.scan,
+        &executed_scan.changed_sidecar_urls,
+        DEFAULT_PRIORITY,
+    );
+
+    Ok(follow_up_tasks)
 }
 
 impl Default for SqliteFilesystemLibraryScanPipeline {

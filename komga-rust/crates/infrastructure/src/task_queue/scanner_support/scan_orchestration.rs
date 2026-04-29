@@ -1,10 +1,11 @@
 use std::path::Path;
 
-use super::*;
-use crate::tasks::scanner::{
-    BookMetadataRefreshRequest, library_empty_trash_after_scan, load_changed_sidecars,
-    persist_scanned_library, scan_library,
+use komga_application::task_processing::TaskProcessingError;
+
+use super::scan_core::{
+    library_empty_trash_after_scan, load_changed_sidecars, persist_scanned_library, scan_library,
 };
+use super::scan_models::{BookMetadataRefreshRequest, ScannedLibrary};
 
 pub(crate) struct ExecutedLibraryScan {
     pub(crate) scan: ScannedLibrary,

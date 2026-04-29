@@ -27,7 +27,6 @@ pub mod search;
 pub mod sql;
 pub mod sqlite;
 pub mod task_queue;
-pub mod tasks;
 
 pub(crate) use persisted_paths::{
     resolve_library_item_path, resolve_optional_library_item_path, resolve_rooted_path,

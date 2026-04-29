@@ -1,7 +1,7 @@
-use super::*;
-pub(super) use crate::tasks::scanner::{ScannedLibrary, ScannedSidecarSource, ScannedSidecarType};
-
+mod scan_core;
+mod scan_models;
 mod scan_orchestration;
+mod scan_sse;
 mod sidecars;
 
 pub(crate) use scan_orchestration::{ExecutedLibraryScan, execute_scan_orchestration};

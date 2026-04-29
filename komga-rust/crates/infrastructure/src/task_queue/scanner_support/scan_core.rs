@@ -3,239 +3,20 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
-use komga_application::runtime_sse::register_runtime_sse_event;
-use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::{Row, SqlitePool};
 
-use crate::sql::task_queue::{DELETE_BOOK_DEPENDENCY_SQL, DELETE_SERIES_DEPENDENCY_SQL};
-
-use super::cleanup_workflow::compare_book_names_kotlin_like;
 use crate::persisted_paths::{resolve_rooted_path, resolve_stored_path};
+use crate::sql::task_queue::{DELETE_BOOK_DEPENDENCY_SQL, DELETE_SERIES_DEPENDENCY_SQL};
 use crate::sqlite::connect_private_write_pool;
 
-#[derive(Clone, Debug)]
-pub(crate) struct LibraryScanConfig {
-    pub root: String,
-    pub scan_cbx: bool,
-    pub scan_pdf: bool,
-    pub scan_epub: bool,
-    pub scan_force_modified_time: bool,
-    pub oneshots_directory: Option<String>,
-    pub scan_directory_exclusions: Vec<String>,
-}
+use super::scan_models::*;
+use super::scan_sse::{
+    RuntimeSseEventBuffer, RuntimeSseMutationKind, emit_scanned_library_runtime_sse_events,
+    record_book_runtime_sse_event, record_series_runtime_sse_event,
+};
 
-#[derive(Clone, Debug)]
-pub(crate) struct ScannedLibrary {
-    pub root_available: bool,
-    pub series_rows: Vec<ScannedSeriesRow>,
-    pub sidecars: Vec<ScannedSidecarRow>,
-    pub book_ids: Vec<String>,
-    pub changed_existing_book_ids: HashSet<String>,
-    pub series_ids_requiring_book_sync: HashSet<String>,
-    pub discovered_series_ids: HashSet<String>,
-    pub discovered_book_ids: HashSet<String>,
-}
-
-#[derive(Clone, Debug)]
-struct ExistingScannedBookRow {
-    book_id: String,
-    series_id: String,
-    file_last_modified_unix_seconds: i64,
-}
-
-#[derive(Clone, Debug)]
-struct ExistingScannedSeriesRow {
-    file_last_modified_unix_seconds: i64,
-}
-
-#[derive(Clone, Debug)]
-struct PersistedScannedSeriesBookRow {
-    book_id: String,
-    book_name: String,
-    book_number: i64,
-    metadata_number: String,
-    metadata_number_sort: f64,
-    metadata_number_lock: bool,
-    metadata_number_sort_lock: bool,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct ScannedSeriesRow {
-    pub series_id: String,
-    pub series_name: String,
-    pub series_url: String,
-    pub series_last_modified_unix_seconds: i64,
-    pub oneshot: bool,
-    pub books: Vec<ScannedBookRow>,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct ScannedBookRow {
-    pub book_id: String,
-    pub book_name: String,
-    pub book_url: String,
-    pub file_name: String,
-    pub file_size: i64,
-    pub file_last_modified_unix_seconds: i64,
-    pub oneshot: bool,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct ScannedSidecarRow {
-    pub url: String,
-    pub parent_url: String,
-    pub last_modified_unix_seconds: i64,
-    pub source: ScannedSidecarSource,
-    pub sidecar_type: ScannedSidecarType,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum ScannedSidecarSource {
-    Series,
-    Book,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum ScannedSidecarType {
-    Metadata,
-    Artwork,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum RuntimeSseMutationKind {
-    Added,
-    Changed,
-}
-
-#[derive(Clone, Debug)]
-struct RuntimeSeriesSseRecord {
-    series_id: String,
-    library_id: String,
-    kind: RuntimeSseMutationKind,
-}
-
-#[derive(Clone, Debug)]
-struct RuntimeBookSseRecord {
-    book_id: String,
-    series_id: String,
-    library_id: String,
-    kind: RuntimeSseMutationKind,
-}
-
-#[derive(Clone, Debug)]
-enum RuntimeSseRecord {
-    Series(RuntimeSeriesSseRecord),
-    Book(RuntimeBookSseRecord),
-}
-
-#[derive(Default)]
-struct RuntimeSseEventBuffer {
-    events: Vec<RuntimeSseRecord>,
-    series_indices: HashMap<String, usize>,
-    book_indices: HashMap<String, usize>,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct InsertedBookCandidate {
-    pub(crate) book_id: String,
-    pub(crate) book_url: String,
-    pub(crate) file_size: i64,
-    pub(crate) series_id: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct BookMetadataRefreshRequest {
-    pub(crate) book_id: String,
-    pub(crate) series_id: String,
-    pub(crate) capabilities: Vec<String>,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct InsertedSeriesCandidate {
-    pub(crate) series_id: String,
-    pub(crate) series_title: String,
-    pub(crate) books: Vec<InsertedBookCandidate>,
-}
-
-pub(crate) struct PersistScannedLibraryOutcome {
-    pub(crate) renumbered_book_ids: Vec<String>,
-    library_changed: bool,
-    pub(crate) changed_series_ids: Vec<String>,
-    pub(crate) book_metadata_refreshes: Vec<BookMetadataRefreshRequest>,
-    runtime_events: Vec<RuntimeSseRecord>,
-}
-
-fn merge_runtime_sse_mutation_kind(
-    existing: RuntimeSseMutationKind,
-    next: RuntimeSseMutationKind,
-) -> RuntimeSseMutationKind {
-    if matches!(existing, RuntimeSseMutationKind::Added)
-        || matches!(next, RuntimeSseMutationKind::Added)
-    {
-        RuntimeSseMutationKind::Added
-    } else {
-        RuntimeSseMutationKind::Changed
-    }
-}
-
-fn record_series_runtime_sse_event(
-    events: &mut RuntimeSseEventBuffer,
-    series_id: &str,
-    library_id: &str,
-    kind: RuntimeSseMutationKind,
-) {
-    if let Some(index) = events.series_indices.get(series_id).copied() {
-        let RuntimeSseRecord::Series(existing) = &mut events.events[index] else {
-            unreachable!("series indices should only point at series events")
-        };
-        existing.kind = merge_runtime_sse_mutation_kind(existing.kind, kind);
-        return;
-    }
-
-    let index = events.events.len();
-    events
-        .events
-        .push(RuntimeSseRecord::Series(RuntimeSeriesSseRecord {
-            series_id: series_id.to_string(),
-            library_id: library_id.to_string(),
-            kind,
-        }));
-    events.series_indices.insert(series_id.to_string(), index);
-}
-
-fn record_book_runtime_sse_event(
-    events: &mut RuntimeSseEventBuffer,
-    book_id: &str,
-    series_id: &str,
-    library_id: &str,
-    kind: RuntimeSseMutationKind,
-) {
-    if let Some(index) = events.book_indices.get(book_id).copied() {
-        let RuntimeSseRecord::Book(existing) = &mut events.events[index] else {
-            unreachable!("book indices should only point at book events")
-        };
-        existing.kind = merge_runtime_sse_mutation_kind(existing.kind, kind);
-        return;
-    }
-
-    let index = events.events.len();
-    events
-        .events
-        .push(RuntimeSseRecord::Book(RuntimeBookSseRecord {
-            book_id: book_id.to_string(),
-            series_id: series_id.to_string(),
-            library_id: library_id.to_string(),
-            kind,
-        }));
-    events.book_indices.insert(book_id.to_string(), index);
-}
-
-#[derive(Clone, Debug)]
-struct RestoredSeriesMatch {
-    inserted_series_id: String,
-    deleted_series_id: String,
-}
+use crate::task_queue::cleanup_tasks::compare_book_names_kotlin_like;
 
 fn compute_file_sha256(path: &Path) -> Result<String, String> {
     let bytes = fs::read(path).map_err(|error| {
@@ -252,7 +33,6 @@ fn compute_file_sha256(path: &Path) -> Result<String, String> {
         .map(|value| format!("{value:02x}"))
         .collect::<String>())
 }
-
 async fn try_restore_deleted_books(
     pool: &SqlitePool,
     library_root: &Path,
@@ -865,54 +645,6 @@ WHERE SERIES_ID = ?"#,
     }
 
     Ok(restored_series_ids)
-}
-
-fn emit_scanned_library_runtime_sse_events(
-    library_id: &str,
-    outcome: &PersistScannedLibraryOutcome,
-) {
-    if outcome.library_changed {
-        register_runtime_sse_event(
-            "LibraryChanged",
-            json!({ "libraryId": library_id }),
-            false,
-            None,
-        );
-    }
-
-    for event in &outcome.runtime_events {
-        match event {
-            RuntimeSseRecord::Series(event) => {
-                register_runtime_sse_event(
-                    match event.kind {
-                        RuntimeSseMutationKind::Added => "SeriesAdded",
-                        RuntimeSseMutationKind::Changed => "SeriesChanged",
-                    },
-                    json!({
-                        "seriesId": event.series_id,
-                        "libraryId": event.library_id,
-                    }),
-                    false,
-                    None,
-                );
-            }
-            RuntimeSseRecord::Book(event) => {
-                register_runtime_sse_event(
-                    match event.kind {
-                        RuntimeSseMutationKind::Added => "BookAdded",
-                        RuntimeSseMutationKind::Changed => "BookChanged",
-                    },
-                    json!({
-                        "bookId": event.book_id,
-                        "seriesId": event.series_id,
-                        "libraryId": event.library_id,
-                    }),
-                    false,
-                    None,
-                );
-            }
-        }
-    }
 }
 
 pub(crate) async fn load_library_scan_config(
@@ -2315,7 +2047,6 @@ fn metadata_updated_unix_seconds(metadata: &fs::Metadata) -> i64 {
         .max()
         .unwrap_or(0)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

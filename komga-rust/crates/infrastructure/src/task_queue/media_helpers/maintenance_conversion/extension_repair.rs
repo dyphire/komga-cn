@@ -1,6 +1,6 @@
+use super::super::media_queries::load_book_for_extension_repair;
+use super::super::media_updates::persist_book_extension_repair;
 use super::*;
-use crate::tasks::media_queries::load_book_for_extension_repair;
-use crate::tasks::media_updates::persist_book_extension_repair;
 use crate::{resolve_library_item_path, resolve_stored_path};
 use std::collections::HashSet;
 use std::path::Path;
