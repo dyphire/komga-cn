@@ -31,7 +31,7 @@ async fn execute_hash_book_pages(
 
     let Some(book_id) = task_target else {
         return Err(TaskExecutionError::invalid_task(
-            "HASH_BOOK_PAGES task must include a book id",
+            "HashBookPages task must include a book id",
         ));
     };
     super::super::hash_book_pages(runtime, book_id)
@@ -490,7 +490,7 @@ mod tests {
                 .admin_mut()
                 .take_available("missing-page-hash-disabled-assert")
                 .is_none(),
-            "finder must not enqueue HASH_BOOK_PAGES tasks when library.hashPages is disabled at execution time",
+            "finder must not enqueue HashBookPages tasks when library.hashPages is disabled at execution time",
         );
 
         fixture.cleanup().await;
