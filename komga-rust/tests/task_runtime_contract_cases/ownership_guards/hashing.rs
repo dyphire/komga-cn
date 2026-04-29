@@ -18,11 +18,10 @@ async fn runtime_blocks_book_hash_when_main_database_is_external_owned() {
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
-        .enqueue(TaskQueueRecord::new(
-            "HashBook_book-1",
-            1_000,
-            Some("book-1".to_string()),
-        ))
+        .enqueue(
+            TaskQueueRecord::new("HashBook_book-1", 1_000, Some("book-1".to_string()))
+                .with_simple_type("HashBook"),
+        )
         .await;
     scheduler
         .process_available(&runtime)
@@ -232,11 +231,10 @@ async fn runtime_blocks_book_page_hash_when_main_database_is_external_owned() {
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
-        .enqueue(TaskQueueRecord::new(
-            "HashBookPages_book-hash-1",
-            1_000,
-            Some("book-hash-1".to_string()),
-        ))
+        .enqueue(
+            TaskQueueRecord::new("HashBookPages_book-hash-1", 1_000, Some("book-hash-1".to_string()))
+                .with_simple_type("HashBookPages"),
+        )
         .await;
     scheduler
         .process_available(&runtime)
