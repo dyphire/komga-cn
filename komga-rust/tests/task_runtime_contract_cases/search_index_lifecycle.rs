@@ -15,7 +15,7 @@ async fn isolated_runtime_keeps_search_index_external_owned() {
     let runtime = runtime_task_context_from_config(&config);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
-        .enqueue(TaskQueueRecord::new("REBUILD_INDEX", 1_000, None))
+        .enqueue(TaskQueueRecord::new("RebuildIndex", 1_000, None))
         .await;
     let processed = scheduler
         .process_available(&runtime)
@@ -47,7 +47,7 @@ async fn runtime_executes_legacy_upgrade_index_task_as_compatibility_noop() {
     let runtime = runtime_task_context(&paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
-        .enqueue(TaskQueueRecord::new("UPGRADE_INDEX", 1_000, None))
+        .enqueue(TaskQueueRecord::new("UpgradeIndex", 1_000, None))
         .await;
 
     let processed = scheduler
@@ -146,7 +146,7 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
     let runtime = runtime_task_context_from_config(&config);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
-        .enqueue(TaskQueueRecord::new("REBUILD_INDEX", 1_000, None))
+        .enqueue(TaskQueueRecord::new("RebuildIndex", 1_000, None))
         .await;
     scheduler
         .process_available(&runtime)
@@ -173,11 +173,11 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
     scheduler
         .enqueue(
             TaskQueueRecord::new(
-                "REFRESH_SERIES_METADATA_series-oneshot",
+                "RefreshSeriesMetadata_series-oneshot",
                 1_000,
                 Some("series-oneshot".to_string()),
             )
-            .with_simple_type("REFRESH_SERIES_METADATA"),
+            .with_simple_type("RefreshSeriesMetadata"),
         )
         .await;
     scheduler
@@ -391,7 +391,7 @@ async fn runtime_refresh_book_metadata_upserts_readlist_search_document_after_co
     let runtime = runtime_task_context_from_config(&config);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
-        .enqueue(TaskQueueRecord::new("REBUILD_INDEX", 1_000, None))
+        .enqueue(TaskQueueRecord::new("RebuildIndex", 1_000, None))
         .await;
     scheduler
         .process_available(&runtime)
@@ -458,7 +458,7 @@ async fn runtime_refresh_book_metadata_upserts_readlist_search_document_after_co
     scheduler
         .enqueue(
             TaskQueueRecord::new(
-                "REFRESH_BOOK_METADATA:book-1",
+                "RefreshBookMetadata:book-1",
                 1_000,
                 Some("series-1".to_string()),
             )
@@ -468,7 +468,7 @@ async fn runtime_refresh_book_metadata_upserts_readlist_search_document_after_co
                     "capabilities": ["READ_LISTS"],
                     "priority": 80,
                     "groupId": "series-1",
-                    "uniqueId": "REFRESH_BOOK_METADATA_book-1"
+                    "uniqueId": "RefreshBookMetadata_book-1"
                 })
                 .to_string(),
             ),
@@ -508,7 +508,7 @@ async fn runtime_rebuild_index_payload_can_scope_rebuild_to_selected_entities() 
     let runtime = runtime_task_context_from_config(&config);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
-        .enqueue(TaskQueueRecord::new("REBUILD_INDEX", 1_000, None))
+        .enqueue(TaskQueueRecord::new("RebuildIndex", 1_000, None))
         .await;
     scheduler
         .process_available(&runtime)
@@ -552,7 +552,7 @@ async fn runtime_rebuild_index_payload_can_scope_rebuild_to_selected_entities() 
 
     scheduler
         .enqueue(
-            TaskQueueRecord::new("REBUILD_INDEX", 1_000, None).with_payload(
+            TaskQueueRecord::new("RebuildIndex", 1_000, None).with_payload(
                 json!({
                     "entities": ["Collection"]
                 })

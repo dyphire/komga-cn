@@ -1,11 +1,10 @@
-use super::{
-    RuntimeFollowUpTask, TaskExecutionError, TaskExecutionOutcome, TaskQueueRecord,
-    runtime_follow_up_task,
-};
+use super::{TaskExecutionError, TaskExecutionOutcome, TaskQueueRecord};
 use crate::operational_settings_access::load_server_settings;
 use crate::search::index_lifecycle::SearchEntityType;
 use crate::sqlite::write_models::server_settings::ServerSettingsStore;
-use komga_application::task_processing::TaskRuntimeContext;
+use komga_application::task_processing::{
+    RefreshBookMetadataPayload, TaskKind, TaskRequest, TaskRuntimeContext,
+};
 use serde_json::Value;
 
 fn thumbnail_max_edge(thumbnail_size: &str) -> i64 {
@@ -23,10 +22,10 @@ pub(super) async fn try_execute(
     task_target: Option<&str>,
 ) -> Option<Result<TaskExecutionOutcome, TaskExecutionError>> {
     match task.simple_type.as_str() {
-        "ANALYZE_BOOK" => Some(execute_analyze_book(runtime, task, task_target).await),
-        "REBUILD_INDEX" => Some(execute_rebuild_index(runtime, task).await),
-        "UPGRADE_INDEX" | "UpgradeIndex" => Some(Ok(TaskExecutionOutcome::completed())),
-        "FIND_BOOK_THUMBNAILS_TO_REGENERATE" => {
+        "AnalyzeBook" => Some(execute_analyze_book(runtime, task, task_target).await),
+        "RebuildIndex" => Some(execute_rebuild_index(runtime, task).await),
+        "UpgradeIndex" => Some(Ok(TaskExecutionOutcome::completed())),
+        "FindBookThumbnailsToRegenerate" => {
             Some(execute_find_book_thumbnails_to_regenerate(runtime, task).await)
         }
         _ => None,
@@ -40,7 +39,7 @@ async fn execute_analyze_book(
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
     let Some(book_id) = task_target else {
         return Err(TaskExecutionError::invalid_task(
-            "ANALYZE_BOOK task must include a book id",
+            "AnalyzeBook task must include a book id",
         ));
     };
 
@@ -50,16 +49,16 @@ async fn execute_analyze_book(
     if outcome.media_status.eq_ignore_ascii_case("READY") && !outcome.series_id.is_empty() {
         let follow_up_priority = task.priority.saturating_add(1);
         return Ok(TaskExecutionOutcome::with_follow_up_tasks(vec![
-            runtime_follow_up_task(RuntimeFollowUpTask::GenerateBookThumbnail {
-                book_id: book_id.clone(),
-                priority: follow_up_priority,
-            }),
-            runtime_follow_up_task(RuntimeFollowUpTask::RefreshBookMetadata {
-                book_id: book_id.clone(),
-                series_id: Some(outcome.series_id),
-                priority: follow_up_priority,
-                capabilities: None,
-            }),
+            TaskRequest::new(TaskKind::GenerateBookThumbnail)
+                .priority(follow_up_priority)
+                .into_queue_record_with_id(&book_id),
+            TaskRequest::with_payload(
+                TaskKind::RefreshBookMetadata,
+                RefreshBookMetadataPayload::new(book_id.clone()),
+            )
+            .priority(follow_up_priority)
+            .group(outcome.series_id)
+            .into_queue_record(),
         ]));
     }
 
@@ -98,10 +97,9 @@ async fn execute_find_book_thumbnails_to_regenerate(
     let follow_up_tasks = book_ids
         .into_iter()
         .map(|book_id| {
-            runtime_follow_up_task(RuntimeFollowUpTask::GenerateBookThumbnail {
-                book_id,
-                priority: task.priority,
-            })
+            TaskRequest::new(TaskKind::GenerateBookThumbnail)
+                .priority(task.priority)
+                .into_queue_record_with_id(&book_id)
         })
         .collect();
     Ok(TaskExecutionOutcome::with_follow_up_tasks(follow_up_tasks))
@@ -114,7 +112,7 @@ fn parse_rebuild_index_entities(
         return Ok(None);
     };
     let payload = serde_json::from_str::<Value>(payload).map_err(|error| {
-        TaskExecutionError::runtime(format!("REBUILD_INDEX payload must be valid JSON: {error}"))
+        TaskExecutionError::runtime(format!("RebuildIndex payload must be valid JSON: {error}"))
     })?;
     let Some(entities) = payload.get("entities") else {
         return Ok(None);
@@ -123,14 +121,14 @@ fn parse_rebuild_index_entities(
         return Ok(None);
     }
     let entity_values = entities.as_array().ok_or_else(|| {
-        TaskExecutionError::invalid_task("REBUILD_INDEX payload field 'entities' must be an array")
+        TaskExecutionError::invalid_task("RebuildIndex payload field 'entities' must be an array")
     })?;
 
     let mut parsed = Vec::new();
     for entity in entity_values {
         let entity_type = parse_rebuild_index_entity(entity).ok_or_else(|| {
             TaskExecutionError::runtime(format!(
-                "REBUILD_INDEX payload contains unsupported entity selector: {entity}"
+                "RebuildIndex payload contains unsupported entity selector: {entity}"
             ))
         })?;
         if !parsed.contains(&entity_type) {
@@ -433,7 +431,7 @@ mod tests {
         };
         let mut scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "thumbnail-finder-test");
-        let finder_task = TaskQueueRecord::new("FIND_BOOK_THUMBNAILS_TO_REGENERATE", 6, None)
+        let finder_task = TaskQueueRecord::new("FindBookThumbnailsToRegenerate", 6, None)
             .with_payload(serde_json::json!({ "for_bigger_result_only": false }).to_string());
 
         let result = execute_and_enqueue(&mut scheduler, &runtime, &finder_task, None).await;
@@ -444,8 +442,8 @@ mod tests {
             .take_available("thumbnail-finder-assert")
             .expect("finder should enqueue one generate thumbnail task");
 
-        assert_eq!(generated.id, "GENERATE_BOOK_THUMBNAIL_book-1");
-        assert_eq!(generated.simple_type, "GENERATE_BOOK_THUMBNAIL");
+        assert_eq!(generated.id, "GenerateBookThumbnail_book-1");
+        assert_eq!(generated.simple_type, "GenerateBookThumbnail");
         assert_eq!(generated.priority, 6);
         assert_eq!(generated.group, None);
 
@@ -502,7 +500,7 @@ mod tests {
         };
         let mut scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "thumbnail-finder-all-books-test");
-        let finder_task = TaskQueueRecord::new("FIND_BOOK_THUMBNAILS_TO_REGENERATE", 6, None)
+        let finder_task = TaskQueueRecord::new("FindBookThumbnailsToRegenerate", 6, None)
             .with_payload(serde_json::json!({ "for_bigger_result_only": false }).to_string());
 
         let result = execute_and_enqueue(&mut scheduler, &runtime, &finder_task, None).await;
@@ -520,8 +518,8 @@ mod tests {
         assert_eq!(
             generated,
             vec![
-                ("GENERATE_BOOK_THUMBNAIL_book-1".to_string(), 6),
-                ("GENERATE_BOOK_THUMBNAIL_book-2".to_string(), 6),
+                ("GenerateBookThumbnail_book-1".to_string(), 6),
+                ("GenerateBookThumbnail_book-2".to_string(), 6),
             ],
             "full thumbnail regeneration should target every non-deleted book and keep the finder task priority for Kotlin parity",
         );
@@ -536,8 +534,8 @@ mod tests {
         let runtime = fixture.runtime_context(false, false);
         let mut scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "analyze-book-follow-up-test");
-        let task = TaskQueueRecord::new("ANALYZE_BOOK_book-1", 90, Some("series-1".to_string()))
-            .with_simple_type("ANALYZE_BOOK");
+        let task = TaskQueueRecord::new("AnalyzeBook_book-1", 90, Some("series-1".to_string()))
+            .with_simple_type("AnalyzeBook");
 
         let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("book-1")).await;
         assert!(matches!(result, Some(Ok(()))));
@@ -582,14 +580,14 @@ mod tests {
             queued,
             vec![
                 (
-                    "GENERATE_BOOK_THUMBNAIL_book-1".to_string(),
-                    "GENERATE_BOOK_THUMBNAIL".to_string(),
+                    "GenerateBookThumbnail_book-1".to_string(),
+                    "GenerateBookThumbnail".to_string(),
                     91,
                     None,
                 ),
                 (
-                    "REFRESH_BOOK_METADATA_book-1".to_string(),
-                    "REFRESH_BOOK_METADATA".to_string(),
+                    "RefreshBookMetadata_book-1".to_string(),
+                    "RefreshBookMetadata".to_string(),
                     91,
                     Some("series-1".to_string()),
                 ),
@@ -609,8 +607,8 @@ mod tests {
             runtime.clone(),
             "analyze-book-disabled-dimensions-test",
         );
-        let task = TaskQueueRecord::new("ANALYZE_BOOK_book-1", 90, Some("series-1".to_string()))
-            .with_simple_type("ANALYZE_BOOK");
+        let task = TaskQueueRecord::new("AnalyzeBook_book-1", 90, Some("series-1".to_string()))
+            .with_simple_type("AnalyzeBook");
 
         let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("book-1")).await;
         assert!(matches!(result, Some(Ok(()))));
@@ -731,8 +729,8 @@ mod tests {
             runtime.clone(),
             "analyze-book-read-progress-adjust-test",
         );
-        let task = TaskQueueRecord::new("ANALYZE_BOOK_book-1", 90, Some("series-1".to_string()))
-            .with_simple_type("ANALYZE_BOOK");
+        let task = TaskQueueRecord::new("AnalyzeBook_book-1", 90, Some("series-1".to_string()))
+            .with_simple_type("AnalyzeBook");
 
         let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("book-1")).await;
         assert!(matches!(result, Some(Ok(()))));
@@ -935,8 +933,8 @@ mod tests {
             runtime.clone(),
             "analyze-book-read-progress-keep-test",
         );
-        let task = TaskQueueRecord::new("ANALYZE_BOOK_book-1", 90, Some("series-1".to_string()))
-            .with_simple_type("ANALYZE_BOOK");
+        let task = TaskQueueRecord::new("AnalyzeBook_book-1", 90, Some("series-1".to_string()))
+            .with_simple_type("AnalyzeBook");
 
         let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("book-1")).await;
         assert!(matches!(result, Some(Ok(()))));

@@ -428,7 +428,7 @@ fn background_task_iteration_logs_completion_and_failure_without_empty_poll_nois
     executor.block_on(async {
         let mut queue = success_queue.lock().await;
         queue
-            .enqueue(TaskQueueRecord::new("REBUILD_INDEX", 1_000, None))
+            .enqueue(TaskQueueRecord::new("RebuildIndex", 1_000, None))
             .await;
     });
     let success_logs = capture_router_logs_async_result(&config, {

@@ -2,10 +2,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
 use komga_application::task_processing::{
-    DefaultLibraryTaskEmitter, DefaultTaskProtocolCatalog, LibraryScanInterval,
-    LibraryScanPipeline, LibraryScanScheduleState, LibraryTaskBatch, LibraryTaskCommand,
-    LibraryTaskEmitter, ScanOneLibrary, ScanOneLibraryResult, ScanSchedulingTrigger,
-    TaskProcessingError, TaskQueueRecord, TaskRuntimeContext, TaskSchedule,
+    BookPayload, LibraryPayload, LibraryScanInterval, LibraryScanPipeline,
+    LibraryScanScheduleState, LibraryTaskBatch, RefreshBookMetadataPayload, ScanOneLibrary,
+    ScanOneLibraryResult, ScanSchedulingTrigger, SeriesPayload, TaskKind, TaskProcessingError,
+    TaskQueueRecord, TaskRequest, TaskRuntimeContext, TaskSchedule,
     normalize_library_scan_profiles,
 };
 use tokio::time::Instant;
@@ -17,34 +17,26 @@ use crate::tasks::media_queries::{
     load_books_with_missing_file_hash, load_library_hashing_flags, load_library_maintenance_flags,
 };
 
-use super::{
-    ExecutedLibraryScan, RuntimeFollowUpTask, enqueue_sidecar_refresh_tasks,
-    execute_scan_orchestration, runtime_follow_up_task,
-};
+use super::{ExecutedLibraryScan, enqueue_sidecar_refresh_tasks, execute_scan_orchestration};
 
 #[derive(Clone, Debug)]
-pub struct SqliteFilesystemLibraryScanPipeline<
-    E = DefaultLibraryTaskEmitter<DefaultTaskProtocolCatalog>,
-> {
+pub struct SqliteFilesystemLibraryScanPipeline {
     database_file: PathBuf,
     owns_main_database: bool,
-    library_task_emitter: E,
 }
 
-impl<E> SqliteFilesystemLibraryScanPipeline<E> {
-    pub fn new(database_file: impl Into<PathBuf>, library_task_emitter: E) -> Self {
+impl SqliteFilesystemLibraryScanPipeline {
+    pub fn new(database_file: impl Into<PathBuf>) -> Self {
         Self {
             database_file: database_file.into(),
             owns_main_database: true,
-            library_task_emitter,
         }
     }
 
-    pub fn for_runtime(runtime: &TaskRuntimeContext, library_task_emitter: E) -> Self {
+    pub fn for_runtime(runtime: &TaskRuntimeContext) -> Self {
         Self {
             database_file: runtime.database_file.clone(),
             owns_main_database: runtime.owns_main_database,
-            library_task_emitter,
         }
     }
 
@@ -58,30 +50,28 @@ impl<E> SqliteFilesystemLibraryScanPipeline<E> {
                 TaskProcessingError::runtime(format!("load library scan profiles: {error}"))
             })
     }
-}
 
-impl<E> SqliteFilesystemLibraryScanPipeline<E>
-where
-    E: LibraryTaskEmitter,
-{
     fn emit_scan_tasks<I>(&self, tasks: I) -> LibraryTaskBatch
     where
         I: IntoIterator<Item = (String, TaskSchedule)>,
     {
-        let mut planned_tasks = Vec::new();
-        for (library_id, schedule) in tasks {
-            planned_tasks.extend(
-                self.library_task_emitter
-                    .emit(LibraryTaskCommand::ScanLibrary {
-                        library_id,
-                        deep_scan: false,
-                        schedule,
-                    })
-                    .tasks,
-            );
-        }
-
-        LibraryTaskBatch::new(planned_tasks)
+        let records = tasks
+            .into_iter()
+            .map(|(library_id, schedule)| {
+                let deep_scan = false;
+                let priority = schedule.scan_priority();
+                TaskRequest::with_payload(
+                    TaskKind::ScanLibrary,
+                    komga_application::task_processing::ScanLibraryPayload::new(
+                        &library_id,
+                        deep_scan,
+                    ),
+                )
+                .priority(priority)
+                .into_queue_record_with_id(&format!("{library_id}_DEEP_{deep_scan}"))
+            })
+            .collect();
+        LibraryTaskBatch::new(records)
     }
 
     async fn schedule_startup(&self) -> Result<LibraryTaskBatch, TaskProcessingError> {
@@ -201,13 +191,12 @@ where
         for series in &executed_scan.scan.series_rows {
             for book in &series.books {
                 if analyzable_book_ids.contains(&book.book_id) {
-                    follow_up_tasks.push(runtime_follow_up_task(
-                        RuntimeFollowUpTask::AnalyzeBook {
-                            book_id: book.book_id.clone(),
-                            series_id: series.series_id.clone(),
-                            priority: DEFAULT_PRIORITY,
-                        },
-                    ));
+                    follow_up_tasks.push(
+                        TaskRequest::new(TaskKind::AnalyzeBook)
+                            .priority(DEFAULT_PRIORITY)
+                            .group(series.series_id.clone())
+                            .into_queue_record_with_id(&book.book_id),
+                    );
                 }
             }
         }
@@ -222,10 +211,11 @@ where
                         ))
                     })?;
             for book_id in book_ids {
-                follow_up_tasks.push(runtime_follow_up_task(RuntimeFollowUpTask::HashBook {
-                    book_id,
-                    priority: LOWEST_PRIORITY,
-                }));
+                follow_up_tasks.push(
+                    TaskRequest::with_payload(TaskKind::HashBook, BookPayload::new(book_id))
+                        .priority(LOWEST_PRIORITY)
+                        .into_queue_record(),
+                );
             }
         }
 
@@ -239,28 +229,32 @@ where
                         ))
                     })?;
             for book_id in book_ids {
-                follow_up_tasks.push(runtime_follow_up_task(
-                    RuntimeFollowUpTask::HashBookKoreader {
-                        book_id,
-                        priority: LOWEST_PRIORITY,
-                    },
-                ));
+                follow_up_tasks.push(
+                    TaskRequest::with_payload(
+                        TaskKind::HashBookKoreader,
+                        BookPayload::new(book_id),
+                    )
+                    .priority(LOWEST_PRIORITY)
+                    .into_queue_record(),
+                );
             }
         }
 
         if hashing_flags.hash_pages {
-            follow_up_tasks.push(runtime_follow_up_task(
-                RuntimeFollowUpTask::FindBooksWithMissingPageHash {
-                    library_id: library_id.to_string(),
-                },
-            ));
+            follow_up_tasks.push(
+                TaskRequest::with_payload(
+                    TaskKind::FindBooksWithMissingPageHash,
+                    LibraryPayload::new(library_id.to_string()),
+                )
+                .priority(LOWEST_PRIORITY)
+                .into_queue_record(),
+            );
         }
-        follow_up_tasks.push(runtime_follow_up_task(
-            RuntimeFollowUpTask::FindDuplicatePagesToDelete {
-                library_id: library_id.to_string(),
-                priority: LOWEST_PRIORITY,
-            },
-        ));
+        follow_up_tasks.push(
+            TaskRequest::new(TaskKind::FindDuplicatePagesToDelete)
+                .priority(LOWEST_PRIORITY)
+                .into_queue_record_with_id(library_id),
+        );
 
         let maintenance_flags =
             load_library_maintenance_flags(self.database_file.as_path(), library_id)
@@ -277,34 +271,38 @@ where
                     ))
                 })?;
             for book in books {
-                follow_up_tasks.push(runtime_follow_up_task(
-                    RuntimeFollowUpTask::RepairExtension {
-                        book_id: book.book_id,
-                        series_id: book.series_id,
-                        priority: LOW_PRIORITY,
-                    },
-                ));
+                follow_up_tasks.push(
+                    TaskRequest::with_payload(
+                        TaskKind::RepairExtension,
+                        BookPayload::new(book.book_id.clone()),
+                    )
+                    .priority(LOW_PRIORITY)
+                    .group(book.series_id.clone())
+                    .into_queue_record(),
+                );
             }
         }
         if maintenance_flags.convert_to_cbz {
-            follow_up_tasks.push(runtime_follow_up_task(
-                RuntimeFollowUpTask::FindBooksToConvert {
-                    library_id: library_id.to_string(),
-                    priority: LOWEST_PRIORITY,
-                },
-            ));
+            follow_up_tasks.push(
+                TaskRequest::new(TaskKind::FindBooksToConvert)
+                    .priority(LOWEST_PRIORITY)
+                    .into_queue_record_with_id(library_id),
+            );
         }
 
         let mut changed_series_ids = executed_scan.changed_series_ids.to_vec();
         changed_series_ids.sort();
         changed_series_ids.dedup();
         for series_id in changed_series_ids {
-            follow_up_tasks.push(runtime_follow_up_task(
-                RuntimeFollowUpTask::RefreshSeriesMetadata {
-                    series_id,
-                    priority: DEFAULT_PRIORITY,
-                },
-            ));
+            follow_up_tasks.push(
+                TaskRequest::with_payload(
+                    TaskKind::RefreshSeriesMetadata,
+                    SeriesPayload::new(&series_id),
+                )
+                .priority(DEFAULT_PRIORITY)
+                .group(&series_id)
+                .into_queue_record(),
+            );
         }
 
         let book_series_ids = executed_scan
@@ -333,14 +331,18 @@ where
         for (book_id, capabilities) in book_metadata_capabilities {
             let capabilities =
                 (!capabilities.is_empty()).then(|| capabilities.into_iter().collect::<Vec<_>>());
-            follow_up_tasks.push(runtime_follow_up_task(
-                RuntimeFollowUpTask::RefreshBookMetadata {
-                    book_id: book_id.clone(),
-                    series_id: book_series_ids.get(&book_id).cloned(),
-                    priority: DEFAULT_PRIORITY,
-                    capabilities,
-                },
-            ));
+            {
+                let mut payload = RefreshBookMetadataPayload::new(&book_id);
+                if let Some(caps) = capabilities {
+                    payload = payload.with_capabilities(caps);
+                }
+                let mut req = TaskRequest::with_payload(TaskKind::RefreshBookMetadata, payload)
+                    .priority(DEFAULT_PRIORITY);
+                if let Some(gid) = book_series_ids.get(&book_id) {
+                    req = req.group(gid.clone());
+                }
+                follow_up_tasks.push(req.into_queue_record());
+            }
         }
 
         enqueue_sidecar_refresh_tasks(
@@ -354,18 +356,13 @@ where
     }
 }
 
-impl Default
-    for SqliteFilesystemLibraryScanPipeline<DefaultLibraryTaskEmitter<DefaultTaskProtocolCatalog>>
-{
+impl Default for SqliteFilesystemLibraryScanPipeline {
     fn default() -> Self {
-        Self::new(PathBuf::new(), DefaultLibraryTaskEmitter::default())
+        Self::new(PathBuf::new())
     }
 }
 
-impl<E> LibraryScanPipeline for SqliteFilesystemLibraryScanPipeline<E>
-where
-    E: LibraryTaskEmitter,
-{
+impl LibraryScanPipeline for SqliteFilesystemLibraryScanPipeline {
     async fn schedule(
         &self,
         trigger: ScanSchedulingTrigger,
@@ -464,10 +461,7 @@ mod tests {
         )
         .await;
 
-        let pipeline = SqliteFilesystemLibraryScanPipeline::new(
-            db_path.clone(),
-            DefaultLibraryTaskEmitter::default(),
-        );
+        let pipeline = SqliteFilesystemLibraryScanPipeline::new(db_path.clone());
         let scheduled = pipeline
             .schedule(
                 ScanSchedulingTrigger::Startup,
@@ -478,8 +472,8 @@ mod tests {
             .into_queue_records();
 
         assert_eq!(scheduled.len(), 1);
-        assert_eq!(scheduled[0].id, "SCAN_LIBRARY_library-1_DEEP_false");
-        assert_eq!(scheduled[0].simple_type, "SCAN_LIBRARY");
+        assert_eq!(scheduled[0].id, "ScanLibrary_library-1_DEEP_false");
+        assert_eq!(scheduled[0].simple_type, "ScanLibrary");
         assert_eq!(scheduled[0].priority, 4);
 
         let _ = std::fs::remove_file(db_path);
@@ -499,10 +493,7 @@ mod tests {
         )
         .await;
 
-        let pipeline = SqliteFilesystemLibraryScanPipeline::new(
-            db_path.clone(),
-            DefaultLibraryTaskEmitter::default(),
-        );
+        let pipeline = SqliteFilesystemLibraryScanPipeline::new(db_path.clone());
         let mut state = LibraryScanScheduleState::default();
         state.mark_elapsed("library-due", Duration::from_secs((60 * 60) + 5));
         state.mark_elapsed("library-not-due", Duration::from_secs(5));
@@ -514,7 +505,7 @@ mod tests {
             .into_queue_records();
 
         assert_eq!(scheduled.len(), 1);
-        assert_eq!(scheduled[0].id, "SCAN_LIBRARY_library-due_DEEP_false");
+        assert_eq!(scheduled[0].id, "ScanLibrary_library-due_DEEP_false");
 
         let _ = std::fs::remove_file(db_path);
     }
@@ -602,10 +593,7 @@ VALUES (?, ?, ?, ?)"#,
         .expect("existing oneshot book metadata should be inserted");
         pool.close().await;
 
-        let pipeline = SqliteFilesystemLibraryScanPipeline::new(
-            db_path.clone(),
-            DefaultLibraryTaskEmitter::default(),
-        );
+        let pipeline = SqliteFilesystemLibraryScanPipeline::new(db_path.clone());
         let result = pipeline
             .run(ScanOneLibrary::new("library-1".to_string(), false))
             .await
@@ -613,7 +601,7 @@ VALUES (?, ?, ?, ?)"#,
         let refresh_series_tasks = result
             .follow_up_tasks
             .into_iter()
-            .filter(|task| task.simple_type == "REFRESH_SERIES_METADATA")
+            .filter(|task| task.simple_type == "RefreshSeriesMetadata")
             .collect::<Vec<_>>();
 
         assert_eq!(refresh_series_tasks.len(), 2);
@@ -718,10 +706,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         .expect("deleted book metadata row should be inserted");
         pool.close().await;
 
-        let pipeline = SqliteFilesystemLibraryScanPipeline::new(
-            db_path.clone(),
-            DefaultLibraryTaskEmitter::default(),
-        );
+        let pipeline = SqliteFilesystemLibraryScanPipeline::new(db_path.clone());
         let result = pipeline
             .run(ScanOneLibrary::new("library-1".to_string(), false))
             .await
@@ -729,7 +714,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         let refresh_book_tasks = result
             .follow_up_tasks
             .iter()
-            .filter(|task| task.simple_type == "REFRESH_BOOK_METADATA")
+            .filter(|task| task.simple_type == "RefreshBookMetadata")
             .collect::<Vec<_>>();
 
         assert_eq!(refresh_book_tasks.len(), 1);
@@ -758,13 +743,13 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
                 .and_then(|value| value.as_str()),
             refresh_book_tasks[0]
                 .id
-                .strip_prefix("REFRESH_BOOK_METADATA_"),
+                .strip_prefix("RefreshBookMetadata_"),
         );
 
         let refresh_series_tasks = result
             .follow_up_tasks
             .iter()
-            .filter(|task| task.simple_type == "REFRESH_SERIES_METADATA")
+            .filter(|task| task.simple_type == "RefreshSeriesMetadata")
             .collect::<Vec<_>>();
         assert_eq!(refresh_series_tasks.len(), 1);
         assert_eq!(
@@ -788,10 +773,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         )
         .await;
 
-        let pipeline = SqliteFilesystemLibraryScanPipeline::new(
-            db_path.clone(),
-            DefaultLibraryTaskEmitter::default(),
-        );
+        let pipeline = SqliteFilesystemLibraryScanPipeline::new(db_path.clone());
         let error = pipeline
             .schedule(
                 ScanSchedulingTrigger::Startup,

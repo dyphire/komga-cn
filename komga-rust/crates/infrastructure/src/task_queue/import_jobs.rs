@@ -10,7 +10,7 @@ pub(super) async fn try_execute(
     task: &TaskQueueRecord,
 ) -> Option<Result<TaskExecutionOutcome, TaskExecutionError>> {
     match task.simple_type.as_str() {
-        "IMPORT_BOOK" => Some(
+        "ImportBook" => Some(
             process_import_book_task(runtime, task)
                 .await
                 .map(TaskExecutionOutcome::with_follow_up_tasks),
@@ -26,7 +26,7 @@ async fn process_import_book_task(
     process_import_task(
         runtime,
         task,
-        "IMPORT_BOOK task requires serialized payload",
+        "ImportBook task requires serialized payload",
         |service, payload, priority| async move {
             service
                 .process_queued_book_payload(&payload, priority)

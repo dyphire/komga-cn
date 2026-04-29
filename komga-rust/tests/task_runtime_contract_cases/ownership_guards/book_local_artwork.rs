@@ -39,7 +39,7 @@ async fn runtime_skips_book_local_artwork_refresh_when_library_import_local_artw
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(TaskQueueRecord::new(
-            "REFRESH_BOOK_LOCAL_ARTWORK:book-1",
+            "RefreshBookLocalArtwork:book-1",
             1_000,
             Some("book-1".to_string()),
         ))
@@ -110,7 +110,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_local_artwork_task() {
     sqlx::query(
         "INSERT INTO TASK (ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER) VALUES (?, ?, ?, ?, ?, ?, NULL)",
     )
-    .bind("REFRESH_BOOK_LOCAL_ARTWORK_book-1")
+    .bind("RefreshBookLocalArtwork_book-1")
     .bind(80_i64)
     .bind(Option::<String>::None)
     .bind("org.gotson.komga.application.tasks.Task$RefreshBookLocalArtwork")
@@ -120,7 +120,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_local_artwork_task() {
             "bookId": "book-1",
             "priority": 80,
             "groupId": Value::Null,
-            "uniqueId": "REFRESH_BOOK_LOCAL_ARTWORK_book-1"
+            "uniqueId": "RefreshBookLocalArtwork_book-1"
         })
         .to_string(),
     )
@@ -193,8 +193,8 @@ async fn runtime_imports_multiple_filesystem_book_local_artworks_and_selects_onl
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(
-            TaskQueueRecord::new("REFRESH_BOOK_LOCAL_ARTWORK_book-1", 1_000, None)
-                .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK"),
+            TaskQueueRecord::new("RefreshBookLocalArtwork_book-1", 1_000, None)
+                .with_simple_type("RefreshBookLocalArtwork"),
         )
         .await;
     scheduler
@@ -284,8 +284,8 @@ async fn runtime_preserves_existing_non_generated_selection_when_importing_book_
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(
-            TaskQueueRecord::new("REFRESH_BOOK_LOCAL_ARTWORK_book-1", 1_000, None)
-                .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK"),
+            TaskQueueRecord::new("RefreshBookLocalArtwork_book-1", 1_000, None)
+                .with_simple_type("RefreshBookLocalArtwork"),
         )
         .await;
     scheduler.process_available(&runtime).await.expect(
@@ -379,8 +379,8 @@ async fn runtime_replaces_generated_selection_when_importing_book_local_artworks
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(
-            TaskQueueRecord::new("REFRESH_BOOK_LOCAL_ARTWORK_book-1", 1_000, None)
-                .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK"),
+            TaskQueueRecord::new("RefreshBookLocalArtwork_book-1", 1_000, None)
+                .with_simple_type("RefreshBookLocalArtwork"),
         )
         .await;
     scheduler
@@ -470,8 +470,8 @@ async fn runtime_book_local_artwork_refresh_emits_thumbnail_book_added_events() 
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(
-            TaskQueueRecord::new("REFRESH_BOOK_LOCAL_ARTWORK_book-1", 1_000, None)
-                .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK"),
+            TaskQueueRecord::new("RefreshBookLocalArtwork_book-1", 1_000, None)
+                .with_simple_type("RefreshBookLocalArtwork"),
         )
         .await;
     scheduler

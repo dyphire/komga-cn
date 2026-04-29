@@ -56,7 +56,7 @@ pub(in crate::task_queue) struct BookArchiveSource {
 }
 
 pub(in crate::task_queue) fn remove_hashed_pages_task_id(book_id: &str) -> String {
-    format!("REMOVE_HASHED_PAGES_{book_id}")
+    format!("RemoveHashedPages_{book_id}")
 }
 
 pub(in crate::task_queue) async fn remove_hashed_pages(

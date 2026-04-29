@@ -89,7 +89,7 @@ async fn enqueue_books_best_effort(
 
 fn kotlin_import_book_task_id(book: &BooksImportEntry) -> String {
     format!(
-        "IMPORT_BOOK_{}_{}",
+        "ImportBook_{}_{}",
         book.series_id,
         book.source_file.display()
     )
@@ -281,7 +281,7 @@ mod tests {
             _urgent: bool,
         ) -> Result<(), String> {
             let task_record = task_records.into_iter().next().expect("task should exist");
-            if task_record.id == "IMPORT_BOOK_series-1_/tmp/book-a.cbz" {
+            if task_record.id == "ImportBook_series-1_/tmp/book-a.cbz" {
                 Err("first enqueue failed".to_string())
             } else {
                 self.persisted_ids.lock().await.push(task_record.id);
@@ -422,7 +422,7 @@ mod tests {
 
         assert_eq!(
             persisted_ids.lock().await.clone(),
-            vec!["IMPORT_BOOK_series-2_/tmp/book-b.cbz".to_string()]
+            vec!["ImportBook_series-2_/tmp/book-b.cbz".to_string()]
         );
     }
 }

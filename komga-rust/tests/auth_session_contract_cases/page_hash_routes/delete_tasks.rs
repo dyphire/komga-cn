@@ -84,7 +84,7 @@ async fn router_post_page_hash_delete_all_enqueues_remove_hashed_pages_tasks_wit
     assert_eq!(rows.len(), 2);
     assert_eq!(
         rows[0].get::<String, _>("ID"),
-        "REMOVE_HASHED_PAGES_book-known-1"
+        "RemoveHashedPages_book-known-1"
     );
     assert_eq!(rows[0].get::<String, _>("SIMPLE_TYPE"), "RemoveHashedPages");
     assert_eq!(rows[0].get::<Option<String>, _>("GROUP_ID"), None);
@@ -112,13 +112,13 @@ async fn router_post_page_hash_delete_all_enqueues_remove_hashed_pages_tasks_wit
             ],
             "priority": 4,
             "groupId": Value::Null,
-            "uniqueId": "REMOVE_HASHED_PAGES_book-known-1"
+            "uniqueId": "RemoveHashedPages_book-known-1"
         })
     );
 
     assert_eq!(
         rows[1].get::<String, _>("ID"),
-        "REMOVE_HASHED_PAGES_book-known-2"
+        "RemoveHashedPages_book-known-2"
     );
     assert_eq!(rows[1].get::<String, _>("SIMPLE_TYPE"), "RemoveHashedPages");
     assert_eq!(rows[1].get::<Option<String>, _>("GROUP_ID"), None);
@@ -139,7 +139,7 @@ async fn router_post_page_hash_delete_all_enqueues_remove_hashed_pages_tasks_wit
             ],
             "priority": 4,
             "groupId": Value::Null,
-            "uniqueId": "REMOVE_HASHED_PAGES_book-known-2"
+            "uniqueId": "RemoveHashedPages_book-known-2"
         })
     );
 
@@ -250,7 +250,7 @@ async fn router_post_page_hash_delete_match_enqueues_remove_hashed_pages_task_wi
     assert_eq!(rows.len(), 1);
     assert_eq!(
         rows[0].get::<String, _>("ID"),
-        "REMOVE_HASHED_PAGES_book-known-1"
+        "RemoveHashedPages_book-known-1"
     );
     assert_eq!(rows[0].get::<String, _>("SIMPLE_TYPE"), "RemoveHashedPages");
     assert_eq!(rows[0].get::<Option<String>, _>("GROUP_ID"), None);
@@ -271,7 +271,7 @@ async fn router_post_page_hash_delete_match_enqueues_remove_hashed_pages_task_wi
             ],
             "priority": 4,
             "groupId": Value::Null,
-            "uniqueId": "REMOVE_HASHED_PAGES_book-known-1"
+            "uniqueId": "RemoveHashedPages_book-known-1"
         })
     );
 
@@ -321,7 +321,7 @@ async fn router_post_page_hash_delete_match_accepts_missing_hash_and_still_enque
     assert_eq!(rows.len(), 1);
     assert_eq!(
         rows[0].get::<String, _>("ID"),
-        "REMOVE_HASHED_PAGES_book-missing-hash"
+        "RemoveHashedPages_book-missing-hash"
     );
     assert_eq!(rows[0].get::<String, _>("SIMPLE_TYPE"), "RemoveHashedPages");
     assert_eq!(rows[0].get::<Option<String>, _>("GROUP_ID"), None);

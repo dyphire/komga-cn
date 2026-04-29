@@ -1,4 +1,7 @@
 use super::*;
+use komga_application::task_processing::{
+    RefreshBookMetadataPayload, SeriesPayload, TaskKind, TaskRequest,
+};
 
 pub(in crate::task_queue) fn enqueue_sidecar_refresh_tasks(
     tasks: &mut Vec<TaskQueueRecord>,
@@ -39,24 +42,26 @@ pub(in crate::task_queue) fn enqueue_sidecar_refresh_tasks(
                 if let Some(series_id) = series_by_url.get(&sidecar.parent_url)
                     && seen_series_metadata.insert(series_id.clone())
                 {
-                    tasks.push(runtime_follow_up_task(
-                        RuntimeFollowUpTask::RefreshSeriesMetadata {
-                            series_id: series_id.clone(),
-                            priority,
-                        },
-                    ));
+                    tasks.push(
+                        TaskRequest::with_payload(
+                            TaskKind::RefreshSeriesMetadata,
+                            SeriesPayload::new(series_id.clone()),
+                        )
+                        .priority(priority)
+                        .group(series_id.clone())
+                        .into_queue_record(),
+                    );
                 }
             }
             (ScannedSidecarSource::Series, ScannedSidecarType::Artwork) => {
                 if let Some(series_id) = series_by_url.get(&sidecar.parent_url)
                     && seen_series_artwork.insert(series_id.clone())
                 {
-                    tasks.push(runtime_follow_up_task(
-                        RuntimeFollowUpTask::RefreshSeriesLocalArtwork {
-                            series_id: series_id.clone(),
-                            priority,
-                        },
-                    ));
+                    tasks.push(
+                        TaskRequest::new(TaskKind::RefreshSeriesLocalArtwork)
+                            .priority(priority)
+                            .into_queue_record_with_id(series_id),
+                    );
                 }
             }
             (ScannedSidecarSource::Book, ScannedSidecarType::Metadata) => {
@@ -64,26 +69,28 @@ pub(in crate::task_queue) fn enqueue_sidecar_refresh_tasks(
                     && seen_books_metadata.insert(book_id.clone())
                 {
                     let group_id = book_series_by_url.get(&sidecar.parent_url).cloned();
-                    tasks.push(runtime_follow_up_task(
-                        RuntimeFollowUpTask::RefreshBookMetadata {
-                            book_id: book_id.clone(),
-                            series_id: group_id,
-                            priority,
-                            capabilities: None,
-                        },
-                    ));
+                    {
+                        let mut req = TaskRequest::with_payload(
+                            TaskKind::RefreshBookMetadata,
+                            RefreshBookMetadataPayload::new(book_id.clone()),
+                        )
+                        .priority(priority);
+                        if let Some(ref gid) = group_id {
+                            req = req.group(gid.clone());
+                        }
+                        tasks.push(req.into_queue_record());
+                    }
                 }
             }
             (ScannedSidecarSource::Book, ScannedSidecarType::Artwork) => {
                 if let Some(book_id) = book_by_url.get(&sidecar.parent_url)
                     && seen_books_artwork.insert(book_id.clone())
                 {
-                    tasks.push(runtime_follow_up_task(
-                        RuntimeFollowUpTask::RefreshBookLocalArtwork {
-                            book_id: book_id.clone(),
-                            priority,
-                        },
-                    ));
+                    tasks.push(
+                        TaskRequest::new(TaskKind::RefreshBookLocalArtwork)
+                            .priority(priority)
+                            .into_queue_record_with_id(book_id),
+                    );
                 }
             }
         }

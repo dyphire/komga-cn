@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use komga_application::task_processing::{
-    DefaultLibraryTaskEmitter, LibraryScanPipeline, LibraryScanProfile, LibraryScanScheduleState,
-    LibraryTaskBatch, ScanSchedulingTrigger, TaskRuntimeConfig, TaskRuntimeContext,
+    LibraryScanPipeline, LibraryScanProfile, LibraryScanScheduleState, LibraryTaskBatch,
+    ScanSchedulingTrigger, TaskKind, TaskRequest, TaskRuntimeConfig, TaskRuntimeContext,
 };
 use serde_json::Value;
 use tokio::runtime::Handle;
@@ -14,7 +14,6 @@ use tracing::{Instrument, Span, error, info};
 
 use super::execution_pool::TaskExecutionPoolHandle;
 use super::library_scan_pipeline::SqliteFilesystemLibraryScanPipeline;
-use super::task_protocol::runtime_startup_task;
 use super::{TaskExecutionError, TaskExecutionResult, TaskQueueRecord, TaskQueueScheduler};
 use crate::tasks::library_scan_profiles::load_persisted_library_scan_profiles;
 
@@ -764,6 +763,13 @@ pub async fn cleanup_authentication_activity_once(
     Ok(())
 }
 
+fn startup_task_record(task_name: &str) -> TaskQueueRecord {
+    match TaskKind::parse(task_name) {
+        Ok(kind) => TaskRequest::new(kind).priority(1_000).into_queue_record(),
+        Err(_) => TaskQueueRecord::new(task_name.to_string(), 1_000, None),
+    }
+}
+
 async fn bootstrap_startup_search_task_inner(
     task_queue: &mut TaskQueueScheduler,
     runtime: &TaskRuntimeContext,
@@ -777,7 +783,7 @@ async fn bootstrap_startup_search_task_inner(
         return Ok(0);
     };
 
-    task_queue.enqueue(runtime_startup_task(task_name)).await;
+    task_queue.enqueue(startup_task_record(task_name)).await;
     Ok(1)
 }
 
@@ -897,61 +903,52 @@ async fn schedule_startup_library_scan_batch(
     runtime: &TaskRuntimeContext,
     action: &str,
 ) -> Result<LibraryTaskBatch, String> {
-    SqliteFilesystemLibraryScanPipeline::new(
-        runtime.database_file.clone(),
-        DefaultLibraryTaskEmitter::default(),
-    )
-    .schedule(
-        ScanSchedulingTrigger::Startup,
-        &LibraryScanScheduleState::default(),
-    )
-    .await
-    .map_err(|error| format!("{action}: {error}"))
+    SqliteFilesystemLibraryScanPipeline::new(runtime.database_file.clone())
+        .schedule(
+            ScanSchedulingTrigger::Startup,
+            &LibraryScanScheduleState::default(),
+        )
+        .await
+        .map_err(|error| format!("{action}: {error}"))
 }
 
 async fn schedule_periodic_library_scan_batch(
     runtime: &TaskRuntimeContext,
     last_run_by_library: &HashMap<String, tokio::time::Instant>,
 ) -> Result<LibraryTaskBatch, String> {
-    SqliteFilesystemLibraryScanPipeline::new(
-        runtime.database_file.clone(),
-        DefaultLibraryTaskEmitter::default(),
-    )
-    .schedule(
-        ScanSchedulingTrigger::Tick,
-        &LibraryScanScheduleState {
-            elapsed_since_last_run_by_library: last_run_by_library
-                .iter()
-                .map(|(library_id, last_run)| (library_id.clone(), last_run.elapsed()))
-                .collect(),
-        },
-    )
-    .await
-    .map_err(|error| format!("schedule periodic library scans: {error}"))
+    SqliteFilesystemLibraryScanPipeline::new(runtime.database_file.clone())
+        .schedule(
+            ScanSchedulingTrigger::Tick,
+            &LibraryScanScheduleState {
+                elapsed_since_last_run_by_library: last_run_by_library
+                    .iter()
+                    .map(|(library_id, last_run)| (library_id.clone(), last_run.elapsed()))
+                    .collect(),
+            },
+        )
+        .await
+        .map_err(|error| format!("schedule periodic library scans: {error}"))
 }
 
 async fn sync_periodic_library_scan_state(
     runtime: &TaskRuntimeContext,
     last_run_by_library: &mut HashMap<String, tokio::time::Instant>,
 ) -> Result<(), String> {
-    SqliteFilesystemLibraryScanPipeline::new(
-        runtime.database_file.clone(),
-        DefaultLibraryTaskEmitter::default(),
-    )
-    .sync_periodic_library_scan_state(last_run_by_library)
-    .await
-    .map_err(|error| format!("build periodic library scan state: {error}"))
+    SqliteFilesystemLibraryScanPipeline::new(runtime.database_file.clone())
+        .sync_periodic_library_scan_state(last_run_by_library)
+        .await
+        .map_err(|error| format!("build periodic library scan state: {error}"))
 }
 
 fn periodic_library_scan_tasks(
     batch: LibraryTaskBatch,
 ) -> Result<Vec<(String, TaskQueueRecord)>, String> {
     batch
-        .tasks
+        .records
         .into_iter()
-        .map(|task| {
-            let library_id = periodic_scan_task_library_id(task.payload.as_deref())?;
-            Ok((library_id, task.into_queue_record()))
+        .map(|record| {
+            let library_id = periodic_scan_task_library_id(record.payload.as_deref())?;
+            Ok((library_id, record))
         })
         .collect()
 }

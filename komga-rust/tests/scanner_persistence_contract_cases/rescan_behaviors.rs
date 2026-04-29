@@ -1,8 +1,6 @@
 use super::support::*;
 use super::*;
-use komga_application::task_processing::{
-    DefaultLibraryTaskEmitter, LibraryScanPipeline, ScanOneLibrary,
-};
+use komga_application::task_processing::{LibraryScanPipeline, ScanOneLibrary};
 use komga_infrastructure::task_queue::library_scan_pipeline::SqliteFilesystemLibraryScanPipeline;
 use std::sync::OnceLock;
 use tokio::sync::Mutex;
@@ -559,10 +557,7 @@ async fn scanner_regular_oneshot_rescan_skips_metadata_refresh_follow_ups_when_r
 
     tokio::time::sleep(Duration::from_millis(1100)).await;
 
-    let pipeline = SqliteFilesystemLibraryScanPipeline::new(
-        fixture.paths.main_db.clone(),
-        DefaultLibraryTaskEmitter::default(),
-    );
+    let pipeline = SqliteFilesystemLibraryScanPipeline::new(fixture.paths.main_db.clone());
     let result = pipeline
         .run(ScanOneLibrary::new("library-1", false))
         .await
@@ -574,7 +569,7 @@ async fn scanner_regular_oneshot_rescan_skips_metadata_refresh_follow_ups_when_r
         .filter(|task| {
             matches!(
                 task.simple_type.as_str(),
-                "REFRESH_SERIES_METADATA" | "REFRESH_BOOK_METADATA" | "ANALYZE_BOOK"
+                "RefreshSeriesMetadata" | "RefreshBookMetadata" | "AnalyzeBook"
             )
         })
         .map(|task| task.simple_type.clone())
@@ -612,10 +607,7 @@ async fn scanner_regular_rescan_skips_sidecar_metadata_refresh_when_legacy_sidec
     .expect("sidecar timestamps should be rewritten to the legacy datetime shape");
     pool.close().await;
 
-    let pipeline = SqliteFilesystemLibraryScanPipeline::new(
-        fixture.paths.main_db.clone(),
-        DefaultLibraryTaskEmitter::default(),
-    );
+    let pipeline = SqliteFilesystemLibraryScanPipeline::new(fixture.paths.main_db.clone());
     let result = pipeline
         .run(ScanOneLibrary::new("library-1", false))
         .await
@@ -627,7 +619,7 @@ async fn scanner_regular_rescan_skips_sidecar_metadata_refresh_when_legacy_sidec
         .filter(|task| {
             matches!(
                 task.simple_type.as_str(),
-                "REFRESH_SERIES_METADATA" | "REFRESH_BOOK_METADATA"
+                "RefreshSeriesMetadata" | "RefreshBookMetadata"
             )
         })
         .map(|task| task.simple_type.clone())

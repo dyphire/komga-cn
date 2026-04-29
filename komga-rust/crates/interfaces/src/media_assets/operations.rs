@@ -39,8 +39,8 @@ pub async fn book_analyze(
     enqueue_task_records(
         &app,
         vec![
-            TaskQueueRecord::new(format!("ANALYZE_BOOK_{book_id}"), 6, Some(book.series_id))
-                .with_simple_type("ANALYZE_BOOK"),
+            TaskQueueRecord::new(format!("AnalyzeBook_{book_id}"), 6, Some(book.series_id))
+                .with_simple_type("AnalyzeBook"),
         ],
     )
     .await
@@ -71,13 +71,13 @@ pub async fn book_metadata_refresh(
         &app,
         vec![
             TaskQueueRecord::new(
-                format!("REFRESH_BOOK_METADATA_{book_id}"),
+                format!("RefreshBookMetadata_{book_id}"),
                 6,
                 Some(book.series_id.clone()),
             )
-            .with_simple_type("REFRESH_BOOK_METADATA"),
-            TaskQueueRecord::new(format!("REFRESH_BOOK_LOCAL_ARTWORK_{book_id}"), 6, None)
-                .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK"),
+            .with_simple_type("RefreshBookMetadata"),
+            TaskQueueRecord::new(format!("RefreshBookLocalArtwork_{book_id}"), 6, None)
+                .with_simple_type("RefreshBookLocalArtwork"),
         ],
     )
     .await
@@ -133,11 +133,11 @@ pub async fn book_metadata_update(
 
             if let Some(series_id) = series_id {
                 let task = TaskQueueRecord::new(
-                    format!("AGGREGATE_SERIES_METADATA_{series_id}"),
+                    format!("AggregateSeriesMetadata_{series_id}"),
                     80,
                     Some(series_id),
                 )
-                .with_simple_type("AGGREGATE_SERIES_METADATA");
+                .with_simple_type("AggregateSeriesMetadata");
                 if let Err(error) = process_task_side_effects(&app, vec![task]).await {
                     return internal_error_response(error);
                 }
@@ -245,11 +245,11 @@ pub async fn book_metadata_batch_update(
             .into_iter()
             .map(|series_id| {
                 TaskQueueRecord::new(
-                    format!("AGGREGATE_SERIES_METADATA_{series_id}"),
+                    format!("AggregateSeriesMetadata_{series_id}"),
                     80,
                     Some(series_id),
                 )
-                .with_simple_type("AGGREGATE_SERIES_METADATA")
+                .with_simple_type("AggregateSeriesMetadata")
             })
             .collect::<Vec<_>>();
         if let Err(error) = process_task_side_effects(&app, tasks).await {
@@ -517,7 +517,7 @@ pub async fn books_thumbnails_regenerate(
     enqueue_task_records(
         &app,
         vec![
-            TaskQueueRecord::new("FIND_BOOK_THUMBNAILS_TO_REGENERATE", 0, None).with_payload(
+            TaskQueueRecord::new("FindBookThumbnailsToRegenerate", 0, None).with_payload(
                 json!({
                     "for_bigger_result_only": query.for_bigger_result_only,
                 })
@@ -537,13 +537,7 @@ pub async fn series_file_delete(
         return response;
     }
 
-    enqueue_delete_media_task(
-        &app,
-        format!("DELETE_SERIES_{series_id}"),
-        "DELETE_SERIES",
-        8,
-    )
-    .await
+    enqueue_delete_media_task(&app, format!("DeleteSeries_{series_id}"), "DeleteSeries", 8).await
 }
 
 pub async fn series_analyze(
@@ -573,11 +567,11 @@ pub async fn series_analyze(
         .into_iter()
         .map(|book_id| {
             TaskQueueRecord::new(
-                format!("ANALYZE_BOOK_{book_id}"),
+                format!("AnalyzeBook_{book_id}"),
                 6,
                 Some(resolved_series_id.clone()),
             )
-            .with_simple_type("ANALYZE_BOOK")
+            .with_simple_type("AnalyzeBook")
         })
         .collect::<Vec<_>>();
 
@@ -607,20 +601,20 @@ pub async fn series_metadata_refresh(
     for book_id in book_ids {
         task_records.push(
             TaskQueueRecord::new(
-                format!("REFRESH_BOOK_METADATA_{book_id}"),
+                format!("RefreshBookMetadata_{book_id}"),
                 6,
                 Some(series_id.clone()),
             )
-            .with_simple_type("REFRESH_BOOK_METADATA"),
+            .with_simple_type("RefreshBookMetadata"),
         );
         task_records.push(
-            TaskQueueRecord::new(format!("REFRESH_BOOK_LOCAL_ARTWORK_{book_id}"), 6, None)
-                .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK"),
+            TaskQueueRecord::new(format!("RefreshBookLocalArtwork_{book_id}"), 6, None)
+                .with_simple_type("RefreshBookLocalArtwork"),
         );
     }
     task_records.push(
-        TaskQueueRecord::new(format!("REFRESH_SERIES_LOCAL_ARTWORK_{series_id}"), 6, None)
-            .with_simple_type("REFRESH_SERIES_LOCAL_ARTWORK"),
+        TaskQueueRecord::new(format!("RefreshSeriesLocalArtwork_{series_id}"), 6, None)
+            .with_simple_type("RefreshSeriesLocalArtwork"),
     );
 
     enqueue_task_records(&app, task_records).await
@@ -635,7 +629,7 @@ pub async fn book_file_delete(
         return response;
     }
 
-    enqueue_delete_media_task(&app, format!("DELETE_BOOK_{book_id}"), "DELETE_BOOK", 8).await
+    enqueue_delete_media_task(&app, format!("DeleteBook_{book_id}"), "DeleteBook", 8).await
 }
 
 async fn enqueue_delete_media_task(

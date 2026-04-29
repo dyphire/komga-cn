@@ -72,7 +72,7 @@ async fn runtime_refresh_book_metadata_can_import_readlists_without_applying_boo
         sqlx::query(
             "INSERT INTO TASK (ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER) VALUES (?, ?, ?, ?, ?, ?, NULL)",
         )
-        .bind("REFRESH_BOOK_METADATA_book-1")
+        .bind("RefreshBookMetadata_book-1")
         .bind(80_i64)
         .bind("series-1")
         .bind("org.gotson.komga.application.tasks.Task$RefreshBookMetadata")
@@ -83,7 +83,7 @@ async fn runtime_refresh_book_metadata_can_import_readlists_without_applying_boo
                 "capabilities": ["READ_LISTS"],
                 "priority": 80,
                 "groupId": "series-1",
-                "uniqueId": "REFRESH_BOOK_METADATA_book-1"
+                "uniqueId": "RefreshBookMetadata_book-1"
             })
             .to_string(),
         )
@@ -176,7 +176,7 @@ async fn runtime_refresh_book_metadata_applies_comicinfo_number_when_capability_
     sqlx::query(
         "INSERT INTO TASK (ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER) VALUES (?, ?, ?, ?, ?, ?, NULL)",
     )
-    .bind("REFRESH_BOOK_METADATA_book-1")
+    .bind("RefreshBookMetadata_book-1")
     .bind(80_i64)
     .bind("series-1")
     .bind("org.gotson.komga.application.tasks.Task$RefreshBookMetadata")
@@ -187,7 +187,7 @@ async fn runtime_refresh_book_metadata_applies_comicinfo_number_when_capability_
             "capabilities": ["NUMBER"],
             "priority": 80,
             "groupId": "series-1",
-            "uniqueId": "REFRESH_BOOK_METADATA_book-1"
+            "uniqueId": "RefreshBookMetadata_book-1"
         })
         .to_string(),
     )
@@ -284,7 +284,7 @@ async fn runtime_refresh_book_metadata_applies_remaining_comicinfo_fields_with_l
     sqlx::query(
         "INSERT INTO TASK (ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER) VALUES (?, ?, ?, ?, ?, ?, NULL)",
     )
-    .bind("REFRESH_BOOK_METADATA_book-1")
+    .bind("RefreshBookMetadata_book-1")
     .bind(80_i64)
     .bind("series-1")
     .bind("org.gotson.komga.application.tasks.Task$RefreshBookMetadata")
@@ -295,7 +295,7 @@ async fn runtime_refresh_book_metadata_applies_remaining_comicinfo_fields_with_l
             "capabilities": ["RELEASE_DATE", "AUTHORS", "TAGS", "ISBN", "LINKS"],
             "priority": 80,
             "groupId": "series-1",
-            "uniqueId": "REFRESH_BOOK_METADATA_book-1"
+            "uniqueId": "RefreshBookMetadata_book-1"
         })
         .to_string(),
     )
@@ -454,7 +454,7 @@ async fn runtime_refresh_book_metadata_does_not_run_comicinfo_for_isbn_or_tags_o
     sqlx::query(
         "INSERT INTO TASK (ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER) VALUES (?, ?, ?, ?, ?, ?, NULL)",
     )
-    .bind("REFRESH_BOOK_METADATA_book-comicinfo-gate-1")
+    .bind("RefreshBookMetadata_book-comicinfo-gate-1")
     .bind(80_i64)
     .bind("series-1")
     .bind("org.gotson.komga.application.tasks.Task$RefreshBookMetadata")
@@ -465,7 +465,7 @@ async fn runtime_refresh_book_metadata_does_not_run_comicinfo_for_isbn_or_tags_o
             "capabilities": ["ISBN", "TAGS"],
             "priority": 80,
             "groupId": "series-1",
-            "uniqueId": "REFRESH_BOOK_METADATA_book-comicinfo-gate-1"
+            "uniqueId": "RefreshBookMetadata_book-comicinfo-gate-1"
         })
         .to_string(),
     )

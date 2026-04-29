@@ -37,14 +37,14 @@ fn runtime_startup_prepare_task_queue_enqueues_search_rebuild_without_processing
         async move {
             let background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
                 runtime_task_context(&config),
-                Some("REBUILD_INDEX"),
+                Some("RebuildIndex"),
             )
             .await;
             let mut queue = background.task_queue.lock().await;
             queue
                 .count_by_simple_type()
                 .await
-                .get("REBUILD_INDEX")
+                .get("RebuildIndex")
                 .copied()
                 .unwrap_or(0)
         }
@@ -86,7 +86,7 @@ fn runtime_startup_prepare_task_queue_enqueues_search_rebuild_without_processing
     assert_eq!(field_u64(search_complete, "processed"), Some(0));
     assert_eq!(
         field_str(search_complete, "startup_task"),
-        Some("REBUILD_INDEX")
+        Some("RebuildIndex")
     );
     assert_eq!(queued_rebuild_tasks, 1);
 }
@@ -144,7 +144,7 @@ fn runtime_startup_prepare_task_queue_logs_truthful_skip_boundaries_for_external
     let logs = capture_contract_log_async(&config, async move {
         let _background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
             runtime,
-            Some("REBUILD_INDEX"),
+            Some("RebuildIndex"),
         )
         .await;
     });
@@ -198,14 +198,14 @@ fn runtime_startup_prepare_task_queue_skips_search_rebuild_when_search_index_not
     let (logs, queued_rebuild_tasks) = capture_contract_log_async_result(&config, async move {
         let background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
             runtime,
-            Some("REBUILD_INDEX"),
+            Some("RebuildIndex"),
         )
         .await;
         let mut queue = background.task_queue.lock().await;
         queue
             .count_by_simple_type()
             .await
-            .get("REBUILD_INDEX")
+            .get("RebuildIndex")
             .copied()
             .unwrap_or(0)
     });
@@ -271,7 +271,7 @@ fn runtime_startup_prepare_task_queue_logs_no_startup_library_scan_skip_when_no_
             queue
                 .count_by_simple_type()
                 .await
-                .get("SCAN_LIBRARY")
+                .get("ScanLibrary")
                 .copied()
                 .unwrap_or(0)
         }

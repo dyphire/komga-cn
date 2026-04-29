@@ -1,5 +1,7 @@
 use super::*;
-use komga_application::task_processing::TaskRuntimeContext;
+use komga_application::task_processing::{
+    SeriesPayload, TaskKind, TaskRequest, TaskRuntimeContext,
+};
 use std::collections::BTreeSet;
 
 use serde_json::Value;
@@ -10,22 +12,22 @@ pub(super) async fn try_execute(
     task_target: Option<&str>,
 ) -> Option<Result<TaskExecutionOutcome, TaskExecutionError>> {
     match task.simple_type.as_str() {
-        "REFRESH_BOOK_METADATA" => {
+        "RefreshBookMetadata" => {
             Some(execute_refresh_book_metadata(runtime, task, task_target).await)
         }
-        "REFRESH_SERIES_METADATA" => {
+        "RefreshSeriesMetadata" => {
             Some(execute_refresh_series_metadata(runtime, task, task_target).await)
         }
-        "AGGREGATE_SERIES_METADATA" => {
+        "AggregateSeriesMetadata" => {
             Some(execute_aggregate_series_metadata(runtime, task_target).await)
         }
-        "REFRESH_BOOK_LOCAL_ARTWORK" => {
+        "RefreshBookLocalArtwork" => {
             Some(execute_refresh_book_local_artwork(runtime, task_target).await)
         }
-        "GENERATE_BOOK_THUMBNAIL" => {
+        "GenerateBookThumbnail" => {
             Some(execute_generate_book_thumbnail(runtime, task_target).await)
         }
-        "REFRESH_SERIES_LOCAL_ARTWORK" => {
+        "RefreshSeriesLocalArtwork" => {
             Some(execute_refresh_series_local_artwork(runtime, task_target).await)
         }
         _ => None,
@@ -39,7 +41,7 @@ async fn execute_refresh_book_metadata(
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
     let Some(book_id) = task_target else {
         return Err(TaskExecutionError::invalid_task(
-            "REFRESH_BOOK_METADATA task must include a book id",
+            "RefreshBookMetadata task must include a book id",
         ));
     };
     let capabilities = refresh_book_metadata_capabilities(task);
@@ -49,10 +51,13 @@ async fn execute_refresh_book_metadata(
     let follow_up_tasks = series_id
         .into_iter()
         .map(|series_id| {
-            runtime_follow_up_task(RuntimeFollowUpTask::RefreshSeriesMetadata {
-                series_id,
-                priority: task.priority - 1,
-            })
+            TaskRequest::with_payload(
+                TaskKind::RefreshSeriesMetadata,
+                SeriesPayload::new(series_id.clone()),
+            )
+            .priority(task.priority - 1)
+            .group(series_id)
+            .into_queue_record()
         })
         .collect();
     Ok(TaskExecutionOutcome::with_follow_up_tasks(follow_up_tasks))
@@ -65,15 +70,18 @@ async fn execute_refresh_series_metadata(
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
     let Some(series_id) = task_target else {
         return Err(TaskExecutionError::invalid_task(
-            "REFRESH_SERIES_METADATA task must include a series id",
+            "RefreshSeriesMetadata task must include a series id",
         ));
     };
     super::super::metadata_tasks::refresh_series_metadata(runtime, series_id).await?;
     Ok(TaskExecutionOutcome::with_follow_up_tasks(vec![
-        runtime_follow_up_task(RuntimeFollowUpTask::AggregateSeriesMetadata {
-            series_id: series_id.to_string(),
-            priority: task.priority,
-        }),
+        TaskRequest::with_payload(
+            TaskKind::AggregateSeriesMetadata,
+            SeriesPayload::new(series_id.to_string()),
+        )
+        .priority(task.priority)
+        .group(series_id.to_string())
+        .into_queue_record(),
     ]))
 }
 
@@ -83,7 +91,7 @@ async fn execute_aggregate_series_metadata(
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
     let Some(series_id) = task_target else {
         return Err(TaskExecutionError::invalid_task(
-            "AGGREGATE_SERIES_METADATA task must include a series id",
+            "AggregateSeriesMetadata task must include a series id",
         ));
     };
     super::super::metadata_tasks::aggregate_series_metadata(runtime, series_id)
@@ -97,7 +105,7 @@ async fn execute_refresh_book_local_artwork(
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
     let Some(book_id) = task_target else {
         return Err(TaskExecutionError::invalid_task(
-            "REFRESH_BOOK_LOCAL_ARTWORK task must include a book id",
+            "RefreshBookLocalArtwork task must include a book id",
         ));
     };
     super::super::metadata_tasks::refresh_book_local_artwork(runtime, book_id)
@@ -111,7 +119,7 @@ async fn execute_generate_book_thumbnail(
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
     let Some(book_id) = task_target else {
         return Err(TaskExecutionError::invalid_task(
-            "GENERATE_BOOK_THUMBNAIL task must include a book id",
+            "GenerateBookThumbnail task must include a book id",
         ));
     };
     super::super::metadata_tasks::generate_book_thumbnail(runtime, book_id)
@@ -125,7 +133,7 @@ async fn execute_refresh_series_local_artwork(
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
     let Some(series_id) = task_target else {
         return Err(TaskExecutionError::invalid_task(
-            "REFRESH_SERIES_LOCAL_ARTWORK task must include a series id",
+            "RefreshSeriesLocalArtwork task must include a series id",
         ));
     };
     super::super::metadata_tasks::refresh_series_local_artwork(runtime, series_id)

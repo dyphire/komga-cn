@@ -11,11 +11,11 @@ async fn enqueue_delete_book(scheduler: &mut TaskQueueScheduler, book_id: &str) 
     scheduler
         .enqueue(
             TaskQueueRecord::new(
-                format!("DELETE_BOOK_{book_id}"),
+                format!("DeleteBook_{book_id}"),
                 1_000,
                 Some(book_id.to_string()),
             )
-            .with_simple_type("DELETE_BOOK"),
+            .with_simple_type("DeleteBook"),
         )
         .await;
 }
@@ -24,11 +24,11 @@ async fn enqueue_delete_series(scheduler: &mut TaskQueueScheduler, series_id: &s
     scheduler
         .enqueue(
             TaskQueueRecord::new(
-                format!("DELETE_SERIES_{series_id}"),
+                format!("DeleteSeries_{series_id}"),
                 1_000,
                 Some(series_id.to_string()),
             )
-            .with_simple_type("DELETE_SERIES"),
+            .with_simple_type("DeleteSeries"),
         )
         .await;
 }

@@ -4,11 +4,11 @@ async fn enqueue_refresh_series_local_artwork(scheduler: &mut TaskQueueScheduler
     scheduler
         .enqueue(
             TaskQueueRecord::new(
-                format!("REFRESH_SERIES_LOCAL_ARTWORK_{series_id}"),
+                format!("RefreshSeriesLocalArtwork_{series_id}"),
                 1_000,
                 Some(series_id.to_string()),
             )
-            .with_simple_type("REFRESH_SERIES_LOCAL_ARTWORK"),
+            .with_simple_type("RefreshSeriesLocalArtwork"),
         )
         .await;
 }

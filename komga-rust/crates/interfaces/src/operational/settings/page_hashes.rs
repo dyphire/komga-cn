@@ -104,7 +104,7 @@ fn build_remove_hashed_pages_task(
     book_id: String,
     pages: Vec<Value>,
 ) -> Result<TaskQueueRecord, StatusCode> {
-    let unique_id = format!("REMOVE_HASHED_PAGES_{book_id}");
+    let unique_id = format!("RemoveHashedPages_{book_id}");
     let payload = serde_json::to_string(&serde_json::json!({
         "bookId": book_id,
         "pages": pages,
@@ -116,7 +116,7 @@ fn build_remove_hashed_pages_task(
 
     Ok(
         TaskQueueRecord::new(unique_id, REMOVE_HASHED_PAGES_PRIORITY, None)
-            .with_simple_type("REMOVE_HASHED_PAGES")
+            .with_simple_type("RemoveHashedPages")
             .with_payload(payload),
     )
 }

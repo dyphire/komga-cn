@@ -29,7 +29,6 @@ pub mod queue_scheduler;
 mod scanner_jobs;
 mod scanner_support;
 mod task_executor;
-mod task_protocol;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod worker_runtime;
@@ -38,7 +37,6 @@ use library_scan_pipeline::SqliteFilesystemLibraryScanPipeline;
 use media_helpers::*;
 use queue_scheduler::TaskQueueScheduler;
 use scanner_support::*;
-use task_protocol::{RuntimeFollowUpTask, runtime_follow_up_task};
 
 pub use execution_pool::TaskExecutionPoolHandle;
 pub use komga_application::task_processing::{LibraryScanInterval, TaskQueueRecord};

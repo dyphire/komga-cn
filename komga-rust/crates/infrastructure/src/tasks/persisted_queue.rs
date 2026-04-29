@@ -1,8 +1,7 @@
 use std::path::PathBuf;
 
 use komga_application::task_processing::{
-    DefaultTaskProtocolCatalog, PersistedTaskRowShape, PlannedTaskKind, TaskProtocolCatalog,
-    TaskQueueRecord,
+    OpaqueTask, PersistedTaskRowShape, TaskKind, TaskQueueRecord,
 };
 use serde_json::{Map, Value, json};
 use sqlx::Row;
@@ -24,61 +23,31 @@ pub struct SqliteTaskQueueStore {
     tasks_db_file: PathBuf,
 }
 
-#[derive(Clone, Debug)]
-struct PersistedTaskCompatibility<C> {
-    catalog: C,
+fn runtime_record_from_persisted_row(persisted_row: PersistedTaskRowShape) -> TaskQueueRecord {
+    if let Ok(kind) = TaskKind::parse(&persisted_row.simple_type) {
+        return known_runtime_record(kind, persisted_row);
+    }
+
+    OpaqueTask {
+        runtime_simple_type: persisted_row.simple_type.clone(),
+        persisted_row,
+    }
+    .into_queue_record()
 }
 
-impl<C: Default> Default for PersistedTaskCompatibility<C> {
-    fn default() -> Self {
-        Self {
-            catalog: C::default(),
-        }
-    }
-}
-
-impl<C: TaskProtocolCatalog> PersistedTaskCompatibility<C> {
-    #[cfg(test)]
-    fn new(catalog: C) -> Self {
-        Self { catalog }
+fn persisted_row_from_runtime_record(task: &PersistedTaskStoreRecord) -> PersistedTaskRowShape {
+    if let Ok(kind) = TaskKind::parse(&task.simple_type) {
+        return known_persisted_row(kind, task);
     }
 
-    fn runtime_record_from_persisted_row(
-        &self,
-        persisted_row: PersistedTaskRowShape,
-    ) -> TaskQueueRecord {
-        if let Some(kind) = self
-            .catalog
-            .known_kind_from_persisted_simple_type(&persisted_row.simple_type)
-        {
-            return known_runtime_record(&self.catalog, kind, persisted_row);
-        }
-
-        self.catalog
-            .opaque_task(persisted_row.simple_type.clone(), persisted_row)
-            .into_queue_record()
-    }
-
-    fn persisted_row_from_runtime_record(
-        &self,
-        task: &PersistedTaskStoreRecord,
-    ) -> PersistedTaskRowShape {
-        if let Some(kind) = self
-            .catalog
-            .known_kind_from_runtime_simple_type(&task.simple_type)
-        {
-            return known_persisted_row(&self.catalog, kind, task);
-        }
-
-        PersistedTaskRowShape {
-            id: task.id.clone(),
-            priority: task.priority,
-            group: task.group.clone(),
-            class_name: runtime_task_class_name(task.simple_type.as_str()),
-            simple_type: task.simple_type.clone(),
-            payload: fallback_task_payload(task),
-            owner: task.owner.clone(),
-        }
+    PersistedTaskRowShape {
+        id: task.id.clone(),
+        priority: task.priority,
+        group: task.group.clone(),
+        class_name: runtime_task_class_name(task.simple_type.as_str()),
+        simple_type: task.simple_type.clone(),
+        payload: fallback_task_payload(task),
+        owner: task.owner.clone(),
     }
 }
 
@@ -96,7 +65,6 @@ impl SqliteTaskQueueStore {
             .await
             .expect("tasks sqlite pool should open for task persistence");
 
-        let compatibility = compatibility();
         let rows = sqlx::query(
             r#"SELECT
                 ID,
@@ -116,13 +84,13 @@ impl SqliteTaskQueueStore {
 
         rows.into_iter()
             .map(persisted_row_shape)
-            .map(|row| compatibility.runtime_record_from_persisted_row(row))
+            .map(runtime_record_from_persisted_row)
             .map(store_record_from_runtime_record)
             .collect::<Vec<_>>()
     }
 
     pub async fn persist_task(&self, task: &PersistedTaskStoreRecord) {
-        let row = compatibility().persisted_row_from_runtime_record(task);
+        let row = persisted_row_from_runtime_record(task);
         let pool = connect_private_write_pool(&self.tasks_db_file)
             .await
             .expect("tasks sqlite pool should open for task persistence");
@@ -222,10 +190,6 @@ impl SqliteTaskQueueStore {
     }
 }
 
-fn compatibility() -> PersistedTaskCompatibility<DefaultTaskProtocolCatalog> {
-    PersistedTaskCompatibility::default()
-}
-
 fn store_record_from_runtime_record(task: TaskQueueRecord) -> PersistedTaskStoreRecord {
     PersistedTaskStoreRecord {
         id: task.id,
@@ -249,35 +213,27 @@ fn persisted_row_shape(row: sqlx::sqlite::SqliteRow) -> PersistedTaskRowShape {
     }
 }
 
-fn known_runtime_record<C: TaskProtocolCatalog>(
-    catalog: &C,
-    kind: PlannedTaskKind,
-    persisted_row: PersistedTaskRowShape,
-) -> TaskQueueRecord {
-    let descriptor = catalog.descriptor(kind);
+fn known_runtime_record(kind: TaskKind, persisted_row: PersistedTaskRowShape) -> TaskQueueRecord {
+    let def = kind.definition();
     let mut runtime_record = TaskQueueRecord::new(
         persisted_row.id,
         persisted_row.priority,
         persisted_row.group,
     )
-    .with_simple_type(descriptor.runtime_simple_type)
+    .with_simple_type(def.simple_type)
     .with_payload(persisted_row.payload);
     runtime_record.owner = persisted_row.owner;
     runtime_record
 }
 
-fn known_persisted_row<C: TaskProtocolCatalog>(
-    catalog: &C,
-    kind: PlannedTaskKind,
-    task: &PersistedTaskStoreRecord,
-) -> PersistedTaskRowShape {
-    let descriptor = catalog.descriptor(kind);
+fn known_persisted_row(kind: TaskKind, task: &PersistedTaskStoreRecord) -> PersistedTaskRowShape {
+    let def = kind.definition();
     PersistedTaskRowShape {
         id: task.id.clone(),
         priority: task.priority,
         group: task.group.clone(),
-        class_name: descriptor.persisted_class_name.to_string(),
-        simple_type: descriptor.persisted_simple_type.to_string(),
+        class_name: def.persisted_class_name.to_string(),
+        simple_type: def.simple_type.to_string(),
         payload: persisted_compatibility_payload(kind, task),
         owner: task.owner.clone(),
     }
@@ -405,13 +361,8 @@ fn scan_library_target(task: &PersistedTaskStoreRecord) -> Option<String> {
         .or_else(|| {
             task_target(task).map(|target| {
                 target
-                    .split_once(":DEEP:")
+                    .split_once("_DEEP_")
                     .map(|(library_id, _)| library_id)
-                    .or_else(|| {
-                        target
-                            .split_once("_DEEP_")
-                            .map(|(library_id, _)| library_id)
-                    })
                     .unwrap_or(target)
                     .to_string()
             })
@@ -425,15 +376,14 @@ fn scan_library_deep(task: &PersistedTaskStoreRecord) -> bool {
         .and_then(Value::as_bool)
         .or_else(|| {
             task.id
-                .rsplit_once(":DEEP:")
-                .or_else(|| task.id.rsplit_once("_DEEP_"))
+                .rsplit_once("_DEEP_")
                 .and_then(|(_, deep_scan)| deep_scan.parse::<bool>().ok())
         })
         .unwrap_or(false)
 }
 
 fn scan_library_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
-    (task.simple_type == "SCAN_LIBRARY").then_some(())?;
+    (task.simple_type == "ScanLibrary").then_some(())?;
     let library_id = scan_library_target(task)?;
     Some(task_payload(
         task,
@@ -445,15 +395,15 @@ fn scan_library_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
 }
 
 fn empty_trash_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
-    target_task_payload(task, "EMPTY_TRASH", "libraryId")
+    target_task_payload(task, "EmptyTrash", "libraryId")
 }
 
 fn analyze_book_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
-    target_task_payload(task, "ANALYZE_BOOK", "bookId")
+    target_task_payload(task, "AnalyzeBook", "bookId")
 }
 
 fn import_book_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
-    (task.simple_type == "IMPORT_BOOK").then_some(())?;
+    (task.simple_type == "ImportBook").then_some(())?;
     let payload = payload_json(task)?;
     let source_file = payload
         .get("sourceFile")
@@ -502,15 +452,15 @@ fn import_book_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
 }
 
 fn find_duplicate_pages_to_delete_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
-    library_target_task_payload(task, "FIND_DUPLICATE_PAGES_TO_DELETE")
+    library_target_task_payload(task, "FindDuplicatePagesToDelete")
 }
 
 fn find_books_with_missing_page_hash_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
-    library_target_task_payload(task, "FIND_BOOKS_WITH_MISSING_PAGE_HASH")
+    library_target_task_payload(task, "FindBooksWithMissingPageHash")
 }
 
 fn find_book_thumbnails_to_regenerate_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
-    (task.simple_type == "FIND_BOOK_THUMBNAILS_TO_REGENERATE").then(|| {
+    (task.simple_type == "FindBookThumbnailsToRegenerate").then(|| {
         task_payload(
             task,
             [(
@@ -542,7 +492,7 @@ fn default_refresh_book_metadata_capabilities() -> Vec<Value> {
 }
 
 fn refresh_book_metadata_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
-    (task.simple_type == "REFRESH_BOOK_METADATA").then(|| {
+    (task.simple_type == "RefreshBookMetadata").then(|| {
         let capabilities = task
             .payload
             .as_deref()
@@ -562,59 +512,59 @@ fn refresh_book_metadata_payload(task: &PersistedTaskStoreRecord) -> Option<Stri
 }
 
 fn refresh_book_local_artwork_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
-    target_task_payload(task, "REFRESH_BOOK_LOCAL_ARTWORK", "bookId")
+    target_task_payload(task, "RefreshBookLocalArtwork", "bookId")
 }
 
 fn refresh_series_metadata_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
-    target_task_payload(task, "REFRESH_SERIES_METADATA", "seriesId")
+    target_task_payload(task, "RefreshSeriesMetadata", "seriesId")
 }
 
 fn aggregate_series_metadata_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
-    target_task_payload(task, "AGGREGATE_SERIES_METADATA", "seriesId")
+    target_task_payload(task, "AggregateSeriesMetadata", "seriesId")
 }
 
 fn refresh_series_local_artwork_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
-    target_task_payload(task, "REFRESH_SERIES_LOCAL_ARTWORK", "seriesId")
+    target_task_payload(task, "RefreshSeriesLocalArtwork", "seriesId")
 }
 
 fn repair_extension_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
-    target_task_payload(task, "REPAIR_EXTENSION", "bookId")
+    target_task_payload(task, "RepairExtension", "bookId")
 }
 
 fn hash_book_pages_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
-    target_task_payload(task, "HASH_BOOK_PAGES", "bookId")
+    target_task_payload(task, "HashBookPages", "bookId")
 }
 
 fn generate_book_thumbnail_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
-    target_task_payload(task, "GENERATE_BOOK_THUMBNAIL", "bookId")
+    target_task_payload(task, "GenerateBookThumbnail", "bookId")
 }
 
 fn hash_book_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
-    target_task_payload(task, "HASH_BOOK", "bookId")
+    target_task_payload(task, "HashBook", "bookId")
 }
 
 fn hash_book_koreader_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
-    target_task_payload(task, "HASH_BOOK_KOREADER", "bookId")
+    target_task_payload(task, "HashBookKoreader", "bookId")
 }
 
 fn delete_book_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
-    target_task_payload(task, "DELETE_BOOK", "bookId")
+    target_task_payload(task, "DeleteBook", "bookId")
 }
 
 fn delete_series_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
-    target_task_payload(task, "DELETE_SERIES", "seriesId")
+    target_task_payload(task, "DeleteSeries", "seriesId")
 }
 
 fn find_books_to_convert_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
-    library_target_task_payload(task, "FIND_BOOKS_TO_CONVERT")
+    library_target_task_payload(task, "FindBooksToConvert")
 }
 
 fn convert_book_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
-    target_task_payload(task, "CONVERT_BOOK", "bookId")
+    target_task_payload(task, "ConvertBook", "bookId")
 }
 
 fn rebuild_index_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
-    (task.simple_type == "REBUILD_INDEX").then(|| {
+    (task.simple_type == "RebuildIndex").then(|| {
         let entities = task
             .payload
             .as_deref()
@@ -632,43 +582,38 @@ fn rebuild_index_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
 }
 
 fn upgrade_index_payload(task: &PersistedTaskStoreRecord) -> Option<String> {
-    (task.simple_type == "UPGRADE_INDEX")
+    (task.simple_type == "UpgradeIndex")
         .then(|| task_payload(task, std::iter::empty::<(&'static str, Value)>()))
 }
 
-fn persisted_compatibility_payload(
-    kind: PlannedTaskKind,
-    task: &PersistedTaskStoreRecord,
-) -> String {
+fn persisted_compatibility_payload(kind: TaskKind, task: &PersistedTaskStoreRecord) -> String {
     let compatibility_payload = match kind {
-        PlannedTaskKind::ScanLibrary => scan_library_payload(task),
-        PlannedTaskKind::EmptyTrash => empty_trash_payload(task),
-        PlannedTaskKind::AnalyzeBook => analyze_book_payload(task),
-        PlannedTaskKind::ImportBook => import_book_payload(task),
-        PlannedTaskKind::FindBooksWithMissingPageHash => {
-            find_books_with_missing_page_hash_payload(task)
-        }
-        PlannedTaskKind::FindDuplicatePagesToDelete => find_duplicate_pages_to_delete_payload(task),
-        PlannedTaskKind::FindBookThumbnailsToRegenerate => {
+        TaskKind::ScanLibrary => scan_library_payload(task),
+        TaskKind::EmptyTrash => empty_trash_payload(task),
+        TaskKind::AnalyzeBook => analyze_book_payload(task),
+        TaskKind::ImportBook => import_book_payload(task),
+        TaskKind::FindBooksWithMissingPageHash => find_books_with_missing_page_hash_payload(task),
+        TaskKind::FindDuplicatePagesToDelete => find_duplicate_pages_to_delete_payload(task),
+        TaskKind::FindBookThumbnailsToRegenerate => {
             find_book_thumbnails_to_regenerate_payload(task)
         }
-        PlannedTaskKind::RefreshBookMetadata => refresh_book_metadata_payload(task),
-        PlannedTaskKind::RefreshBookLocalArtwork => refresh_book_local_artwork_payload(task),
-        PlannedTaskKind::RefreshSeriesMetadata => refresh_series_metadata_payload(task),
-        PlannedTaskKind::AggregateSeriesMetadata => aggregate_series_metadata_payload(task),
-        PlannedTaskKind::RefreshSeriesLocalArtwork => refresh_series_local_artwork_payload(task),
-        PlannedTaskKind::RepairExtension => repair_extension_payload(task),
-        PlannedTaskKind::GenerateBookThumbnail => generate_book_thumbnail_payload(task),
-        PlannedTaskKind::HashBook => hash_book_payload(task),
-        PlannedTaskKind::HashBookKoreader => hash_book_koreader_payload(task),
-        PlannedTaskKind::HashBookPages => hash_book_pages_payload(task),
-        PlannedTaskKind::RebuildIndex => rebuild_index_payload(task),
-        PlannedTaskKind::UpgradeIndex => upgrade_index_payload(task),
-        PlannedTaskKind::DeleteBook => delete_book_payload(task),
-        PlannedTaskKind::DeleteSeries => delete_series_payload(task),
-        PlannedTaskKind::FindBooksToConvert => find_books_to_convert_payload(task),
-        PlannedTaskKind::ConvertBook => convert_book_payload(task),
-        PlannedTaskKind::RemoveHashedPages => None,
+        TaskKind::RefreshBookMetadata => refresh_book_metadata_payload(task),
+        TaskKind::RefreshBookLocalArtwork => refresh_book_local_artwork_payload(task),
+        TaskKind::RefreshSeriesMetadata => refresh_series_metadata_payload(task),
+        TaskKind::AggregateSeriesMetadata => aggregate_series_metadata_payload(task),
+        TaskKind::RefreshSeriesLocalArtwork => refresh_series_local_artwork_payload(task),
+        TaskKind::RepairExtension => repair_extension_payload(task),
+        TaskKind::GenerateBookThumbnail => generate_book_thumbnail_payload(task),
+        TaskKind::HashBook => hash_book_payload(task),
+        TaskKind::HashBookKoreader => hash_book_koreader_payload(task),
+        TaskKind::HashBookPages => hash_book_pages_payload(task),
+        TaskKind::RebuildIndex => rebuild_index_payload(task),
+        TaskKind::UpgradeIndex => upgrade_index_payload(task),
+        TaskKind::DeleteBook => delete_book_payload(task),
+        TaskKind::DeleteSeries => delete_series_payload(task),
+        TaskKind::FindBooksToConvert => find_books_to_convert_payload(task),
+        TaskKind::ConvertBook => convert_book_payload(task),
+        TaskKind::RemoveHashedPages => None,
     };
 
     compatibility_payload
@@ -679,100 +624,24 @@ fn persisted_compatibility_payload(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use komga_application::task_processing::TaskDescriptor;
     use serde_json::Value;
 
-    #[derive(Clone, Copy, Debug)]
-    struct UpgradeIndexCatalog;
-
-    impl TaskProtocolCatalog for UpgradeIndexCatalog {
-        fn descriptor(&self, kind: PlannedTaskKind) -> TaskDescriptor {
-            match kind {
-                PlannedTaskKind::UpgradeIndex => TaskDescriptor {
-                    runtime_simple_type: "CUSTOM_UPGRADE_INDEX",
-                    persisted_simple_type: "LegacyUpgradeIndex",
-                    persisted_class_name: "custom.tasks.LegacyUpgradeIndex",
-                },
-                _ => kind.descriptor(),
-            }
-        }
-
-        fn known_kind_from_runtime_simple_type(
-            &self,
-            simple_type: &str,
-        ) -> Option<PlannedTaskKind> {
-            match simple_type {
-                "CUSTOM_UPGRADE_INDEX" => Some(PlannedTaskKind::UpgradeIndex),
-                _ => None,
-            }
-        }
-
-        fn known_kind_from_persisted_simple_type(
-            &self,
-            simple_type: &str,
-        ) -> Option<PlannedTaskKind> {
-            match simple_type {
-                "LegacyUpgradeIndex" => Some(PlannedTaskKind::UpgradeIndex),
-                _ => None,
-            }
-        }
-    }
-
     fn persisted_row(task: PersistedTaskStoreRecord) -> PersistedTaskRowShape {
-        compatibility().persisted_row_from_runtime_record(&task)
-    }
-
-    #[test]
-    fn compatibility_uses_catalog_descriptor_when_persisting_known_runtime_task() {
-        let row = PersistedTaskCompatibility::new(UpgradeIndexCatalog)
-            .persisted_row_from_runtime_record(&PersistedTaskStoreRecord {
-                id: "UPGRADE_INDEX".to_string(),
-                simple_type: "CUSTOM_UPGRADE_INDEX".to_string(),
-                priority: 9,
-                group: None,
-                payload: None,
-                owner: None,
-            });
-
-        assert_eq!(row.simple_type, "LegacyUpgradeIndex");
-        assert_eq!(row.class_name, "custom.tasks.LegacyUpgradeIndex");
-    }
-
-    #[test]
-    fn compatibility_uses_catalog_descriptor_when_loading_known_persisted_task() {
-        let record = PersistedTaskCompatibility::new(UpgradeIndexCatalog)
-            .runtime_record_from_persisted_row(PersistedTaskRowShape {
-                id: "UPGRADE_INDEX".to_string(),
-                priority: 9,
-                group: None,
-                class_name: "custom.tasks.LegacyUpgradeIndex".to_string(),
-                simple_type: "LegacyUpgradeIndex".to_string(),
-                payload: json!({
-                    "id": "UPGRADE_INDEX",
-                    "simpleType": "CUSTOM_UPGRADE_INDEX",
-                    "priority": 9,
-                    "groupId": Value::Null,
-                })
-                .to_string(),
-                owner: Some("rust-main".to_string()),
-            });
-
-        assert_eq!(record.simple_type, "CUSTOM_UPGRADE_INDEX");
-        assert_eq!(record.owner.as_deref(), Some("rust-main"));
+        persisted_row_from_runtime_record(&task)
     }
 
     #[test]
     fn persisted_find_duplicate_pages_to_delete_uses_kotlin_task_shape() {
         let row = persisted_row(PersistedTaskStoreRecord {
-            id: "FIND_DUPLICATE_PAGES_TO_DELETE_library-1".to_string(),
-            simple_type: "FIND_DUPLICATE_PAGES_TO_DELETE".to_string(),
+            id: "FindDuplicatePagesToDelete_library-1".to_string(),
+            simple_type: "FindDuplicatePagesToDelete".to_string(),
             priority: 42,
             group: None,
             payload: None,
             owner: None,
         });
 
-        assert_eq!(row.id, "FIND_DUPLICATE_PAGES_TO_DELETE_library-1");
+        assert_eq!(row.id, "FindDuplicatePagesToDelete_library-1");
         assert_eq!(row.simple_type, "FindDuplicatePagesToDelete");
         assert_eq!(
             row.class_name,
@@ -785,7 +654,7 @@ mod tests {
                 "libraryId": "library-1",
                 "priority": 42,
                 "groupId": Value::Null,
-                "uniqueId": "FIND_DUPLICATE_PAGES_TO_DELETE_library-1"
+                "uniqueId": "FindDuplicatePagesToDelete_library-1"
             })
         );
     }
@@ -793,15 +662,15 @@ mod tests {
     #[test]
     fn persisted_find_books_to_convert_uses_kotlin_task_shape() {
         let row = persisted_row(PersistedTaskStoreRecord {
-            id: "FIND_BOOKS_TO_CONVERT_library-1".to_string(),
-            simple_type: "FIND_BOOKS_TO_CONVERT".to_string(),
+            id: "FindBooksToConvert_library-1".to_string(),
+            simple_type: "FindBooksToConvert".to_string(),
             priority: 0,
             group: None,
             payload: None,
             owner: None,
         });
 
-        assert_eq!(row.id, "FIND_BOOKS_TO_CONVERT_library-1");
+        assert_eq!(row.id, "FindBooksToConvert_library-1");
         assert_eq!(row.simple_type, "FindBooksToConvert");
         assert_eq!(
             row.class_name,
@@ -814,7 +683,7 @@ mod tests {
                 "libraryId": "library-1",
                 "priority": 0,
                 "groupId": Value::Null,
-                "uniqueId": "FIND_BOOKS_TO_CONVERT_library-1"
+                "uniqueId": "FindBooksToConvert_library-1"
             })
         );
     }
@@ -822,15 +691,15 @@ mod tests {
     #[test]
     fn persisted_rebuild_index_uses_kotlin_task_shape() {
         let row = persisted_row(PersistedTaskStoreRecord {
-            id: "REBUILD_INDEX".to_string(),
-            simple_type: "REBUILD_INDEX".to_string(),
+            id: "RebuildIndex".to_string(),
+            simple_type: "RebuildIndex".to_string(),
             priority: 8,
             group: None,
             payload: Some(json!({ "entities": ["Collection"] }).to_string()),
             owner: None,
         });
 
-        assert_eq!(row.id, "REBUILD_INDEX");
+        assert_eq!(row.id, "RebuildIndex");
         assert_eq!(row.simple_type, "RebuildIndex");
         assert_eq!(
             row.class_name,
@@ -843,7 +712,7 @@ mod tests {
                 "entities": ["Collection"],
                 "priority": 8,
                 "groupId": Value::Null,
-                "uniqueId": "REBUILD_INDEX"
+                "uniqueId": "RebuildIndex"
             })
         );
     }
@@ -851,15 +720,15 @@ mod tests {
     #[test]
     fn persisted_refresh_series_metadata_uses_kotlin_task_shape() {
         let row = persisted_row(PersistedTaskStoreRecord {
-            id: "REFRESH_SERIES_METADATA_series-1".to_string(),
-            simple_type: "REFRESH_SERIES_METADATA".to_string(),
+            id: "RefreshSeriesMetadata_series-1".to_string(),
+            simple_type: "RefreshSeriesMetadata".to_string(),
             priority: 5,
             group: Some("series-1".to_string()),
             payload: None,
             owner: None,
         });
 
-        assert_eq!(row.id, "REFRESH_SERIES_METADATA_series-1");
+        assert_eq!(row.id, "RefreshSeriesMetadata_series-1");
         assert_eq!(row.simple_type, "RefreshSeriesMetadata");
         assert_eq!(
             row.class_name,
@@ -872,7 +741,7 @@ mod tests {
                 "seriesId": "series-1",
                 "priority": 5,
                 "groupId": "series-1",
-                "uniqueId": "REFRESH_SERIES_METADATA_series-1"
+                "uniqueId": "RefreshSeriesMetadata_series-1"
             })
         );
     }
@@ -880,15 +749,15 @@ mod tests {
     #[test]
     fn persisted_aggregate_series_metadata_uses_kotlin_task_shape() {
         let row = persisted_row(PersistedTaskStoreRecord {
-            id: "AGGREGATE_SERIES_METADATA_series-1".to_string(),
-            simple_type: "AGGREGATE_SERIES_METADATA".to_string(),
+            id: "AggregateSeriesMetadata_series-1".to_string(),
+            simple_type: "AggregateSeriesMetadata".to_string(),
             priority: 6,
             group: Some("series-1".to_string()),
             payload: None,
             owner: None,
         });
 
-        assert_eq!(row.id, "AGGREGATE_SERIES_METADATA_series-1");
+        assert_eq!(row.id, "AggregateSeriesMetadata_series-1");
         assert_eq!(row.simple_type, "AggregateSeriesMetadata");
         assert_eq!(
             row.class_name,
@@ -901,7 +770,7 @@ mod tests {
                 "seriesId": "series-1",
                 "priority": 6,
                 "groupId": "series-1",
-                "uniqueId": "AGGREGATE_SERIES_METADATA_series-1"
+                "uniqueId": "AggregateSeriesMetadata_series-1"
             })
         );
     }
@@ -909,15 +778,15 @@ mod tests {
     #[test]
     fn persisted_upgrade_index_uses_kotlin_task_shape() {
         let row = persisted_row(PersistedTaskStoreRecord {
-            id: "UPGRADE_INDEX".to_string(),
-            simple_type: "UPGRADE_INDEX".to_string(),
+            id: "UpgradeIndex".to_string(),
+            simple_type: "UpgradeIndex".to_string(),
             priority: 9,
             group: None,
             payload: None,
             owner: None,
         });
 
-        assert_eq!(row.id, "UPGRADE_INDEX");
+        assert_eq!(row.id, "UpgradeIndex");
         assert_eq!(row.simple_type, "UpgradeIndex");
         assert_eq!(
             row.class_name,
@@ -929,7 +798,7 @@ mod tests {
             json!({
                 "priority": 9,
                 "groupId": Value::Null,
-                "uniqueId": "UPGRADE_INDEX"
+                "uniqueId": "UpgradeIndex"
             })
         );
     }
@@ -937,15 +806,15 @@ mod tests {
     #[test]
     fn persisted_find_book_thumbnails_to_regenerate_uses_kotlin_task_shape() {
         let row = persisted_row(PersistedTaskStoreRecord {
-            id: "FIND_BOOK_THUMBNAILS_TO_REGENERATE".to_string(),
-            simple_type: "FIND_BOOK_THUMBNAILS_TO_REGENERATE".to_string(),
+            id: "FindBookThumbnailsToRegenerate".to_string(),
+            simple_type: "FindBookThumbnailsToRegenerate".to_string(),
             priority: 0,
             group: None,
             payload: Some(json!({ "for_bigger_result_only": true }).to_string()),
             owner: None,
         });
 
-        assert_eq!(row.id, "FIND_BOOK_THUMBNAILS_TO_REGENERATE");
+        assert_eq!(row.id, "FindBookThumbnailsToRegenerate");
         assert_eq!(row.simple_type, "FindBookThumbnailsToRegenerate");
         assert_eq!(
             row.class_name,
@@ -958,7 +827,7 @@ mod tests {
                 "forBiggerResultOnly": true,
                 "priority": 0,
                 "groupId": Value::Null,
-                "uniqueId": "FIND_BOOK_THUMBNAILS_TO_REGENERATE"
+                "uniqueId": "FindBookThumbnailsToRegenerate"
             })
         );
     }
@@ -966,8 +835,8 @@ mod tests {
     #[test]
     fn persisted_import_book_uses_kotlin_task_shape() {
         let row = persisted_row(PersistedTaskStoreRecord {
-            id: "IMPORT_BOOK:task-1".to_string(),
-            simple_type: "IMPORT_BOOK".to_string(),
+            id: "ImportBook:task-1".to_string(),
+            simple_type: "ImportBook".to_string(),
             priority: 100,
             group: Some("series-1".to_string()),
             payload: Some(
@@ -985,7 +854,7 @@ mod tests {
             owner: None,
         });
 
-        assert_eq!(row.id, "IMPORT_BOOK:task-1");
+        assert_eq!(row.id, "ImportBook:task-1");
         assert_eq!(row.simple_type, "ImportBook");
         assert_eq!(
             row.class_name,
@@ -1002,7 +871,7 @@ mod tests {
                 "upgradeBookId": "book-1",
                 "priority": 100,
                 "groupId": "series-1",
-                "uniqueId": "IMPORT_BOOK:task-1"
+                "uniqueId": "ImportBook:task-1"
             })
         );
     }
@@ -1010,15 +879,15 @@ mod tests {
     #[test]
     fn persisted_convert_book_uses_kotlin_task_shape() {
         let row = persisted_row(PersistedTaskStoreRecord {
-            id: "CONVERT_BOOK_book-1".to_string(),
-            simple_type: "CONVERT_BOOK".to_string(),
+            id: "ConvertBook_book-1".to_string(),
+            simple_type: "ConvertBook".to_string(),
             priority: 7,
             group: Some("series-1".to_string()),
             payload: None,
             owner: None,
         });
 
-        assert_eq!(row.id, "CONVERT_BOOK_book-1");
+        assert_eq!(row.id, "ConvertBook_book-1");
         assert_eq!(row.simple_type, "ConvertBook");
         assert_eq!(
             row.class_name,
@@ -1031,7 +900,7 @@ mod tests {
                 "bookId": "book-1",
                 "priority": 7,
                 "groupId": "series-1",
-                "uniqueId": "CONVERT_BOOK_book-1"
+                "uniqueId": "ConvertBook_book-1"
             })
         );
     }
@@ -1039,15 +908,15 @@ mod tests {
     #[test]
     fn persisted_refresh_book_local_artwork_uses_kotlin_task_shape() {
         let row = persisted_row(PersistedTaskStoreRecord {
-            id: "REFRESH_BOOK_LOCAL_ARTWORK_book-1".to_string(),
-            simple_type: "REFRESH_BOOK_LOCAL_ARTWORK".to_string(),
+            id: "RefreshBookLocalArtwork_book-1".to_string(),
+            simple_type: "RefreshBookLocalArtwork".to_string(),
             priority: 80,
             group: None,
             payload: None,
             owner: None,
         });
 
-        assert_eq!(row.id, "REFRESH_BOOK_LOCAL_ARTWORK_book-1");
+        assert_eq!(row.id, "RefreshBookLocalArtwork_book-1");
         assert_eq!(row.simple_type, "RefreshBookLocalArtwork");
         assert_eq!(
             row.class_name,
@@ -1060,7 +929,7 @@ mod tests {
                 "bookId": "book-1",
                 "priority": 80,
                 "groupId": Value::Null,
-                "uniqueId": "REFRESH_BOOK_LOCAL_ARTWORK_book-1"
+                "uniqueId": "RefreshBookLocalArtwork_book-1"
             })
         );
     }
@@ -1068,15 +937,15 @@ mod tests {
     #[test]
     fn persisted_refresh_series_local_artwork_uses_kotlin_task_shape() {
         let row = persisted_row(PersistedTaskStoreRecord {
-            id: "REFRESH_SERIES_LOCAL_ARTWORK_series-1".to_string(),
-            simple_type: "REFRESH_SERIES_LOCAL_ARTWORK".to_string(),
+            id: "RefreshSeriesLocalArtwork_series-1".to_string(),
+            simple_type: "RefreshSeriesLocalArtwork".to_string(),
             priority: 80,
             group: None,
             payload: None,
             owner: None,
         });
 
-        assert_eq!(row.id, "REFRESH_SERIES_LOCAL_ARTWORK_series-1");
+        assert_eq!(row.id, "RefreshSeriesLocalArtwork_series-1");
         assert_eq!(row.simple_type, "RefreshSeriesLocalArtwork");
         assert_eq!(
             row.class_name,
@@ -1089,7 +958,7 @@ mod tests {
                 "seriesId": "series-1",
                 "priority": 80,
                 "groupId": Value::Null,
-                "uniqueId": "REFRESH_SERIES_LOCAL_ARTWORK_series-1"
+                "uniqueId": "RefreshSeriesLocalArtwork_series-1"
             })
         );
     }
@@ -1097,15 +966,15 @@ mod tests {
     #[test]
     fn persisted_repair_extension_uses_kotlin_task_shape() {
         let row = persisted_row(PersistedTaskStoreRecord {
-            id: "REPAIR_EXTENSION_book-1".to_string(),
-            simple_type: "REPAIR_EXTENSION".to_string(),
+            id: "RepairExtension_book-1".to_string(),
+            simple_type: "RepairExtension".to_string(),
             priority: 12,
             group: Some("series-1".to_string()),
             payload: None,
             owner: None,
         });
 
-        assert_eq!(row.id, "REPAIR_EXTENSION_book-1");
+        assert_eq!(row.id, "RepairExtension_book-1");
         assert_eq!(row.simple_type, "RepairExtension");
         assert_eq!(
             row.class_name,
@@ -1118,7 +987,7 @@ mod tests {
                 "bookId": "book-1",
                 "priority": 12,
                 "groupId": "series-1",
-                "uniqueId": "REPAIR_EXTENSION_book-1"
+                "uniqueId": "RepairExtension_book-1"
             })
         );
     }
@@ -1126,15 +995,15 @@ mod tests {
     #[test]
     fn persisted_hash_book_pages_uses_kotlin_task_shape() {
         let row = persisted_row(PersistedTaskStoreRecord {
-            id: "HASH_BOOK_PAGES_book-1".to_string(),
-            simple_type: "HASH_BOOK_PAGES".to_string(),
+            id: "HashBookPages_book-1".to_string(),
+            simple_type: "HashBookPages".to_string(),
             priority: 5,
             group: None,
             payload: None,
             owner: None,
         });
 
-        assert_eq!(row.id, "HASH_BOOK_PAGES_book-1");
+        assert_eq!(row.id, "HashBookPages_book-1");
         assert_eq!(row.simple_type, "HashBookPages");
         assert_eq!(
             row.class_name,
@@ -1147,7 +1016,7 @@ mod tests {
                 "bookId": "book-1",
                 "priority": 5,
                 "groupId": Value::Null,
-                "uniqueId": "HASH_BOOK_PAGES_book-1"
+                "uniqueId": "HashBookPages_book-1"
             })
         );
     }
@@ -1155,15 +1024,15 @@ mod tests {
     #[test]
     fn persisted_hash_book_koreader_uses_kotlin_task_shape() {
         let row = persisted_row(PersistedTaskStoreRecord {
-            id: "HASH_BOOK_KOREADER_book-1".to_string(),
-            simple_type: "HASH_BOOK_KOREADER".to_string(),
+            id: "HashBookKoreader_book-1".to_string(),
+            simple_type: "HashBookKoreader".to_string(),
             priority: 5,
             group: None,
             payload: None,
             owner: None,
         });
 
-        assert_eq!(row.id, "HASH_BOOK_KOREADER_book-1");
+        assert_eq!(row.id, "HashBookKoreader_book-1");
         assert_eq!(row.simple_type, "HashBookKoreader");
         assert_eq!(
             row.class_name,
@@ -1176,7 +1045,7 @@ mod tests {
                 "bookId": "book-1",
                 "priority": 5,
                 "groupId": Value::Null,
-                "uniqueId": "HASH_BOOK_KOREADER_book-1"
+                "uniqueId": "HashBookKoreader_book-1"
             })
         );
     }
@@ -1184,15 +1053,15 @@ mod tests {
     #[test]
     fn persisted_delete_book_uses_kotlin_task_shape() {
         let row = persisted_row(PersistedTaskStoreRecord {
-            id: "DELETE_BOOK_book-1".to_string(),
-            simple_type: "DELETE_BOOK".to_string(),
+            id: "DeleteBook_book-1".to_string(),
+            simple_type: "DeleteBook".to_string(),
             priority: 8,
             group: None,
             payload: None,
             owner: None,
         });
 
-        assert_eq!(row.id, "DELETE_BOOK_book-1");
+        assert_eq!(row.id, "DeleteBook_book-1");
         assert_eq!(row.simple_type, "DeleteBook");
         assert_eq!(
             row.class_name,
@@ -1205,7 +1074,7 @@ mod tests {
                 "bookId": "book-1",
                 "priority": 8,
                 "groupId": Value::Null,
-                "uniqueId": "DELETE_BOOK_book-1"
+                "uniqueId": "DeleteBook_book-1"
             })
         );
     }
@@ -1213,15 +1082,15 @@ mod tests {
     #[test]
     fn persisted_delete_series_uses_kotlin_task_shape() {
         let row = persisted_row(PersistedTaskStoreRecord {
-            id: "DELETE_SERIES_series-1".to_string(),
-            simple_type: "DELETE_SERIES".to_string(),
+            id: "DeleteSeries_series-1".to_string(),
+            simple_type: "DeleteSeries".to_string(),
             priority: 8,
             group: None,
             payload: None,
             owner: None,
         });
 
-        assert_eq!(row.id, "DELETE_SERIES_series-1");
+        assert_eq!(row.id, "DeleteSeries_series-1");
         assert_eq!(row.simple_type, "DeleteSeries");
         assert_eq!(
             row.class_name,
@@ -1234,7 +1103,7 @@ mod tests {
                 "seriesId": "series-1",
                 "priority": 8,
                 "groupId": Value::Null,
-                "uniqueId": "DELETE_SERIES_series-1"
+                "uniqueId": "DeleteSeries_series-1"
             })
         );
     }

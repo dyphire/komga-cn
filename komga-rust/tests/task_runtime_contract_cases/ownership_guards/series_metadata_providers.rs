@@ -64,11 +64,11 @@ async fn runtime_refresh_series_metadata_applies_epub_from_book_provider_patch()
     scheduler
         .enqueue(
             TaskQueueRecord::new(
-                "REFRESH_SERIES_METADATA_series-1",
+                "RefreshSeriesMetadata_series-1",
                 1_000,
                 Some("series-1".to_string()),
             )
-            .with_simple_type("REFRESH_SERIES_METADATA"),
+            .with_simple_type("RefreshSeriesMetadata"),
         )
         .await;
     scheduler
@@ -178,11 +178,11 @@ async fn runtime_refresh_series_metadata_ignores_non_iso_language_tags_from_book
     scheduler
         .enqueue(
             TaskQueueRecord::new(
-                "REFRESH_SERIES_METADATA_series-1",
+                "RefreshSeriesMetadata_series-1",
                 1_000,
                 Some("series-1".to_string()),
             )
-            .with_simple_type("REFRESH_SERIES_METADATA"),
+            .with_simple_type("RefreshSeriesMetadata"),
         )
         .await;
     scheduler
@@ -280,11 +280,11 @@ async fn runtime_refresh_series_metadata_ignores_generic_series_xml_sidecar_with
     scheduler
         .enqueue(
             TaskQueueRecord::new(
-                "REFRESH_SERIES_METADATA_series-1",
+                "RefreshSeriesMetadata_series-1",
                 1_000,
                 Some("series-1".to_string()),
             )
-            .with_simple_type("REFRESH_SERIES_METADATA"),
+            .with_simple_type("RefreshSeriesMetadata"),
         )
         .await;
     scheduler
@@ -401,11 +401,11 @@ async fn runtime_refresh_series_metadata_applies_comicinfo_from_book_provider_an
     scheduler
         .enqueue(
             TaskQueueRecord::new(
-                "REFRESH_SERIES_METADATA_series-1",
+                "RefreshSeriesMetadata_series-1",
                 1_000,
                 Some("series-1".to_string()),
             )
-            .with_simple_type("REFRESH_SERIES_METADATA"),
+            .with_simple_type("RefreshSeriesMetadata"),
         )
         .await;
     scheduler
@@ -594,11 +594,11 @@ async fn runtime_refresh_series_metadata_ignores_deleted_books_from_book_provide
     scheduler
         .enqueue(
             TaskQueueRecord::new(
-                "REFRESH_SERIES_METADATA_series-1",
+                "RefreshSeriesMetadata_series-1",
                 1_000,
                 Some("series-1".to_string()),
             )
-            .with_simple_type("REFRESH_SERIES_METADATA"),
+            .with_simple_type("RefreshSeriesMetadata"),
         )
         .await;
     scheduler
@@ -713,11 +713,11 @@ async fn runtime_refresh_series_metadata_applies_mylar_series_provider() {
     scheduler
         .enqueue(
             TaskQueueRecord::new(
-                "REFRESH_SERIES_METADATA_series-1",
+                "RefreshSeriesMetadata_series-1",
                 1_000,
                 Some("series-1".to_string()),
             )
-            .with_simple_type("REFRESH_SERIES_METADATA"),
+            .with_simple_type("RefreshSeriesMetadata"),
         )
         .await;
     scheduler
@@ -820,11 +820,11 @@ async fn runtime_refresh_series_metadata_ignores_mylar_series_json_when_library_
     scheduler
         .enqueue(
             TaskQueueRecord::new(
-                "REFRESH_SERIES_METADATA_series-1",
+                "RefreshSeriesMetadata_series-1",
                 1_000,
                 Some("series-1".to_string()),
             )
-            .with_simple_type("REFRESH_SERIES_METADATA"),
+            .with_simple_type("RefreshSeriesMetadata"),
         )
         .await;
     scheduler

@@ -14,7 +14,7 @@ fn startup_search_lifecycle_missing_index_enqueues_rebuild_contract() {
     let startup_task = komga_server::app::prepare_startup_search_task_for_contract(&config)
         .expect("missing index startup preparation should succeed");
 
-    assert_eq!(startup_task, Some("REBUILD_INDEX"));
+    assert_eq!(startup_task, Some("RebuildIndex"));
     assert!(
         !lucene_dir.join("meta.json").exists(),
         "startup lifecycle decision must not create an index before the rebuild task runs",
@@ -56,7 +56,7 @@ fn startup_search_lifecycle_stale_schema_forces_rebuild_contract() {
     let startup_task = komga_server::app::prepare_startup_search_task_for_contract(&config)
         .expect("stale schema startup preparation should recover through explicit rebuild");
 
-    assert_eq!(startup_task, Some("REBUILD_INDEX"));
+    assert_eq!(startup_task, Some("RebuildIndex"));
     assert_eq!(
         fs::read_to_string(lucene_dir.join("meta.json")).ok(),
         None,
@@ -85,7 +85,7 @@ fn startup_search_lifecycle_stale_analyzer_version_forces_rebuild_contract() {
     let startup_task = komga_server::app::prepare_startup_search_task_for_contract(&config)
         .expect("stale analyzer version startup should recover through explicit rebuild");
 
-    assert_eq!(startup_task, Some("REBUILD_INDEX"));
+    assert_eq!(startup_task, Some("RebuildIndex"));
     assert_eq!(
         fs::read_to_string(lucene_dir.join("meta.json")).ok(),
         None,
@@ -112,7 +112,7 @@ fn startup_search_lifecycle_corrupt_index_forces_rebuild_contract() {
     let startup_task = komga_server::app::prepare_startup_search_task_for_contract(&config)
         .expect("corrupt index startup preparation should recover through explicit rebuild");
 
-    assert_eq!(startup_task, Some("REBUILD_INDEX"));
+    assert_eq!(startup_task, Some("RebuildIndex"));
     assert_eq!(
         fs::read_to_string(lucene_dir.join("meta.json")).ok(),
         None,

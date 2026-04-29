@@ -737,7 +737,7 @@ async fn router_series_file_delete_enqueues_delete_series_without_group_id() {
             "seriesId": "series-1",
             "priority": 8,
             "groupId": Value::Null,
-            "uniqueId": "DELETE_SERIES_series-1"
+            "uniqueId": "DeleteSeries_series-1"
         }),
         "series file delete route should persist the Kotlin-compatible DeleteSeries payload shape",
     );
@@ -823,9 +823,9 @@ async fn router_series_metadata_refresh_enqueues_kotlin_style_task_groups() {
             .map(|row| row.get::<String, _>("ID"))
             .collect::<Vec<_>>(),
         vec![
-            "REFRESH_BOOK_LOCAL_ARTWORK_book-1".to_string(),
-            "REFRESH_BOOK_METADATA_book-1".to_string(),
-            "REFRESH_SERIES_LOCAL_ARTWORK_series-1".to_string(),
+            "RefreshBookLocalArtwork_book-1".to_string(),
+            "RefreshBookMetadata_book-1".to_string(),
+            "RefreshSeriesLocalArtwork_series-1".to_string(),
         ]
     );
     assert_eq!(rows[0].get::<Option<String>, _>("GROUP_ID"), None);
@@ -854,7 +854,7 @@ async fn router_series_metadata_refresh_enqueues_kotlin_style_task_groups() {
             ],
             "priority": 6,
             "groupId": "series-1",
-            "uniqueId": "REFRESH_BOOK_METADATA_book-1"
+            "uniqueId": "RefreshBookMetadata_book-1"
         })
     );
 
@@ -896,7 +896,7 @@ async fn router_series_metadata_refresh_does_not_canonicalize_series_id() {
     assert_eq!(rows.len(), 1);
     assert_eq!(
         rows[0].get::<String, _>("ID"),
-        "REFRESH_SERIES_LOCAL_ARTWORK_series-2"
+        "RefreshSeriesLocalArtwork_series-2"
     );
     assert_eq!(
         rows[0].get::<String, _>("SIMPLE_TYPE"),

@@ -105,7 +105,7 @@ where
                 .map_err(|error| format!("serialize books import payload: {error}"))?;
 
                 Ok(TaskQueueRecord::new(next_task_id(), 100, Some(group_id))
-                    .with_simple_type("IMPORT_BOOK")
+                    .with_simple_type("ImportBook")
                     .with_payload(task_payload))
             })
             .collect()
@@ -166,24 +166,24 @@ fn import_follow_up_analyze_task(
     series_id: &str,
 ) -> TaskQueueRecord {
     TaskQueueRecord::new(
-        format!("ANALYZE_BOOK_{book_id}"),
+        format!("AnalyzeBook_{book_id}"),
         import_priority.saturating_add(1),
         Some(series_id.to_string()),
     )
-    .with_simple_type("ANALYZE_BOOK")
+    .with_simple_type("AnalyzeBook")
 }
 
 fn import_follow_up_metadata_task(book_id: &str, series_id: &str) -> TaskQueueRecord {
     import_follow_up_refresh_task(
-        format!("REFRESH_BOOK_METADATA_{book_id}"),
+        format!("RefreshBookMetadata_{book_id}"),
         Some(series_id.to_string()),
     )
-    .with_simple_type("REFRESH_BOOK_METADATA")
+    .with_simple_type("RefreshBookMetadata")
 }
 
 fn import_follow_up_local_artwork_task(book_id: &str) -> TaskQueueRecord {
-    import_follow_up_refresh_task(format!("REFRESH_BOOK_LOCAL_ARTWORK_{book_id}"), None)
-        .with_simple_type("REFRESH_BOOK_LOCAL_ARTWORK")
+    import_follow_up_refresh_task(format!("RefreshBookLocalArtwork_{book_id}"), None)
+        .with_simple_type("RefreshBookLocalArtwork")
 }
 
 fn import_follow_up_refresh_task(task_id: String, group_id: Option<String>) -> TaskQueueRecord {
@@ -349,14 +349,14 @@ mod tests {
             "analyze and artwork refresh should both be queued"
         );
         assert!(tasks.iter().any(|task| {
-            task.id == "ANALYZE_BOOK_book-1"
+            task.id == "AnalyzeBook_book-1"
                 && task.group == Some("series-1".to_string())
-                && task.simple_type == "ANALYZE_BOOK"
+                && task.simple_type == "AnalyzeBook"
                 && task.priority == 101
         }));
         assert!(tasks.iter().any(|task| {
-            task.id == "REFRESH_BOOK_LOCAL_ARTWORK_book-1"
-                && task.simple_type == "REFRESH_BOOK_LOCAL_ARTWORK"
+            task.id == "RefreshBookLocalArtwork_book-1"
+                && task.simple_type == "RefreshBookLocalArtwork"
                 && task.group.is_none()
                 && task.priority == 4
         }));
@@ -383,7 +383,7 @@ mod tests {
                     "upgradeBookId": "book-1",
                     "priority": 100,
                     "groupId": "series-1",
-                    "uniqueId": "IMPORT_BOOK:task-1"
+                    "uniqueId": "ImportBook:task-1"
                 })
                 .to_string(),
                 100,
@@ -392,8 +392,8 @@ mod tests {
         .expect("kotlin-style import payload should parse successfully");
 
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].id, "ANALYZE_BOOK_book-1");
-        assert_eq!(tasks[0].simple_type, "ANALYZE_BOOK");
+        assert_eq!(tasks[0].id, "AnalyzeBook_book-1");
+        assert_eq!(tasks[0].simple_type, "AnalyzeBook");
         assert_eq!(tasks[0].priority, 101);
         assert_eq!(tasks[0].group.as_deref(), Some("series-1"));
     }

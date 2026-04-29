@@ -19,7 +19,7 @@ async fn runtime_blocks_book_thumbnail_generation_when_main_database_is_external
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(TaskQueueRecord::new(
-            "GENERATE_BOOK_THUMBNAIL:book-1",
+            "GenerateBookThumbnail:book-1",
             1_000,
             Some("book-1".to_string()),
         ))
@@ -63,8 +63,8 @@ async fn runtime_generate_book_thumbnail_replaces_invalid_selected_thumbnail_wit
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(
-            TaskQueueRecord::new("GENERATE_BOOK_THUMBNAIL_book-1", 1_000, None)
-                .with_simple_type("GENERATE_BOOK_THUMBNAIL"),
+            TaskQueueRecord::new("GenerateBookThumbnail_book-1", 1_000, None)
+                .with_simple_type("GenerateBookThumbnail"),
         )
         .await;
     scheduler

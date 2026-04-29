@@ -1,5 +1,5 @@
 use super::*;
-use komga_application::task_processing::TaskRuntimeContext;
+use komga_application::task_processing::{BookPayload, TaskKind, TaskRequest, TaskRuntimeContext};
 
 pub(super) async fn try_execute(
     runtime: &TaskRuntimeContext,
@@ -7,11 +7,11 @@ pub(super) async fn try_execute(
     task_target: Option<&str>,
 ) -> Option<Result<TaskExecutionOutcome, TaskExecutionError>> {
     match task.simple_type.as_str() {
-        "REPAIR_EXTENSION" => Some(execute_repair_extension(runtime, task_target).await),
-        "FIND_BOOKS_TO_CONVERT" => {
+        "RepairExtension" => Some(execute_repair_extension(runtime, task_target).await),
+        "FindBooksToConvert" => {
             Some(execute_find_books_to_convert(runtime, task, task_target).await)
         }
-        "CONVERT_BOOK" => Some(execute_convert_book(runtime, task_target).await),
+        "ConvertBook" => Some(execute_convert_book(runtime, task_target).await),
         _ => None,
     }
 }
@@ -22,7 +22,7 @@ async fn execute_repair_extension(
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
     let Some(book_id) = task_target else {
         return Err(TaskExecutionError::invalid_task(
-            "REPAIR_EXTENSION task must include a book id",
+            "RepairExtension task must include a book id",
         ));
     };
     if !runtime.owns_main_database {
@@ -41,7 +41,7 @@ async fn execute_find_books_to_convert(
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
     let Some(library_id) = task_target else {
         return Err(TaskExecutionError::invalid_task(
-            "FIND_BOOKS_TO_CONVERT task must include a library id",
+            "FindBooksToConvert task must include a library id",
         ));
     };
     if !runtime.owns_main_database {
@@ -53,11 +53,10 @@ async fn execute_find_books_to_convert(
     let follow_up_tasks = books
         .into_iter()
         .map(|book| {
-            runtime_follow_up_task(RuntimeFollowUpTask::ConvertBook {
-                book_id: book.book_id,
-                series_id: book.series_id,
-                priority: task.priority + 1,
-            })
+            TaskRequest::with_payload(TaskKind::ConvertBook, BookPayload::new(book.book_id))
+                .priority(task.priority + 1)
+                .group(book.series_id)
+                .into_queue_record()
         })
         .collect();
     Ok(TaskExecutionOutcome::with_follow_up_tasks(follow_up_tasks))
@@ -69,7 +68,7 @@ async fn execute_convert_book(
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
     let Some(book_id) = task_target else {
         return Err(TaskExecutionError::invalid_task(
-            "CONVERT_BOOK task must include a book id",
+            "ConvertBook task must include a book id",
         ));
     };
     if !runtime.owns_main_database {
@@ -194,11 +193,11 @@ mod tests {
         let runtime = fixture.runtime_context(true, true);
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         let task = TaskQueueRecord::new(
-            "FIND_BOOKS_TO_CONVERT_library-1",
+            "FindBooksToConvert_library-1",
             1_000,
             Some("library-1".to_string()),
         )
-        .with_simple_type("FIND_BOOKS_TO_CONVERT");
+        .with_simple_type("FindBooksToConvert");
 
         let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("library-1")).await;
         assert!(matches!(result, Some(Ok(()))));
@@ -206,7 +205,7 @@ mod tests {
             scheduler
                 .count_by_simple_type()
                 .await
-                .get("CONVERT_BOOK")
+                .get("ConvertBook")
                 .copied(),
             Some(1),
             "find-books-to-convert should enqueue one downstream convert task",
@@ -223,7 +222,7 @@ mod tests {
                 .expect("convert-book task row should be queryable");
         tasks_pool.close().await;
 
-        assert_eq!(row.get::<String, _>("ID"), "CONVERT_BOOK_book-1");
+        assert_eq!(row.get::<String, _>("ID"), "ConvertBook_book-1");
         assert_eq!(
             row.get::<Option<String>, _>("GROUP_ID"),
             Some("series-1".to_string())
@@ -236,7 +235,7 @@ mod tests {
                 "bookId": "book-1",
                 "priority": 1001,
                 "groupId": "series-1",
-                "uniqueId": "CONVERT_BOOK_book-1"
+                "uniqueId": "ConvertBook_book-1"
             }),
         );
 
@@ -296,11 +295,11 @@ mod tests {
         let runtime = fixture.runtime_context(true, true);
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         let task = TaskQueueRecord::new(
-            "FIND_BOOKS_TO_CONVERT_library-1",
+            "FindBooksToConvert_library-1",
             1_000,
             Some("library-1".to_string()),
         )
-        .with_simple_type("FIND_BOOKS_TO_CONVERT");
+        .with_simple_type("FindBooksToConvert");
 
         let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("library-1")).await;
         assert!(matches!(result, Some(Ok(()))));
@@ -388,11 +387,11 @@ mod tests {
         let runtime = fixture.runtime_context(false, true);
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         let task = TaskQueueRecord::new(
-            format!("CONVERT_BOOK_{book_id}"),
+            format!("ConvertBook_{book_id}"),
             900,
             Some("series-1".to_string()),
         )
-        .with_simple_type("CONVERT_BOOK");
+        .with_simple_type("ConvertBook");
 
         let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some(book_id)).await;
         assert!(matches!(result, Some(Ok(()))));
@@ -478,11 +477,11 @@ mod tests {
         let runtime = fixture.runtime_context(false, true);
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         let task = TaskQueueRecord::new(
-            format!("CONVERT_BOOK_{book_id}"),
+            format!("ConvertBook_{book_id}"),
             900,
             Some("series-1".to_string()),
         )
-        .with_simple_type("CONVERT_BOOK");
+        .with_simple_type("ConvertBook");
 
         let first = execute_and_enqueue(&mut scheduler, &runtime, &task, Some(book_id)).await;
         assert!(matches!(first, Some(Err(_))));
@@ -608,11 +607,11 @@ mod tests {
         let runtime = fixture.runtime_context(false, false);
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         let task = TaskQueueRecord::new(
-            format!("CONVERT_BOOK_{book_id}"),
+            format!("ConvertBook_{book_id}"),
             900,
             Some("series-1".to_string()),
         )
-        .with_simple_type("CONVERT_BOOK");
+        .with_simple_type("ConvertBook");
 
         let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some(book_id)).await;
         assert!(matches!(result, Some(Ok(()))));
@@ -794,17 +793,17 @@ mod tests {
         let runtime = fixture.runtime_context(true, true);
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         let task = TaskQueueRecord::new(
-            format!("REPAIR_EXTENSION_{book_id}"),
+            format!("RepairExtension_{book_id}"),
             1_000,
             Some("series-1".to_string()),
         )
-        .with_simple_type("REPAIR_EXTENSION")
+        .with_simple_type("RepairExtension")
         .with_payload(
             serde_json::json!({
                 "bookId": book_id,
                 "priority": 1000,
                 "groupId": "series-1",
-                "uniqueId": format!("REPAIR_EXTENSION_{book_id}"),
+                "uniqueId": format!("RepairExtension_{book_id}"),
             })
             .to_string(),
         );

@@ -59,11 +59,11 @@ async fn runtime_aggregate_series_metadata_refreshes_series_books_metadata_surfa
     scheduler
         .enqueue(
             TaskQueueRecord::new(
-                "AGGREGATE_SERIES_METADATA_series-1",
+                "AggregateSeriesMetadata_series-1",
                 1_000,
                 Some("series-1".to_string()),
             )
-            .with_simple_type("AGGREGATE_SERIES_METADATA"),
+            .with_simple_type("AggregateSeriesMetadata"),
         )
         .await;
     let processed = scheduler
@@ -181,11 +181,11 @@ async fn runtime_aggregate_series_metadata_preserves_series_metadata_title_and_s
     scheduler
         .enqueue(
             TaskQueueRecord::new(
-                "AGGREGATE_SERIES_METADATA_series-1",
+                "AggregateSeriesMetadata_series-1",
                 1_000,
                 Some("series-1".to_string()),
             )
-            .with_simple_type("AGGREGATE_SERIES_METADATA"),
+            .with_simple_type("AggregateSeriesMetadata"),
         )
         .await;
     let processed = scheduler

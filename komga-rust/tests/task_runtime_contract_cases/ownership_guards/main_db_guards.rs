@@ -37,11 +37,11 @@ async fn runtime_blocks_import_book_when_main_database_is_external_owned() {
     scheduler
         .enqueue(
             TaskQueueRecord::new(
-                "IMPORT_BOOK:blocked-import",
+                "ImportBook:blocked-import",
                 1_000,
                 Some("series-1".to_string()),
             )
-            .with_simple_type("IMPORT_BOOK")
+            .with_simple_type("ImportBook")
             .with_payload(payload),
         )
         .await;
@@ -65,7 +65,7 @@ async fn runtime_blocks_import_book_when_main_database_is_external_owned() {
         .await
         .expect("tasks db should open for blocked import follow-up verification");
     let analyze_follow_ups =
-        sqlx::query("SELECT COUNT(*) AS COUNT FROM TASK WHERE SIMPLE_TYPE = 'ANALYZE_BOOK'")
+        sqlx::query("SELECT COUNT(*) AS COUNT FROM TASK WHERE SIMPLE_TYPE = 'AnalyzeBook'")
             .fetch_one(&tasks_pool)
             .await
             .expect("blocked import follow-up rows should be queryable")
@@ -146,17 +146,17 @@ async fn runtime_blocks_extension_repair_when_main_database_is_external_owned() 
     scheduler
         .enqueue(
             TaskQueueRecord::new(
-                "REPAIR_EXTENSION_book-repair-1",
+                "RepairExtension_book-repair-1",
                 1_000,
                 Some("series-1".to_string()),
             )
-            .with_simple_type("REPAIR_EXTENSION")
+            .with_simple_type("RepairExtension")
             .with_payload(
                 json!({
                     "bookId": "book-repair-1",
                     "priority": 1000,
                     "groupId": "series-1",
-                    "uniqueId": "REPAIR_EXTENSION_book-repair-1"
+                    "uniqueId": "RepairExtension_book-repair-1"
                 })
                 .to_string(),
             ),
@@ -241,11 +241,11 @@ async fn runtime_blocks_find_books_to_convert_when_main_database_is_external_own
     scheduler
         .enqueue(
             TaskQueueRecord::new(
-                "FIND_BOOKS_TO_CONVERT_library-1",
+                "FindBooksToConvert_library-1",
                 1_000,
                 Some("library-1".to_string()),
             )
-            .with_simple_type("FIND_BOOKS_TO_CONVERT"),
+            .with_simple_type("FindBooksToConvert"),
         )
         .await;
     let processed = scheduler

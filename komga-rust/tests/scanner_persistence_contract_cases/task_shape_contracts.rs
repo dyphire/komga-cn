@@ -9,12 +9,12 @@ async fn scanner_persists_hash_book_tasks_with_kotlin_task_shape() {
 
     let mut scheduler = scheduler_for_config(&fixture.config);
     scheduler
-        .enqueue(TaskQueueRecord::new("HASH_BOOK_book-1", 0, None).with_simple_type("HASH_BOOK"))
+        .enqueue(TaskQueueRecord::new("HashBook_book-1", 0, None).with_simple_type("HashBook"))
         .await;
 
     assert_persisted_task_shape(
         fixture.paths.tasks_db.as_path(),
-        "HASH_BOOK_book-1",
+        "HashBook_book-1",
         "org.gotson.komga.application.tasks.Task$HashBook",
         "HashBook",
         None,
@@ -22,7 +22,7 @@ async fn scanner_persists_hash_book_tasks_with_kotlin_task_shape() {
             "bookId": "book-1",
             "priority": 0,
             "groupId": Value::Null,
-            "uniqueId": "HASH_BOOK_book-1"
+            "uniqueId": "HashBook_book-1"
         }),
     )
     .await;
@@ -40,17 +40,17 @@ async fn scanner_persists_refresh_book_metadata_tasks_with_kotlin_task_shape() {
     scheduler
         .enqueue(
             TaskQueueRecord::new(
-                "REFRESH_BOOK_METADATA_book-1",
+                "RefreshBookMetadata_book-1",
                 80,
                 Some("series-1".to_string()),
             )
-            .with_simple_type("REFRESH_BOOK_METADATA"),
+            .with_simple_type("RefreshBookMetadata"),
         )
         .await;
 
     assert_persisted_task_shape(
         fixture.paths.tasks_db.as_path(),
-        "REFRESH_BOOK_METADATA_book-1",
+        "RefreshBookMetadata_book-1",
         "org.gotson.komga.application.tasks.Task$RefreshBookMetadata",
         "RefreshBookMetadata",
         Some("series-1"),
@@ -71,7 +71,7 @@ async fn scanner_persists_refresh_book_metadata_tasks_with_kotlin_task_shape() {
             ],
             "priority": 80,
             "groupId": "series-1",
-            "uniqueId": "REFRESH_BOOK_METADATA_book-1"
+            "uniqueId": "RefreshBookMetadata_book-1"
         }),
     )
     .await;
@@ -88,14 +88,14 @@ async fn scanner_persists_find_duplicate_pages_to_delete_tasks_with_kotlin_task_
     let mut scheduler = scheduler_for_config(&fixture.config);
     scheduler
         .enqueue(
-            TaskQueueRecord::new("FIND_DUPLICATE_PAGES_TO_DELETE_library-1", 85, None)
-                .with_simple_type("FIND_DUPLICATE_PAGES_TO_DELETE"),
+            TaskQueueRecord::new("FindDuplicatePagesToDelete_library-1", 85, None)
+                .with_simple_type("FindDuplicatePagesToDelete"),
         )
         .await;
 
     assert_persisted_task_shape(
         fixture.paths.tasks_db.as_path(),
-        "FIND_DUPLICATE_PAGES_TO_DELETE_library-1",
+        "FindDuplicatePagesToDelete_library-1",
         "org.gotson.komga.application.tasks.Task$FindDuplicatePagesToDelete",
         "FindDuplicatePagesToDelete",
         None,
@@ -103,7 +103,7 @@ async fn scanner_persists_find_duplicate_pages_to_delete_tasks_with_kotlin_task_
             "libraryId": "library-1",
             "priority": 85,
             "groupId": Value::Null,
-            "uniqueId": "FIND_DUPLICATE_PAGES_TO_DELETE_library-1"
+            "uniqueId": "FindDuplicatePagesToDelete_library-1"
         }),
     )
     .await;
@@ -121,14 +121,14 @@ async fn scanner_persists_find_books_with_missing_page_hash_tasks_with_kotlin_ta
     let mut scheduler = scheduler_for_config(&fixture.config);
     scheduler
         .enqueue(
-            TaskQueueRecord::new("FIND_BOOKS_WITH_MISSING_PAGE_HASH_library-1", 0, None)
-                .with_simple_type("FIND_BOOKS_WITH_MISSING_PAGE_HASH"),
+            TaskQueueRecord::new("FindBooksWithMissingPageHash_library-1", 0, None)
+                .with_simple_type("FindBooksWithMissingPageHash"),
         )
         .await;
 
     assert_persisted_task_shape(
         fixture.paths.tasks_db.as_path(),
-        "FIND_BOOKS_WITH_MISSING_PAGE_HASH_library-1",
+        "FindBooksWithMissingPageHash_library-1",
         "org.gotson.komga.application.tasks.Task$FindBooksWithMissingPageHash",
         "FindBooksWithMissingPageHash",
         None,
@@ -136,7 +136,7 @@ async fn scanner_persists_find_books_with_missing_page_hash_tasks_with_kotlin_ta
             "libraryId": "library-1",
             "priority": 0,
             "groupId": Value::Null,
-            "uniqueId": "FIND_BOOKS_WITH_MISSING_PAGE_HASH_library-1"
+            "uniqueId": "FindBooksWithMissingPageHash_library-1"
         }),
     )
     .await;

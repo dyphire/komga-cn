@@ -47,7 +47,7 @@ impl ScannerPersistenceFixture {
 }
 
 pub(super) fn scan_library_task_id(library_id: &str, deep_scan: bool) -> String {
-    format!("SCAN_LIBRARY_{library_id}_DEEP_{deep_scan}")
+    format!("ScanLibrary_{library_id}_DEEP_{deep_scan}")
 }
 
 pub(super) fn scan_library_task_payload(
@@ -71,7 +71,7 @@ pub(super) fn scan_library_task(
     deep_scan: bool,
 ) -> TaskQueueRecord {
     TaskQueueRecord::new(scan_library_task_id(library_id, deep_scan), priority, None)
-        .with_simple_type("SCAN_LIBRARY")
+        .with_simple_type("ScanLibrary")
         .with_payload(scan_library_task_payload(library_id, priority, deep_scan))
 }
 

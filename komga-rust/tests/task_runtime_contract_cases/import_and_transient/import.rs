@@ -243,7 +243,7 @@ async fn router_books_import_reuses_kotlin_style_unique_id_for_duplicate_series_
 
     let source = paths.config_dir.join("incoming-dedup.cbz");
     std::fs::write(&source, b"import-dedup-fixture").expect("dedup source should be writable");
-    let expected_id = format!("IMPORT_BOOK_series-1_{}", source.to_string_lossy());
+    let expected_id = format!("ImportBook_series-1_{}", source.to_string_lossy());
 
     for (context, payload) in [
         (
@@ -399,14 +399,14 @@ async fn router_books_import_runtime_follow_up_enqueues_analyze_book_instead_of_
     assert!(
         follow_up_tasks
             .iter()
-            .all(|task| task.simple_type != "SCAN_LIBRARY"),
+            .all(|task| task.simple_type != "ScanLibrary"),
         "import runtime follow-up must not fall back to library scan tasks",
     );
     assert!(
-        follow_up_tasks[0].id.starts_with("ANALYZE_BOOK_"),
+        follow_up_tasks[0].id.starts_with("AnalyzeBook_"),
         "import runtime follow-up should enqueue analyze-book task ids",
     );
-    assert_eq!(follow_up_tasks[0].simple_type, "ANALYZE_BOOK");
+    assert_eq!(follow_up_tasks[0].simple_type, "AnalyzeBook");
     assert_eq!(follow_up_tasks[0].priority, 101);
     assert_eq!(follow_up_tasks[0].group.as_deref(), Some("series-1"));
 

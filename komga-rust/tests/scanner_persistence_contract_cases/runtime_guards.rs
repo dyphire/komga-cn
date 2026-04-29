@@ -62,7 +62,7 @@ async fn scanner_runtime_blocks_scan_output_when_filesystem_scan_writer_is_exter
 
     assert_eq!(
         remaining_tasks, 0,
-        "external-owned filesystem scan execution must still drain the persisted SCAN_LIBRARY task instead of leaving it queued forever",
+        "external-owned filesystem scan execution must still drain the persisted ScanLibrary task instead of leaving it queued forever",
     );
     assert_eq!(
         owned_tasks, 0,
@@ -247,7 +247,7 @@ async fn scanner_startup_leaves_tasks_untouched_when_tasks_writer_is_external_ow
 
     let background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
         runtime,
-        Some("REBUILD_INDEX"),
+        Some("RebuildIndex"),
     )
     .await;
 
@@ -343,7 +343,7 @@ async fn scanner_persisted_scan_library_payload_overrides_legacy_id_target_and_d
     sqlx::query(
         "INSERT INTO TASK (ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER) VALUES (?, ?, ?, ?, ?, ?, NULL)",
     )
-    .bind("SCAN_LIBRARY:missing-library:DEEP:true")
+    .bind("ScanLibrary_missing-library_DEEP_true")
     .bind(900_i64)
     .bind(Option::<String>::None)
     .bind("org.gotson.komga.application.tasks.Task$ScanLibrary")
@@ -354,7 +354,7 @@ async fn scanner_persisted_scan_library_payload_overrides_legacy_id_target_and_d
             "scanDeep": false,
             "priority": 900,
             "groupId": Value::Null,
-            "uniqueId": "SCAN_LIBRARY:missing-library:DEEP:true"
+            "uniqueId": "ScanLibrary_missing-library_DEEP_true"
         })
         .to_string(),
     )
@@ -389,7 +389,7 @@ async fn scanner_persisted_scan_library_payload_overrides_legacy_id_target_and_d
     assert_eq!(
         load_media_page_file_size(&fixture.paths.main_db, &book_url).await,
         initial_page_size,
-        "scan-library replay must honor payload.scanDeep over the legacy :DEEP: suffix so a false payload does not force deep reanalysis",
+        "scan-library replay must honor payload.scanDeep over the legacy _DEEP_ suffix so a false payload does not force deep reanalysis",
     );
     assert_ne!(
         initial_page_size, updated_page_size,
@@ -433,8 +433,8 @@ async fn scanner_persisted_scan_library_recovers_deep_flag_from_underscore_legac
 
     scheduler
         .enqueue(
-            TaskQueueRecord::new("SCAN_LIBRARY_library-1_DEEP_true", 900, None)
-                .with_simple_type("SCAN_LIBRARY"),
+            TaskQueueRecord::new("ScanLibrary_library-1_DEEP_true", 900, None)
+                .with_simple_type("ScanLibrary"),
         )
         .await;
     scheduler
@@ -445,58 +445,6 @@ async fn scanner_persisted_scan_library_recovers_deep_flag_from_underscore_legac
         load_media_page_file_size(&fixture.paths.main_db, &book_url).await,
         expected_updated_page_size,
         "scan-library enqueue must recover deep=true from the legacy _DEEP_ suffix so persisted execution still performs deep reanalysis",
-    );
-
-    fixture.cleanup();
-}
-
-#[tokio::test]
-async fn scanner_persisted_scan_library_recovers_deep_flag_from_colon_legacy_id() {
-    let fixture = ScannerPersistenceFixture::new("scanner-persistence-scan-colon-deep")
-        .await
-        .expect("scanner colon deep fixture should be created");
-
-    let book_path = fixture.library_root.join("Series-A").join("Book-001.cbz");
-    let book_url = book_path.to_string_lossy().to_string();
-    let initial_page_size = write_scannable_cbz_fixture(&book_path, b"page-before-colon")
-        .expect("initial colon scan fixture should be written");
-
-    let runtime = runtime_task_context_from_config(&fixture.config);
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
-    scheduler
-        .enqueue(scan_library_task("library-1", 900, false))
-        .await;
-    scheduler
-        .process_available(&runtime)
-        .await
-        .expect("initial scan should seed colon deep replay state");
-
-    assert_eq!(
-        load_media_page_file_size(&fixture.paths.main_db, &book_url).await,
-        initial_page_size,
-        "fixture sanity: initial scan should persist MEDIA_PAGE rows before colon replay",
-    );
-
-    tokio::time::sleep(Duration::from_millis(1100)).await;
-    let expected_updated_page_size =
-        write_scannable_cbz_fixture(&book_path, b"page-after-colon-deep")
-            .expect("updated colon scan fixture should be written");
-
-    scheduler
-        .enqueue(TaskQueueRecord::new(
-            "SCAN_LIBRARY:library-1:DEEP:true",
-            900,
-            None,
-        ))
-        .await;
-    scheduler
-        .process_available(&runtime).await
-        .expect("colon legacy scan-library id should process successfully after canonical payload restoration");
-
-    assert_eq!(
-        load_media_page_file_size(&fixture.paths.main_db, &book_url).await,
-        expected_updated_page_size,
-        "scan-library execution must recover deep=true from the legacy :DEEP: suffix when payload is absent so persisted replay still performs deep reanalysis",
     );
 
     fixture.cleanup();

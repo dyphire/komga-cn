@@ -120,7 +120,7 @@ async fn router_book_file_delete_enqueues_delete_book_even_when_book_is_missing(
     tasks_pool.close().await;
 
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].get::<String, _>("ID"), "DELETE_BOOK_missing-book");
+    assert_eq!(rows[0].get::<String, _>("ID"), "DeleteBook_missing-book");
     assert_eq!(rows[0].get::<String, _>("SIMPLE_TYPE"), "DeleteBook");
     assert_eq!(rows[0].get::<Option<String>, _>("GROUP_ID"), None);
     assert_eq!(rows[0].get::<i32, _>("PRIORITY"), 8);
@@ -131,7 +131,7 @@ async fn router_book_file_delete_enqueues_delete_book_even_when_book_is_missing(
             "bookId": "missing-book",
             "priority": 8,
             "groupId": Value::Null,
-            "uniqueId": "DELETE_BOOK_missing-book"
+            "uniqueId": "DeleteBook_missing-book"
         }),
     );
 

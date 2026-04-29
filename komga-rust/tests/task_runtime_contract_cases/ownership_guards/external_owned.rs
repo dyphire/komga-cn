@@ -127,8 +127,8 @@ async fn runtime_blocks_book_media_analysis_when_main_database_is_external_owned
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(
-            TaskQueueRecord::new("ANALYZE_BOOK_book-1", 1_000, Some("series-1".to_string()))
-                .with_simple_type("ANALYZE_BOOK"),
+            TaskQueueRecord::new("AnalyzeBook_book-1", 1_000, Some("series-1".to_string()))
+                .with_simple_type("AnalyzeBook"),
         )
         .await;
     scheduler
@@ -222,7 +222,7 @@ async fn runtime_blocks_sidecar_metadata_refresh_when_sidecar_output_is_external
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(TaskQueueRecord::new(
-            "REFRESH_BOOK_METADATA:book-1",
+            "RefreshBookMetadata:book-1",
             1_000,
             Some("book-1".to_string()),
         ))
@@ -286,11 +286,11 @@ async fn runtime_blocks_series_metadata_aggregation_when_main_database_is_extern
     scheduler
         .enqueue(
             TaskQueueRecord::new(
-                "AGGREGATE_SERIES_METADATA_series-1",
+                "AggregateSeriesMetadata_series-1",
                 1_000,
                 Some("series-1".to_string()),
             )
-            .with_simple_type("AGGREGATE_SERIES_METADATA"),
+            .with_simple_type("AggregateSeriesMetadata"),
         )
         .await;
     scheduler
@@ -362,12 +362,8 @@ async fn runtime_blocks_empty_trash_cleanup_when_main_database_is_external_owned
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(
-            TaskQueueRecord::new(
-                "EMPTY_TRASH_library-1",
-                1_000,
-                Some("library-1".to_string()),
-            )
-            .with_simple_type("EMPTY_TRASH"),
+            TaskQueueRecord::new("EmptyTrash_library-1", 1_000, Some("library-1".to_string()))
+                .with_simple_type("EmptyTrash"),
         )
         .await;
     scheduler

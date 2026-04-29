@@ -290,15 +290,15 @@ mod tests {
     use tokio::sync::Mutex;
 
     fn scan_library_task() -> TaskQueueRecord {
-        TaskQueueRecord::new("SCAN_LIBRARY_library-1_DEEP_false", 8, None)
-            .with_simple_type("SCAN_LIBRARY")
+        TaskQueueRecord::new("ScanLibrary_library-1_DEEP_false", 8, None)
+            .with_simple_type("ScanLibrary")
             .with_payload(
                 json!({
                     "libraryId": "library-1",
                     "scanDeep": false,
                     "priority": 8,
                     "groupId": serde_json::Value::Null,
-                    "uniqueId": "SCAN_LIBRARY_library-1_DEEP_false",
+                    "uniqueId": "ScanLibrary_library-1_DEEP_false",
                 })
                 .to_string(),
             )
@@ -340,11 +340,7 @@ mod tests {
             );
 
             let queued_tasks = task_queue.lock().await.count_by_simple_type().await;
-            assert_eq!(
-                queued_tasks.get("SCAN_LIBRARY"),
-                Some(&1),
-                "urgent={urgent}"
-            );
+            assert_eq!(queued_tasks.get("ScanLibrary"), Some(&1), "urgent={urgent}");
         }
     }
 

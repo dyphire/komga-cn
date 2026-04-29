@@ -168,8 +168,8 @@ fn kotlin_visible_task_type_counts(
 
 fn kotlin_visible_task_type_key(task_type: &str) -> String {
     match task_type {
-        "SCAN_LIBRARY" => "scanLibrary".to_string(),
-        "ANALYZE_BOOK" => "analyzeBook".to_string(),
+        "ScanLibrary" => "scanLibrary".to_string(),
+        "AnalyzeBook" => "analyzeBook".to_string(),
         _ => task_type.to_string(),
     }
 }

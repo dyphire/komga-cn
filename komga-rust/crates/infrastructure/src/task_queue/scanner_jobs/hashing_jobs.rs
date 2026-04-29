@@ -1,4 +1,5 @@
 use super::*;
+use komga_application::task_processing::{BookPayload, TaskKind, TaskRequest};
 
 pub(super) async fn try_execute(
     runtime: &TaskRuntimeContext,
@@ -6,18 +7,16 @@ pub(super) async fn try_execute(
     task_target: Option<&str>,
 ) -> Option<Result<TaskExecutionOutcome, TaskExecutionError>> {
     match task.simple_type.as_str() {
-        "HASH_BOOK_PAGES" => Some(execute_hash_book_pages(runtime, task_target).await),
-        "HASH_BOOK" => Some(execute_hash_book(runtime, task_target, false).await),
-        "HASH_BOOK_KOREADER" => Some(execute_hash_book(runtime, task_target, true).await),
-        "FIND_BOOKS_WITH_MISSING_PAGE_HASH" => {
+        "HashBookPages" => Some(execute_hash_book_pages(runtime, task_target).await),
+        "HashBook" => Some(execute_hash_book(runtime, task_target, false).await),
+        "HashBookKoreader" => Some(execute_hash_book(runtime, task_target, true).await),
+        "FindBooksWithMissingPageHash" => {
             Some(execute_find_books_with_missing_page_hash(runtime, task, task_target).await)
         }
-        "FIND_DUPLICATE_PAGES_TO_DELETE" => {
+        "FindDuplicatePagesToDelete" => {
             Some(execute_find_duplicate_pages_to_delete(runtime, task, task_target).await)
         }
-        "REMOVE_HASHED_PAGES" => {
-            Some(execute_remove_hashed_pages(runtime, task, task_target).await)
-        }
+        "RemoveHashedPages" => Some(execute_remove_hashed_pages(runtime, task, task_target).await),
         _ => None,
     }
 }
@@ -46,9 +45,9 @@ async fn execute_hash_book(
     koreader: bool,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
     let task_name = if koreader {
-        "HASH_BOOK_KOREADER"
+        "HashBookKoreader"
     } else {
-        "HASH_BOOK"
+        "HashBook"
     };
     let Some(book_id) = task_target else {
         return Err(TaskExecutionError::invalid_task(&format!(
@@ -72,7 +71,7 @@ async fn execute_find_books_with_missing_page_hash(
 
     let Some(library_id) = task_target else {
         return Err(TaskExecutionError::invalid_task(
-            "FIND_BOOKS_WITH_MISSING_PAGE_HASH task must include a library id",
+            "FindBooksWithMissingPageHash task must include a library id",
         ));
     };
     let hashing_flags = load_library_hashing_flags(runtime, library_id).await?;
@@ -85,7 +84,9 @@ async fn execute_find_books_with_missing_page_hash(
         .into_iter()
         .map(|book_id| {
             let priority = task.priority.saturating_add(1);
-            runtime_follow_up_task(RuntimeFollowUpTask::HashBookPages { book_id, priority })
+            TaskRequest::with_payload(TaskKind::HashBookPages, BookPayload::new(book_id))
+                .priority(priority)
+                .into_queue_record()
         })
         .collect();
     Ok(TaskExecutionOutcome::with_follow_up_tasks(follow_up_tasks))
@@ -102,7 +103,7 @@ async fn execute_find_duplicate_pages_to_delete(
 
     let Some(library_id) = task_target else {
         return Err(TaskExecutionError::invalid_task(
-            "FIND_DUPLICATE_PAGES_TO_DELETE task must include a library id",
+            "FindDuplicatePagesToDelete task must include a library id",
         ));
     };
     let targets = find_duplicate_pages_to_delete(runtime, library_id).await?;
@@ -116,16 +117,15 @@ async fn execute_find_duplicate_pages_to_delete(
         ))
         .map_err(|error| {
             TaskExecutionError::runtime(format!(
-                "failed to serialize REMOVE_HASHED_PAGES payload: {error}",
+                "failed to serialize RemoveHashedPages payload: {error}",
             ))
         })?;
-        follow_up_tasks.push(runtime_follow_up_task(
-            RuntimeFollowUpTask::RemoveHashedPages {
-                book_id,
-                priority,
-                payload,
-            },
-        ));
+        follow_up_tasks.push({
+            let task_id = format!("RemoveHashedPages_{book_id}");
+            TaskQueueRecord::new(task_id.clone(), priority, None)
+                .with_simple_type("RemoveHashedPages")
+                .with_payload(payload)
+        });
     }
     Ok(TaskExecutionOutcome::with_follow_up_tasks(follow_up_tasks))
 }
@@ -141,29 +141,29 @@ async fn execute_remove_hashed_pages(
 
     let Some(book_id) = task_target else {
         return Err(TaskExecutionError::invalid_task(
-            "REMOVE_HASHED_PAGES task must include a book id",
+            "RemoveHashedPages task must include a book id",
         ));
     };
     let Some(payload) = task.payload.as_deref() else {
         return Err(TaskExecutionError::invalid_task(
-            "REMOVE_HASHED_PAGES task requires serialized payload",
+            "RemoveHashedPages task requires serialized payload",
         ));
     };
     let parsed = serde_json::from_str::<super::super::RemoveHashedPagesPayload>(payload).map_err(
         |error| {
             TaskExecutionError::runtime(format!(
-                "failed to parse REMOVE_HASHED_PAGES payload: {error}",
+                "failed to parse RemoveHashedPages payload: {error}",
             ))
         },
     )?;
     if parsed.book_id != book_id {
         return Err(TaskExecutionError::invalid_task(
-            "REMOVE_HASHED_PAGES payload book id must match task id",
+            "RemoveHashedPages payload book id must match task id",
         ));
     }
     if parsed.unique_id != task.id {
         return Err(TaskExecutionError::invalid_task(
-            "REMOVE_HASHED_PAGES payload unique id must match task id",
+            "RemoveHashedPages payload unique id must match task id",
         ));
     }
 
@@ -171,12 +171,11 @@ async fn execute_remove_hashed_pages(
     let pages = parsed.pages;
     let regenerate_thumbnail = remove_hashed_pages(runtime, &book_id, &pages).await?;
     let follow_up_tasks = if regenerate_thumbnail {
-        vec![runtime_follow_up_task(
-            RuntimeFollowUpTask::GenerateBookThumbnail {
-                book_id,
-                priority: task.priority.saturating_add(1),
-            },
-        )]
+        vec![
+            TaskRequest::new(TaskKind::GenerateBookThumbnail)
+                .priority(task.priority.saturating_add(1))
+                .into_queue_record_with_id(&book_id),
+        ]
     } else {
         Vec::new()
     };
@@ -334,8 +333,8 @@ mod tests {
             12,
         ))
         .expect("remove-hashed-pages failure fixture payload should serialize");
-        let task = TaskQueueRecord::new("REMOVE_HASHED_PAGES_book-1", 12, None)
-            .with_simple_type("REMOVE_HASHED_PAGES")
+        let task = TaskQueueRecord::new("RemoveHashedPages_book-1", 12, None)
+            .with_simple_type("RemoveHashedPages")
             .with_payload(payload);
 
         (fixture, runtime, task)
@@ -395,9 +394,8 @@ mod tests {
         let runtime = fixture.runtime_context(false, true);
         let mut scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "missing-page-hash-finder-test");
-        let finder_task =
-            TaskQueueRecord::new("FIND_BOOKS_WITH_MISSING_PAGE_HASH_library-1", 0, None)
-                .with_simple_type("FIND_BOOKS_WITH_MISSING_PAGE_HASH");
+        let finder_task = TaskQueueRecord::new("FindBooksWithMissingPageHash_library-1", 0, None)
+            .with_simple_type("FindBooksWithMissingPageHash");
 
         let result =
             execute_and_enqueue(&mut scheduler, &runtime, &finder_task, Some("library-1")).await;
@@ -408,8 +406,8 @@ mod tests {
             .take_available("missing-page-hash-finder-assert")
             .expect("finder should enqueue one hash book pages task");
 
-        assert_eq!(generated.id, "HASH_BOOK_PAGES_book-1");
-        assert_eq!(generated.simple_type, "HASH_BOOK_PAGES");
+        assert_eq!(generated.id, "HashBookPages_book-1");
+        assert_eq!(generated.simple_type, "HashBookPages");
         assert_eq!(generated.group, None);
         assert_eq!(
             generated
@@ -420,7 +418,7 @@ mod tests {
                 "bookId": "book-1",
                 "priority": 1,
                 "groupId": serde_json::Value::Null,
-                "uniqueId": "HASH_BOOK_PAGES_book-1"
+                "uniqueId": "HashBookPages_book-1"
             })),
         );
 
@@ -481,9 +479,8 @@ mod tests {
         let runtime = fixture.runtime_context(false, true);
         let mut scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "missing-page-hash-disabled-test");
-        let finder_task =
-            TaskQueueRecord::new("FIND_BOOKS_WITH_MISSING_PAGE_HASH_library-1", 3, None)
-                .with_simple_type("FIND_BOOKS_WITH_MISSING_PAGE_HASH");
+        let finder_task = TaskQueueRecord::new("FindBooksWithMissingPageHash_library-1", 3, None)
+            .with_simple_type("FindBooksWithMissingPageHash");
 
         let result =
             execute_and_enqueue(&mut scheduler, &runtime, &finder_task, Some("library-1")).await;
@@ -640,8 +637,8 @@ mod tests {
             12,
         ))
         .expect("remove-hashed-pages payload should serialize");
-        let task = TaskQueueRecord::new("REMOVE_HASHED_PAGES_book-1", 12, None)
-            .with_simple_type("REMOVE_HASHED_PAGES")
+        let task = TaskQueueRecord::new("RemoveHashedPages_book-1", 12, None)
+            .with_simple_type("RemoveHashedPages")
             .with_payload(payload);
 
         let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some(book_id)).await;
@@ -653,8 +650,8 @@ mod tests {
             .expect(
                 "remove-hashed-pages should enqueue generate thumbnail when first page is removed",
             );
-        assert_eq!(generated.id, "GENERATE_BOOK_THUMBNAIL_book-1");
-        assert_eq!(generated.simple_type, "GENERATE_BOOK_THUMBNAIL");
+        assert_eq!(generated.id, "GenerateBookThumbnail_book-1");
+        assert_eq!(generated.simple_type, "GenerateBookThumbnail");
 
         let verify_pool = connect_test_pool(fixture.database_file.as_path(), 1)
             .await

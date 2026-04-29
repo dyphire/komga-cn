@@ -14,7 +14,7 @@ fn scheduler_logs_truthful_success_lifecycle_at_commit_boundaries() {
 
     let config = runtime_config_for_paths(&paths);
     let task = TaskQueueRecord::new(
-        "UPGRADE_INDEX:logging-success",
+        "UpgradeIndex:logging-success",
         1_000,
         Some("search-maintenance".to_string()),
     );
@@ -35,11 +35,11 @@ fn scheduler_logs_truthful_success_lifecycle_at_commit_boundaries() {
 
     let events = parse_json_log_lines(&logs);
     let enqueue =
-        event_fields_with_task_id(&events, "task_enqueue", "UPGRADE_INDEX:logging-success");
-    let claim = event_fields_with_task_id(&events, "task_claim", "UPGRADE_INDEX:logging-success");
-    let start = event_fields_with_task_id(&events, "task_start", "UPGRADE_INDEX:logging-success");
+        event_fields_with_task_id(&events, "task_enqueue", "UpgradeIndex:logging-success");
+    let claim = event_fields_with_task_id(&events, "task_claim", "UpgradeIndex:logging-success");
+    let start = event_fields_with_task_id(&events, "task_start", "UpgradeIndex:logging-success");
     let complete =
-        event_fields_with_task_id(&events, "task_complete", "UPGRADE_INDEX:logging-success");
+        event_fields_with_task_id(&events, "task_complete", "UpgradeIndex:logging-success");
     let process_start = event_fields_with_outcome(&events, "task_process_available", "started");
     let process_complete =
         event_fields_with_outcome(&events, "task_process_available", "completed");
@@ -52,26 +52,16 @@ fn scheduler_logs_truthful_success_lifecycle_at_commit_boundaries() {
     );
     assert_task_fields(
         enqueue,
-        "UPGRADE_INDEX:logging-success",
-        "UPGRADE_INDEX",
+        "UpgradeIndex:logging-success",
+        "UpgradeIndex",
         1_000,
     );
-    assert_task_fields(
-        claim,
-        "UPGRADE_INDEX:logging-success",
-        "UPGRADE_INDEX",
-        1_000,
-    );
-    assert_task_fields(
-        start,
-        "UPGRADE_INDEX:logging-success",
-        "UPGRADE_INDEX",
-        1_000,
-    );
+    assert_task_fields(claim, "UpgradeIndex:logging-success", "UpgradeIndex", 1_000);
+    assert_task_fields(start, "UpgradeIndex:logging-success", "UpgradeIndex", 1_000);
     assert_task_fields(
         complete,
-        "UPGRADE_INDEX:logging-success",
-        "UPGRADE_INDEX",
+        "UpgradeIndex:logging-success",
+        "UpgradeIndex",
         1_000,
     );
     assert_eq!(field_str(enqueue, "group"), Some("search-maintenance"));
@@ -110,7 +100,7 @@ fn scheduler_logs_failure_with_concurrent_success_without_fake_success_events() 
     )
     .with_simple_type("UNSUPPORTED_TASK");
     let disowned_task = TaskQueueRecord::new(
-        "UPGRADE_INDEX:logging-disown",
+        "UpgradeIndex:logging-disown",
         1_000,
         Some("search-maintenance".to_string()),
     );
@@ -143,7 +133,7 @@ fn scheduler_logs_failure_with_concurrent_success_without_fake_success_events() 
     let events = parse_json_log_lines(&logs);
     let fail = event_fields_with_task_id(&events, "task_fail", "UNSUPPORTED_TASK:logging-failure");
     let complete =
-        event_fields_with_task_id(&events, "task_complete", "UPGRADE_INDEX:logging-disown");
+        event_fields_with_task_id(&events, "task_complete", "UpgradeIndex:logging-disown");
     let process_failed = event_fields_with_outcome(&events, "task_process_available", "failed");
 
     println!("scheduler_failure_disown_logs {logs}");
@@ -166,8 +156,8 @@ fn scheduler_logs_failure_with_concurrent_success_without_fake_success_events() 
     );
     assert_task_fields(
         complete,
-        "UPGRADE_INDEX:logging-disown",
-        "UPGRADE_INDEX",
+        "UpgradeIndex:logging-disown",
+        "UpgradeIndex",
         1_000,
     );
     assert_eq!(field_str(complete, "outcome"), Some("completed"));
@@ -191,7 +181,7 @@ fn scheduler_logs_failure_with_concurrent_success_without_fake_success_events() 
     assert!(
         matching_event_fields(&events, "task_disown")
             .into_iter()
-            .all(|fields| field_str(fields, "task_id") != Some("UPGRADE_INDEX:logging-disown")),
+            .all(|fields| field_str(fields, "task_id") != Some("UpgradeIndex:logging-disown")),
         "concurrently completed tasks must not be logged as disowned: {events:?}",
     );
 }
@@ -210,7 +200,7 @@ fn scheduler_logs_recover_before_reclaiming_owned_work() {
 
     let config = runtime_config_for_paths(&paths);
     let task = TaskQueueRecord::new(
-        "UPGRADE_INDEX:logging-recover",
+        "UpgradeIndex:logging-recover",
         1_000,
         Some("search-maintenance".to_string()),
     );
@@ -227,7 +217,7 @@ fn scheduler_logs_recover_before_reclaiming_owned_work() {
                 .take_next()
                 .await
                 .expect("recover fixture should claim the queued task before recovery");
-            assert_eq!(claimed.id, "UPGRADE_INDEX:logging-recover");
+            assert_eq!(claimed.id, "UpgradeIndex:logging-recover");
 
             scheduler
                 .recover_and_process(&runtime)
@@ -238,11 +228,11 @@ fn scheduler_logs_recover_before_reclaiming_owned_work() {
 
     let events = parse_json_log_lines(&logs);
     let recover =
-        event_fields_with_task_id(&events, "task_recover", "UPGRADE_INDEX:logging-recover");
-    let disown = event_fields_with_task_id(&events, "task_disown", "UPGRADE_INDEX:logging-recover");
-    let claim_events = task_events(&events, "task_claim", "UPGRADE_INDEX:logging-recover");
+        event_fields_with_task_id(&events, "task_recover", "UpgradeIndex:logging-recover");
+    let disown = event_fields_with_task_id(&events, "task_disown", "UpgradeIndex:logging-recover");
+    let claim_events = task_events(&events, "task_claim", "UpgradeIndex:logging-recover");
     let complete =
-        event_fields_with_task_id(&events, "task_complete", "UPGRADE_INDEX:logging-recover");
+        event_fields_with_task_id(&events, "task_complete", "UpgradeIndex:logging-recover");
 
     println!("scheduler_recover_logs {logs}");
 
@@ -252,8 +242,8 @@ fn scheduler_logs_recover_before_reclaiming_owned_work() {
     );
     assert_task_fields(
         recover,
-        "UPGRADE_INDEX:logging-recover",
-        "UPGRADE_INDEX",
+        "UpgradeIndex:logging-recover",
+        "UpgradeIndex",
         1_000,
     );
     assert_eq!(field_str(recover, "outcome"), Some("recovered"));
@@ -278,28 +268,28 @@ async fn scheduler_take_next_respects_priority_order_group_locks_and_owner_persi
         .expect("tasks db should open for batch claim ordering setup");
     for (id, priority, group_id, class_name, simple_type) in [
         (
-            "UPGRADE_INDEX:shared-high",
+            "UpgradeIndex:shared-high",
             1_000_i64,
             Some("shared-group"),
             "org.gotson.komga.application.tasks.Task$UpgradeIndex",
             "UpgradeIndex",
         ),
         (
-            "UPGRADE_INDEX:shared-low",
+            "UpgradeIndex:shared-low",
             950_i64,
             Some("shared-group"),
             "org.gotson.komga.application.tasks.Task$UpgradeIndex",
             "UpgradeIndex",
         ),
         (
-            "REBUILD_INDEX:free-middle",
+            "RebuildIndex:free-middle",
             900_i64,
             Some("independent-group"),
             "org.gotson.komga.application.tasks.Task$RebuildIndex",
             "RebuildIndex",
         ),
         (
-            "UPGRADE_INDEX:free-low",
+            "UpgradeIndex:free-low",
             800_i64,
             None,
             "org.gotson.komga.application.tasks.Task$UpgradeIndex",
@@ -349,9 +339,9 @@ async fn scheduler_take_next_respects_priority_order_group_locks_and_owner_persi
             .map(|task| task.id.clone())
             .collect::<Vec<_>>(),
         vec![
-            "UPGRADE_INDEX:shared-high".to_string(),
-            "REBUILD_INDEX:free-middle".to_string(),
-            "UPGRADE_INDEX:free-low".to_string(),
+            "UpgradeIndex:shared-high".to_string(),
+            "RebuildIndex:free-middle".to_string(),
+            "UpgradeIndex:free-low".to_string(),
         ],
         "batch claim should keep priority order while skipping same-group work behind an already claimed head task",
     );
@@ -384,16 +374,16 @@ async fn scheduler_take_next_respects_priority_order_group_locks_and_owner_persi
         owners,
         vec![
             (
-                "UPGRADE_INDEX:shared-high".to_string(),
+                "UpgradeIndex:shared-high".to_string(),
                 Some("rust-main".to_string()),
             ),
-            ("UPGRADE_INDEX:shared-low".to_string(), None),
+            ("UpgradeIndex:shared-low".to_string(), None),
             (
-                "REBUILD_INDEX:free-middle".to_string(),
+                "RebuildIndex:free-middle".to_string(),
                 Some("rust-main".to_string()),
             ),
             (
-                "UPGRADE_INDEX:free-low".to_string(),
+                "UpgradeIndex:free-low".to_string(),
                 Some("rust-main".to_string()),
             ),
         ],

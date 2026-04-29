@@ -76,7 +76,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task() {
     sqlx::query(
         "INSERT INTO TASK (ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER) VALUES (?, ?, ?, ?, ?, ?, NULL)",
     )
-    .bind("REFRESH_BOOK_METADATA_book-1")
+    .bind("RefreshBookMetadata_book-1")
     .bind(80_i64)
     .bind("series-1")
     .bind("org.gotson.komga.application.tasks.Task$RefreshBookMetadata")
@@ -99,7 +99,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task() {
             ],
             "priority": 80,
             "groupId": "series-1",
-            "uniqueId": "REFRESH_BOOK_METADATA_book-1"
+            "uniqueId": "RefreshBookMetadata_book-1"
         })
         .to_string(),
     )
@@ -213,11 +213,11 @@ async fn runtime_refresh_series_metadata_applies_oneshot_provider_fields() {
     scheduler
         .enqueue(
             TaskQueueRecord::new(
-                "REFRESH_SERIES_METADATA_series-oneshot",
+                "RefreshSeriesMetadata_series-oneshot",
                 1_000,
                 Some("series-oneshot".to_string()),
             )
-            .with_simple_type("REFRESH_SERIES_METADATA"),
+            .with_simple_type("RefreshSeriesMetadata"),
         )
         .await;
     scheduler
@@ -290,7 +290,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task_with_defau
     sqlx::query(
         "INSERT INTO TASK (ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER) VALUES (?, ?, ?, ?, ?, ?, NULL)",
     )
-    .bind("REFRESH_BOOK_METADATA_book-1")
+    .bind("RefreshBookMetadata_book-1")
     .bind(80_i64)
     .bind("series-1")
     .bind("org.gotson.komga.application.tasks.Task$RefreshBookMetadata")
@@ -300,7 +300,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task_with_defau
             "bookId": "book-1",
             "priority": 80,
             "groupId": "series-1",
-            "uniqueId": "REFRESH_BOOK_METADATA_book-1"
+            "uniqueId": "RefreshBookMetadata_book-1"
         })
         .to_string(),
     )
@@ -386,7 +386,7 @@ async fn runtime_executes_kotlin_persisted_repair_extension_task() {
     sqlx::query(
         "INSERT INTO TASK (ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER) VALUES (?, ?, ?, ?, ?, ?, NULL)",
     )
-    .bind("REPAIR_EXTENSION_book-repair-1")
+    .bind("RepairExtension_book-repair-1")
     .bind(12_i64)
     .bind("series-1")
     .bind("org.gotson.komga.application.tasks.Task$RepairExtension")
@@ -396,7 +396,7 @@ async fn runtime_executes_kotlin_persisted_repair_extension_task() {
             "bookId": "book-repair-1",
             "priority": 12,
             "groupId": "series-1",
-            "uniqueId": "REPAIR_EXTENSION_book-repair-1"
+            "uniqueId": "RepairExtension_book-repair-1"
         })
         .to_string(),
     )

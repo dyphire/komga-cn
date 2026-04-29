@@ -90,8 +90,8 @@ async fn runtime_skips_book_hash_when_library_hash_files_was_disabled_after_enqu
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(
-            TaskQueueRecord::new("HASH_BOOK_book-hash-flag-1", 1_000, None)
-                .with_simple_type("HASH_BOOK"),
+            TaskQueueRecord::new("HashBook_book-hash-flag-1", 1_000, None)
+                .with_simple_type("HashBook"),
         )
         .await;
     scheduler.process_available(&runtime).await.expect(
@@ -144,9 +144,7 @@ async fn runtime_skips_book_hash_when_book_already_has_hash() {
     let runtime = runtime_task_context(&paths);
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
-        .enqueue(
-            TaskQueueRecord::new("HASH_BOOK_book-1", 1_000, None).with_simple_type("HASH_BOOK"),
-        )
+        .enqueue(TaskQueueRecord::new("HashBook_book-1", 1_000, None).with_simple_type("HashBook"))
         .await;
     scheduler
         .process_available(&runtime)
@@ -308,8 +306,8 @@ async fn runtime_skips_book_koreader_hash_when_library_hash_koreader_was_disable
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(
-            TaskQueueRecord::new("HASH_BOOK_KOREADER_book-koreader-flag-1", 1_000, None)
-                .with_simple_type("HASH_BOOK_KOREADER"),
+            TaskQueueRecord::new("HashBookKoreader_book-koreader-flag-1", 1_000, None)
+                .with_simple_type("HashBookKoreader"),
         )
         .await;
     scheduler
@@ -352,8 +350,8 @@ async fn runtime_skips_book_koreader_hash_when_book_already_has_hash() {
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(
-            TaskQueueRecord::new("HASH_BOOK_KOREADER_book-1", 1_000, None)
-                .with_simple_type("HASH_BOOK_KOREADER"),
+            TaskQueueRecord::new("HashBookKoreader_book-1", 1_000, None)
+                .with_simple_type("HashBookKoreader"),
         )
         .await;
     scheduler
@@ -442,8 +440,8 @@ async fn runtime_skips_book_page_hash_when_library_hash_pages_was_disabled_after
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(
-            TaskQueueRecord::new("HASH_BOOK_PAGES_book-hash-flag-1", 1_000, None)
-                .with_simple_type("HASH_BOOK_PAGES"),
+            TaskQueueRecord::new("HashBookPages_book-hash-flag-1", 1_000, None)
+                .with_simple_type("HashBookPages"),
         )
         .await;
     scheduler.process_available(&runtime).await.expect(

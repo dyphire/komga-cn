@@ -1,8 +1,6 @@
 use super::support::*;
 use super::*;
-use komga_application::task_processing::{
-    DefaultLibraryTaskEmitter, LibraryScanPipeline, ScanOneLibrary,
-};
+use komga_application::task_processing::{LibraryScanPipeline, ScanOneLibrary};
 use komga_infrastructure::task_queue::library_scan_pipeline::SqliteFilesystemLibraryScanPipeline;
 
 #[tokio::test]
@@ -191,10 +189,7 @@ async fn pipeline_run_public_seam_keeps_runtime_follow_ups_ahead_of_sidecar_refr
         .await
         .expect("scanner pipeline fixture should be created");
 
-    let pipeline = SqliteFilesystemLibraryScanPipeline::new(
-        fixture.paths.main_db.clone(),
-        DefaultLibraryTaskEmitter::default(),
-    );
+    let pipeline = SqliteFilesystemLibraryScanPipeline::new(fixture.paths.main_db.clone());
     let result = pipeline
         .run(ScanOneLibrary::new("library-1", false))
         .await
@@ -207,19 +202,19 @@ async fn pipeline_run_public_seam_keeps_runtime_follow_ups_ahead_of_sidecar_refr
         .collect::<Vec<_>>();
     let analyze_index = follow_up_types
         .iter()
-        .position(|simple_type| *simple_type == "ANALYZE_BOOK")
+        .position(|simple_type| *simple_type == "AnalyzeBook")
         .expect("scan run should enqueue analyze follow-up tasks before sidecar refresh work");
     let duplicate_pages_index = follow_up_types
         .iter()
-        .position(|simple_type| *simple_type == "FIND_DUPLICATE_PAGES_TO_DELETE")
+        .position(|simple_type| *simple_type == "FindDuplicatePagesToDelete")
         .expect("scan run should enqueue duplicate-page cleanup follow-up work");
     let renumber_refresh_index = follow_up_types
         .iter()
-        .position(|simple_type| *simple_type == "REFRESH_BOOK_METADATA")
+        .position(|simple_type| *simple_type == "RefreshBookMetadata")
         .expect("scan run should enqueue runtime metadata refresh follow-up work");
     let sidecar_refresh_index = follow_up_types
         .iter()
-        .rposition(|simple_type| *simple_type == "REFRESH_SERIES_METADATA")
+        .rposition(|simple_type| *simple_type == "RefreshSeriesMetadata")
         .expect("scan run should enqueue sidecar-driven series metadata refresh work");
 
     assert!(

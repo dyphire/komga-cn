@@ -3,13 +3,8 @@ use super::{
     LibraryCatalogMutationError, LibraryCatalogMutationPort, LibraryChangeSet, LibraryTaskResult,
 };
 use crate::task_processing::{
-    BookSeriesRef, DefaultLibraryTaskEmitter, DefaultTaskProtocolCatalog, LibraryTaskCommand,
-    LibraryTaskEmitter, TaskQueueRecord,
+    BookSeriesRef, LibraryTaskCommand, TaskQueueRecord, emit_library_task_batch,
 };
-
-fn library_task_emitter() -> DefaultLibraryTaskEmitter<DefaultTaskProtocolCatalog> {
-    DefaultLibraryTaskEmitter::default()
-}
 
 pub struct UpdateLibraryService<P> {
     port: P,
@@ -90,43 +85,38 @@ where
 }
 
 fn hash_book_task_records(book_ids: Vec<String>, priority: i32) -> Vec<TaskQueueRecord> {
-    library_task_emitter()
-        .emit(LibraryTaskCommand::HashBooks { book_ids, priority })
+    emit_library_task_batch(LibraryTaskCommand::HashBooks { book_ids, priority })
         .into_queue_records()
 }
 
 fn hash_book_koreader_task_records(book_ids: Vec<String>, priority: i32) -> Vec<TaskQueueRecord> {
-    library_task_emitter()
-        .emit(LibraryTaskCommand::HashKoreaderBooks { book_ids, priority })
+    emit_library_task_batch(LibraryTaskCommand::HashKoreaderBooks { book_ids, priority })
         .into_queue_records()
 }
 
 fn find_books_with_missing_page_hash_task_records(library_id: &str) -> Vec<TaskQueueRecord> {
-    library_task_emitter()
-        .emit(LibraryTaskCommand::FindBooksWithMissingPageHash {
-            library_id: library_id.to_string(),
-        })
-        .into_queue_records()
+    emit_library_task_batch(LibraryTaskCommand::FindBooksWithMissingPageHash {
+        library_id: library_id.to_string(),
+    })
+    .into_queue_records()
 }
 
 fn repair_extension_task_records(
     books: Vec<(String, String)>,
     priority: i32,
 ) -> Vec<TaskQueueRecord> {
-    library_task_emitter()
-        .emit(LibraryTaskCommand::RepairExtensions {
-            books: books.into_iter().map(BookSeriesRef::from).collect(),
-            priority,
-        })
-        .into_queue_records()
+    emit_library_task_batch(LibraryTaskCommand::RepairExtensions {
+        books: books.into_iter().map(BookSeriesRef::from).collect(),
+        priority,
+    })
+    .into_queue_records()
 }
 
 fn find_books_to_convert_task_records(library_id: &str) -> Vec<TaskQueueRecord> {
-    library_task_emitter()
-        .emit(LibraryTaskCommand::FindBooksToConvert {
-            library_id: library_id.to_string(),
-        })
-        .into_queue_records()
+    emit_library_task_batch(LibraryTaskCommand::FindBooksToConvert {
+        library_id: library_id.to_string(),
+    })
+    .into_queue_records()
 }
 
 #[cfg(test)]
@@ -234,8 +224,8 @@ mod tests {
         .expect("enabling convert-to-cbz should succeed");
 
         assert_eq!(result.task_records.len(), 1);
-        assert_eq!(result.task_records[0].id, "FIND_BOOKS_TO_CONVERT_library-1");
-        assert_eq!(result.task_records[0].simple_type, "FIND_BOOKS_TO_CONVERT");
+        assert_eq!(result.task_records[0].id, "FindBooksToConvert_library-1");
+        assert_eq!(result.task_records[0].simple_type, "FindBooksToConvert");
         assert_eq!(result.task_records[0].priority, 0);
         assert_eq!(result.task_records[0].group, None);
     }

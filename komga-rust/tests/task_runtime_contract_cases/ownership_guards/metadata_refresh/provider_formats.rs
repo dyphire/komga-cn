@@ -231,7 +231,7 @@ async fn runtime_refresh_book_metadata_applies_epub_provider_patch_when_title_ca
     sqlx::query(
         "INSERT INTO TASK (ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER) VALUES (?, ?, ?, ?, ?, ?, NULL)",
     )
-    .bind("REFRESH_BOOK_METADATA_book-1")
+    .bind("RefreshBookMetadata_book-1")
     .bind(80_i64)
     .bind("series-1")
     .bind("org.gotson.komga.application.tasks.Task$RefreshBookMetadata")
@@ -242,7 +242,7 @@ async fn runtime_refresh_book_metadata_applies_epub_provider_patch_when_title_ca
             "capabilities": ["TITLE"],
             "priority": 80,
             "groupId": "series-1",
-            "uniqueId": "REFRESH_BOOK_METADATA_book-1"
+            "uniqueId": "RefreshBookMetadata_book-1"
         })
         .to_string(),
     )
@@ -345,7 +345,7 @@ async fn runtime_refresh_book_metadata_applies_barcode_isbn_for_non_epub_books()
     sqlx::query(
         "INSERT INTO TASK (ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER) VALUES (?, ?, ?, ?, ?, ?, NULL)",
     )
-    .bind("REFRESH_BOOK_METADATA_book-barcode-1")
+    .bind("RefreshBookMetadata_book-barcode-1")
     .bind(80_i64)
     .bind("series-1")
     .bind("org.gotson.komga.application.tasks.Task$RefreshBookMetadata")
@@ -356,7 +356,7 @@ async fn runtime_refresh_book_metadata_applies_barcode_isbn_for_non_epub_books()
             "capabilities": ["ISBN"],
             "priority": 80,
             "groupId": "series-1",
-            "uniqueId": "REFRESH_BOOK_METADATA_book-barcode-1"
+            "uniqueId": "RefreshBookMetadata_book-barcode-1"
         })
         .to_string(),
     )

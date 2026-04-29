@@ -57,7 +57,7 @@ fn plan_startup_search_task(config: &RuntimeConfig) -> std::io::Result<StartupSe
             Ok(StartupSearchPlan {
                 writer_decision,
                 lifecycle: "rebuild_required",
-                startup_task: Some("REBUILD_INDEX"),
+                startup_task: Some("RebuildIndex"),
             })
         }
         Err(error) => Err(std::io::Error::other(format!(

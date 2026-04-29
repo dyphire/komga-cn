@@ -294,7 +294,7 @@ async fn router_api_library_create_and_scan_enqueue_expected_scan_tasks() {
 
     assert_single_scan_task(
         &paths,
-        format!("SCAN_LIBRARY_{library_id}_DEEP_false"),
+        format!("ScanLibrary_{library_id}_DEEP_false"),
         library_id,
         4,
         false,
@@ -325,7 +325,7 @@ async fn router_api_library_create_and_scan_enqueue_expected_scan_tasks() {
 
     assert_single_scan_task(
         &paths,
-        "SCAN_LIBRARY_library-1_DEEP_true".to_string(),
+        "ScanLibrary_library-1_DEEP_true".to_string(),
         "library-1",
         8,
         true,
@@ -392,7 +392,7 @@ async fn router_api_library_analyze_enqueues_analyze_book_tasks_grouped_by_serie
     .await;
 
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].get::<String, _>("ID"), "ANALYZE_BOOK_book-1");
+    assert_eq!(rows[0].get::<String, _>("ID"), "AnalyzeBook_book-1");
     assert_eq!(rows[0].get::<String, _>("SIMPLE_TYPE"), "AnalyzeBook");
     assert_eq!(
         rows[0].get::<Option<String>, _>("GROUP_ID"),
@@ -434,15 +434,12 @@ async fn router_api_library_metadata_refresh_leaves_series_local_artwork_ungroup
     assert_eq!(rows.len(), 3);
     assert_eq!(
         rows[0].get::<String, _>("ID"),
-        "REFRESH_BOOK_LOCAL_ARTWORK_book-1"
+        "RefreshBookLocalArtwork_book-1"
     );
     assert_eq!(rows[0].get::<Option<String>, _>("GROUP_ID"), None);
     assert_eq!(rows[0].get::<i32, _>("PRIORITY"), 6);
 
-    assert_eq!(
-        rows[1].get::<String, _>("ID"),
-        "REFRESH_BOOK_METADATA_book-1"
-    );
+    assert_eq!(rows[1].get::<String, _>("ID"), "RefreshBookMetadata_book-1");
     assert_eq!(
         rows[1].get::<Option<String>, _>("GROUP_ID"),
         Some("series-1".to_string())
@@ -451,7 +448,7 @@ async fn router_api_library_metadata_refresh_leaves_series_local_artwork_ungroup
 
     assert_eq!(
         rows[2].get::<String, _>("ID"),
-        "REFRESH_SERIES_LOCAL_ARTWORK_series-1"
+        "RefreshSeriesLocalArtwork_series-1"
     );
     assert_eq!(rows[2].get::<Option<String>, _>("GROUP_ID"), None);
     assert_eq!(rows[2].get::<i32, _>("PRIORITY"), 6);
@@ -488,7 +485,7 @@ async fn router_api_library_empty_trash_enqueues_ungrouped_task() {
     .await;
 
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].get::<String, _>("ID"), "EMPTY_TRASH_library-1");
+    assert_eq!(rows[0].get::<String, _>("ID"), "EmptyTrash_library-1");
     assert_eq!(rows[0].get::<String, _>("SIMPLE_TYPE"), "EmptyTrash");
     assert_eq!(rows[0].get::<Option<String>, _>("GROUP_ID"), None);
     assert_eq!(rows[0].get::<i32, _>("PRIORITY"), 6);
@@ -499,7 +496,7 @@ async fn router_api_library_empty_trash_enqueues_ungrouped_task() {
             "libraryId": "library-1",
             "priority": 6,
             "groupId": Value::Null,
-            "uniqueId": "EMPTY_TRASH_library-1"
+            "uniqueId": "EmptyTrash_library-1"
         }),
         "library empty-trash route should persist the Kotlin-compatible payload shape consumed by legacy readers",
     );

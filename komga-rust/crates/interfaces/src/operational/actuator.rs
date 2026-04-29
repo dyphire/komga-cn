@@ -3,7 +3,7 @@ use axum::extract::Path as AxumPath;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use komga_application::task_processing::PlannedTaskKind;
+use komga_application::task_processing::TaskKind;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::fs;
@@ -986,34 +986,9 @@ fn actuator_metric_names() -> Vec<&'static str> {
 }
 
 fn known_task_metric_types() -> impl Iterator<Item = String> {
-    [
-        PlannedTaskKind::ScanLibrary,
-        PlannedTaskKind::AnalyzeBook,
-        PlannedTaskKind::EmptyTrash,
-        PlannedTaskKind::ImportBook,
-        PlannedTaskKind::FindBooksWithMissingPageHash,
-        PlannedTaskKind::FindDuplicatePagesToDelete,
-        PlannedTaskKind::FindBookThumbnailsToRegenerate,
-        PlannedTaskKind::RefreshBookMetadata,
-        PlannedTaskKind::RefreshBookLocalArtwork,
-        PlannedTaskKind::RefreshSeriesLocalArtwork,
-        PlannedTaskKind::RefreshSeriesMetadata,
-        PlannedTaskKind::AggregateSeriesMetadata,
-        PlannedTaskKind::RepairExtension,
-        PlannedTaskKind::GenerateBookThumbnail,
-        PlannedTaskKind::HashBook,
-        PlannedTaskKind::HashBookKoreader,
-        PlannedTaskKind::HashBookPages,
-        PlannedTaskKind::RebuildIndex,
-        PlannedTaskKind::UpgradeIndex,
-        PlannedTaskKind::RemoveHashedPages,
-        PlannedTaskKind::DeleteBook,
-        PlannedTaskKind::DeleteSeries,
-        PlannedTaskKind::FindBooksToConvert,
-        PlannedTaskKind::ConvertBook,
-    ]
-    .into_iter()
-    .map(|kind| kind.descriptor().persisted_simple_type.to_string())
+    TaskKind::all()
+        .iter()
+        .map(|kind| kind.simple_type().to_string())
 }
 
 fn unique_strings(values: impl IntoIterator<Item = String>) -> Vec<String> {
